@@ -10,6 +10,21 @@
 //   0x0 = VFT2_UNKNOWN
 //   0x409 = US English, 1200 = Unicode code page
 
+// This file is UTF-8 and says so explicitly. LegalCopyright carries the U+00A9 sign
+// required by decision 8 of DECISIONS.md, which makes the script non-ASCII, and rc.exe
+// with no declaration reads a .rc in the system ANSI code page, cp1251 on this machine.
+// The two UTF-8 bytes C2 A9 are then taken for two cp1251 characters and the file
+// properties end up reading "Copyright <U+0412><U+00A9> 2026 ...". Measured during task
+// T-01-1a, not assumed. Like every trap of TOOLCHAIN.md section 8, it costs nothing at
+// build time: the build succeeds, the resource is present, only its content is wrong.
+//
+// Declared by pragma rather than by a byte order mark, because the pragma is visible in
+// the text. A BOM is invisible in an editor, and any tool that rewrites the file without
+// preserving it silently brings the defect back; this line survives as ordinary content.
+// Same reasoning as the #define below: this script states its assumptions instead of
+// inheriting them from the environment it happens to be compiled in.
+#pragma code_page(65001)
+
 // VS_VERSION_INFO is a macro from windows.h, and its value is 1. Without this define
 // rc.exe reads the bare word as a resource NAME rather than an ID, and quietly emits the
 // version block under a string name. Nothing errors: the build succeeds, the resource is
@@ -58,7 +73,7 @@ BEGIN
             VALUE "FileDescription",  "Lang Switcher"
             VALUE "FileVersion",      "0.1.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
-            VALUE "LegalCopyright",   "Copyright (C) 2026 Panda_Pishet_Kod"
+            VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
             VALUE "ProductVersion",   "0.1.0.0"

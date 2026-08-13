@@ -4,3 +4,4 @@
 //! implementation belongs to stage E4.
 //!
 //! Requirements this module will cover: FR-40, FR-41, FR-42, FR-43, FR-44, FR-45.
+//! Implemented by backlog tasks: T-04-1, T-04-2.

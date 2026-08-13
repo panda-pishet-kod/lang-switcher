@@ -4,3 +4,4 @@
 //! implementation belongs to stage E1.
 //!
 //! Requirements this module will cover: FR-45, FR-92, SEC-01, SEC-07, NFR-12.
+//! Implemented by backlog tasks: T-06-4.

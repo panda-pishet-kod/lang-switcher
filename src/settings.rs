@@ -6,3 +6,4 @@
 //!
 //! Requirements this module will cover: FR-92, FR-93, FR-94, and the configuration schema
 //! of section 7 of SPEC.
+//! Implemented by backlog tasks: T-01-3, T-08-1, T-08-2.
