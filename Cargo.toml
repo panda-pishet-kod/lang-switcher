@@ -1,0 +1,59 @@
+[package]
+name = "lang_switcher"
+version = "0.1.0"
+edition = "2024"
+
+# Two targets on purpose. Integration tests under tests\ can only link against a library
+# target, so a bin-only crate would make that directory useless and force a rebuild of the
+# crate layout at stage E3. Decision R-11.
+[lib]
+name = "lang_switcher"
+path = "src/lib.rs"
+
+# The binary is named LangSwitcher, which produces LangSwitcher.exe. Fixed by decision 6 and
+# already hard-wired into the LangSw-Install scheduled task; it must not be renamed.
+[[bin]]
+name = "LangSwitcher"
+path = "src/main.rs"
+
+# The full dependency list of SPEC section 3.2, all four crates at once. serde and toml are
+# only needed by task T-01-3, but filling Cargo.toml in one go keeps it from becoming a
+# shared edit point between tasks that run in parallel. Decision R-14.
+#
+# The list is closed: adding any crate outside it requires a decision from the user. That is
+# the enforcement mechanism behind SEC-03, not a preference.
+[dependencies]
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Input",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Shell",
+  "Win32_UI_TextServices",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_RemoteDesktop",
+  "Win32_Globalization",
+] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[build-dependencies]
+embed-resource = "3.0.11"
+
+# SEC-04a: the debug control channel compiles only under this feature, and the feature is
+# absent from the Release configuration. Acceptance criterion 8 of SPEC section 13 checks
+# that the shipped binary carries no trace of it.
+[features]
+testing = []
+
+# Carried over verbatim from SPEC section 3.2.
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
+strip         = true

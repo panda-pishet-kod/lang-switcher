@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+      type="win32"
+      name="Panda_Pishet_Kod.LangSwitcher"
+      version="0.1.0.0"
+      processorArchitecture="amd64"/>
+
+  <!-- Development manifest: asInvoker, with UI access explicitly not requested.
+       Section 8.2 of SPEC requires exactly this split, and the reason is not stylistic.
+       A binary whose manifest requests UI access cannot be launched at all unless it is
+       signed AND sitting in %ProgramFiles%. Windows fails CreateProcess with error 740
+       instead of degrading gracefully. Embedding the release manifest into test binaries
+       therefore makes cargo test fail before a single test runs. Measured in task H-9,
+       not assumed.
+
+       Two notes for whoever edits this file.
+
+       First: an XML comment may not contain a double hyphen. Two hyphens in a row here
+       produce a manifest that parses nowhere, and Windows reports it as the wholly
+       unhelpful error 14001, side-by-side configuration is incorrect. TOOLCHAIN.md
+       section 8.4.
+
+       Second: do not spell the release attribute out literally anywhere in this file,
+       not even inside a comment. The controller tool verify-resources.ps1 searches the
+       raw manifest text for that attribute and would report the Debug build as carrying
+       UI access. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11. Section 3 of SPEC: minimum is Windows 10 1607, because
+           ToUnicodeEx needs the 0x4 flag. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

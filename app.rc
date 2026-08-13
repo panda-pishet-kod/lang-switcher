@@ -1,0 +1,71 @@
+// Resource script for Lang_Switcher: tray icons, the manifest and VERSIONINFO.
+//
+// Deliberately uses no #include <windows.h>: rc.exe is driven by embed-resource, which
+// does not necessarily export the SDK include paths. Every constant is spelled out
+// numerically so the script compiles regardless of how the include environment is set up.
+//
+//   24 = RT_MANIFEST
+//   0x00040004 = VOS_NT_WINDOWS32
+//   0x1 = VFT_APP
+//   0x0 = VFT2_UNKNOWN
+//   0x409 = US English, 1200 = Unicode code page
+
+// VS_VERSION_INFO is a macro from windows.h, and its value is 1. Without this define
+// rc.exe reads the bare word as a resource NAME rather than an ID, and quietly emits the
+// version block under a string name. Nothing errors: the build succeeds, the resource is
+// present, and GetFileVersionInfo returns nothing at all, because it looks up RT_VERSION
+// strictly by ID 1. File properties come up empty and there is no error message anywhere.
+// TOOLCHAIN.md section 8.3, measured during task H-9.
+#define VS_VERSION_INFO 1
+
+#define IDI_APP_ACTIVE  101
+#define IDI_APP_PAUSED  102
+
+// FR-90: two visually distinct tray states, each icon carrying the 16/20/24/32 px frames.
+// The paths are relative to this file, which sits next to Cargo.toml -- exactly the layout
+// proven by the H-9 control build. rc.exe resolves paths inside .rc files in a non-obvious
+// way and a wrong one shows up as a silently missing resource, not as an error.
+IDI_APP_ACTIVE  ICON  "res/langswitcher-active.ico"
+IDI_APP_PAUSED  ICON  "res/langswitcher-paused.ico"
+
+// The manifest is chosen by a /d define passed from build.rs, NOT hard-wired.
+//
+// A binary carrying uiAccess="true" refuses to start unless it is both signed and located
+// in %ProgramFiles% -- CreateProcess returns 740 rather than degrading. Wiring the uiAccess
+// manifest in unconditionally makes `cargo test` fail before a single test runs, because
+// the test harness is built from this same bin target. Measured during task H-9.
+#ifdef LANGSW_UIACCESS
+1 24 "app.manifest"
+#else
+1 24 "app-dev.manifest"
+#endif
+
+// Values fixed by decision 8 of DECISIONS.md.
+VS_VERSION_INFO VERSIONINFO
+  FILEVERSION     0,1,0,0
+  PRODUCTVERSION  0,1,0,0
+  FILEFLAGSMASK   0x3fL
+  FILEFLAGS       0x0L
+  FILEOS          0x00040004L
+  FILETYPE        0x1L
+  FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Panda_Pishet_Kod"
+            VALUE "FileDescription",  "Lang Switcher"
+            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "InternalName",     "LangSwitcher.exe"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Panda_Pishet_Kod"
+            VALUE "OriginalFilename", "LangSwitcher.exe"
+            VALUE "ProductName",      "Lang Switcher"
+            VALUE "ProductVersion",   "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

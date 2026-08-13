@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+      type="win32"
+      name="Panda_Pishet_Kod.LangSwitcher"
+      version="0.1.0.0"
+      processorArchitecture="amd64"/>
+
+  <!-- Release manifest. Section 8.1 of SPEC: the process stays at medium integrity, the
+       token only gains the right to bypass UIPI when installing global hooks and calling
+       SendInput. Administrator rights are NOT granted.
+
+       Section 8.2 of SPEC: a binary carrying uiAccess="true" only starts when it is signed
+       AND located in %ProgramFiles%. Outside those conditions CreateProcess fails with
+       error 740 and there is no graceful degradation, which is why the Debug build gets
+       app-dev.manifest instead.
+
+       Note for whoever edits this file: an XML comment may not contain a double hyphen.
+       Two hyphens in a row here produce a manifest that parses nowhere, and Windows
+       reports it as the wholly unhelpful error 14001, side-by-side configuration
+       is incorrect. TOOLCHAIN.md section 8.4. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="true"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11. Section 3 of SPEC: minimum is Windows 10 1607, because
+           ToUnicodeEx needs the 0x4 flag. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
