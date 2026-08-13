@@ -1,0 +1,11 @@
+* text=auto eol=crlf
+
+# Бинарные ресурсы — без нормализации переводов строк.
+*.ico binary
+*.png binary
+*.exe binary
+*.pdb binary
+*.res binary
+
+# Ресурсные скрипты Windows компилирует rc.exe; CRLF обязателен.
+*.rc  text eol=crlf
