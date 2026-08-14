@@ -12,6 +12,7 @@
 //! tests under `tests\` can only link against a library target, which is why the split
 //! exists from the very first task (decision R-11).
 
+pub mod app;
 pub mod buffer;
 pub mod convert;
 pub mod diag;

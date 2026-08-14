@@ -13,7 +13,14 @@
 // hard-wired into the LangSw-Install scheduled task, so the lint is suppressed rather than
 // the target renamed.
 //
-// Task T-01-1 asks nothing more of this file than that it build, start and exit with code 0
-// without opening a window. The hidden window and the message loop are task T-01-2.
+// This file stays a thin entry point and gains nothing else (decision R-18). The process
+// lifecycle — the single instance of FR-82, the three threads of section 6.1, their hidden
+// windows, their message loops and shutdown — lives in `lang_switcher::app`, that is, in the
+// library rather than in the binary: code in a binary is reachable neither by the
+// integration tests under tests\ nor by any later task.
 
-fn main() {}
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    lang_switcher::app::run()
+}
