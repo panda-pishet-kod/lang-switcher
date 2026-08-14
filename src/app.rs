@@ -31,6 +31,10 @@
 //! [`crate::inject::on_hotkey`], which is where section 6.1 puts `SendInput` and the only place
 //! FR-40 allows it. That call is the whole of this module's part in the replacement; everything
 //! about the packet, the modifiers and the pause of FR-44 belongs to `inject`.
+//! Task **T-03-4** moved the state of the `testing`-only `acceptance` module into
+//! [`crate::control`], which SEC-04a makes the single source of the acceptance numbers: what is
+//! left here is the file sink, unchanged in keys and in format, and the five `note_*` calls
+//! this module makes now name `control` instead.
 //! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
 //! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
 //! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
@@ -99,7 +103,7 @@
 //! No keystroke, key code or buffer content passes through this module, and none may be
 //! added later: neither [`report_non_critical`] nor the panic hook is given anything but
 //! an operation name and an OS error code. The `testing`-only `acceptance` module below
-//! publishes the *length* of the buffer, which is the one number SEC-04a allows out, and no
+//! writes out the *length* of the buffer, which is the one number SEC-04a allows out, and no
 //! more.
 
 use std::ffi::c_void;
@@ -150,7 +154,7 @@ pub fn run() -> ExitCode {
     // configuration. First in the body so that the reference point NFR-08 is measured from is
     // the earliest instant this program can observe of itself.
     #[cfg(feature = "testing")]
-    acceptance::note_start();
+    crate::control::note_start();
 
     install_panic_hook();
 
@@ -673,7 +677,7 @@ fn serve_window(role: Role) -> WinResult<()> {
             // than reasoned about: see the `acceptance` module for why the program has to be
             // the one holding the stopwatch.
             #[cfg(feature = "testing")]
-            acceptance::note_hook_installed();
+            crate::control::note_hook_installed();
 
             // Task T-03-2a, and deliberately **after** the hook. See `start_input_pipeline`.
             start_input_pipeline();
@@ -716,11 +720,12 @@ fn serve_window(role: Role) -> WinResult<()> {
 
     let pumped = pump();
 
-    // Read before the frame unwinds: the buffer belongs to this thread and is dropped — and
-    // zeroed, SEC-02 — with it, so after this function returns there is nothing left to count.
+    // Latched before the frame unwinds: the buffer belongs to this thread and is dropped — and
+    // zeroed, SEC-02 — with it, so after this function returns the live mirror of SEC-04a reads
+    // a truthful zero and the file sink, which runs later still, would have nothing to report.
     #[cfg(feature = "testing")]
     if matches!(role, Role::Input) {
-        acceptance::note_buffer_len();
+        crate::control::note_buffer_len_at_exit();
     }
 
     pumped
@@ -763,7 +768,7 @@ fn start_input_pipeline() {
     rebuild_layout_cache();
 
     #[cfg(feature = "testing")]
-    acceptance::note_cache_ready();
+    crate::control::note_cache_ready();
 
     // FR-07 again. The sweep above takes long enough that the UI thread has almost always
     // published `[buffer] capacity` by now; this applies it without waiting for the message
@@ -827,7 +832,7 @@ fn rebuild_layout_cache() {
     // and FR-11 — that the rebuild left the buffer alone — can only be asserted against a
     // rebuild that is known to have run.
     #[cfg(feature = "testing")]
-    acceptance::note_cache_built();
+    crate::control::note_cache_built();
 }
 
 /// The cache to use, given what [`LayoutCache::build`] answered — FR-25.
@@ -1714,7 +1719,7 @@ fn terminate_this_process(code: u32) {
 // Instrumentation of the acceptance bench — SEC-04a, feature `testing`
 // ---------------------------------------------------------------------------------------
 
-/// Numbers the acceptance run of section 11.5 cannot obtain from outside the process.
+/// The **file** sink of the acceptance instrumentation: the numbers, once, at shutdown.
 ///
 /// Compiled **only** under the cargo feature `testing`, which SEC-04a defines for this purpose
 /// — automating the acceptance checks of §11.5 — and which is absent from the Release
@@ -1730,84 +1735,46 @@ fn terminate_this_process(code: u32) {
 /// buffer after a synthetic `ghbdtn`, and SEC-04 has removed every inter-process entry point on
 /// purpose, so there is nothing to ask.
 ///
+/// # This module holds nothing — task T-03-4
+///
+/// It used to own the counters and the start-up marks. They are module [`crate::control`]'s
+/// now, and that module is the **single source** both sinks read (decision Р-28): the live
+/// channel of SEC-04a, and the file below. What is left here is one function that formats and
+/// writes, because a channel needs a live process and a client while a run that merely expired
+/// under FR-97 still has to leave its numbers somewhere.
+///
+/// **The keys and the format of the file are unchanged, to the character.** Tasks are wired to
+/// this file by its shape, so growth goes through the channel and not through here.
+///
 /// # SEC-01, SEC-07
 ///
-/// What leaves this module is two durations and four counts. **No key code, no scan code, no
-/// character and nothing derived from one**, and nothing that could carry one may ever be added
-/// to the report below. `buffer::len` is the one number SEC-04a allows a debug channel to
-/// publish, and it is published as a number and as nothing else; `Stroke` has neither `Debug`
-/// nor `Display`, so the content is not expressible here even by mistake.
+/// What leaves this module is two durations and a row of counts. **No key code, no scan code,
+/// no character and nothing derived from one**, and nothing that could carry one may ever be
+/// added to the report below. The length of the buffer is the one number SEC-04a allows a
+/// debug channel to publish, and it is published as a number and as nothing else; `Stroke` has
+/// neither `Debug` nor `Display`, so the content is not expressible here even by mistake.
 ///
 /// # Threading
 ///
-/// The three threads of section 6.1 do nothing here but store into an atomic. The file is
-/// written by the **main** thread, after every one of them has been joined: section 6.1 leaves
-/// file I/O to the UI thread, NFR-05 forbids it near the callback, and the main thread is
-/// neither of those places.
+/// The file is written by the **main** thread, after every one of the three threads of section
+/// 6.1 has been joined: section 6.1 leaves file I/O to the UI thread, NFR-05 forbids it near
+/// the callback, and the main thread is neither of those places.
 #[cfg(feature = "testing")]
 mod acceptance {
-    use std::sync::OnceLock;
-    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-    use std::time::Instant;
-
     /// Environment variable naming the file the report is written to.
     ///
     /// Absent means silent, which is what every run that did not ask for a report gets.
     const REPORT_ENV_VAR: &str = "LANGSW_TESTING_REPORT";
-
-    /// The instant [`super::run`] was entered — the reference point of NFR-08.
-    static STARTED: OnceLock<Instant> = OnceLock::new();
-
-    /// Microseconds from [`STARTED`] to the installed hook — the quantity NFR-08 bounds.
-    static HOOK_READY_US: AtomicU32 = AtomicU32::new(0);
-
-    /// Microseconds from [`STARTED`] to the published layout cache of FR-20.
-    static CACHE_READY_US: AtomicU32 = AtomicU32::new(0);
-
-    /// Strokes in the buffer when the input thread left its message loop.
-    static BUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
-
-    /// Completed builds of the layout cache: one at start-up, one per message of FR-21.
-    static CACHE_BUILDS: AtomicU32 = AtomicU32::new(0);
-
-    /// Records the reference point. Idempotent; the first call wins.
-    pub fn note_start() {
-        let _ = STARTED.set(Instant::now());
-    }
-
-    /// Records the moment `SetWindowsHookExW` returned — NFR-08.
-    pub fn note_hook_installed() {
-        HOOK_READY_US.store(elapsed_us(), Ordering::Relaxed);
-    }
-
-    /// Records the moment the cache of FR-20 reached the buffer.
-    pub fn note_cache_ready() {
-        CACHE_READY_US.store(elapsed_us(), Ordering::Relaxed);
-    }
-
-    /// Reads the length of the calling thread's buffer while it still exists.
-    pub fn note_buffer_len() {
-        BUFFER_LEN.store(crate::buffer::len(), Ordering::Relaxed);
-    }
-
-    /// Counts one completed build of the layout cache — FR-20 at start-up, FR-21 afterwards.
-    pub fn note_cache_built() {
-        CACHE_BUILDS.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Microseconds since [`note_start`], saturating rather than wrapping.
-    fn elapsed_us() -> u32 {
-        STARTED
-            .get()
-            .map(|started| u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX))
-            .unwrap_or(0)
-    }
 
     /// Writes the numbers to the file named by [`REPORT_ENV_VAR`], if the variable is set.
     pub fn write_report() {
         let Ok(path) = std::env::var(REPORT_ENV_VAR) else {
             return;
         };
+
+        // Decision Р-28: one source, two sinks. Everything above the subscriptions comes from
+        // the same snapshot the channel of SEC-04a publishes, so the two can never disagree.
+        let state = crate::control::snapshot();
 
         // Task T-03-3 added the eight counts of module `watchdog`. Every one of them is a
         // count of events — SEC-07 allows those and nothing else, and there is no stroke, key
@@ -1816,13 +1783,16 @@ mod acceptance {
 
         let report = format!(
             "hook_ready_us={}\ncache_ready_us={}\ncache_builds={}\nbuffer_len={}\nlayout_cache_failures={}\nhotkey_handoffs={}\npost_failures={}\nmouse_packets={}\nmouse_flushes={}\nwindow_flushes={}\nwindow_flushes_taken={}\nfull_clears={}\npartial_clears={}\nkept_events={}\nstrokes_removed={}\ndevice_changes={}\nlayout_probes={}\n",
-            HOOK_READY_US.load(Ordering::Relaxed),
-            CACHE_READY_US.load(Ordering::Relaxed),
-            CACHE_BUILDS.load(Ordering::Relaxed),
-            BUFFER_LEN.load(Ordering::Relaxed),
-            super::layout_cache_failures(),
-            crate::hook::hotkey_handoffs(),
-            crate::hook::post_failures(),
+            state.hook_ready_us,
+            state.cache_ready_us,
+            state.cache_builds,
+            // The latched value and not the live mirror: by the time this runs the input
+            // thread is gone and its buffer has been dropped and zeroed (SEC-02), so the live
+            // number is a truthful zero and a useless one. See `control::note_buffer_len_at_exit`.
+            state.buffer_len_at_exit,
+            state.layout_cache_failures,
+            state.hotkey_handoffs,
+            state.post_failures,
             subscriptions.mouse_packets,
             subscriptions.mouse_flushes,
             subscriptions.window_flushes,

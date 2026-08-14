@@ -17,7 +17,12 @@
 //! `RegisterRawInputDevices` registration and the `WM_INPUT` parsing. What arrives here is the
 //! flush that subscription produces, through [`reset_up_to`], exactly as the flush produced by
 //! the `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions does.
-//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done).
+//! Task **T-03-4** added the length mirror of SEC-04a: [`Ring::set_len`] is now the one writer
+//! of the ring's length, and under the `testing` feature — and only under it — every write
+//! publishes the new length into [`crate::control`], which is the only way a thread other than
+//! the input one can learn a number that lives in a thread-local (section 6.3). Nothing else
+//! about the buffer changed, and in a build without the feature the mirror does not exist.
+//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done), T-03-4 (done).
 //! Task T-03-2a took the physical half of the stroke out of a thread-local of its own and put
 //! it into the fields of [`KeyEvent`], where it belonged all along, and wired this module into
 //! the running program: `app` installs the buffer, publishes the cache of FR-20 into it and
@@ -434,17 +439,53 @@ struct Ring {
     /// Index of the oldest live stroke.
     head: usize,
     /// How many strokes are live, `0..=capacity`.
+    ///
+    /// Written **only** by [`Ring::set_len`] — see there for why that matters.
     len: usize,
 }
 
 impl Ring {
     /// A ring of exactly `capacity` slots, all zero.
     fn with_capacity(capacity: usize) -> Self {
-        Self {
+        let mut ring = Self {
             slots: core::iter::repeat_n(Stroke::ZEROED, capacity).collect(),
             head: 0,
             len: 0,
-        }
+        };
+
+        // The literal above is a write of `len` like any other, and it is routed back through
+        // the one function that publishes so that the rule of `set_len` has no exception at
+        // all. See [`Ring::set_len`].
+        ring.set_len(0);
+
+        ring
+    }
+
+    /// The one place `len` is written — and, under the `testing` feature, the one place the
+    /// length mirror of SEC-04a is published from.
+    ///
+    /// # Why every write goes through here
+    ///
+    /// The debug channel of SEC-04a reports `buffer_len`, and the acceptance bench of
+    /// section 11.5 takes that number for the truth. A mirror that lagged behind the buffer
+    /// would be worse than no mirror at all: an absent number is noticed, a stale one is
+    /// believed. Section 6.3 makes the buffer a thread-local of the input thread, so no other
+    /// thread can read it and the value has to be *published* rather than fetched — and the
+    /// only way to be sure the publication is complete is for it to be impossible to change
+    /// the length without performing it. Hence one writer, and `len` private to it.
+    ///
+    /// # NFR-01 to NFR-05
+    ///
+    /// This is on the callback path of the keyboard hook. What the `testing` feature adds to
+    /// that path is one relaxed atomic store and nothing else: no allocation (NFR-03), no
+    /// lock (NFR-04), no I/O (NFR-05). In a build without the feature — every Release build,
+    /// by SEC-04a condition 1 — the call is not compiled at all and this is a plain field
+    /// assignment.
+    fn set_len(&mut self, len: usize) {
+        self.len = len;
+
+        #[cfg(feature = "testing")]
+        crate::control::note_buffer_len(len);
     }
 
     /// How many strokes fit.
@@ -483,7 +524,7 @@ impl Ring {
         if evicted {
             self.head = (self.head + 1) % capacity;
         } else {
-            self.len += 1;
+            self.set_len(self.len + 1);
         }
 
         evicted
@@ -501,7 +542,7 @@ impl Ring {
 
         let index = (self.head + self.len - 1) % self.capacity();
         self.zero_slot(index);
-        self.len -= 1;
+        self.set_len(self.len - 1);
 
         true
     }
@@ -519,7 +560,7 @@ impl Ring {
         }
 
         self.head = 0;
-        self.len = 0;
+        self.set_len(0);
     }
 
     /// Drops every stroke recorded at or before `event_time` and reports how many survived —
@@ -563,7 +604,7 @@ impl Ring {
         }
 
         self.head = (self.head + leading) % capacity;
-        self.len -= leading;
+        self.set_len(self.len - leading);
 
         // Pass two: anything the event covers that is not in that run.
         let mut kept = 0;
@@ -590,7 +631,7 @@ impl Ring {
             self.zero_slot((self.head + offset) % capacity);
         }
 
-        self.len = kept;
+        self.set_len(kept);
 
         kept
     }
