@@ -3,11 +3,15 @@
 //!
 //! Responsibility taken from the module table in section 6.2 of SPEC.
 //!
-//! Requirements this module will cover: FR-20, FR-21, FR-35 — implemented here by task
-//! T-02-1; FR-30, FR-31, FR-32, FR-33, FR-34 — target layout selection and cycling, left
-//! to task T-05-2.
-//! Moved out to match the backlog (decision R-17): FR-52 to module `switch`, task T-05-1.
-//! Implemented by backlog tasks: T-02-1 (done), T-02-1a (done), T-05-2.
+//! Requirements this module covers: FR-20, FR-21, FR-35 — implemented here by task T-02-1;
+//! FR-30, FR-31, FR-33 and the target-choosing half of FR-32 — the selection of the target
+//! layout and the cycle of section 4.4, task T-05-2.
+//! Moved out to match the backlog (decision R-17): FR-52 to module `switch`, task T-05-1;
+//! **FR-34 to module `buffer`, task T-05-2** — the position counter is reset by every rule of
+//! FR-10 without exception, so it lives beside the ring it is reset with and not beside the
+//! cycle it counts along. It was listed here by task T-01-1a and is listed here no longer;
+//! `buffer` names it now, which is the documentation debt of section 4.3 of `STATE.md`.
+//! Implemented by backlog tasks: T-02-1 (done), T-02-1a (done), T-05-2 (done).
 //!
 //! # What the cache is
 //!
@@ -78,12 +82,15 @@
 
 use core::ffi::c_void;
 use core::fmt;
+use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayoutList, HKL, MAPVK_VK_TO_VSC_EX, MapVirtualKeyExW, ToUnicodeEx, VK_CAPITAL,
     VK_CONTROL, VK_LCONTROL, VK_LSHIFT, VK_MENU, VK_RMENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{WM_DEVICECHANGE, WM_INPUTLANGCHANGE};
+
+use crate::settings::{self, LayoutMode};
 
 /// `ToUnicodeEx` flag `wFlags = 0x4`, "do not change the keyboard state".
 ///
@@ -1004,6 +1011,27 @@ impl LayoutCache {
         &self.maps
     }
 
+    /// Copies the layouts the cache covers into `out`, in system order, and returns how many.
+    ///
+    /// The participating set of FR-35 as the *live cache* holds it, which is what the choice of
+    /// section 4.4 is made against: [`LayoutCache::build`] filled it from [`enumerate`], so the
+    /// IMEs are already gone and the order is the system's own — the order FR-30 means by
+    /// "первые две раскладки системного списка".
+    ///
+    /// Allocation-free, and that is the point (NFR-09): this is read on the hotkey path, where
+    /// [`crate::inject::on_hotkey`] hands it a fixed array of [`MAX_CYCLE`] elements. `out`
+    /// shorter than the cache is not an error — the first `out.len()` layouts are copied, which
+    /// is what a caller with a bounded list can use anyway.
+    pub fn layouts(&self, out: &mut [LayoutId]) -> usize {
+        let taken = out.len().min(self.maps.len());
+
+        for (slot, map) in out.iter_mut().zip(&self.maps) {
+            *slot = map.layout;
+        }
+
+        taken
+    }
+
     /// How many layouts the cache covers. Never zero.
     pub fn len(&self) -> usize {
         self.maps.len()
@@ -1040,4 +1068,562 @@ impl LayoutCache {
     pub fn contains(&self, layout: LayoutId) -> bool {
         self.get(layout).is_some()
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Choosing the target layout — section 4.4, FR-30 to FR-35, task T-05-2
+// ---------------------------------------------------------------------------------------
+
+/// Longest list of layouts one press of the hotkey steps along.
+///
+/// Section 7 puts no bound on `cycle`, and a hand-edited file must not be able to turn into an
+/// unbounded array on the hotkey path, exactly as `[buffer] capacity` must not — see
+/// [`crate::buffer::MAX_CAPACITY`], which answers the same question for the same reason. Eight
+/// is more layouts than a Windows session is ever set up with; decision 19 fixes this machine at
+/// two. Entries past the eighth are dropped, not an error.
+pub const MAX_CYCLE: usize = 8;
+
+/// A layout identifier **as section 7 writes it** — `"0x00000409"`, not an `HKL`.
+///
+/// The distinction is load-bearing and it is why this is a type of its own rather than a
+/// [`LayoutId`]. The value section 7 prints, `0x00000409`, is the *keyboard layout identifier*:
+/// the language in the low word and zero in the high word. The handle the OS hands out for the
+/// very same layout is `0x04090409`, the language repeated in both words, and a layout loaded
+/// twice, or loaded under an explicit layout id, carries something else again in the high word.
+/// Comparing the two for equality would therefore never match anything, and the configuration
+/// of section 7 — the one decision 19 confirms and the one shipped as the default — would
+/// silently select nothing at all.
+///
+/// So the rule is stated once, in [`LayoutSpec::matches`], and applied everywhere: a spec whose
+/// high word is zero names a **language** and matches any loaded layout serving it; a spec with
+/// a high word names a **handle** and matches only that one. Both forms are accepted from the
+/// file, and section 7 is not extended by one field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LayoutSpec(usize);
+
+impl LayoutSpec {
+    /// The spec that names nothing — an absent or unreadable field of section 7.
+    pub const NONE: Self = Self(0);
+
+    /// Reads one field of `[layouts]`, in either of the two forms section 7 allows.
+    ///
+    /// Hexadecimal in both cases, with or without the `0x` prefix, because that is what a
+    /// keyboard layout identifier is on Windows: the value in the registry under
+    /// `HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layouts` is the eight hexadecimal digits
+    /// `00000409`, and section 7 prints it with the prefix. A field this cannot read is
+    /// [`LayoutSpec::NONE`] rather than a failure: a typo in a hand-edited file must leave a
+    /// resident program working off the defaults, and the settings dialog of FR-92 (task
+    /// T-08-1) is where a bad value is reported to the user.
+    ///
+    /// Allocation-free — it is called on the UI thread while publishing, and there is nothing
+    /// here that needs a string of its own.
+    pub fn parse(text: &str) -> Self {
+        let trimmed = text.trim();
+        let digits = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed);
+
+        match usize::from_str_radix(digits, 16) {
+            Ok(value) => Self(value),
+            Err(_) => Self::NONE,
+        }
+    }
+
+    /// Wraps a raw identifier — the form the published atomics carry.
+    pub const fn from_raw(raw: usize) -> Self {
+        Self(raw)
+    }
+
+    /// The raw identifier.
+    pub const fn raw(self) -> usize {
+        self.0
+    }
+
+    /// Whether this spec names nothing.
+    pub const fn is_none(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether this spec names `layout` — the one rule, stated once.
+    pub const fn matches(self, layout: LayoutId) -> bool {
+        if self.is_none() {
+            return false;
+        }
+
+        if self.0 >> 16 == 0 {
+            // A keyboard layout identifier: the language alone. `0x00000409` names US whichever
+            // handle the session gave it.
+            return layout.language_id() as usize == self.0 & 0xFFFF;
+        }
+
+        // A handle, written out in full. Compared exactly, so that a session with the same
+        // language loaded twice can still be told apart by a user who writes both handles down.
+        layout.raw() == self.0
+    }
+
+    /// The layout of `available` this spec names, if the session has one.
+    pub fn resolve(self, available: &[LayoutId]) -> Option<LayoutId> {
+        available
+            .iter()
+            .copied()
+            .find(|&layout| self.matches(layout))
+    }
+}
+
+/// Why a target layout could not be chosen.
+///
+/// Every variant is a **refusal**: the caller performs no replacement and no switch. FR-35 asks
+/// for exactly that — "обработать как отказ и сосчитать, а не переключаться" — and the counting
+/// is [`selection_failures`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionError {
+    /// **FR-35.** A layout served by a TSF/IME text service turned up in the pair or in the
+    /// cycle list.
+    ///
+    /// It cannot get there from the live cache: [`enumerate`] drops IMEs before a map is ever
+    /// built. So it is either a caller passing a list this module did not produce or a
+    /// `config.toml` naming one by hand, and both are defects rather than requests. The
+    /// composition step of an IME breaks the correspondence between keystrokes and the field's
+    /// contents, which is the whole reason FR-35 exists, so the answer is to do nothing.
+    ImeLayout,
+    /// Fewer than two layouts to walk: there is nothing to convert *into*.
+    ///
+    /// A session with one layout, or a cycle list that resolved to one layout or to none of the
+    /// layouts this session has.
+    NoLayouts,
+    /// The layout the strokes were typed under is not in the list — FR-30, "остальные
+    /// раскладки игнорируются".
+    ///
+    /// With three layouts and mode `pair` the user names two of them, and text typed under the
+    /// third is not this program's business: converting it would mean guessing a direction the
+    /// user did not give.
+    OriginOutside,
+}
+
+impl fmt::Display for SelectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Names of outcomes; no character, no scan code, no layout handle — SEC-01, SEC-07.
+        let text = match self {
+            Self::ImeLayout => "an IME layout was named as a participant and FR-35 excludes it",
+            Self::NoLayouts => "fewer than two layouts to switch between",
+            Self::OriginOutside => "the layout in use is not one of the participants",
+        };
+        f.write_str(text)
+    }
+}
+
+impl std::error::Error for SelectionError {}
+
+/// How many times each refusal of [`SelectionError`] has been answered — the counting half of
+/// FR-35.
+///
+/// Counts of events, never a keystroke and never a character: the same shape as
+/// [`crate::switch::Failures`], and offered to the diagnostic journal of task T-06-4 on the same
+/// terms (SEC-01, SEC-07).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelectionFailures {
+    /// [`SelectionError::ImeLayout`] — FR-35.
+    pub ime_layout: u32,
+    /// [`SelectionError::NoLayouts`].
+    pub no_layouts: u32,
+    /// [`SelectionError::OriginOutside`].
+    pub origin_outside: u32,
+}
+
+static IME_LAYOUT: AtomicU32 = AtomicU32::new(0);
+static NO_LAYOUTS: AtomicU32 = AtomicU32::new(0);
+static ORIGIN_OUTSIDE: AtomicU32 = AtomicU32::new(0);
+
+/// Counts one refusal and hands it back, so that a refusal cannot be produced without being
+/// counted.
+///
+/// The one place any of the three counters is raised, and it is reached from the two places a
+/// [`SelectionError`] is *created* — [`Cycle::from_layouts`] and [`Cycle::target`]. Everything
+/// above them propagates with `?` and counts nothing, which is what keeps one refusal from being
+/// counted twice.
+///
+/// Relaxed: these are counters and nothing is ordered against them (NFR-04 — no lock anywhere on
+/// this path).
+fn refuse(error: SelectionError) -> SelectionError {
+    let counter = match error {
+        SelectionError::ImeLayout => &IME_LAYOUT,
+        SelectionError::NoLayouts => &NO_LAYOUTS,
+        SelectionError::OriginOutside => &ORIGIN_OUTSIDE,
+    };
+
+    counter.fetch_add(1, Ordering::Relaxed);
+
+    error
+}
+
+/// What the three counters stand at.
+pub fn selection_failures() -> SelectionFailures {
+    SelectionFailures {
+        ime_layout: IME_LAYOUT.load(Ordering::Relaxed),
+        no_layouts: NO_LAYOUTS.load(Ordering::Relaxed),
+        origin_outside: ORIGIN_OUTSIDE.load(Ordering::Relaxed),
+    }
+}
+
+/// Zeroes the three counters. For tests; the product never calls it.
+pub fn reset_selection_failures() {
+    IME_LAYOUT.store(0, Ordering::Relaxed);
+    NO_LAYOUTS.store(0, Ordering::Relaxed);
+    ORIGIN_OUTSIDE.store(0, Ordering::Relaxed);
+}
+
+/// The ordered list of layouts one press of the hotkey steps along — **FR-30, FR-31, FR-33**.
+///
+/// # Why there is one type here and not two
+///
+/// FR-33: "В режиме «Пара» механизм тот же при длине цикла 2, благодаря чему повторное нажатие
+/// горячей клавиши работает как откат **без отдельной реализации**." That is a statement about
+/// how the code is built, not a remark about how it behaves, and two branches that happened to
+/// agree would not satisfy it — they would part company at the first change to either.
+///
+/// So "Пара" is not a mode of this type. It is a [`Cycle`] whose list has two elements, produced
+/// by the same [`cycle_for`] out of a different part of section 7, and stepped along by the same
+/// [`Cycle::target`]. The whole difference between the two modes of FR-30 and FR-31 is **which
+/// layouts end up in the list**, and it is spent before this type exists.
+///
+/// Fixed size and `Copy`: building one allocates nothing (NFR-03), and it is built on the hotkey
+/// path, where NFR-09 gives the whole replacement thirty milliseconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Cycle {
+    slots: [LayoutId; MAX_CYCLE],
+    len: u8,
+}
+
+impl Cycle {
+    /// A cycle with nothing in it. Answers [`SelectionError::NoLayouts`] to everything.
+    pub const EMPTY: Self = Self {
+        slots: [LayoutId::from_raw(0); MAX_CYCLE],
+        len: 0,
+    };
+
+    /// The cycle `layouts` names: in order, without repetitions, clamped to [`MAX_CYCLE`].
+    ///
+    /// The one constructor, and therefore the one place FR-35 is enforced: an IME anywhere in
+    /// the list refuses the whole selection and is counted. Refusing rather than skipping is
+    /// what FR-35 asks for — a list that names an IME is a defect of the caller or a damaged
+    /// `config.toml`, and quietly switching to something else instead would hide it.
+    ///
+    /// Repetitions are dropped rather than refused: a list naming the same layout twice is a
+    /// cycle of the layouts it names, and the position counter must not sit still for a press.
+    /// A list that has fewer than two distinct layouts left is [`SelectionError::NoLayouts`].
+    pub fn from_layouts(layouts: &[LayoutId]) -> Result<Self, SelectionError> {
+        let mut cycle = Self::EMPTY;
+
+        for &layout in layouts {
+            if layout.is_ime() {
+                return Err(refuse(SelectionError::ImeLayout));
+            }
+
+            if usize::from(cycle.len) == MAX_CYCLE || cycle.contains(layout) {
+                continue;
+            }
+
+            cycle.slots[usize::from(cycle.len)] = layout;
+            cycle.len += 1;
+        }
+
+        if cycle.len < 2 {
+            return Err(refuse(SelectionError::NoLayouts));
+        }
+
+        Ok(cycle)
+    }
+
+    /// The layouts in the order the hotkey walks them.
+    pub fn layouts(&self) -> &[LayoutId] {
+        &self.slots[..usize::from(self.len)]
+    }
+
+    /// How many layouts the cycle walks. Two in mode `pair` — FR-33.
+    pub fn len(&self) -> usize {
+        usize::from(self.len)
+    }
+
+    /// Whether the cycle walks nothing.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Whether `layout` takes part.
+    pub fn contains(&self, layout: LayoutId) -> bool {
+        self.layouts().contains(&layout)
+    }
+
+    /// Where `layout` sits in the cycle.
+    pub fn position_of(&self, layout: LayoutId) -> Option<usize> {
+        self.layouts().iter().position(|&entry| entry == layout)
+    }
+
+    /// **The layout `step` presses along the cycle from `origin` — FR-31, FR-32, FR-33.**
+    ///
+    /// The whole of the cycling, in one expression, for both modes:
+    ///
+    /// * `step` is the position counter of FR-32, which module `buffer` keeps beside the ring
+    ///   and resets with it (FR-34). It counts *presses of the hotkey against this buffer*, and
+    ///   `0` is "as typed";
+    /// * `origin` is the layout the strokes were recorded under — FR-26 decides the direction
+    ///   from the recorded `hkl` and never from the text;
+    /// * the answer is the layout at `origin + step`, taken around the ring of participants.
+    ///
+    /// FR-31 falls out of it: with the list `[A, B, C]` and the text typed under `A`, the first
+    /// press answers `B`, the second `C` and the third `A` — "по кругу с возвратом к исходному
+    /// варианту". So does FR-33: with `[A, B]` the first press answers `B` and the second `A`,
+    /// which is the rollback, and it is this same line that produces it.
+    ///
+    /// **And so does FR-32.** The answer for a step that is a multiple of the length is `origin`
+    /// itself, and rendering the *original* strokes into the layout they were typed under
+    /// reproduces what the user typed, code unit for code unit —
+    /// [`crate::convert::convert_strokes`] asks the target layout what the same physical key
+    /// gives, and for the original layout that is the character the stroke already carries.
+    /// Nothing accumulates, because nothing is ever converted from a conversion: the buffer is
+    /// never written back.
+    ///
+    /// The reduction is `step % len` before the addition, so a counter that has been running for
+    /// a long time cannot overflow the sum.
+    pub fn target(&self, origin: LayoutId, step: usize) -> Result<LayoutId, SelectionError> {
+        let len = self.len();
+
+        if len < 2 {
+            return Err(refuse(SelectionError::NoLayouts));
+        }
+
+        let Some(position) = self.position_of(origin) else {
+            return Err(refuse(SelectionError::OriginOutside));
+        };
+
+        Ok(self.slots[(position + step % len) % len])
+    }
+}
+
+/// `[layouts]` of section 7 as the input thread reads it — the published form.
+///
+/// Plain `Copy` data of fixed size: the hotkey path reads it out of atomics with no lock, no
+/// allocation and no file (NFR-04, NFR-03, NFR-09). What it carries is what section 7 carries
+/// and nothing besides — the mode, the two fields of the pair and the cycle list — because the
+/// schema of section 7 is closed and this task does not extend it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Configured {
+    mode: LayoutMode,
+    pair: [LayoutSpec; 2],
+    cycle: [LayoutSpec; MAX_CYCLE],
+    cycle_len: u8,
+}
+
+impl Default for Configured {
+    /// What the program uses before anything has been published.
+    ///
+    /// Mode `pair`, as section 7 and decision 19 have it, and **no** identifiers at all — which
+    /// is not the same as the identifiers of section 7 written out here a second time. On the
+    /// two-layout machine of decision 19 the first bullet of FR-30 answers without consulting a
+    /// field, and with three layouts an unpublished configuration falls back to the first two of
+    /// the system list, which is precisely the prefill rule the second bullet gives. Repeating
+    /// `0x00000409` here would put the defaults of section 7 in a second place, where they could
+    /// drift from `settings::Layouts::default`.
+    fn default() -> Self {
+        Self {
+            mode: LayoutMode::Pair,
+            pair: [LayoutSpec::NONE; 2],
+            cycle: [LayoutSpec::NONE; MAX_CYCLE],
+            cycle_len: 0,
+        }
+    }
+}
+
+impl Configured {
+    /// Reads `[layouts]` of a loaded configuration. Called on the UI thread, which is the thread
+    /// section 6.1 lets touch a file.
+    pub fn from_settings(layouts: &settings::Layouts) -> Self {
+        let mut configured = Self {
+            mode: layouts.mode,
+            pair: [
+                LayoutSpec::parse(&layouts.pair_source),
+                LayoutSpec::parse(&layouts.pair_target),
+            ],
+            ..Self::default()
+        };
+
+        for spec in layouts.cycle.iter().take(MAX_CYCLE) {
+            configured.cycle[usize::from(configured.cycle_len)] = LayoutSpec::parse(spec);
+            configured.cycle_len += 1;
+        }
+
+        configured
+    }
+
+    /// The mode of FR-30 and FR-31.
+    pub const fn mode(self) -> LayoutMode {
+        self.mode
+    }
+
+    /// `pair_source` and `pair_target`, in that order.
+    pub const fn pair(&self) -> &[LayoutSpec; 2] {
+        &self.pair
+    }
+
+    /// The `cycle` list, as long as the file made it.
+    pub fn cycle(&self) -> &[LayoutSpec] {
+        &self.cycle[..usize::from(self.cycle_len)]
+    }
+}
+
+/// The published `[layouts]`, one atomic per value — section 6.3.
+///
+/// The configuration belongs to the UI thread and the choice is made on the input thread, so the
+/// values are *published* rather than fetched, exactly as `[replacement]` is (task T-04-2). Plain
+/// atomics and no lock: NFR-04 forbids blocking primitives near the input path, and the cheapest
+/// way to obey a ban is to have nothing to ban.
+static MODE: AtomicU8 = AtomicU8::new(PAIR_CODE);
+static PAIR: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
+static CYCLE: [AtomicUsize; MAX_CYCLE] = [const { AtomicUsize::new(0) }; MAX_CYCLE];
+static CYCLE_LEN: AtomicUsize = AtomicUsize::new(0);
+
+/// `mode = "pair"` as one byte.
+const PAIR_CODE: u8 = 0;
+/// `mode = "cycle"` as one byte.
+const CYCLE_CODE: u8 = 1;
+
+/// Publishes `[layouts]` to the input thread — the only writer.
+///
+/// Called by `app` after the configuration has been read, on the UI thread, together with the
+/// other published values of section 7. Nothing is applied to anything already built: the next
+/// press of the hotkey reads whatever stands here at that moment.
+pub fn publish(configured: Configured) {
+    for (slot, spec) in PAIR.iter().zip(configured.pair()) {
+        slot.store(spec.raw(), Ordering::Release);
+    }
+
+    for (slot, spec) in CYCLE.iter().zip(configured.cycle()) {
+        slot.store(spec.raw(), Ordering::Release);
+    }
+
+    // The length is stored after the values it bounds, so a reader that sees the new length sees
+    // the entries that go with it; and the mode last, because it is what decides which of the two
+    // groups is read at all.
+    CYCLE_LEN.store(configured.cycle().len(), Ordering::Release);
+    MODE.store(
+        match configured.mode() {
+            LayoutMode::Pair => PAIR_CODE,
+            LayoutMode::Cycle => CYCLE_CODE,
+        },
+        Ordering::Release,
+    );
+}
+
+/// What was published — read once per press of the hotkey.
+///
+/// [`MAX_CYCLE`] plus three atomic loads and nothing else: no allocation (NFR-03), no lock
+/// (NFR-04), no file (NFR-05, NFR-09).
+pub fn published() -> Configured {
+    let mut configured = Configured {
+        mode: match MODE.load(Ordering::Acquire) {
+            CYCLE_CODE => LayoutMode::Cycle,
+            // Nothing but `publish` writes the byte and it writes only the two codes, so this is
+            // unreachable — and the hotkey path must have a mode rather than a question even so,
+            // which is what makes the fallback the documented default of section 7.
+            _ => LayoutMode::Pair,
+        },
+        ..Configured::default()
+    };
+
+    for (spec, slot) in configured.pair.iter_mut().zip(&PAIR) {
+        *spec = LayoutSpec::from_raw(slot.load(Ordering::Acquire));
+    }
+
+    let len = CYCLE_LEN.load(Ordering::Acquire).min(MAX_CYCLE);
+    for (spec, slot) in configured.cycle.iter_mut().zip(&CYCLE).take(len) {
+        *spec = LayoutSpec::from_raw(slot.load(Ordering::Acquire));
+    }
+    configured.cycle_len = len as u8;
+
+    configured
+}
+
+/// **The list the hotkey walks, for this configuration and this session — FR-30, FR-31, FR-33.**
+///
+/// The one function both modes go through, and the only place the two of them differ at all:
+/// what ends up in the list. Below this line there is no mode any more — [`Cycle::target`] steps
+/// along whatever came out, and a pair is a list of two.
+///
+/// # Mode `pair`, and the two bullets of FR-30
+///
+/// * **Exactly two layouts in the session.** "Работа полностью автоматическая, настройка не
+///   требуется: целевая раскладка есть вторая из двух." The configuration is not consulted at
+///   all — not even to be overridden — because a machine in the state decision 19 fixes must
+///   work with no settings whatever, including with a `config.toml` that names layouts this
+///   session does not have.
+/// * **Three or more.** The user names the working pair and the rest are ignored. A field that
+///   names no layout of this session leaves the pair unusable, and the answer is then the rule
+///   FR-30 gives for the dialog — "поля предзаполняются первыми двумя раскладками системного
+///   списка" — applied to the choice itself, so that the program keeps working while the user
+///   has not opened the settings yet.
+///
+/// # Mode `cycle` and FR-31
+///
+/// The configured list, resolved against the session in the order the file gives, which is the
+/// order FR-31 walks. Entries naming layouts this session does not have are dropped: a list that
+/// mentions a layout the user has since removed is still a list of the others. If fewer than two
+/// survive there is nothing configured to walk, and the session's own layouts are walked
+/// instead — the same answer the defaults of section 7 would have given, since `cycle` defaults
+/// to the two layouts of decision 19.
+///
+/// Allocates nothing: both branches build the list in a fixed array.
+pub fn cycle_for(configured: Configured, available: &[LayoutId]) -> Result<Cycle, SelectionError> {
+    match configured.mode() {
+        LayoutMode::Pair => {
+            if available.len() == 2 {
+                return Cycle::from_layouts(available);
+            }
+
+            let [source, target] = configured.pair();
+            match (source.resolve(available), target.resolve(available)) {
+                (Some(source), Some(target)) if source != target => {
+                    Cycle::from_layouts(&[source, target])
+                }
+                _ => Cycle::from_layouts(available.get(..2).unwrap_or(available)),
+            }
+        }
+
+        LayoutMode::Cycle => {
+            let mut resolved = [LayoutId::from_raw(0); MAX_CYCLE];
+            let mut len = 0;
+
+            for spec in configured.cycle() {
+                if len == MAX_CYCLE {
+                    break;
+                }
+                if let Some(layout) = spec.resolve(available) {
+                    resolved[len] = layout;
+                    len += 1;
+                }
+            }
+
+            if len >= 2 {
+                Cycle::from_layouts(&resolved[..len])
+            } else {
+                Cycle::from_layouts(available)
+            }
+        }
+    }
+}
+
+/// **The whole of section 4.4 in one call**: the layout this press renders the strokes into.
+///
+/// `origin` is the layout the strokes were recorded under (FR-26) and `step` the position
+/// counter of FR-32 as it will stand *after* this press. Everything else is
+/// [`cycle_for`] and [`Cycle::target`], in that order, with nothing between them.
+///
+/// This is what [`crate::inject::on_hotkey`] calls, once per press.
+pub fn target_for(
+    configured: Configured,
+    available: &[LayoutId],
+    origin: LayoutId,
+    step: usize,
+) -> Result<LayoutId, SelectionError> {
+    cycle_for(configured, available)?.target(origin, step)
 }

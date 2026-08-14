@@ -14,9 +14,11 @@
 //! the product never prints them.
 
 use lang_switcher::layouts::{
-    KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap, LayoutMapBuilder,
-    MappingKind, Mods, REBUILD_MESSAGES, enumerate, enumerate_all, needs_rebuild,
+    Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
+    LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MappingKind, Mods, REBUILD_MESSAGES, SelectionError,
+    cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures, target_for,
 };
+use lang_switcher::settings::{LayoutMode, Layouts};
 
 /// Russian, slot 1 of `HKCU\Keyboard Layout\Preload` — TOOLCHAIN.md section 4.
 const RUSSIAN: LayoutId = LayoutId::from_raw(0x0419_0419);
@@ -490,6 +492,407 @@ fn a_key_with_no_character_reads_as_empty_rather_than_as_a_failure() {
         us.lookup(0xE01E, MAIN_BLOCK, Mods::NONE),
         us.lookup(SCAN_A, MAIN_BLOCK, Mods::NONE),
         "only the low byte of a scan code selects a key"
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// §4.4 — choosing the target layout. Task T-05-2.
+//
+// Everything below is arithmetic over layout identifiers and touches neither the OS nor the
+// session's layout list: the lists are written out by hand, exactly as FR-30 and FR-31 let a
+// configuration write them, so the answers are the same on any machine.
+// -------------------------------------------------------------------------------------
+
+/// Greek, the third layout of position 17 of the matrix — synthetic, nothing is attached here.
+const GREEK: LayoutId = LayoutId::from_raw(0x0408_0408);
+
+/// Chinese Simplified, Microsoft Pinyin — an **IME**, excluded by FR-35.
+///
+/// The top nibble of the device handle is `0xE`, which is what `LayoutId::is_ime` reads.
+const PINYIN: LayoutId = LayoutId::from_raw(0xE020_0804);
+
+/// `[layouts]` of section 7, as a hand-edited file would carry it.
+fn settings(mode: LayoutMode, pair: [&str; 2], cycle: &[&str]) -> Configured {
+    Configured::from_settings(&Layouts {
+        mode,
+        pair_source: pair[0].to_owned(),
+        pair_target: pair[1].to_owned(),
+        cycle: cycle.iter().map(|entry| (*entry).to_owned()).collect(),
+    })
+}
+
+/// The pair of decision 19, in mode `pair`.
+fn the_pair_of_decision_19() -> Configured {
+    settings(
+        LayoutMode::Pair,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    )
+}
+
+// -------------------------------------------------------------------------------------
+// Point 13 — FR-30: exactly two layouts, and no configuration at all
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn two_layouts_in_the_session_choose_the_target_without_any_configuration() {
+    // "Если в системе установлены ровно две раскладки — работа полностью автоматическая,
+    // настройка не требуется: целевая раскладка есть вторая из двух." Nothing has been
+    // published and nothing is read: `Configured::default` is what the input thread sees
+    // before the UI thread has said anything at all.
+    let session = [US, RUSSIAN];
+    let cycle = cycle_for(Configured::default(), &session).expect("two layouts are a pair");
+
+    assert_eq!(cycle.layouts(), session);
+    assert_eq!(
+        cycle.target(US, 1).expect("the second of the two"),
+        RUSSIAN,
+        "FR-30: the target is the other one of the two"
+    );
+    assert_eq!(
+        cycle.target(RUSSIAN, 1).expect("the second of the two"),
+        US,
+        "and it is symmetric — either layout may be the one typed under"
+    );
+
+    // The same answer with a `config.toml` that names layouts this session does not have. A
+    // machine in the state decision 19 fixes has to work whatever the file says, and this is
+    // the case the first bullet of FR-30 is written for.
+    let nonsense = settings(
+        LayoutMode::Pair,
+        ["0x0000040C", "0x00000407"],
+        &["0x0000040C"],
+    );
+    let cycle = cycle_for(nonsense, &session).expect("two layouts are a pair regardless");
+
+    assert_eq!(cycle.layouts(), session);
+    assert_eq!(cycle.target(US, 1).expect("the other one"), RUSSIAN);
+}
+
+// -------------------------------------------------------------------------------------
+// Point 14 — FR-30: three or more, mode `pair`
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn three_layouts_in_pair_mode_walk_the_named_pair_and_ignore_the_rest() {
+    let session = [US, RUSSIAN, GREEK];
+
+    // "Пользователь явно задаёт рабочую пару «источник ↔ цель». Остальные раскладки
+    // игнорируются."
+    let cycle = cycle_for(the_pair_of_decision_19(), &session).expect("the named pair");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+    assert!(!cycle.contains(GREEK), "the third layout takes no part");
+    assert_eq!(cycle.target(US, 1).expect("the pair"), RUSSIAN);
+    assert_eq!(cycle.target(RUSSIAN, 1).expect("the pair"), US);
+
+    // Text typed under the layout that takes no part is not converted at all: the direction
+    // it would be converted in is one the user did not give.
+    let before = selection_failures().origin_outside;
+
+    assert_eq!(cycle.target(GREEK, 1), Err(SelectionError::OriginOutside));
+    assert!(
+        selection_failures().origin_outside > before,
+        "the refusal is counted"
+    );
+
+    // The pair the user names is the pair that is walked, whichever two of the three it is.
+    let other_pair = settings(
+        LayoutMode::Pair,
+        ["0x00000419", "0x00000408"],
+        &["0x00000409", "0x00000419"],
+    );
+    let cycle = cycle_for(other_pair, &session).expect("the named pair");
+
+    assert_eq!(cycle.layouts(), [RUSSIAN, GREEK]);
+    assert_eq!(cycle.target(RUSSIAN, 1).expect("the pair"), GREEK);
+
+    // A pair naming a layout this session does not have falls back to the rule FR-30 gives
+    // for the dialog — the first two of the system list — rather than stopping the program.
+    let absent = settings(
+        LayoutMode::Pair,
+        ["0x0000040C", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    );
+    let cycle = cycle_for(absent, &session).expect("the prefill of FR-30");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+}
+
+// -------------------------------------------------------------------------------------
+// Point 15 — FR-31: variant 2, then variant 3, then round
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
+    let session = [US, RUSSIAN, GREEK];
+    let three = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419", "0x00000408"],
+    );
+
+    let cycle = cycle_for(three, &session).expect("the configured list");
+
+    assert_eq!(cycle.layouts(), session);
+
+    // "первое нажатие — вариант 2, второе — вариант 3, и так далее по кругу с возвратом
+    // к исходному варианту."
+    assert_eq!(cycle.target(US, 1).expect("variant 2"), RUSSIAN);
+    assert_eq!(cycle.target(US, 2).expect("variant 3"), GREEK);
+    assert_eq!(cycle.target(US, 3).expect("back to the start"), US);
+    assert_eq!(cycle.target(US, 4).expect("round again"), RUSSIAN);
+
+    // The order is the file's, not the system's.
+    let reversed = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000408", "0x00000419"],
+    );
+    let cycle = cycle_for(reversed, &session).expect("the configured list");
+
+    assert_eq!(cycle.layouts(), [US, GREEK, RUSSIAN]);
+    assert_eq!(cycle.target(US, 1).expect("variant 2"), GREEK);
+
+    // A list mentioning layouts this session does not have is the list of the others; a list
+    // that leaves fewer than two is the session's own layouts, which is what the defaults of
+    // section 7 name anyway.
+    let partly_absent = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x0000040C", "0x00000419", "0x00000409"],
+    );
+    assert_eq!(
+        cycle_for(partly_absent, &session)
+            .expect("what is left of the list")
+            .layouts(),
+        [RUSSIAN, US]
+    );
+
+    let all_absent = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x0000040C"],
+    );
+    assert_eq!(
+        cycle_for(all_absent, &session)
+            .expect("the session's own layouts")
+            .layouts(),
+        session
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Point 18 — FR-35: an IME in the pair or in the cycle list
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
+    assert!(PINYIN.is_ime(), "the fixture is an IME to begin with");
+    assert!(!US.is_ime() && !RUSSIAN.is_ime() && !GREEK.is_ime());
+
+    // In the pair: the session has exactly two layouts and one of them is an IME. FR-35
+    // excludes it from the participating set, so there is no pair to switch between and the
+    // answer is a refusal — "обработать как отказ и сосчитать, а не переключаться".
+    let before = selection_failures().ime_layout;
+
+    assert_eq!(
+        cycle_for(the_pair_of_decision_19(), &[US, PINYIN]),
+        Err(SelectionError::ImeLayout)
+    );
+
+    // In the cycle list, named by hand in a damaged `config.toml`.
+    let with_an_ime = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0xE0200804", "0x00000419"],
+    );
+
+    assert_eq!(
+        cycle_for(with_an_ime, &[US, PINYIN, RUSSIAN]),
+        Err(SelectionError::ImeLayout)
+    );
+
+    // And through the one call the product makes, which is where a refusal turns into "no
+    // replacement and no switch".
+    assert_eq!(
+        target_for(the_pair_of_decision_19(), &[US, PINYIN], US, 1),
+        Err(SelectionError::ImeLayout)
+    );
+
+    let after = selection_failures().ime_layout;
+
+    assert!(
+        after >= before + 3,
+        "FR-35: every refusal is counted — {before} then {after}"
+    );
+
+    // An IME merely *present* in the session is not an error: FR-35 excludes it from the
+    // participants, and a pair naming the other two is a pair.
+    let cycle = cycle_for(the_pair_of_decision_19(), &[US, PINYIN, RUSSIAN])
+        .expect("the named pair does not include the IME");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+}
+
+// -------------------------------------------------------------------------------------
+// The identifiers of section 7, and the bounds of the list
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn the_identifiers_of_section_7_are_read_in_both_forms() {
+    // The form section 7 prints: the language in the low word, the high word zero. It names
+    // the language and matches whatever handle this session gave it.
+    let us = LayoutSpec::parse("0x00000409");
+
+    assert!(us.matches(US), "0x00000409 names the US layout");
+    assert!(
+        us.matches(LayoutId::from_raw(0xF001_0409)),
+        "and any handle serving it"
+    );
+    assert!(!us.matches(RUSSIAN));
+
+    // A handle written out in full is compared exactly, so that two layouts of one language
+    // can still be told apart.
+    let handle = LayoutSpec::parse("0x04090409");
+
+    assert!(handle.matches(US));
+    assert!(!handle.matches(LayoutId::from_raw(0xF001_0409)));
+
+    // Without the prefix, which is how the registry writes a keyboard layout identifier.
+    assert!(LayoutSpec::parse("00000419").matches(RUSSIAN));
+    assert!(LayoutSpec::parse("  0x00000419  ").matches(RUSSIAN));
+
+    // A field this cannot read names nothing and matches nothing — a typo leaves the program
+    // on its defaults rather than selecting something at random.
+    assert!(LayoutSpec::parse("ru-RU").is_none());
+    assert!(LayoutSpec::parse("").is_none());
+    assert!(!LayoutSpec::parse("zzz").matches(US));
+
+    // Resolution against the session is the same rule, applied to a list.
+    assert_eq!(us.resolve(&[RUSSIAN, US]), Some(US));
+    assert_eq!(
+        LayoutSpec::parse("0x0000040C").resolve(&[RUSSIAN, US]),
+        None
+    );
+}
+
+#[test]
+fn a_cycle_is_bounded_and_holds_no_repetitions() {
+    // A list longer than the bound keeps its first `MAX_CYCLE` entries: a hand-edited file
+    // must not be able to turn into an unbounded array on the hotkey path.
+    let many: Vec<LayoutId> = (0..(MAX_CYCLE as u16 + 4))
+        .map(|index| LayoutId::from_raw(0x0001_0000 | usize::from(index)))
+        .collect();
+    let cycle = Cycle::from_layouts(&many).expect("more than two layouts");
+
+    assert_eq!(cycle.len(), MAX_CYCLE);
+    assert_eq!(cycle.layouts(), &many[..MAX_CYCLE]);
+
+    // A layout named twice takes one place: the counter must not spend a press standing
+    // still.
+    let cycle = Cycle::from_layouts(&[US, RUSSIAN, US]).expect("two distinct layouts");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+
+    // Fewer than two layouts is nothing to switch between, and it is counted like any other
+    // refusal.
+    let before = selection_failures().no_layouts;
+
+    assert_eq!(Cycle::from_layouts(&[US]), Err(SelectionError::NoLayouts));
+    assert_eq!(Cycle::from_layouts(&[]), Err(SelectionError::NoLayouts));
+    assert_eq!(
+        Cycle::EMPTY.target(US, 1),
+        Err(SelectionError::NoLayouts),
+        "and an empty cycle answers nothing"
+    );
+
+    assert!(selection_failures().no_layouts >= before + 3);
+
+    // A step far beyond the length is reduced rather than added: a counter that has been
+    // running for a while cannot overflow the sum.
+    let cycle = Cycle::from_layouts(&[US, RUSSIAN, GREEK]).expect("three layouts");
+
+    assert_eq!(
+        cycle.target(US, usize::MAX).expect("reduced"),
+        cycle.target(US, usize::MAX % 3).expect("reduced")
+    );
+    assert_eq!(cycle.target(US, 3_000).expect("reduced"), US);
+}
+
+// -------------------------------------------------------------------------------------
+// Point 22 — SEC-01, SEC-07: nothing here can carry a keystroke
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn nothing_the_selection_can_say_carries_a_keystroke() {
+    // The three refusals are the only things this half of the module ever formats, and each
+    // of them is a sentence about layouts — no character, no scan code, no virtual key, and
+    // not even a layout identifier.
+    for error in [
+        SelectionError::ImeLayout,
+        SelectionError::NoLayouts,
+        SelectionError::OriginOutside,
+    ] {
+        let text = error.to_string();
+
+        assert!(!text.is_empty());
+        assert!(text.is_ascii(), "an outcome, not a keystroke");
+        assert!(!text.contains("0x"), "not even a handle");
+    }
+
+    // And what the counters report are counts.
+    let counted = selection_failures();
+    let _: (u32, u32, u32) = (
+        counted.ime_layout,
+        counted.no_layouts,
+        counted.origin_outside,
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// `[layouts]` reaches the input thread
+// -------------------------------------------------------------------------------------
+
+/// Section 7 travels from a `settings::Layouts` into the atomics the hotkey path reads.
+///
+/// The publication is process-wide, so this is the only test in this file that reads it; every
+/// other test above passes its configuration in by hand. It puts the defaults back when it is
+/// done, for the reason `tests\inject.rs` states about the two atomics of `[replacement]`.
+#[test]
+fn the_layouts_section_of_the_configuration_reaches_the_input_thread() {
+    let configured = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000419", "0x00000408", "0x00000409"],
+    );
+
+    lang_switcher::layouts::publish(configured);
+
+    let read_back = published();
+
+    assert_eq!(read_back.mode(), LayoutMode::Cycle);
+    assert!(read_back.pair()[0].matches(US));
+    assert!(read_back.pair()[1].matches(RUSSIAN));
+    assert_eq!(read_back.cycle().len(), 3);
+    assert_eq!(
+        cycle_for(read_back, &[US, RUSSIAN, GREEK])
+            .expect("the published list")
+            .layouts(),
+        [RUSSIAN, GREEK, US]
+    );
+
+    // The defaults of section 7, back where they were.
+    lang_switcher::layouts::publish(Configured::from_settings(&Layouts::default()));
+
+    let default = published();
+
+    assert_eq!(default.mode(), LayoutMode::Pair);
+    assert_eq!(
+        cycle_for(default, &[US, RUSSIAN, GREEK])
+            .expect("the pair of decision 19")
+            .layouts(),
+        [US, RUSSIAN]
     );
 }
 

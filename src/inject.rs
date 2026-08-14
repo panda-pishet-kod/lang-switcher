@@ -75,7 +75,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 
 use crate::convert::{self, ConvertError, Keystroke};
 use crate::hook::INJECTED_SIGNATURE;
-use crate::layouts::{LayoutId, LayoutMap};
+use crate::layouts::{self, LayoutId, LayoutMap};
 use crate::settings::ReplacementMethod;
 
 // ---------------------------------------------------------------------------------------
@@ -1253,45 +1253,94 @@ fn run_steps(
 ///
 /// # Boundaries
 ///
-/// * the target layout is task **T-05-2**'s choice; until it exists, [`interim_target`] stands
-///   in and is documented there as the interim it is;
+/// * **which** layout the strokes are rendered into is section 4.4 and module `layouts` (task
+///   T-05-2), reached from [`take_press`] below; this module asks for it and does not decide it;
 /// * the layout switch of FR-40 step 5 is module **`switch`**'s (task T-05-1) and is reached
 ///   from the marked point inside [`replace_in_with`]; its target is `target.layout()`, the
-///   layout the strokes were rendered into, which is what `interim_target` above chose.
+///   layout the strokes were rendered into.
 pub fn on_hotkey() -> Option<Replaced> {
-    let (mut strokes, active) = take_strokes()?;
+    let Press {
+        mut strokes,
+        target,
+        cycle_len,
+    } = take_press()?;
 
-    let outcome = interim_target(active)
-        .map(|target| {
-            replace_with(
-                &strokes,
-                &target,
-                inter_event_delay_ms(),
-                replacement_method(),
-            )
-        })
-        .and_then(Result::ok);
+    let outcome = replace_with(
+        &strokes,
+        &target,
+        inter_event_delay_ms(),
+        replacement_method(),
+    )
+    .ok();
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02.
     strokes.fill(Keystroke::default());
     drop(strokes);
 
     if outcome.is_some() {
-        // The last row of the FR-10 table, as module `buffer` describes it: the session is
-        // marked converted and the buffer is deliberately **not** flushed, so that FR-32 can
-        // render the same scan codes into the next layout on the next press. It is the next
-        // ordinary key that ends the session, and `Recorder::record` flushes then.
-        crate::buffer::note_conversion();
+        crate::buffer::with(|recorder| {
+            // The last row of the FR-10 table, as module `buffer` describes it: the session is
+            // marked converted and the buffer is deliberately **not** flushed, so that FR-32 can
+            // render the same scan codes into the next layout on the next press. It is the next
+            // ordinary key that ends the session, and `Recorder::record` flushes then.
+            recorder.note_conversion();
+
+            // **FR-32, the other half.** The strokes stay as they were; what moves is the
+            // position counter, and it moves once per replacement that actually happened. The
+            // next press therefore renders *these same* strokes one step further along the
+            // cycle, and the press that brings the counter back to zero renders them into the
+            // layout they were typed under — which is the original text, code unit for code
+            // unit.
+            recorder.advance_cycle(cycle_len);
+        });
     }
 
     outcome
 }
 
-/// Copies the live strokes of this thread's buffer out, with the layout they were typed under.
+/// What one press of the hotkey needs, taken under a single borrow of the buffer.
 ///
-/// `None` on a thread with no buffer, and on an empty buffer — there is nothing to replace.
-fn take_strokes() -> Option<(Vec<Keystroke>, LayoutId)> {
-    let taken = crate::buffer::with(|recorder| {
+/// The strokes are a **copy**: [`crate::buffer::with`] is a `RefCell` borrow and `SendInput`
+/// re-enters this thread's own hook callback, so nothing may be sent while the borrow is alive.
+/// The buffer itself is left exactly as it was — FR-32.
+struct Press {
+    /// The strokes as they were recorded, oldest first.
+    strokes: Vec<Keystroke>,
+    /// The layout they are to be rendered into on this press — section 4.4.
+    target: LayoutMap,
+    /// How many layouts the cycle walks, so that the counter can be advanced by the same number
+    /// the target was chosen with.
+    cycle_len: usize,
+}
+
+/// Copies the strokes out and chooses the layout this press renders them into — **section 4.4**.
+///
+/// `None` when there is nothing to do, and nothing is sent in any of those cases:
+///
+/// * no typing buffer on this thread — which is every thread but the input one, and is what
+///   makes an unsolicited `WM_APP_HOTKEY` from another process harmless (SEC-05);
+/// * an empty buffer;
+/// * no mapping cache yet, which is the few milliseconds of start-up before the sweep of FR-20
+///   has finished; a stroke recorded then carries no characters anyway;
+/// * **a refusal from module `layouts`** — an IME named as a participant (FR-35), fewer than two
+///   layouts to switch between, or text typed under a layout that is not one of the participants
+///   (FR-30, "остальные раскладки игнорируются"). Every one of them is counted there
+///   ([`crate::layouts::selection_failures`]) and none of them switches anything.
+///
+/// # Where the target comes from — NFR-09, FR-25
+///
+/// From the **live cache** of FR-20, through [`crate::buffer::Recorder::cache`], and never from
+/// a sweep of its own: FR-20 costs thousands of `ToUnicodeEx` calls and about five milliseconds,
+/// against the thirty NFR-09 gives the whole path. The map is cloned out of the cache — a copy
+/// of an array that is already built, not a rebuild of it — because the borrow has to be dropped
+/// before anything is sent.
+///
+/// The hardwired RU/EN table of FR-25 is still the emergency reserve and is still reached, by
+/// exactly the route FR-25 describes: `app::cache_or_fallback` publishes
+/// [`crate::convert::fallback_cache`] into the buffer when the sweep fails, and the choice below
+/// is then made against that cache like any other.
+fn take_press() -> Option<Press> {
+    crate::buffer::with(|recorder| {
         let mut strokes = vec![Keystroke::default(); recorder.len()];
 
         // The slice was sized from `recorder.len()` under this very borrow, so
@@ -1300,41 +1349,44 @@ fn take_strokes() -> Option<(Vec<Keystroke>, LayoutId)> {
         let live = recorder.keystrokes(&mut strokes).unwrap_or(0);
         strokes.truncate(live);
 
-        (strokes, recorder.active_layout())
-    })?;
+        if strokes.is_empty() {
+            return None;
+        }
 
-    if taken.0.is_empty() {
-        return None;
-    }
+        let cache = recorder.cache()?;
 
-    Some(taken)
-}
+        // The participating layouts of FR-35, in system order — the list section 4.4 chooses
+        // from. A fixed array on the stack: no allocation on the hotkey path.
+        let mut available = [LayoutId::default(); layouts::MAX_CYCLE];
+        let count = cache.layouts(&mut available);
 
-/// The layout the conversion targets, **until task T-05-2 chooses it**.
-///
-/// ⚠ This is an interim and is marked as one. FR-30 to FR-34 give the choice its own rules —
-/// the "Пара" and "Цикл" modes, the position counter, `[layouts]` of section 7 — and task
-/// T-05-2 owns them; task T-04-1 may not start on them and does not. What it may not do either
-/// is leave the running program with no target at all, because then the whole path this task
-/// exists to build would be unreachable and unobservable.
-///
-/// So the interim rule is the narrowest one that works and cannot be mistaken for the real
-/// thing: the counterpart of the recorded layout inside the hardwired RU/EN table of FR-25, and
-/// `None` for every other layout, which means no replacement rather than a guess. It reaches
-/// only module `convert`, allocates two small maps and touches neither the OS nor a file, so it
-/// stays inside NFR-09.
-///
-/// TODO(T-05-2): replace with the target layout chosen by `[layouts]` and the cycle of FR-31.
-fn interim_target(active: LayoutId) -> Option<LayoutMap> {
-    let counterpart = if active == convert::FALLBACK_US {
-        convert::FALLBACK_RUSSIAN
-    } else if active == convert::FALLBACK_RUSSIAN {
-        convert::FALLBACK_US
-    } else {
-        return None;
-    };
+        let cycle = layouts::cycle_for(layouts::published(), &available[..count]).ok()?;
 
-    convert::fallback_map(counterpart)
+        // **FR-26: the direction comes from the HKL recorded with the stroke**, and never from
+        // the layout that happens to be active now. The difference is the whole of FR-33: step 5
+        // of FR-40 switches the foreground window to the layout the *previous* press rendered
+        // into, so by the second press "the layout in use" is the target of the first one. A
+        // cycle counted from there would answer the same layout again and the rollback would
+        // quietly stop working — and only from the second press onwards, which is exactly the
+        // kind of defect FR-32 warns about. The strokes are unchanged (FR-32), so the layout the
+        // run was typed in is still recorded in them.
+        let origin = strokes
+            .first()
+            .map_or_else(|| recorder.active_layout(), |stroke| stroke.layout());
+
+        // The step this press moves to. The counter is *read* here and advanced only once the
+        // replacement has really been sent, so a press that ends in a refusal below leaves the
+        // buffer and the counter exactly as it found them.
+        let step = recorder.cycle_position() + 1;
+        let target = cycle.target(origin, step).ok()?;
+
+        Some(Press {
+            strokes,
+            target: cache.get(target)?.clone(),
+            cycle_len: cycle.len(),
+        })
+    })
+    .flatten()
 }
 
 // ---------------------------------------------------------------------------------------

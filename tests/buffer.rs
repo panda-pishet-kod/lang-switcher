@@ -1622,6 +1622,326 @@ fn the_conversion_session_ends_with_a_full_clearance_and_survives_a_partial_one(
     assert!(!recorder.in_conversion());
 }
 
+// -------------------------------------------------------------------------------------
+// The position counter of FR-32 — task T-05-2
+// -------------------------------------------------------------------------------------
+
+/// Puts the counter somewhere other than zero, so that a flush that fails to reset it is
+/// visible.
+///
+/// Three steps along a cycle of four, which leaves it at `3` — a value no rule below could
+/// arrive at by accident.
+fn counter_at_three(recorder: &mut Recorder) {
+    for _ in 0..3 {
+        recorder.advance_cycle(4);
+    }
+
+    assert_eq!(recorder.cycle_position(), 3, "the counter is off zero");
+}
+
+#[test]
+fn the_position_counter_walks_the_cycle_and_stays_inside_it() {
+    let mut recorder = fresh();
+
+    // FR-32: the counter starts where "what is on the screen is what was typed" is.
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // A cycle of three: one press per step, and the third brings it back to the start —
+    // FR-31, and it is the same counter that makes FR-33 work at a length of two.
+    assert_eq!(recorder.advance_cycle(3), 1);
+    assert_eq!(recorder.advance_cycle(3), 2);
+    assert_eq!(recorder.advance_cycle(3), 0);
+    assert_eq!(recorder.advance_cycle(3), 1);
+
+    // It is a *position*, reduced by the length every time, so there is no value it can grow
+    // into: a thousand presses leave it inside `0..len` like the first one.
+    for _ in 0..1_000 {
+        recorder.advance_cycle(2);
+        assert!(recorder.cycle_position() < 2);
+    }
+
+    // No cycle at all is no position at all, rather than a division by zero.
+    assert_eq!(recorder.advance_cycle(0), 0);
+    assert_eq!(recorder.cycle_position(), 0);
+}
+
+// -------------------------------------------------------------------------------------
+// Point 16 — FR-34: every rule of FR-10 zeroes the counter with the buffer
+// -------------------------------------------------------------------------------------
+
+/// Every row of the FR-10 table that says "полный сброс", one by one, with the counter off
+/// zero before it and at zero after it.
+///
+/// The rows are the table of §4.2 in the order it prints them. Four of them arrive through
+/// [`Recorder::record`] — the boundary keys, the editing keys, the command combinations and the
+/// last row, any key after a conversion. The other five are asynchronous and all five arrive
+/// through [`Recorder::reset`] or [`Recorder::reset_up_to`], which is where module `buffer`
+/// documents them: the mouse click of FR-13 over Raw Input, `EVENT_SYSTEM_FOREGROUND`,
+/// `EVENT_OBJECT_FOCUS`, `WM_WTSSESSION_CHANGE` and the user's own pause from the tray.
+///
+/// `Backspace` is in the table and is **not** a flush — it takes one element out — so the
+/// counter stays where it is, and that is asserted too.
+#[test]
+fn every_flush_rule_of_fr10_zeroes_the_position_counter() {
+    // Row 1 of the table: `Space`, `Tab`, `Enter`, `Esc`.
+    for vk in [VK_SPACE, VK_TAB, VK_RETURN, VK_ESCAPE] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        counter_at_three(&mut recorder);
+
+        assert_eq!(press(&mut recorder, vk, SCAN_A), Recorded::Flushed);
+        assert_eq!(recorder.len(), 0);
+        assert_eq!(
+            recorder.cycle_position(),
+            0,
+            "FR-34: the counter goes with the buffer"
+        );
+    }
+
+    // Row 3: `Delete`, the arrows, `Home`/`End`/`PgUp`/`PgDn`, `Insert`.
+    for vk in [
+        VK_DELETE, VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN, VK_HOME, VK_END, VK_PRIOR, VK_NEXT, VK_INSERT,
+    ] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        counter_at_three(&mut recorder);
+
+        assert_eq!(press(&mut recorder, vk, SCAN_A), Recorded::Flushed);
+        assert_eq!(recorder.len(), 0);
+        assert_eq!(recorder.cycle_position(), 0);
+    }
+
+    // Row 4: `Ctrl`/`Alt`/`Win` + key — a command, not text.
+    for modifier in [VK_LCONTROL, VK_LMENU, VK_LWIN] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        counter_at_three(&mut recorder);
+
+        hold(&mut recorder, modifier);
+        assert_eq!(press(&mut recorder, VK_B, SCAN_A), Recorded::Flushed);
+        assert_eq!(recorder.len(), 0);
+        assert_eq!(recorder.cycle_position(), 0);
+    }
+
+    // The last row: any key after a conversion.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    assert_eq!(press(&mut recorder, VK_2, SCAN_2), Recorded::Stored);
+    assert_eq!(
+        recorder.len(),
+        1,
+        "the key that ended the session started a new buffer"
+    );
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // Rows 5 to 9 — the mouse click of FR-13, the two `WinEvent` subscriptions, the session
+    // change and the tray's pause. All five are `reset`, which is the entry point module
+    // `buffer` gives them, and one of them is enough to show the reset because there is one
+    // function underneath.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    counter_at_three(&mut recorder);
+
+    recorder.reset();
+    assert_eq!(recorder.len(), 0);
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // The same five when they carry a timestamp and FR-12 makes the clearance a full one.
+    let mut recorder = fresh();
+    press_at(&mut recorder, 100);
+    press_at(&mut recorder, 200);
+    counter_at_three(&mut recorder);
+
+    assert_eq!(
+        recorder.reset_up_to(300),
+        ResetOutcome::Cleared { removed: 2 }
+    );
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // And through the thread-local entry point the asynchronous sources really call.
+    let mut recorder = fresh();
+    fill(&mut recorder, 2);
+    counter_at_three(&mut recorder);
+    buffer::install_recorder(recorder);
+
+    assert!(buffer::reset());
+    assert_eq!(
+        buffer::with(|recorder| recorder.cycle_position()),
+        Some(0),
+        "FR-34 through the public flush of the FR-10 table"
+    );
+
+    buffer::uninstall();
+
+    // `Backspace` is the one row of the table that is not a flush: it takes the last stroke
+    // out and leaves the rest, so the position the screen is at does not change either.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    counter_at_three(&mut recorder);
+
+    assert_eq!(press(&mut recorder, VK_BACK, SCAN_A), Recorded::Popped);
+    assert_eq!(recorder.len(), 2);
+    assert_eq!(
+        recorder.cycle_position(),
+        3,
+        "Backspace is not a flush, so FR-34 has nothing to say about it"
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Point 17 — FR-11: a layout change flushes neither the buffer nor the counter
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn a_layout_change_flushes_neither_the_buffer_nor_the_counter() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    counter_at_three(&mut recorder);
+
+    // The user presses `Alt+Shift` or `Win+Space` and the program is told which layout is
+    // active now. FR-11: nothing is flushed — and FR-34 is not triggered either, because what
+    // FR-34 follows is the buffer and not the layout.
+    recorder.set_active_layout(RU);
+
+    assert_eq!(
+        recorder.len(),
+        3,
+        "FR-11 forbids flushing on a layout change"
+    );
+    assert_eq!(recorder.cycle_position(), 3, "and the counter goes with it");
+
+    // The rebuild of FR-21 arrives on the same `WM_INPUTLANGCHANGE` and must not flush either.
+    recorder.set_cache(cache());
+
+    assert_eq!(recorder.len(), 3);
+    assert_eq!(recorder.cycle_position(), 3);
+
+    // `Alt+Shift` itself: modifiers alone, answered as modifiers, and nothing is touched.
+    hold(&mut recorder, VK_LMENU);
+    hold(&mut recorder, VK_LSHIFT);
+    release(&mut recorder, VK_LSHIFT);
+    release(&mut recorder, VK_LMENU);
+
+    assert_eq!(recorder.len(), 3);
+    assert_eq!(recorder.cycle_position(), 3);
+}
+
+/// **Decision Р-44.** `Win+Space` immediately after a conversion keeps the buffer, the counter
+/// and the conversion session.
+///
+/// The exception of FR-11 used to sit inside the "Ctrl/Alt/Win + клавиша" row of the FR-10
+/// table, where it answered that row alone. `Win+Space` also falls under the **last** row —
+/// "любая клавиша после конвертации" — and that row cleared the ring before the exception was
+/// consulted, so the user who converted a word, corrected the layout by hand and reached for the
+/// hotkey again found nothing left to roll back. FR-11 is unconditional; Р-44 gives the repair
+/// to this task, and this is the test that fixes it in place.
+#[test]
+fn win_space_right_after_a_conversion_keeps_the_buffer_and_the_counter() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    // `Win` goes down, `Space` follows. `Space` is not a modifier, so it reaches the rules —
+    // and FR-11 is answered before any of them.
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+    assert_eq!(
+        deliver(
+            &mut recorder,
+            VK_SPACE,
+            SCAN_SPACE,
+            0,
+            SOME_TIME,
+            Edge::Down
+        ),
+        Recorded::Ignored,
+        "Р-44: FR-11 covers the last row of the FR-10 table as well"
+    );
+    assert_eq!(release(&mut recorder, VK_LWIN), Recorded::Modifier);
+
+    assert_eq!(recorder.len(), 3, "the strokes survive the switch — FR-11");
+    assert_eq!(recorder.cycle_position(), 3, "and so does the counter");
+    assert!(
+        recorder.in_conversion(),
+        "the session is still the one the hotkey opened, so the next press rolls it back"
+    );
+    assert_eq!(typed(&recorder), "aaa", "and nothing was recorded either");
+
+    // The switch is where the *layout* changes, and the buffer is told about it the usual way.
+    recorder.set_active_layout(RU);
+
+    assert_eq!(recorder.len(), 3);
+    assert_eq!(recorder.cycle_position(), 3);
+    assert!(recorder.in_conversion());
+
+    // What still ends the session is an ordinary key, exactly as the last row says.
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert!(!recorder.in_conversion());
+    assert_eq!(recorder.len(), 1);
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // The neighbouring combinations are untouched: they switch no layout and stay commands.
+    for modifier in [VK_LCONTROL, VK_LMENU] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 2);
+        counter_at_three(&mut recorder);
+
+        hold(&mut recorder, VK_LWIN);
+        hold(&mut recorder, modifier);
+
+        assert_eq!(
+            deliver(
+                &mut recorder,
+                VK_SPACE,
+                SCAN_SPACE,
+                0,
+                SOME_TIME,
+                Edge::Down
+            ),
+            Recorded::Flushed
+        );
+        assert_eq!(recorder.len(), 0);
+        assert_eq!(recorder.cycle_position(), 0);
+    }
+}
+
+// -------------------------------------------------------------------------------------
+// Point 20 — SEC-02: what the reset frees is zeroed, counter included
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn the_flush_that_zeroes_the_counter_zeroes_every_slot_with_it() {
+    let mut recorder = fresh_of(8);
+    fill(&mut recorder, 5);
+    counter_at_three(&mut recorder);
+
+    assert_eq!(non_zero_slots(&recorder), 5);
+
+    recorder.reset();
+
+    // SEC-02 for the ring: the whole backing array, live window and free slots alike.
+    assert_eq!(non_zero_slots(&recorder), 0);
+    for slot in recorder.slots() {
+        assert!(*slot == Stroke::ZEROED, "SEC-02: the slot is zeroed");
+    }
+
+    // And the counter, which is the other thing this task freed: zeroing a `usize` *is* its
+    // overwrite, and it happens in the same function, `Recorder::clear_ring`.
+    assert_eq!(recorder.cycle_position(), 0);
+
+    // The same through a key of the FR-10 table rather than through the public flush.
+    fill(&mut recorder, 4);
+    counter_at_three(&mut recorder);
+
+    assert_eq!(press(&mut recorder, VK_ESCAPE, SCAN_A), Recorded::Flushed);
+
+    assert_eq!(non_zero_slots(&recorder), 0);
+    assert_eq!(recorder.cycle_position(), 0);
+}
+
 #[test]
 fn the_thread_local_flush_reaches_the_buffer_of_the_calling_thread() {
     // Every thread but the input one owns no buffer (section 6.3), and the window procedure

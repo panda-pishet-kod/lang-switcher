@@ -17,10 +17,12 @@
 //!
 //! # Two assertions, three verdicts
 //!
-//! Step 7 produces two rows, not one: the text, and the layout. The layout row is always
-//! `pending` on **T-05-1**, because switching the layout is that task's and does not exist
-//! yet — decision Р-30. The bench still *reads* the layout and reports what it saw, so that
-//! when T-05-1 lands the row changes from `pending` to `pass` without the bench changing.
+//! Step 7 produces two rows, not one: the text, and the layout. **Both are real verdicts.** The
+//! layout row was `pending` on **T-05-1** while the switch of FR-40 step 5 did not exist; task
+//! T-05-1 wrote the chain of §4.6 (commit `c8e463f`) and task T-05-2 gave it the target of §4.4
+//! to switch to, so the row now says `pass` or `fail` by the layout the bench really reads. The
+//! third verdict of decision Р-30 stays where it belongs: the positions the bench may not drive
+//! at all, which §11.6 hands to a person, and the requirements no task has written yet.
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -434,20 +436,36 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
             .unwrap_or_else(|| "канал не ответил".to_owned())
     ));
 
-    // The layout assertion. Read for real, then reported as `pending`: FR-50 is task T-05-1 and
-    // is not implemented, so a `fail` here would blame the product for something nobody has
-    // written yet, and a `pass` would be a lie. Р-30's third verdict is exactly this case.
-    let observed = layout::of_window(window).map(layout::id_of);
-    let layout_row = Row::pending(
+    // The layout assertion — a verdict, not a deferral. The chain of §4.6 exists (FR-50 to
+    // FR-52, task T-05-1, commit `c8e463f`) and the target it is given is the choice of §4.4
+    // (task T-05-2), so the scenario of §11.3 can be asserted whole: `привет` **and** the RU
+    // layout in the active window.
+    //
+    // The wait is on the condition and never on a clock — requirement 1 of §11.5. Step 5 of
+    // FR-40 is sent after the replacement (FR-43), so the layout may still be the source one at
+    // the instant the text arrives; the same timeout the text half uses is given to it, and it
+    // is spent only when the switch really did not happen.
+    let observed = wait::until(wait::TEXT_TIMEOUT, || {
+        layout::of_window(window)
+            .map(layout::id_of)
+            .filter(|id| id & 0xFFFF == layout::RUSSIAN & 0xFFFF)
+    })
+    .or_else(|| layout::of_window(window).map(layout::id_of));
+
+    let layout_row = Row::new(
         position,
         app_name,
         Assertion::Layout,
-        "T-05-1",
+        match observed {
+            Some(id) if id & 0xFFFF == layout::RUSSIAN & 0xFFFF => Verdict::Pass,
+            _ => Verdict::Fail,
+        },
+        observed.map_or("<чтение не удалось>".to_owned(), layout::describe),
         layout::describe(layout::RUSSIAN),
     )
     .with_note(format!(
-        "фактически наблюдалась {} — переключение раскладки (FR-50, §4.6) не реализовано",
-        observed.map_or("неизвестно".to_owned(), layout::describe)
+        "исходная раскладка окна {}; переключение — FR-40 шаг 5 и §4.6, цель выбрана по §4.4",
+        layout::describe(source_layout)
     ));
 
     vec![text_row, layout_row]
@@ -942,7 +960,7 @@ fn handed_to_session(number: u8, name: &str, reason: &str) -> Vec<Row> {
             "П",
             layout::describe(layout::RUSSIAN),
         )
-        .with_note("плюс T-05-1: переключение раскладки не реализовано"),
+        .with_note("та же причина, что у строки текста: сценарий целиком идёт в сессию §11.6"),
     ]
 }
 

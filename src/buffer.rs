@@ -17,6 +17,16 @@
 //! `RegisterRawInputDevices` registration and the `WM_INPUT` parsing. What arrives here is the
 //! flush that subscription produces, through [`reset_up_to`], exactly as the flush produced by
 //! the `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions does.
+//! Task **T-05-2** added the position counter of the cycle and the two requirements that live
+//! with it: **FR-32**, in the half this module owns — the buffer holds the strokes the user
+//! really made and is *never* written back with the result of a conversion, so that every press
+//! of the hotkey renders the same original scan codes into the next layout; and **FR-34**, the
+//! counter is reset by every rule of FR-10 without exception, which is why it sits in
+//! [`Recorder`] beside the ring and is zeroed by the one function that empties it,
+//! [`Recorder::clear_ring`]. FR-34 was listed by module `layouts` until this task; the cycle is
+//! chosen there and the counter is reset here, and the backlog (decision R-17) puts a
+//! requirement where its code is. The same task carried out decision **Р-44**: the exception of
+//! FR-11 now covers the last row of the FR-10 table as well — see [`Recorder::record`].
 //! Task **T-03-4** added the length mirror of SEC-04a: [`Ring::set_len`] is now the one writer
 //! of the ring's length, and under the `testing` feature — and only under it — every write
 //! publishes the new length into [`crate::control`], which is the only way a thread other than
@@ -969,6 +979,25 @@ pub struct Recorder {
     held: Held,
     /// A conversion has run and the next key ends the session — the last row of FR-10.
     converted: bool,
+    /// **The position counter of FR-32**: how many presses of the hotkey have been applied to
+    /// the strokes the ring is holding right now.
+    ///
+    /// `0` means "what is on the screen is what was typed". It is kept **reduced modulo the
+    /// length of the cycle** by [`Recorder::advance_cycle`], the one function that raises it, so
+    /// it is a position and not a running total: there is no value it can grow into and no wrap
+    /// to reason about.
+    ///
+    /// It is a plain field of a thread-local value and not an atomic, for the reason section 6.3
+    /// gives the buffer itself: the counter is written by the input thread on the hotkey path
+    /// and read by the same thread, and there is no second thread to synchronise with. That is
+    /// stronger than "atomic operations only" rather than weaker — an ordinary load and store of
+    /// a `usize` is indivisible, allocates nothing (NFR-03), blocks nothing (NFR-04) and touches
+    /// no file (NFR-05).
+    ///
+    /// **FR-34.** It is zeroed by [`Recorder::clear_ring`] and by nothing else, so it cannot be
+    /// left behind by a flush: every rule of FR-10 that empties the ring empties it through that
+    /// one function.
+    cycle: usize,
 }
 
 impl Recorder {
@@ -989,6 +1018,7 @@ impl Recorder {
             active_index: None,
             held: Held::default(),
             converted: false,
+            cycle: 0,
         }
     }
 
@@ -1029,6 +1059,13 @@ impl Recorder {
     /// input thread's message loop and never from the callback (NFR-03).
     pub fn set_capacity(&mut self, capacity: usize) {
         self.ring = Ring::with_capacity(effective_capacity(capacity));
+
+        // The strokes went with the old ring, so the position counter of FR-32 has nothing left
+        // to be a position in and goes too. This is not one of the flushes of FR-10 — see above
+        // — but a counter left standing over an empty buffer would make the *next* buffer start
+        // its cycle in the middle, which is the one way FR-32 could be broken without anybody
+        // writing back into the buffer at all.
+        self.cycle = 0;
     }
 
     /// How many strokes are live. The one number SEC-04a allows the debug channel to publish.
@@ -1054,6 +1091,55 @@ impl Recorder {
     /// Whether a cache has been published.
     pub fn has_cache(&self) -> bool {
         self.cache.is_some()
+    }
+
+    /// The mapping cache of FR-20 as it stands — `None` until one has been published.
+    ///
+    /// # Why this accessor exists — NFR-09
+    ///
+    /// The choice of the target layout (section 4.4) needs two things the cache holds: the list
+    /// of participating layouts, which is what FR-30 means by "первые две раскладки системного
+    /// списка", and the map of the layout it chose, which is what the conversion of FR-22 is
+    /// driven by. Both are here already, built once at start-up and rebuilt only on the messages
+    /// of FR-21.
+    ///
+    /// Without a way to read them, the hotkey path would have to build a map of its own on every
+    /// press — the sweep of FR-20 is thousands of `ToUnicodeEx` calls and about five
+    /// milliseconds on this machine, against the thirty NFR-09 gives the *whole* path from the
+    /// press to the last event of the replacement. So this is the accessor task T-05-2 needed
+    /// and the reason the interim of task T-04-1 could be removed: the target now comes out of
+    /// the live cache, and the hardwired table of FR-25 goes back to being what FR-25 says it
+    /// is — the emergency reserve, reached when the cache could not be built at all.
+    ///
+    /// Reading it never leaves the process: a `LayoutMap` is a keyboard layout, not a recording
+    /// of anybody's typing, and nothing here is formatted (SEC-01, SEC-07).
+    pub fn cache(&self) -> Option<&LayoutCache> {
+        self.cache.as_ref()
+    }
+
+    /// **The position counter of FR-32** — how many presses of the hotkey the text on the screen
+    /// is away from what the buffer holds.
+    ///
+    /// `0` is "as typed", and it is what every flush of FR-10 leaves behind (FR-34).
+    pub fn cycle_position(&self) -> usize {
+        self.cycle
+    }
+
+    /// Advances the counter along a cycle of `len` layouts and answers the new position —
+    /// FR-31, FR-32.
+    ///
+    /// Called once per press of the hotkey, by the code that has just decided a replacement will
+    /// really happen. `len` comes from [`crate::layouts::Cycle::len`]; the counter is reduced by
+    /// it here, which is what keeps it a position in `0..len` rather than a total that would one
+    /// day have to wrap. A `len` of zero — no cycle at all — leaves the counter at zero, since
+    /// there is nothing to be a position in.
+    ///
+    /// One addition, one remainder, one store. No allocation, no lock, no I/O: NFR-01 to NFR-05
+    /// hold here as they do everywhere else in this module.
+    pub fn advance_cycle(&mut self, len: usize) -> usize {
+        self.cycle = if len == 0 { 0 } else { (self.cycle + 1) % len };
+
+        self.cycle
     }
 
     /// Publishes the layout strokes are recorded under — the `hkl` of FR-04.
@@ -1138,48 +1224,58 @@ impl Recorder {
             return Recorded::Ignored;
         }
 
+        let mods = self.mods_now(key.flags);
+
+        // ⚠ **FR-11, and it stands in front of every flush row below — decision Р-44.**
+        //
+        // FR-11 names two combinations — `Alt+Shift` and `Win+Space` — and says a layout switch
+        // "**не сбрасывает** буфер: HKL хранится по каждому нажатию отдельно". `Alt+Shift` never
+        // reaches this line: it is modifiers alone and the first statement of this function has
+        // already answered `Modifier` for both halves of it, which task T-03-3b measured rather
+        // than assumed. `Win+Space` does reach it, because `Space` is not a modifier.
+        //
+        // **Why the check moved here, above the two rows that flush.** The user's decision on
+        // question 43 (commit e6ba407) put this exception inside the "Ctrl/Alt/Win + клавиша"
+        // row, where it answered that row alone. But `Win+Space` pressed **right after a
+        // conversion** also falls under the *last* row of the table, "любая клавиша после
+        // конвертации — полный сброс", and that row cleared the ring before the exception was
+        // ever consulted. The user who converted a word, noticed the layout was still wrong,
+        // pressed `Win+Space` and reached for the hotkey again found the buffer gone — that is,
+        // lost exactly the rollback of FR-33 that the counter below exists to provide. The text
+        // of FR-11 is unconditional and carries no "кроме как после конвертации"; decision
+        // Р-44 says so and gives the repair to this task.
+        //
+        // The exception stays as narrow as the requirement is: `Space`, with `Win` held, and
+        // with neither `Ctrl` nor `Alt` in the combination — `Ctrl+Win+Space` and `Alt+Win+Space`
+        // switch no layout and remain commands. Everything else keeps the behaviour it had:
+        // `Win+R` is a command and flushes, and a bare `Space` with no modifier at all is the
+        // boundary key of the first row of the FR-10 table and flushes as well, further down.
+        //
+        // Nothing is recorded either, and the conversion session is left open. The return is
+        // `Ignored` and not a fall-through, because the stroke is a switch the system consumes:
+        // it puts no space into the text, and pushing one into the ring would make the
+        // conversion of FR-22 produce a character the user never typed. The position counter of
+        // FR-32 stays where it was for the same reason the strokes do — a layout change is not a
+        // flush, so FR-34 has nothing to say about it.
+        if key.vk == VK_SPACE.0 && self.held.win && !mods.ctrl() && !mods.alt() {
+            return Recorded::Ignored;
+        }
+
         // FR-10, last row: "любая клавиша после конвертации — полный сброс (завершение сессии
         // конвертации)". The flush happens here and the key itself is then treated normally,
         // so the first letter of the next word is the first stroke of the next buffer.
         if self.converted {
             self.converted = false;
-            self.ring.clear();
+            self.clear_ring();
         }
-
-        let mods = self.mods_now(key.flags);
 
         // FR-10: "Ctrl/Alt/Win + клавиша, **кроме комбинаций смены раскладки, названных
         // FR-11** — полный сброс (команда, а не текст)". `AltGr` is the exception the mask
         // itself carries: it is `Ctrl` plus the right `Alt` by construction and it produces
-        // characters, so a layout that puts text on it keeps working.
+        // characters, so a layout that puts text on it keeps working. The other exception, the
+        // `Win+Space` of FR-11, has been answered above.
         if (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr() {
-            // ⚠ **FR-11, the second exception, and the narrower of the two.** FR-11 names two
-            // combinations by name — `Alt+Shift` and `Win+Space` — and says a layout switch
-            // "**не сбрасывает** буфер: HKL хранится по каждому нажатию отдельно". `Alt+Shift`
-            // never arrives here: it is modifiers alone and the first line of this function has
-            // already answered `Modifier` for both halves of it, which task T-03-3b measured
-            // rather than assumed. `Win+Space` does arrive, because `Space` is not a modifier,
-            // and until the user's decision on question 43 (commit e6ba407, which is the
-            // wording of the row quoted above) it was flushed here — so a user who noticed the
-            // wrong layout mid-word, pressed `Win+Space` to fix it and reached for the hotkey
-            // found nothing left to convert. That is the very outcome FR-11 exists to prevent.
-            //
-            // The exception is kept as narrow as the requirement is: `Space`, with `Win` held,
-            // and with neither `Ctrl` nor `Alt` in the combination — `Ctrl+Win+Space` and
-            // `Alt+Win+Space` switch no layout and stay commands. Everything else keeps the
-            // behaviour it had: `Win+R` is a command and flushes, and a bare `Space` with no
-            // modifier at all is the boundary key of the first row of the FR-10 table and
-            // flushes as well, three rules further down.
-            //
-            // Nothing is recorded either. The return is `Ignored` and not a fall-through,
-            // because the stroke is a switch the system consumes: it puts no space into the
-            // text, and pushing one into the ring would make the conversion of FR-22 produce a
-            // character the user never typed.
-            if key.vk == VK_SPACE.0 && self.held.win && !mods.ctrl() && !mods.alt() {
-                return Recorded::Ignored;
-            }
-
-            self.ring.clear();
+            self.clear_ring();
             return Recorded::Flushed;
         }
 
@@ -1194,7 +1290,7 @@ impl Recorder {
         }
 
         if flushes(key.vk) {
-            self.ring.clear();
+            self.clear_ring();
             return Recorded::Flushed;
         }
 
@@ -1222,11 +1318,33 @@ impl Recorder {
     /// flush for all of them to call, which zeroes the memory exactly once and in one place, is
     /// what keeps SEC-02 a property of the module rather than of each caller.
     ///
-    /// The conversion session ends with it. Task T-05-2 owns FR-34 and hangs its cycle counter
-    /// on this call, which is why the flush is one function and not one per caller.
+    /// The conversion session ends with it, and so does the position counter of FR-32 — which is
+    /// FR-34, and which is why the flush is one function and not one per caller.
     pub fn reset(&mut self) {
-        self.ring.clear();
+        self.clear_ring();
         self.converted = false;
+    }
+
+    /// Empties the ring and zeroes the position counter — **FR-10, FR-34, SEC-02.**
+    ///
+    /// The one place the ring is emptied, and therefore the one place FR-34 has to be obeyed.
+    /// Every rule of the FR-10 table that says "полный сброс" arrives here: the boundary keys
+    /// and the editing keys of [`Recorder::record`], the command combinations of the same
+    /// function, the last row — any key after a conversion — and, through [`Recorder::reset`],
+    /// the mouse click of FR-13, the two `WinEvent` subscriptions, `WM_WTSSESSION_CHANGE` and
+    /// the user's own pause from the tray.
+    ///
+    /// It is one function precisely because FR-34 says "**вместе с** буфером": a counter zeroed
+    /// at each call site would be a rule that holds until somebody adds the eleventh call site
+    /// and forgets. Here there is nothing to forget — the ring cannot be emptied without the
+    /// counter going with it.
+    ///
+    /// SEC-02 is [`Ring::clear`]'s, unchanged: the whole backing array is overwritten with
+    /// zeroes, live window and free slots alike. The counter is a `usize` and zeroing it *is*
+    /// its overwrite.
+    fn clear_ring(&mut self) {
+        self.ring.clear();
+        self.cycle = 0;
     }
 
     /// Flushes the buffer of everything typed at or before `event_time` — **FR-12**.

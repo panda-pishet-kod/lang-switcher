@@ -1128,10 +1128,11 @@ fn publish_configuration_to_input_thread() {
             tray.config().buffer.capacity,
             tray.config().replacement.method,
             tray.config().replacement.inter_event_delay_ms,
+            crate::layouts::Configured::from_settings(&tray.config().layouts),
         )
     });
 
-    let Some((active, hotkey, capacity, method, inter_event_delay_ms)) = published else {
+    let Some((active, hotkey, capacity, method, inter_event_delay_ms, layouts)) = published else {
         return;
     };
 
@@ -1155,6 +1156,15 @@ fn publish_configuration_to_input_thread() {
     // whatever stands here at that moment.
     crate::inject::set_replacement_method(method);
     crate::inject::set_inter_event_delay_ms(inter_event_delay_ms);
+
+    // Section `[layouts]` of section 7 — FR-30, FR-31, task T-05-2. Published for the same
+    // reason and by the same rule as `[replacement]` above: the configuration belongs to the UI
+    // thread (section 6.1), the choice of the target layout is made on the input thread, and
+    // NFR-09 forbids that choice to read a file. The strings of section 7 are parsed here, once
+    // per publication, so that the hotkey path reads numbers out of atomics and parses nothing.
+    // Nothing is applied to anything already built: the next press reads whatever stands there
+    // at that moment, exactly as it does for the replacement method.
+    crate::layouts::publish(layouts);
 
     publish_buffer_capacity(capacity);
 }
