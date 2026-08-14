@@ -26,6 +26,11 @@
 //! can reach a program whose windows are hidden and never focused, so the rebuild is driven by
 //! `WM_INPUT_DEVICE_CHANGE` and by the layout probe of [`refresh_layout_and_cache`] instead.
 //! FR-11 holds across all of it and is checked separately.
+//! Task **T-04-1** attached the far end of the FR-02 handoff to [`window_proc`]: a
+//! `hook::WM_APP_HOTKEY` taken off the input thread's queue runs steps 3 to 6 of FR-40 through
+//! [`crate::inject::on_hotkey`], which is where section 6.1 puts `SendInput` and the only place
+//! FR-40 allows it. That call is the whole of this module's part in the replacement; everything
+//! about the packet, the modifiers and the pause of FR-44 belongs to `inject`.
 //! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
 //! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
 //! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
@@ -1387,6 +1392,33 @@ unsafe extern "system" fn window_proc(
                     Some(crate::watchdog::Rebuild::IfLayoutChanged) => refresh_layout_and_cache(),
                     None => {}
                 }
+            }
+
+            // **FR-40, steps 3 to 6 — task T-04-1.** The far end of the handoff of FR-02: the
+            // callback recognised the hotkey, suppressed it (step 1), posted
+            // `hook::WM_APP_HOTKEY` and returned at once (step 2), and this is where the work
+            // is done — on the input thread, in its ordinary message loop, with the callback
+            // long returned. Section 6.1 puts `SendInput` exactly here and FR-40 forbids it
+            // anywhere else: `SendInput` calls this process's own low-level hook back
+            // synchronously, so from inside the callback it would be re-entrancy into a
+            // function the system is already running.
+            //
+            // `buffer::is_installed` is what says "this is the input thread", the same test the
+            // two rebuild paths above use, and it is also the whole of SEC-05 here: any process
+            // at the same integrity level can post `WM_APP_HOTKEY` to any of these three
+            // windows, and on the UI and watcher windows that buys the sender nothing at all,
+            // while on the input window it buys a replacement of text the user has already
+            // typed, from data the sender can neither see nor influence.
+            //
+            // Placed before `hook::handle_input_message` because that function answers
+            // `Some(LRESULT(0))` for this message and returns; its counter of FR-02 handoffs
+            // still counts every one of them, one line further down.
+            //
+            // The result is dropped: module `inject` counts what FR-45 asks to be counted and
+            // there is nothing for a window procedure to do with the answer. SEC-01, SEC-07 —
+            // what is dropped is counts and lengths, never a stroke.
+            if message == crate::hook::WM_APP_HOTKEY && crate::buffer::is_installed() {
+                let _ = crate::inject::on_hotkey();
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
