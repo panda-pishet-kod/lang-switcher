@@ -9,8 +9,9 @@
 //! replaces the selection, instead of `N` × `Backspace`), FR-43 (the replacement is formed and
 //! sent **before** the layout is switched), FR-44 (the configurable pause between events),
 //! FR-45 (the return value of `SendInput` is compared with the number of events sent).
-//! Boundary: the layout switch of FR-50 that FR-40 step 5 asks for belongs to task T-05-1 and is
-//! left as a marked connection point in [`replace_in_with`]; the *choice* of the target layout
+//! Boundary: the layout switch of FR-50 that FR-40 step 5 asks for belongs to module `switch`
+//! (task T-05-1) and is reached from the marked connection point in [`replace_in_with`], which
+//! fixes its *position* and nothing else; the *choice* of the target layout
 //! belongs to task T-05-2 and arrives here as a parameter; the **selection path of FR-60 to
 //! FR-65 is a different requirement and a different task (T-07-2)** — there the text is one the
 //! *user* has already selected and it travels through the clipboard, whereas FR-42 selects the
@@ -815,8 +816,8 @@ pub trait Environment {
     ///
     /// Called after the replacement has been sent and before the modifiers are restored, which
     /// is the position **FR-43** fixes: "Замена выполняется до переключения раскладки". The
-    /// default does nothing, and that is the whole of what task T-04-1 leaves here — §4.6
-    /// (FR-50 to FR-52) is task T-05-1's and is not started.
+    /// default does nothing, so a bench observes the *position* of the switch without performing
+    /// one; [`System`] overrides it with the chain of §4.6 (FR-50 to FR-52), module `switch`.
     ///
     /// It is a member of this trait rather than a comment in the body so that the position of
     /// the switch is something a test can *see*: FR-43 is a statement about order, and an order
@@ -826,9 +827,29 @@ pub trait Environment {
 
 /// The real machine — the [`Environment`] the program runs on.
 ///
-/// A unit type: everything it does is a system call, so there is no state to carry.
+/// Everything it does is a system call, so the one thing it carries is the argument step 5 needs
+/// and the trait cannot pass: see [`System::target`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct System;
+pub struct System {
+    /// **The target of FR-40 step 5** — the layout the replacement was rendered into, and so the
+    /// layout the foreground window is switched to once the replacement is out.
+    ///
+    /// It is a field and not an argument of [`Environment::switch_layout`] because changing that
+    /// signature would change the bench of `tests\inject.rs`, which is not task T-05-1's to
+    /// touch; the seam task T-04-1 left carries no target of its own. `None` — the value
+    /// [`Default`] gives — means "do not switch", which is what [`dispatch`] wants: it sends a
+    /// packet and performs no step 5 at all.
+    target: Option<LayoutId>,
+}
+
+impl System {
+    /// The real machine for a replacement that ends in the layout switch of FR-40 step 5.
+    pub const fn for_target(target: LayoutId) -> Self {
+        Self {
+            target: Some(target),
+        }
+    }
+}
 
 impl Environment for System {
     fn held(&mut self) -> Modifiers {
@@ -843,8 +864,23 @@ impl Environment for System {
         sleep_ms(delay_ms);
     }
 
-    // `switch_layout` is deliberately not overridden. TODO(T-05-1): the chain of FR-50 goes
-    // here, and this is the only place in the program that has to change for it.
+    /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
+    ///
+    /// This runs on the input thread, in its message loop, with the hook callback long returned
+    /// — module `switch` documents why none of the three methods may be reached from inside the
+    /// callback, and it is the same reason `SendInput` may not be.
+    ///
+    /// The result is dropped because module `switch` counts every refusal and every failed
+    /// method itself, and there is nothing an injection can do about a layout that would not
+    /// change. SEC-01 and SEC-07: what is dropped is an outcome and a layout handle, never a
+    /// stroke.
+    fn switch_layout(&mut self) {
+        let Some(target) = self.target else {
+            return;
+        };
+
+        let _ = crate::switch::to(target);
+    }
 }
 
 /// **FR-41 and FR-44.** Sends `events` through the real system, and records what happened
@@ -852,7 +888,8 @@ impl Environment for System {
 ///
 /// See [`dispatch_in`] for the rule.
 pub fn dispatch(events: &[INPUT], delay_ms: u32) -> Dispatched {
-    dispatch_in(&mut System, events, delay_ms)
+    // No target: this sends a packet and performs no step 5. See `System::target`.
+    dispatch_in(&mut System::default(), events, delay_ms)
 }
 
 /// **FR-41 against FR-44**, against any [`Environment`].
@@ -1020,7 +1057,7 @@ pub struct Replaced {
 /// 3. **step 3** — the modifiers the user is holding are released explicitly, so that the
 ///    injected `Backspace` is a `Backspace` and not `Shift+Backspace`;
 /// 4. **step 4** — the replacement, one packet, FR-41;
-/// 5. **step 5** — the layout switch, task T-05-1, marked below and deliberately empty;
+/// 5. **step 5** — the layout switch of §4.6, marked below and performed by module `switch`;
 /// 6. **step 6** — the modifiers held *at that moment* are pressed again.
 ///
 /// **FR-43** is the position of step 5 and nothing else: the replacement is formed and sent
@@ -1038,7 +1075,15 @@ pub fn replace(
     target: &LayoutMap,
     delay_ms: u32,
 ) -> Result<Replaced, InjectError> {
-    replace_in(&mut System, strokes, target, delay_ms)
+    // FR-40 step 5, task T-05-1: the layout the strokes were just rendered into is the layout the
+    // foreground window is switched to. `LayoutMap::layout` is that identifier and it is already
+    // here, so step 5 invents no target of its own — choosing one is task T-05-2's.
+    replace_in(
+        &mut System::for_target(target.layout()),
+        strokes,
+        target,
+        delay_ms,
+    )
 }
 
 /// **FR-40, steps 3 to 6**, against any [`Environment`] — see [`replace`] for the requirement.
@@ -1072,7 +1117,14 @@ pub fn replace_with(
     delay_ms: u32,
     method: ReplacementMethod,
 ) -> Result<Replaced, InjectError> {
-    replace_in_with(&mut System, strokes, target, delay_ms, method)
+    // FR-40 step 5, task T-05-1 — see `replace` for why the target is `target.layout()`.
+    replace_in_with(
+        &mut System::for_target(target.layout()),
+        strokes,
+        target,
+        delay_ms,
+        method,
+    )
 }
 
 /// [`replace_with`] against any [`Environment`].
@@ -1133,8 +1185,8 @@ fn run_steps(
     // ---- step 5 — the connection point of task T-05-1 ----------------------------------
     //
     // FR-40 step 5 switches the layout of the foreground window and §4.6 (FR-50 to FR-52) says
-    // how. It is task T-05-1's, and what task T-04-1 leaves is this call to a trait member
-    // whose default body is empty.
+    // how. The how is module `switch` (task T-05-1), reached through `Environment::switch_layout`;
+    // what this line owns is the *position*, which is the whole reason it is a trait member.
     //
     // ⚠ **FR-43: the call goes here and nowhere earlier.** Everything above has already been
     // sent; everything below only puts back what step 3 took away. A switch moved in front of
@@ -1203,8 +1255,9 @@ fn run_steps(
 ///
 /// * the target layout is task **T-05-2**'s choice; until it exists, [`interim_target`] stands
 ///   in and is documented there as the interim it is;
-/// * the layout switch of FR-40 step 5 is task **T-05-1**'s and is marked inside
-///   [`replace_in_with`].
+/// * the layout switch of FR-40 step 5 is module **`switch`**'s (task T-05-1) and is reached
+///   from the marked point inside [`replace_in_with`]; its target is `target.layout()`, the
+///   layout the strokes were rendered into, which is what `interim_target` above chose.
 pub fn on_hotkey() -> Option<Replaced> {
     let (mut strokes, active) = take_strokes()?;
 

@@ -1072,6 +1072,44 @@ pub(crate) fn post_to_input_thread(message: u32) {
     post_to(Role::Input, message);
 }
 
+/// Posts `message` to the watcher thread's window, and answers whether that thread had one.
+///
+/// **The handover of decision R-31**, and the only thing module `switch` needs from this module.
+/// Method 3 of FR-50 is `ITfInputProcessorProfileMgr::ActivateProfile`, which is COM, and section
+/// 6.1 writes of the input thread "Не выполняет: UI, файловый ввод-вывод, **COM**"; the watcher
+/// thread already holds an STA by the same table. So the input thread publishes the target and
+/// posts this, which is one atomic load and one `PostMessageW` — it queues and returns, so the
+/// thread that holds the hook does not block on COM (NFR-04, FR-80).
+///
+/// The answer matters, which is why this returns something and [`post_to_input_thread`] does not:
+/// with no watcher window there is no method 3, and module `switch` has to take its pending
+/// target back rather than leave it for a later message to act on.
+pub(crate) fn post_to_watcher_thread(message: u32) -> bool {
+    if WAKE_TARGETS[Role::Watcher.index()].load(Ordering::Acquire) == NO_WINDOW {
+        return false;
+    }
+
+    post_to(Role::Watcher, message);
+    true
+}
+
+/// Whether `hwnd` is the watcher thread's own window.
+///
+/// **Section 6.1 in one line.** Method 3 of FR-50 may run on the watcher thread and on no other,
+/// and all three threads of this process share one window procedure, so the procedure has to be
+/// able to tell which window a message arrived at. `buffer::is_installed` is the same test for
+/// the input thread; the watcher owns no thread-local of its own, and the register of which
+/// thread owns which window is already here.
+///
+/// **SEC-05.** This is also what keeps a forged `switch::WM_APP_SWITCH` harmless twice over: a
+/// message aimed at the input or the UI window is ignored here, and one aimed at the watcher
+/// window finds no pending target and does nothing.
+fn is_watcher_window(hwnd: HWND) -> bool {
+    let raw = WAKE_TARGETS[Role::Watcher.index()].load(Ordering::Acquire);
+
+    raw != NO_WINDOW && raw == hwnd.0 as usize
+}
+
 /// Hands the input thread the settings it reacts to — FR-02 and FR-95 for the hook, FR-07 for
 /// the buffer, and FR-42 with FR-44 for the replacement of module `inject`.
 ///
@@ -1462,6 +1500,31 @@ unsafe extern "system" fn window_proc(
             // what is dropped is counts and lengths, never a stroke.
             if message == crate::hook::WM_APP_HOTKEY && crate::buffer::is_installed() {
                 let _ = crate::inject::on_hotkey();
+            }
+
+            // **FR-50 method 3 — decision R-31**, task T-05-1. The far end of the second handoff
+            // in this program, and it exists for the same class of reason the first one does.
+            //
+            // The chain of FR-50 runs on the input thread as part of step 5 of FR-40. Its third
+            // method is `ITfInputProcessorProfileMgr::ActivateProfile`, which is COM, and section
+            // 6.1 writes of the input thread: "Не выполняет: UI, файловый ввод-вывод, **COM**".
+            // So the input thread publishes the target and posts this message, and the work is
+            // done *here*, on the watcher thread, which section 6.1 already gives an STA. The
+            // input thread does not block on it and does not learn the verdict — module `switch`
+            // counts it. Method 3 is reached only after the first two failed, that is, rarely.
+            //
+            // `is_watcher_window` is what says "this is the watcher thread", the counterpart of
+            // the `buffer::is_installed` test above, and it is not decoration: without it a
+            // `WM_APP_SWITCH` posted to the input window would run COM on the thread section 6.1
+            // exists to keep free of it.
+            //
+            // SEC-05: the message carries nothing — `wparam` and `lparam` are zero — and the
+            // target travels in an atomic only this process writes, so a forged `WM_APP_SWITCH`
+            // finds nothing pending and does nothing. The result is dropped: it is a verdict
+            // module `switch` has already counted. SEC-01, SEC-07 — a layout handle, never a
+            // stroke.
+            if message == crate::switch::WM_APP_SWITCH && is_watcher_window(hwnd) {
+                let _ = crate::switch::run_pending();
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
