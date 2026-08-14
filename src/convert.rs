@@ -7,7 +7,7 @@
 //! Moved out to match the backlog (decision R-17): FR-32 (cycle accuracy, the position
 //! counter) to module `layouts`, task T-05-2. What FR-32 needs from *this* module is a
 //! property rather than code, and it is stated below.
-//! Implemented by backlog tasks: T-02-2 (done).
+//! Implemented by backlog tasks: T-02-2 (done), T-02-1a (done).
 //!
 //! # What conversion is
 //!
@@ -78,22 +78,25 @@ use crate::layouts::{
 
 /// One recorded keystroke, in the coordinates FR-22 converts in.
 ///
-/// This is the part of the stroke of FR-04 that conversion needs: the physical key, the
-/// modifier combination, the layout that was active when the key went down, and what the key
-/// produced back then. The ring buffer of task T-03-2 owns the full structure — virtual key,
-/// extended flag, timestamp — and narrows it to this type on the way in; nothing here needs
-/// the rest.
+/// This is the part of the stroke of FR-04 that conversion needs: the physical key — scan
+/// code *and* extended flag — the modifier combination, the layout that was active when the
+/// key went down, and what the key produced back then. The ring buffer of task T-03-2 owns
+/// the full structure — virtual key, timestamp — and narrows it to this type on the way in;
+/// nothing here needs the rest.
 ///
 /// Plain `Copy` data. Building one and converting it allocates nothing (NFR-03).
 ///
 /// Note that [`Mods`] carries only the three modifiers that change which character a key
-/// produces. The extended flag of FR-05 is not among them: it belongs to the stroke, travels
-/// with it, and is replayed by the injection of FR-40, but it is not part of the coordinates
-/// a layout is queried in.
+/// produces. The extended flag of FR-05 is not among them, and it is not a modifier here
+/// either: it is the ninth bit of the key itself, because the keypad repeats the scan codes
+/// of the main block and the `E0` prefix is all that tells the two apart. Its source in the
+/// product is `LLKHF_EXTENDED` in `KBDLLHOOKSTRUCT::flags`, read by the hook of tasks T-03-1
+/// and T-03-2; the same flag is replayed by the injection of FR-40.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Keystroke {
     layout: LayoutId,
     scan: u16,
+    extended: bool,
     mods: Mods,
     produced: KeyMapping,
 }
@@ -103,27 +106,36 @@ impl Keystroke {
     ///
     /// `produced` is what the key gave when it was pressed, as `ToUnicodeEx` reported it
     /// then — the `chars` and `len` fields of FR-04, and the dead key flag of FR-24.
-    pub const fn new(layout: LayoutId, scan: u16, mods: Mods, produced: KeyMapping) -> Self {
+    /// `extended` is the `LLKHF_EXTENDED` flag of FR-05.
+    pub const fn new(
+        layout: LayoutId,
+        scan: u16,
+        extended: bool,
+        mods: Mods,
+        produced: KeyMapping,
+    ) -> Self {
         Self {
             layout,
             scan,
+            extended,
             mods,
             produced,
         }
     }
 
-    /// The stroke the hook would have recorded for `scan` and `mods` while `map`'s layout was
-    /// active.
+    /// The stroke the hook would have recorded for the key `(scan, extended)` under `mods`
+    /// while `map`'s layout was active.
     ///
     /// The decoding step of FR-06 is already done and cached by module `layouts`, so this
     /// reads the cache instead of asking the OS again, and works in a unit test with a
     /// synthetic layout exactly as it works on the live cache.
-    pub fn recorded_in(map: &LayoutMap, scan: u16, mods: Mods) -> Self {
+    pub fn recorded_in(map: &LayoutMap, scan: u16, extended: bool, mods: Mods) -> Self {
         Self {
             layout: map.layout(),
             scan,
+            extended,
             mods,
-            produced: map.lookup(scan, mods),
+            produced: map.lookup(scan, extended, mods),
         }
     }
 
@@ -135,9 +147,17 @@ impl Keystroke {
         self.layout
     }
 
-    /// Scan code of the physical key.
+    /// Scan code of the physical key, low byte only.
     pub const fn scan(self) -> u16 {
         self.scan
+    }
+
+    /// Whether the key was an extended one — the `LLKHF_EXTENDED` flag of FR-05.
+    ///
+    /// The other half of the key: `false` names the `/?` key of the main block, `true` the
+    /// `/` of the keypad, and both report the scan code `0x35`.
+    pub const fn extended(self) -> bool {
+        self.extended
     }
 
     /// Modifier combination held when the key went down.
@@ -211,13 +231,13 @@ impl std::error::Error for ConvertError {}
 ///    stroke is concerned the target layout offers no character — case 3 again. Module
 ///    `layouts` keeps dead keys out of its reverse index for the same reason.
 ///
-/// Returns a [`KeyMapping`] by value: twelve bytes of `Copy` data, no allocation, no borrow
-/// of either argument.
+/// Returns a [`KeyMapping`] by value: ten bytes of `Copy` data, no allocation, no borrow of
+/// either argument.
 pub fn convert_stroke(stroke: Keystroke, target: &LayoutMap) -> KeyMapping {
     if stroke.produced.is_dead() {
         return stroke.produced;
     }
-    let candidate = target.lookup(stroke.scan, stroke.mods);
+    let candidate = target.lookup(stroke.scan, stroke.extended, stroke.mods);
     if candidate.is_empty() || candidate.is_dead() {
         return stroke.produced;
     }
@@ -296,6 +316,13 @@ pub const FALLBACK_RUSSIAN: LayoutId = LayoutId::from_raw(0x0419_0419);
 /// `Shift` and `CapsLock` together, the fourth combination the fallback table fills.
 const SHIFT_CAPS: Mods = Mods::new(true, true, false);
 
+/// The extended flag of FR-05 for a key of the main block: never set.
+///
+/// Every row of [`FALLBACK_KEYS`] is a main block key, so the flag is a constant here. It is
+/// named rather than written as a bare `false` at the call sites of `set` below, where a
+/// stray boolean would say nothing about which key it selects.
+const MAIN_BLOCK: bool = false;
+
 /// One row of [`FALLBACK_KEYS`]: the scan code of a physical key, then what that key produces
 /// in US and in Russian as `[unshifted, with Shift]`.
 type FallbackRow = (u16, [char; 2], [char; 2]);
@@ -312,10 +339,13 @@ type FallbackRow = (u16, [char; 2], [char; 2]);
 /// of both alphabets in both cases, the digit row with and without `Shift`, the punctuation
 /// keys, and `ё`/`~`.
 ///
-/// The numeric keypad is deliberately absent. Its keys share their scan codes with the main
-/// block and are told apart only by the extended flag of FR-05, which is not part of the
-/// coordinates a layout is queried in; a keypad row would therefore not be a new key but a
-/// second, conflicting reading of one already here.
+/// The numeric keypad is deliberately absent, and since task T-02-1a that is a choice rather
+/// than a constraint: the extended flag of FR-05 is now part of the key, so a keypad row
+/// would land in its own slot instead of colliding with the main block key of the same scan
+/// code. It stays absent because FR-25 is an emergency reserve for typing RU/EN text, and
+/// the keypad reads alike in both layouts — a row for it would add nothing a conversion
+/// could use. Rule 3 of [`convert_stroke`] covers those keys: absent from the target, the
+/// stroke keeps its own character.
 const FALLBACK_KEYS: [FallbackRow; 47] = [
     (0x29, ['`', '~'], ['ё', 'Ё']),
     (0x02, ['1', '!'], ['1', '!']),
@@ -386,10 +416,20 @@ fn build_fallback(layout: LayoutId, russian: bool) -> LayoutMap {
             (plain, shifted)
         };
 
-        builder.set(scan, Mods::NONE, KeyMapping::from_char(plain));
-        builder.set(scan, Mods::SHIFT, KeyMapping::from_char(shifted));
-        builder.set(scan, Mods::CAPS, KeyMapping::from_char(caps));
-        builder.set(scan, SHIFT_CAPS, KeyMapping::from_char(shift_caps));
+        builder.set(scan, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char(plain));
+        builder.set(
+            scan,
+            MAIN_BLOCK,
+            Mods::SHIFT,
+            KeyMapping::from_char(shifted),
+        );
+        builder.set(scan, MAIN_BLOCK, Mods::CAPS, KeyMapping::from_char(caps));
+        builder.set(
+            scan,
+            MAIN_BLOCK,
+            SHIFT_CAPS,
+            KeyMapping::from_char(shift_caps),
+        );
     }
     builder.finish()
 }
@@ -456,6 +496,10 @@ mod tests {
     /// Scan codes for the synthetic layouts below. Arbitrary but stable.
     const SCANS: [u16; 3] = [0x10, 0x11, 0x12];
 
+    /// The extended flag of FR-05 for a key of the keypad — the counterpart of
+    /// [`MAIN_BLOCK`].
+    const KEYPAD: bool = true;
+
     /// The English half of the fallback table.
     fn us() -> LayoutMap {
         fallback_map(FALLBACK_US).expect("the fallback table must carry US")
@@ -479,7 +523,7 @@ mod tests {
                 let press = map
                     .find_key(ch)
                     .unwrap_or_else(|| panic!("layout {} has no key for {ch:?}", map.layout()));
-                Keystroke::recorded_in(map, press.scan, press.mods)
+                Keystroke::recorded_in(map, press.scan, press.extended, press.mods)
             })
             .collect()
     }
@@ -512,7 +556,7 @@ mod tests {
     fn synthetic(raw: usize, alphabet: &str) -> LayoutMap {
         let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(raw));
         for (scan, ch) in SCANS.iter().zip(alphabet.chars()) {
-            builder.set(*scan, Mods::NONE, KeyMapping::from_char(ch));
+            builder.set(*scan, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char(ch));
         }
         builder.finish()
     }
@@ -547,13 +591,13 @@ mod tests {
         // them and a wrong implementation cannot pass by accident.
         let (us, ru) = (us(), ru());
         let digit_two = us.find_key('2').expect("US must carry '2'");
-        let shifted = Keystroke::recorded_in(&us, digit_two.scan, Mods::SHIFT);
+        let shifted = Keystroke::recorded_in(&us, digit_two.scan, MAIN_BLOCK, Mods::SHIFT);
 
         assert_eq!(shifted.produced().single_char(), Some('@'));
         assert_eq!(convert_stroke(shifted, &ru).single_char(), Some('"'));
 
         // And back, from the same physical key.
-        let typed_in_russian = Keystroke::recorded_in(&ru, digit_two.scan, Mods::SHIFT);
+        let typed_in_russian = Keystroke::recorded_in(&ru, digit_two.scan, MAIN_BLOCK, Mods::SHIFT);
         assert_eq!(typed_in_russian.produced().single_char(), Some('"'));
         assert_eq!(
             convert_stroke(typed_in_russian, &us).single_char(),
@@ -570,16 +614,16 @@ mod tests {
         // strokes after it are still converted.
         let source = synthetic(0xF001_0409, "abc");
         let mut sparse = LayoutMapBuilder::new(LayoutId::from_raw(0xF002_0409));
-        sparse.set(SCANS[0], Mods::NONE, KeyMapping::from_char('х'));
-        sparse.set(SCANS[2], Mods::NONE, KeyMapping::from_char('ц'));
+        sparse.set(SCANS[0], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('х'));
+        sparse.set(SCANS[2], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('ц'));
         let target = sparse.finish();
 
         let strokes: Vec<Keystroke> = SCANS
             .iter()
-            .map(|&scan| Keystroke::recorded_in(&source, scan, Mods::NONE))
+            .map(|&scan| Keystroke::recorded_in(&source, scan, MAIN_BLOCK, Mods::NONE))
             .collect();
 
-        assert!(target.lookup(SCANS[1], Mods::NONE).is_empty());
+        assert!(target.lookup(SCANS[1], MAIN_BLOCK, Mods::NONE).is_empty());
         assert_eq!(render(&strokes, &target), "хbц");
 
         // Not an error, not a dropped character, not a shorter result.
@@ -596,7 +640,7 @@ mod tests {
 
         let strokes: Vec<Keystroke> = SCANS
             .iter()
-            .map(|&scan| Keystroke::recorded_in(&first, scan, Mods::NONE))
+            .map(|&scan| Keystroke::recorded_in(&first, scan, MAIN_BLOCK, Mods::NONE))
             .collect();
         let original_strokes = strokes.clone();
         let original_units = recorded_units(&strokes);
@@ -635,19 +679,25 @@ mod tests {
         // longer than a single unit, which is what section 11.1 means by a ligature.
         builder.set(
             SCANS[0],
+            MAIN_BLOCK,
             Mods::NONE,
             KeyMapping::from_to_unicode(2, &[0x0066, 0x0069]),
         );
-        builder.set(SCANS[1], Mods::NONE, KeyMapping::from_char('\u{1F600}'));
+        builder.set(
+            SCANS[1],
+            MAIN_BLOCK,
+            Mods::NONE,
+            KeyMapping::from_char('\u{1F600}'),
+        );
         let target = builder.finish();
 
         let strokes: Vec<Keystroke> = SCANS[..2]
             .iter()
-            .map(|&scan| Keystroke::recorded_in(&source, scan, Mods::NONE))
+            .map(|&scan| Keystroke::recorded_in(&source, scan, MAIN_BLOCK, Mods::NONE))
             .collect();
 
         assert_eq!(
-            target.lookup(SCANS[0], Mods::NONE).kind(),
+            target.lookup(SCANS[0], MAIN_BLOCK, Mods::NONE).kind(),
             MappingKind::Ligature
         );
         assert_eq!(converted_len(&strokes, &target), 4);
@@ -664,15 +714,20 @@ mod tests {
     #[test]
     fn a_dead_stroke_is_carried_through_unchanged() {
         let mut source = LayoutMapBuilder::new(LayoutId::from_raw(0xF001_0409));
-        source.set(SCANS[0], Mods::NONE, KeyMapping::dead('\u{0300}'));
-        source.set(SCANS[1], Mods::NONE, KeyMapping::from_char('a'));
+        source.set(
+            SCANS[0],
+            MAIN_BLOCK,
+            Mods::NONE,
+            KeyMapping::dead('\u{0300}'),
+        );
+        source.set(SCANS[1], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
         let source = source.finish();
 
         // The target has an ordinary character on both keys, so a conversion that ignored the
         // dead flag would visibly replace it.
         let target = synthetic(0xF002_0419, "фы");
 
-        let dead = Keystroke::recorded_in(&source, SCANS[0], Mods::NONE);
+        let dead = Keystroke::recorded_in(&source, SCANS[0], MAIN_BLOCK, Mods::NONE);
         assert!(dead.is_dead());
         let converted = convert_stroke(dead, &target);
         assert_eq!(converted, dead.produced());
@@ -681,16 +736,24 @@ mod tests {
 
         // The stroke next to it is converted normally: FR-24 is about one stroke, not about
         // giving up on the sequence.
-        let strokes = [dead, Keystroke::recorded_in(&source, SCANS[1], Mods::NONE)];
+        let strokes = [
+            dead,
+            Keystroke::recorded_in(&source, SCANS[1], MAIN_BLOCK, Mods::NONE),
+        ];
         assert_eq!(render(&strokes, &target), "\u{0300}ы");
 
         // The mirror case: an ordinary stroke whose key is a dead key in the target. Emitting
         // the dead character would start a composition in the user's application, so the
         // target offers this stroke no character and FR-23 applies.
         let mut dead_target = LayoutMapBuilder::new(LayoutId::from_raw(0xF003_0409));
-        dead_target.set(SCANS[1], Mods::NONE, KeyMapping::dead('\u{0301}'));
+        dead_target.set(
+            SCANS[1],
+            MAIN_BLOCK,
+            Mods::NONE,
+            KeyMapping::dead('\u{0301}'),
+        );
         let dead_target = dead_target.finish();
-        let ordinary = Keystroke::recorded_in(&source, SCANS[1], Mods::NONE);
+        let ordinary = Keystroke::recorded_in(&source, SCANS[1], MAIN_BLOCK, Mods::NONE);
         assert_eq!(convert_stroke(ordinary, &dead_target), ordinary.produced());
     }
 
@@ -715,9 +778,10 @@ mod tests {
     fn a_result_that_does_not_fit_is_an_error_and_not_a_panic() {
         let source = synthetic(0xF001_0409, "ab");
         let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0xF002_0409));
-        builder.set(SCANS[0], Mods::NONE, KeyMapping::from_char('x'));
+        builder.set(SCANS[0], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('x'));
         builder.set(
             SCANS[1],
+            MAIN_BLOCK,
             Mods::NONE,
             KeyMapping::from_to_unicode(2, &[0x0066, 0x0069]),
         );
@@ -725,7 +789,7 @@ mod tests {
 
         let strokes: Vec<Keystroke> = SCANS[..2]
             .iter()
-            .map(|&scan| Keystroke::recorded_in(&source, scan, Mods::NONE))
+            .map(|&scan| Keystroke::recorded_in(&source, scan, MAIN_BLOCK, Mods::NONE))
             .collect();
 
         // Exactly enough: three units, no error.
@@ -788,7 +852,7 @@ mod tests {
             (Mods::CAPS, 'A', 'Ф'),
             (SHIFT_CAPS, 'a', 'ф'),
         ] {
-            let stroke = Keystroke::recorded_in(&us, letter, mods);
+            let stroke = Keystroke::recorded_in(&us, letter, MAIN_BLOCK, mods);
             assert_eq!(stroke.produced().single_char(), Some(expected_en));
             assert_eq!(convert_stroke(stroke, &ru).single_char(), Some(expected_ru));
         }
@@ -799,7 +863,7 @@ mod tests {
             (Mods::CAPS, '2', '2'),
             (SHIFT_CAPS, '@', '"'),
         ] {
-            let stroke = Keystroke::recorded_in(&us, digit, mods);
+            let stroke = Keystroke::recorded_in(&us, digit, MAIN_BLOCK, mods);
             assert_eq!(stroke.produced().single_char(), Some(expected_en));
             assert_eq!(convert_stroke(stroke, &ru).single_char(), Some(expected_ru));
         }
@@ -812,16 +876,57 @@ mod tests {
         // find_key of the character, then lookup — would give the same answer for both, since
         // find_key has only one answer per character. Going through the key gives two.
         let mut source = LayoutMapBuilder::new(LayoutId::from_raw(0xF001_0409));
-        source.set(SCANS[0], Mods::NONE, KeyMapping::from_char('a'));
-        source.set(SCANS[1], Mods::NONE, KeyMapping::from_char('a'));
+        source.set(SCANS[0], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
+        source.set(SCANS[1], MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
         let source = source.finish();
         let target = synthetic(0xF002_0419, "фы");
 
-        let first = Keystroke::recorded_in(&source, SCANS[0], Mods::NONE);
-        let second = Keystroke::recorded_in(&source, SCANS[1], Mods::NONE);
+        let first = Keystroke::recorded_in(&source, SCANS[0], MAIN_BLOCK, Mods::NONE);
+        let second = Keystroke::recorded_in(&source, SCANS[1], MAIN_BLOCK, Mods::NONE);
         assert_eq!(first.produced(), second.produced());
         assert_eq!(convert_stroke(first, &target).single_char(), Some('ф'));
         assert_eq!(convert_stroke(second, &target).single_char(), Some('ы'));
+    }
+
+    #[test]
+    fn the_extended_flag_is_part_of_the_key_and_not_a_modifier() {
+        // The defect of task T-02-1a in miniature. Two keys share the scan code `0x35` and
+        // are told apart only by the extended flag of FR-05; in the source they read alike,
+        // in the target they do not. A cache keyed by the scan code alone would let one of
+        // them take the slot of the other and both strokes would convert to the same
+        // character.
+        const SHARED: u16 = 0x35;
+
+        let mut source = LayoutMapBuilder::new(LayoutId::from_raw(0xF001_0409));
+        source.set(SHARED, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('/'));
+        source.set(SHARED, KEYPAD, Mods::NONE, KeyMapping::from_char('/'));
+        let source = source.finish();
+
+        let mut target = LayoutMapBuilder::new(LayoutId::from_raw(0xF002_0419));
+        target.set(SHARED, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('.'));
+        target.set(SHARED, KEYPAD, Mods::NONE, KeyMapping::from_char('/'));
+        let target = target.finish();
+
+        // Both keys really are in the map, and both really are filled.
+        assert_eq!(source.len(), 2);
+        assert_eq!(target.len(), 2);
+
+        let main = Keystroke::recorded_in(&source, SHARED, MAIN_BLOCK, Mods::NONE);
+        let keypad = Keystroke::recorded_in(&source, SHARED, KEYPAD, Mods::NONE);
+        assert!(!main.extended());
+        assert!(keypad.extended());
+        assert_eq!(main.scan(), keypad.scan());
+        assert_eq!(main.produced(), keypad.produced());
+        assert_ne!(main, keypad);
+
+        assert_eq!(convert_stroke(main, &target).single_char(), Some('.'));
+        assert_eq!(convert_stroke(keypad, &target).single_char(), Some('/'));
+
+        // The reverse index prefers the main block, which is the key a user pressed and the
+        // key task T-07-2 replays.
+        let press = target.find_key('.').expect("the target must carry '.'");
+        assert_eq!(press.scan, SHARED);
+        assert!(!press.extended);
     }
 
     #[test]

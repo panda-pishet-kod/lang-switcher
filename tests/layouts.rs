@@ -14,8 +14,8 @@
 //! the product never prints them.
 
 use lang_switcher::layouts::{
-    KeyMapping, LayoutCache, LayoutError, LayoutId, LayoutMap, LayoutMapBuilder, MappingKind, Mods,
-    REBUILD_MESSAGES, enumerate, enumerate_all, needs_rebuild,
+    KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap, LayoutMapBuilder,
+    MappingKind, Mods, REBUILD_MESSAGES, enumerate, enumerate_all, needs_rebuild,
 };
 
 /// Russian, slot 1 of `HKCU\Keyboard Layout\Preload` — TOOLCHAIN.md section 4.
@@ -27,6 +27,15 @@ const US: LayoutId = LayoutId::from_raw(0x0409_0409);
 /// Scan code of the `A` key on a set 1 keyboard. Used as a cross-check only: every test
 /// below finds the key through the cache rather than through this constant.
 const SCAN_A: u16 = 0x1E;
+
+/// Scan code shared by the `/?` key of the main block and the `/` key of the keypad, the
+/// pair task T-02-1a separated.
+const SCAN_SLASH: u16 = 0x35;
+
+/// The extended flag of FR-05 for a key of the main block, and for one of the keypad.
+const MAIN_BLOCK: bool = false;
+/// See [`MAIN_BLOCK`].
+const KEYPAD: bool = true;
 
 /// Builds the cache, failing the test with the reason if it cannot be built.
 fn cache() -> LayoutCache {
@@ -55,16 +64,18 @@ fn scan_of_a(cache: &LayoutCache) -> u16 {
         press.scan, SCAN_A,
         "the A key is scan code 0x1E on a set 1 keyboard"
     );
+    assert!(!press.extended, "the A key is not an extended key");
     press.scan
 }
 
 /// The single character a key produces, or a failure naming the coordinates.
-fn char_at(map: &LayoutMap, scan: u16, mods: Mods) -> char {
-    let mapping = map.lookup(scan, mods);
+fn char_at(map: &LayoutMap, scan: u16, extended: bool, mods: Mods) -> char {
+    let mapping = map.lookup(scan, extended, mods);
     mapping.single_char().unwrap_or_else(|| {
         panic!(
-            "layout {} scan 0x{scan:02X} mods 0b{:03b} produced {:?}, not a single character",
+            "layout {} key 0x{:03X} mods 0b{:03b} produced {:?}, not a single character",
             map.layout(),
+            usize::from(scan & 0xFF) | usize::from(extended) << 8,
             mods.bits(),
             mapping.kind()
         )
@@ -101,7 +112,10 @@ fn enumeration_contains_the_russian_and_us_layouts() {
 fn the_a_key_unmodified_produces_cyrillic_ef_in_russian() {
     let cache = cache();
     let scan = scan_of_a(&cache);
-    assert_eq!(char_at(map_of(&cache, RUSSIAN), scan, Mods::NONE), 'ф');
+    assert_eq!(
+        char_at(map_of(&cache, RUSSIAN), scan, MAIN_BLOCK, Mods::NONE),
+        'ф'
+    );
 }
 
 // -- criterion 12 ------------------------------------------------------------------------
@@ -110,7 +124,10 @@ fn the_a_key_unmodified_produces_cyrillic_ef_in_russian() {
 fn the_a_key_unmodified_produces_latin_a_in_us() {
     let cache = cache();
     let scan = scan_of_a(&cache);
-    assert_eq!(char_at(map_of(&cache, US), scan, Mods::NONE), 'a');
+    assert_eq!(
+        char_at(map_of(&cache, US), scan, MAIN_BLOCK, Mods::NONE),
+        'a'
+    );
 }
 
 // -- criterion 13 ------------------------------------------------------------------------
@@ -119,8 +136,14 @@ fn the_a_key_unmodified_produces_latin_a_in_us() {
 fn shift_on_the_a_key_produces_capitals_in_both_layouts() {
     let cache = cache();
     let scan = scan_of_a(&cache);
-    assert_eq!(char_at(map_of(&cache, US), scan, Mods::SHIFT), 'A');
-    assert_eq!(char_at(map_of(&cache, RUSSIAN), scan, Mods::SHIFT), 'Ф');
+    assert_eq!(
+        char_at(map_of(&cache, US), scan, MAIN_BLOCK, Mods::SHIFT),
+        'A'
+    );
+    assert_eq!(
+        char_at(map_of(&cache, RUSSIAN), scan, MAIN_BLOCK, Mods::SHIFT),
+        'Ф'
+    );
 }
 
 // -- criterion 14 ------------------------------------------------------------------------
@@ -137,11 +160,16 @@ fn one_physical_key_gives_at_in_us_and_a_quote_in_russian() {
     assert_eq!(digit_two.mods, Mods::NONE);
 
     assert_eq!(
-        char_at(map_of(&cache, US), digit_two.scan, Mods::SHIFT),
+        char_at(map_of(&cache, US), digit_two.scan, MAIN_BLOCK, Mods::SHIFT),
         '@'
     );
     assert_eq!(
-        char_at(map_of(&cache, RUSSIAN), digit_two.scan, Mods::SHIFT),
+        char_at(
+            map_of(&cache, RUSSIAN),
+            digit_two.scan,
+            MAIN_BLOCK,
+            Mods::SHIFT
+        ),
         '"'
     );
 }
@@ -181,7 +209,7 @@ fn the_reverse_index_finds_the_key_that_produces_the_character() {
         "'ф' must come from the same physical key that carries 'a' in US"
     );
     assert_eq!(
-        char_at(russian, press.scan, press.mods),
+        char_at(russian, press.scan, press.extended, press.mods),
         'ф',
         "the two directions must agree"
     );
@@ -196,7 +224,7 @@ fn the_reverse_index_finds_the_key_that_produces_the_character() {
             let press = map
                 .find_key(ch)
                 .unwrap_or_else(|| panic!("{ch:?} not found in layout {}", map.layout()));
-            assert_eq!(char_at(map, press.scan, press.mods), ch);
+            assert_eq!(char_at(map, press.scan, press.extended, press.mods), ch);
         }
     }
 
@@ -290,6 +318,97 @@ fn a_failed_build_is_distinguishable_from_an_empty_cache() {
     assert!(built.maps().iter().any(|map| !map.is_empty()));
 }
 
+// -- task T-02-1a, the extended key in the cache key ---------------------------------------
+
+#[test]
+fn the_main_block_and_the_keypad_slash_keys_occupy_different_slots() {
+    // Both keys report the scan code 0x35 and `MapVirtualKeyExW(MAPVK_VK_TO_VSC_EX)` tells
+    // them apart by the `E0` prefix: 0x0035 for the `/?` key, 0xE035 for the keypad `/`.
+    // Before task T-02-1a they shared one slot and the keypad won it in both layouts, which
+    // is why the Russian map read `/` where the layout says `.`.
+    let cache = cache();
+
+    for (layout, plain, shifted) in [(US, '/', '?'), (RUSSIAN, '.', ',')] {
+        let map = map_of(&cache, layout);
+
+        // The main block key, with its own reading in each layout.
+        assert_eq!(char_at(map, SCAN_SLASH, MAIN_BLOCK, Mods::NONE), plain);
+        assert_eq!(char_at(map, SCAN_SLASH, MAIN_BLOCK, Mods::SHIFT), shifted);
+
+        // And the keypad key, still there, reading `/` whatever the layout and whatever the
+        // Shift state: two keys, two slots, both reachable.
+        assert_eq!(char_at(map, SCAN_SLASH, KEYPAD, Mods::NONE), '/');
+        assert_eq!(char_at(map, SCAN_SLASH, KEYPAD, Mods::SHIFT), '/');
+    }
+
+    // The Russian map is where the two used to collapse into one answer.
+    let russian = map_of(&cache, RUSSIAN);
+    assert_ne!(
+        russian.lookup(SCAN_SLASH, MAIN_BLOCK, Mods::NONE),
+        russian.lookup(SCAN_SLASH, KEYPAD, Mods::NONE)
+    );
+}
+
+#[test]
+fn the_reverse_index_carries_the_extended_flag() {
+    // A synthetic layout, because no character of the RU/EN pair is carried by a keypad key
+    // alone: the reverse index keeps the first writer and the main block is written first,
+    // so the live cache cannot show the `true` case. Here the two keys carry different
+    // characters and each is found under its own flag.
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0xF001_0409));
+    builder.set(
+        SCAN_SLASH,
+        MAIN_BLOCK,
+        Mods::NONE,
+        KeyMapping::from_char('/'),
+    );
+    builder.set(
+        SCAN_SLASH,
+        KEYPAD,
+        Mods::NONE,
+        KeyMapping::from_char('\u{00F7}'),
+    );
+    let map = builder.finish();
+
+    assert_eq!(
+        map.find_key('/'),
+        Some(KeyPress {
+            scan: SCAN_SLASH,
+            extended: false,
+            mods: Mods::NONE,
+        })
+    );
+    assert_eq!(
+        map.find_key('\u{00F7}'),
+        Some(KeyPress {
+            scan: SCAN_SLASH,
+            extended: true,
+            mods: Mods::NONE,
+        })
+    );
+
+    // On the live cache both `/` keys carry the same character, and the answer is the main
+    // block one — the key a user pressed, and the key task T-07-2 has to replay.
+    let cache = cache();
+    let press = map_of(&cache, US)
+        .find_key('/')
+        .expect("the US layout must have a key that produces '/'");
+    assert_eq!(press.scan, SCAN_SLASH);
+    assert!(
+        !press.extended,
+        "'/' must be found on the main block key, not on the keypad"
+    );
+    assert_eq!(press.mods, Mods::NONE);
+
+    // The reverse index of the Russian layout gained a key it did not have before: `.` sits
+    // on the very slot the keypad used to take.
+    let full_stop = map_of(&cache, RUSSIAN)
+        .find_key('.')
+        .expect("the Russian layout must have a key that produces '.'");
+    assert_eq!(full_stop.scan, SCAN_SLASH);
+    assert!(!full_stop.extended);
+}
+
 // -- beyond the required set --------------------------------------------------------------
 
 #[test]
@@ -310,17 +429,17 @@ fn dead_keys_and_ligatures_are_stored_whole() {
     let dead = KeyMapping::dead('\u{0300}');
     let ligature = KeyMapping::from_to_unicode(2, &[0x0066, 0x0069]);
     let outside_bmp = KeyMapping::from_char('\u{1F600}');
-    builder.set(0x10, Mods::NONE, dead);
-    builder.set(0x11, Mods::NONE, ligature);
-    builder.set(0x12, Mods::NONE, outside_bmp);
+    builder.set(0x10, MAIN_BLOCK, Mods::NONE, dead);
+    builder.set(0x11, MAIN_BLOCK, Mods::NONE, ligature);
+    builder.set(0x12, MAIN_BLOCK, Mods::NONE, outside_bmp);
     let map = builder.finish();
 
-    let stored_dead = map.lookup(0x10, Mods::NONE);
+    let stored_dead = map.lookup(0x10, MAIN_BLOCK, Mods::NONE);
     assert_eq!(stored_dead.kind(), MappingKind::Dead);
     assert_eq!(stored_dead.units(), [0x0300]);
     assert!(stored_dead.is_dead());
 
-    let stored_ligature = map.lookup(0x11, Mods::NONE);
+    let stored_ligature = map.lookup(0x11, MAIN_BLOCK, Mods::NONE);
     assert_eq!(stored_ligature.kind(), MappingKind::Ligature);
     assert_eq!(
         stored_ligature.units(),
@@ -332,7 +451,7 @@ fn dead_keys_and_ligatures_are_stored_whole() {
     // A dead key is not reachable backwards: replaying it would start a composition.
     assert_eq!(map.find_key('\u{0300}'), None);
     // A surrogate pair is one character and is reachable backwards.
-    assert_eq!(map.lookup(0x12, Mods::NONE).units().len(), 2);
+    assert_eq!(map.lookup(0x12, MAIN_BLOCK, Mods::NONE).units().len(), 2);
     assert_eq!(
         map.find_key('\u{1F600}').map(|press| press.scan),
         Some(0x12)
@@ -350,11 +469,28 @@ fn a_key_with_no_character_reads_as_empty_rather_than_as_a_failure() {
     let cache = cache();
     let us = map_of(&cache, US);
     // Scan code 0 is not a key: nothing may be filed under it.
-    assert!(us.lookup(0x00, Mods::NONE).is_empty());
-    assert_eq!(us.lookup(0x00, Mods::NONE).kind(), MappingKind::None);
+    assert!(us.lookup(0x00, MAIN_BLOCK, Mods::NONE).is_empty());
+    assert_eq!(
+        us.lookup(0x00, MAIN_BLOCK, Mods::NONE).kind(),
+        MappingKind::None
+    );
     // FR-23 rests on this: an absent mapping is an ordinary answer, and the caller carries
     // the character over unchanged instead of aborting the conversion.
-    assert!(us.lookup(0xFF, Mods::ALTGR).is_empty());
+    assert!(us.lookup(0xFF, MAIN_BLOCK, Mods::ALTGR).is_empty());
+
+    // The index is bounded by construction, not by the caller: a scan code that still has
+    // the `E0` prefix in it, or any other value a hook could report, is masked into the
+    // table rather than read past its end.
+    assert!(us.lookup(0xE000, KEYPAD, Mods::ALTGR).is_empty());
+    assert!(
+        us.lookup(u16::MAX, KEYPAD, Mods::from_bits_truncate(0xFF))
+            .is_empty()
+    );
+    assert_eq!(
+        us.lookup(0xE01E, MAIN_BLOCK, Mods::NONE),
+        us.lookup(SCAN_A, MAIN_BLOCK, Mods::NONE),
+        "only the low byte of a scan code selects a key"
+    );
 }
 
 #[test]

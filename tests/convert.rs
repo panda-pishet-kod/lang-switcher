@@ -38,27 +38,30 @@ const SHIFT_CAPS: Mods = Mods::new(true, true, false);
 /// be passed through rather than text to be converted.
 const TEXT_MODS: [Mods; 4] = [Mods::NONE, Mods::SHIFT, Mods::CAPS, SHIFT_CAPS];
 
-/// Scan code shared by the main block `/` key and the keypad `/` key.
+/// Scan code shared by the main block `/?` key and the keypad `/` key.
 ///
-/// The two are told apart only by the extended flag of FR-05, which module `layouts` does not
-/// keep in the mapping coordinates — see the note in the report of this task. In the live
-/// cache the keypad wins the slot for both layouts, so `0x35` is the one key of the hardwired
-/// table the live cache answers differently for, and the traversal constants below leave it
-/// out. Everything else in the table matches character for character.
+/// The two are told apart by the extended flag of FR-05, which is the ninth bit of the cache
+/// key since task T-02-1a. Before that task the keypad won the slot in both layouts, EN `/`
+/// converted to RU `/` instead of RU `.`, and the traversal constants below had to leave the
+/// key out; they carry it again.
 const SHARED_WITH_KEYPAD: u16 = 0x35;
 
-/// The keys of the main block, unshifted in the English layout, without the key of
-/// [`SHARED_WITH_KEYPAD`].
+/// The extended flag of FR-05 for a key of the main block, and for one of the keypad.
+const MAIN_BLOCK: bool = false;
+/// See [`MAIN_BLOCK`].
+const KEYPAD: bool = true;
+
+/// The 47 keys of the main block, unshifted in the English layout.
 ///
 /// Aligned character by character with [`RU_LOWER`]: the *n*-th character is what the *n*-th
 /// of the other becomes when the same physical key is read in the other layout.
-const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,.";
+const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
 /// The same keys in the Russian layout, unshifted.
-const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю";
+const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
 /// The same keys in the English layout, with `Shift`.
-const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>";
+const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
 /// The same keys in the Russian layout, with `Shift`.
-const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ";
+const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
 
 /// The live mapping cache, or a failure naming the reason.
 fn cache() -> LayoutCache {
@@ -83,7 +86,7 @@ fn type_text(map: &LayoutMap, text: &str) -> Vec<Keystroke> {
             let press = map
                 .find_key(ch)
                 .unwrap_or_else(|| panic!("layout {} has no key for {ch:?}", map.layout()));
-            Keystroke::recorded_in(map, press.scan, press.mods)
+            Keystroke::recorded_in(map, press.scan, press.extended, press.mods)
         })
         .collect()
 }
@@ -111,7 +114,9 @@ fn a_full_ru_en_traversal_on_the_live_cache_converts_every_key_in_both_cases() {
     assert_eq!(render(&type_text(ru, RU_UPPER), us), EN_UPPER);
 
     // The constants are aligned key by key, so the assertions above are the claim they look
-    // like and not an accident of two strings of unequal length.
+    // like and not an accident of two strings of unequal length. All 47 keys of the main
+    // block, the `/?` key included since task T-02-1a.
+    assert_eq!(EN_LOWER.chars().count(), 47);
     assert_eq!(EN_LOWER.chars().count(), RU_LOWER.chars().count());
     assert_eq!(EN_UPPER.chars().count(), RU_UPPER.chars().count());
     assert_eq!(EN_LOWER.chars().count(), EN_UPPER.chars().count());
@@ -126,11 +131,11 @@ fn the_same_physical_key_gives_at_in_us_and_a_quote_in_russian_on_the_live_cache
     let digit_two = us.find_key('2').expect("the US layout must carry '2'");
     assert_eq!(digit_two.mods, Mods::NONE);
 
-    let typed_in_us = Keystroke::recorded_in(us, digit_two.scan, Mods::SHIFT);
+    let typed_in_us = Keystroke::recorded_in(us, digit_two.scan, MAIN_BLOCK, Mods::SHIFT);
     assert_eq!(typed_in_us.produced().single_char(), Some('@'));
     assert_eq!(convert_stroke(typed_in_us, ru).single_char(), Some('"'));
 
-    let typed_in_russian = Keystroke::recorded_in(ru, digit_two.scan, Mods::SHIFT);
+    let typed_in_russian = Keystroke::recorded_in(ru, digit_two.scan, MAIN_BLOCK, Mods::SHIFT);
     assert_eq!(typed_in_russian.produced().single_char(), Some('"'));
     assert_eq!(
         convert_stroke(typed_in_russian, us).single_char(),
@@ -168,27 +173,36 @@ fn the_fallback_table_converts_exactly_as_the_live_cache_does() {
 
     let mut compared = 0usize;
     for scan in 0..=u16::from(u8::MAX) {
-        if scan == SHARED_WITH_KEYPAD {
-            continue;
-        }
         for mods in TEXT_MODS {
             // Only where the hardwired table claims to know a key: the live cache also
             // describes the keypad, the function keys and the control keys, and FR-25 never
-            // promised those.
-            if table_us.lookup(scan, mods).is_empty() {
+            // promised those. Every row of the table is a main block key.
+            if table_us.lookup(scan, MAIN_BLOCK, mods).is_empty() {
                 continue;
             }
 
             // EN to RU and RU to EN, once through the table and once through the OS.
             assert_eq!(
-                convert_stroke(Keystroke::recorded_in(&table_us, scan, mods), &table_ru),
-                convert_stroke(Keystroke::recorded_in(live_us, scan, mods), live_ru),
+                convert_stroke(
+                    Keystroke::recorded_in(&table_us, scan, MAIN_BLOCK, mods),
+                    &table_ru
+                ),
+                convert_stroke(
+                    Keystroke::recorded_in(live_us, scan, MAIN_BLOCK, mods),
+                    live_ru
+                ),
                 "EN to RU differs at scan 0x{scan:02X} mods 0b{:03b}",
                 mods.bits()
             );
             assert_eq!(
-                convert_stroke(Keystroke::recorded_in(&table_ru, scan, mods), &table_us),
-                convert_stroke(Keystroke::recorded_in(live_ru, scan, mods), live_us),
+                convert_stroke(
+                    Keystroke::recorded_in(&table_ru, scan, MAIN_BLOCK, mods),
+                    &table_us
+                ),
+                convert_stroke(
+                    Keystroke::recorded_in(live_ru, scan, MAIN_BLOCK, mods),
+                    live_us
+                ),
                 "RU to EN differs at scan 0x{scan:02X} mods 0b{:03b}",
                 mods.bits()
             );
@@ -196,15 +210,64 @@ fn the_fallback_table_converts_exactly_as_the_live_cache_does() {
         }
     }
 
-    // 46 of the 47 keys of the table, four modifier combinations each. Stated as a number so
-    // that a table that quietly lost half its rows cannot pass this test by comparing nothing.
-    assert_eq!(compared, 46 * 4);
+    // All 47 keys of the table, four modifier combinations each. Stated as a number so that a
+    // table that quietly lost half its rows cannot pass this test by comparing nothing. It
+    // was 46 before task T-02-1a: the key of `SHARED_WITH_KEYPAD` had to be skipped because
+    // the live cache answered it with the keypad.
+    assert_eq!(compared, 47 * 4);
 
     // And the letters and digits section 11.1 names, end to end through both.
     assert_eq!(
         render(&type_text(&table_us, "ghbdtn123"), &table_ru),
         render(&type_text(live_us, "ghbdtn123"), live_ru)
     );
+}
+
+// -- the defect of task T-02-1a, on the live cache -----------------------------------------
+
+/// The `/?` key of the main block reads `/` in US and `.` in Russian, so EN `/` has to
+/// convert to RU `.`. Before task T-02-1a it came out as `/`: the keypad `/` shares the scan
+/// code `0x35`, the cache was keyed by the scan code alone, and `VK_DIVIDE` reached the slot
+/// first. It is a punctuation mark, and the traversal of section 11.1 of SPEC covers those.
+///
+/// The body of this test is what failed before the fix, character for character; only the
+/// shared `type_text` helper above learned to pass the extended flag on.
+#[test]
+fn the_main_block_slash_key_converts_to_a_russian_full_stop() {
+    let cache = cache();
+    let (us, ru) = (map_of(&cache, US), map_of(&cache, RUSSIAN));
+    assert_eq!(render(&type_text(us, "/"), ru), ".");
+}
+
+/// The other direction. Before the fix the Russian map had no key that produced `.` at all,
+/// because its only one was the slot the keypad had taken.
+#[test]
+fn the_russian_full_stop_converts_back_to_an_english_slash() {
+    let cache = cache();
+    let (us, ru) = (map_of(&cache, US), map_of(&cache, RUSSIAN));
+    assert_eq!(render(&type_text(ru, "."), us), "/");
+}
+
+/// And the keypad key itself is still there, in its own slot, reading `/` in both layouts —
+/// the repair separated the two keys rather than replacing one with the other.
+#[test]
+fn the_keypad_slash_key_keeps_its_own_slot_in_both_layouts() {
+    let cache = cache();
+    let (us, ru) = (map_of(&cache, US), map_of(&cache, RUSSIAN));
+
+    for (map, other) in [(us, ru), (ru, us)] {
+        let keypad = Keystroke::recorded_in(map, SHARED_WITH_KEYPAD, KEYPAD, Mods::NONE);
+        assert_eq!(keypad.produced().single_char(), Some('/'));
+        assert_eq!(convert_stroke(keypad, other).single_char(), Some('/'));
+    }
+
+    // The same scan code, the other key: two different characters out of one scan code is
+    // the whole point of the ninth bit.
+    let main_block = Keystroke::recorded_in(us, SHARED_WITH_KEYPAD, MAIN_BLOCK, Mods::NONE);
+    let keypad = Keystroke::recorded_in(us, SHARED_WITH_KEYPAD, KEYPAD, Mods::NONE);
+    assert_eq!(main_block.produced(), keypad.produced());
+    assert_eq!(convert_stroke(main_block, ru).single_char(), Some('.'));
+    assert_eq!(convert_stroke(keypad, ru).single_char(), Some('/'));
 }
 
 // -- hygiene -------------------------------------------------------------------------------

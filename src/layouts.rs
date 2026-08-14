@@ -7,7 +7,7 @@
 //! T-02-1; FR-30, FR-31, FR-32, FR-33, FR-34 — target layout selection and cycling, left
 //! to task T-05-2.
 //! Moved out to match the backlog (decision R-17): FR-52 to module `switch`, task T-05-1.
-//! Implemented by backlog tasks: T-02-1 (done), T-05-2.
+//! Implemented by backlog tasks: T-02-1 (done), T-02-1a (done), T-05-2.
 //!
 //! # What the cache is
 //!
@@ -21,6 +21,30 @@
 //! * backward, [`LayoutMap::find_key`] — character to the key that produces it. This is
 //!   the path step 5 of FR-61 walks, where the selection carries characters and the scan
 //!   codes are gone.
+//!
+//! # What a physical key is here — task T-02-1a
+//!
+//! A scan code alone does not name a key. The keypad repeats the low byte of the main
+//! block: the `/` of the keypad and the `/?` key both report `0x35`, and the hardware tells
+//! them apart by the `E0` prefix the hook delivers as `LLKHF_EXTENDED` (FR-05). A cache
+//! keyed by the scan code alone therefore lets one of the two keys take the slot of the
+//! other, and on the RU/EN pair the visible half of that is a punctuation mark: the `/?` key
+//! reads `/` in US and `.` in Russian, so EN `/` has to convert to RU `.` and used to come
+//! out as `/` because the keypad had written the slot first.
+//!
+//! The key of this cache is therefore **nine bits wide**: the low eight are the scan code,
+//! the ninth is the extended flag — see [`key_index`]. The sweep reads both from one call,
+//! `MapVirtualKeyExW` with `MAPVK_VK_TO_VSC_EX`, which returns the prefix in the high byte
+//! (`0xE035` for the keypad `/`, `0x0035` for the `/?` key).
+//!
+//! `MAPVK_VK_TO_VSC_EX` does not separate every pair that shares a low byte:
+//! `VK_DELETE`/`VK_DECIMAL` both report `0x0053`, `VK_HOME`/`VK_NUMPAD7` both `0x0047`,
+//! `VK_END`/`VK_NUMPAD1` both `0x004F`, `VK_INSERT`/`VK_NUMPAD0` both `0x0052`. Windows does
+//! not mark the navigation block extended in a layout table. Those pairs stay collapsed and
+//! that is harmless: each is "a keypad character against a navigation key", both readings
+//! agree across RU and EN, and the rule of [`LayoutMapBuilder::set`] keeps whichever of the
+//! two carries a character. The pair conversion actually depends on is `0x35`, and
+//! `MAPVK_VK_TO_VSC_EX` does separate that one.
 //!
 //! # Threading contract
 //!
@@ -56,7 +80,7 @@ use core::ffi::c_void;
 use core::fmt;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyboardLayoutList, HKL, MAPVK_VK_TO_VSC, MapVirtualKeyExW, ToUnicodeEx, VK_CAPITAL,
+    GetKeyboardLayoutList, HKL, MAPVK_VK_TO_VSC_EX, MapVirtualKeyExW, ToUnicodeEx, VK_CAPITAL,
     VK_CONTROL, VK_LCONTROL, VK_LSHIFT, VK_MENU, VK_RMENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{WM_DEVICECHANGE, WM_INPUTLANGCHANGE};
@@ -78,9 +102,19 @@ const LAST_VK: u32 = 0xFF;
 
 /// Number of scan codes the forward table indexes: the whole single byte space.
 ///
-/// `MapVirtualKeyExW(MAPVK_VK_TO_VSC)` yields a one byte scan code; the `E0` prefix of an
-/// extended key is not part of it and travels in the extended flag of FR-05 instead.
+/// The low byte of `MapVirtualKeyExW(MAPVK_VK_TO_VSC_EX)`, and the whole of
+/// `KBDLLHOOKSTRUCT::scanCode`.
 const SCAN_CODES: usize = 256;
+
+/// Ninth bit of the cache key: the key is an extended one, the `E0` of FR-05.
+const EXTENDED_BIT: usize = 0x100;
+
+/// Number of physical keys the forward table indexes — task T-02-1a.
+///
+/// Every scan code twice over, once plain and once extended, so that the keypad and the main
+/// block never share a slot. Two times 256 is exactly [`EXTENDED_BIT`] doubled, which is what
+/// makes [`key_index`] a mask rather than a bounds check.
+const KEY_SLOTS: usize = SCAN_CODES * 2;
 
 /// The eight modifier combinations of FR-20.
 const MOD_COMBINATIONS: usize = 8;
@@ -98,11 +132,15 @@ const DECODE_UNITS: usize = 16;
 
 /// Capacity of the per-layout reverse index. A power of two, so the modulo is a mask.
 ///
-/// The forward table holds at most `SCAN_CODES * MOD_COMBINATIONS` = 2048 entries and each
+/// The forward table holds at most `KEY_SLOTS * MOD_COMBINATIONS` = 4096 entries and each
 /// contributes at most one reverse key, so the load factor never exceeds one half. That is
 /// the textbook working range for linear probing and it bounds the probe count by a
 /// compile-time constant that does not depend on the keystroke being looked up.
-const REVERSE_CAPACITY: usize = 4096;
+///
+/// Task T-02-1a doubled [`KEY_SLOTS`], so this doubled with it: at the previous 4096 slots
+/// the load factor of a full table would have been one, at which linear probing degenerates
+/// and [`insert_reverse`] could meet no free slot at all.
+const REVERSE_CAPACITY: usize = 8192;
 
 /// Mask that keeps a slot index inside [`REVERSE_CAPACITY`].
 const REVERSE_MASK: usize = REVERSE_CAPACITY - 1;
@@ -111,8 +149,8 @@ const REVERSE_MASK: usize = REVERSE_CAPACITY - 1;
 /// ratio. Spreads the low, dense Unicode blocks a keyboard layout actually produces.
 const REVERSE_MULTIPLIER: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// Shift that keeps the high 12 bits of the product, `4096 == 1 << 12`.
-const REVERSE_SHIFT: u32 = 64 - 12;
+/// Shift that keeps the high 13 bits of the product, `8192 == 1 << 13`.
+const REVERSE_SHIFT: u32 = 64 - 13;
 
 /// Marker of a free reverse slot. `u32::MAX` is not a Unicode scalar value, so no real key
 /// can collide with it.
@@ -210,8 +248,10 @@ impl fmt::Display for LayoutId {
 ///
 /// Only the three modifiers that change which character a key produces are represented.
 /// `Ctrl` and `Alt` on their own mark a command rather than text and reset the buffer
-/// (FR-10); the extended flag of FR-05 belongs to the stroke, not to the mapping. The
-/// wider stroke mask of FR-04 is narrowed to this type by the buffer module (task T-03-2).
+/// (FR-10). The extended flag of FR-05 is not among them either, and for a different
+/// reason: it does not modify a key, it *names* one, so it belongs to the other half of the
+/// cache key — see [`key_index`]. The wider stroke mask of FR-04 is narrowed to this type by
+/// the buffer module (task T-03-2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mods(u8);
 
@@ -290,10 +330,22 @@ impl Mods {
 /// A physical key together with the modifiers that make it produce a given character.
 ///
 /// The answer of the reverse lookup, and the coordinates the conversion of FR-22 works in.
+///
+/// The three fields are exactly what a replay of the key needs: task T-07-2 puts [`scan`]
+/// into `KEYBDINPUT::wScan` and [`extended`] into `KEYEVENTF_EXTENDEDKEY`, which is FR-05
+/// read backwards. That is why the extended flag is a field of its own rather than a bit
+/// folded into [`scan`]: a scan code that had `0x100` set in it would be injected as a
+/// different key.
+///
+/// [`scan`]: KeyPress::scan
+/// [`extended`]: KeyPress::extended
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KeyPress {
     /// Scan code of the physical key, low byte only.
     pub scan: u16,
+    /// Whether the key is an extended one — the `E0` prefix of FR-05. `true` for the keypad
+    /// `/`, `false` for the `/?` key of the main block, which share the scan code `0x35`.
+    pub extended: bool,
     /// Modifier combination.
     pub mods: Mods,
 }
@@ -325,7 +377,7 @@ pub enum MappingKind {
 
 /// What one physical key produces under one modifier combination in one layout.
 ///
-/// Plain `Copy` data of twelve bytes: a lookup returns it by value and allocates nothing.
+/// Plain `Copy` data of ten bytes: a lookup returns it by value and allocates nothing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct KeyMapping {
     kind: MappingKind,
@@ -470,6 +522,7 @@ struct ReverseSlot {
     /// Unicode scalar value, or [`REVERSE_FREE`] when the slot is free.
     key: u32,
     scan: u16,
+    extended: bool,
     mods: Mods,
 }
 
@@ -477,17 +530,32 @@ impl ReverseSlot {
     const FREE: Self = Self {
         key: REVERSE_FREE,
         scan: 0,
+        extended: false,
         mods: Mods::NONE,
     };
 }
 
-/// Position of a `(scan, mods)` pair inside the forward table.
+/// The nine bit key of one physical key — task T-02-1a.
 ///
-/// Only the low byte of the scan code selects a row, which is exactly what
-/// `MapVirtualKeyExW(MAPVK_VK_TO_VSC)` and `KBDLLHOOKSTRUCT::scanCode` deliver. The mask
-/// also guarantees the index stays inside the table for any input.
-const fn forward_index(scan: u16, mods: Mods) -> usize {
-    (scan as usize & 0xFF) * MOD_COMBINATIONS + mods.index()
+/// The low eight bits are the scan code, the ninth is the extended flag: `0x035` is the `/?`
+/// key of the main block and `0x135` the `/` of the keypad. The two halves of the table are
+/// therefore whole scan code spaces rather than interleaved, which keeps a dump of the table
+/// readable and makes "the extended keys" a contiguous range.
+///
+/// The scan code is masked to its low byte rather than checked, so the result is inside
+/// `0..KEY_SLOTS` for **every** `u16` — including a scan code the hook reported with the
+/// `E0` prefix still in it. The bound is a property of the arithmetic, not of the caller.
+const fn key_index(scan: u16, extended: bool) -> usize {
+    (scan as usize & 0xFF) | if extended { EXTENDED_BIT } else { 0 }
+}
+
+/// Position of a `(scan, extended, mods)` triple inside the forward table.
+///
+/// Both factors are bounded by construction — [`key_index`] by its mask and [`Mods::index`]
+/// by the three bits of [`Mods`] — so the product is below `KEY_SLOTS * MOD_COMBINATIONS`
+/// for any input and the table read below can never leave the table.
+const fn forward_index(scan: u16, extended: bool, mods: Mods) -> usize {
+    key_index(scan, extended) * MOD_COMBINATIONS + mods.index()
 }
 
 /// Slot a character hashes to.
@@ -499,7 +567,7 @@ fn reverse_slot(key: u32) -> usize {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutMap {
     layout: LayoutId,
-    /// `SCAN_CODES * MOD_COMBINATIONS` entries, indexed by [`forward_index`].
+    /// `KEY_SLOTS * MOD_COMBINATIONS` entries, indexed by [`forward_index`].
     forward: Box<[KeyMapping]>,
     /// `REVERSE_CAPACITY` slots, open addressed with linear probing.
     reverse: Box<[ReverseSlot]>,
@@ -515,19 +583,31 @@ impl LayoutMap {
 
     /// What the physical key `scan` produces under `mods` — the forward path of FR-22.
     ///
+    /// `extended` is the flag of FR-05, `true` for the keypad and the other `E0` keys. It is
+    /// part of the key, not a modifier: without it the keypad `/` and the `/?` key of the
+    /// main block would be the same coordinate, which is the defect task T-02-1a repaired.
+    ///
     /// One index computation and one array read: no allocation (NFR-03), no lock (NFR-04),
-    /// no branch that depends on how full the table is (NFR-01). Safe to call from the hook
+    /// no branch that depends on how full the table is (NFR-01), and — by the masking in
+    /// [`key_index`] — no input that can leave the table. Safe to call from the hook
     /// callback.
-    pub fn lookup(&self, scan: u16, mods: Mods) -> KeyMapping {
-        self.forward[forward_index(scan, mods)]
+    pub fn lookup(&self, scan: u16, extended: bool, mods: Mods) -> KeyMapping {
+        self.forward[forward_index(scan, extended, mods)]
     }
 
     /// Which key produces `ch` — the backward path of step 5 of FR-61.
     ///
-    /// Returns the plainest modifier combination that produces the character, since the
-    /// index is filled in the order of [`Mods::ALL`] and the first writer of a character
-    /// keeps the slot. Dead keys are deliberately absent from the index: replaying one
-    /// would start a composition instead of inserting a character.
+    /// Returns the plainest key that produces the character, and it is plainest in two
+    /// senses, because the index is filled in the order of [`key_index`] and then of
+    /// [`Mods::ALL`] and the first writer of a character keeps the slot: the main block
+    /// before the keypad, and the fewest modifiers before the most. A character carried by
+    /// both `/` keys therefore answers with the main block one, which is the key a user
+    /// would have pressed and the key task T-07-2 should replay. Dead keys are deliberately
+    /// absent from the index: replaying one would start a composition instead of inserting a
+    /// character.
+    ///
+    /// The answer carries the extended flag of FR-05, so a caller can replay the key without
+    /// having to guess which block it came from.
     ///
     /// Reads a fixed-capacity open addressed table filled to at most one half, so the probe
     /// walk is bounded by a compile-time constant and allocates nothing.
@@ -542,6 +622,7 @@ impl LayoutMap {
             if entry.key == key {
                 return Some(KeyPress {
                     scan: entry.scan,
+                    extended: entry.extended,
                     mods: entry.mods,
                 });
             }
@@ -581,24 +662,29 @@ impl LayoutMapBuilder {
     pub fn new(layout: LayoutId) -> Self {
         Self {
             layout,
-            forward: vec![KeyMapping::EMPTY; SCAN_CODES * MOD_COMBINATIONS].into_boxed_slice(),
+            forward: vec![KeyMapping::EMPTY; KEY_SLOTS * MOD_COMBINATIONS].into_boxed_slice(),
             filled: 0,
         }
     }
 
-    /// Records `mapping` for `scan` under `mods` and reports whether it was stored.
+    /// Records `mapping` for the key `(scan, extended)` under `mods` and reports whether it
+    /// was stored.
     ///
     /// An entry that produces nothing is never stored, and an occupied slot is never
-    /// overwritten. Together the two rules settle the one real collision of the sweep:
-    /// several virtual keys map to the same scan code — `VK_INSERT` and `VK_NUMPAD0` both
-    /// map to `0x52` — and the rule keeps the one that carries a character regardless of
-    /// the order they are offered in. That makes the result reproducible, which is what
-    /// FR-21 needs from a rebuild.
-    pub fn set(&mut self, scan: u16, mods: Mods, mapping: KeyMapping) -> bool {
+    /// overwritten. Together the two rules settle what remains of the collisions of the
+    /// sweep. Since task T-02-1a the keypad no longer collides with the main block wherever
+    /// `MAPVK_VK_TO_VSC_EX` reports the `E0` prefix, but Windows withholds that prefix for
+    /// the navigation block, so four pairs still share a slot — `VK_DELETE`/`VK_DECIMAL` on
+    /// `0x53`, `VK_HOME`/`VK_NUMPAD7` on `0x47`, `VK_END`/`VK_NUMPAD1` on `0x4F`,
+    /// `VK_INSERT`/`VK_NUMPAD0` on `0x52`. In each of them the navigation key carries no
+    /// character at all, so the rule keeps the keypad reading regardless of the order the
+    /// two are offered in, and both layouts of the pair read those keys alike. That makes
+    /// the result reproducible, which is what FR-21 needs from a rebuild.
+    pub fn set(&mut self, scan: u16, extended: bool, mods: Mods, mapping: KeyMapping) -> bool {
         if mapping.is_empty() {
             return false;
         }
-        let index = forward_index(scan, mods);
+        let index = forward_index(scan, extended, mods);
         if !self.forward[index].is_empty() {
             return false;
         }
@@ -610,9 +696,11 @@ impl LayoutMapBuilder {
     /// Derives the reverse index and freezes the map.
     pub fn finish(self) -> LayoutMap {
         let mut reverse = vec![ReverseSlot::FREE; REVERSE_CAPACITY].into_boxed_slice();
-        for scan in 0..SCAN_CODES {
+        // Ascending key index, so the whole plain half is walked before the extended one and
+        // the main block wins every reverse slot it shares with the keypad.
+        for key in 0..KEY_SLOTS {
             for mods in Mods::ALL {
-                let mapping = self.forward[scan * MOD_COMBINATIONS + mods.index()];
+                let mapping = self.forward[key * MOD_COMBINATIONS + mods.index()];
                 if mapping.is_empty() || mapping.is_dead() {
                     continue;
                 }
@@ -622,7 +710,13 @@ impl LayoutMapBuilder {
                     // path, not of a constant time index.
                     continue;
                 };
-                insert_reverse(&mut reverse, ch as u32, scan as u16, mods);
+                insert_reverse(
+                    &mut reverse,
+                    ch as u32,
+                    (key & 0xFF) as u16,
+                    key & EXTENDED_BIT != 0,
+                    mods,
+                );
             }
         }
         LayoutMap {
@@ -636,17 +730,22 @@ impl LayoutMapBuilder {
 
 /// Inserts one character into the reverse index, keeping the first writer.
 ///
-/// The table holds at most 2048 keys in 4096 slots, so the walk always meets a free slot;
+/// The table holds at most 4096 keys in 8192 slots, so the walk always meets a free slot;
 /// the bound on the loop is a guard against a future change to those two numbers, not an
 /// expected outcome.
-fn insert_reverse(table: &mut [ReverseSlot], key: u32, scan: u16, mods: Mods) {
+fn insert_reverse(table: &mut [ReverseSlot], key: u32, scan: u16, extended: bool, mods: Mods) {
     let mut slot = reverse_slot(key);
     for _ in 0..REVERSE_CAPACITY {
         if table[slot].key == key {
             return;
         }
         if table[slot].key == REVERSE_FREE {
-            table[slot] = ReverseSlot { key, scan, mods };
+            table[slot] = ReverseSlot {
+                key,
+                scan,
+                extended,
+                mods,
+            };
             return;
         }
         slot = (slot + 1) & REVERSE_MASK;
@@ -766,17 +865,31 @@ fn keyboard_state(mods: Mods) -> [u8; 256] {
     state
 }
 
-/// Scan code of the physical key that carries `vk` in `layout`, or `0` if there is none.
-fn scan_code_of(vk: u32, layout: LayoutId) -> u16 {
+/// The physical key that carries `vk` in `layout` as `(scan, extended)`, or `None` if the
+/// layout has no key for it — task T-02-1a.
+///
+/// `MAPVK_VK_TO_VSC_EX` is the only translation this module asks for. It returns the scan
+/// code in the low byte and the hardware prefix in the high byte, so one call answers both
+/// halves of the cache key; the plain `MAPVK_VK_TO_VSC` returns the low byte alone and is
+/// what let the keypad and the main block share a slot.
+///
+/// Only the `E0` prefix counts as extended, which is precisely the flag the hook reports as
+/// `LLKHF_EXTENDED` (FR-05). `E1`, the prefix of `Pause`, is not a hook extended flag and
+/// must not be read as one; those keys carry no character in any case.
+fn physical_key_of(vk: u32, layout: LayoutId) -> Option<(u16, bool)> {
     // SAFETY: MapVirtualKeyExW takes three values and returns one; it reads nothing through
     // a pointer and writes nothing back, so there is no buffer whose size could be wrong.
     // The handle came from GetKeyboardLayoutList and is a layout loaded in this session, and
-    // an unloaded or invalid handle would only make the call return `0`, which the caller
-    // treats as "no such key" (NFR-13).
-    let scan = unsafe { MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC, Some(layout.hkl())) };
-    // MAPVK_VK_TO_VSC yields a one byte scan code; the mask states that expectation rather
-    // than assuming it.
-    (scan & 0xFF) as u16
+    // an unloaded or invalid handle would only make the call return `0`, which is checked
+    // below and reported as "no such key" (NFR-13).
+    let translated = unsafe { MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC_EX, Some(layout.hkl())) };
+    let scan = (translated & 0xFF) as u16;
+    if scan == 0 {
+        // The layout has no physical key for this virtual key. Nothing to record, and scan
+        // code `0` must not become a bucket that everything falls into.
+        return None;
+    }
+    Some((scan, translated & 0xFF00 == 0xE000))
 }
 
 /// What `vk` produces in `layout` under the keyboard state `state` — FR-06.
@@ -812,14 +925,19 @@ fn build_layout_map(layout: LayoutId) -> LayoutMap {
 
     let mut builder = LayoutMapBuilder::new(layout);
     for vk in FIRST_VK..=LAST_VK {
-        let scan = scan_code_of(vk, layout);
-        if scan == 0 {
-            // The layout has no physical key for this virtual key. Nothing to record, and
-            // scan code `0` must not become a bucket that everything falls into.
+        let Some((scan, extended)) = physical_key_of(vk, layout) else {
             continue;
-        }
+        };
         for mods in Mods::ALL {
-            builder.set(scan, mods, decode(vk, scan, &states[mods.index()], layout));
+            // `ToUnicodeEx` is given the plain scan code: its `wScanCode` parameter is a
+            // hardware scan code whose only other meaningful bit is the key-up bit, and the
+            // prefix travels in `extended` instead.
+            builder.set(
+                scan,
+                extended,
+                mods,
+                decode(vk, scan, &states[mods.index()], layout),
+            );
         }
     }
     builder.finish()
