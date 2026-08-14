@@ -12,6 +12,13 @@
 //! FR-98 (panic hook) — implemented here by task T-01-2 and completed by task T-03-1, which
 //! added the removal of the keyboard hook to both and rewrote the timeout so that it works
 //! while the UI thread is blocked.
+//! Task **T-03-2a** added the assembly of the input path, which is a matter of *calling* what
+//! the other modules already built and of calling it from the one thread section 6.1 allows:
+//! FR-07 (the buffer is installed on the input thread, at the capacity of section 7), FR-20
+//! (the layout cache is built there), FR-25 (a build that fails falls back to the hardwired
+//! table of module `convert` instead of taking the program down), FR-21 (the cache is rebuilt
+//! on the two messages `layouts::needs_rebuild` names) and FR-11 (neither of those flushes the
+//! buffer, and neither may ever be made to).
 //! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
 //! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
 //! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
@@ -20,14 +27,15 @@
 //! [`window_proc`], because `src\tray.rs` was outside the file scope of task T-03-1.
 //! FR-01's "one hook on the input thread" is installed here, in [`serve_window`], and
 //! implemented in [`crate::hook`].
-//! Implemented by backlog tasks: T-01-2 (done), T-01-4 (done), T-03-1 (done).
+//! Implemented by backlog tasks: T-01-2 (done), T-01-4 (done), T-03-1 (done), T-03-2a (done).
 //!
 //! # Thread model — section 6.1
 //!
 //! Three threads, each with a single responsibility and its own message loop:
 //!
-//! * **input** — owns a message-only window; task T-03-1 adds `WH_KEYBOARD_LL` to it,
-//!   T-02-1's layout cache is rebuilt on its messages, and `SendInput` runs here;
+//! * **input** — owns a message-only window; task T-03-1 put `WH_KEYBOARD_LL` on it, task
+//!   T-03-2a added the typing buffer and T-02-1's layout cache, which is rebuilt on this
+//!   thread's messages, and `SendInput` will run here;
 //! * **UI** — owns a hidden top-level window; task T-01-4 attached the tray icon and menu
 //!   to it, and they run on this thread and on no other;
 //! * **watcher** — owns a message-only window and a COM STA apartment; tasks T-06-1 and
@@ -57,22 +65,31 @@
 //!
 //! # Synchronisation — section 6.3
 //!
-//! Nothing here is a mutex, a lock or a channel. The only cross-thread state is an
-//! `AtomicBool` and three published window handles, and the only cross-thread call is
+//! Nothing here is a mutex, a lock or a channel. The cross-thread state is a handful of
+//! atomics — the shutdown flag, three published window handles, the buffer capacity the UI
+//! thread publishes (FR-07) and one failure counter — and the only cross-thread call is
 //! `PostMessageW`, which does not block. This is deliberate groundwork: NFR-04 forbids
 //! blocking primitives on the hook path and section 6.3 forbids mutexes there outright, so
 //! the shutdown interface T-03-1 will call from inside hook-adjacent code must not have
 //! any.
 //!
+//! Section 6.3 also fixes the direction the configuration travels — "Конфигурация публикуется
+//! потоком UI" — and task T-03-2a follows it for the buffer exactly as task T-03-1 did for the
+//! hotkey: the input thread starts on the default of section 7, the UI thread publishes what
+//! the file says into an atomic and nudges the input thread with a message, and the input
+//! thread resizes its own buffer. The message carries nothing; the atomic carries the value.
+//!
 //! # SEC-01, SEC-07
 //!
 //! No keystroke, key code or buffer content passes through this module, and none may be
 //! added later: neither [`report_non_critical`] nor the panic hook is given anything but
-//! an operation name and an OS error code.
+//! an operation name and an OS error code. The `testing`-only `acceptance` module below
+//! publishes the *length* of the buffer, which is the one number SEC-04a allows out, and no
+//! more.
 
 use std::ffi::c_void;
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 
 use windows::Win32::Foundation::{
@@ -84,13 +101,18 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 #[cfg(debug_assertions)]
 use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
-    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
+    GetMessageW, GetWindowThreadProcessId, HWND_MESSAGE, MB_ICONINFORMATION, MB_OK,
+    MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW,
+    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
+
+use crate::layouts::{LayoutCache, LayoutError, LayoutId};
+use crate::settings;
 
 // ---------------------------------------------------------------------------------------
 // Public surface
@@ -109,6 +131,12 @@ pub const EXIT_ALREADY_RUNNING: u8 = 2;
 /// detail: the panic hook (FR-98) is installed before anything is acquired, so there is no
 /// window in which a panic could leave something behind.
 pub fn run() -> ExitCode {
+    // Instrumentation of the acceptance bench, feature `testing`, absent from the Release
+    // configuration. First in the body so that the reference point NFR-08 is measured from is
+    // the earliest instant this program can observe of itself.
+    #[cfg(feature = "testing")]
+    acceptance::note_start();
+
     install_panic_hook();
 
     match SingleInstance::acquire() {
@@ -182,6 +210,16 @@ pub fn shutdown_requested() -> bool {
     SHUTDOWN_REQUESTED.load(Ordering::Acquire)
 }
 
+/// How many times the layout cache of FR-20 failed to build and the hardwired table of FR-25
+/// was used instead — see [`LAYOUT_CACHE_FAILURES`].
+///
+/// Non-zero on a machine whose layout list cannot be read, or one on which every loaded layout
+/// is IME based (FR-35). The program runs either way; what it loses is the ability to convert
+/// anything but the RU/EN pair the fallback table carries.
+pub fn layout_cache_failures() -> u32 {
+    LAYOUT_CACHE_FAILURES.load(Ordering::Relaxed)
+}
+
 /// The UI thread's window as a raw value, or zero when that thread has none right now.
 ///
 /// Exists for FR-99: the fail-safe transition is decided on the input thread, inside the
@@ -221,6 +259,17 @@ const NO_WINDOW: usize = 0;
 /// the loop re-read a flag that is still `false` and carry on.
 const WM_APP_WAKE: u32 = WM_APP + 1;
 
+/// The private message that tells the input thread the configuration has been published.
+///
+/// `WM_APP + 5`: `WM_APP + 1` is the wake-up above, `WM_APP + 2` is the tray callback of
+/// [`crate::tray`], and `WM_APP + 3` and `WM_APP + 4` belong to [`crate::hook`].
+///
+/// SEC-05: like [`WM_APP_WAKE`], it carries nothing and decides nothing. The handler re-reads
+/// [`BUFFER_CAPACITY`] — an atomic of this process that no sender can influence — and does
+/// nothing at all unless the buffer it finds is of the wrong size, so an unsolicited post buys
+/// the sender one comparison.
+const WM_APP_CONFIGURED: u32 = WM_APP + 5;
+
 /// The one and only shutdown flag of the process.
 ///
 /// Process-global rather than an `Arc` threaded through every frame because the state it
@@ -235,6 +284,22 @@ static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// storable in an atomic; the conversion is round-trip exact in both directions.
 static WAKE_TARGETS: [AtomicUsize; THREAD_COUNT] =
     [const { AtomicUsize::new(NO_WINDOW) }; THREAD_COUNT];
+
+/// `[buffer] capacity` of section 7 as the UI thread published it — FR-07, section 6.3.
+///
+/// Zero means "the UI thread has not read the file yet", and it is also exactly what
+/// [`crate::buffer::effective_capacity`] turns into the default of section 7, so the input
+/// thread can install its buffer from this value before anybody has published anything and get
+/// the documented default rather than a special case.
+static BUFFER_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+
+/// How many times [`LayoutCache::build`] failed and the hardwired table of FR-25 was used.
+///
+/// FR-25 asks for the fallback, not for a diagnosis, and a program that cannot enumerate the
+/// layouts of the session must still run — so the failure is *counted* rather than escalated.
+/// A counter is also all NFR-05 would allow if this ever moved closer to the callback, and it
+/// is what module `diag` (task T-06-4) will journal.
+static LAYOUT_CACHE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
 /// What a thread of this process is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -461,6 +526,12 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
     // today the panic hook, from T-01-4 onwards the tray's "Exit" and FR-83.
     let clean = join_all(threads);
 
+    // Instrumentation of the acceptance bench, feature `testing`. Here and nowhere earlier:
+    // every thread has been joined, so the numbers are final, and this is the main thread,
+    // which owns no window, no hook and no buffer and may therefore touch a file.
+    #[cfg(feature = "testing")]
+    acceptance::write_report();
+
     // Order matters and is spelled out rather than left to drop order: every window is gone
     // once the threads are joined, so the class can be unregistered; the mutex is released
     // last, so that no second instance can start while this one still has a window alive.
@@ -560,11 +631,11 @@ fn serve_window(role: Role) -> WinResult<()> {
             let attachment = crate::tray::attach(_window.handle, instance)?;
 
             // Section 6.3, "Конфигурация публикуется потоком UI": the tray has just read
-            // `config.toml`, and this is the moment the input thread's hook learns what is
-            // in it. It cannot read the file itself — NFR-08 gives the hook fifty
-            // milliseconds from start-up and a file read is exactly the kind of thing task
-            // T-03-1 was told to keep off that path.
-            publish_configuration_to_hook();
+            // `config.toml`, and this is the moment the input thread learns what is in it. It
+            // cannot read the file itself — NFR-08 gives the hook fifty milliseconds from
+            // start-up and a file read is exactly the kind of thing task T-03-1 was told to
+            // keep off that path.
+            publish_configuration_to_input_thread();
 
             Some(attachment)
         }
@@ -580,7 +651,20 @@ fn serve_window(role: Role) -> WinResult<()> {
     // that window until the moment the hook comes off, so the window has to outlive the hook
     // and not the other way round.
     let _hook = match role {
-        Role::Input => Some(crate::hook::install(_window.handle, instance)?),
+        Role::Input => {
+            let installed = crate::hook::install(_window.handle, instance)?;
+
+            // NFR-08 is a deadline on exactly this instant, and it is measured here rather
+            // than reasoned about: see the `acceptance` module for why the program has to be
+            // the one holding the stopwatch.
+            #[cfg(feature = "testing")]
+            acceptance::note_hook_installed();
+
+            // Task T-03-2a, and deliberately **after** the hook. See `start_input_pipeline`.
+            start_input_pipeline();
+
+            Some(installed)
+        }
         Role::Ui | Role::Watcher => None,
     };
 
@@ -593,27 +677,258 @@ fn serve_window(role: Role) -> WinResult<()> {
         return Ok(());
     }
 
-    pump()
+    let pumped = pump();
+
+    // Read before the frame unwinds: the buffer belongs to this thread and is dropped — and
+    // zeroed, SEC-02 — with it, so after this function returns there is nothing left to count.
+    #[cfg(feature = "testing")]
+    if matches!(role, Role::Input) {
+        acceptance::note_buffer_len();
+    }
+
+    pumped
 }
 
-/// Hands the hook of task T-03-1 the two settings it reacts to — FR-02 and FR-95.
+// ---------------------------------------------------------------------------------------
+// The input path — FR-07, FR-20, FR-21, FR-25, FR-11 (task T-03-2a)
+// ---------------------------------------------------------------------------------------
+
+/// Everything the input thread owns besides the hook: the typing buffer of FR-07, the layout
+/// cache of FR-20 and the active layout of FR-04.
+///
+/// # Why this runs after the hook and not before it
+///
+/// NFR-08 gives the program under fifty milliseconds from start-up to an installed hook, and
+/// building the cache is not a constant: FR-20 sweeps virtual keys `0x08..=0xFF` against eight
+/// modifier combinations **for every layout loaded in the session**, so its cost is thousands
+/// of `ToUnicodeEx` calls multiplied by a number the user chooses. Measured values are in the
+/// report of task T-03-2a; the argument does not rest on them, because no measurement on one
+/// machine can bound a quantity that grows with somebody else's layout list.
+///
+/// So the order is fixed the way the task specification fixes it: **the hook first**. Without
+/// the cache the program still records every stroke — by scan code, which is what section 4.1
+/// says the buffer is for — and merely has no characters to put beside them until the sweep
+/// finishes. Without the hook it is not a program at all. The price of this order is that the
+/// input thread does not reach `GetMessageW` until the sweep is over, so a keystroke made in
+/// that window is *delayed* by up to the sweep's duration rather than lost; the alternative
+/// order would have lost it outright, and would have missed NFR-08 to do it.
+///
+/// The buffer goes up between the two, because it is one allocation of eight kilobytes and
+/// because a cache published into a buffer that does not exist would be dropped on the floor.
+fn start_input_pipeline() {
+    // FR-07.
+    install_buffer();
+
+    // FR-04, the `hkl` every stroke is stored under. FR-11 rests on it being per stroke.
+    publish_active_layout(foreground_layout());
+
+    // FR-20, and FR-25 if it fails.
+    rebuild_layout_cache();
+
+    #[cfg(feature = "testing")]
+    acceptance::note_cache_ready();
+
+    // FR-07 again. The sweep above takes long enough that the UI thread has almost always
+    // published `[buffer] capacity` by now; this applies it without waiting for the message
+    // that would otherwise be the only thing that does.
+    apply_configured_capacity();
+}
+
+/// Installs the typing buffer of FR-07 on the calling thread.
+///
+/// The capacity is whatever the UI thread has published, and the default of section 7 when it
+/// has published nothing yet — [`BUFFER_CAPACITY`] and [`crate::buffer::effective_capacity`]
+/// agree that zero means the default, so there is no third state to handle here.
+fn install_buffer() {
+    crate::buffer::install(&settings::Buffer {
+        capacity: BUFFER_CAPACITY.load(Ordering::Acquire),
+    });
+}
+
+/// Resizes the buffer to the capacity the UI thread published, if it is not that size already.
+///
+/// Called from the window procedure on every message, which is what makes the message a
+/// wake-up rather than a command (SEC-05), and once more at the end of the start-up pipeline,
+/// which is what makes a post that arrived before the window existed harmless.
+fn apply_configured_capacity() {
+    apply_capacity(BUFFER_CAPACITY.load(Ordering::Acquire));
+}
+
+/// The half of [`apply_configured_capacity`] that does not read the atomic — see there.
+///
+/// Separate so that the rule can be driven from a test without a second thread and without
+/// touching process-global state.
+fn apply_capacity(requested: usize) {
+    if requested == 0 {
+        // Nothing published yet. Not a reason to touch a buffer that is already the right size
+        // by the defaults of section 7.
+        return;
+    }
+
+    crate::buffer::with(|recorder| {
+        // The comparison is against the *effective* capacity and not against the raw number,
+        // because the buffer clamps what it is asked for: comparing the raw `100000` against
+        // the `4096` the buffer really has would differ for ever, and this runs on every
+        // message, so the buffer would be rebuilt — and emptied — again and again.
+        if recorder.capacity() != crate::buffer::effective_capacity(requested) {
+            recorder.set_capacity(requested);
+        }
+    });
+}
+
+/// Builds the layout cache of FR-20 and publishes it into the buffer.
+///
+/// ⚠ Never from the hook callback. FR-20 is thousands of `ToUnicodeEx` calls and NFR-01 gives
+/// the callback a hundred microseconds; module `layouts` says the same in its own threading
+/// contract. Both call sites are on the input thread outside the callback: the start-up
+/// pipeline and the window procedure of FR-21.
+fn rebuild_layout_cache() {
+    publish_cache(cache_or_fallback(LayoutCache::build()));
+
+    // Instrumentation, feature `testing`. It is what lets the acceptance run tell a rebuild
+    // that happened from one that was merely wired up: FR-21 has no visible effect of its own,
+    // and FR-11 — that the rebuild left the buffer alone — can only be asserted against a
+    // rebuild that is known to have run.
+    #[cfg(feature = "testing")]
+    acceptance::note_cache_built();
+}
+
+/// The cache to use, given what [`LayoutCache::build`] answered — FR-25.
+///
+/// A failure to build is **not** a reason to end the program, and not a reason to run without a
+/// cache either: FR-25 has module `convert` carry a hardwired RU/EN table for exactly this, and
+/// point 4 of it is why `LayoutCache` refuses to be empty — "the cache did not build" has to
+/// stay distinguishable from "these keys carry no characters".
+fn cache_or_fallback(built: Result<LayoutCache, LayoutError>) -> LayoutCache {
+    match built {
+        Ok(cache) => cache,
+
+        // SEC-01, SEC-07: the reason is dropped unread rather than formatted. `LayoutError`
+        // carries no keystroke, and the rule of this program is still that nothing on this path
+        // becomes a string. What is kept is the count.
+        Err(_reason) => {
+            LAYOUT_CACHE_FAILURES.fetch_add(1, Ordering::Relaxed);
+            crate::convert::fallback_cache()
+        }
+    }
+}
+
+/// Hands the cache to the buffer of the calling thread — FR-20, FR-21.
+///
+/// ⚠ **FR-11: this does not flush the buffer.** `Recorder::set_cache` re-resolves the position
+/// of the active layout and touches nothing else, which is the whole of what a rebuild owes the
+/// buffer. See [`publish_active_layout`] for the other half of the same rule.
+fn publish_cache(cache: LayoutCache) {
+    crate::buffer::with(|recorder| recorder.set_cache(cache));
+}
+
+/// Publishes the layout strokes are recorded under — the `hkl` of FR-04.
+///
+/// ⚠ **FR-11: "смена раскладки не сбрасывает буфер".** The user switching layout in the middle
+/// of a word is a normal thing to do and not a signal that what came before is void; every
+/// stroke carries the layout it was typed under precisely so that nothing has to be thrown
+/// away. There is no `reset` on this path and there must never be one.
+fn publish_active_layout(layout: LayoutId) {
+    crate::buffer::with(|recorder| recorder.set_active_layout(layout));
+}
+
+/// The keyboard layout of the window the user is typing into.
+///
+/// Not `GetKeyboardLayout(0)`: that answers for the *calling* thread, and the input thread of
+/// this program never has the keyboard focus, so it would report whatever layout that thread
+/// happened to inherit and never change again.
+///
+/// A zero answer is not an error and is returned as [`LayoutId::default`], which no cache
+/// contains: the buffer then records strokes with their scan codes and no characters, which is
+/// the same outcome as a key the layouts have nothing on, and FR-23 carries such a stroke
+/// through conversion unchanged.
+fn foreground_layout() -> LayoutId {
+    // SAFETY: GetForegroundWindow takes no arguments, returns a handle by value and touches no
+    // memory of ours. A null result is documented — no window has the focus, which happens
+    // while the desktop is switching and on the secure desktop — and is handled below.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.is_invalid() {
+        // NFR-13: examined. Passing a null window on would get a thread id of zero, and zero
+        // means "the calling thread" to `GetKeyboardLayout`, which is the one answer that
+        // would be wrong rather than merely unknown.
+        return LayoutId::default();
+    }
+
+    // SAFETY: `foreground` is the handle the call above returned and was checked non-null.
+    // `None` for the process id is the documented way to ask for the thread id alone, and it
+    // is what makes this call write nothing back through a pointer of ours.
+    let thread = unsafe { GetWindowThreadProcessId(foreground, None) };
+
+    if thread == 0 {
+        // NFR-13: zero is the documented failure — the window was destroyed between the two
+        // calls — and must not be forwarded as "the calling thread".
+        return LayoutId::default();
+    }
+
+    // SAFETY: takes a thread id by value and returns a layout handle by value; it dereferences
+    // nothing. The handle is never dereferenced here either — `LayoutId` keeps the numeric
+    // value, which is what module `layouts` identifies a layout by.
+    let layout = unsafe { GetKeyboardLayout(thread) };
+
+    LayoutId::from_raw(layout.0 as usize)
+}
+
+/// Posts `message` to the window of `role`, if that thread has one right now.
+///
+/// The same shape as the wake-up loop of [`request_shutdown`] and for the same reason:
+/// `PostMessageW` queues and returns, so one thread can nudge another without either of them
+/// blocking, which is what section 6.3 and NFR-04 require of everything near the hook path.
+fn post_to(role: Role, message: u32) {
+    let raw = WAKE_TARGETS[role.index()].load(Ordering::Acquire);
+
+    if raw == NO_WINDOW {
+        // That thread has not created its window yet, or has already destroyed it. The first
+        // case is covered by the target re-reading what was published once it has one.
+        return;
+    }
+
+    // SAFETY: `raw` was published by `Window::create` from the handle CreateWindowExW returned
+    // and is cleared by `Window::drop` before the window is destroyed, so the value read here
+    // is either a live window of this process or `NO_WINDOW`, which was filtered out above.
+    // PostMessageW only queues the message and returns; it never dereferences wparam or lparam,
+    // both of which are zero here, and it does not block.
+    let posted = unsafe {
+        PostMessageW(
+            Some(HWND(raw as *mut c_void)),
+            message,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    };
+
+    if let Err(error) = posted {
+        // NFR-13: examined, not discarded. A failure here means the target destroyed its window
+        // between the load above and this call, that is, it is already leaving.
+        report_non_critical("PostMessageW", &error);
+    }
+}
+
+/// Hands the input thread the three settings it reacts to — FR-02 and FR-95 for the hook, and
+/// FR-07 for the buffer.
 ///
 /// Runs on the UI thread, right after the tray has been attached, because the tray is where
 /// the configuration of section 7 lives: it read the file, it owns `general.enabled`, and it
-/// is the thread allowed to touch a file at all (section 6.1). The hook only ever reads the
-/// two published atomics.
+/// is the thread allowed to touch a file at all (section 6.1). The input thread only ever
+/// reads the published atomics.
 ///
 /// `with_tray` answers `None` on any thread that is not the UI thread, so a stray call from
 /// elsewhere would publish nothing rather than publish something wrong.
-fn publish_configuration_to_hook() {
+fn publish_configuration_to_input_thread() {
     let published = crate::tray::with_tray(|tray| {
         (
             tray.enabled(),
             crate::hook::vk_from_name(&tray.config().hotkey.key),
+            tray.config().buffer.capacity,
         )
     });
 
-    let Some((active, hotkey)) = published else {
+    let Some((active, hotkey, capacity)) = published else {
         return;
     };
 
@@ -627,6 +942,23 @@ fn publish_configuration_to_hook() {
     if let Some(vk) = hotkey {
         crate::hook::set_hotkey_vk(vk);
     }
+
+    publish_buffer_capacity(capacity);
+}
+
+/// Publishes `[buffer] capacity` to the input thread and nudges it into applying it — FR-07.
+///
+/// Two steps and in this order: the value goes into the atomic first, and only then is the
+/// message posted, so a thread woken by the message cannot read a stale capacity.
+///
+/// The message is a wake-up and not a command — the same design as [`WM_APP_WAKE`], and for
+/// the same SEC-05 reason. If it never arrives, because the input thread had not created its
+/// window yet, the value is not lost: [`start_input_pipeline`] reads the atomic once more when
+/// its sweep is over.
+fn publish_buffer_capacity(capacity: usize) {
+    BUFFER_CAPACITY.store(capacity, Ordering::Release);
+
+    post_to(Role::Input, WM_APP_CONFIGURED);
 }
 
 /// The message loop. Returns when [`PostQuitMessage`] has been reached, that is, when this
@@ -867,6 +1199,35 @@ unsafe extern "system" fn window_proc(
                 crate::hook::uninstall();
             }
 
+            // FR-21, task T-03-2a. `layouts` names the two messages that oblige the owner of
+            // the cache to rebuild it — `WM_INPUTLANGCHANGE`, when the user adds, removes or
+            // switches a layout, and `WM_DEVICECHANGE`, when a keyboard arrives or leaves with
+            // a different scan code map — and offers `needs_rebuild` so that this line does not
+            // have to restate the requirement. Until now nobody called it.
+            //
+            // This is the message loop of the input thread, with the hook callback long
+            // returned, which is where module `layouts` says a rebuild belongs and where NFR-01
+            // and NFR-02 confine it: the sweep is thousands of `ToUnicodeEx` calls, three
+            // orders of magnitude past the callback's budget.
+            //
+            // `buffer::is_installed` is what says "this is the input thread": section 6.3 gives
+            // the buffer to that thread and to no other. The test is not decoration — the UI
+            // window is top-level, `WM_DEVICECHANGE` is broadcast to top-level windows, and
+            // without it every device change in the machine would run a full sweep on the
+            // thread section 6.1 exists to keep free.
+            //
+            // ⚠ **FR-11: neither call flushes the buffer.** See `publish_cache` and
+            // `publish_active_layout`; there is no `reset` anywhere on this path.
+            //
+            // SEC-05: a process at the same integrity level can post either message. All that
+            // buys it is a rebuild of our own cache out of the system's own layout list — an
+            // idempotent operation over memory of ours, which is the same standing the wake-up
+            // message has.
+            if crate::layouts::needs_rebuild(message) && crate::buffer::is_installed() {
+                publish_active_layout(foreground_layout());
+                rebuild_layout_cache();
+            }
+
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
                 return result;
             }
@@ -884,6 +1245,16 @@ unsafe extern "system" fn window_proc(
             if let Some(active) = crate::tray::with_tray(|tray| tray.enabled()) {
                 crate::hook::set_active(active);
             }
+
+            // FR-07, and exactly the same wiring for exactly the same reason: `[buffer]
+            // capacity` is the UI thread's to read and the input thread's to obey, and
+            // re-reading the published value after every message costs one atomic load and one
+            // comparison, cannot miss a change however the change was made, and needs no
+            // channel between the two threads. `WM_APP_CONFIGURED` is therefore only a nudge —
+            // it makes a message arrive, and it is this line that decides.
+            //
+            // Answers nothing on the UI and watcher threads, which own no buffer.
+            apply_configured_capacity();
 
             match handled {
                 Some(result) => result,
@@ -1135,6 +1506,122 @@ fn terminate_this_process(code: u32) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Instrumentation of the acceptance bench — SEC-04a, feature `testing`
+// ---------------------------------------------------------------------------------------
+
+/// Numbers the acceptance run of section 11.5 cannot obtain from outside the process.
+///
+/// Compiled **only** under the cargo feature `testing`, which SEC-04a defines for this purpose
+/// — automating the acceptance checks of §11.5 — and which is absent from the Release
+/// configuration; acceptance criterion 8 of §13 of SPEC checks that the shipped binary carries
+/// no trace of the feature. The same gate module [`crate::hook`]'s fault injection sits behind,
+/// and for the same reason.
+///
+/// # Why the program has to measure itself
+///
+/// NFR-08 is a deadline on the program's own start-up — under fifty milliseconds from launch to
+/// an installed hook — and no observer outside the process can see the instant the hook went
+/// up. Point 19 of task T-03-2a is the same shape: it asks how many strokes are in the typing
+/// buffer after a synthetic `ghbdtn`, and SEC-04 has removed every inter-process entry point on
+/// purpose, so there is nothing to ask.
+///
+/// # SEC-01, SEC-07
+///
+/// What leaves this module is two durations and four counts. **No key code, no scan code, no
+/// character and nothing derived from one**, and nothing that could carry one may ever be added
+/// to the report below. `buffer::len` is the one number SEC-04a allows a debug channel to
+/// publish, and it is published as a number and as nothing else; `Stroke` has neither `Debug`
+/// nor `Display`, so the content is not expressible here even by mistake.
+///
+/// # Threading
+///
+/// The three threads of section 6.1 do nothing here but store into an atomic. The file is
+/// written by the **main** thread, after every one of them has been joined: section 6.1 leaves
+/// file I/O to the UI thread, NFR-05 forbids it near the callback, and the main thread is
+/// neither of those places.
+#[cfg(feature = "testing")]
+mod acceptance {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    /// Environment variable naming the file the report is written to.
+    ///
+    /// Absent means silent, which is what every run that did not ask for a report gets.
+    const REPORT_ENV_VAR: &str = "LANGSW_TESTING_REPORT";
+
+    /// The instant [`super::run`] was entered — the reference point of NFR-08.
+    static STARTED: OnceLock<Instant> = OnceLock::new();
+
+    /// Microseconds from [`STARTED`] to the installed hook — the quantity NFR-08 bounds.
+    static HOOK_READY_US: AtomicU32 = AtomicU32::new(0);
+
+    /// Microseconds from [`STARTED`] to the published layout cache of FR-20.
+    static CACHE_READY_US: AtomicU32 = AtomicU32::new(0);
+
+    /// Strokes in the buffer when the input thread left its message loop.
+    static BUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
+
+    /// Completed builds of the layout cache: one at start-up, one per message of FR-21.
+    static CACHE_BUILDS: AtomicU32 = AtomicU32::new(0);
+
+    /// Records the reference point. Idempotent; the first call wins.
+    pub fn note_start() {
+        let _ = STARTED.set(Instant::now());
+    }
+
+    /// Records the moment `SetWindowsHookExW` returned — NFR-08.
+    pub fn note_hook_installed() {
+        HOOK_READY_US.store(elapsed_us(), Ordering::Relaxed);
+    }
+
+    /// Records the moment the cache of FR-20 reached the buffer.
+    pub fn note_cache_ready() {
+        CACHE_READY_US.store(elapsed_us(), Ordering::Relaxed);
+    }
+
+    /// Reads the length of the calling thread's buffer while it still exists.
+    pub fn note_buffer_len() {
+        BUFFER_LEN.store(crate::buffer::len(), Ordering::Relaxed);
+    }
+
+    /// Counts one completed build of the layout cache — FR-20 at start-up, FR-21 afterwards.
+    pub fn note_cache_built() {
+        CACHE_BUILDS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Microseconds since [`note_start`], saturating rather than wrapping.
+    fn elapsed_us() -> u32 {
+        STARTED
+            .get()
+            .map(|started| u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX))
+            .unwrap_or(0)
+    }
+
+    /// Writes the numbers to the file named by [`REPORT_ENV_VAR`], if the variable is set.
+    pub fn write_report() {
+        let Ok(path) = std::env::var(REPORT_ENV_VAR) else {
+            return;
+        };
+
+        let report = format!(
+            "hook_ready_us={}\ncache_ready_us={}\ncache_builds={}\nbuffer_len={}\nlayout_cache_failures={}\nhotkey_handoffs={}\npost_failures={}\n",
+            HOOK_READY_US.load(Ordering::Relaxed),
+            CACHE_READY_US.load(Ordering::Relaxed),
+            CACHE_BUILDS.load(Ordering::Relaxed),
+            BUFFER_LEN.load(Ordering::Relaxed),
+            super::layout_cache_failures(),
+            crate::hook::hotkey_handoffs(),
+            crate::hook::post_failures(),
+        );
+
+        // A failed write is not worth ending on: the process is already leaving, and the run
+        // that asked for a report notices an absent file without being told.
+        let _ = std::fs::write(path, report);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // FR-98 — the panic hook
 // ---------------------------------------------------------------------------------------
 
@@ -1209,4 +1696,179 @@ fn install_panic_hook() {
 /// journal into.
 pub(crate) fn report_non_critical(operation: &str, error: &WinError) {
     let _ = (operation, error);
+}
+
+// ---------------------------------------------------------------------------------------
+// Tests of the input path — task T-03-2a
+// ---------------------------------------------------------------------------------------
+
+/// What can be driven without a window, a hook or a keyboard.
+///
+/// The three functions tested here are the whole of what this module does *to* the buffer, and
+/// they were written as separate functions so that they could be reached from here: the window
+/// procedure and the start-up pipeline around them are Win32 and are verified on the running
+/// program instead, which is the only honest place for them.
+///
+/// The buffer is a thread-local (section 6.3) and every test runs on its own thread, so the
+/// recorder one test installs is invisible to the next.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::{self, Recorder};
+    use crate::hook::{Edge, KeyEvent};
+    use crate::layouts::LayoutCache;
+
+    /// Scan code and virtual key of `A`. Nothing here depends on which key it is.
+    const VK_A: u16 = 0x41;
+    const SCAN_A: u16 = 0x1E;
+
+    /// A layout no cache in this file contains — the lookup then answers "no characters",
+    /// which is an outcome and not an error (FR-23).
+    const SOME_LAYOUT: LayoutId = LayoutId::from_raw(0x0409_0409);
+
+    /// Types one ordinary key into the buffer of this thread.
+    fn press() {
+        buffer::record(KeyEvent {
+            vk: VK_A,
+            edge: Edge::Down,
+            extra_info: 0,
+            scan: SCAN_A,
+            flags: 0,
+            time: 0,
+        });
+    }
+
+    /// FR-25. A cache that will not build is answered with the hardwired table of module
+    /// `convert`, the failure is counted, and the program carries on with a usable cache.
+    ///
+    /// Both directions are one test on purpose: [`LAYOUT_CACHE_FAILURES`] is a counter of the
+    /// process, `cargo test` runs the tests of a binary in parallel, and two tests asserting on
+    /// the same counter would be asserting on each other's timing.
+    #[test]
+    fn a_failed_build_falls_back_to_the_hardwired_table_of_fr25() {
+        let built = crate::convert::fallback_cache();
+        let before = layout_cache_failures();
+
+        // A cache that built is used exactly as it is, and nothing is counted.
+        assert_eq!(cache_or_fallback(Ok(built.clone())), built);
+        assert_eq!(layout_cache_failures(), before);
+
+        // Every way the build can fail ends on the table of FR-25 rather than on a panic, an
+        // empty cache or a dead program.
+        for reason in [
+            LayoutError::Enumeration,
+            LayoutError::NoUsableLayouts,
+            LayoutError::Empty,
+        ] {
+            let fallen_back = cache_or_fallback(Err(reason));
+
+            // The very cache FR-25 prescribes, and not an empty one: point 4 of FR-25 is that
+            // "the cache did not build" stays distinguishable from "these keys carry no
+            // characters".
+            assert_eq!(fallen_back, built, "failure {reason:?}");
+            assert!(!fallen_back.is_empty(), "failure {reason:?}");
+        }
+
+        assert_eq!(layout_cache_failures(), before + 3);
+    }
+
+    /// **FR-11.** Neither a new active layout nor a rebuilt cache flushes the buffer — the two
+    /// calls this module makes into the buffer on the `WM_INPUTLANGCHANGE` path, driven here
+    /// exactly as the window procedure makes them.
+    #[test]
+    fn neither_a_layout_change_nor_a_rebuilt_cache_flushes_the_buffer() {
+        buffer::install_recorder(Recorder::with_capacity(16));
+
+        for _ in 0..3 {
+            press();
+        }
+        assert_eq!(buffer::len(), 3);
+
+        // The user switched layout: FR-21 says rebuild, FR-11 says keep what was typed.
+        publish_active_layout(SOME_LAYOUT);
+        assert_eq!(buffer::len(), 3, "FR-11: a layout change flushes nothing");
+
+        publish_cache(crate::convert::fallback_cache());
+        assert_eq!(buffer::len(), 3, "FR-11: a rebuilt cache flushes nothing");
+
+        // And again, because the messages of FR-21 arrive as often as the user presses the
+        // layout switch: a rule that held once and not twice would be no rule.
+        publish_active_layout(LayoutId::default());
+        publish_cache(crate::convert::fallback_cache());
+        assert_eq!(buffer::len(), 3);
+
+        buffer::uninstall();
+    }
+
+    /// The cache really does reach the buffer — a rebuild that published nothing would satisfy
+    /// the test above by doing no work at all.
+    #[test]
+    fn the_published_cache_is_the_one_the_buffer_answers_from() {
+        buffer::install_recorder(Recorder::with_capacity(4));
+
+        assert_eq!(buffer::with(|recorder| recorder.has_cache()), Some(false));
+
+        publish_cache(
+            LayoutCache::from_maps(crate::convert::fallback_cache().maps().to_vec())
+                .expect("the hardwired table of FR-25 is never empty"),
+        );
+
+        assert_eq!(buffer::with(|recorder| recorder.has_cache()), Some(true));
+
+        buffer::uninstall();
+    }
+
+    /// FR-07: the capacity published by the UI thread is applied, and applied **once**.
+    #[test]
+    fn the_configured_capacity_is_applied_only_when_it_differs() {
+        buffer::install_recorder(Recorder::with_capacity(8));
+        press();
+        assert_eq!(buffer::len(), 1);
+
+        // Nothing published yet: the buffer is left exactly as it is, strokes included.
+        apply_capacity(0);
+        assert_eq!(buffer::with(|recorder| recorder.capacity()), Some(8));
+        assert_eq!(buffer::len(), 1);
+
+        // The configured value is the one already in force — and this is the case that runs on
+        // every message of the input thread, so it must not touch the buffer.
+        apply_capacity(8);
+        assert_eq!(
+            buffer::len(),
+            1,
+            "an unchanged capacity must not empty the buffer"
+        );
+
+        // A value the buffer clamps. Applied once, and then recognised as already in force,
+        // which is what keeps the ring from being rebuilt on every message for ever.
+        apply_capacity(usize::MAX);
+        assert_eq!(
+            buffer::with(|recorder| recorder.capacity()),
+            Some(crate::buffer::MAX_CAPACITY)
+        );
+
+        press();
+        assert_eq!(buffer::len(), 1);
+        apply_capacity(usize::MAX);
+        assert_eq!(
+            buffer::len(),
+            1,
+            "the clamped capacity is compared, not the raw one"
+        );
+
+        buffer::uninstall();
+    }
+
+    /// A thread with no buffer is every thread but the input one, and none of the three calls
+    /// above may fail there — the window procedure runs on all of them.
+    #[test]
+    fn a_thread_without_a_buffer_is_left_alone() {
+        assert!(!buffer::is_installed());
+
+        apply_capacity(512);
+        publish_active_layout(SOME_LAYOUT);
+        publish_cache(crate::convert::fallback_cache());
+
+        assert!(!buffer::is_installed());
+    }
 }

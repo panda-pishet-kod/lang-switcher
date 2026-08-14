@@ -14,7 +14,7 @@
 //! Moved out to match the backlog (decision R-17): FR-05, FR-06 (decoding through
 //! `ToUnicodeEx`) and FR-13 to module `buffer`, tasks T-03-2 and T-03-3; FR-80 (the hook
 //! watchdog) to module `watchdog`, task T-06-2.
-//! Implemented by backlog tasks: T-03-1 (done).
+//! Implemented by backlog tasks: T-03-1 (done), T-03-2a (done).
 //!
 //! # The shape of the callback
 //!
@@ -27,10 +27,13 @@
 //!
 //! 1. **FR-96, first and unconditional.** Two integer comparisons, and only if they match, a
 //!    modifier query. Nothing precedes it that could fail or loop.
-//! 2. **The decision, guarded.** [`classify`] is a pure function of a [`Mode`], a
-//!    [`HotkeyState`] and a [`KeyEvent`]: no Win32, no globals, no allocation, and therefore
-//!    fully covered by `tests\hook.rs`. In a build that unwinds it runs inside
-//!    `catch_unwind`, which is FR-99.
+//! 2. **The decision, guarded.** [`classify`] is a function of a [`Mode`], a [`HotkeyState`]
+//!    and a [`KeyEvent`] and of nothing else: no Win32, no globals, no allocation, and
+//!    therefore fully covered by `tests\hook.rs`. It is not *pure* — since task T-03-2 it
+//!    hands the stroke to [`crate::buffer::record`] at the one point where the stroke is the
+//!    user's text, and that call writes the buffer of the calling thread. It is pure of Win32,
+//!    of allocation and of anything that can block, which is what NFR-01 to NFR-05 ask for. In
+//!    a build that unwinds it runs inside `catch_unwind`, which is FR-99.
 //! 3. **The effects**, which are exactly two: one `PostMessageW` when the hotkey has been
 //!    recognised, and `CallNextHookEx` when the stroke is not suppressed.
 //!
@@ -169,11 +172,19 @@ pub enum Decision {
     Suppress,
 }
 
-/// The stroke, reduced to the three fields the decision depends on.
+/// The stroke, as much of `KBDLLHOOKSTRUCT` as this program has any use for.
 ///
 /// Deliberately not `KBDLLHOOKSTRUCT`: that type can only be produced by the system, and a
 /// decision that could only be tested by pressing a key on a live machine would not be tested
 /// at all.
+///
+/// The first three fields are what [`classify`] decides on. The last three are the physical
+/// half of the stroke, which the decision never reads and [`crate::buffer::record`] records:
+/// task T-03-2 had to publish them through a thread-local because `tests\hook.rs` was outside
+/// its file scope, and task T-03-2a made them fields, which is what they should have been.
+/// One value, one nesting of `KeyEvent`, one call — the invariant "one publication, one
+/// stroke" is now a property of the type rather than of the order of two calls in the most
+/// dangerous function of the program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyEvent {
     /// `KBDLLHOOKSTRUCT.vkCode`, which the documentation confines to 1..=254.
@@ -182,12 +193,21 @@ pub struct KeyEvent {
     pub edge: Edge,
     /// `KBDLLHOOKSTRUCT.dwExtraInfo` — the field FR-03 is about.
     pub extra_info: usize,
+    /// `KBDLLHOOKSTRUCT.scanCode` — the physical key of FR-04, which is what the buffer
+    /// stores and what the conversion of FR-22 is driven by.
+    pub scan: u16,
+    /// `KBDLLHOOKSTRUCT.flags` — carries `LLKHF_EXTENDED` (FR-05), which names the key rather
+    /// than modifying it, and `LLKHF_ALTDOWN`, which corroborates the tracked `Alt` of FR-10.
+    pub flags: u32,
+    /// `KBDLLHOOKSTRUCT.time` — the timestamp FR-12 resolves asynchronous flush races against.
+    pub time: u32,
 }
 
 /// Everything about the program's own state that the decision depends on.
 ///
-/// Passed in rather than read from the statics inside [`classify`], so that the function is
-/// pure and every combination of the three flags is reachable from a test.
+/// Passed in rather than read from the statics inside [`classify`], so that the decision is a
+/// function of its arguments and every combination of the three flags is reachable from a
+/// test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Mode {
     /// `general.enabled` of section 7 — the "активна" of FR-90 and FR-95.
@@ -253,7 +273,12 @@ pub fn is_emergency_key(vk: u16, message: u32) -> bool {
     vk == EMERGENCY_VK && matches!(edge_of(message), Some(Edge::Down))
 }
 
-/// The whole decision, as a pure function.
+/// The whole decision, as a function of its three arguments and of nothing else.
+///
+/// One effect, and it is deliberate: at the point where the stroke has been established to be
+/// the user's own text, the stroke is handed to [`crate::buffer::record`] — task T-03-2, and
+/// see the comment at that line for why the point is exactly there. Everything else here is a
+/// comparison. No Win32, no global, no allocation, nothing that can block (NFR-01 to NFR-05).
 ///
 /// The order of the tests is fixed by the requirements and is not free:
 ///
@@ -1149,20 +1174,21 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     };
 
-    // Task T-03-2. The physical half of the stroke — the scan code of FR-04, the flags
-    // carrying `LLKHF_EXTENDED` of FR-05 and the timestamp FR-12 resolves races against —
-    // published for the `buffer::record` that `classify` performs below. It travels beside
-    // `KeyEvent` rather than inside it because `tests\hook.rs`, which belongs to task T-03-1
-    // and is outside the area of T-03-2, builds `KeyEvent` with exhaustive struct literals in
-    // four places; a field added here would stop the accepted test suite from compiling. Three
-    // stores into a thread-local of this thread, taken by `record` on the next call
-    // (NFR-01, NFR-03).
-    crate::buffer::publish_physical(event.scanCode as u16, event.flags.0, event.time);
-
+    // The whole stroke, read out of `KBDLLHOOKSTRUCT` in one place: the three fields the
+    // decision needs and the three the record of FR-04 needs — the scan code, the flags
+    // carrying `LLKHF_EXTENDED` of FR-05, and the timestamp FR-12 resolves races against.
+    // Six `Copy` scalars into a value on the stack; nothing is allocated and nothing is
+    // published anywhere for a later call to pick up (NFR-01, NFR-03).
+    //
+    // `scanCode` is documented as the scan code of the key and is carried at `u16` throughout
+    // this program, which is the width `KEYBDINPUT::wScan` takes it back at (task T-04-1).
     let key = KeyEvent {
         vk,
         edge,
         extra_info: event.dwExtraInfo,
+        scan: event.scanCode as u16,
+        flags: event.flags.0,
+        time: event.time,
     };
 
     let outcome = guarded_decision(key);
@@ -1185,8 +1211,9 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 
 /// The decision, against this thread's FR-08 state and the published mode.
 ///
-/// Separate from [`classify`] so that the pure function stays pure and this — the four lines
-/// that touch a thread-local and three atomics — is the only thing between it and the system.
+/// Separate from [`classify`] so that the decision keeps taking its state as arguments and
+/// this — the four lines that touch a thread-local and three atomics — is the only thing
+/// between it and the system.
 fn decide_here(key: KeyEvent) -> Outcome {
     // Inside the guarded region on purpose: FR-98 and FR-99 are only observable if the fault
     // is raised where a real one would be. Compiled out of every build that does not ask for

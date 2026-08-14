@@ -449,8 +449,10 @@ impl Tray {
         // FR-83, "сохранение конфигурации".
         self.save_config();
 
-        // FR-83, "снятие хуков" — TODO(T-03-1): there is no `WH_KEYBOARD_LL` hook yet, and
-        // this is where `UnhookWindowsHookEx` goes when there is one.
+        // FR-83, "снятие хуков" — already done, and deliberately not from here: task T-03-1
+        // put the `UnhookWindowsHookEx` of `WM_ENDSESSION` into `app::window_proc`, which sees
+        // the message before this cleanup is reached, because `src\tray.rs` was outside that
+        // task's file scope. The code there is correct; only this note was stale.
         //
         // FR-83, "обнуление буфера" — TODO(T-03-2): there is no keystroke buffer yet, and
         // this is where it is wiped (SEC-07) when there is one.

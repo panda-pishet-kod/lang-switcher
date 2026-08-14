@@ -59,11 +59,21 @@ fn passed_on() -> Outcome {
 }
 
 /// A stroke of the user's own hand.
+///
+/// The physical half — `scan`, `flags`, `time` — is zero throughout this file, and that is
+/// deliberate rather than lazy: task T-03-2a made those three fields of `KeyEvent`, and not
+/// one of the decisions this file drives reads them. FR-99, FR-03, FR-90, FR-02, FR-08 and
+/// FR-95 are decided on the virtual key, the edge and `dwExtraInfo` alone, so a test that gave
+/// the three fields values would be asserting that they are ignored — which they are, and
+/// which `tests\buffer.rs` shows from the side that does read them.
 fn user_key(vk: u16, edge: Edge) -> KeyEvent {
     KeyEvent {
         vk,
         edge,
         extra_info: FOREIGN_SIGNATURE,
+        scan: 0,
+        flags: 0,
+        time: 0,
     }
 }
 
@@ -196,6 +206,9 @@ fn our_own_injected_stroke_is_filtered_out_and_still_delivered() {
         vk: VK_PAUSE,
         edge: Edge::Down,
         extra_info: INJECTED_SIGNATURE,
+        scan: 0,
+        flags: 0,
+        time: 0,
     };
 
     let outcome = hook::classify(armed(), &mut state, ours);
@@ -225,6 +238,9 @@ fn a_foreign_injected_stroke_is_ordinary_user_input() {
                 vk: VK_PAUSE,
                 edge: Edge::Down,
                 extra_info,
+                scan: 0,
+                flags: 0,
+                time: 0,
             },
         );
 
@@ -292,6 +308,9 @@ fn the_fail_safe_of_fr99_passes_everything_through() {
                         vk,
                         edge,
                         extra_info,
+                        scan: 0,
+                        flags: 0,
+                        time: 0,
                     },
                 );
 

@@ -271,11 +271,13 @@ fn deliver(
     time: u32,
     edge: Edge,
 ) -> Recorded {
-    recorder.publish_physical(scan, flags, time);
     recorder.record(KeyEvent {
         vk,
         edge,
         extra_info: FOREIGN_SIGNATURE,
+        scan,
+        flags,
+        time,
     })
 }
 
@@ -933,10 +935,8 @@ fn armed() -> Mode {
     }
 }
 
-/// Delivers one stroke the way the callback does: publish the physical half, then classify.
+/// Delivers one stroke the way the callback does: one whole `KeyEvent`, one `classify`.
 fn through_the_hook(state: &mut HotkeyState, vk: u16, scan: u16, extra_info: usize) -> Decision {
-    buffer::publish_physical(scan, 0, SOME_TIME);
-
     hook::classify(
         armed(),
         state,
@@ -944,6 +944,9 @@ fn through_the_hook(state: &mut HotkeyState, vk: u16, scan: u16, extra_info: usi
             vk,
             edge: Edge::Down,
             extra_info,
+            scan,
+            flags: 0,
+            time: SOME_TIME,
         },
     )
     .decision
@@ -1012,8 +1015,6 @@ fn a_suspended_or_failed_program_buffers_nothing() {
             ..armed()
         },
     ] {
-        buffer::publish_physical(SCAN_A, 0, SOME_TIME);
-
         hook::classify(
             mode,
             &mut state,
@@ -1021,6 +1022,9 @@ fn a_suspended_or_failed_program_buffers_nothing() {
                 vk: VK_A,
                 edge: Edge::Down,
                 extra_info: FOREIGN_SIGNATURE,
+                scan: SCAN_A,
+                flags: 0,
+                time: SOME_TIME,
             },
         );
     }
@@ -1041,13 +1045,14 @@ fn a_thread_without_a_buffer_records_nothing_and_does_not_fail() {
     assert!(!buffer::note_conversion());
     assert!(!buffer::uninstall());
 
-    buffer::publish_physical(SCAN_A, 0, SOME_TIME);
-
     assert_eq!(
         buffer::record(KeyEvent {
             vk: VK_A,
             edge: Edge::Down,
             extra_info: FOREIGN_SIGNATURE,
+            scan: SCAN_A,
+            flags: 0,
+            time: SOME_TIME,
         }),
         Recorded::Ignored
     );
@@ -1064,11 +1069,13 @@ fn the_public_flush_is_reachable_from_the_thread_local_layer() {
     // пользователем" of the tray — all need one flush to call. This is it.
     buffer::install_recorder(fresh());
 
-    buffer::publish_physical(SCAN_A, 0, SOME_TIME);
     buffer::record(KeyEvent {
         vk: VK_A,
         edge: Edge::Down,
         extra_info: FOREIGN_SIGNATURE,
+        scan: SCAN_A,
+        flags: 0,
+        time: SOME_TIME,
     });
 
     assert_eq!(buffer::len(), 1);
@@ -1095,4 +1102,96 @@ fn a_released_buffer_is_zeroed_before_the_memory_goes_back() {
     assert_eq!(non_zero_slots(&recorder), 0);
 
     drop(recorder);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-03-2a — the whole stroke in one value, and the capacity that arrives late
+// -------------------------------------------------------------------------------------
+
+#[test]
+fn one_key_event_is_one_whole_stroke() {
+    // The point of task T-03-2a. Until it, the physical half of a stroke travelled to the
+    // buffer through a thread-local published by the callback a moment before the decision,
+    // and "one publication, one stroke" was an invariant held up by the order of two calls
+    // inside the most dangerous function of the program. Now it is one value: what `record`
+    // stores can only have come from the `KeyEvent` it was handed.
+    let mut recorder = fresh_of(4);
+
+    let stored = recorder.record(KeyEvent {
+        vk: VK_A,
+        edge: Edge::Down,
+        extra_info: FOREIGN_SIGNATURE,
+        scan: SCAN_SLASH,
+        flags: LLKHF_EXTENDED.0,
+        time: SOME_TIME,
+    });
+
+    assert_eq!(stored, Recorded::Stored);
+
+    let stroke = recorder.stroke(0).expect("one stroke");
+
+    assert!(stroke.vk() == VK_A, "the virtual key of FR-04");
+    assert!(stroke.scan() == SCAN_SLASH, "the scan code of FR-04");
+    assert!(stroke.time() == SOME_TIME, "the timestamp FR-12 needs");
+    assert!(stroke.mods().extended(), "the LLKHF_EXTENDED of FR-05");
+
+    // And it is the extended reading of the shared scan code that was looked up, which is the
+    // keypad key of task T-02-1a and not the `/?` key of the main block.
+    assert_eq!(String::from_utf16(stroke.units()).expect("valid text"), "*");
+}
+
+#[test]
+fn the_capacity_a_buffer_really_has_is_the_effective_one() {
+    // `app` compares "what the configuration asks for" against "what the buffer has" on every
+    // message of the input thread, and it has to compare like with like: the rule that clamps
+    // the configured number is published so that the comparison can use it.
+    for requested in [
+        0,
+        1,
+        7,
+        DEFAULT_CAPACITY,
+        MAX_CAPACITY,
+        MAX_CAPACITY + 1,
+        usize::MAX,
+    ] {
+        assert_eq!(
+            Recorder::with_capacity(requested).capacity(),
+            buffer::effective_capacity(requested),
+            "capacity {requested}"
+        );
+    }
+
+    assert_eq!(buffer::effective_capacity(0), DEFAULT_CAPACITY);
+    assert_eq!(buffer::effective_capacity(usize::MAX), MAX_CAPACITY);
+}
+
+#[test]
+fn a_resize_keeps_the_cache_and_the_layout_and_leaves_no_strokes_behind() {
+    // FR-07 with the configuration arriving after the buffer is already up — the case NFR-08
+    // creates by forbidding the input thread to wait for a file. Re-installing the recorder
+    // would answer it too, and would throw the cache of FR-20 away with it: a second sweep of
+    // every layout in the session, to change one number.
+    let mut recorder = fresh_of(8);
+    fill(&mut recorder, 3);
+
+    recorder.set_capacity(64);
+
+    assert_eq!(recorder.capacity(), 64);
+    assert!(recorder.has_cache(), "FR-20: the cache survives a resize");
+    assert_eq!(recorder.active_layout(), EN, "FR-04: so does the layout");
+
+    // The new ring is empty and every slot of it is zero — SEC-02 holds for the array that
+    // replaced the old one exactly as it holds for a flush.
+    assert_eq!(recorder.len(), 0);
+    assert_eq!(non_zero_slots(&recorder), 0);
+
+    // And the buffer works afterwards, decoding from the cache it kept.
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(typed(&recorder), "a");
+
+    // Clamped exactly as construction clamps it.
+    recorder.set_capacity(0);
+    assert_eq!(recorder.capacity(), DEFAULT_CAPACITY);
+    recorder.set_capacity(usize::MAX);
+    assert_eq!(recorder.capacity(), MAX_CAPACITY);
 }

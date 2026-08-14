@@ -11,7 +11,11 @@
 //! never merely marked empty) — task T-03-2.
 //! Still to come: FR-12, the resolution of asynchronous flush races against the timestamps
 //! this module already records, and FR-13, Raw Input — task T-03-3.
-//! Implemented by backlog tasks: T-03-2 (done), T-03-3.
+//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3.
+//! Task T-03-2a took the physical half of the stroke out of a thread-local of its own and put
+//! it into the fields of [`KeyEvent`], where it belonged all along, and wired this module into
+//! the running program: `app` installs the buffer, publishes the cache of FR-20 into it and
+//! keeps the active layout of FR-04 up to date.
 //! NFR-01 to NFR-05 are properties of [`Recorder::record`] and are argued where it is defined.
 //!
 //! # What is stored, and why it is a scan code
@@ -124,6 +128,26 @@ pub const DEFAULT_CAPACITY: usize = 256;
 /// the value of FR-07 is more strokes than a user types between two flushes by a wide margin,
 /// and the whole ring is still well under a hundred kilobytes.
 pub const MAX_CAPACITY: usize = 4096;
+
+/// How many strokes a buffer asked for `requested` slots really holds.
+///
+/// The capacity is clamped into `1..=`[`MAX_CAPACITY`], and a configured zero is read as
+/// [`DEFAULT_CAPACITY`]: section 7 documents the field as a size, a file saying `0` is a
+/// mistake rather than a request for a program that quietly stops working, and there is no one
+/// to report it to from here.
+///
+/// Public because the answer is not the question. `app` publishes the configured capacity to
+/// the input thread and re-installs the buffer only when what the configuration asks for
+/// differs from what the buffer already has; comparing the *raw* number against
+/// [`Recorder::capacity`] would find a difference on every look for any value outside the
+/// range above, and would re-install — and so wipe — the buffer over and over.
+pub const fn effective_capacity(requested: usize) -> usize {
+    match requested {
+        0 => DEFAULT_CAPACITY,
+        requested if requested > MAX_CAPACITY => MAX_CAPACITY,
+        requested => requested,
+    }
+}
 
 // ---------------------------------------------------------------------------------------
 // The modifier mask of FR-04
@@ -674,8 +698,7 @@ pub enum Recorded {
     /// A modifier key: the held state was updated and nothing else happened. A modifier is
     /// not text, and holding one is not yet a command.
     Modifier,
-    /// Nothing happened: a key release, an empty `Backspace`, or a call with no physical half
-    /// published.
+    /// Nothing happened: a key release, an empty `Backspace`, or a thread with no buffer.
     Ignored,
 }
 
@@ -709,16 +732,6 @@ impl std::error::Error for ReadError {}
 // The recorder
 // ---------------------------------------------------------------------------------------
 
-/// The physical half of a stroke, as the callback reads it out of `KBDLLHOOKSTRUCT`.
-///
-/// See [`Recorder::publish_physical`] for why it travels separately from [`KeyEvent`].
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Physical {
-    scan: u16,
-    flags: u32,
-    time: u32,
-}
-
 /// The typing buffer of section 6.2: the ring, the flush rules, the modifier state and the
 /// layout every stroke is recorded under.
 ///
@@ -740,8 +753,6 @@ pub struct Recorder {
     /// the per-keystroke work stays one array read (module `layouts` asks for exactly this).
     active_index: Option<usize>,
     held: Held,
-    /// The physical half of the stroke being decided right now.
-    pending: Option<Physical>,
     /// A conversion has run and the next key ends the session — the last row of FR-10.
     converted: bool,
 }
@@ -749,27 +760,20 @@ pub struct Recorder {
 impl Recorder {
     /// A buffer of `capacity` strokes — FR-07, with the value from `[buffer] capacity`.
     ///
-    /// The capacity is clamped into `1..=`[`MAX_CAPACITY`], and a configured zero is read as
-    /// [`DEFAULT_CAPACITY`]: section 7 documents the field as a size, a file saying `0` is a
-    /// mistake rather than a request for a program that quietly stops working, and there is no
-    /// one to report it to from here.
+    /// The number asked for is put through [`effective_capacity`], which is what a caller
+    /// comparing "the buffer I have" against "the buffer the configuration asks for" has to
+    /// use as well.
     ///
     /// This is the one allocation in the module and the only place there can ever be one:
     /// FR-07 says the ring is sized at creation, and everything after this runs in the hook
     /// callback where NFR-03 allows none.
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = match capacity {
-            0 => DEFAULT_CAPACITY,
-            requested => requested.min(MAX_CAPACITY),
-        };
-
         Self {
-            ring: Ring::with_capacity(capacity),
+            ring: Ring::with_capacity(effective_capacity(capacity)),
             cache: None,
             active: LayoutId::default(),
             active_index: None,
             held: Held::default(),
-            pending: None,
             converted: false,
         }
     }
@@ -785,6 +789,32 @@ impl Recorder {
     /// How many strokes fit.
     pub fn capacity(&self) -> usize {
         self.ring.capacity()
+    }
+
+    /// Resizes the ring, keeping everything else this recorder knows — FR-07.
+    ///
+    /// # Why a resize exists at all
+    ///
+    /// `[buffer] capacity` is read from a file by the UI thread, and the input thread must not
+    /// wait for it: NFR-08 gives the hook fifty milliseconds from start-up. So the buffer is
+    /// installed on the default of section 7 and the configured value arrives afterwards —
+    /// usually within the same few milliseconds, but the UI thread is also talking to the shell
+    /// about a tray icon, and that can take its time.
+    ///
+    /// Re-installing the whole recorder would answer that too, and would throw away the cache
+    /// of FR-20 and the layout of FR-04 with it — that is, it would pay for a second sweep of
+    /// every layout in the session in order to change one number. This changes the one number.
+    ///
+    /// The old ring is dropped, which overwrites it with zeroes (SEC-02, [`Ring::drop`]), so
+    /// whatever was in the buffer is gone. That is a property of resizing an array and not a
+    /// flush of FR-10, it happens once and at start-up, and it is **not** the case FR-11 speaks
+    /// about: a layout change flushes nothing and goes through
+    /// [`Recorder::set_active_layout`], which touches no slot at all.
+    ///
+    /// Allocates, exactly once, like [`Recorder::with_capacity`] — so it is called from the
+    /// input thread's message loop and never from the callback (NFR-03).
+    pub fn set_capacity(&mut self, capacity: usize) {
+        self.ring = Ring::with_capacity(effective_capacity(capacity));
     }
 
     /// How many strokes are live. The one number SEC-04a allows the debug channel to publish.
@@ -862,29 +892,6 @@ impl Recorder {
         self.converted
     }
 
-    /// Publishes the physical half of the stroke the callback is about to decide on.
-    ///
-    /// `scan` is `KBDLLHOOKSTRUCT.scanCode`, `flags` is `KBDLLHOOKSTRUCT.flags` — the
-    /// `LLKHF_EXTENDED` of FR-05 and the `LLKHF_ALTDOWN` that corroborates the tracked `Alt` —
-    /// and `time` is `KBDLLHOOKSTRUCT.time`, the timestamp FR-12 will resolve races against.
-    ///
-    /// # Why this is a separate call and not three more fields of [`KeyEvent`]
-    ///
-    /// It should have been three more fields, and could not be: `tests\hook.rs` builds
-    /// `KeyEvent` with exhaustive struct literals in four places, so a field added to that type
-    /// stops the accepted test suite of task T-03-1 from compiling, and that file is outside
-    /// the area of task T-03-2. The report of the task states this and proposes the four-line
-    /// change that would let the fields be added instead.
-    ///
-    /// The pairing is safe by construction rather than by convention: the callback publishes
-    /// immediately before it asks for the decision, on the input thread, which is single and
-    /// cannot re-enter the callback; [`Recorder::record`] **takes** the value, so one published
-    /// half is one recorded stroke and a decision reached without a publication records
-    /// nothing at all.
-    pub fn publish_physical(&mut self, scan: u16, flags: u32, time: u32) {
-        self.pending = Some(Physical { scan, flags, time });
-    }
-
     /// The whole rule set of FR-10 and the recording of FR-04, for one keystroke.
     ///
     /// Called from [`crate::hook::classify`], which means: inside the hook callback, after
@@ -906,11 +913,6 @@ impl Recorder {
     /// key that is not a modifier, so that `Shift` and then a letter is one session end and
     /// not two.
     pub fn record(&mut self, key: KeyEvent) -> Recorded {
-        // One published physical half, one recorded stroke. See `publish_physical`.
-        let Some(physical) = self.pending.take() else {
-            return Recorded::Ignored;
-        };
-
         if let Some(role) = modifier_role(key.vk) {
             self.held.apply(role, key.edge);
             return Recorded::Modifier;
@@ -930,7 +932,7 @@ impl Recorder {
             self.ring.clear();
         }
 
-        let mods = self.mods_now(physical.flags);
+        let mods = self.mods_now(key.flags);
 
         // FR-10: "Ctrl/Alt/Win + клавиша — полный сброс (команда, а не текст)". `AltGr` is the
         // exception the mask itself carries: it is `Ctrl` plus the right `Alt` by construction
@@ -957,16 +959,9 @@ impl Recorder {
 
         // FR-06 through the cache of FR-20, and FR-04: what the key gave, at the moment it was
         // pressed, in the layout that was active then.
-        let produced = self.lookup(physical.scan, mods);
+        let produced = self.lookup(key.scan, mods);
 
-        let stroke = Stroke::new(
-            key.vk,
-            physical.scan,
-            mods,
-            self.active,
-            physical.time,
-            produced,
-        );
+        let stroke = Stroke::new(key.vk, key.scan, mods, self.active, key.time, produced);
 
         if self.ring.push(stroke) {
             Recorded::Evicted
@@ -1162,14 +1157,6 @@ pub fn is_installed() -> bool {
 /// channel of SEC-04a is allowed to report all go through it.
 pub fn with<R>(action: impl FnOnce(&mut Recorder) -> R) -> Option<R> {
     RECORDER.with(|cell| cell.borrow_mut().as_mut().map(action))
-}
-
-/// Publishes the physical half of the stroke — called by the hook callback.
-///
-/// See [`Recorder::publish_physical`]. Costs one thread-local access and three stores when a
-/// buffer is installed, and one thread-local access when there is none.
-pub fn publish_physical(scan: u16, flags: u32, time: u32) {
-    with(|recorder| recorder.publish_physical(scan, flags, time));
 }
 
 /// Records one keystroke — called by [`crate::hook::classify`] at the point FR-03, FR-90 and
