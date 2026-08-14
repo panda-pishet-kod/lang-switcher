@@ -10,10 +10,12 @@
 //!
 //! Requirements this module covers: FR-82 (single instance), FR-97 (debug build timeout),
 //! FR-98 (panic hook) — implemented here by task T-01-2.
-//! Boundary: the full FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing
-//! the tray icon, wiping the buffer, saving the configuration) belongs to task T-01-4;
-//! what this module offers it is [`request_shutdown`] and [`shutdown_requested`].
-//! Implemented by backlog tasks: T-01-2 (done), T-01-4.
+//! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
+//! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
+//! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
+//! "release the mutex" action of FR-83 is the one part of it that lives here, in
+//! [`SingleInstance`]'s `Drop`.
+//! Implemented by backlog tasks: T-01-2 (done), T-01-4 (done).
 //!
 //! # Thread model — section 6.1
 //!
@@ -21,7 +23,8 @@
 //!
 //! * **input** — owns a message-only window; task T-03-1 adds `WH_KEYBOARD_LL` to it,
 //!   T-02-1's layout cache is rebuilt on its messages, and `SendInput` runs here;
-//! * **UI** — owns a hidden top-level window; task T-01-4 adds the tray icon and menu;
+//! * **UI** — owns a hidden top-level window; task T-01-4 attached the tray icon and menu
+//!   to it, and they run on this thread and on no other;
 //! * **watcher** — owns a message-only window and a COM STA apartment; tasks T-06-1 and
 //!   T-06-2 add `SetWinEventHook` and the UI Automation password-field probe.
 //!
@@ -497,6 +500,18 @@ fn serve_window(role: Role) -> WinResult<()> {
     let instance = module_instance()?;
     let _window = Window::create(role, instance)?;
 
+    // Task T-01-4. Section 6.1 puts the tray on the UI thread and nowhere else, and this is
+    // the only place it is installed, so no other thread can reach it: `tray` keeps it in
+    // thread-local storage, and on the input and watcher threads that slot stays empty.
+    //
+    // Declared after `_window` so that it is dropped *before* it: dropping the attachment is
+    // the cleanup path of FR-83, and removing the icon needs the window it was added under
+    // to still exist.
+    let _tray = match role {
+        Role::Ui => Some(crate::tray::attach(_window.handle, instance)?),
+        Role::Input | Role::Watcher => None,
+    };
+
     // Re-read the flag after the window has been published, and before the first
     // `GetMessageW`. This closes the only race in the shutdown design: a `request_shutdown`
     // that ran before the window existed found `NO_WINDOW`, posted nothing, and would
@@ -724,10 +739,26 @@ unsafe extern "system" fn window_proc(
         // through nothing else.
         WM_CLOSE => LRESULT(0),
 
-        // SAFETY: forwarding the message unchanged to the default procedure, which is what
-        // every message not named above must get. The arguments are the ones the OS just
-        // passed in and are handed on unmodified; nothing is dereferenced on the way.
-        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+        // Task T-01-4. The tray of the UI thread gets its look at the message next: the
+        // icon's callback, the registered `TaskbarCreated` of FR-81 and the two session
+        // messages of FR-83 are all values that cannot be written as a `match` arm here,
+        // because one of them is only known at run time. `handle_ui_message` answers `None`
+        // for everything it does not handle — and on the input and watcher threads it
+        // answers `None` to everything, because those threads have no tray.
+        //
+        // SEC-05 is unaffected: the list of messages `tray` acts on is closed and explicit,
+        // and none of them initiates a privileged action. The menu is tracked with
+        // `TPM_RETURNCMD`, so there is no `WM_COMMAND` handler anywhere in this process for
+        // a foreign message to aim at.
+        _ => match crate::tray::handle_ui_message(message, wparam, lparam) {
+            Some(result) => result,
+
+            // SAFETY: forwarding the message unchanged to the default procedure, which is
+            // what every message not named above must get. The arguments are the ones the
+            // OS just passed in and are handed on unmodified; nothing is dereferenced on
+            // the way.
+            None => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+        },
     }
 }
 
@@ -931,6 +962,11 @@ fn install_panic_hook() {
 /// it exists. SEC-01 and SEC-07: only an operation name and an OS error code ever reach
 /// this function, and nothing that could carry a keystroke, a key code or buffer contents
 /// may ever be added to its arguments.
-fn report_non_critical(operation: &str, error: &WinError) {
+///
+/// `pub(crate)` rather than private since task T-01-4: `tray` has the same kind of failures
+/// to record — a shell that is not up yet, a handle that will not free — and a second copy
+/// of this function there would defeat the whole point of having one place to wire the
+/// journal into.
+pub(crate) fn report_non_critical(operation: &str, error: &WinError) {
     let _ = (operation, error);
 }
