@@ -91,6 +91,10 @@ windows = { version = "0.6x", features = [
   "Win32_System_Threading",
   "Win32_System_LibraryLoader",
   "Win32_System_RemoteDesktop",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_Performance",
+  "Win32_UI_Controls",
   "Win32_Globalization",
 ] }
 serde = { version = "1", features = ["derive"] }
@@ -106,6 +110,8 @@ codegen-units = 1
 panic         = "abort"
 strip         = true
 ```
+
+Ещё четыре feature — `Win32_System_Pipes`, `Win32_System_Registry`, `Win32_System_Performance`, `Win32_UI_Controls` — добавлены 2026-08-14 по решению пользователя, вторым таким дополнением. Без них требования спецификации невыполнимы: отладочный канал контроля SEC-04a есть именованный канал, а `CreateNamedPipeW`, `ConnectNamedPipe` и `DisconnectNamedPipe` доступны только под `Win32_System_Pipes`, и замены им в `std` нет; автозапуск FR-93 определён как запись в `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, а `RegSetValueExW` живёт под `Win32_System_Registry`; список раскладок с галочками участия и порядком и разделы диалога FR-92 суть элементы общих элементов управления — `InitCommonControlsEx` и константы `LVM_*`, `TCM_*` под `Win32_UI_Controls`; критерий приёмки 2 §13 называет `QueryPerformanceCounter` поимённо, а он объявлен под `Win32_System_Performance`. Состав крейтов не меняется по той же причине, что и в первом дополнении.
 
 Три feature — `Win32_Security`, `Win32_Graphics_Gdi`, `Win32_System_Com` — добавлены 2026-08-14 по решению пользователя. Без них требования спецификации невыполнимы: `CreateMutexW` (FR-82) закрыт feature `Win32_Security`; все варианты `RegisterClass*` и все структуры `WNDCLASS*`, то есть любое собственное окно (§6.1, FR-90, FR-91, FR-92), закрыты `Win32_Graphics_Gdi`; `CoInitializeEx` для COM-квартиры STA потока наблюдения (§6.1, SEC-06) живёт в модуле под `Win32_System_Com`. Состав крейтов при этом не меняется: у крейта `windows` нет опциональных зависимостей, поэтому вывод `cargo tree` остаётся прежним и SEC-03 не затрагивается.
 
@@ -228,7 +234,7 @@ struct Stroke {
 
 **FR-44.** Настраиваемая задержка между событиями `SendInput` (по умолчанию `0` мс) для приложений, теряющих события при пакетной отправке.
 
-**FR-45.** Возвращаемое значение `SendInput` проверяется. Расхождение с числом отправленных событий фиксируется в диагностическом журнале (§9.4).
+**FR-45.** Возвращаемое значение `SendInput` проверяется. Расхождение с числом отправленных событий фиксируется в диагностическом журнале (SEC-07, модуль `diag`).
 
 ### 4.6. Переключение раскладки
 
