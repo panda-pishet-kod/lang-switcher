@@ -51,6 +51,7 @@ use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::settings::ReplacementMethod;
+use lang_switcher::watchdog;
 use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_BACK, VK_RETURN};
 
@@ -100,8 +101,10 @@ fn the_payload_is_exactly_the_documented_keys_one_per_line() {
 ///
 /// A character, a key code or a scan code would have to arrive as a value, so the values are
 /// what this looks at: every one of them is a decimal number, except `replacement_method`,
-/// which is one of the two words section 7 defines. There is no third shape for anything to
-/// hide in.
+/// which is one of the two words section 7 defines, and `watchdog_last_reason`, which is one of
+/// the five words of `watchdog::Reason` — task **T-06-2**. There is no third shape for anything
+/// to hide in, and each of the two word-valued keys is checked against its own closed list
+/// rather than against "any word", which is what keeps the exception from becoming a hole.
 #[test]
 fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     let text = control::render(&control::snapshot());
@@ -111,6 +114,17 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
         "the payload is ASCII, so no decoded character can be riding in it"
     );
 
+    let reasons: Vec<&str> = [
+        watchdog::Reason::None,
+        watchdog::Reason::Timer,
+        watchdog::Reason::DesktopSwitch,
+        watchdog::Reason::SessionChange,
+        watchdog::Reason::PowerResume,
+    ]
+    .iter()
+    .map(|reason| reason.name())
+    .collect();
+
     for line in text.lines() {
         let (key, value) = line.split_once('=').expect("key=value");
 
@@ -118,6 +132,14 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
             assert!(
                 value == "backspace" || value == "selection",
                 "replacement_method is one of the two words of section 7"
+            );
+            continue;
+        }
+
+        if key == "watchdog_last_reason" {
+            assert!(
+                reasons.contains(&value),
+                "watchdog_last_reason is one of {reasons:?}, and {value:?} is not"
             );
             continue;
         }

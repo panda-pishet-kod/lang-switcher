@@ -735,6 +735,34 @@ fn serve_window(role: Role) -> WinResult<()> {
         Role::Input | Role::Ui => None,
     };
 
+    // Task T-06-2, FR-80. The two halves of the watchdog that need a window of their own, and
+    // each goes to the only window that can carry it.
+    //
+    // `WM_WTSSESSION_CHANGE` and `WM_POWERBROADCAST` are delivered to **top-level** windows, and
+    // the UI thread's is the only one this program has — the input and watcher windows are
+    // `HWND_MESSAGE` children (see `Window::create`). That is the same rake FR-81 stood on with
+    // `RegisterWindowMessage("TaskbarCreated")`, and decision R-20 point 2 is why the UI window
+    // is a hidden top-level window rather than a message-only one.
+    //
+    // The liveness timer goes on the **input** window, because section 6.1 writes "таймер
+    // сторожа" under the input thread and because a `WH_KEYBOARD_LL` hook is called back on the
+    // thread that installed it: the reinstallation the timer causes has to happen there.
+    //
+    // Declared after `_window` for the reason `_tray`, `_hook` and the two above are — each
+    // names that window and each must be undone before the window stops existing. A failure of
+    // either ends the thread and so the program: a resident program without a watchdog is one
+    // that will one day stop responding to its own hotkey and say nothing about it, which FR-80
+    // exists to prevent.
+    let _session_notice = match role {
+        Role::Ui => Some(crate::watchdog::register_session_notice(_window.handle)?),
+        Role::Input | Role::Watcher => None,
+    };
+
+    let _liveness = match role {
+        Role::Input => Some(crate::watchdog::start_liveness_timer(_window.handle)?),
+        Role::Ui | Role::Watcher => None,
+    };
+
     // Re-read the flag after the window has been published, and before the first
     // `GetMessageW`. This closes the only race in the shutdown design: a `request_shutdown`
     // that ran before the window existed found `NO_WINDOW`, posted nothing, and would
@@ -1535,6 +1563,22 @@ unsafe extern "system" fn window_proc(
             // stroke.
             if message == crate::switch::WM_APP_SWITCH && is_watcher_window(hwnd) {
                 let _ = crate::switch::run_pending();
+            }
+
+            // **FR-80 — task T-06-2.** Four messages, and each is answered on one window only:
+            // `WM_POWERBROADCAST` and `WM_WTSSESSION_CHANGE` on the UI window, which is the only
+            // top-level window of this process and therefore the only one they can arrive at,
+            // and `WM_TIMER` and `watchdog::WM_APP_REHOOK` on the input window, which is the
+            // only thread allowed to own the hook. Everything else answers `None` and falls
+            // through unchanged.
+            //
+            // SEC-05: a process at the same integrity level can post any of the four. What that
+            // buys is one reinstallation of this program's own hook — an operation it performs
+            // on itself every thirty seconds anyway, over state of its own, granting nothing.
+            // The rehook message carries nothing: the reason travels in an atomic of this
+            // process, and a forged message that finds it empty does nothing at all.
+            if let Some(result) = crate::watchdog::handle_watchdog_message(hwnd, message, wparam) {
+                return result;
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {

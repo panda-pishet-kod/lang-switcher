@@ -520,10 +520,10 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is thirteen short `key=value` lines — some two hundred bytes — and a page is
-/// comfortably more than the widest it could grow to when task T-06-1 adds its key. Sizing it
-/// above the payload is what lets [`publish`] hand the bytes over without waiting for the
-/// client to read them.
+/// The payload is fifteen short `key=value` lines — some two hundred and fifty bytes — and a
+/// page is comfortably more than the widest it could grow to when task T-06-1 adds its key.
+/// Sizing it above the payload is what lets [`publish`] hand the bytes over without waiting
+/// for the client to read them.
 const PIPE_OUT_BUFFER_BYTES: u32 = 4096;
 
 /// Inbound buffer of the pipe: none. **Condition 4 of SEC-04a.** There is nothing to read
@@ -813,8 +813,9 @@ fn await_client(pipe: HANDLE) -> WinResult<bool> {
 ///
 /// # SEC-01, SEC-07, condition 2 of SEC-04a
 ///
-/// The bytes are [`render`] of one [`snapshot`], which is twelve counts and one word of
-/// section 7. Nothing else can be sent from here: there is no other write in this module.
+/// The bytes are [`render`] of one [`snapshot`], which is thirteen counts, one word of section 7
+/// and one of the five words of [`crate::watchdog::Reason`]. Nothing else can be sent from here:
+/// there is no other write in this module.
 fn publish(pipe: HANDLE) {
     let payload = render(&snapshot());
 
@@ -1055,6 +1056,15 @@ pub struct Snapshot {
     /// `0` is "as typed", and it is what every flush of FR-10 leaves behind (FR-34). A number
     /// in `0..len`, never a layout and never a character: see [`CYCLE_POSITION`].
     pub cycle_position: usize,
+    /// Completed reinstallations of the hook — **FR-80**, and position 18 of section 11.3.
+    ///
+    /// The one number that says the watchdog did something, and the reason it is out here at
+    /// all: from outside the process this quantity is not observable even in principle
+    /// (decision Р-37), so a bench with no channel has nothing to confirm the position with.
+    pub watchdog_recoveries: u32,
+    /// Why the hook was last put back — one of the five words of
+    /// [`crate::watchdog::Reason::name`], never anything else.
+    pub watchdog_last_reason: crate::watchdog::Reason,
     //
     // Deliberately absent until its owning task exists, so that the bench cannot mistake a
     // fabricated zero for an answer:
@@ -1069,6 +1079,7 @@ pub struct Snapshot {
 /// agree.
 pub fn snapshot() -> Snapshot {
     let (send_mismatches, events_lost) = crate::inject::send_mismatches();
+    let watchdog = crate::watchdog::health();
 
     Snapshot {
         buffer_len: BUFFER_LEN.load(Ordering::Relaxed),
@@ -1085,6 +1096,8 @@ pub fn snapshot() -> Snapshot {
         inter_event_delay_ms: crate::inject::inter_event_delay_ms(),
         replacement_method: crate::inject::replacement_method(),
         cycle_position: CYCLE_POSITION.load(Ordering::Relaxed),
+        watchdog_recoveries: watchdog.recoveries,
+        watchdog_last_reason: watchdog.last_reason,
     }
 }
 
@@ -1096,6 +1109,12 @@ pub fn snapshot() -> Snapshot {
 /// `cycle_position` is last rather than beside `buffer_len`, and that is a decision about the
 /// diff: the twelve lines above stood in this order for two tasks, and appending leaves every
 /// one of them where a human comparing two runs already expects it. Task **T-05-2a**.
+///
+/// The two `watchdog_` lines of task **T-06-2** were appended for the same reason and nowhere
+/// else — not beside `hook_installed`, where they belong by subject. They are the counter of
+/// FR-80 and the reason the hook was last put back, and they are here rather than inside the
+/// program because decision Р-37 says what the bench of section 11.5 needs to confirm position
+/// 18 has to leave the process somehow.
 ///
 /// `password_field` is **not** here. See the module documentation: it arrives with task
 /// T-06-1, one line, and until then its absence is the honest answer.
@@ -1113,7 +1132,9 @@ pub fn render(state: &Snapshot) -> String {
          events_lost={}\n\
          inter_event_delay_ms={}\n\
          replacement_method={}\n\
-         cycle_position={}\n",
+         cycle_position={}\n\
+         watchdog_recoveries={}\n\
+         watchdog_last_reason={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1127,6 +1148,8 @@ pub fn render(state: &Snapshot) -> String {
         state.inter_event_delay_ms,
         method_name(state.replacement_method),
         state.cycle_position,
+        state.watchdog_recoveries,
+        state.watchdog_last_reason.name(),
     )
 }
 
@@ -1146,7 +1169,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 13] = [
+pub const KEYS: [&str; 15] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1160,6 +1183,8 @@ pub const KEYS: [&str; 13] = [
     "inter_event_delay_ms",
     "replacement_method",
     "cycle_position",
+    "watchdog_recoveries",
+    "watchdog_last_reason",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

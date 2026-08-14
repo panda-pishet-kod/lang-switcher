@@ -4,17 +4,18 @@
 //!
 //! Requirements this module covers: FR-13 (mouse clicks over **Raw Input**, never
 //! `WH_MOUSE_LL`), the three asynchronous rows of the FR-10 flush table — a mouse button over
-//! Raw Input, `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` — and the **delivery** of
+//! Raw Input, `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` — the **delivery** of
 //! FR-21, that is, making the layout cache actually rebuild on a machine whose hidden windows
-//! never receive `WM_INPUTLANGCHANGE` — task T-03-3.
+//! never receive `WM_INPUTLANGCHANGE` — task T-03-3 — and **FR-80, the hook watchdog proper**,
+//! with all four of its mechanisms: the `EVENT_SYSTEM_DESKTOPSWITCH` subscription, the
+//! `WM_WTSSESSION_CHANGE` registration, `WM_POWERBROADCAST` with `PBT_APMRESUMEAUTOMATIC`, and
+//! the thirty-second liveness timer — task T-06-2.
 //! FR-12, the race resolution these subscriptions feed, belongs to [`crate::buffer`]: the module
 //! table gives "разрешение гонок по временны́м меткам" to the buffer, and this module hands it a
 //! timestamp and nothing else.
-//! Still to come: FR-80, the hook watchdog proper, and the `EVENT_SYSTEM_DESKTOPSWITCH`,
-//! `WM_WTSSESSION_CHANGE` and `POWERBROADCAST` subscriptions — task T-06-2.
 //! Moved out to match the backlog (decision R-17): FR-82 (single instance) to the process
 //! level, task T-01-2; FR-83 (clean shutdown) to the tray, task T-01-4, module `tray`.
-//! Implemented by backlog tasks: T-03-3 (done), T-06-2.
+//! Implemented by backlog tasks: T-03-3 (done), T-06-2 (done).
 //!
 //! # Why Raw Input and not `WH_MOUSE_LL` — FR-13
 //!
@@ -32,6 +33,74 @@
 //! anywhere under `src\`, and `SetWindowsHookExW` is called exactly once in this program, in
 //! [`crate::hook`], with `WH_KEYBOARD_LL`.
 //!
+//! # FR-80 — the watchdog, and why it cannot ask whether the hook is alive
+//!
+//! FR-80 names four ways the system takes a low-level hook away **without saying so**: the
+//! callback overrunning `LowLevelHooksTimeout` (`HKCU\Control Panel\Desktop`, about five
+//! seconds by default), a switch to a secure desktop (a UAC prompt, `Ctrl+Alt+Del`), a session
+//! change, and a resume from sleep. In every one of them the program keeps running, the tray
+//! icon keeps sitting there, [`crate::hook::is_installed`] keeps answering `true` — and not one
+//! keystroke reaches the callback ever again.
+//!
+//! **There is no call that answers "is my hook still registered".** `UnhookWindowsHookEx` is
+//! the only function in the API that touches an installed `HHOOK`, and it is destructive.
+//! Nothing enumerates the hook chain. The absence of callbacks proves nothing: the user may
+//! simply not be typing. That is not a detail of this implementation, it is the shape of the
+//! problem, and it decides the design:
+//!
+//! * three of the four cases announce themselves with an **event**, and this module subscribes
+//!   to all three — [`WATCHED_EVENTS`] adds `EVENT_SYSTEM_DESKTOPSWITCH` to the subscription
+//!   [`watch`] already made, [`register_session_notice`] asks for `WM_WTSSESSION_CHANGE`, and
+//!   the `PBT_APMRESUMEAUTOMATIC` arm of [`handle_watchdog_message`] answers the resume;
+//! * the fourth — the timeout — announces nothing at all, so the thirty-second timer of FR-80
+//!   **reinstalls unconditionally** rather than checking first, because there is nothing to
+//!   check. [`reinstall_hook`] is the single path all four mechanisms end in.
+//!
+//! What an unconditional reinstall costs, and what it does not:
+//!
+//! * **the gap.** Between `UnhookWindowsHookEx` and `SetWindowsHookExW` this process has no
+//!   hook. Keystrokes made in that window are not seen by the callback, so they are not
+//!   buffered — they reach the application the user is typing into exactly as they always
+//!   would, because this program suppresses nothing but its own hotkey. The gap is measured
+//!   rather than assumed: [`Health::last_gap_us`] and [`Health::max_gap_us`];
+//! * **the order is forced, and it is the right one.** [`crate::hook::install`] refuses while a
+//!   hook is registered — FR-01 says *one* hook — so "install then uninstall" is not
+//!   expressible against the accepted module at all. It is also the order that cannot produce
+//!   two live hooks for even an instant, and two live hooks would mean every stroke recorded
+//!   twice: `gghbbddttnn` in the buffer instead of `ghbdtn`;
+//! * **what it cannot tell in advance** is whether the hook needed replacing. It can tell
+//!   afterwards, and does: if `UnhookWindowsHookEx` fails on a handle this program believed
+//!   live, the system had already taken it, and that is counted as
+//!   [`Health::silent_removals`]. That count is a diagnostic, not a decision — the reinstall
+//!   happens either way.
+//!
+//! ⚠ **Synthetic input is not used as a pulse.** Sending a keystroke with `SendInput` to see
+//! whether it comes back through the callback would put keystrokes into whatever window the
+//! user has in front of them, on a timer, and would entangle the watchdog with the injected-
+//! input filter of FR-03. There is no `SendInput` in this module and no other module is asked
+//! to make one on its behalf.
+//!
+//! # Which window receives what — FR-81's rake, stepped on twice
+//!
+//! `WM_POWERBROADCAST` is delivered to **top-level windows**. Two of this program's three
+//! windows are `HWND_MESSAGE` children (`app::Window::create`), and a message-only window is
+//! not top-level: it is out of `EnumWindows`, out of the Z order, and out of every broadcast.
+//! Measured, not argued — the report of task T-06-2 enumerates the three windows of a running
+//! process and posts the message to each of them in turn.
+//! This is the same rake FR-81 already stepped on — `RegisterWindowMessage("TaskbarCreated")`
+//! never reached `HWND_MESSAGE` either, which is why decision R-20 point 2 made the UI thread's
+//! window a hidden top-level one with `WS_EX_TOOLWINDOW`. **That window is the only one of ours
+//! a power broadcast can reach**, so [`handle_watchdog_message`] answers `WM_POWERBROADCAST`
+//! and `WM_WTSSESSION_CHANGE` on it and on no other — see [`is_ui_window`]. The registration of
+//! [`register_session_notice`] names the same window for the same reason.
+//!
+//! Section 6.1 then decides where the *work* happens, and it is not there: the line "таймер
+//! сторожа" stands under the **input thread**, and a `WH_KEYBOARD_LL` hook is called back on
+//! the thread that installed it, so the hook must be reinstalled by that thread and by no
+//! other. The UI window and the `WinEvent` callback therefore only **mark and wake** —
+//! [`request_rehook`] is one atomic store and one `PostMessageW` — and [`reinstall_hook`] runs
+//! on the input thread, out of its ordinary message loop.
+//!
 //! # Threading — section 6.1
 //!
 //! Section 6.1 puts each of these where it belongs and this module follows it exactly:
@@ -39,10 +108,17 @@
 //! * **input thread** — `RegisterRawInputDevices (RIDEV_INPUTSINK)` and the reception of
 //!   `WM_INPUT`. The registration is bound to that thread's message-only window, and the buffer
 //!   the flush lands in is a thread-local of that same thread (section 6.3), so the whole path
-//!   from the click to the zeroed slot happens without a single cross-thread hand-off;
-//! * **watcher thread** — `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND` and
-//!   `EVENT_OBJECT_FOCUS`. An out-of-context `WinEvent` hook calls back on the thread that
-//!   installed it, so installing it there is what puts the callback there.
+//!   from the click to the zeroed slot happens without a single cross-thread hand-off. Section
+//!   6.1 also puts "таймер сторожа" here in so many words, and [`start_liveness_timer`] is that
+//!   line: the timer is set on the input window, so `WM_TIMER` and every reinstall it causes
+//!   happen on the one thread that is allowed to own the hook;
+//! * **watcher thread** — `SetWinEventHook` for `EVENT_SYSTEM_FOREGROUND`, `EVENT_OBJECT_FOCUS`
+//!   and, from task T-06-2, `EVENT_SYSTEM_DESKTOPSWITCH` — the three events section 6.1 lists
+//!   under this thread. An out-of-context `WinEvent` hook calls back on the thread that
+//!   installed it, so installing it there is what puts the callback there;
+//! * **UI thread** — `WTSRegisterSessionNotification` and the two messages the system delivers
+//!   to a top-level window. Not a choice: that thread owns the only top-level window in the
+//!   process, and no other window can be given these messages.
 //!
 //! # NFR-01 to NFR-05, NFR-10 — what the callbacks are allowed to do
 //!
@@ -61,10 +137,14 @@
 //! of two bits, and for the overwhelmingly common packet — a cursor movement — it stops at that
 //! comparison and touches the buffer not at all.
 //!
-//! NFR-10, "загрузка ЦП в покое неотличима от нуля": nothing here polls, nothing here holds a
-//! timer, and nothing here wakes the process on its own. Every one of these subscriptions is
-//! silent until the user moves the mouse, clicks, or changes window — that is, until the machine
-//! is by definition not at rest.
+//! NFR-10, "загрузка ЦП в покое неотличима от нуля": nothing here polls, and every one of the
+//! subscriptions is silent until the user moves the mouse, clicks, or changes window — that is,
+//! until the machine is by definition not at rest. The one thing that does wake the process on
+//! its own is the timer FR-80 asks for, and it is the coarsest kind there is: a single
+//! `SetTimer` at [`LIVENESS_INTERVAL_MS`], thirty seconds, which the system coalesces with
+//! whatever else it is waking the machine for. Two wake-ups a minute, each of them two Win32
+//! calls long. No thread of this program sleeps in a loop, and no interval anywhere in this
+//! module is shorter than that one.
 //!
 //! # SEC-05
 //!
@@ -77,30 +157,49 @@
 //!   this process and never in the message — and does nothing at all;
 //! * a forged [`WM_APP_LAYOUT`] or `WM_INPUT_DEVICE_CHANGE` buys the sender a re-read of the
 //!   system's own layout list into memory of ours, which is idempotent, and is the same standing
-//!   the wake-up message of [`crate::app`] has.
+//!   the wake-up message of [`crate::app`] has;
+//! * a forged [`WM_APP_REHOOK`], `WM_POWERBROADCAST` or `WM_WTSSESSION_CHANGE` buys the sender
+//!   one reinstallation of **our own** hook — an operation this program performs on itself
+//!   every thirty seconds anyway, which changes no state the sender can see and grants no
+//!   privilege. The rehook message carries nothing: the reason travels in [`PENDING_REASON`],
+//!   an atomic of this process, and a forged message that finds it empty does nothing at all.
+//!   The two system messages are answered on the UI window and on no other, so a copy aimed at
+//!   either message-only window is ignored where the real one could never have arrived;
+//! * `WM_TIMER` is answered only for [`LIVENESS_TIMER_ID`] and only on the thread that owns the
+//!   buffer, so a forged one aimed at another window of ours falls through to `DefWindowProcW`.
 //!
 //! # SEC-01, SEC-07
 //!
 //! Nothing here is written to a log, a file or a panic message. What crosses this module is a
-//! button-flag word, a millisecond timestamp and a count of events; no key code, no scan code
-//! and no character passes through it, and the [`Counters`] this module publishes are counts and
-//! nothing else.
+//! button-flag word, a millisecond timestamp, a count of events and a reason code that is one of
+//! five named constants; no key code, no scan code and no character passes through it, and the
+//! [`Counters`] and [`Health`] this module publishes are counts, durations and that reason code
+//! and nothing else. [`Reason`] deliberately has no arm that could carry a key: the four
+//! mechanisms of FR-80 are the four arms, and a stroke is not one of them.
 
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::mem::ManuallyDrop;
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::time::Instant;
 
-use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::RemoteDesktop::{
+    NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
+};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::{
     GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
     RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_OBJECT_FOCUS, EVENT_SYSTEM_FOREGROUND, GetMessageTime, RI_MOUSE_BUTTON_1_DOWN,
-    RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN,
+    EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GetMessageTime,
+    KillTimer, PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN,
+    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN, SetTimer,
     WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
+    WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
 };
-use windows::core::{Error as WinError, Result as WinResult};
+use windows::core::{Error as WinError, PCWSTR, Result as WinResult};
 
 use crate::buffer::{ResetOutcome, is_newer_than};
 
@@ -129,14 +228,59 @@ pub const WM_APP_FLUSH: u32 = WM_APP + 6;
 /// layout is; the sender cannot put a layout into it.
 pub const WM_APP_LAYOUT: u32 = WM_APP + 7;
 
+/// The private message that asks the input thread to put the hook back — FR-80.
+///
+/// `WM_APP + 9`, the next free number: `+ 1` is the wake-up of [`crate::app`], `+ 2` the tray
+/// callback, `+ 3` and `+ 4` belong to [`crate::hook`], `+ 5` is the configuration nudge of
+/// [`crate::app`], `+ 6` and `+ 7` are [`WM_APP_FLUSH`] and [`WM_APP_LAYOUT`], and **`+ 8` is
+/// [`crate::switch::WM_APP_SWITCH`]** — which is why this is `+ 9` and not the number that
+/// followed [`WM_APP_LAYOUT`] when this module was last touched. A test asserts the whole set is
+/// distinct, because the two collide silently: both are private messages of this process and
+/// nothing but the number tells them apart.
+///
+/// Posted by [`win_event_proc`] on `EVENT_SYSTEM_DESKTOPSWITCH`, and by the UI window on
+/// `WM_WTSSESSION_CHANGE` and on `WM_POWERBROADCAST`/`PBT_APMRESUMEAUTOMATIC`. It exists because
+/// none of those three places is the input thread, and FR-01 puts the hook on the input thread.
+///
+/// SEC-05: it carries nothing. The reason travels in [`PENDING_REASON`], an atomic of this
+/// process no sender can reach, and the handler does nothing whatsoever when that atomic is
+/// empty.
+pub const WM_APP_REHOOK: u32 = WM_APP + 9;
+
 /// The `WinEvent` events the flush table of FR-10 lists — "смена активного окна" and "смена
 /// фокуса внутри окна".
 ///
 /// Named as data rather than written into a condition so that a test can assert the list itself,
 /// the same shape [`crate::layouts::REBUILD_MESSAGES`] uses for the messages of FR-21.
 ///
-/// `EVENT_SYSTEM_DESKTOPSWITCH` is deliberately **absent**: it belongs to task T-06-2.
+/// `EVENT_SYSTEM_DESKTOPSWITCH` is deliberately **absent from this list**, and that is a
+/// statement about the flush table and not about the subscription: a switch to the secure
+/// desktop is not one of the rows of FR-10, so it must not throw away what the user has typed.
+/// It is subscribed to all the same — see [`WATCHED_EVENTS`] — because FR-80 needs it.
 pub const FLUSH_EVENTS: [u32; 2] = [EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_FOCUS];
+
+/// Every `WinEvent` event this program subscribes to — the two of FR-10 and the one of FR-80.
+///
+/// **One list, one loop, one guard.** FR-80 asks for `EVENT_SYSTEM_DESKTOPSWITCH` and this is
+/// how it is delivered: by lengthening the array [`watch`] already iterates over, not by
+/// building a second subscription mechanism beside it. `WATCHED_EVENTS[..2]` is
+/// [`FLUSH_EVENTS`], and [`win_event_proc`] tells the two purposes apart by the event code it is
+/// handed.
+///
+/// Section 6.1 lists exactly these three under the watcher thread: "SetWinEventHook: FOREGROUND,
+/// OBJECT_FOCUS, DESKTOPSWITCH".
+pub const WATCHED_EVENTS: [u32; 3] = [
+    EVENT_SYSTEM_FOREGROUND,
+    EVENT_OBJECT_FOCUS,
+    EVENT_SYSTEM_DESKTOPSWITCH,
+];
+
+/// The interval of the liveness timer of FR-80, in milliseconds — "с интервалом 30 с".
+pub const LIVENESS_INTERVAL_MS: u32 = 30_000;
+
+/// `nIDEvent` of the liveness timer. Window-scoped, so it only has to be unique among the timers
+/// of the input window, and it is the only one there in a shipping build.
+pub const LIVENESS_TIMER_ID: usize = 1;
 
 /// HID usage page 1, "generic desktop controls" — the page both the mouse and the keyboard are
 /// on.
@@ -613,16 +757,16 @@ fn take_pending_flush() -> Option<u32> {
 // The `WinEvent` subscriptions of section 6.1 — FR-10
 // ---------------------------------------------------------------------------------------
 
-/// The two `WinEvent` subscriptions, removed when this value is dropped.
+/// The `WinEvent` subscriptions of [`WATCHED_EVENTS`], removed when this value is dropped.
 ///
 /// The value never leaves the thread that created it, which is what makes the `Drop` correct:
 /// an out-of-context hook is served by the installing thread's message queue and is unhooked
 /// from that same thread.
 pub struct Watching {
-    hooks: [HWINEVENTHOOK; FLUSH_EVENTS.len()],
+    hooks: [HWINEVENTHOOK; WATCHED_EVENTS.len()],
 }
 
-/// Subscribes to the two `WinEvent` events of the FR-10 table on the calling thread.
+/// Subscribes to the `WinEvent` events of [`WATCHED_EVENTS`] on the calling thread.
 ///
 /// Called by the **watcher** thread and by no other: section 6.1 puts `SetWinEventHook` there,
 /// and an out-of-context hook calls back on the thread that installed it, so where it is
@@ -638,14 +782,16 @@ pub struct Watching {
 ///   Without it the tray menu opening would look like a foreground change and would flush the
 ///   buffer the user is about to convert.
 ///
-/// A separate hook per event, rather than one hook over the range between them: the two codes
-/// are `0x0003` and `0x8005`, and a single subscription spanning that range would ask the system
-/// to deliver every accessibility event there is, for every process in the session, so that we
-/// could discard all but two of them.
+/// A separate hook per event, rather than one hook over the range between them: the codes are
+/// `0x0003`, `0x8005` and `0x0020`, and a single subscription spanning that range would ask the
+/// system to deliver every accessibility event there is, for every process in the session, so
+/// that we could discard all but three of them. Task T-06-2 lengthened the array by one entry
+/// and changed nothing else here — the loop, the flags, the failure path and the guard are the
+/// ones task T-03-3 wrote.
 pub fn watch() -> WinResult<Watching> {
-    let mut hooks = [HWINEVENTHOOK::default(); FLUSH_EVENTS.len()];
+    let mut hooks = [HWINEVENTHOOK::default(); WATCHED_EVENTS.len()];
 
-    for (slot, event) in hooks.iter_mut().zip(FLUSH_EVENTS) {
+    for (slot, event) in hooks.iter_mut().zip(WATCHED_EVENTS) {
         // SAFETY: `None` for the module handle is what `WINEVENT_OUTOFCONTEXT` requires and
         // means no DLL is loaded anywhere; the callback is a `'static` function of this image,
         // which cannot be unloaded while the process runs. The two zeroes ask for every process
@@ -700,11 +846,16 @@ impl Drop for Watching {
     }
 }
 
-/// The `WinEvent` callback — FR-10, and half of the FR-21 delivery.
+/// The `WinEvent` callback — FR-10, half of the FR-21 delivery, and the first mechanism of
+/// FR-80.
 ///
 /// Runs on the watcher thread, called by the system out of that thread's message queue.
 /// **Everything it does is an atomic and a `PostMessageW`**, for the reason given in the module
 /// documentation: a `WinEvent` callback is as much in the system's way as a hook callback is.
+/// That applies with particular force to `EVENT_SYSTEM_DESKTOPSWITCH`, which the system raises
+/// while it is switching desktops: reinstalling the hook from here would put a
+/// `SetWindowsHookExW` inside the system's own desktop switch. The arm below marks and wakes,
+/// and [`reinstall_hook`] runs later, on the input thread, out of its ordinary message loop.
 ///
 /// The buffer cannot be flushed from here even if it were free to be: the buffer is a
 /// thread-local of the *input* thread (section 6.3), so the only correct thing to do with the
@@ -725,6 +876,20 @@ unsafe extern "system" fn win_event_proc(
     _thread_id: u32,
     event_time: u32,
 ) {
+    if event == EVENT_SYSTEM_DESKTOPSWITCH {
+        // **FR-80, first mechanism.** A switch to the secure desktop — a UAC prompt,
+        // `Ctrl+Alt+Del` — is one of the four cases in which the system takes the hook away
+        // without saying so. It is deliberately **not** a flush: FR-10 does not list it, and the
+        // user coming back from a UAC prompt has typed nothing that should be thrown away.
+        //
+        // Two events arrive for one prompt, one for each direction, and the second one finds the
+        // hook this program put back after the first. That costs one more reinstallation and is
+        // exactly what makes the mechanism correct without knowing which direction is which.
+        DESKTOP_SWITCHES.fetch_add(1, Ordering::Relaxed);
+        request_rehook(Reason::DesktopSwitch);
+        return;
+    }
+
     if !is_flush_event(event) {
         // A subscription is per event code, so this cannot happen; it is here because a callback
         // the system drives is the wrong place to assume anything.
@@ -749,6 +914,610 @@ unsafe extern "system" fn win_event_proc(
     crate::app::post_to_input_thread(WM_APP_LAYOUT);
 }
 
+// ---------------------------------------------------------------------------------------
+// FR-80 — the watchdog proper
+// ---------------------------------------------------------------------------------------
+
+/// Why the hook was last put back — the four mechanisms of FR-80, and "not yet".
+///
+/// **SEC-01, SEC-07.** Five named constants and nothing else. There is no arm here that could
+/// carry a key code, a scan code or a character, and none may ever be added: this value is
+/// published through the channel of SEC-04a, and the whole argument for letting it out is that
+/// the set of things it can say is closed and listed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Reason {
+    /// The hook has not been reinstalled since the program started.
+    #[default]
+    None = 0,
+    /// The liveness timer of FR-80 — the fourth mechanism, and the only one that fires when
+    /// nothing at all has happened.
+    Timer = 1,
+    /// `EVENT_SYSTEM_DESKTOPSWITCH` — a UAC prompt or `Ctrl+Alt+Del`.
+    DesktopSwitch = 2,
+    /// `WM_WTSSESSION_CHANGE` — the session was locked, unlocked, connected or disconnected.
+    SessionChange = 3,
+    /// `WM_POWERBROADCAST` with `PBT_APMRESUMEAUTOMATIC` — the machine came back from sleep.
+    PowerResume = 4,
+}
+
+impl Reason {
+    /// The word the channel of SEC-04a prints for this reason.
+    ///
+    /// Written out here rather than in [`crate::control`] so that the list of words and the list
+    /// of arms cannot drift apart — the same shape `control::method_name` uses for FR-42.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Timer => "timer",
+            Self::DesktopSwitch => "desktop_switch",
+            Self::SessionChange => "session_change",
+            Self::PowerResume => "power_resume",
+        }
+    }
+
+    /// The reason a stored code names, or [`Reason::None`] for anything else.
+    ///
+    /// Total, because the value comes out of an atomic and a total function is one less thing
+    /// that can panic on a path the window procedure runs.
+    const fn from_code(code: u32) -> Self {
+        match code {
+            1 => Self::Timer,
+            2 => Self::DesktopSwitch,
+            3 => Self::SessionChange,
+            4 => Self::PowerResume,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Completed reinstallations of the hook — every one of them, whatever the reason.
+///
+/// This is the number FR-90 and SEC-04a ask for, and it counts *reinstallations* rather than
+/// *rescues* because the program cannot tell the two apart in advance; see the module
+/// documentation. [`SILENT_REMOVALS`] is the part of it that was demonstrably a rescue.
+static RECOVERIES: AtomicU32 = AtomicU32::new(0);
+
+/// Reinstallations at which `UnhookWindowsHookEx` failed on a handle this program believed live
+/// — that is, at which the system had already taken the hook away silently.
+///
+/// The retrospective detector of FR-80, and the only evidence of a silent removal there is.
+static SILENT_REMOVALS: AtomicU32 = AtomicU32::new(0);
+
+/// Reinstallations at which the hook was already known to be absent before the attempt.
+///
+/// Distinct from [`SILENT_REMOVALS`]: this is the case in which this program's own bookkeeping
+/// already said there was no hook — a failed previous reinstallation, or FR-83's `WM_ENDSESSION`
+/// path having taken it off.
+static ABSENT_AT_CHECK: AtomicU32 = AtomicU32::new(0);
+
+/// `SetWindowsHookExW` refusals during a reinstallation — NFR-13.
+///
+/// A non-zero value here is the one state in which this program is running without a hook and
+/// knows it; [`hook_down`] is what reports it and FR-90 is what the tray does about it.
+static INSTALL_FAILURES: AtomicU32 = AtomicU32::new(0);
+
+/// [`Reason`] of the last completed reinstallation, as a code — see [`Reason::from_code`].
+static LAST_REASON: AtomicU32 = AtomicU32::new(0);
+
+/// The reason waiting for the input thread, set by whoever posted [`WM_APP_REHOOK`].
+///
+/// SEC-05: this is why the message itself carries nothing. A forged [`WM_APP_REHOOK`] finds this
+/// cell empty and the handler returns without touching the hook.
+static PENDING_REASON: AtomicU32 = AtomicU32::new(0);
+
+/// Ticks of the liveness timer that reached the handler — NFR-10 measured rather than asserted.
+static LIVENESS_TICKS: AtomicU32 = AtomicU32::new(0);
+
+/// `EVENT_SYSTEM_DESKTOPSWITCH` events seen.
+static DESKTOP_SWITCHES: AtomicU32 = AtomicU32::new(0);
+
+/// `WM_WTSSESSION_CHANGE` messages seen at the UI window.
+static SESSION_CHANGES: AtomicU32 = AtomicU32::new(0);
+
+/// `WM_POWERBROADCAST` messages with `PBT_APMRESUMEAUTOMATIC` seen at the UI window.
+static POWER_RESUMES: AtomicU32 = AtomicU32::new(0);
+
+/// Microseconds the last reinstallation left this process without a hook.
+static LAST_GAP_US: AtomicU32 = AtomicU32::new(0);
+
+/// The longest such gap so far.
+static MAX_GAP_US: AtomicU32 = AtomicU32::new(0);
+
+/// The value [`NOTICE_WINDOW`] holds when there is no such window.
+///
+/// Zero is not a window handle, which is what lets one atomic carry both the handle and its
+/// absence.
+const NO_WINDOW: usize = 0;
+
+/// The window [`register_session_notice`] was given, as a raw value — the process's one
+/// top-level window, and the only one `WM_POWERBROADCAST` and `WM_WTSSESSION_CHANGE` can reach.
+///
+/// Raw rather than an `HWND` for the reason `app::ui_window_raw` states: `HWND` is a raw pointer
+/// and therefore not `Send`, and a static that promised otherwise would be a lie about a value
+/// two threads really do look at. Nothing is ever done with it but a comparison — see
+/// [`is_ui_window`] — so it is never converted back.
+static NOTICE_WINDOW: AtomicUsize = AtomicUsize::new(NO_WINDOW);
+
+/// Whether a reinstallation is between its `UnhookWindowsHookEx` and its `SetWindowsHookExW`.
+///
+/// Read by [`hook_down`] and by nothing else: without it the tray of FR-90 could sample
+/// [`crate::hook::is_installed`] inside the microsecond gap of a healthy reinstallation and
+/// report a program that is perfectly well as suspended.
+static REINSTALLING: AtomicBool = AtomicBool::new(false);
+
+/// What the watchdog of FR-80 has done — counts, durations and a reason code.
+///
+/// **SEC-01, SEC-07.** Nine numbers and one of five named words. No key code, no scan code, no
+/// character, and nothing derived from one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Health {
+    /// Completed reinstallations of the hook — [`RECOVERIES`].
+    pub recoveries: u32,
+    /// Of those, the ones at which the system had demonstrably taken the hook already.
+    pub silent_removals: u32,
+    /// Of those, the ones at which this program already knew it had no hook.
+    pub absent_at_check: u32,
+    /// `SetWindowsHookExW` refusals — NFR-13.
+    pub install_failures: u32,
+    /// Why the hook was last put back.
+    pub last_reason: Reason,
+    /// Microseconds without a hook during the last reinstallation.
+    pub last_gap_us: u32,
+    /// The longest such gap so far.
+    pub max_gap_us: u32,
+    /// Ticks of the thirty-second timer — NFR-10.
+    pub liveness_ticks: u32,
+    /// `EVENT_SYSTEM_DESKTOPSWITCH` events seen.
+    pub desktop_switches: u32,
+    /// `WM_WTSSESSION_CHANGE` messages seen.
+    pub session_changes: u32,
+    /// `PBT_APMRESUMEAUTOMATIC` broadcasts seen.
+    pub power_resumes: u32,
+}
+
+/// What the watchdog of FR-80 has done so far.
+pub fn health() -> Health {
+    Health {
+        recoveries: RECOVERIES.load(Ordering::Relaxed),
+        silent_removals: SILENT_REMOVALS.load(Ordering::Relaxed),
+        absent_at_check: ABSENT_AT_CHECK.load(Ordering::Relaxed),
+        install_failures: INSTALL_FAILURES.load(Ordering::Relaxed),
+        last_reason: Reason::from_code(LAST_REASON.load(Ordering::Relaxed)),
+        last_gap_us: LAST_GAP_US.load(Ordering::Relaxed),
+        max_gap_us: MAX_GAP_US.load(Ordering::Relaxed),
+        liveness_ticks: LIVENESS_TICKS.load(Ordering::Relaxed),
+        desktop_switches: DESKTOP_SWITCHES.load(Ordering::Relaxed),
+        session_changes: SESSION_CHANGES.load(Ordering::Relaxed),
+        power_resumes: POWER_RESUMES.load(Ordering::Relaxed),
+    }
+}
+
+/// Whether this program currently has **no** keyboard hook — FR-90, the "приостановлена" of the
+/// tray when it is not the user who suspended it.
+///
+/// ⚠ The honest reading of this function is "as far as this program can tell". A hook the system
+/// has taken away silently still answers `true` to [`crate::hook::is_installed`] until the
+/// watchdog next reinstalls, which is what FR-80 exists for and what no call can shorten. What
+/// this *does* report truthfully is the state that matters to the user: a
+/// `SetWindowsHookExW` that refused, leaving the program running and deaf until the next tick.
+///
+/// The microsecond during which a healthy reinstallation has taken the hook off and not yet put
+/// it back is deliberately not reported as down — see [`REINSTALLING`].
+///
+/// Displaying this is task T-08-1's; publishing it is this module's.
+pub fn hook_down() -> bool {
+    !crate::hook::is_installed() && !REINSTALLING.load(Ordering::Acquire)
+}
+
+/// Records that the hook should be put back, and wakes the thread that will do it.
+///
+/// **The whole of what a `WinEvent` callback and a window procedure of another thread are
+/// allowed to do about FR-80**: one relaxed store and one `PostMessageW`, which does not block.
+/// No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), and nothing that can panic.
+///
+/// Two requests that arrive before the input thread gets round to either collapse into one, and
+/// that is lossless: the reinstallation the second would have caused is the same operation as
+/// the first, and the reason the input thread ends up acting on is the later of the two.
+pub fn request_rehook(reason: Reason) {
+    PENDING_REASON.store(reason as u32, Ordering::Release);
+    crate::app::post_to_input_thread(WM_APP_REHOOK);
+}
+
+/// Takes the hook off and puts it back — the single recovery path of FR-80, and the only place
+/// in this module that touches [`crate::hook`].
+///
+/// ⚠ **Input thread only.** A `WH_KEYBOARD_LL` hook is called back on the thread that installed
+/// it, so installing it anywhere else would move the callback off the thread section 6.1 built
+/// for it. Every caller in this module checks [`is_input_window`] first.
+///
+/// # Order, and why there is no choice about it
+///
+/// Uninstall, then install. [`crate::hook::install`] refuses while a hook is registered —
+/// FR-01 says *one* hook, and two would mean every stroke recorded twice — so the other order
+/// cannot even be written against the accepted module. It is also the only order that cannot
+/// leave two hooks live for an instant.
+///
+/// # What is lost
+///
+/// The strokes made between the two calls, which is a few microseconds' worth
+/// ([`Health::max_gap_us`] is the measured figure). They are not swallowed — this program
+/// suppresses nothing but its own hotkey — so they reach the application the user is typing
+/// into exactly as they always would; what is lost is their place in the typing buffer, and
+/// with it the ability to convert that fragment. FR-96 is not armed during the gap either,
+/// which is the one part of it that a reinstallation cannot carry across.
+///
+/// # NFR-13
+///
+/// Both Win32 results are examined. `UnhookWindowsHookEx` is examined twice over, in fact: its
+/// failure counter is read before and after, because a failure on a handle this program
+/// believed live is the only evidence of a silent removal that exists anywhere.
+pub fn reinstall_hook(notify: HWND, reason: Reason) -> bool {
+    let instance = match module_instance() {
+        Ok(instance) => instance,
+        Err(error) => {
+            INSTALL_FAILURES.fetch_add(1, Ordering::Relaxed);
+            crate::app::report_non_critical("GetModuleHandleW (watchdog)", &error);
+            return false;
+        }
+    };
+
+    let believed_installed = crate::hook::is_installed();
+    let (unhook_failures_before, _) = crate::hook::unhook_failures();
+
+    if !believed_installed {
+        ABSENT_AT_CHECK.fetch_add(1, Ordering::Relaxed);
+    }
+
+    REINSTALLING.store(true, Ordering::Release);
+    let started = Instant::now();
+
+    crate::hook::uninstall();
+
+    let (unhook_failures_after, _) = crate::hook::unhook_failures();
+
+    if believed_installed && unhook_failures_after != unhook_failures_before {
+        // The handle this program was holding is no longer a hook. Nothing else can produce
+        // that: `uninstall` takes the handle out of its atomic with a single swap, so a second
+        // caller cannot have unhooked it, and the handle came from a successful
+        // `SetWindowsHookExW`. This is a silent removal by the system, observed after the fact.
+        SILENT_REMOVALS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    let outcome = crate::hook::install(notify, instance);
+    let gap_us = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
+
+    REINSTALLING.store(false, Ordering::Release);
+
+    match outcome {
+        Ok(installed) => {
+            // ⚠ The guard must **not** run. `Installed::drop` calls `hook::uninstall`, so
+            // dropping it here would take off the hook that was just put on, and the program
+            // would be deaf until the next tick. The guard `app::serve_window` has held since
+            // start-up is what removes the hook at the end: `uninstall` reads the handle out of
+            // an atomic, so it removes whichever hook is current, including this one.
+            let _kept = ManuallyDrop::new(installed);
+
+            LAST_GAP_US.store(gap_us, Ordering::Relaxed);
+            MAX_GAP_US.fetch_max(gap_us, Ordering::Relaxed);
+            LAST_REASON.store(reason as u32, Ordering::Relaxed);
+            RECOVERIES.fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        Err(error) => {
+            // NFR-13. The program is now running without a hook and knows it — `hook_down`
+            // answers `true` — and the next tick of the liveness timer tries again.
+            INSTALL_FAILURES.fetch_add(1, Ordering::Relaxed);
+            crate::app::report_non_critical("SetWindowsHookExW (watchdog)", &error);
+            false
+        }
+    }
+}
+
+/// The window-procedure entry point of the watchdog, called by `app::window_proc`.
+///
+/// `Some` means the message was handled and that value has to be returned to Windows; `None`
+/// means it is none of ours. Mirrors [`crate::hook::handle_input_message`] and
+/// `crate::tray::handle_ui_message`, and for the same reason: the window procedure belongs to
+/// `app` and the knowledge of which messages matter belongs to the module that defined them.
+///
+/// **Every arm is bound to a window.** The two system messages are answered on the UI window,
+/// which is the only top-level window this program has and therefore the only one they can
+/// arrive at; the timer and the rehook request are answered on the input window, which is the
+/// only thread allowed to own the hook. SEC-05: a copy of any of them aimed at the wrong window
+/// of ours falls through to `DefWindowProcW` and does nothing.
+pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Option<LRESULT> {
+    match message {
+        // **FR-80, third mechanism.** `PBT_APMRESUMEAUTOMATIC` is delivered on every resume,
+        // including the ones nobody was present for, which is exactly the case FR-80 is about:
+        // the machine woke, the hook did not, and there is no user to notice.
+        //
+        // `RegisterPowerSettingNotification` is **not** used and is not needed: it exists for
+        // `PBT_POWERSETTINGCHANGE`, which FR-80 does not name, and its feature is absent from
+        // section 3.2. The `PBT_APM*` notifications arrive at every top-level window without any
+        // registration at all.
+        WM_POWERBROADCAST if is_ui_window(window) => {
+            if wparam.0 as u32 == PBT_APMRESUMEAUTOMATIC {
+                POWER_RESUMES.fetch_add(1, Ordering::Relaxed);
+                request_rehook(Reason::PowerResume);
+            }
+
+            // TRUE, which is what a window that has finished with a power notification answers.
+            // The other `PBT_*` subtypes fall in here too and are counted by nobody: this
+            // program has nothing to say about a suspend request and grants it by answering
+            // TRUE, which is also what `DefWindowProcW` would have done.
+            Some(LRESULT(1))
+        }
+
+        // **FR-80, second mechanism.** Every subtype is treated alike — lock, unlock, console
+        // connect and disconnect, logon and logoff. Telling them apart would be a distinction
+        // without a difference: the hook has to go back either way, and reinstalling it when it
+        // did not need it costs the microseconds `reinstall_hook` documents.
+        WM_WTSSESSION_CHANGE if is_ui_window(window) => {
+            SESSION_CHANGES.fetch_add(1, Ordering::Relaxed);
+            request_rehook(Reason::SessionChange);
+            Some(LRESULT(0))
+        }
+
+        // **FR-80, fourth mechanism** — the only one that fires when nothing has happened, and
+        // the only one that answers the `LowLevelHooksTimeout` case, which announces itself with
+        // nothing whatsoever.
+        WM_TIMER if wparam.0 == LIVENESS_TIMER_ID && is_input_window() => {
+            LIVENESS_TICKS.fetch_add(1, Ordering::Relaxed);
+            reinstall_hook(window, Reason::Timer);
+            Some(LRESULT(0))
+        }
+
+        // The far end of [`request_rehook`], for the three mechanisms that observe the event on
+        // another thread. SEC-05: the message carries nothing, and a forged one finds
+        // [`PENDING_REASON`] empty and returns without touching the hook.
+        WM_APP_REHOOK if is_input_window() => {
+            let pending = PENDING_REASON.swap(Reason::None as u32, Ordering::AcqRel);
+
+            match Reason::from_code(pending) {
+                Reason::None => {}
+                reason => {
+                    reinstall_hook(window, reason);
+                }
+            }
+
+            Some(LRESULT(0))
+        }
+
+        // SEC-04a, feature `testing`, absent from the Release configuration: the fault injection
+        // that lets an acceptance run watch the watchdog work.
+        #[cfg(feature = "testing")]
+        WM_TIMER if wparam.0 == fault::DROP_HOOK_TIMER_ID && is_input_window() => {
+            fault::drop_the_hook(window);
+            Some(LRESULT(0))
+        }
+
+        _ => None,
+    }
+}
+
+/// Whether `window` is the top-level window of the UI thread — the only window of this process a
+/// broadcast to top-level windows can reach.
+///
+/// # Why the handle comes from [`NOTICE_WINDOW`] and not from `app`
+///
+/// The obvious spelling — comparing against `app::ui_window_raw` — does not compile in the
+/// shipping configuration: that accessor is `#[cfg(panic = "unwind")]`, it exists for FR-99, and
+/// the Release profile of section 3.2 sets `panic = "abort"`. The mistake was caught by
+/// `cargo build --release` and not by reasoning, which is the reason the acceptance criteria ask
+/// for that build separately.
+///
+/// So this module remembers the handle itself, at the one place it is handed one:
+/// [`register_session_notice`], which `app::serve_window` calls on the UI thread and on no
+/// other. The two questions are the same question — "which window of ours can a message aimed at
+/// top-level windows reach" — because the session registration is made on that window for
+/// exactly the reason the power broadcast needs it. One relaxed atomic load and no Win32 call.
+fn is_ui_window(window: HWND) -> bool {
+    let notice = NOTICE_WINDOW.load(Ordering::Acquire);
+
+    notice != NO_WINDOW && window.0 as usize == notice
+}
+
+/// Whether the calling thread is the input thread.
+///
+/// Section 6.3 gives the typing buffer to that thread and to no other, so owning it is what
+/// being the input thread means — the same test `app::window_proc` already uses to tell the
+/// three windows apart.
+fn is_input_window() -> bool {
+    crate::buffer::is_installed()
+}
+
+/// Handle of this module, the `hInstance` `SetWindowsHookExW` wants.
+///
+/// `app` has a private function of the same shape; this one exists so that a reinstallation is
+/// self-contained and `app` keeps to the three lines task T-06-2 was allowed to add to it. The
+/// call costs a lookup in the loader's table, once per reinstallation, which is twice a minute.
+fn module_instance() -> WinResult<HINSTANCE> {
+    // SAFETY: `None` asks for the handle of the file used to create the calling process, which
+    // is the documented way to name the running executable and cannot refer to a module that
+    // could be unloaded under us. The result is a borrowed handle that must not be freed, and
+    // nothing here frees it.
+    let module = unsafe { GetModuleHandleW(PCWSTR::null())? };
+
+    Ok(HINSTANCE(module.0))
+}
+
+/// The session-change registration of FR-80, undone when this value is dropped.
+///
+/// The registration is a resource the system holds **against the window**, which is why the
+/// undoing is explicit and not left to the window's destruction: FR-80 names
+/// `WTSUnRegisterSessionNotification` and the task specification of T-06-2 calls it obligatory.
+pub struct SessionNotice {
+    /// The window the registration names, so that the removal names the same one.
+    window: HWND,
+}
+
+/// Asks for `WM_WTSSESSION_CHANGE` at `window` — FR-80, second mechanism.
+///
+/// `NOTIFY_FOR_THIS_SESSION` and not `NOTIFY_FOR_ALL_SESSIONS`: FR-82 makes this program one
+/// instance per user session, its hook is a hook of that session, and the sessions of other
+/// users are none of its business.
+///
+/// ⚠ `window` must be the **top-level** window of the UI thread. A message-only window is a
+/// child of `HWND_MESSAGE`, and the whole family of session and power notifications is aimed at
+/// windows that are not.
+pub fn register_session_notice(window: HWND) -> WinResult<SessionNotice> {
+    // SAFETY: `window` is the caller's live window and is passed by value; the call registers
+    // the handle with the terminal-services subsystem and dereferences nothing of ours. The
+    // guard returned here is dropped before that window is destroyed, because
+    // `app::serve_window` declares it after the window.
+    unsafe { WTSRegisterSessionNotification(window, NOTIFY_FOR_THIS_SESSION) }?;
+
+    // Published only after the registration is known good, and it is what [`is_ui_window`] reads:
+    // this is the moment the module learns which of the three windows is the top-level one.
+    NOTICE_WINDOW.store(window.0 as usize, Ordering::Release);
+
+    Ok(SessionNotice { window })
+}
+
+impl Drop for SessionNotice {
+    fn drop(&mut self) {
+        // Unpublished first, so that no message can be answered on a window whose registration
+        // is about to go — the same order `app::Window::drop` uses for the same reason.
+        NOTICE_WINDOW.store(NO_WINDOW, Ordering::Release);
+
+        // SAFETY: `self.window` is the handle a successful `WTSRegisterSessionNotification`
+        // was given, and this type is neither `Copy` nor `Clone`, so the registration is
+        // removed exactly once. The window is still alive: `app::serve_window` declares this
+        // guard after the window and drop order takes it first.
+        if let Err(error) = unsafe { WTSUnRegisterSessionNotification(self.window) } {
+            // NFR-13: examined. Nothing can be done about it, and the system drops the
+            // registration when the window is destroyed in any case.
+            crate::app::report_non_critical("WTSUnRegisterSessionNotification", &error);
+        }
+    }
+}
+
+/// The liveness timer of FR-80, killed when this value is dropped.
+pub struct Liveness {
+    /// The window the timer belongs to, so that the removal names the same one.
+    window: HWND,
+}
+
+/// Starts the thirty-second liveness timer of FR-80 on `window` — FR-80, fourth mechanism.
+///
+/// ⚠ `window` must be the **input** thread's window: `WM_TIMER` is delivered to the thread that
+/// owns the window, and the reinstallation it causes has to happen on the thread that owns the
+/// hook. Section 6.1 puts "таймер сторожа" under the input thread for that reason.
+///
+/// A window timer and not a thread of its own: a fourth thread would be outside section 6.1, and
+/// a sleeping loop would be a thread waking up on a schedule of its own instead of the system's.
+/// `SetTimer` costs nothing while the queue is idle and NFR-10 gets the coarsest wake-up the
+/// requirement allows.
+pub fn start_liveness_timer(window: HWND) -> WinResult<Liveness> {
+    // SAFETY: `window` is the caller's live window, on the calling thread, which is what a
+    // window timer requires; `None` for the callback asks for `WM_TIMER` in the ordinary message
+    // queue rather than a `TIMERPROC` pointer, so no function of ours is registered anywhere and
+    // nothing can dangle. The guard returned here is dropped before the window is destroyed.
+    let started = unsafe { SetTimer(Some(window), LIVENESS_TIMER_ID, LIVENESS_INTERVAL_MS, None) };
+
+    // NFR-13: `SetTimer` reports failure with zero. A program whose liveness timer never
+    // started is a program that has lost the only mechanism answering the `LowLevelHooksTimeout`
+    // case of FR-80, so this is an error and not a warning.
+    if started == 0 {
+        return Err(WinError::from_thread());
+    }
+
+    #[cfg(feature = "testing")]
+    fault::arm_from_environment(window);
+
+    Ok(Liveness { window })
+}
+
+impl Drop for Liveness {
+    fn drop(&mut self) {
+        #[cfg(feature = "testing")]
+        fault::disarm(self.window);
+
+        // SAFETY: the pair `(window, id)` is the one a successful `SetTimer` returned for, and
+        // this type is neither `Copy` nor `Clone`, so the timer is killed exactly once. It runs
+        // on the thread that set it: the guard is created inside `app::serve_window` and never
+        // leaves that frame.
+        if let Err(error) = unsafe { KillTimer(Some(self.window), LIVENESS_TIMER_ID) } {
+            // NFR-13: examined. The timer dies with the window in any case.
+            crate::app::report_non_critical("KillTimer", &error);
+        }
+    }
+}
+
+/// Fault injection for the acceptance run — SEC-04a, feature `testing`, absent from the Release
+/// configuration.
+///
+/// FR-80 is about a failure nobody can stage: waiting for the system to take the hook away is
+/// waiting for a UAC prompt, a sleep or a wedged callback. Point 21 of the acceptance criteria
+/// asks instead for the hook to be **taken off from inside the program** and for the watchdog to
+/// be caught putting it back, and this is the switch that does it: one environment variable, one
+/// one-shot window timer, one call to the same `hook::uninstall` FR-83 and FR-96 use.
+///
+/// It stages the *consequence* of a silent removal — no hook — and not its cause, and the report
+/// of task T-06-2 says so plainly. What it cannot stage is the system's own bookkeeping: after
+/// this the program knows it has no hook, where after a real silent removal it would not.
+#[cfg(feature = "testing")]
+mod fault {
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
+
+    /// Environment variable naming the delay, in milliseconds, after which the hook is dropped.
+    ///
+    /// Absent means armed by nothing, which is what every run that did not ask for it gets.
+    const DROP_HOOK_ENV_VAR: &str = "LANGSW_TESTING_DROP_HOOK_MS";
+
+    /// `nIDEvent` of the one-shot timer. Distinct from [`super::LIVENESS_TIMER_ID`].
+    pub const DROP_HOOK_TIMER_ID: usize = 2;
+
+    /// Whether the one-shot timer is running, so that [`disarm`] does not try to kill a timer
+    /// that was never set and journal the refusal.
+    static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// Sets the one-shot timer if the environment asks for it.
+    pub fn arm_from_environment(window: HWND) {
+        let Ok(raw) = std::env::var(DROP_HOOK_ENV_VAR) else {
+            return;
+        };
+
+        let Ok(delay_ms) = raw.trim().parse::<u32>() else {
+            return;
+        };
+
+        if delay_ms == 0 {
+            return;
+        }
+
+        // SAFETY: the same invariants `super::start_liveness_timer` states — the caller's live
+        // window, on the calling thread, and `None` for the callback so that no function pointer
+        // of ours is registered.
+        let started = unsafe { SetTimer(Some(window), DROP_HOOK_TIMER_ID, delay_ms, None) };
+
+        ARMED.store(started != 0, Ordering::Release);
+    }
+
+    /// Kills the one-shot timer if it is still running.
+    pub fn disarm(window: HWND) {
+        if !ARMED.swap(false, Ordering::AcqRel) {
+            return;
+        }
+
+        // SAFETY: the pair `(window, id)` is the one `arm_from_environment` set the timer for,
+        // on this thread, and `ARMED` makes the kill happen exactly once.
+        if let Err(error) = unsafe { KillTimer(Some(window), DROP_HOOK_TIMER_ID) } {
+            crate::app::report_non_critical("KillTimer (fault)", &error);
+        }
+    }
+
+    /// Takes the hook off and stops the one-shot timer — the injected fault itself.
+    pub fn drop_the_hook(window: HWND) {
+        disarm(window);
+        crate::hook::uninstall();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,8 +1540,9 @@ mod tests {
         }
     }
 
-    /// The two events of the FR-10 table and nothing else. `EVENT_SYSTEM_DESKTOPSWITCH` is task
-    /// T-06-2 and must not be answered here yet.
+    /// The two events of the FR-10 table and nothing else. `EVENT_SYSTEM_DESKTOPSWITCH` is
+    /// subscribed to by task T-06-2 but is **not** a flush: a UAC prompt must not throw away
+    /// what the user has typed.
     #[test]
     fn the_subscription_list_is_the_two_rows_of_fr10() {
         assert_eq!(FLUSH_EVENTS, [EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_FOCUS]);
@@ -782,5 +1552,41 @@ mod tests {
         // 0x0020 — `EVENT_SYSTEM_DESKTOPSWITCH`, written out rather than imported so that adding
         // the constant to the list is a deliberate act and not an import away.
         assert!(!is_flush_event(0x0020));
+    }
+
+    /// FR-80: the desktop switch joined the list [`watch`] iterates over, and the list is the
+    /// three events section 6.1 puts under the watcher thread.
+    #[test]
+    fn the_watched_list_is_the_two_of_fr10_plus_the_one_of_fr80() {
+        assert_eq!(
+            WATCHED_EVENTS,
+            [
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_OBJECT_FOCUS,
+                EVENT_SYSTEM_DESKTOPSWITCH
+            ]
+        );
+        assert_eq!(WATCHED_EVENTS[..FLUSH_EVENTS.len()], FLUSH_EVENTS);
+        assert_eq!(EVENT_SYSTEM_DESKTOPSWITCH, 0x0020);
+    }
+
+    /// Every code the channel of SEC-04a can print, and the round trip that keeps the words and
+    /// the arms from drifting apart.
+    #[test]
+    fn every_reason_survives_the_atomic_it_travels_in() {
+        for reason in [
+            Reason::None,
+            Reason::Timer,
+            Reason::DesktopSwitch,
+            Reason::SessionChange,
+            Reason::PowerResume,
+        ] {
+            assert_eq!(Reason::from_code(reason as u32), reason, "{reason:?}");
+        }
+
+        // Anything that is not one of the five is "not yet", never a panic: the value comes out
+        // of an atomic and is read inside a window procedure.
+        assert_eq!(Reason::from_code(5), Reason::None);
+        assert_eq!(Reason::from_code(u32::MAX), Reason::None);
     }
 }

@@ -1,39 +1,52 @@
-//! Integration tests for task T-03-3 — the subscriptions of module `watchdog`.
+//! Integration tests for tasks T-03-3 and T-06-2 — the subscriptions of module `watchdog` and
+//! the hook watchdog of FR-80.
 //!
 //! # What is tested here and what cannot be
 //!
 //! Everything that decides something is a function of its arguments and is driven directly:
 //! whether a `RAWMOUSE` button word is a press or a movement (FR-10, FR-13), which `WinEvent`
-//! codes the flush table lists, what each message of the FR-21 delivery asks for, and how two
-//! flush requests coalesce across the wrap of the millisecond counter (FR-12).
+//! codes the flush table lists and which the watched list adds (FR-80), what each message of the
+//! FR-21 delivery asks for, how two flush requests coalesce across the wrap of the millisecond
+//! counter (FR-12), and which window each arm of the watchdog's window procedure is bound to.
 //!
-//! Two tests do touch Win32, because the value of checking them is precisely that they are
-//! real: the Raw Input registration of FR-13 with `RIDEV_INPUTSINK`, and the two
-//! `SetWinEventHook` subscriptions. Both are installed and immediately removed, on a window
-//! this file creates and destroys.
+//! Several tests do touch Win32, because the value of checking them is precisely that they are
+//! real: the Raw Input registration of FR-13 with `RIDEV_INPUTSINK`, the three `SetWinEventHook`
+//! subscriptions, the `WTSRegisterSessionNotification` of FR-80 and its withdrawal, and the
+//! thirty-second timer and its `KillTimer`. Every one of them is installed and immediately
+//! removed, on a window this file creates and destroys.
 //!
-//! **No test here installs a keyboard hook**, for the reason `tests\hook.rs` states: a
-//! `WH_KEYBOARD_LL` hook in a process that is not pumping messages freezes the keyboard of
-//! whoever is running `cargo test`. A `WinEvent` hook has no such property — it is
+//! **No test that `cargo test` runs installs a keyboard hook**, for the reason `tests\hook.rs`
+//! states: a `WH_KEYBOARD_LL` hook in a process that is not pumping messages freezes the
+//! keyboard of whoever is running `cargo test`. A `WinEvent` hook has no such property — it is
 //! `WINEVENT_OUTOFCONTEXT`, so the system posts to a queue instead of calling into us, and a
 //! queue nobody pumps is a queue nobody waits on.
 //!
+//! The one exception is `the_gap_without_a_hook_is_microseconds`, which is `#[ignore]`d for
+//! exactly that reason and run deliberately — the same shape the behavioural tests of
+//! `tests\switch.rs`, `tests\cycle.rs` and `tests\inject.rs` already have. It is the only place
+//! the gap FR-80 trades away can be measured at all, and it pumps the queue between rounds so
+//! that a stroke arriving inside it is answered rather than left to `LowLevelHooksTimeout`.
+//!
 //! What no test can show is the part of FR-12 that is about the *world*: that
 //! `KBDLLHOOKSTRUCT.time`, `GetMessageTime` and `dwmsEventTime` really are the same counter.
-//! That is argued in the report of task T-03-3 and measured on the running program.
+//! That is argued in the report of task T-03-3 and measured on the running program. Neither can
+//! a test stage a **silent** removal — the system does that, on its own schedule, and the report
+//! of task T-06-2 says exactly which part of FR-80 is therefore argued rather than measured.
 
 use lang_switcher::buffer::{self, Recorder, ResetOutcome};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{self, Counters, FLUSH_EVENTS, Rebuild, WM_APP_FLUSH, WM_APP_LAYOUT};
-use windows::Win32::Foundation::{HINSTANCE, LPARAM};
+use windows::Win32::Foundation::{HINSTANCE, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, EVENT_OBJECT_FOCUS, EVENT_SYSTEM_FOREGROUND, HWND_MESSAGE,
-    RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP,
-    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP,
-    RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, WINDOW_STYLE,
-    WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE,
+    CreateWindowExW, DestroyWindow, DispatchMessageW, EVENT_OBJECT_FOCUS,
+    EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, HWND_MESSAGE, MSG, PBT_APMRESUMEAUTOMATIC,
+    PM_REMOVE, PeekMessageW, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
+    RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN,
+    RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL,
+    RI_MOUSE_WHEEL, WINDOW_STYLE, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE,
+    WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
 
@@ -378,4 +391,328 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
         "the forged WM_INPUT was not a packet"
     );
     assert_eq!(counted.mouse_flushes, 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-80 — the watchdog proper, task T-06-2
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ **No test here reinstalls the hook**, and that is not caution but the same rule
+// `tests\hook.rs` states: a `WH_KEYBOARD_LL` hook in a process that is not pumping messages
+// freezes the keyboard of whoever is running `cargo test`. What is checked instead is that
+// every path to a reinstallation is bound to a window this process does not have, and the
+// checks below run in a process where neither window exists — so a binding left out would show
+// up here as a hook appearing in the test process, which the last assertion of
+// `no_watchdog_message_installs_a_hook_on_a_foreign_window` would catch.
+
+/// Criterion 9: `EVENT_SYSTEM_DESKTOPSWITCH` joined the list `watch` already iterated over, and
+/// no second subscription mechanism was built beside it.
+#[test]
+fn the_desktop_switch_joined_the_existing_subscription_list() {
+    assert_eq!(
+        watchdog::WATCHED_EVENTS,
+        [
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_OBJECT_FOCUS,
+            EVENT_SYSTEM_DESKTOPSWITCH
+        ],
+        "section 6.1: SetWinEventHook: FOREGROUND, OBJECT_FOCUS, DESKTOPSWITCH"
+    );
+
+    // The two rows of FR-10 are still the first two entries, so `watch` did not have its list
+    // replaced — it had it lengthened.
+    assert_eq!(
+        watchdog::WATCHED_EVENTS[..FLUSH_EVENTS.len()],
+        FLUSH_EVENTS,
+        "the flush events must still be the head of the watched list"
+    );
+
+    // And the desktop switch is deliberately **not** a flush: FR-10 does not list it, and a UAC
+    // prompt must not throw away what the user has typed.
+    assert!(!watchdog::is_flush_event(EVENT_SYSTEM_DESKTOPSWITCH));
+}
+
+/// The three subscriptions really install and really come off, on the real API.
+#[test]
+fn all_three_subscriptions_install_and_come_off() {
+    let watching = watchdog::watch().expect("three WinEvent subscriptions must install");
+
+    drop(watching);
+
+    // A second round proves the first was withdrawn as far as anything can: a leaked hook would
+    // still be in the machine, and this call would be the fourth, fifth and sixth subscriptions
+    // of a process that is supposed to hold three.
+    let again = watchdog::watch().expect("and must install again");
+
+    drop(again);
+}
+
+/// Criterion 10: the registration of FR-80 is made and — the half the task specification calls
+/// obligatory — withdrawn.
+#[test]
+fn the_session_registration_of_fr80_is_accepted_and_withdrawn() {
+    let window = TestWindow::new();
+
+    let registration = watchdog::register_session_notice(window.handle)
+        .expect("WTSRegisterSessionNotification must be accepted");
+
+    // The withdrawal is the point. A registration left behind is a resource the system holds
+    // against a window that is about to stop existing.
+    drop(registration);
+
+    // Registering the same window again would be a duplicate if the first had not been
+    // withdrawn.
+    let again = watchdog::register_session_notice(window.handle)
+        .expect("and the window must be registrable again");
+
+    drop(again);
+}
+
+/// The fourth mechanism of FR-80: thirty seconds, on a window, killed on the way out.
+#[test]
+fn the_liveness_timer_is_the_thirty_seconds_of_fr80_and_comes_off() {
+    assert_eq!(
+        watchdog::LIVENESS_INTERVAL_MS,
+        30_000,
+        "FR-80: периодическая проверка живости хука с интервалом 30 с"
+    );
+
+    let window = TestWindow::new();
+
+    let liveness =
+        watchdog::start_liveness_timer(window.handle).expect("the liveness timer must start");
+
+    // `KillTimer` inside the guard's `Drop` fails loudly if the pair `(window, id)` never named
+    // a timer, so a successful drop is the withdrawal being accepted.
+    drop(liveness);
+
+    let again = watchdog::start_liveness_timer(window.handle).expect("and must start again");
+
+    drop(again);
+}
+
+/// The private messages of this process are all different numbers.
+///
+/// Not a formality: `WM_APP_REHOOK` was written as `WM_APP + 8` first, which is
+/// `switch::WM_APP_SWITCH`. Two private messages sharing a number collide silently — nothing but
+/// the number tells them apart, and the window procedure would run the wrong arm.
+#[test]
+fn the_private_messages_of_this_process_are_all_distinct() {
+    let messages = [
+        lang_switcher::hook::WM_APP_HOTKEY,
+        lang_switcher::hook::WM_APP_FAIL_SAFE,
+        WM_APP_FLUSH,
+        WM_APP_LAYOUT,
+        lang_switcher::switch::WM_APP_SWITCH,
+        watchdog::WM_APP_REHOOK,
+    ];
+
+    for (index, message) in messages.iter().enumerate() {
+        for other in &messages[index + 1..] {
+            assert_ne!(message, other, "two private messages share a number");
+        }
+    }
+}
+
+/// SEC-05 and FR-01: every arm of the watchdog's window procedure is bound to a window this
+/// process does not have, so none of them does anything here — least of all install a hook.
+#[test]
+fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
+    // The preconditions this test rests on, asserted rather than assumed: this thread owns no
+    // typing buffer, so it is not the input thread, and this process has no hook.
+    assert!(
+        !buffer::is_installed(),
+        "this test must not run on a thread that owns the buffer"
+    );
+    assert!(
+        !lang_switcher::hook::is_installed(),
+        "no test in this binary may install a keyboard hook"
+    );
+
+    let window = TestWindow::new();
+    let before = watchdog::health();
+
+    for (message, wparam) in [
+        (WM_POWERBROADCAST, WPARAM(PBT_APMRESUMEAUTOMATIC as usize)),
+        (WM_WTSSESSION_CHANGE, WPARAM(WTS_SESSION_UNLOCK as usize)),
+        (WM_TIMER, WPARAM(watchdog::LIVENESS_TIMER_ID)),
+        (watchdog::WM_APP_REHOOK, WPARAM(0)),
+    ] {
+        assert!(
+            watchdog::handle_watchdog_message(window.handle, message, wparam).is_none(),
+            "message {message:#x} must fall through on a window that is neither ours"
+        );
+    }
+
+    let after = watchdog::health();
+
+    assert_eq!(
+        after.recoveries, before.recoveries,
+        "nothing was reinstalled"
+    );
+    assert_eq!(after.power_resumes, before.power_resumes);
+    assert_eq!(after.session_changes, before.session_changes);
+    assert_eq!(after.liveness_ticks, before.liveness_ticks);
+
+    // The one that matters: no keyboard hook exists in this process, and the keyboard of
+    // whoever is running `cargo test` is untouched.
+    assert!(!lang_switcher::hook::is_installed());
+}
+
+/// FR-90, criterion 18: the state the tray of task T-08-1 will show is readable from outside
+/// this module, and a process without a hook says so.
+#[test]
+fn a_process_without_a_hook_reports_the_hook_down() {
+    assert!(!lang_switcher::hook::is_installed());
+    assert!(
+        watchdog::hook_down(),
+        "FR-90: a program with no hook is not active, whatever the icon says"
+    );
+
+    let health = watchdog::health();
+
+    // A test process runs no watchdog, so every count is zero and the reason is "not yet".
+    assert_eq!(health.recoveries, 0);
+    assert_eq!(health.install_failures, 0);
+    assert_eq!(health.last_reason, watchdog::Reason::None);
+    assert_eq!(health.last_reason.name(), "none");
+}
+
+/// SEC-01, SEC-07: the reason that leaves the process through the channel of SEC-04a is one of
+/// five short ASCII words, and the set is closed.
+#[test]
+fn the_reason_is_one_of_five_ascii_words_and_nothing_else() {
+    let reasons = [
+        watchdog::Reason::None,
+        watchdog::Reason::Timer,
+        watchdog::Reason::DesktopSwitch,
+        watchdog::Reason::SessionChange,
+        watchdog::Reason::PowerResume,
+    ];
+
+    let words: Vec<&str> = reasons.iter().map(|reason| reason.name()).collect();
+
+    assert_eq!(
+        words,
+        vec![
+            "none",
+            "timer",
+            "desktop_switch",
+            "session_change",
+            "power_resume"
+        ]
+    );
+
+    for word in &words {
+        assert!(
+            word.is_ascii() && !word.is_empty(),
+            "a channel value must be ASCII: {word:?}"
+        );
+        assert!(
+            word.chars()
+                .all(|character| character.is_ascii_lowercase() || character == '_'),
+            "and must carry nothing that could be a character the user typed: {word:?}"
+        );
+    }
+}
+
+/// **The gap of FR-80, measured** — criterion 13 asks the report for a number and this is where
+/// the number comes from, together with criterion 14's proof at the level of the API itself.
+///
+/// ⚠ `#[ignore]`d, and the reason is the one `tests\hook.rs` and the behavioural tests of
+/// `tests\switch.rs` give for theirs: this installs a **live global `WH_KEYBOARD_LL` hook** in a
+/// process that is not the product. It is deliberate, short, and pumps the queue between rounds
+/// so that a stroke arriving during it is answered rather than left to `LowLevelHooksTimeout`.
+/// The hook it installs is the product's own callback, so `Ctrl+Alt+Shift+F12` remains an escape
+/// hatch throughout.
+///
+/// What it shows:
+///
+/// * the gap between `UnhookWindowsHookEx` and `SetWindowsHookExW` is microseconds, not
+///   milliseconds, so the strokes a reinstallation cannot buffer are the ones typed inside a
+///   window narrower than the gap between two keys of the fastest typist alive;
+/// * **two hooks never exist at once**: `hook::install` refuses while one is registered, which
+///   is FR-01 enforced by the accepted module and the reason `reinstall_hook` cannot be written
+///   in the other order.
+#[test]
+#[ignore = "installs a live global WH_KEYBOARD_LL hook; run deliberately with --ignored --test-threads=1"]
+fn the_gap_without_a_hook_is_microseconds() {
+    /// Reinstallations to time. Enough for a maximum to mean something, few enough that the
+    /// hook is in the machine for milliseconds and not seconds.
+    const ROUNDS: u32 = 20;
+
+    // SAFETY: `None` asks for the handle of the running executable, which cannot be unloaded
+    // under us.
+    let module = unsafe { GetModuleHandleW(PCWSTR::null()) }.expect("the module handle");
+    let instance = HINSTANCE(module.0);
+
+    let window = TestWindow::new();
+
+    let installed =
+        lang_switcher::hook::install(window.handle, instance).expect("the hook must install");
+
+    // **Criterion 14, at the level where FR-01 is enforced.** A second installation is refused
+    // while one is registered, so no code path — this module's included — can hold two.
+    assert!(
+        lang_switcher::hook::install(window.handle, instance).is_err(),
+        "FR-01: a second hook must be refused while one is registered"
+    );
+
+    for round in 0..ROUNDS {
+        assert!(
+            watchdog::reinstall_hook(window.handle, watchdog::Reason::Timer),
+            "round {round} must end with a hook"
+        );
+        assert!(lang_switcher::hook::is_installed());
+
+        // And still exactly one after the reinstallation, not two.
+        assert!(lang_switcher::hook::install(window.handle, instance).is_err());
+
+        drain_the_queue();
+    }
+
+    drop(installed);
+
+    assert!(
+        !lang_switcher::hook::is_installed(),
+        "the guard must take the hook off however many times it was replaced"
+    );
+
+    let health = watchdog::health();
+
+    println!("reinstallations   = {}", health.recoveries);
+    println!("last gap, us      = {}", health.last_gap_us);
+    println!("longest gap, us   = {}", health.max_gap_us);
+    println!("silent removals   = {}", health.silent_removals);
+    println!("absent at check   = {}", health.absent_at_check);
+    println!("install failures  = {}", health.install_failures);
+    println!("last reason       = {}", health.last_reason.name());
+
+    assert_eq!(health.recoveries, ROUNDS);
+    assert_eq!(health.install_failures, 0);
+    assert_eq!(
+        health.silent_removals, 0,
+        "nothing took the hook away during a test that lasted milliseconds"
+    );
+    assert_eq!(health.last_reason, watchdog::Reason::Timer);
+    assert!(
+        health.max_gap_us < 100_000,
+        "the gap is microseconds; {} us is not",
+        health.max_gap_us
+    );
+}
+
+/// Answers whatever is in this thread's queue, so that a stroke delivered to the hook installed
+/// above is dispatched rather than left waiting on `LowLevelHooksTimeout`.
+#[cfg(test)]
+fn drain_the_queue() {
+    let mut message = MSG::default();
+
+    // SAFETY: `message` is a live `MSG` of this frame written by the call; `None` for the window
+    // asks for every message of the calling thread, and the two zeroes for no filter. The call
+    // returns a `BOOL` saying whether it wrote anything, which is what the loop condition is.
+    while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+        // SAFETY: `message` was just filled by `PeekMessageW` and is passed unchanged.
+        unsafe { DispatchMessageW(&message) };
+    }
 }
