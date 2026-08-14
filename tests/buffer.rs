@@ -242,6 +242,7 @@ const VK_LCONTROL: u16 = 0xA2;
 const VK_LMENU: u16 = 0xA4;
 const VK_RMENU: u16 = 0xA5;
 const VK_LWIN: u16 = 0x5B;
+const VK_RWIN: u16 = 0x5C;
 const VK_CAPITAL: u16 = 0x14;
 /// `Pause`, the default hotkey of section 7.
 const VK_PAUSE: u16 = 0x13;
@@ -651,10 +652,16 @@ fn ctrl_alt_and_win_combinations_are_commands_and_flush() {
 /// because holding `Ctrl` is not yet a command and `Shift` is not text. Only `Win+Space` has a
 /// non-modifier in it.
 ///
-/// And the outcome does not identify the row even for `Win+Space`: `Space` is a boundary key
-/// of FR-10 in its own right, so the plain `Space` at the end of this test answers
-/// [`Recorded::Flushed`] with no modifier held at all. The two rows are one value from the
-/// outside, which is what the last block records.
+/// ⚠ **Updated by task T-03-3c, and only in the `Win+Space` block.** The fact this test is
+/// named after has not moved — `Win+Space` is still the one switcher of the three that reaches
+/// the row — but what the row does with it has: the user's decision on question 43 (commit
+/// `e6ba407`) rewrote it as "`Ctrl`/`Alt`/`Win` + клавиша, **кроме комбинаций смены раскладки,
+/// названных FR-11**", so the switch is no longer a command and no longer flushes. The two
+/// modifier-only blocks and the bare-`Space` control block are untouched.
+///
+/// `Space` remains a boundary key of FR-10 in its own right, which is what the last block
+/// records and why the exception in [`Recorder::record`] is written as narrowly as it is: with
+/// no `Win` held, the very same key still answers [`Recorded::Flushed`].
 ///
 /// Nothing here is a defect. FR-11 says a layout change must not flush the buffer, and the two
 /// switchers that leave it untouched are FR-11 working exactly as written. The test exists so
@@ -686,29 +693,162 @@ fn only_one_of_the_three_layout_switchers_reaches_the_command_row_of_fr10() {
         "Ctrl+Shift is modifiers and nothing else"
     );
 
-    // `Win+Space`. `Space` is not a modifier, so this one is a command and the buffer goes.
+    // `Win+Space`. `Space` is not a modifier, so this one — and only this one of the three —
+    // does reach the row, which is what this test is named after and what it still measures.
+    //
+    // ⚠ What the row **does** with it changed, and this is the one assertion of this test that
+    // task T-03-3c had to move. The row now reads "кроме комбинаций смены раскладки, названных
+    // FR-11" (`SPEC.md` §4.2, commit e6ba407, the user's decision on question 43), so the
+    // switch is no longer a command: nothing is flushed, and nothing is stored either.
     let mut recorder = fresh();
     fill(&mut recorder, 3);
 
     assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
     assert_eq!(
         press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed,
-        "Win+Space is the one switcher of the three that is a command"
+        Recorded::Ignored,
+        "Win+Space reaches the row and the row lets it past — FR-11"
     );
-    assert_eq!(recorder.len(), 0);
+    assert_eq!(recorder.len(), 3, "FR-11: a layout switch keeps the buffer");
     release(&mut recorder, VK_LWIN);
 
-    // And `Space` alone answers the same, from the boundary-key row instead. A caller that
-    // watched the outcome could not tell a command from an ordinary word break.
+    // And `Space` alone still flushes, from the boundary-key row instead — the row FR-11 says
+    // nothing about, and the reason the exception above is written as narrowly as it is.
     let mut recorder = fresh();
     fill(&mut recorder, 3);
 
     assert_eq!(
         press(&mut recorder, VK_SPACE, SCAN_SPACE),
         Recorded::Flushed,
-        "a bare Space is a flush too, and an indistinguishable one"
+        "a bare Space is a flush, exactly as it was"
     );
+    assert_eq!(recorder.len(), 0);
+}
+
+// -------------------------------------------------------------------------------------
+// FR-11 against FR-10 — task T-03-3c, the user's decision on question 43
+// -------------------------------------------------------------------------------------
+
+/// **`Win`+`Space` does not flush, and the strokes keep the layout they were typed under** —
+/// FR-11, and the whole of part 1 of task T-03-3c.
+///
+/// The requirement in one sentence: "Смена раскладки самим пользователем (`Alt+Shift`,
+/// `Win+Space`) **не сбрасывает** буфер: HKL хранится по каждому нажатию отдельно."
+///
+/// This is the sequence the user actually performs, in the order they perform it, and it is the
+/// sequence that used to lose their text: type, notice the wrong layout, switch it with
+/// `Win+Space`, carry on typing, and only then reach for the hotkey. What the hotkey has to
+/// find at the end is **everything** — the part typed before the switch and the part typed
+/// after — with each stroke still carrying the `hkl` that was active when that stroke was made,
+/// because FR-26 converts by the recorded `hkl` and by nothing else.
+///
+/// `set_active_layout` between the two halves is what the probe of part 2 causes the input
+/// thread to do (`app::refresh_layout_and_cache`), and it is called here directly for the same
+/// reason the rest of this file calls the recorder directly: no window, no hook, no keyboard.
+#[test]
+fn a_layout_switch_with_win_and_space_keeps_everything_typed_before_it() {
+    let mut recorder = fresh();
+
+    // Two strokes in English, the layout that was active when they were typed.
+    fill(&mut recorder, 2);
+
+    // The switch itself. It reaches the command row of FR-10 — `Space` is not a modifier — and
+    // the row lets it past, because FR-11 names this combination.
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Ignored,
+        "FR-11: Win+Space is a layout switch, not a command"
+    );
+    assert_eq!(recorder.len(), 2, "FR-11: the buffer survives the switch");
+    assert_eq!(release(&mut recorder, VK_LWIN), Recorded::Modifier);
+
+    // Nothing was stored either: the system consumes the switch and puts no space into the
+    // text, so a space in the ring would be a character the user never typed.
+    assert_eq!(recorder.len(), 2, "the switch is not text");
+
+    // The layout the probe of part 2 discovers, published exactly as the input thread does it.
+    recorder.set_active_layout(RU);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(recorder.len(), 3);
+
+    // FR-11, the second half of the sentence, and FR-26: the `hkl` is per stroke, so the two
+    // halves of the buffer keep their own and the same physical key reads as two characters.
+    assert_eq!(recorder.stroke(0).expect("stored").hkl(), EN);
+    assert_eq!(recorder.stroke(1).expect("stored").hkl(), EN);
+    assert_eq!(recorder.stroke(2).expect("stored").hkl(), RU);
+    assert_eq!(typed(&recorder), "aaф");
+}
+
+/// **The FR-11 exception is exactly `Win`+`Space` and not one combination wider** — FR-10.
+///
+/// Every row of the FR-10 table that was a flush before task T-03-3c is still a flush. The
+/// exception is one combination, held to three conditions: the key is `Space`, `Win` is down,
+/// and neither `Ctrl` nor `Alt` is — `Ctrl+Win+Space` and `Alt+Win+Space` switch no layout on
+/// this system and stay commands.
+///
+/// The `Space` row of the table ("`Space`, `Tab`, `Enter`, `Esc` — полный сброс") is the one
+/// this could most easily have damaged, and the first case below is it: with no modifier held
+/// the very same key flushes exactly as it always did.
+#[test]
+fn everything_but_win_plus_space_flushes_exactly_as_it_did() {
+    // `Space` with nothing held — the boundary-key row of FR-10, untouched.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed
+    );
+    assert_eq!(recorder.len(), 0, "a bare Space still flushes");
+
+    // `Win` plus a key that is not `Space` — the command row, untouched.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    hold(&mut recorder, VK_LWIN);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Flushed);
+    assert_eq!(recorder.len(), 0, "Win+A is still a command");
+    release(&mut recorder, VK_LWIN);
+
+    // `Win` plus the other boundary keys: `Space` is excepted by name, and `Tab`, `Enter` and
+    // `Esc` are not.
+    for vk in [VK_TAB, VK_RETURN, VK_ESCAPE] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        hold(&mut recorder, VK_LWIN);
+        assert_eq!(
+            press(&mut recorder, vk, SCAN_A),
+            Recorded::Flushed,
+            "Win plus vk {vk:#04x} is still a command"
+        );
+        assert_eq!(recorder.len(), 0, "vk {vk:#04x}");
+    }
+
+    // `Space` with `Win` and a command modifier on top of it. Not the switch FR-11 names, and
+    // therefore not excepted.
+    for extra in [VK_LCONTROL, VK_LMENU] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        hold(&mut recorder, VK_LWIN);
+        hold(&mut recorder, extra);
+        assert_eq!(
+            press(&mut recorder, VK_SPACE, SCAN_SPACE),
+            Recorded::Flushed,
+            "Win+{extra:#04x}+Space is not the switcher of FR-11"
+        );
+        assert_eq!(recorder.len(), 0, "extra modifier {extra:#04x}");
+    }
+
+    // And the right `Win` is the same key as the left one, which is how the tracker reads it.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    hold(&mut recorder, VK_RWIN);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Ignored,
+        "the right Win switches the layout too"
+    );
+    assert_eq!(recorder.len(), 3);
 }
 
 #[test]

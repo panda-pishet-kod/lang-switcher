@@ -34,8 +34,11 @@
 //!    user's text, and that call writes the buffer of the calling thread. It is pure of Win32,
 //!    of allocation and of anything that can block, which is what NFR-01 to NFR-05 ask for. In
 //!    a build that unwinds it runs inside `catch_unwind`, which is FR-99.
-//! 3. **The effects**, which are exactly two: one `PostMessageW` when the hotkey has been
-//!    recognised, and `CallNextHookEx` when the stroke is not suppressed.
+//! 3. **The effects**, which are exactly three: one `PostMessageW` when the hotkey has been
+//!    recognised, one `PostMessageW` when a modifier has been released and the keyboard layout
+//!    is worth re-reading (FR-21, task T-03-3c), and `CallNextHookEx` when the stroke is not
+//!    suppressed. Never more than one of the two posts on the same stroke: a modifier is not
+//!    the hotkey.
 //!
 //! # How a recognised hotkey press leaves this module — the interface T-03-2 attaches to
 //!
@@ -77,7 +80,8 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE, VK_F1, VK_F12,
-    VK_HOME, VK_INSERT, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_SCROLL, VK_SHIFT,
+    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK,
+    VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SNAPSHOT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -239,6 +243,16 @@ pub struct Outcome {
     /// `PostMessageW` of [`WM_APP_HOTKEY`]. False for auto-repeat (FR-08) and for the
     /// release.
     pub fire_hotkey: bool,
+    /// A modifier key has just been released and the keyboard layout is worth re-reading —
+    /// the `PostMessageW` of [`crate::watchdog::WM_APP_LAYOUT`], task T-03-3c. See
+    /// [`is_layout_probe`] for which strokes these are and why.
+    ///
+    /// A flag on the way out rather than a call inside [`classify`], for the reason the whole
+    /// of this type exists: the decision stays a function of its arguments, so `tests\hook.rs`
+    /// can *measure* that each of the three layout switchers of FR-11 ends in one of these
+    /// instead of taking it on trust. The `PostMessageW` itself is in
+    /// [`keyboard_hook_proc`], next to the one [`fire_hotkey`](Self::fire_hotkey) drives.
+    pub probe_layout: bool,
 }
 
 impl Outcome {
@@ -246,7 +260,76 @@ impl Outcome {
     const PASS: Self = Self {
         decision: Decision::Pass,
         fire_hotkey: false,
+        probe_layout: false,
     };
+}
+
+/// Virtual-key codes of the modifier keys whose **release** is worth a layout probe —
+/// task T-03-3c.
+///
+/// Both the sided codes and the neutral ones, for the reason [`crate::buffer`] accepts both:
+/// `WH_KEYBOARD_LL` reports the sided ones, which is what makes `AltGr` recognisable at all,
+/// and a neutral code arriving from anywhere else is still the same physical key.
+///
+/// `CapsLock` is deliberately **not** here, although [`crate::buffer`] counts it a modifier. It
+/// is a toggle rather than a held key, it appears in none of the combinations FR-11 names, and
+/// every release of it would be a probe that can never find anything.
+const LAYOUT_PROBE_MODIFIERS: [u16; 11] = [
+    VK_SHIFT.0,
+    VK_LSHIFT.0,
+    VK_RSHIFT.0,
+    VK_CONTROL.0,
+    VK_LCONTROL.0,
+    VK_RCONTROL.0,
+    VK_MENU.0,
+    VK_LMENU.0,
+    VK_RMENU.0,
+    VK_LWIN.0,
+    VK_RWIN.0,
+];
+
+/// Whether this stroke is the moment to ask the input thread to re-read the keyboard layout —
+/// **the probe that closes the open limit of FR-21**, task T-03-3c.
+///
+/// # The limit
+///
+/// FR-21 rebuilds the cache "по сообщениям `WM_INPUTLANGCHANGE` и `WM_DEVICECHANGE`", and
+/// neither reaches this program — task T-03-2a measured that. Task T-03-3 replaced them with a
+/// question asked at `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS`, and that mechanism
+/// stays exactly as it is. What it cannot see is a user who switches layout **without leaving
+/// the window they are typing in**: no foreground changes and no focus moves, so nothing asks,
+/// and every stroke until the next window change is recorded under the previous `hkl` — which
+/// is the value FR-26 then converts by.
+///
+/// # Why a modifier release, and why that is a measured claim and not an assumed one
+///
+/// The three layout switchers of Windows — `Alt+Shift`, `Ctrl+Shift` and `Win+Space` — differ
+/// in composition, and four earlier mechanisms failed on properties only two of them had. The
+/// one property all three do share is that **all three end with a modifier being released**,
+/// and a release is an event this hook already sees. `tests\hook.rs` drives each of the three
+/// through [`classify`] one event at a time and asserts it; nothing here rests on the claim
+/// being plausible.
+///
+/// The **release** and not the press, because the system performs the switch after this
+/// callback has returned: a probe fired on the press would read the layout that is on its way
+/// out. Both releases of a two-modifier switcher fire one, which is deliberate — the later of
+/// the two is the one with the best chance of finding the switch already complete, and the
+/// earlier one costs a probe that answers "unchanged".
+///
+/// # What a false probe costs, and why there is no threshold guarding this
+///
+/// Releasing `Shift` after a capital letter is a modifier release too, so this answers `true`
+/// for it. That is the whole design and not an oversight: the probe **asks**, it does not
+/// rebuild. `app::layout_refresh_needed` compares the layout the foreground window is running
+/// against the one the buffer is recording under and returns before anything is built when
+/// they agree, so an ordinary capital letter costs one `PostMessageW` here and three cheap
+/// Win32 reads on the input thread — never the sweep of FR-20.
+///
+/// ⚠ **FR-11: this flushes nothing.** It asks a question about the layout and that is all it
+/// does; the buffer is not touched here, and the path this message ends on
+/// (`app::refresh_layout_and_cache`) has no `reset` on it either.
+fn is_layout_probe(key: KeyEvent) -> bool {
+    matches!(key.edge, Edge::Up) && LAYOUT_PROBE_MODIFIERS.contains(&key.vk)
 }
 
 /// Turns the `wParam` of the callback into an [`Edge`].
@@ -329,7 +412,20 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
         // of Win32 (NFR-01 to NFR-05).
         crate::buffer::record(key);
 
-        return Outcome::PASS;
+        // **FR-21, the limit task T-03-3 left open** — task T-03-3c. A modifier going up is
+        // the one event all three layout switchers of FR-11 have in common, so this is where
+        // the program asks whether the layout moved. It is a flag and not a call: the answer
+        // travels out with the outcome and `keyboard_hook_proc` posts it, which keeps this
+        // function free of Win32 (NFR-01, NFR-05) and keeps the rule reachable from a test.
+        //
+        // Below the three early returns above on purpose. A fail-safe program (FR-99) asks
+        // nothing, our own injected input (FR-03) switches no layout, and a suspended one
+        // (FR-90) has no buffer to record under — all three answer `Outcome::PASS`, whose
+        // `probe_layout` is false.
+        return Outcome {
+            probe_layout: is_layout_probe(key),
+            ..Outcome::PASS
+        };
     }
 
     match key.edge {
@@ -347,6 +443,8 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
                 // known until the buffer is consulted, long after this has returned.
                 decision: Decision::Suppress,
                 fire_hotkey: first_press,
+                // The hotkey of FR-02 is not a modifier and switches no layout.
+                probe_layout: false,
             }
         }
 
@@ -358,6 +456,7 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
                 // through leaves the application with a key it never saw go down.
                 decision: Decision::Suppress,
                 fire_hotkey: false,
+                probe_layout: false,
             }
         }
     }
@@ -1198,6 +1297,13 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         post_hotkey();
     }
 
+    // FR-21, task T-03-3c. One `PostMessageW` and nothing else, on the same terms as the one
+    // above: `classify` decided, this posts. The two are mutually exclusive in practice — the
+    // hotkey of FR-02 is not a modifier — so no stroke ever costs both.
+    if outcome.probe_layout {
+        post_layout_probe();
+    }
+
     match outcome.decision {
         Decision::Suppress => SUPPRESS,
 
@@ -1261,6 +1367,54 @@ fn post_hotkey() {
     if posted.is_err() {
         // NFR-13: examined and recorded. NFR-05: recorded in an atomic, not in a journal —
         // this is the callback.
+        POST_FAILURES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Posts [`crate::watchdog::WM_APP_LAYOUT`] to the input thread's window — **the layout probe
+/// of FR-21**, task T-03-3c. See [`is_layout_probe`] for when and why.
+///
+/// The same window and the same message as the delivery task T-03-3 built: the input thread's
+/// message-only window answers `WM_APP_LAYOUT` by re-reading the layout of the foreground
+/// window and rebuilding the cache **only if it really changed**. That mechanism is reused
+/// whole and is not touched — this adds a second occasion to ask, not a second way to answer.
+///
+/// Written here rather than as a call to `app::post_to_input_thread`, which does the same thing
+/// for module `watchdog`, for one reason: this runs inside the hook callback, and a failure has
+/// to end in an atomic counter (NFR-05, NFR-13) rather than in whatever `app` reports a
+/// non-critical error through. It is one atomic load and one `PostMessageW`, which is the whole
+/// of what NFR-01 to NFR-05 permit on this path.
+///
+/// The message carries no parameters — SEC-01 and SEC-07: a keystroke must never travel in a
+/// window message, and this one says only "the layout may have moved", never which key moved
+/// it. SEC-05: any process at the same integrity level can post it, and all that buys the
+/// sender is a re-read of the system's own layout list into memory of ours.
+fn post_layout_probe() {
+    let raw = HOTKEY_TARGET.load(Ordering::Relaxed);
+
+    if raw == NO_HANDLE {
+        // No window to post to — the same window and the same window-less window of time as
+        // `post_hotkey`, and recorded rather than ignored for the same reason (NFR-13).
+        POST_FAILURES.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+
+    // SAFETY: identical to `post_hotkey` above, and for the identical reason: `raw` is the
+    // handle `install` published for the input thread's message-only window, that window
+    // outlives the hook, and `PostMessageW` queues the message and returns without
+    // dereferencing either parameter — both are zero — and without blocking (NFR-01, NFR-02,
+    // NFR-04).
+    let posted = unsafe {
+        PostMessageW(
+            Some(HWND(raw as *mut c_void)),
+            crate::watchdog::WM_APP_LAYOUT,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    };
+
+    if posted.is_err() {
+        // NFR-13: examined and recorded, in an atomic and not in a journal (NFR-05).
         POST_FAILURES.fetch_add(1, Ordering::Relaxed);
     }
 }

@@ -50,11 +50,12 @@ fn armed() -> Mode {
     }
 }
 
-/// The outcome every "not ours" path has to produce: hand it on, start nothing.
+/// The outcome every "not ours" path has to produce: hand it on, start nothing, ask nothing.
 fn passed_on() -> Outcome {
     Outcome {
         decision: Decision::Pass,
         fire_hotkey: false,
+        probe_layout: false,
     }
 }
 
@@ -339,6 +340,288 @@ fn a_hotkey_held_across_a_state_change_does_not_stay_stuck_down() {
     // ...and when it comes back, the next press is a press and not a repeat.
     let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
     assert!(outcome.fire_hotkey);
+}
+
+// -------------------------------------------------------------------------------------
+// FR-21 — the layout probe of task T-03-3c
+// -------------------------------------------------------------------------------------
+
+/// The modifier keys, sided and neutral, and the two keys used as counter-examples.
+const VK_SHIFT: u16 = 0x10;
+const VK_CONTROL: u16 = 0x11;
+const VK_MENU: u16 = 0x12;
+const VK_CAPITAL: u16 = 0x14;
+const VK_SPACE: u16 = 0x20;
+const VK_LWIN: u16 = 0x5B;
+const VK_RWIN: u16 = 0x5C;
+const VK_LSHIFT: u16 = 0xA0;
+const VK_RSHIFT: u16 = 0xA1;
+const VK_LCONTROL: u16 = 0xA2;
+const VK_RCONTROL: u16 = 0xA3;
+const VK_LMENU: u16 = 0xA4;
+const VK_RMENU: u16 = 0xA5;
+
+/// Every modifier the probe answers to.
+const PROBE_MODIFIERS: [u16; 11] = [
+    VK_SHIFT,
+    VK_LSHIFT,
+    VK_RSHIFT,
+    VK_CONTROL,
+    VK_LCONTROL,
+    VK_RCONTROL,
+    VK_MENU,
+    VK_LMENU,
+    VK_RMENU,
+    VK_LWIN,
+    VK_RWIN,
+];
+
+/// **The measurement the whole of part 2 rests on: all three layout switchers end with a
+/// modifier being released** — task T-03-3c, point 15, and rule Р-41.
+///
+/// Four mechanisms for closing the open limit of FR-21 have been rejected before this one, and
+/// the fourth was rejected because a property was *asserted* of the code instead of being read
+/// out of it: `Alt+Shift` and `Ctrl+Shift` were said to reach the command row of FR-10, and
+/// they do not. The fifth mechanism rests on a different property — that all three switchers
+/// **end with a modifier release** — and this test is that property measured rather than
+/// assumed. If it were false for any one of the three, the mechanism would be as dead as the
+/// four before it and this test would say so.
+///
+/// Each switcher is driven through [`hook::classify`] one event at a time, exactly as the
+/// callback delivers them: a press per key going down and a release per key going up, in the
+/// order the fingers make them. What is asserted of each is that its **last** event asks for a
+/// probe, which is the claim; the exact number of probes per switch is asserted beside it,
+/// because that number is what the mechanism costs and it should not be able to grow unnoticed.
+#[test]
+fn every_layout_switcher_of_fr11_ends_in_a_stroke_that_asks_for_the_probe() {
+    /// One layout switcher as the hook sees it: its name, the events it is made of, and the
+    /// number of probes it is expected to cost.
+    type Switcher = (&'static str, &'static [(u16, Edge)], u32);
+
+    let switchers: [Switcher; 3] = [
+        (
+            "Alt+Shift",
+            &[
+                (VK_LMENU, Edge::Down),
+                (VK_LSHIFT, Edge::Down),
+                (VK_LSHIFT, Edge::Up),
+                (VK_LMENU, Edge::Up),
+            ],
+            2,
+        ),
+        (
+            "Ctrl+Shift",
+            &[
+                (VK_LCONTROL, Edge::Down),
+                (VK_LSHIFT, Edge::Down),
+                (VK_LSHIFT, Edge::Up),
+                (VK_LCONTROL, Edge::Up),
+            ],
+            2,
+        ),
+        (
+            // The one switcher of the three with a key in it, which is why it is also the only
+            // one that reaches the command row of FR-10 — `tests\buffer.rs` measures that half.
+            "Win+Space",
+            &[
+                (VK_LWIN, Edge::Down),
+                (VK_SPACE, Edge::Down),
+                (VK_SPACE, Edge::Up),
+                (VK_LWIN, Edge::Up),
+            ],
+            1,
+        ),
+    ];
+
+    for (name, events, expected_probes) in switchers {
+        let mut state = HotkeyState::default();
+        let mut probes = 0;
+        let mut last_asked = false;
+
+        for &(vk, edge) in events {
+            let outcome = hook::classify(armed(), &mut state, user_key(vk, edge));
+
+            // None of the six keys involved is the hotkey, so every one of them is passed on
+            // to the application untouched — a layout switch must still switch the layout.
+            assert_eq!(
+                outcome.decision,
+                Decision::Pass,
+                "{name}, {vk:#04x} {edge:?}"
+            );
+            assert!(!outcome.fire_hotkey, "{name}, {vk:#04x} {edge:?}");
+
+            last_asked = outcome.probe_layout;
+
+            if last_asked {
+                probes += 1;
+            }
+        }
+
+        assert!(
+            last_asked,
+            "{name} does not end in a stroke that asks for a probe — the mechanism of T-03-3c \
+             does not cover it"
+        );
+        assert_eq!(probes, expected_probes, "{name} costs this many probes");
+    }
+}
+
+#[test]
+fn the_probe_is_asked_for_by_a_modifier_going_up_and_by_nothing_else() {
+    for vk in PROBE_MODIFIERS {
+        let mut state = HotkeyState::default();
+
+        // The press must not ask. The system performs the switch after this callback has
+        // returned, so a probe fired here would read the layout that is on its way out.
+        assert!(
+            !hook::classify(armed(), &mut state, user_key(vk, Edge::Down)).probe_layout,
+            "the press of {vk:#04x} must not ask"
+        );
+        assert!(
+            hook::classify(armed(), &mut state, user_key(vk, Edge::Up)).probe_layout,
+            "the release of {vk:#04x} must ask"
+        );
+    }
+
+    // Not modifiers, on either edge. `CapsLock` is in this list on purpose: module `buffer`
+    // counts it a modifier, and the probe deliberately does not — it is a toggle, it switches
+    // no layout, and every release of it would be a probe that can never find anything.
+    for vk in [VK_A, VK_SPACE, VK_CAPITAL] {
+        let mut state = HotkeyState::default();
+
+        for edge in [Edge::Down, Edge::Up] {
+            assert!(
+                !hook::classify(armed(), &mut state, user_key(vk, edge)).probe_layout,
+                "vk {vk:#04x}, {edge:?} is not a layout switch"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_program_that_is_not_listening_asks_for_no_probe() {
+    // FR-99. A fail-safe program looks at nothing at all, and that has to include this.
+    let tripped = Mode {
+        fail_safe: true,
+        ..armed()
+    };
+    // FR-90. A suspended program records nothing, so it has no layout to keep up to date.
+    let suspended = Mode {
+        active: false,
+        ..armed()
+    };
+
+    for mode in [tripped, suspended] {
+        let mut state = HotkeyState::default();
+
+        for vk in PROBE_MODIFIERS {
+            assert!(
+                !hook::classify(mode, &mut state, user_key(vk, Edge::Up)).probe_layout,
+                "vk {vk:#04x}"
+            );
+        }
+    }
+
+    // FR-03. Our own injected input switches no layout, and it is filtered out before the
+    // buffer for the same reason it must be filtered out before this.
+    let mut state = HotkeyState::default();
+
+    for vk in PROBE_MODIFIERS {
+        let ours = KeyEvent {
+            vk,
+            edge: Edge::Up,
+            extra_info: INJECTED_SIGNATURE,
+            scan: 0,
+            flags: 0,
+            time: 0,
+        };
+
+        assert!(
+            !hook::classify(armed(), &mut state, ours).probe_layout,
+            "our own stroke, vk {vk:#04x}"
+        );
+    }
+
+    // And the hotkey branch asks for nothing either, even in the one configuration where the
+    // hotkey of section 7 would be a modifier: FR-95 suppresses the stroke, so the application
+    // never sees it and no layout can have changed.
+    let hotkey_is_a_modifier = Mode {
+        hotkey_vk: VK_LSHIFT,
+        ..armed()
+    };
+    let mut state = HotkeyState::default();
+
+    let outcome = hook::classify(
+        hotkey_is_a_modifier,
+        &mut state,
+        user_key(VK_LSHIFT, Edge::Up),
+    );
+
+    assert_eq!(outcome.decision, Decision::Suppress);
+    assert!(!outcome.probe_layout);
+}
+
+/// **What the probe costs on an ordinary phrase, as a number** — NFR-10, and point 18 of the
+/// task, which asks for a figure rather than a word.
+///
+/// A probe is fired by *every* modifier release, and the release of `Shift` after a capital
+/// letter is one. That is the design and not an oversight — the probe asks a question, it does
+/// not rebuild anything, and `app::layout_refresh_needed` answers "unchanged" and returns
+/// before the sweep of FR-20 is even considered — but the frequency has to be known rather
+/// than guessed at, so it is counted here out of the production rule itself.
+///
+/// The sample is one ordinary Russian sentence, typed on ЙЦУКЕН:
+/// "Привет! Как твои дела? Всё хорошо, спасибо." — 43 characters, six of which need `Shift`:
+/// the three capitals `П`, `К`, `В`, the `!` and the `?`, and the comma, which is the shifted
+/// half of the key whose unshifted half is the full stop. Each shifted character is typed the
+/// way a typist types it — `Shift` down, the key, `Shift` up — and each unshifted one on its
+/// own.
+///
+/// The answer the assertions below fix: **six probes for 43 characters, that is 14 probes per
+/// 100 characters typed**, and 98 key events in total, so slightly under one probe per sixteen
+/// events. The cost of one is a single `PostMessageW` on the callback path and three cheap
+/// reads on the input thread.
+#[test]
+fn typing_an_ordinary_phrase_costs_fourteen_probes_per_hundred_characters() {
+    /// Length of the sample sentence, in characters.
+    const CHARACTERS: usize = 43;
+    /// Zero-based positions of the characters that need `Shift`.
+    const SHIFTED: [usize; 6] = [0, 6, 8, 21, 23, 33];
+
+    let mut state = HotkeyState::default();
+    let mut probes = 0_usize;
+    let mut events = 0_usize;
+
+    for position in 0..CHARACTERS {
+        let shifted = SHIFTED.contains(&position);
+
+        let mut stroke = |vk, edge| {
+            events += 1;
+
+            if hook::classify(armed(), &mut state, user_key(vk, edge)).probe_layout {
+                probes += 1;
+            }
+        };
+
+        if shifted {
+            stroke(VK_LSHIFT, Edge::Down);
+        }
+
+        stroke(VK_A, Edge::Down);
+        stroke(VK_A, Edge::Up);
+
+        if shifted {
+            stroke(VK_LSHIFT, Edge::Up);
+        }
+    }
+
+    assert_eq!(events, 98, "43 characters and six of them shifted");
+    assert_eq!(probes, SHIFTED.len(), "one probe per shifted character");
+    assert_eq!(
+        probes * 100 / CHARACTERS,
+        13,
+        "13.95 probes per hundred characters, integer division"
+    );
 }
 
 // -------------------------------------------------------------------------------------

@@ -1148,10 +1148,37 @@ impl Recorder {
 
         let mods = self.mods_now(key.flags);
 
-        // FR-10: "Ctrl/Alt/Win + клавиша — полный сброс (команда, а не текст)". `AltGr` is the
-        // exception the mask itself carries: it is `Ctrl` plus the right `Alt` by construction
-        // and it produces characters, so a layout that puts text on it keeps working.
+        // FR-10: "Ctrl/Alt/Win + клавиша, **кроме комбинаций смены раскладки, названных
+        // FR-11** — полный сброс (команда, а не текст)". `AltGr` is the exception the mask
+        // itself carries: it is `Ctrl` plus the right `Alt` by construction and it produces
+        // characters, so a layout that puts text on it keeps working.
         if (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr() {
+            // ⚠ **FR-11, the second exception, and the narrower of the two.** FR-11 names two
+            // combinations by name — `Alt+Shift` and `Win+Space` — and says a layout switch
+            // "**не сбрасывает** буфер: HKL хранится по каждому нажатию отдельно". `Alt+Shift`
+            // never arrives here: it is modifiers alone and the first line of this function has
+            // already answered `Modifier` for both halves of it, which task T-03-3b measured
+            // rather than assumed. `Win+Space` does arrive, because `Space` is not a modifier,
+            // and until the user's decision on question 43 (commit e6ba407, which is the
+            // wording of the row quoted above) it was flushed here — so a user who noticed the
+            // wrong layout mid-word, pressed `Win+Space` to fix it and reached for the hotkey
+            // found nothing left to convert. That is the very outcome FR-11 exists to prevent.
+            //
+            // The exception is kept as narrow as the requirement is: `Space`, with `Win` held,
+            // and with neither `Ctrl` nor `Alt` in the combination — `Ctrl+Win+Space` and
+            // `Alt+Win+Space` switch no layout and stay commands. Everything else keeps the
+            // behaviour it had: `Win+R` is a command and flushes, and a bare `Space` with no
+            // modifier at all is the boundary key of the first row of the FR-10 table and
+            // flushes as well, three rules further down.
+            //
+            // Nothing is recorded either. The return is `Ignored` and not a fall-through,
+            // because the stroke is a switch the system consumes: it puts no space into the
+            // text, and pushing one into the ring would make the conversion of FR-22 produce a
+            // character the user never typed.
+            if key.vk == VK_SPACE.0 && self.held.win && !mods.ctrl() && !mods.alt() {
+                return Recorded::Ignored;
+            }
+
             self.ring.clear();
             return Recorded::Flushed;
         }
