@@ -9,8 +9,8 @@
 //! session.
 //!
 //! Requirements this module covers: SEC-04a, for the acceptance bench of section 11.5 and
-//! acceptance criterion 8 of section 13 of SPEC — task **T-03-4**.
-//! Implemented by backlog tasks: T-03-4.
+//! acceptance criterion 8 of section 13 of SPEC — tasks **T-03-4** and **T-03-4-2**.
+//! Implemented by backlog tasks: T-03-4 (name, descriptor, snapshot), T-03-4-2 (the server).
 //!
 //! # The four conditions of SEC-04a, and where each of them is met
 //!
@@ -53,28 +53,28 @@
 //! Both are one line each in [`Snapshot`] and one line each in [`render`] when their owning
 //! task arrives; neither the format nor the server has to change to accept them.
 //!
-//! # ⛔ The pipe server is not here, and why
+//! # The server — task T-03-4-2
 //!
-//! Task T-03-4 was to put a named pipe over this snapshot. Three of the items it needs are
-//! outside the closed feature list of section 3.2 of SPEC, in `windows 0.62.2`:
-//!
-//! | Item | Feature it is gated behind |
-//! |---|---|
-//! | `CreateNamedPipeW` | `Win32_Security` **and** `Win32_Storage_FileSystem` |
-//! | `PIPE_ACCESS_OUTBOUND` (a `FILE_FLAGS_AND_ATTRIBUTES`) | `Win32_Storage_FileSystem` |
-//! | `ConnectNamedPipe` (an `*mut OVERLAPPED` parameter) | `Win32_System_IO` |
-//!
-//! `Win32_System_Pipes` pulls in neither. Section 3.2 states the opposite, and the list is
-//! closed by decision of the user as the enforcement mechanism behind SEC-03, so adding the
-//! two missing features is not this task's to do. Everything the server would stand on is
-//! here and is tested — the name ([`PIPE_NAME_PREFIX`], [`pipe_name`]), the descriptor
-//! ([`OwnerOnly`]) and the payload ([`snapshot`], [`render`]).
+//! [`start`] creates one instance of the named pipe and hands it to a thread of its own,
+//! which spends its life inside `ConnectNamedPipe`; every client that arrives is written the
+//! rendering of one [`snapshot`] and is then disconnected. [`Channel::stop`] brings that
+//! thread down. The three questions this design had to answer are argued where the code is:
+//! the thread at [`start`], the wake-up at [`Channel::stop`], and the write at [`publish`].
 
+use std::ffi::c_void;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::mem::ManuallyDrop;
+use std::os::windows::io::FromRawHandle;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, GENERIC_READ, HANDLE};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_DATA, ERROR_PIPE_CONNECTED,
+    ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, HANDLE,
+};
 use windows::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
     AddAccessAllowedAce, EqualSid, GetAce, GetAclInformation, GetLengthSid,
@@ -82,9 +82,16 @@ use windows::Win32::Security::{
     PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
     SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
+use windows::Win32::Storage::FileSystem::{
+    FILE_FLAGS_AND_ATTRIBUTES, FlushFileBuffers, PIPE_ACCESS_OUTBOUND,
+};
+use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, NAMED_PIPE_MODE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+};
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
-use windows::core::Result as WinResult;
+use windows::core::{Error as WinError, PCWSTR, Result as WinResult};
 
 use crate::settings::ReplacementMethod;
 
@@ -455,6 +462,416 @@ impl Drop for OwnedToken {
         // process is the only thing that could leak.
         if let Err(error) = unsafe { CloseHandle(self.0) } {
             crate::app::report_non_critical("CloseHandle(token)", &error);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The server — task T-03-4-2
+// ---------------------------------------------------------------------------------------
+
+/// `dwOpenMode` of the pipe: the server writes, the client reads, and there is no other
+/// direction.
+///
+/// **Condition 4 of SEC-04a in the shape of the object itself.** `PIPE_ACCESS_OUTBOUND` gives
+/// the instance no inbound half at all, so the pipe this program creates is one a client
+/// cannot send anything through — the read this module refuses to perform is a read that does
+/// not exist to be performed.
+///
+/// **No `FILE_FLAG_OVERLAPPED`, deliberately.** The flag belongs to the handle and not to a
+/// single operation: on an overlapped handle every operation is overlapped, writes included,
+/// and `std`'s `File::write` calls `WriteFile` with a null `lpOverlapped`, which Microsoft
+/// documents as able to "incorrectly report that the write operation is complete". The task
+/// requires the payload to be written through `std::fs::File`, so the handle has to be a
+/// synchronous one, and the way this thread is unblocked follows from that — see
+/// [`Channel::stop`].
+pub const PIPE_OPEN_MODE: FILE_FLAGS_AND_ATTRIBUTES = PIPE_ACCESS_OUTBOUND;
+
+/// `dwPipeMode` of the pipe: a byte stream, blocking, and **local clients only**.
+///
+/// `PIPE_REJECT_REMOTE_CLIENTS` is the load-bearing bit. SEC-03 and NFR-11 require the total
+/// absence of network activity, and a named pipe without this flag is reachable over SMB from
+/// another machine: the channel would become the one network surface in a program that is
+/// supposed to have none. `PIPE_TYPE_BYTE` and `PIPE_WAIT` are both zero, so this constant is
+/// numerically the reject bit alone; they are spelled out anyway, because what a reader has to
+/// be able to check is the intent, and a `0` would hide two decisions.
+///
+/// Assembled by hand rather than with `|` because `BitOr` is not a `const fn` on this type.
+pub const PIPE_MODE: NAMED_PIPE_MODE =
+    NAMED_PIPE_MODE(PIPE_TYPE_BYTE.0 | PIPE_WAIT.0 | PIPE_REJECT_REMOTE_CLIENTS.0);
+
+/// `nMaxInstances`: exactly one.
+///
+/// One thread serves one client at a time and reuses a single instance for its whole life, so
+/// one is the truth. It is also the tighter statement: `PIPE_UNLIMITED_INSTANCES` would
+/// declare that further instances of this name may exist, and nothing about this channel wants
+/// a second server behind the same name.
+const PIPE_INSTANCES: u32 = 1;
+
+/// Outbound buffer of the pipe, in bytes.
+///
+/// The payload is a dozen short `key=value` lines — some two hundred bytes — and a page is
+/// comfortably more than the widest it could grow to when tasks T-06-1 and T-05-2 add their
+/// keys. Sizing it above the payload is what lets [`publish`] hand the bytes over without
+/// waiting for the client to read them.
+const PIPE_OUT_BUFFER_BYTES: u32 = 4096;
+
+/// Inbound buffer of the pipe: none. **Condition 4 of SEC-04a.** There is nothing to read
+/// from, so nothing can be sent to this process through the channel.
+const PIPE_IN_BUFFER_BYTES: u32 = 0;
+
+/// `nDefaultTimeOut` of the instance, in milliseconds — the value a client gets when it calls
+/// `WaitNamedPipe` with `NMPWAIT_USE_DEFAULT_WAIT`. Nothing in this program waits on it.
+const PIPE_DEFAULT_TIMEOUT_MS: u32 = 5_000;
+
+/// Name of the channel thread, as the debugger and Process Explorer show it.
+const THREAD_NAME: &str = "langsw-control";
+
+/// How long [`Channel::stop`] waits for the channel thread before giving up on it.
+///
+/// Generous next to what the operation actually costs — one local connection and one loop
+/// iteration, sub-millisecond — and still far below anything a person could notice on the way
+/// out. Neither FR-96 nor FR-97 waits on it: see [`Channel::stop`].
+const STOP_GRACE: Duration = Duration::from_millis(500);
+
+/// How often [`Channel::stop`] retries the wake-up inside [`STOP_GRACE`].
+const STOP_POLL: Duration = Duration::from_millis(5);
+
+/// Asks the channel thread to leave its loop. Read at the top of every iteration and once
+/// more the moment a client arrives.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// A running channel — the value [`start`] returns and [`Channel::stop`] consumes.
+///
+/// Holding it keeps the security descriptor alive for as long as the pipe exists, which is
+/// what [`OwnerOnly`] asks of its owner.
+///
+/// Dropping it instead of calling [`Channel::stop`] detaches the thread. That is not a leak
+/// worth guarding against: a Rust process ends when `main` returns and takes every other
+/// thread with it, which is also why the channel cannot hold up FR-96 or FR-97.
+pub struct Channel {
+    /// The channel thread. It owns the pipe handle and closes it on its way out.
+    thread: JoinHandle<()>,
+    /// Kept alive, not used: the descriptor the pipe was created with.
+    _descriptor: OwnerOnly,
+}
+
+/// Creates the channel and starts the thread that serves it.
+///
+/// # Why a thread of its own — section 6.1
+///
+/// None of the three threads of section 6.1 can hold a blocking `ConnectNamedPipe`. The input
+/// thread must never block, which is the whole of section 6.3 and of NFR-01 to NFR-05. A UI
+/// thread stuck for a few seconds has its low-level hook removed by the system without a word
+/// (section 6.1, FR-80). The watcher thread is a COM single-threaded apartment with `WinEvent`
+/// subscriptions on it, and a blocked STA delivers no events, which would silently break two
+/// rows of the FR-10 reset table.
+///
+/// **This is not a change to the threading model of section 6.1**, and the reason is the `cfg`
+/// on the module rather than an argument about what a fourth thread costs. Section 6.1
+/// describes the program that ships. This thread is created only under `testing`, the feature
+/// is absent from the Release configuration (SEC-04a condition 1), and acceptance criterion 8
+/// of section 13 checks the shipped binary for traces of it. The shipped program therefore has
+/// exactly the three threads section 6.1 prescribes; the fourth exists only in a build that
+/// section 6.1 does not describe and that no user is given. The fault injection of module
+/// `hook` stands on the same ground.
+///
+/// # Failure
+///
+/// Returns the error rather than ending the process. The caller reports it and runs on: the
+/// channel is a diagnostic, and a program that refused to start because its diagnostic did not
+/// come up would have made the diagnostic the most dangerous part of itself.
+pub fn start() -> WinResult<Channel> {
+    // A previous channel in the same process — only a test does this — must not leave its stop
+    // request behind for this one to trip over.
+    STOP.store(false, Ordering::Release);
+
+    let descriptor = OwnerOnly::for_this_process()?;
+    let pipe = create_pipe(&descriptor)?;
+
+    // `HANDLE` is a raw pointer and therefore not `Send`, so it crosses the thread boundary as
+    // the integer it actually is and is rebuilt on the other side. The conversion is exact in
+    // both directions, and this is the same device `app` uses for the window handles the hook
+    // callback has to reach.
+    let raw = pipe.0.0 as usize;
+
+    let spawned = thread::Builder::new()
+        .name(THREAD_NAME.to_owned())
+        .spawn(move || serve(HANDLE(raw as *mut c_void)));
+
+    match spawned {
+        Ok(thread) => {
+            // The thread owns the pipe now and closes it when it ends; this frame must not.
+            std::mem::forget(pipe);
+
+            Ok(Channel {
+                thread,
+                _descriptor: descriptor,
+            })
+        }
+        // `pipe` is dropped here, which closes the instance: a channel nobody serves would
+        // accept a client and then never answer it.
+        Err(error) => Err(WinError::from(error)),
+    }
+}
+
+impl Channel {
+    /// Stops the channel thread and waits, up to [`STOP_GRACE`], for it to end.
+    ///
+    /// Returns whether it ended. `false` means the thread is still inside a call — see the
+    /// last paragraph — and has been detached.
+    ///
+    /// # How a blocking `ConnectNamedPipe` is unblocked
+    ///
+    /// By connecting to our own channel. The flag is set first, then this loop opens the pipe
+    /// by name exactly as any client would; that completes the `ConnectNamedPipe` the thread is
+    /// parked in, the thread re-reads the flag before writing anything, publishes nothing,
+    /// disconnects and leaves. The connection is dropped unread — it is a doorbell, not a
+    /// client.
+    ///
+    /// The alternative, overlapped I/O with an event, is ruled out by the requirement that the
+    /// payload be written through `std::fs::File`: the flag that would make the connect
+    /// cancellable also makes every write on that handle overlapped, and `std`'s write passes a
+    /// null `OVERLAPPED`. See [`PIPE_OPEN_MODE`].
+    ///
+    /// **Why the wake-up cannot be missed.** The one objection to this route is that it turns
+    /// shutdown into an operation that might not succeed. Three things remove it:
+    ///
+    /// * The instance is created **once**, in [`start`], and lives for the whole life of the
+    ///   thread, so the name always resolves while there is a thread to wake.
+    /// * Every outcome of the open is progress. It succeeds — the thread was parked and is now
+    ///   awake. It fails with `ERROR_PIPE_BUSY` — the thread is not parked at all but serving
+    ///   somebody, and it re-reads the flag as soon as it disconnects. It fails with
+    ///   `ERROR_FILE_NOT_FOUND` — the thread has already closed the pipe and ended. So the
+    ///   attempt is retried rather than judged, which is why its result is not inspected.
+    /// * Nothing waits on this. FR-96 ends the process with `TerminateProcess` from inside the
+    ///   hook callback and never reaches this code; FR-97 has already given the three threads
+    ///   of section 6.1 their grace and their own termination before this runs. This call sits
+    ///   after them, is bounded, and a thread that outlives it is detached and dies with the
+    ///   process.
+    pub fn stop(self) -> bool {
+        STOP.store(true, Ordering::Release);
+
+        let deadline = Instant::now() + STOP_GRACE;
+
+        while !self.thread.is_finished() {
+            // The doorbell. Read access, which is all this program's own DACL grants anybody
+            // (see `CHANNEL_RIGHTS`), and the result is deliberately not examined: every one of
+            // its outcomes means the thread is on its way out. Nothing is read from the
+            // handle — the connection exists only to make the server's `ConnectNamedPipe`
+            // return, and dropping it here closes it.
+            let _ = OpenOptions::new().read(true).open(pipe_name());
+
+            if self.thread.is_finished() || Instant::now() >= deadline {
+                break;
+            }
+
+            thread::sleep(STOP_POLL);
+        }
+
+        if !self.thread.is_finished() {
+            // Detached on purpose. `JoinHandle::join` has no timed form, and the one situation
+            // that gets us here — a client that connected and then never read what it asked
+            // for, leaving the thread inside `FlushFileBuffers` — is exactly the situation in
+            // which joining would hang the shutdown it is supposed to be tidying up.
+            return false;
+        }
+
+        // Finished, so this cannot block. The body returns `()` and panics nowhere; a panic
+        // would already have gone through the hook of FR-98, and there is nothing here that
+        // could act on the payload (SEC-01, SEC-07).
+        self.thread.join().is_ok()
+    }
+}
+
+/// Creates the one instance of the channel — **the call every flag of SEC-04a lands on**.
+fn create_pipe(descriptor: &OwnerOnly) -> WinResult<OwnedPipe> {
+    let name = pipe_name();
+
+    // The project's idiom for a wide string argument: a NUL-terminated UTF-16 buffer owned by
+    // this frame, which outlives the call below.
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let attributes = descriptor.attributes();
+
+    // SAFETY: `wide` is a NUL-terminated UTF-16 buffer alive for the whole call and only read
+    // through. `attributes` is a live local whose `lpSecurityDescriptor` addresses the
+    // descriptor `descriptor` owns, and `descriptor` outlives this call; the kernel copies the
+    // descriptor into the object it creates, so nothing here has to outlive the return. Every
+    // other argument is a value.
+    let handle = unsafe {
+        CreateNamedPipeW(
+            PCWSTR(wide.as_ptr()),
+            PIPE_OPEN_MODE,
+            PIPE_MODE,
+            PIPE_INSTANCES,
+            PIPE_OUT_BUFFER_BYTES,
+            PIPE_IN_BUFFER_BYTES,
+            PIPE_DEFAULT_TIMEOUT_MS,
+            Some(&raw const attributes),
+        )
+    };
+
+    // NFR-13. This one binding returns the raw handle rather than a `Result`, so the check is
+    // written out: `INVALID_HANDLE_VALUE` is the documented failure and the reason is in the
+    // thread's last error.
+    if handle.is_invalid() {
+        return Err(WinError::from_thread());
+    }
+
+    Ok(OwnedPipe(handle))
+}
+
+/// The body of the channel thread: wait for a client, answer it, disconnect, repeat.
+///
+/// One instance for the whole life of the thread — `DisconnectNamedPipe` returns it to the
+/// listening state and `ConnectNamedPipe` parks on it again. Creating a fresh instance per
+/// client would leave windows in which the name does not resolve, and [`Channel::stop`] rings
+/// the doorbell by name.
+fn serve(pipe: HANDLE) {
+    // Takes ownership: the instance is closed when this function returns, however it returns.
+    let pipe = OwnedPipe(pipe);
+
+    while !stop_requested() {
+        let connected = match await_client(pipe.0) {
+            Ok(connected) => connected,
+            Err(error) => {
+                // NFR-13: examined and journalled, not escalated. There is no recovery from a
+                // connect that fails for a reason other than the two below — the instance is
+                // in a state this code did not put it in — so the channel ends and the program
+                // carries on without it.
+                crate::app::report_non_critical("ConnectNamedPipe", &error);
+                break;
+            }
+        };
+
+        // The flag is re-read here and not only at the top of the loop, because the client that
+        // just arrived may be `Channel::stop`'s doorbell, and a doorbell must not be answered
+        // with a snapshot.
+        if connected && !stop_requested() {
+            publish(pipe.0);
+        }
+
+        // Back to the listening state for the next client. Reached after every outcome,
+        // including the ones `await_client` reports as "no client": a connect that returned
+        // `ERROR_NO_DATA` still leaves the instance connected to a client that has gone.
+        //
+        // SAFETY: `pipe.0` is the instance this thread owns and has not closed. The call
+        // forcibly ends whatever connection the instance has and dereferences nothing; ending
+        // it without waiting for the client is the intent, because this program never waits on
+        // one. NFR-13: the result is examined below.
+        if let Err(error) = unsafe { DisconnectNamedPipe(pipe.0) } {
+            // Nothing here can put the instance back into a state this loop understands, so the
+            // channel ends and the program carries on without it.
+            crate::app::report_non_critical("DisconnectNamedPipe", &error);
+            break;
+        }
+    }
+}
+
+/// Parks until a client connects. `Ok(false)` means one came and went before it could be
+/// answered.
+fn await_client(pipe: HANDLE) -> WinResult<bool> {
+    // SAFETY: `pipe` is the instance this thread owns and has not closed. `None` for the
+    // overlapped structure is the documented way to ask for the synchronous form, which is the
+    // form a handle created without `FILE_FLAG_OVERLAPPED` supports; the call blocks until a
+    // client connects, which is the point of this thread existing. NFR-13: every outcome is
+    // classified below.
+    let connected = unsafe { ConnectNamedPipe(pipe, None) };
+
+    match connected {
+        Ok(()) => Ok(true),
+        // A client that connected in the window between `DisconnectNamedPipe` and this call.
+        // Documented, ordinary, and a connection all the same.
+        Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => Ok(true),
+        // A client connected and closed its end before this call ran. There is nobody to write
+        // to; the instance still has to be disconnected.
+        Err(error) if error.code() == ERROR_NO_DATA.to_hresult() => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Writes one snapshot to the connected client — **the whole of what leaves this process**.
+///
+/// # The write goes through `std`
+///
+/// `std::fs::File` over the pipe handle, as the task requires: the standard library owns the
+/// `WriteFile` call, its retry loop and its error mapping, and this module gains no second way
+/// of writing to a handle. The `File` is a borrowed view and not an owner —
+/// `File::from_raw_handle` takes ownership and would close the instance this thread reuses, so
+/// the value is wrapped in `ManuallyDrop` and its destructor never runs.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// The bytes are [`render`] of one [`snapshot`], which is a dozen counts and one word of
+/// section 7. Nothing else can be sent from here: there is no other write in this module.
+fn publish(pipe: HANDLE) {
+    let payload = render(&snapshot());
+
+    // SAFETY: `pipe` is the instance this thread owns; it was created with
+    // `PIPE_ACCESS_OUTBOUND`, so the handle carries write access, and without
+    // `FILE_FLAG_OVERLAPPED`, so the synchronous `WriteFile` `std` performs on it is the
+    // correct form. `ManuallyDrop` is what keeps `File`'s destructor from closing a handle this
+    // thread still owns and reuses for the next client.
+    let mut file = ManuallyDrop::new(unsafe { File::from_raw_handle(pipe.0.cast()) });
+
+    if let Err(error) = file.write_all(payload.as_bytes()) {
+        // NFR-13: examined. A client that closed its end mid-read is the ordinary case and not
+        // a fault of this program; anything else is journalled.
+        let error = WinError::from(error);
+
+        if !is_client_gone(&error) {
+            crate::app::report_non_critical("write(control channel)", &error);
+        }
+
+        return;
+    }
+
+    // The payload is in the pipe's buffer, not yet in the client. `DisconnectNamedPipe`
+    // discards whatever the client has not read, so without this the answer could be thrown
+    // away before it arrived.
+    //
+    // SAFETY: `pipe` is the instance this thread owns, as above. The call waits for the client
+    // to drain the buffer and dereferences nothing. NFR-13: the result is examined below.
+    if let Err(error) = unsafe { FlushFileBuffers(pipe) }
+        && !is_client_gone(&error)
+    {
+        // NFR-13: examined; same classification as the write above.
+        crate::app::report_non_critical("FlushFileBuffers", &error);
+    }
+}
+
+/// Whether a failure means "the client is no longer there", which is an outcome and not a
+/// fault: a reader is free to close its end at any moment, and this program never waits on one.
+fn is_client_gone(error: &WinError) -> bool {
+    let code = error.code();
+
+    code == ERROR_BROKEN_PIPE.to_hresult()
+        || code == ERROR_NO_DATA.to_hresult()
+        || code == ERROR_PIPE_NOT_CONNECTED.to_hresult()
+}
+
+/// Whether [`Channel::stop`] has asked the thread to leave.
+fn stop_requested() -> bool {
+    // Acquire against the Release store in `Channel::stop`, for the same reason
+    // `app::shutdown_requested` pairs that way: a thread woken by the doorbell must observe
+    // the request that was made before it rang.
+    STOP.load(Ordering::Acquire)
+}
+
+/// A named-pipe instance that closes itself — the same shape as [`OwnedToken`], and for the
+/// same reason: the handle has exactly one owner at every moment and no path out of a function
+/// leaks it.
+struct OwnedPipe(HANDLE);
+
+impl Drop for OwnedPipe {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the handle `CreateNamedPipeW` returned into this value. It is
+        // moved, never copied — `start` gives it to the thread with `mem::forget` rather than
+        // duplicating it — so it is closed exactly once. NFR-13: the result is examined; a
+        // handle that will not close is not worth ending the process over.
+        if let Err(error) = unsafe { CloseHandle(self.0) } {
+            crate::app::report_non_critical("CloseHandle(pipe)", &error);
         }
     }
 }

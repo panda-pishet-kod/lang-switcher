@@ -512,6 +512,23 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
         }
     };
 
+    // SEC-04a, task T-03-4-2: the debug control channel, on a thread of its own and only
+    // under the `testing` feature — the argument for that thread is in `control::start`.
+    // Started after the three threads of section 6.1 rather than before them, because it
+    // reports on them and there is nothing to report until they are up.
+    //
+    // A channel that will not come up is journalled and the program runs on. It is a
+    // diagnostic; refusing to run without it would make the diagnostic the most dangerous
+    // part of the program.
+    #[cfg(feature = "testing")]
+    let channel = match crate::control::start() {
+        Ok(channel) => Some(channel),
+        Err(error) => {
+            report_non_critical("control::start", &error);
+            None
+        }
+    };
+
     // FR-97. In a Release build neither this block nor the module it calls into exists in
     // the compiled code, which is what acceptance point 13 checks by reading the source:
     // the absence of the string `LANGSW_DEBUG_TIMEOUT_SEC` from the Release binary proves
@@ -544,6 +561,15 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
     // A Release build has no deadline: it waits here until something requests shutdown —
     // today the panic hook, from T-01-4 onwards the tray's "Exit" and FR-83.
     let clean = join_all(threads);
+
+    // SEC-04a: the channel comes down after the three threads and not before, so that a bench
+    // holding it open sees the program right up to the end. Bounded — see `Channel::stop` —
+    // and reached by neither FR-96, which terminates the process from inside the callback, nor
+    // by the deadline half of FR-97 above, which has already ended it by this point.
+    #[cfg(feature = "testing")]
+    if let Some(channel) = channel {
+        channel.stop();
+    }
 
     // Instrumentation of the acceptance bench, feature `testing`. Here and nowhere earlier:
     // every thread has been joined, so the numbers are final, and this is the main thread,

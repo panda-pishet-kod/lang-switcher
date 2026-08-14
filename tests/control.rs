@@ -14,16 +14,23 @@
 //! * Condition 3 — **the owner of the current session and nobody else** — is checked by
 //!   reading the descriptor back through the Win32 accessors and counting the entries of its
 //!   DACL, including the `NULL`-DACL case, which is the way this is usually got wrong.
-//! * Condition 4 — **read only** — is a property of the code: no `ReadFile`, and an access mask
-//!   that grants no write to anyone. The mask is asserted below; the absence of a read is a
-//!   matter of reading the module, which has no pipe handle to read from in the first place.
+//! * Condition 4 — **read only** — is a property of the code: no `ReadFile`, an instance
+//!   created with no inbound buffer at all, and an access mask that grants no write to anyone.
+//!   The mask is asserted below, and so is the failure of a client that tries to open the
+//!   channel for writing.
 //! * The **length mirror**, on which the honesty of `buffer_len` rests: every path that changes
 //!   the buffer must publish, and that is checked path by path against the list in
 //!   `Ring::set_len`.
+//! * The **server** of task T-03-4-2 — that a client of this user connects and is answered,
+//!   that the answer tracks the buffer, that the channel takes no commands, and that the
+//!   thread ends when it is asked to.
 //!
-//! The pipe server itself is absent from `control` — three of the items it needs are outside
-//! the closed feature list of section 3.2 of SPEC — so there is no server here to test. See
-//! the module documentation of `control` and the report of task T-03-4.
+//! # One test for everything that touches the pipe
+//!
+//! The channel is named after the **session**, so a process has one of them and two tests that
+//! started a server would collide over the name. `cargo test` runs the tests of a binary in
+//! parallel, so they are one test function instead — the same reason, and the same shape, as
+//! the mirror test below.
 //!
 //! # Printing
 //!
@@ -32,11 +39,24 @@
 
 #![cfg(feature = "testing")]
 
+use std::fs::OpenOptions;
+use std::io::Read;
+use std::sync::{Mutex, PoisonError};
+
 use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::settings::ReplacementMethod;
+use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_BACK, VK_RETURN};
+
+/// Serialises the two tests that assert on the process-wide length mirror.
+///
+/// The mirror is one atomic for the whole process and the typing buffer is a thread-local, so
+/// two tests running in parallel would be asserting on each other's timing rather than on the
+/// code. Each of the two holds this for its whole body; nothing else in the file touches the
+/// mirror.
+static MIRROR: Mutex<()> = Mutex::new(());
 
 // -------------------------------------------------------------------------------------
 // Condition 2 of SEC-04a — metadata only
@@ -287,6 +307,8 @@ fn mirrored() -> usize {
 /// path from them to a publication runs through a `Drop` and is worth seeing work.
 #[test]
 fn every_path_that_changes_the_buffer_publishes_its_length() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
     // `Ring::with_capacity`, through `install`. A fresh buffer is empty and says so.
     buffer::install_recorder(Recorder::with_capacity(4));
     assert_eq!(mirrored(), 0, "a new buffer publishes zero");
@@ -401,4 +423,194 @@ fn every_path_that_changes_the_buffer_publishes_its_length() {
 
     buffer::uninstall();
     assert_eq!(mirrored(), 0);
+}
+
+// -------------------------------------------------------------------------------------
+// The server — task T-03-4-2
+// -------------------------------------------------------------------------------------
+
+/// How many times a client retries a channel that is busy with somebody else.
+const CONNECT_ATTEMPTS: u32 = 50;
+
+/// Opens the channel the way any client of the acceptance bench would: **read only**, by name.
+///
+/// Retries a busy channel rather than failing: the instance is single and the server returns it
+/// to the listening state between clients, so a client that arrives inside that window is early
+/// rather than refused.
+fn connect() -> std::io::Result<std::fs::File> {
+    let name = control::pipe_name();
+    let mut last = None;
+
+    for _ in 0..CONNECT_ATTEMPTS {
+        match OpenOptions::new().read(true).open(&name) {
+            Ok(file) => return Ok(file),
+            Err(error) => {
+                last = Some(error);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    Err(last.expect("the loop runs at least once"))
+}
+
+/// Connects, reads one answer to its end, and returns it.
+///
+/// The end of an answer is the server taking the connection away — it writes once, flushes and
+/// disconnects — so a read that fails after bytes have arrived is the end of the message and
+/// not a fault. A read that fails before any have is left to the assertions of the caller,
+/// which check the content.
+fn read_channel() -> String {
+    let mut file = connect().expect("a client of the current user connects to the channel");
+    let mut answer = Vec::new();
+    let mut chunk = [0u8; 512];
+
+    loop {
+        match file.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => answer.extend_from_slice(&chunk[..read]),
+            Err(_disconnected) => break,
+        }
+    }
+
+    String::from_utf8(answer).expect("the payload is ASCII, so it is UTF-8")
+}
+
+/// The value of one key of an answer.
+fn value_of<'a>(answer: &'a str, key: &str) -> &'a str {
+    answer
+        .lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+        .unwrap_or_else(|| panic!("the answer carries {key}"))
+}
+
+/// **The channel, end to end**: it is created, it admits this user, it answers with the
+/// snapshot, it follows the buffer, it takes no commands, and it stops when it is asked to.
+///
+/// One test rather than six because the channel is named after the session: a process has one
+/// of them, and `cargo test` would run six of these at once. The numbered points of the task's
+/// acceptance list are marked in the body.
+#[test]
+fn the_channel_serves_the_owner_of_this_process_and_stops_when_asked() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    // Point 18, and it is asserted on the constants the server actually passes to
+    // `CreateNamedPipeW` rather than on a copy of them: SEC-03 and NFR-11 forbid network
+    // activity, and a named pipe without this flag is reachable over SMB.
+    assert!(
+        control::PIPE_MODE.contains(PIPE_REJECT_REMOTE_CLIENTS),
+        "SEC-03, NFR-11: the channel refuses clients from other machines"
+    );
+
+    // Condition 4 of SEC-04a in the creation flags: the instance is outbound only and has no
+    // inbound buffer, so there is nothing for a client to send through and nothing to read.
+    assert_eq!(
+        control::PIPE_OPEN_MODE,
+        windows::Win32::Storage::FileSystem::PIPE_ACCESS_OUTBOUND,
+        "SEC-04a condition 4: the server writes, the client reads, and there is no other way"
+    );
+
+    // The buffer this test will make the channel report on. Installed before the server so
+    // that the first answer already has a length to carry.
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let channel = control::start().expect("the channel comes up");
+
+    // Point 16 and point 26: a client running as the current user connects and is answered,
+    // and the answer is the documented snapshot — the same set of keys, in the same order,
+    // that `render` is checked against above.
+    let answer = read_channel();
+
+    let keys: Vec<&str> = answer
+        .lines()
+        .map(|line| line.split_once('=').expect("key=value").0)
+        .collect();
+
+    assert_eq!(
+        keys,
+        control::KEYS.to_vec(),
+        "point 26: the keys of the task table arrive over the channel"
+    );
+    assert!(answer.is_ascii() && answer.ends_with('\n'));
+
+    for reserved in control::RESERVED_KEYS {
+        assert!(
+            !answer.contains(reserved),
+            "point 22 holds on the wire too: {reserved} is absent, not zero"
+        );
+    }
+
+    // Point 27. Six strokes into this thread's buffer, and the channel says six. The number
+    // travels through the mirror of section 6.3, which is the only way a thread that is not
+    // the input thread can learn it.
+    for _ in 0..6 {
+        press(VK_A.0, SCAN_A);
+    }
+
+    assert_eq!(buffer::len(), 6, "six strokes are in the buffer");
+    assert_eq!(
+        value_of(&read_channel(), "buffer_len"),
+        "6",
+        "point 27: the channel reports six"
+    );
+
+    // Point 28. Any rule of FR-10 — `Enter` is the boundary row — and the channel says zero.
+    press(VK_RETURN.0, 0x1C);
+
+    assert_eq!(buffer::len(), 0, "the flush emptied the buffer");
+    assert_eq!(
+        value_of(&read_channel(), "buffer_len"),
+        "0",
+        "point 28: the channel reports zero after a reset"
+    );
+
+    // Point 29, and condition 4 of SEC-04a. A client cannot obtain a writable handle at all:
+    // the one allow entry of the DACL grants `GENERIC_READ` and the instance is outbound, so
+    // the attempt is refused by the object rather than ignored by the server.
+    assert!(
+        OpenOptions::new()
+            .write(true)
+            .open(control::pipe_name())
+            .is_err(),
+        "point 29: the channel takes no writer"
+    );
+    assert!(
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(control::pipe_name())
+            .is_err(),
+        "point 29: nor a reader that also wants to write"
+    );
+
+    // And the program is unchanged by having been asked: the channel still answers, with the
+    // same keys.
+    let after = read_channel();
+
+    assert_eq!(
+        after
+            .lines()
+            .map(|line| line.split_once('=').expect("key=value").0)
+            .collect::<Vec<&str>>(),
+        control::KEYS.to_vec(),
+        "point 29: a refused writer changes nothing about the program"
+    );
+
+    // The thread ends when it is asked to, inside its grace period — the mechanism points 30
+    // and 31 rest on, exercised here without a running program.
+    assert!(
+        channel.stop(),
+        "the channel thread leaves `ConnectNamedPipe` and ends"
+    );
+
+    // And it really is gone: the name no longer resolves, so no thread is left holding it.
+    assert!(
+        OpenOptions::new()
+            .read(true)
+            .open(control::pipe_name())
+            .is_err(),
+        "a stopped channel leaves nothing listening"
+    );
+
+    buffer::uninstall();
 }
