@@ -295,7 +295,15 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
 
     if key.vk != mode.hotkey_vk {
         // An ordinary stroke of an active program. Task T-03-2 puts it in the ring buffer
-        // here; T-03-1 ends at this line by the terms of the task.
+        // here; T-03-1 ended at this line by the terms of the task.
+        //
+        // The point is here and not higher up because everything above it is a reason *not*
+        // to buffer: FR-99 has disarmed the program, FR-03 has recognised our own injected
+        // input, or FR-90 has suspended it. `record` applies the flush rules of FR-10 itself
+        // and returns a `Copy` value; it allocates nothing, takes no lock and calls nothing
+        // of Win32 (NFR-01 to NFR-05).
+        crate::buffer::record(key);
+
         return Outcome::PASS;
     }
 
@@ -1140,6 +1148,16 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         // SAFETY: as for the forwarding call above.
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     };
+
+    // Task T-03-2. The physical half of the stroke — the scan code of FR-04, the flags
+    // carrying `LLKHF_EXTENDED` of FR-05 and the timestamp FR-12 resolves races against —
+    // published for the `buffer::record` that `classify` performs below. It travels beside
+    // `KeyEvent` rather than inside it because `tests\hook.rs`, which belongs to task T-03-1
+    // and is outside the area of T-03-2, builds `KeyEvent` with exhaustive struct literals in
+    // four places; a field added here would stop the accepted test suite from compiling. Three
+    // stores into a thread-local of this thread, taken by `record` on the next call
+    // (NFR-01, NFR-03).
+    crate::buffer::publish_physical(event.scanCode as u16, event.flags.0, event.time);
 
     let key = KeyEvent {
         vk,
