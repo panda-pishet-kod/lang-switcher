@@ -32,7 +32,13 @@
 //! publishes the new length into [`crate::control`], which is the only way a thread other than
 //! the input one can learn a number that lives in a thread-local (section 6.3). Nothing else
 //! about the buffer changed, and in a build without the feature the mirror does not exist.
-//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done), T-03-4 (done).
+//! Task **T-05-2a** gave the position counter of FR-32 the same treatment and for the same
+//! reason: [`Recorder::advance_cycle`] and [`Recorder::clear_ring`] publish it into
+//! [`crate::control`] under the `testing` feature, so that `cycle_position` on the channel of
+//! SEC-04a says where the cycle really is. The counter, the cycle and the choice of the target
+//! layout are untouched — the task made the existing behaviour observable, not different.
+//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done), T-03-4 (done),
+//! T-05-2a (done).
 //! Task T-03-2a took the physical half of the stroke out of a thread-local of its own and put
 //! it into the fields of [`KeyEvent`], where it belonged all along, and wired this module into
 //! the running program: `app` installs the buffer, publishes the cache of FR-20 into it and
@@ -1136,8 +1142,16 @@ impl Recorder {
     ///
     /// One addition, one remainder, one store. No allocation, no lock, no I/O: NFR-01 to NFR-05
     /// hold here as they do everywhere else in this module.
+    ///
+    /// Under the `testing` feature the new position is published into [`crate::control`] —
+    /// see [`Recorder::clear_ring`] for why the publication is written out at each of the two
+    /// places rather than hidden in a setter, and what task T-05-2a left for the controller to
+    /// decide about a third.
     pub fn advance_cycle(&mut self, len: usize) -> usize {
         self.cycle = if len == 0 { 0 } else { (self.cycle + 1) % len };
+
+        #[cfg(feature = "testing")]
+        crate::control::note_cycle_position(self.cycle);
 
         self.cycle
     }
@@ -1342,9 +1356,36 @@ impl Recorder {
     /// SEC-02 is [`Ring::clear`]'s, unchanged: the whole backing array is overwritten with
     /// zeroes, live window and free slots alike. The counter is a `usize` and zeroing it *is*
     /// its overwrite.
+    ///
+    /// # The mirror of SEC-04a — task T-05-2a
+    ///
+    /// Under the `testing` feature, and only under it, the zero goes to [`crate::control`] as
+    /// well. This is the publication that keeps the mirror from lagging **after a flush**,
+    /// which is the case that matters: an absent number is noticed, a stale one is believed,
+    /// and a channel still reporting position 2 over a buffer FR-34 has just emptied would tell
+    /// the acceptance bench of section 11.5 the opposite of the truth.
+    ///
+    /// # Why the publication is repeated instead of routed through one writer
+    ///
+    /// [`Ring::set_len`] does it the other way — `len` is private to a single setter, so the
+    /// length cannot be changed without publishing — and that is the stronger construction.
+    /// Task T-05-2a was permitted to add the publication at `advance_cycle` and here, and
+    /// **not** to change how the counter is written, so it did not build the setter. There is a
+    /// third assignment to `self.cycle`, in [`Recorder::set_capacity`], which therefore does not
+    /// publish; it is reached only from the configuration message of `app`, where the counter is
+    /// already zero, so nothing lags in the product today. The report of T-05-2a puts the
+    /// choice — widen the permission, or make the counter single-writer like `len` — to the
+    /// controller rather than taking it.
+    ///
+    /// NFR-01 to NFR-05: this function is reached from inside the hook callback, and what the
+    /// feature adds to that path is one relaxed atomic store. In a build without it — every
+    /// Release build, by SEC-04a condition 1 — the call is not compiled at all.
     fn clear_ring(&mut self) {
         self.ring.clear();
         self.cycle = 0;
+
+        #[cfg(feature = "testing")]
+        crate::control::note_cycle_position(0);
     }
 
     /// Flushes the buffer of everything typed at or before `event_time` — **FR-12**.

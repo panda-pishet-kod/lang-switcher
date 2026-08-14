@@ -113,8 +113,10 @@ const WM_INPUTLANGCHANGEREQUEST: u32 = 0x0050;
 /// ⚠ This is the bench arranging a **precondition**, not doing the product's work. The scenario
 /// of §11.3 is "type `ghbdtn` **in the English layout**, press the hotkey"; putting the window
 /// into the English layout first is setting the stage, and the assertion it enables — that the
-/// layout afterwards became RU — is precisely the one the bench then reports as `pending` on
-/// T-05-1 rather than performing itself.
+/// layout afterwards became RU — is one the bench then **asserts as a verdict**, because the
+/// switch exists: task T-05-1 wrote the chain of FR-50 to FR-52 (commit `c8e463f`) and task
+/// T-05-2 gave it the target of §4.4. The bench sets the stage and reads the result; it never
+/// performs the switch the assertion is about.
 ///
 /// The same message is the first link of the FR-50 chain, which is a coincidence of mechanism,
 /// not of purpose: there is no other documented way to ask a foreign window to change layout.
@@ -167,10 +169,13 @@ pub fn ensure(hwnd: HWND, language: u32, timeout: std::time::Duration) -> Result
 //
 // Footnote 3 allows position 17 to attach a third layout with `LoadKeyboardLayout` and
 // `KLF_ACTIVATE`, and requires it detached afterwards. **This bench attaches none**, and there
-// is no code here that could: position 17 is the only position that needs one, it is `pending`
-// on T-05-2 because the "Цикл" mode of FR-31 does not exist yet, and a bench that installed a
-// keyboard layout on somebody's machine to exercise a code path nobody has written would be
-// doing harm for no information.
+// is no code here that could: position 17 is the only position that needs one, and the bench
+// cannot prepare the rest of that position's environment either — writing `config.toml` with
+// `mode = "cycle"` and three layouts, which it only ever reads. The "Цикл" mode of FR-31 itself
+// **exists**, written by task T-05-2 and covered by the automated tests of `tests\cycle.rs`;
+// what is missing is the bench's ability to set the stage, and that is task T-04-3-3's, which is
+// where position 17's `pending` now points. Attaching a keyboard layout to somebody's machine
+// before that ability exists would be doing harm for no information.
 //
 // The requirement is therefore satisfied by measurement rather than by mechanism: `attached()`
 // is read before the run and after it, and the run reports whether the two lists are identical.

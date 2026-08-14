@@ -3,10 +3,16 @@
 //! # Three verdicts, and why `pending` is not a shade of `pass`
 //!
 //! The scenario of §11.3 makes **two** assertions per position: the text became `привет`, and
-//! the active layout of the window became RU. Layout switching is task T-05-1 and does not
-//! exist yet, so the second assertion cannot be tested — and "cannot be tested" is a third
-//! outcome, not a quiet success. Decision Р-30 names it `pending`, requires it counted
-//! separately, and forbids a run with a non-zero `pending` from calling itself successful.
+//! the active layout of the window became RU. **Both are real verdicts today.** The layout row
+//! was `pending` while the switch of §4.6 did not exist; task T-05-1 wrote the chain of FR-50 to
+//! FR-52 (commit `c8e463f`) and task T-05-2 gave it the target of §4.4 (commit `7932eb2`), so
+//! the bench reads the window's layout and says `pass` or `fail` by what it reads.
+//!
+//! `pending` is undiminished by that and keeps the two jobs decision Р-30 gave it: the positions
+//! marked **П**, which §11.6 hands to a person because the bench may not drive them at all, and
+//! the requirements no task has written yet. "Cannot be tested" is a third outcome and not a
+//! quiet success — Р-30 requires it counted separately and forbids a run with a non-zero
+//! `pending` from calling itself successful.
 //!
 //! Every [`Pending`] carries the task that owns the missing requirement, so the summary says
 //! not only that something is untested but who will make it testable.

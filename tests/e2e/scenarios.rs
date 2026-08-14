@@ -15,6 +15,13 @@
 //!
 //! Steps 5 and 7 are waits on a condition, never on a clock — requirement 1 of §11.5.
 //!
+//! **Position 16 is those same seven steps and one more** — [`Scene::rollback`]: the hotkey is
+//! pressed a second time and what is asserted is the *original* text, the layout back at en-US
+//! and `cycle_position` back at zero. The wait before the second press is step 7's wait for
+//! `привет` and not a pause, which is requirement 1 of §11.5 again and matters more here than
+//! anywhere else: a second press sent while the first replacement is still on its way would
+//! measure the race and not the rollback.
+//!
 //! # Two assertions, three verdicts
 //!
 //! Step 7 produces two rows, not one: the text, and the layout. **Both are real verdicts.** The
@@ -285,6 +292,43 @@ fn both_failed(position: u8, app: &str, reason: &str) -> Vec<Row> {
     ]
 }
 
+/// All three rows of position 16 when the scenario could not reach the second press.
+///
+/// Its own helper and not [`both_failed`] because position 16 asserts three things and expects
+/// different values for two of them: the *original* text, and the *source* layout. A row that
+/// failed while claiming to have expected `привет` would misreport what the position is for.
+fn rollback_failed(position: u8, app: &str, reason: &str) -> Vec<Row> {
+    vec![
+        Row::new(
+            position,
+            app,
+            Assertion::Text,
+            Verdict::Fail,
+            reason,
+            format!("{TYPED:?} побитово"),
+        ),
+        Row::new(
+            position,
+            app,
+            Assertion::Layout,
+            Verdict::Fail,
+            reason,
+            layout::describe(layout::US),
+        ),
+        Row::new(
+            position,
+            app,
+            Assertion::Other(CYCLE_ASSERTION),
+            Verdict::Fail,
+            reason,
+            "cycle_position=0",
+        ),
+    ]
+}
+
+/// What the third row of position 16 is about, in the report.
+const CYCLE_ASSERTION: &str = "позиция в цикле";
+
 /// Everything [`replacement`] needs about one already-set-up application.
 struct Scene<'a> {
     position: u8,
@@ -300,6 +344,13 @@ struct Scene<'a> {
     /// Whether the field can be emptied with `Ctrl+A`, `Delete` first. False for consoles,
     /// where both keys mean something else.
     clear_first: bool,
+    /// **Position 16 only** — press the hotkey a second time and assert the rollback of FR-33
+    /// instead of the replacement.
+    ///
+    /// A flag on the existing scene rather than a scenario of its own, because that is what
+    /// position 16 is: the seven steps of [`replacement`], unchanged, and one more press. Every
+    /// other position passes `false` and takes byte for byte the path it took before.
+    rollback: bool,
 }
 
 /// The seven steps, for one already-launched application and its content element.
@@ -312,12 +363,25 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
         content,
         modifiers,
         clear_first,
+        rollback,
     } = scene;
+
+    // A setup failure has to be reported in the shape of the position it happened in: two rows
+    // for the ordinary scenario, three for the rollback of position 16, and with that position's
+    // own expected values. For `rollback == false` this is `both_failed` called exactly as it was
+    // called before, argument for argument.
+    let failed = |reason: &str| -> Vec<Row> {
+        if rollback {
+            rollback_failed(position, app_name, reason)
+        } else {
+            both_failed(position, app_name, reason)
+        }
+    };
 
     // Step 1 — forward. Rake 3, for every application and not only for Word. The window handle
     // goes too: the window is in registry A, so Win32 may be used on it directly.
     if let Err(error) = shell::activate_window(pid, Some(window)) {
-        return both_failed(position, app_name, &format!("вывод окна вперёд: {error}"));
+        return failed(&format!("вывод окна вперёд: {error}"));
     }
 
     let target = input::Target { pid, hwnd: window };
@@ -326,24 +390,24 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
     let source_layout = match layout::ensure(window, layout::US, Duration::from_secs(5)) {
         Ok(id) => id,
         Err(error) => {
-            return both_failed(position, app_name, &format!("исходная раскладка: {error}"));
+            return failed(&format!("исходная раскладка: {error}"));
         }
     };
 
     // Step 3 — empty the field, so the reading afterwards is only this run's doing.
     if clear_first {
         if let Err(error) = input::chord(&[VK_CONTROL.0], VK_A.0, &target) {
-            return both_failed(position, app_name, &format!("очистка поля: {error}"));
+            return failed(&format!("очистка поля: {error}"));
         }
         if let Err(error) = input::tap(VK_DELETE.0, &target) {
-            return both_failed(position, app_name, &format!("очистка поля: {error}"));
+            return failed(&format!("очистка поля: {error}"));
         }
     }
 
     // Step 4 — type. The foreground check is inside `type_text`; a refusal ends the position
     // here rather than typing into somebody else's window.
     if let Err(error) = input::type_text(TYPED, &target) {
-        return both_failed(position, app_name, &format!("ввод {TYPED:?}: {error}"));
+        return failed(&format!("ввод {TYPED:?}: {error}"));
     }
 
     // Step 5 — wait until the application has actually taken the keystrokes. Not a delay: the
@@ -357,14 +421,10 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
 
     let Some((_, source)) = typed_seen else {
         let actual = content.read().map(|(raw, _)| normalise(&raw));
-        return both_failed(
-            position,
-            app_name,
-            &format!(
-                "введённое не дошло до приложения: прочитано {:?}, ожидалось содержащее {TYPED:?}",
-                actual.unwrap_or_else(|| "<чтение не удалось>".to_owned())
-            ),
-        );
+        return failed(&format!(
+            "введённое не дошло до приложения: прочитано {:?}, ожидалось содержащее {TYPED:?}",
+            actual.unwrap_or_else(|| "<чтение не удалось>".to_owned())
+        ));
     };
 
     // What the product itself saw of those keystrokes, through SEC-04a. Not a verdict — an
@@ -388,7 +448,7 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
         input::chord(modifiers, ctx.hotkey_vk, &target)
     };
     if let Err(error) = pressed {
-        return both_failed(position, app_name, &format!("горячая клавиша: {error}"));
+        return failed(&format!("горячая клавиша: {error}"));
     }
 
     // Step 7 — wait for the replacement, then read the layout.
@@ -405,6 +465,29 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
     let shown = final_text
         .clone()
         .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    // ⚠ **Position 16 — the eighth step, and the only difference from the seven above.**
+    //
+    // Everything before this line has already happened for position 16 exactly as it happens
+    // for position 1, including step 7's wait for `привет`. That wait *is* the wait between the
+    // two presses (requirement 1 of §11.5): it is a condition and not a clock, and it is the
+    // reason the second press can be trusted to be a second press rather than half of a race.
+    if rollback {
+        return rolled_back(
+            ctx,
+            &target,
+            RollbackScene {
+                position,
+                app_name,
+                window,
+                content,
+                modifiers,
+                source_layout,
+                first_press_gave: replaced.as_deref(),
+                shown: &shown,
+            },
+        );
+    }
 
     let text_row = Row::new(
         position,
@@ -471,6 +554,191 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
     vec![text_row, layout_row]
 }
 
+// ---------------------------------------------------------------------------------------
+// Position 16 — the eighth step: the rollback of FR-33
+// ---------------------------------------------------------------------------------------
+
+/// What [`rolled_back`] needs from the seven steps that have already run.
+struct RollbackScene<'a> {
+    position: u8,
+    app_name: &'a str,
+    window: HWND,
+    content: &'a Element,
+    /// Modifiers held over the hotkey — empty for position 16, and carried through so that the
+    /// second press is the same gesture as the first.
+    modifiers: &'a [u16],
+    /// The layout the window was in before the first press: en-US, and the value the rollback
+    /// has to bring it back to.
+    source_layout: u32,
+    /// What step 7 read after the first press, when it read `привет` — `None` when it never did.
+    first_press_gave: Option<&'a str>,
+    /// What is in the field now, whatever it is, for the failure message.
+    shown: &'a str,
+}
+
+/// The second press of the hotkey, and the three assertions of position 16 — **FR-32, FR-33**.
+///
+/// # What is asserted, and why the third one exists
+///
+/// | Row | Expected |
+/// |---|---|
+/// | text | `ghbdtn` **bit for bit** — not "contains", see below |
+/// | layout | back at `0x00000409`, en-US |
+/// | `cycle_position` | `0` — the cycle of length two is back at its start |
+///
+/// The first two could both hold by accident: a product that never saw the second press at all
+/// would leave the field holding `привет`, and one that flushed the buffer on some rule of FR-10
+/// and then re-typed nothing would leave the text alone too. The third row is what tells "the
+/// text happens to match" from "the program really came back to the start of the cycle", and it
+/// is the reason task T-05-2a put `cycle_position` on the channel of SEC-04a in the first place.
+///
+/// # Bit for bit, and what that means through UI Automation
+///
+/// FR-32: "Возврат к началу цикла восстанавливает исходный текст побитово точно." The comparison
+/// is therefore `==` against the whole reading and **not** `contains`: `contains` would accept
+/// `привет ghbdtn`, which is the shape a replacement that appended instead of replacing would
+/// leave, and that is precisely the failure FR-32 is about. What is compared is the reading
+/// after [`normalise`], which folds the line breaks and the padding characters the providers add
+/// and touches nothing else; the raw reading goes into the row's note either way, so a
+/// disagreement can be read rather than guessed at.
+fn rolled_back(ctx: &Context, target: &input::Target, scene: RollbackScene<'_>) -> Vec<Row> {
+    let RollbackScene {
+        position,
+        app_name,
+        window,
+        content,
+        modifiers,
+        source_layout,
+        first_press_gave,
+        shown,
+    } = scene;
+
+    // ⚠ Requirement 1 of §11.5. The first press must have landed before the second is sent, and
+    // "landed" is a condition — step 7's wait for `привет`, already spent by the caller — and
+    // never a pause. Without it the bench would be measuring the race between two replacements.
+    let Some(after_first) = first_press_gave else {
+        return rollback_failed(
+            position,
+            app_name,
+            &format!(
+                "первое нажатие не дало {EXPECTED:?}, второе не отправлялось: прочитано {shown:?}"
+            ),
+        );
+    };
+
+    // The second press — the same gesture as the first, modifiers included.
+    let pressed = if modifiers.is_empty() {
+        input::tap(ctx.hotkey_vk, target)
+    } else {
+        input::chord(modifiers, ctx.hotkey_vk, target)
+    };
+    if let Err(error) = pressed {
+        return rollback_failed(position, app_name, &format!("второе нажатие: {error}"));
+    }
+
+    // Step 7 again, for the *original* text this time. A condition, not a clock.
+    let restored = wait::until(wait::TEXT_TIMEOUT, || {
+        content
+            .read()
+            .map(|(raw, _)| (normalise(&raw), raw))
+            .filter(|(text, _)| text == TYPED)
+    });
+
+    let (shown_now, raw_now) = restored
+        .clone()
+        .or_else(|| content.read().map(|(raw, _)| (normalise(&raw), raw)))
+        .unwrap_or_else(|| ("<чтение не удалось>".to_owned(), String::new()));
+
+    // The layout the rollback has to have brought back. The same wait-on-a-condition the
+    // ordinary scenario gives the switch of FR-40 step 5: the switch follows the replacement
+    // (FR-43), so the layout may still be RU at the instant the text arrives.
+    let observed = wait::until(wait::TEXT_TIMEOUT, || {
+        layout::of_window(window)
+            .map(layout::id_of)
+            .filter(|id| id & 0xFFFF == layout::US & 0xFFFF)
+    })
+    .or_else(|| layout::of_window(window).map(layout::id_of));
+
+    // And what the product itself says about where the cycle is — the key task T-05-2a added.
+    let snapshot = crate::channel::read();
+    let cycle = snapshot
+        .as_ref()
+        .ok()
+        .and_then(|snapshot| snapshot.get(CYCLE_KEY).map(str::to_owned));
+    let counters = snapshot
+        .as_ref()
+        .ok()
+        .map(|snapshot| {
+            format!(
+                "buffer_len={}, hotkey_handoffs={}, post_failures={}, send_mismatches={}",
+                snapshot.get("buffer_len").unwrap_or("?"),
+                snapshot.get("hotkey_handoffs").unwrap_or("?"),
+                snapshot.get("post_failures").unwrap_or("?"),
+                snapshot.get("send_mismatches").unwrap_or("?"),
+            )
+        })
+        .unwrap_or_else(|| "канал не ответил".to_owned());
+
+    vec![
+        Row::new(
+            position,
+            app_name,
+            Assertion::Text,
+            if restored.is_some() {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            format!("{shown_now:?}"),
+            format!("{TYPED:?} побитово"),
+        )
+        .with_note(format!(
+            "после первого нажатия {after_first:?}; сырое чтение после второго {raw_now:?}; \
+             сравнение — равенство целиком, не «содержит» (FR-32); продукт: {counters}"
+        )),
+        Row::new(
+            position,
+            app_name,
+            Assertion::Layout,
+            match observed {
+                Some(id) if id & 0xFFFF == layout::US & 0xFFFF => Verdict::Pass,
+                _ => Verdict::Fail,
+            },
+            observed.map_or("<чтение не удалось>".to_owned(), layout::describe),
+            layout::describe(layout::US),
+        )
+        .with_note(format!(
+            "исходная раскладка окна {}; после двух нажатий цикл длины 2 возвращает её же \
+             (FR-33), переключение — FR-40 шаг 5 и §4.6",
+            layout::describe(source_layout)
+        )),
+        Row::new(
+            position,
+            app_name,
+            Assertion::Other(CYCLE_ASSERTION),
+            match cycle.as_deref() {
+                Some("0") => Verdict::Pass,
+                _ => Verdict::Fail,
+            },
+            match &cycle {
+                Some(value) => format!("{CYCLE_KEY}={value}"),
+                None => match &snapshot {
+                    Ok(_) => format!("ключ {CYCLE_KEY} в снимке отсутствует"),
+                    Err(error) => format!("канал SEC-04a не ответил: {error}"),
+                },
+            },
+            format!("{CYCLE_KEY}=0"),
+        )
+        .with_note(format!(
+            "FR-32, FR-33: цикл длины 2 вернулся в начало; ключ канала — задача T-05-2a; \
+             прочие счётчики: {counters}"
+        )),
+    ]
+}
+
+/// The key of the SEC-04a channel this position rests on — task T-05-2a.
+const CYCLE_KEY: &str = "cycle_position";
+
 /// Runs a position end to end: launch, find, replace, restore.
 /// What a position needs beyond the command that starts it.
 struct Plan<'a> {
@@ -482,6 +750,8 @@ struct Plan<'a> {
     content_in: &'a dyn Fn(&Automation, &Element) -> Option<Element>,
     modifiers: &'a [u16],
     clear_first: bool,
+    /// **Position 16 only** — see [`Scene::rollback`].
+    rollback: bool,
 }
 
 /// Runs a position end to end: launch, find the window, find the content, replace, restore.
@@ -518,6 +788,7 @@ fn run_position(
                     content: &content,
                     modifiers: plan.modifiers,
                     clear_first: plan.clear_first,
+                    rollback: plan.rollback,
                 },
             ),
         },
@@ -545,7 +816,7 @@ fn text_field(element: &Element) -> bool {
 /// so the window belongs to a process the bench never spawned. The window is therefore found
 /// by class among all top-level windows and its process adopted — see `App::adopt`.
 pub fn position_1(ctx: &Context) -> Vec<Row> {
-    notepad_position(ctx, 1, "Блокнот", &[])
+    notepad_position(ctx, 1, "Блокнот", &[], false)
 }
 
 /// Position 22 is the same application with `Shift` held over the hotkey.
@@ -555,10 +826,46 @@ pub fn position_22(ctx: &Context) -> Vec<Row> {
         22,
         "Модификаторы: Shift + горячая клавиша (Блокнот)",
         &[VK_SHIFT.0],
+        false,
     )
 }
 
-fn notepad_position(ctx: &Context, number: u8, name: &str, modifiers: &[u16]) -> Vec<Row> {
+/// Position 16 — **the rollback of FR-33**: the hotkey twice, and the original text back.
+///
+/// # Why Notepad, and why that is not a shortcut
+///
+/// Position 1's application, deliberately. It is already launched, adopted and closed by code
+/// that has been passing for two tasks, and position 16 is not a test of an application: it is a
+/// test of a **property of the product** — that the buffer keeps the strokes the user really
+/// made (FR-32) and that walking the cycle of length two round to its start restores them
+/// (FR-33). Choosing an application whose text field is known to work is what keeps the verdict
+/// about that property rather than about UI Automation.
+///
+/// The three assertions and the reason there are three of them are in [`rolled_back`].
+///
+/// # ⚠ `allow(dead_code)`, and it is a finding rather than a shrug
+///
+/// Nothing calls this function today, and that is not because it is unfinished. The run walks
+/// the positions in `tests\e2e\e2e.rs`: a `DEFAULT` list and a `match` that maps a number to the
+/// function that performs it. Position 16 is in neither, and adding it there is two lines — one
+/// in the list, one arm reading `16 => scenarios::position_16(&context)`.
+///
+/// **That file was outside the permissions of task T-05-2a**, which wrote this function, so the
+/// task stopped at the boundary and put the two lines in its report instead of taking the file
+/// (rule 5 of §3 of the controller's brief). The attribute keeps the build free of warnings
+/// while the wiring is decided, and it comes off with the same commit that adds the arm.
+#[allow(dead_code)]
+pub fn position_16(ctx: &Context) -> Vec<Row> {
+    notepad_position(ctx, 16, "Откат двойным нажатием (Блокнот)", &[], true)
+}
+
+fn notepad_position(
+    ctx: &Context,
+    number: u8,
+    name: &str,
+    modifiers: &[u16],
+    rollback: bool,
+) -> Vec<Row> {
     run_position(
         ctx,
         Plan {
@@ -570,6 +877,7 @@ fn notepad_position(ctx: &Context, number: u8, name: &str, modifiers: &[u16]) ->
             },
             modifiers,
             clear_first: true,
+            rollback,
         },
         || {
             let child = Command::new("notepad.exe")
@@ -717,6 +1025,7 @@ fn word_body(ctx: &Context, app: &mut App, log: &mut String) -> Vec<Row> {
             content: &content,
             modifiers: &[],
             clear_first: false,
+            rollback: false,
         },
     );
 
@@ -817,6 +1126,7 @@ pub fn position_3(ctx: &Context) -> Vec<Row> {
             },
             modifiers: &[],
             clear_first: true,
+            rollback: false,
         },
         || launch_chrome("chrome3", &["about:blank"]),
     )
@@ -844,6 +1154,7 @@ pub fn position_4(ctx: &Context) -> Vec<Row> {
             },
             modifiers: &[],
             clear_first: true,
+            rollback: false,
         },
         || launch_chrome("chrome4", &[PAGE]),
     )
@@ -1284,6 +1595,7 @@ pub fn position_11(ctx: &Context) -> Vec<Row> {
                         content: &content,
                         modifiers: &[],
                         clear_first: true,
+                        rollback: false,
                     },
                 ),
                 None => both_failed(11, "Диалог «Выполнить»", "поле ввода не найдено"),
@@ -1600,23 +1912,37 @@ pub fn pending_positions() -> Vec<Row> {
             "конвертированная фраза",
         )
         .with_note("путь выделения §4.7 не реализован"),
+        // ⚠ **Position 16 is no longer pending on a missing requirement.** The scenario is
+        // written and lives in this file — [`position_16`], the seven steps of [`replacement`]
+        // plus the second press. What it waits for is not a task of the product but two lines of
+        // wiring in `tests\e2e\e2e.rs`: the list of positions the run walks by default, and the
+        // arm of its `match` that would call [`position_16`]. That file was outside the
+        // permissions of task T-05-2a, so the task stopped and wrote it in its report rather
+        // than widening its own area, and this row says the same thing where the matrix is read.
         Row::pending(
             16,
-            "Откат двойным нажатием",
+            "Откат двойным нажатием (Блокнот)",
             Assertion::Other("исходный текст восстановлен побитово"),
-            "T-05-2",
+            "T-05-2a",
             format!("{TYPED:?} побитово"),
         )
-        .with_note("выбор целевой раскладки по режимам «Пара»/«Цикл» (FR-30…FR-34) не реализован"),
+        .with_note(
+            "FR-30…FR-34 реализованы, сценарий написан — scenarios::position_16, три \
+             утверждения: текст побитово, раскладка en-US, cycle_position=0; не запускается \
+             потому, что диспетчер позиций в tests\\e2e\\e2e.rs не имеет ветки 16, а этот файл \
+             задаче T-05-2a запрещён",
+        ),
         Row::pending(
             17,
             "Цикл при трёх раскладках",
             Assertion::Other("три нажатия возвращают исходный текст"),
-            "T-05-2",
+            "T-04-3-3",
             format!("{TYPED:?} побитово"),
         )
         .with_note(
-            "режим «Цикл» не реализован; временная третья раскладка стендом не подключалась",
+            "режим «Цикл» (FR-31) реализован задачей T-05-2; стенд пока не умеет подготовить \
+             окружение из трёх раскладок — записать config.toml с mode = \"cycle\", подключить \
+             третью раскладку и снять её после (сноска 3 §11.3); config.toml стенд только читает",
         ),
         Row::pending(
             18,

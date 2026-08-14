@@ -21,6 +21,10 @@
 //! * The **length mirror**, on which the honesty of `buffer_len` rests: every path that changes
 //!   the buffer must publish, and that is checked path by path against the list in
 //!   `Ring::set_len`.
+//! * The **cycle mirror** of task T-05-2a, on which the honesty of `cycle_position` rests, and
+//!   which is checked the same way: the hotkey path that raises the counter (FR-32, FR-33) and
+//!   the flush path that zeroes it (FR-34), each asserted against what the channel would report
+//!   at that instant.
 //! * The **server** of task T-03-4-2 — that a client of this user connects and is answered,
 //!   that the answer tracks the buffer, that the channel takes no commands, and that the
 //!   thread ends when it is asked to.
@@ -50,11 +54,11 @@ use lang_switcher::settings::ReplacementMethod;
 use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_BACK, VK_RETURN};
 
-/// Serialises the two tests that assert on the process-wide length mirror.
+/// Serialises the tests that assert on the process-wide mirrors.
 ///
-/// The mirror is one atomic for the whole process and the typing buffer is a thread-local, so
+/// Each mirror is one atomic for the whole process and the typing buffer is a thread-local, so
 /// two tests running in parallel would be asserting on each other's timing rather than on the
-/// code. Each of the two holds this for its whole body; nothing else in the file touches the
+/// code. Each of the three holds this for its whole body; nothing else in the file touches a
 /// mirror.
 static MIRROR: Mutex<()> = Mutex::new(());
 
@@ -125,19 +129,32 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     }
 }
 
-/// **The two reserved keys are missing, not zero.** SEC-06, and the shape the future needs.
+/// **The one reserved key is missing, not zero.** SEC-06, and the shape the future needs.
 ///
 /// A bench that read `password_field=0` would record "no buffering in a password field" for a
-/// build that cannot tell. Absence is the honest answer until task T-06-1 (`password_field`)
-/// and task T-05-2 (`cycle_position`) arrive.
+/// build that cannot tell. Absence is the honest answer until task T-06-1 arrives.
+///
+/// The list held two keys until task **T-05-2a**, which published `cycle_position` and took it
+/// out of the reservation. The assertion is on the whole array rather than on "contains", so
+/// the day T-06-1 publishes its key this test fails and somebody looks — which is what a
+/// reservation is for.
 #[test]
 fn the_reserved_keys_are_absent_rather_than_answered_with_a_zero() {
     let text = control::render(&control::snapshot());
 
     assert_eq!(
         control::RESERVED_KEYS,
-        ["password_field", "cycle_position"],
-        "the reserved list names the two keys SEC-04a reserves"
+        ["password_field"],
+        "the reserved list names the one key SEC-04a still reserves"
+    );
+
+    assert!(
+        !control::RESERVED_KEYS.contains(&"cycle_position"),
+        "cycle_position is published by task T-05-2a and is no longer reserved"
+    );
+    assert!(
+        control::KEYS.contains(&"cycle_position"),
+        "and it is in the emitted key list instead"
     );
 
     for reserved in control::RESERVED_KEYS {
@@ -423,6 +440,127 @@ fn every_path_that_changes_the_buffer_publishes_its_length() {
 
     buffer::uninstall();
     assert_eq!(mirrored(), 0);
+}
+
+// -------------------------------------------------------------------------------------
+// The cycle mirror — the honesty of `cycle_position`, task T-05-2a
+// -------------------------------------------------------------------------------------
+
+/// The position the channel would report right now.
+fn mirrored_cycle() -> usize {
+    control::snapshot().cycle_position
+}
+
+/// **Both paths that move the counter of FR-32 publish it, and nothing else has to.**
+///
+/// The counter lives in a field of `Recorder`, which is a thread-local of the input thread
+/// (section 6.3), so the number a client of the channel reads is the *mirror* and not the
+/// counter. A mirror that lagged would be worse than no mirror: the acceptance bench of
+/// section 11.5 takes it for the truth, and position 16 of the matrix of section 11.3 uses it
+/// to tell "the text matched by luck" from "the program really came back to the start of the
+/// cycle".
+///
+/// One test rather than several, for the reason the length mirror gives above: the mirror is a
+/// process-wide atomic and `cargo test` runs the tests of a binary in parallel.
+#[test]
+fn every_path_that_moves_the_cycle_position_publishes_it() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    buffer::install_recorder(Recorder::with_capacity(8));
+
+    // A known starting point, and the first assertion of FR-34 on the way to it: the flush
+    // publishes the zero it leaves behind rather than merely holding it.
+    assert!(buffer::reset());
+    assert_eq!(mirrored_cycle(), 0, "a flush publishes the zero of FR-34");
+
+    // `Recorder::advance_cycle` — the hotkey path. A cycle of two is the "Пара" of FR-30, and
+    // FR-33 says the rollback is that cycle walked twice: 0 → 1 → 0.
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(2)), Some(1));
+    assert_eq!(
+        mirrored_cycle(),
+        1,
+        "the hotkey path publishes the new position"
+    );
+
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(2)), Some(0));
+    assert_eq!(
+        mirrored_cycle(),
+        0,
+        "FR-33: the second press comes back to the start, and the channel says so"
+    );
+
+    // A cycle of three — FR-31 — walked past its end, so that a mirror published only on the
+    // growing branch would be caught.
+    for expected in [1usize, 2, 0, 1] {
+        assert_eq!(
+            buffer::with(|recorder| recorder.advance_cycle(3)),
+            Some(expected)
+        );
+        assert_eq!(mirrored_cycle(), expected);
+        assert_eq!(
+            buffer::with(|recorder| recorder.cycle_position()),
+            Some(mirrored_cycle()),
+            "the published position is the position of the buffer"
+        );
+    }
+
+    // FR-34 through a rule of the FR-10 table: a stroke, the counter off zero, a boundary key,
+    // and the channel reports zero at once — not after the next press of the hotkey.
+    press(VK_A.0, SCAN_A);
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(3)), Some(2));
+    assert_eq!(mirrored_cycle(), 2);
+
+    press(VK_RETURN.0, 0x1C);
+    assert_eq!(buffer::len(), 0, "the boundary key emptied the buffer");
+    assert_eq!(buffer::with(|recorder| recorder.cycle_position()), Some(0));
+    assert_eq!(
+        mirrored_cycle(),
+        0,
+        "FR-34: the mirror does not lag behind the flush"
+    );
+
+    // And through the public flush the asynchronous sources of FR-10 arrive at.
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(2)), Some(1));
+    assert_eq!(mirrored_cycle(), 1);
+    assert!(buffer::reset());
+    assert_eq!(mirrored_cycle(), 0, "reset publishes zero");
+
+    // `Backspace` is the one row of the table that is not a flush, so it moves the length and
+    // must not move the position — a publication hung on the wrong path would show up here.
+    press(VK_A.0, SCAN_A);
+    press(VK_A.0, SCAN_A);
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(4)), Some(1));
+    press(VK_BACK.0, 0x0E);
+    assert_eq!(buffer::len(), 1, "Backspace took one stroke out");
+    assert_eq!(
+        mirrored_cycle(),
+        1,
+        "and left the position where it was — FR-34 has nothing to say about it"
+    );
+
+    // **SEC-01, SEC-07.** What actually leaves the process is a decimal number on one line.
+    // Nothing about the strokes that got the cycle there, and nothing about the layout the
+    // position names.
+    assert!(buffer::reset());
+    assert_eq!(buffer::with(|recorder| recorder.advance_cycle(3)), Some(1));
+
+    let text = control::render(&control::snapshot());
+    let published = value_of(&text, "cycle_position");
+
+    assert_eq!(published, "1", "the channel carries the position itself");
+    assert!(
+        published.bytes().all(|byte| byte.is_ascii_digit()),
+        "and carries it as a plain decimal count and nothing else"
+    );
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("cycle_position="))
+            .count(),
+        1,
+        "on exactly one line"
+    );
+
+    buffer::uninstall();
 }
 
 // -------------------------------------------------------------------------------------

@@ -10,20 +10,26 @@
 //!
 //! Requirements this module covers: SEC-04a, for the acceptance bench of section 11.5 and
 //! acceptance criterion 8 of section 13 of SPEC — tasks **T-03-4** and **T-03-4-2**.
-//! Implemented by backlog tasks: T-03-4 (name, descriptor, snapshot), T-03-4-2 (the server).
+//! Task **T-05-2a** added the `cycle_position` key of FR-32 and FR-33, which is the position
+//! counter task T-05-2 put in [`crate::buffer::Recorder`] made visible from outside the
+//! process; the choice of the target layout is section 4.4's and is not this module's.
+//! Implemented by backlog tasks: T-03-4 (name, descriptor, snapshot), T-03-4-2 (the server),
+//! T-05-2a (`cycle_position`).
 //!
 //! # The four conditions of SEC-04a, and where each of them is met
 //!
 //! 1. **Compiled only under `testing`.** The whole module is behind
 //!    `#[cfg(feature = "testing")] pub mod control;` in `src\lib.rs`, the feature is absent
-//!    from the Release configuration, and the length mirror this module reads in
-//!    [`crate::buffer`] carries the same gate. Nothing here has a counterpart outside it.
+//!    from the Release configuration, and the two mirrors this module reads in
+//!    [`crate::buffer`] — the ring's length and the cycle position — carry the same gate.
+//!    Nothing here has a counterpart outside it.
 //! 2. **Metadata only.** [`Snapshot`] is the whole of what leaves this module, and every
 //!    field of it is a count, a duration or a published configuration value. There is no
 //!    field for a stroke, a key code, a scan code or a character, and none may ever be added:
 //!    SEC-01 and SEC-07 forbid it, and `buffer::Stroke` has neither `Debug` nor `Display`, so
-//!    the content is not even expressible here by mistake. `buffer_len` is a number, which is
-//!    exactly what condition 2 of SEC-04a names as the one thing allowed out.
+//!    the content is not even expressible here by mistake. `buffer_len` is a number, and so is
+//!    `cycle_position` — a step along the cycle of section 4.4, not a layout and not a
+//!    character — which is what condition 2 of SEC-04a names as the one thing allowed out.
 //! 3. **Owner of the current session only.** [`OwnerOnly`] builds an explicit security
 //!    descriptor whose DACL holds exactly one allow entry, on the SID taken from this
 //!    process's own token. A `NULL` DACL means "everyone" and is the opposite of the
@@ -42,16 +48,20 @@
 //!
 //! # Keys that are deliberately absent
 //!
-//! [`render`] emits a key only when the value behind it exists. Two keys of SEC-04a are
+//! [`render`] emits a key only when the value behind it exists. One key of SEC-04a is
 //! therefore **missing from the output rather than published as zero** — a stand that reports
 //! a fabricated zero would count it as the truth:
 //!
 //! * `password_field` — SEC-06, FR-70 to FR-73, position 14 of the matrix of section 11.3.
 //!   Task **T-06-1**. This is the key SEC-04a exists for at all.
-//! * `cycle_position` — FR-32, FR-33. Task **T-05-2**.
 //!
-//! Both are one line each in [`Snapshot`] and one line each in [`render`] when their owning
-//! task arrives; neither the format nor the server has to change to accept them.
+//! It is one line in [`Snapshot`] and one line in [`render`] when its owning task arrives;
+//! neither the format nor the server has to change to accept it.
+//!
+//! `cycle_position` was the second such key until task **T-05-2a**, which is the task this
+//! paragraph is being edited by. The counter itself is task T-05-2's and is not touched here:
+//! what T-05-2a added is the mirror that makes it observable, [`note_cycle_position`], built
+//! on the pattern [`note_buffer_len`] set — see [`CYCLE_POSITION`].
 //!
 //! # The server — task T-03-4-2
 //!
@@ -510,10 +520,10 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is a dozen short `key=value` lines — some two hundred bytes — and a page is
-/// comfortably more than the widest it could grow to when tasks T-06-1 and T-05-2 add their
-/// keys. Sizing it above the payload is what lets [`publish`] hand the bytes over without
-/// waiting for the client to read them.
+/// The payload is thirteen short `key=value` lines — some two hundred bytes — and a page is
+/// comfortably more than the widest it could grow to when task T-06-1 adds its key. Sizing it
+/// above the payload is what lets [`publish`] hand the bytes over without waiting for the
+/// client to read them.
 const PIPE_OUT_BUFFER_BYTES: u32 = 4096;
 
 /// Inbound buffer of the pipe: none. **Condition 4 of SEC-04a.** There is nothing to read
@@ -803,7 +813,7 @@ fn await_client(pipe: HANDLE) -> WinResult<bool> {
 ///
 /// # SEC-01, SEC-07, condition 2 of SEC-04a
 ///
-/// The bytes are [`render`] of one [`snapshot`], which is a dozen counts and one word of
+/// The bytes are [`render`] of one [`snapshot`], which is twelve counts and one word of
 /// section 7. Nothing else can be sent from here: there is no other write in this module.
 fn publish(pipe: HANDLE) {
     let payload = render(&snapshot());
@@ -900,6 +910,20 @@ static CACHE_BUILDS: AtomicU32 = AtomicU32::new(0);
 /// the buffer without the mirror following.
 static BUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
 
+/// Where the strokes in the buffer stand in the cycle of section 4.4 **right now** — the
+/// mirror of the counter FR-32 puts beside the ring.
+///
+/// The same construction as [`BUFFER_LEN`] and for the same reason: `Recorder::cycle` is a
+/// field of a thread-local of the input thread (section 6.3), so a reader outside that thread
+/// needs the value published rather than fetched. Module `buffer` writes this from the places
+/// its counter is written, under the `testing` feature and nowhere else.
+///
+/// **SEC-01, SEC-07.** A step along the cycle — a number in `0..len` — and nothing else.
+/// Which layout that step names is not here, and neither is a scan code, a character or a
+/// stroke. A zero means "what is on the screen is what was typed", which is the state every
+/// flush of FR-10 leaves behind (FR-34).
+static CYCLE_POSITION: AtomicUsize = AtomicUsize::new(0);
+
 /// [`BUFFER_LEN`] as it stood when the input thread left its message loop.
 ///
 /// The file sink runs on the main thread after every thread has been joined, by which time
@@ -945,6 +969,28 @@ pub fn note_cache_built() {
 #[inline]
 pub fn note_buffer_len(len: usize) {
     BUFFER_LEN.store(len, Ordering::Relaxed);
+}
+
+/// Publishes the position in the cycle of section 4.4 — called by module `buffer` from the
+/// places its counter changes, and by nothing else.
+///
+/// # NFR-01 to NFR-05
+///
+/// Both callers sit on the input thread: one on the hotkey path (`Recorder::advance_cycle`),
+/// one on the flush path every rule of FR-10 arrives at (`Recorder::clear_ring`, which is
+/// reached from inside the hook callback). So this is one relaxed atomic store and nothing
+/// else — no allocation (NFR-03), no lock and no mutex (NFR-04), no I/O and nothing formatted
+/// (NFR-05), a constant handful of instructions (NFR-01, NFR-02). `Relaxed` for the reason
+/// [`note_buffer_len`] gives: there is no other datum whose visibility has to be ordered
+/// against it.
+///
+/// # SEC-01, SEC-07
+///
+/// A `usize`, and a small one: the position in the cycle. Not the layout it names, not the
+/// stroke it was reached by, not the character either of them would produce.
+#[inline]
+pub fn note_cycle_position(position: usize) {
+    CYCLE_POSITION.store(position, Ordering::Relaxed);
 }
 
 /// Latches the live length for the file sink — see [`BUFFER_LEN_AT_EXIT`].
@@ -1004,11 +1050,15 @@ pub struct Snapshot {
     pub inter_event_delay_ms: u32,
     /// `[replacement] method` as published — **FR-42**, section 7.
     pub replacement_method: ReplacementMethod,
+    /// Where the buffer stands in the cycle of section 4.4 — **FR-32, FR-33**.
+    ///
+    /// `0` is "as typed", and it is what every flush of FR-10 leaves behind (FR-34). A number
+    /// in `0..len`, never a layout and never a character: see [`CYCLE_POSITION`].
+    pub cycle_position: usize,
     //
-    // Deliberately absent until their owning task exists, so that the bench cannot mistake a
+    // Deliberately absent until its owning task exists, so that the bench cannot mistake a
     // fabricated zero for an answer:
     //   password_field — SEC-06, FR-70..FR-73, position 14 of section 11.3. Task T-06-1.
-    //   cycle_position — FR-32, FR-33. Task T-05-2.
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1034,6 +1084,7 @@ pub fn snapshot() -> Snapshot {
         events_lost,
         inter_event_delay_ms: crate::inject::inter_event_delay_ms(),
         replacement_method: crate::inject::replacement_method(),
+        cycle_position: CYCLE_POSITION.load(Ordering::Relaxed),
     }
 }
 
@@ -1042,9 +1093,12 @@ pub fn snapshot() -> Snapshot {
 /// The order is the order of the table in task T-03-4. A reader that parses line by line does
 /// not depend on it; a human diffing two runs does.
 ///
-/// `password_field` and `cycle_position` are **not** here. See the module documentation: they
-/// arrive with tasks T-06-1 and T-05-2 respectively, one line each, and until then their
-/// absence is the honest answer.
+/// `cycle_position` is last rather than beside `buffer_len`, and that is a decision about the
+/// diff: the twelve lines above stood in this order for two tasks, and appending leaves every
+/// one of them where a human comparing two runs already expects it. Task **T-05-2a**.
+///
+/// `password_field` is **not** here. See the module documentation: it arrives with task
+/// T-06-1, one line, and until then its absence is the honest answer.
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1058,7 +1112,8 @@ pub fn render(state: &Snapshot) -> String {
          send_mismatches={}\n\
          events_lost={}\n\
          inter_event_delay_ms={}\n\
-         replacement_method={}\n",
+         replacement_method={}\n\
+         cycle_position={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1071,6 +1126,7 @@ pub fn render(state: &Snapshot) -> String {
         state.events_lost,
         state.inter_event_delay_ms,
         method_name(state.replacement_method),
+        state.cycle_position,
     )
 }
 
@@ -1090,7 +1146,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 12] = [
+pub const KEYS: [&str; 13] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1103,8 +1159,13 @@ pub const KEYS: [&str; 12] = [
     "events_lost",
     "inter_event_delay_ms",
     "replacement_method",
+    "cycle_position",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module
-/// documentation. `password_field` is task **T-06-1**, `cycle_position` task **T-05-2**.
-pub const RESERVED_KEYS: [&str; 2] = ["password_field", "cycle_position"];
+/// documentation.
+///
+/// One key, and it is task **T-06-1**'s. `cycle_position` was the other until task T-05-2a
+/// published it; the list shrinks as the tasks arrive, and a key that is *reserved* is one no
+/// build may answer with a fabricated zero.
+pub const RESERVED_KEYS: [&str; 1] = ["password_field"];
