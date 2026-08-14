@@ -82,29 +82,139 @@ pub fn run_script(name: &str, args: &[String]) -> Result<(bool, String), String>
 /// foreground window actually belonging to `pid` is the fact the next `SendInput` depends on,
 /// and it is what this waits for. The retry loop lives here rather than inside the script so
 /// that the bench keeps exactly one sleeping place — see `wait`.
-pub fn activate(pid: u32) -> Result<(), String> {
-    let asked = wait::until_true(ACTIVATE_TIMEOUT, || {
-        // Ask once per poll; the script itself does not loop and does not sleep.
-        let asked = run_script(
-            "word-activate.ps1",
-            &["-ProcessId".to_owned(), pid.to_string()],
-        )
-        .map(|(ok, _)| ok)
-        .unwrap_or(false);
+/// [`activate_window`] with the window handle, when the caller has it.
+///
+/// ⚠ **Why a handle helps, and why using it is allowed.** `AppActivate` addresses a *process*
+/// and lets the shell pick which of its windows to raise; with a handle the bench can also ask
+/// Win32 directly — `ShowWindow(SW_RESTORE)` for a window that came up minimised, and
+/// `SetForegroundWindow` on that exact window. Both act on a window whose process has already
+/// passed `own::claim_window_process`, so it is in registry A and requirements A–E permit it:
+/// the rule is "nothing the bench did not start", not "no Win32".
+///
+/// The order matters. The cheap Win32 pair is tried first on every poll; `AppActivate` costs a
+/// PowerShell process and is the fallback that goes through the shell's own arbitration when
+/// Win32 is ignored — rake 3.
+pub fn activate_window(
+    pid: u32,
+    hwnd: Option<windows::Win32::Foundation::HWND>,
+) -> Result<(), String> {
+    // ⛔ The gate, before anything is done to any window.
+    if !crate::own::is_ours(pid) {
+        return Err(format!(
+            "⛔ процесс {pid} не в реестре A — стенд не выводит вперёд чужие окна"
+        ));
+    }
 
-        asked && input::foreground().is_some_and(|(front, _)| front == pid)
+    let asked = wait::until_true(ACTIVATE_TIMEOUT, || {
+        if let Some(handle) = hwnd {
+            raise_own_window(handle);
+
+            if input::foreground().is_some_and(|(front, _)| front == pid) {
+                return true;
+            }
+        }
+
+        ask_and_check(pid)
     });
 
     if asked {
-        Ok(())
-    } else {
-        let front = input::foreground().map_or("нет".to_owned(), |(p, _)| p.to_string());
-        Err(format!(
-            "окно процесса {pid} не удалось вывести вперёд за {} с; переднее окно принадлежит \
-             процессу {front}",
-            ACTIVATE_TIMEOUT.as_secs()
-        ))
+        return Ok(());
     }
+
+    // ⚠ Losing the race for the foreground is an **ordinary state of a desktop**, not a
+    // breakage, and the bench has to survive it: the position fails, naming who holds the
+    // foreground, and the run carries on. It must never stop to ask a person for a keystroke —
+    // a position that needs one is **П** by the definition of §11.6 and belongs to the
+    // acceptance session, not to an automatic run.
+    let holder = match input::foreground() {
+        Some((front, _)) => {
+            let name =
+                crate::own::process_table_name(front).unwrap_or_else(|| "<имя неизвестно>".into());
+            format!("процессу {front} ({name})")
+        }
+        None => "никому — переднего окна нет".to_owned(),
+    };
+
+    Err(format!(
+        "окно процесса {pid} не удалось вывести вперёд за {} с; передний план принадлежит {holder}",
+        ACTIVATE_TIMEOUT.as_secs()
+    ))
+}
+
+/// Raises a window that belongs to a process in registry A, past the foreground lock.
+///
+/// ⚠ **`SetForegroundWindow` alone is ignored when the caller is not itself in the foreground**
+/// — rake 3, and the bench is always a background console process. The documented way past it
+/// is to attach this thread's input queue to the queue of whichever thread owns the foreground:
+/// while attached the two share foreground rights, so the call stops being ignored, and the
+/// attachment is undone at once.
+///
+/// This is the same technique the five `#[ignore]` tests of `tests\inject.rs` were moved onto in
+/// part 2, and for the same reason: it addresses **our own** window, where `AppActivate` — which
+/// looks a window up by process or title — has nothing reliable to go on. `AppActivate` stays as
+/// the fallback in the caller, for the applications where it does work.
+///
+/// The caller re-reads `GetForegroundWindow` afterwards; nothing here is trusted on its return.
+fn raise_own_window(handle: windows::Win32::Foundation::HWND) {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SW_RESTORE,
+        SetForegroundWindow, ShowWindow,
+    };
+
+    // SAFETY: no arguments; returns a handle by value, possibly null.
+    let front = unsafe { GetForegroundWindow() };
+    // SAFETY: a null `front` yields zero, which is examined below; `None` asks only for the
+    // thread id and writes nothing of ours.
+    let owner = unsafe { GetWindowThreadProcessId(front, None) };
+    // SAFETY: no arguments; returns this thread's id.
+    let ours = unsafe { GetCurrentThreadId() };
+
+    // Attaching a thread to itself is an error; a zero owner means nothing holds the foreground.
+    let attached = owner != 0 && owner != ours;
+
+    if attached {
+        // SAFETY: both ids name live threads — ours by construction, the other taken from the
+        // current foreground window a moment ago. NFR-13: a failed attach is not fatal, it only
+        // means the calls below run unprivileged, and the caller re-reads the fact regardless.
+        unsafe {
+            let _ = AttachThreadInput(ours, owner, true);
+        }
+    }
+
+    // SAFETY: `handle` belongs to a process that passed the registry gate in `activate_window`.
+    // All three calls take it by value and dereference nothing of ours; their `BOOL`s are
+    // deliberately not fatal for the same reason.
+    unsafe {
+        if IsIconic(handle).as_bool() {
+            let _ = ShowWindow(handle, SW_RESTORE);
+        }
+        let _ = BringWindowToTop(handle);
+        let _ = SetForegroundWindow(handle);
+    }
+
+    if attached {
+        // SAFETY: undoes exactly the attachment made above, with the same two ids. Leaving input
+        // queues attached would tie this thread's fate to another one's.
+        unsafe {
+            let _ = AttachThreadInput(ours, owner, false);
+        }
+    }
+}
+
+/// One `AppActivate` and one re-read of the fact — rake 3, the shell-arbitrated way.
+///
+/// The script does not loop and does not sleep: the repetition belongs to `wait::until`, which
+/// is the bench's single sleeping place.
+fn ask_and_check(pid: u32) -> bool {
+    let asked = run_script(
+        "word-activate.ps1",
+        &["-ProcessId".to_owned(), pid.to_string()],
+    )
+    .map(|(ok, _)| ok)
+    .unwrap_or(false);
+
+    asked && input::foreground().is_some_and(|(front, _)| front == pid)
 }
 
 // ---------------------------------------------------------------------------------------

@@ -315,6 +315,86 @@ pub fn refusals() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The parent chain of a process, innermost first — the **measurement** behind requirement A.
+///
+/// Criterion 29 asks each of six positions to be classified by measuring whether the window's
+/// process is kin to something the bench started, rather than by assuming it from how the
+/// application is known to behave. This is that measurement, printed rather than inferred:
+/// every step of the chain with its process name, so the reader can see where it leaves the
+/// bench's own subtree — or that it never entered it.
+/// ⚠ A parent that has already exited is still **named**, as `<завершился>`, rather than
+/// silently ending the chain. The distinction matters for the measurement: the System32
+/// `notepad.exe` is a stub that hands over to the packaged application and exits at once, so a
+/// chain that simply stopped at the packaged process would read as "no kin" when the truth is
+/// "kin, and the parent is already gone".
+pub fn ancestry(pid: u32) -> Vec<(u32, String)> {
+    let table = process_table();
+    let mut chain = Vec::new();
+    let mut current = pid;
+
+    for _ in 0..MAX_ANCESTRY {
+        let Some(entry) = table.get(&current) else {
+            chain.push((current, "<завершился>".to_owned()));
+            break;
+        };
+        chain.push((current, entry.name.clone()));
+
+        if entry.parent == 0 || entry.parent == current {
+            break;
+        }
+        current = entry.parent;
+    }
+
+    chain
+}
+
+/// The measurement requirement 29 asks for, on its own: does this process descend from one the
+/// bench started?
+///
+/// Separate from [`claim_window_process`] because that one refuses a protected name **before**
+/// it walks the parent chain — correct for safety, useless for classification, since it would
+/// report every `WindowsTerminal.exe` as "not ours" without ever having looked.
+pub fn kinship(pid: u32) -> Option<u32> {
+    let roots = SPAWNED.lock().ok().map(|set| set.clone())?;
+    if roots.is_empty() {
+        return None;
+    }
+    if roots.contains(&pid) {
+        return Some(pid);
+    }
+
+    let table = process_table();
+    let mut current = pid;
+
+    for _ in 0..MAX_ANCESTRY {
+        let entry = table.get(&current)?;
+        if entry.parent == 0 || entry.parent == current {
+            return None;
+        }
+        if roots.contains(&entry.parent) {
+            return Some(entry.parent);
+        }
+        current = entry.parent;
+    }
+
+    None
+}
+
+/// Whether this process id is one the bench spawned itself — for the classification report.
+pub fn is_spawned_root(pid: u32) -> bool {
+    was_spawned(pid)
+}
+
+/// Process ids currently running under this executable name — read-only, for measurement.
+pub fn pids_named(name: &str) -> Vec<u32> {
+    let wanted = name.trim();
+    process_table()
+        .into_iter()
+        .filter(|(_, entry)| entry.name.eq_ignore_ascii_case(wanted))
+        .map(|(pid, _)| pid)
+        .collect()
+}
+
 /// Everything the registry holds, for the report.
 pub fn describe() -> String {
     let spawned = SPAWNED

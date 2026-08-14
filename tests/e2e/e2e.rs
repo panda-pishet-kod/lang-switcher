@@ -93,6 +93,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-kill") => experiment_kill(),
         Some("--channel-only") => channel_only(),
         Some("--experiment-foreign") => experiment_foreign(arguments),
+        Some("--classify") => scenarios::classify(&|| uia::Automation::new().ok()),
         _ => full_run(arguments),
     }
 }

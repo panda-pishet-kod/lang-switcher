@@ -231,35 +231,6 @@ fn adopt_window(
     }
 }
 
-/// Finds a window **among those of the process the bench spawned**, and adopts it.
-///
-/// ⛔ The strongest form of requirement B, and the one to prefer whenever the application keeps
-/// its window in the process that was launched: the search never leaves the bench's own process
-/// in the first place, so a predicate cannot nominate a stranger's window at all.
-///
-/// Used where it is known to work — Telegram and VS Code. Chrome needs the broader search
-/// because its window can belong to a child process, and there `own::claim_window_process` is
-/// what does the deciding.
-fn adopt_own_window(
-    automation: &Automation,
-    app: &mut App,
-    predicate: &dyn Fn(&Element) -> bool,
-) -> Result<Element, String> {
-    let pid = app.pid;
-
-    let window = automation
-        .await_window(pid, wait::WINDOW_TIMEOUT, predicate)
-        .ok_or_else(|| {
-            format!(
-                "у запущенного стендом процесса {pid} не появилось подходящего окна; окна чужих \
-                 процессов для этой позиции не рассматриваются вовсе (пункт B)"
-            )
-        })?;
-
-    app.adopt(&window)?;
-    Ok(window)
-}
-
 /// The `App` for something launched by a command that may or may not own the window.
 ///
 /// ⛔ **Requirement A.** This is the funnel every launch goes through, and it registers the
@@ -341,8 +312,9 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
         clear_first,
     } = scene;
 
-    // Step 1 — forward. Rake 3, for every application and not only for Word.
-    if let Err(error) = shell::activate(pid) {
+    // Step 1 — forward. Rake 3, for every application and not only for Word. The window handle
+    // goes too: the window is in registry A, so Win32 may be used on it directly.
+    if let Err(error) = shell::activate_window(pid, Some(window)) {
         return both_failed(position, app_name, &format!("вывод окна вперёд: {error}"));
     }
 
@@ -705,7 +677,7 @@ fn word_body(ctx: &Context, app: &mut App, log: &mut String) -> Vec<Row> {
     log.push_str(&format!("Элемент документа: {}\n", content.describe()));
 
     // Rake 3, through the shared technique.
-    if let Err(error) = shell::activate(pid) {
+    if let Err(error) = shell::activate_window(pid, Some(hwnd)) {
         log.push_str(&format!("AppActivate: {error}\n"));
         return both_failed(2, "Microsoft Word", &format!("AppActivate: {error}"));
     }
@@ -863,53 +835,42 @@ pub fn position_4(ctx: &Context) -> Vec<Row> {
 // Position 5 — Visual Studio Code
 // ---------------------------------------------------------------------------------------
 
-pub fn position_5(ctx: &Context) -> Vec<Row> {
-    const CODE: &str = r"<dev>\tools\vscode\Code.exe";
-
-    run_position(
-        ctx,
-        Plan {
-            number: 5,
-            name: "Visual Studio Code",
-            window_is: &|element: &Element| {
-                element.class() == "Chrome_WidgetWin_1"
-                    && element.name().contains("Visual Studio Code")
-            },
-            content_in: &|automation: &Automation, window: &Element| {
-                // The editor surface, by whatever name this build gives it. The first attempt
-                // required the name to contain `e2e` and found nothing — the tab name is not
-                // always what UI Automation reports for the editing surface — so the predicate
-                // now accepts any editable text element that can be read back, which is what
-                // the scenario actually needs.
-                automation.await_element(window, wait::WINDOW_TIMEOUT, &|e: &Element| {
-                    e.control_type() == Some(UIA_EditControlTypeId)
-                        && (e.name().contains("e2e") || e.value().is_some() || e.text().is_some())
-                })
-            },
-            modifiers: &[],
-            clear_first: true,
-        },
-        || {
-            let scratch = scratch_dir("vscode");
-            let file = scratch.join("e2e.txt");
-            std::fs::write(&file, "").map_err(|error| format!("временный файл: {error}"))?;
-
-            let child = Command::new(CODE)
-                .args(["--new-window", "--disable-extensions", "--user-data-dir"])
-                .arg(scratch.join("user"))
-                .arg("--extensions-dir")
-                .arg(scratch.join("ext"))
-                .arg(&file)
-                .spawn()
-                .map_err(|error| error.to_string())?;
-
-            Ok(launched(
-                "Visual Studio Code",
-                child,
-                CloseWith::Terminate,
-                Some(scratch),
-            ))
-        },
+/// ⛔ **П — приёмочная сессия.** Не по родству окна, а потому что читать нечего.
+///
+/// # The measurement
+///
+/// VS Code's window is in the UI Automation tree — class `Chrome_WidgetWin_1`, title
+/// `e2e.txt - Visual Studio Code`, and the bench spawned it, so requirements A–E are satisfied
+/// and it could be typed into. What cannot be done is the **reading back**, and requirement 3 of
+/// §11.5 is explicit that the result is verified through `ValuePattern` or `TextPattern`.
+///
+/// Measured twice, the second time with accessibility support switched on in the bench's own
+/// throwaway profile — the state in which Monaco is documented to publish an accessible text
+/// area:
+///
+/// ```text
+///   окно: 'e2e.txt - Visual Studio Code'
+///     ControlType.Edit:     найдено 0
+///     ControlType.Document: найдено 0
+///     ControlType.Text:     найдено 0
+/// ```
+///
+/// Not "the predicate was too narrow": **the editor is not in the tree at all**, and neither is
+/// any text. Monaco draws its own glyphs and this build publishes nothing of them. Widening the
+/// predicate is what the two earlier attempts did, and it could not have worked.
+///
+/// ⚠ **This says nothing about the product.** The bench cannot observe the outcome; a person
+/// looking at the screen can. That is precisely the division §11.6 exists to make, so the
+/// position goes to the acceptance session with a scenario written out in the report.
+pub fn position_5(_ctx: &Context) -> Vec<Row> {
+    handed_to_session(
+        5,
+        "Visual Studio Code",
+        "окно принадлежит запущенному стендом процессу и по пунктам A–E доступно, но UI \
+         Automation не отдаёт содержимое: измерено дважды, в том числе с включённым \
+         editor.accessibilitySupport в собственном временном профиле стенда — Edit, Document \
+         и Text найдено по нулю. Требование 3 §11.5 (считывание через ValuePattern либо \
+         TextPattern) выполнить нечем",
     )
 }
 
@@ -917,175 +878,119 @@ pub fn position_5(ctx: &Context) -> Vec<Row> {
 // Positions 6 and 7 — Windows Terminal
 // ---------------------------------------------------------------------------------------
 
-pub fn position_6(ctx: &Context) -> Vec<Row> {
-    terminal_position(ctx, 6, "Windows Terminal — PowerShell", "PowerShell")
+/// ⛔ **П — приёмочная сессия.** Классифицировано измерением, см. `--classify`.
+///
+/// # The measurement, and why its answer is not the one that was expected
+///
+/// The controller's estimate was that `wt.exe` is a launcher whose window is created by COM
+/// activation, so the terminal would not be kin to anything the bench started. **The
+/// measurement says otherwise**: `WindowsTerminal.exe` really is a child of the `wt.exe` the
+/// bench spawns —
+///
+/// ```text
+///   новое окно принадлежит процессу 4796
+///     4796   WindowsTerminal.exe
+///     11976  <завершился>  <-- ЗАПУЩЕН СТЕНДОМ, корень реестра A
+///   РОДСТВО: происходит от процесса 11976, запущенного стендом
+/// ```
+///
+/// So requirement A's kinship test **passes**. What refuses the position is requirement **C**:
+/// `WindowsTerminal` is on the protected list, and C exempts only an instance the bench spawned
+/// **directly**, not one it merely descends from.
+///
+/// That is a deliberate policy, not an accident of the code, and the bench obeys it rather than
+/// arguing with it: C exists precisely because a terminal usually belongs to the person at the
+/// machine, and "it descends from something of mine" is the kind of reasoning that ended with
+/// the controller's editor being closed twice. Whether C should be relaxed for a proved
+/// descendant is a question for the controller, and it is in the report — not a decision the
+/// bench takes for itself.
+pub fn position_6(_ctx: &Context) -> Vec<Row> {
+    handed_to_session(
+        6,
+        "Windows Terminal — PowerShell",
+        "окно принадлежит WindowsTerminal.exe. Измерение: оно ПРОИСХОДИТ от запущенного \
+         стендом wt.exe, то есть родство по пункту A есть. Отказывает пункт C: имя \
+         WindowsTerminal в запретном списке, а C освобождает только экземпляр, запущенный \
+         стендом напрямую, а не потомка",
+    )
 }
 
-pub fn position_7(ctx: &Context) -> Vec<Row> {
-    terminal_position(ctx, 7, "Windows Terminal — cmd", "Command Prompt")
+pub fn position_7(_ctx: &Context) -> Vec<Row> {
+    handed_to_session(
+        7,
+        "Windows Terminal — cmd",
+        "то же приложение и тот же способ запуска, что позиция 6: родство есть, отказывает \
+         пункт C по имени процесса",
+    )
 }
 
-fn terminal_position(ctx: &Context, number: u8, name: &str, profile: &str) -> Vec<Row> {
-    let profile = profile.to_owned();
-
-    run_position(
-        ctx,
-        Plan {
+/// A position handed to the acceptance session of §11.6 — **`pending`, owner `П`**.
+///
+/// ⚠ Not `fail`. A `fail` says the product misbehaved; these positions say nothing about the
+/// product at all — the bench simply may not drive the window, and §11.6 exists for exactly
+/// this. Decision Р-30 counts `pending` separately and keeps it out of "successful", which is
+/// the honest accounting.
+fn handed_to_session(number: u8, name: &str, reason: &str) -> Vec<Row> {
+    vec![
+        Row::pending(number, name, Assertion::Text, "П", EXPECTED).with_note(format!(
+            "{reason}; сценарий для человека — в отчёте T-04-3-2"
+        )),
+        Row::pending(
             number,
             name,
-            window_is: &|element: &Element| element.class() == "CASCADIA_HOSTING_WINDOW_CLASS",
-            content_in: &|automation: &Automation, window: &Element| {
-                automation.await_element(window, wait::WINDOW_TIMEOUT, &|e: &Element| {
-                    e.control_type() == Some(UIA_DocumentControlTypeId) && e.text().is_some()
-                })
-            },
-            modifiers: &[],
-            // ⚠ A console is not a text field: `Ctrl+A` and `Delete` mean other things there,
-            // so nothing is cleared and the reading is a `contains` over the visible buffer.
-            clear_first: false,
-        },
-        || {
-            let child = Command::new("wt.exe")
-                .args(["-w", "new", "-p", &profile])
-                .spawn()
-                .map_err(|error| error.to_string())?;
-            // `wt.exe` is a launcher that exits at once; the window belongs to
-            // `WindowsTerminal.exe`, whose process is adopted from the window.
-            Ok(launched(&profile, child, CloseWith::WmClose, None))
-        },
-    )
+            Assertion::Layout,
+            "П",
+            layout::describe(layout::RUSSIAN),
+        )
+        .with_note("плюс T-05-1: переключение раскладки не реализовано"),
+    ]
 }
 
 // ---------------------------------------------------------------------------------------
 // Position 8 — Telegram Desktop
 // ---------------------------------------------------------------------------------------
 
-/// ⚠ **The whole of footnote 7 of §11.3, in code.**
+/// ⛔ **П — приёмочная сессия, по прямому указанию сноски 7 §11.3.**
 ///
-/// Work happens in «Избранное» (Saved Messages) and nowhere else, `Enter` is never sent under
-/// any circumstance, and the input field is emptied after the scenario. Sending a message to a
-/// live contact is an external action and is not allowed in an automatic run — so the bench has
-/// no code path that presses `Enter`, not even a guarded one. The only virtual keys named
-/// anywhere on this position's path are `Ctrl`, `A`, `Delete` and the hotkey.
-pub fn position_8(ctx: &Context) -> Vec<Row> {
-    let clipboard = clip::Guard::capture();
-
-    let telegram = match std::env::var("APPDATA") {
-        Ok(appdata) => PathBuf::from(appdata)
-            .join("Telegram Desktop")
-            .join("Telegram.exe"),
-        Err(error) => {
-            return both_failed(8, "Telegram Desktop", &format!("%APPDATA%: {error}"));
-        }
-    };
-    if !telegram.exists() {
-        return both_failed(
-            8,
-            "Telegram Desktop",
-            &format!("{} не найден", telegram.display()),
-        );
-    }
-
-    let child = match Command::new(&telegram).spawn() {
-        Ok(child) => child,
-        Err(error) => return both_failed(8, "Telegram Desktop", &format!("запуск: {error}")),
-    };
-
-    let mut app = launched("Telegram Desktop", child, CloseWith::WmClose, None);
-
-    // ⚠ The window is **not** identified by title. `probe-telegram.ps1` records why: the title
-    // of the Telegram main window carries the name of the open chat, not the word "Telegram",
-    // so a title predicate matches nothing — which is exactly how the first run of this position
-    // failed. The window is found among the windows of the process the bench started, by its Qt
-    // window class.
-    let window = adopt_own_window(ctx.automation, &mut app, &|element: &Element| {
-        element.class().contains("Qt")
-    });
-
-    let mut rows = match (window, app.window) {
-        (Ok(window), Some(hwnd)) => telegram_body(ctx, app.pid, hwnd, &window),
-        (Err(reason), _) => both_failed(8, "Telegram Desktop", &reason),
-        (_, None) => both_failed(8, "Telegram Desktop", "у окна нет дескриптора"),
-    };
-
-    let closed = app.close();
-    for row in &mut rows {
-        row.note = format!(
-            "{}; закрытие: {closed}; буфер обмена не изменился: {}",
-            row.note,
-            clipboard.unchanged()
-        );
-    }
-    rows
-}
-
-/// Opens «Избранное» and runs the scenario in its input field.
-fn telegram_body(ctx: &Context, pid: u32, hwnd: HWND, window: &Element) -> Vec<Row> {
-    if let Err(error) = shell::activate(pid) {
-        return both_failed(
-            8,
-            "Telegram Desktop",
-            &format!("вывод окна вперёд: {error}"),
-        );
-    }
-
-    // «Избранное» is opened by invoking its item in the chat list — never by typing into a
-    // search box and pressing `Enter`, which is the shape of action footnote 7 forbids.
-    let saved = ctx.automation.find(window, &|e: &Element| {
-        let name = e.name();
-        name == "Избранное" || name == "Saved Messages"
-    });
-
-    let Some(saved) = saved else {
-        return both_failed(
-            8,
-            "Telegram Desktop",
-            "чат «Избранное» не найден в дереве UI Automation; стенд не переходит ни в какой \
-             другой чат — сноска 7 §11.3",
-        );
-    };
-
-    let opened = saved.invoke() || saved.set_focus();
-    if !opened {
-        return both_failed(
-            8,
-            "Telegram Desktop",
-            "не удалось открыть «Избранное» через UI Automation; стенд не пользуется \
-             синтетической мышью и не переходит в другой чат",
-        );
-    }
-
-    let field = ctx
-        .automation
-        .await_element(window, wait::WINDOW_TIMEOUT, &|e: &Element| {
-            e.control_type() == Some(UIA_EditControlTypeId)
-                && e.class().contains("InputField")
-                && e.value().is_some()
-        });
-
-    let Some(field) = field else {
-        return both_failed(8, "Telegram Desktop", "поле ввода сообщения не найдено");
-    };
-
-    let rows = replacement(
-        ctx,
-        Scene {
-            position: 8,
-            app_name: "Telegram Desktop",
-            pid,
-            window: hwnd,
-            content: &field,
-            modifiers: &[],
-            clear_first: true,
-        },
-    );
-
-    // Footnote 7: the input field is emptied after the scenario. `Enter` is not involved.
-    let target = input::Target { pid, hwnd };
-    let _ = input::chord(&[VK_CONTROL.0], VK_A.0, &target);
-    let _ = input::tap(VK_DELETE.0, &target);
-
-    rows
+/// # Footnote 7 anticipates this outcome by name
+///
+/// > Автоматизация возможна при условии, что UI Automation отдаёт поле ввода сообщения через
+/// > `ValuePattern` либо `TextPattern`; у Qt-приложений поддержка неполная. **Если поле
+/// > недоступно, позиция переводится в П**, заносится в `DEFERRED.md` и выполняется
+/// > в приёмочной сессии.
+///
+/// # What was measured, step by step, before invoking that clause
+///
+/// The bench got further at every attempt, and each step was fixed on evidence rather than
+/// guessed at. Recorded because the next person to touch this position should not repeat it:
+///
+/// | Attempt | Result | Cause found |
+/// |---|---|---|
+/// | window by title containing `Telegram` | окно не появилось | the title carries the **open chat's** name |
+/// | window by class containing `Qt` | окно не появилось | the class is `class MainWindow`, no `Qt` in it |
+/// | chat row by `name == "Избранное"` | чат не найден | the accessible name is a **composite** of the row's whole preview |
+/// | chat row by prefix, bounded tree walk | чат не найден | the walk's depth and node bounds are reached before the row is |
+/// | chat row by prefix, `FindAll(Descendants)`, asked once | чат не найден | the chat list is filled **after** the window appears |
+/// | same, waited for | **found, opened, title confirms «Избранное»**, message box found and told apart from the search box | — |
+/// | typed `ghbdtn` | **прочитано `""`** | keystrokes do not reach the field |
+/// | `SetFocus` on the field first — it reports success | **прочитано `""`** | Qt's UI Automation provider accepts the focus call and the field still does not receive the input |
+///
+/// The last line is the one footnote 7 is about: the element is in the tree and exposes
+/// `ValuePattern`, but the pairing of synthetic input with that provider does not work here, and
+/// the bench has no honest way around it. Clicking into the field with a synthetic mouse is not
+/// one — the position would then be testing the bench's aim, and §11.5 gives it no such licence.
+///
+/// ⚠ **`Enter` is still never sent, and the bench never left «Избранное».** The safety gate that
+/// confirms the open chat from the window title stayed in the code and passed every time.
+pub fn position_8(_ctx: &Context) -> Vec<Row> {
+    handed_to_session(
+        8,
+        "Telegram Desktop",
+        "измерено: окно и поле ввода находятся, «Избранное» открывается и подтверждается по \
+         заголовку, но введённое через SendInput до поля не доходит — ValuePattern возвращает \
+         пустую строку и после успешного SetFocus. Это ровно условие сноски 7 §11.3 о неполной \
+         поддержке UI Automation у Qt-приложений",
+    )
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1105,38 +1010,218 @@ fn telegram_body(ctx: &Context, pid: u32, hwnd: HWND, window: &Element) -> Vec<R
 /// window it is not allowed to close. Refusing after the fact is not enough when the attempt
 /// itself leaves a trace; the honest form is to not make it.
 pub fn position_10(_ctx: &Context) -> Vec<Row> {
-    shell_position_refused(
+    handed_to_session(
         10,
         "Проводник — поле поиска",
-        "окно Проводника создаёт уже работающая оболочка (explorer.exe передаёт ей запрос и \
-         выходит), поэтому окно принадлежит процессу, которого стенд не запускал: пункт B \
-         запрещает его усыновлять, а имя explorer стоит и в списке пункта C. Позиция не \
-         запускается вовсе — попытка оставляет на рабочем столе пользователя окно, закрыть \
-         которое стенд не вправе",
+        "измерено: запущенный стендом explorer.exe завершается сам за <10 с и окном владеть \
+         не может; окно CabinetWClass создаёт уже работающая оболочка (explorer.exe PID 6396), \
+         которая не происходит ни от одного процесса стенда. Окно не открывается вовсе — \
+         в части 1 такая попытка оставила окно на рабочем столе пользователя",
     )
 }
 
-/// The two positions that would require driving the shell, refused without being attempted.
-fn shell_position_refused(number: u8, name: &str, reason: &str) -> Vec<Row> {
-    vec![
-        Row::new(
-            number,
-            name,
-            Assertion::Text,
-            Verdict::Fail,
-            format!("не выполнялась: {reason}"),
-            EXPECTED,
-        )
-        .with_note("см. раздел 7.5 отчёта T-04-3 — вопрос вынесен контролеру"),
-        Row::new(
-            number,
-            name,
-            Assertion::Layout,
-            Verdict::Fail,
-            format!("не выполнялась: {reason}"),
-            layout::describe(layout::RUSSIAN),
+// ---------------------------------------------------------------------------------------
+// Classification of the six doubtful positions — criterion 29
+// ---------------------------------------------------------------------------------------
+
+/// Measures, for each doubtful position, whether the window belongs to a process the bench
+/// started — and prints the parent chain that decides it.
+///
+/// ⚠ **Measurement, not assumption.** Criterion 29 asks for exactly this: the classification of
+/// positions 1, 6, 7, 10, 12 and 22 must come from an experiment, not from what the application
+/// is known to do. The controller's prior estimate is written beside each result so the two can
+/// be compared.
+///
+/// Two of the six are measured **without opening their window at all**, and deliberately:
+///
+/// * **10 (Explorer)** — a folder window belongs to the running shell. Opening one would leave
+///   a window on the user's desktop that the bench is then forbidden to close, which is what
+///   happened in part 1. Instead the two facts that settle it are measured separately: the
+///   `explorer.exe` the bench spawns **exits within a second**, so it can own no window, and
+///   the shell process that would own it is not kin to anything the bench started.
+/// * **12 (Start menu)** — same reasoning, and the shell processes are already running.
+pub fn classify(automation: &dyn Fn() -> Option<Automation>) -> std::process::ExitCode {
+    println!("--- КЛАССИФИКАЦИЯ ШЕСТИ ПОЗИЦИЙ ИЗМЕРЕНИЕМ (пункт 29) ---\n");
+
+    let Some(automation) = automation() else {
+        eprintln!("UI Automation недоступна");
+        return std::process::ExitCode::from(1);
+    };
+
+    measure_launched(&automation, 1, "Блокнот", "notepad.exe", &[], "Notepad");
+    measure_launched(
+        &automation,
+        6,
+        "Windows Terminal",
+        "wt.exe",
+        &["-w", "new", "-p", "PowerShell"],
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+    );
+    measure_shell_owned(10, "Проводник", "explorer.exe", &["CabinetWClass"]);
+    measure_shell_owned(
+        12,
+        "Меню «Пуск»",
+        "StartMenuExperienceHost.exe / SearchHost.exe",
+        &["Windows.UI.Core.CoreWindow"],
+    );
+
+    println!(
+        "\nПозиции 7 и 22 — те же приложения, что 6 и 1: Windows Terminal с другим профилем \
+         и Блокнот с удерживаемым Shift. Родство окна с реестром у них то же самое, \
+         отдельного измерения не требуют."
+    );
+
+    std::process::ExitCode::SUCCESS
+}
+
+/// Launches an application and measures who ends up owning its window.
+fn measure_launched(
+    automation: &Automation,
+    number: u8,
+    title: &str,
+    command: &str,
+    args: &[&str],
+    window_class: &str,
+) {
+    println!("=== позиция {number}: {title} ===");
+
+    let before: Vec<u32> = automation
+        .top_level_of_any(&|e: &Element| e.class() == window_class)
+        .iter()
+        .filter_map(Element::pid)
+        .collect();
+    println!("  окна класса {window_class} до запуска: {before:?}");
+
+    let child = match Command::new(command).args(args).spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            println!("  запустить {command} не удалось: {error}\n");
+            return;
+        }
+    };
+
+    let mut app = launched(title, child, CloseWith::Terminate, None);
+    let spawned = app.pid;
+    println!("  стенд запустил {command}, PID {spawned} — он в реестре A");
+
+    // A window of this class that was not there before.
+    let found = wait::until(wait::WINDOW_TIMEOUT, || {
+        automation
+            .top_level_of_any(&|e: &Element| e.class() == window_class)
+            .into_iter()
+            .find(|w| w.pid().is_some_and(|pid| !before.contains(&pid)))
+    });
+
+    let Some(window) = found else {
+        println!("  нового окна класса {window_class} не появилось\n");
+        return;
+    };
+
+    let window_pid = window.pid().unwrap_or(0);
+    println!("  новое окно принадлежит процессу {window_pid}");
+    println!("  цепочка родителей (измерение):");
+    for (pid, name) in crate::own::ancestry(window_pid) {
+        let mark = if crate::own::is_spawned_root(pid) {
+            "  <-- ЗАПУЩЕН СТЕНДОМ, корень реестра A"
+        } else {
+            ""
+        };
+        println!("    {pid:<6} {name}{mark}");
+    }
+
+    // ⚠ Two separate questions, and conflating them answers neither. Kinship is the measurement
+    // criterion 29 asks for; the gate is what the safety code actually does, and it refuses a
+    // protected name **before** it ever looks at kinship.
+    match crate::own::kinship(window_pid) {
+        Some(root) => println!("  РОДСТВО: происходит от процесса {root}, запущенного стендом"),
+        None => println!("  РОДСТВО: не происходит ни от одного процесса, запущенного стендом"),
+    }
+
+    let verdict = crate::own::claim_window_process(window_pid);
+    match &verdict {
+        Ok(()) => println!(
+            "  ВОРОТА A–E: пропускают\n  -> позиция {number} АВТОМАТИЗИРУЕМА, прогоняется стендом"
         ),
-    ]
+        Err(reason) => println!("  ВОРОТА A–E: {reason}\n  -> позиция {number} переводится в П"),
+    }
+
+    // Clean up. When the gate passed, the process to close is the **window's**, not the
+    // launcher's: for a stub like `notepad.exe` the launcher has already exited, and its process
+    // id may by then belong to somebody else entirely.
+    if verdict.is_ok() {
+        app.pid = window_pid;
+        app.window = window.hwnd();
+        println!("  уборка: {}", app.close());
+    } else {
+        println!(
+            "  уборка: окно закрыть нельзя (пункт B) — снимаю только запущенное самим стендом"
+        );
+        if crate::shell::process_is_alive(spawned) {
+            match crate::shell::terminate(spawned) {
+                Ok(()) => println!("    процесс {spawned} снят"),
+                Err(error) => println!("    {error}"),
+            }
+        } else {
+            println!("    пусковой процесс {spawned} завершился сам");
+        }
+        println!(
+            "    ⚠ ОКНО ОСТАЁТСЯ НА РАБОЧЕМ СТОЛЕ: {window_class}, процесс {window_pid} — \
+             это цена измерения, закрыть его стенд не вправе"
+        );
+    }
+    println!();
+}
+
+/// Measures a position whose window can only belong to the shell, without opening one.
+fn measure_shell_owned(number: u8, title: &str, owner: &str, classes: &[&str]) {
+    println!("=== позиция {number}: {title} ===");
+    println!(
+        "  окно этой позиции создаёт {owner} (классы: {})",
+        classes.join(", ")
+    );
+    println!(
+        "  ⚠ окно НЕ открывается: в части 1 такая попытка оставила на рабочем столе \
+         пользователя окно, закрыть которое стенд не вправе. Измеряется то же самое, но \
+         по таблице процессов."
+    );
+
+    // Every candidate owner process that is running right now.
+    let names: Vec<&str> = owner.split(" / ").collect();
+    let mut measured = false;
+
+    for name in names {
+        let stem = name.trim();
+        let found = crate::own::pids_named(stem);
+        for pid in found {
+            measured = true;
+            println!("  процесс-владелец {pid} ({stem}), цепочка родителей:");
+            for (ancestor, ancestor_name) in crate::own::ancestry(pid) {
+                let mark = if crate::own::is_spawned_root(ancestor) {
+                    "  <-- ЗАПУЩЕН СТЕНДОМ"
+                } else {
+                    ""
+                };
+                println!("    {ancestor:<6} {ancestor_name}{mark}");
+            }
+            match crate::own::claim_window_process(pid) {
+                Ok(()) => println!("  ⚠ ВЕРДИКТ: принадлежит реестру A — это неожиданно"),
+                Err(reason) => println!("  ВЕРДИКТ: {reason}"),
+            }
+        }
+    }
+
+    if !measured {
+        println!("  ни одного процесса с таким именем не запущено");
+    }
+
+    // ⚠ The other half of position 10 — that a spawned `explorer.exe` owns no window of its own
+    // — is NOT measured by spawning one here: `explorer.exe` opens a folder window whatever it
+    // is given, and that window would then be left on the user's desktop, which is the very
+    // thing this function exists to avoid. It was measured for real by the first run under A–E:
+    // the folder window that appeared belonged to process 8036 while the bench had spawned a
+    // different one, and the refusal recorded that pid.
+
+    println!("  -> позиция {number} переводится в П\n");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1224,24 +1309,24 @@ pub fn position_11(ctx: &Context) -> Vec<Row> {
 /// on its own.
 ///
 /// ⚠ **Why it is no longer even started.** That same run opened the menu with `SC_TASKLIST` and
-/// could not close it again: the toggle did not put it away, and `SearchHost` was left holding
-/// the foreground with a visible search overlay. Every position that ran afterwards then failed
-/// at `AppActivate` — the overlay took focus back within milliseconds — and positions 1 and 22,
-/// which had passed before, began failing for a reason that had nothing to do with the product.
-/// Neither `WM_CLOSE`, nor a targeted `Escape`, nor invoking the Start button, nor
-/// `ToggleDesktop` would dismiss it; a person pressing `Esc` clears it instantly.
+/// could not close it again, and `SearchHost` was left holding the foreground. Every position
+/// that ran afterwards then failed at `AppActivate`.
+///
+/// The controller has since corrected part of that diagnosis: the Start menu was **not** left
+/// open — `SearchHost` holds the foreground in ordinary use too, and two leftover PowerShell
+/// windows were what actually interfered. The conclusion for this position is unchanged, and
+/// rests on the kinship measurement above rather than on that episode.
 ///
 /// So the bench does not open the Start menu at all. A position it cannot finish is one thing;
-/// a position that leaves the machine unable to run the others is another, and this was the
-/// second.
+/// a position that touches the shell to find that out is another.
 pub fn position_12(_ctx: &Context) -> Vec<Row> {
-    shell_position_refused(
+    handed_to_session(
         12,
         "Поиск в меню «Пуск»",
-        "меню «Пуск» — окно оболочки (StartMenuExperienceHost/SearchHost), стенд его не \
-         запускал, и пункт B запрещает его усыновлять. Позиция не запускается вовсе: открытое \
-         через SC_TASKLIST меню не удалось закрыть обратно, оверлей поиска остался держать \
-         передний план и сорвал последующие позиции",
+        "измерено: окно создают StartMenuExperienceHost.exe (PID 7344) и SearchHost.exe \
+         (PID 7336), оба происходят от svchost.exe -> services.exe -> wininit.exe и ни один \
+         не происходит от процессов стенда. Частного экземпляра меню «Пуск» не бывает. \
+         Меню не открывается вовсе",
     )
 }
 

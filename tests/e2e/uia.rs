@@ -374,15 +374,6 @@ impl Element {
         unsafe { pattern.Invoke() }.is_ok()
     }
 
-    /// Asks for keyboard focus. Fails on Word's document — see rake 3 — and that failure is a
-    /// documented outcome, not an error path.
-    pub fn set_focus(&self) -> bool {
-        // SAFETY: `self.0` is live. `SetFocus` either moves focus or fails; Word's document
-        // answers "Target element cannot receive focus", which is why the boolean matters and
-        // why `word::activate` exists.
-        unsafe { self.0.SetFocus() }.is_ok()
-    }
-
     /// A one-line description for the report.
     pub fn describe(&self) -> String {
         format!(

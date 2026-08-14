@@ -1472,19 +1472,23 @@ fn the_default_mode_is_backspace_and_choosing_it_changes_nothing() {
 /// other test in this file: nothing above may reach a `SendInput`.
 mod behavioural {
     use super::{GHBDTN, Recorder, buffer};
+    use std::sync::{Mutex, MutexGuard};
+
     use lang_switcher::convert;
     use lang_switcher::hook::{Edge, INJECTED_SIGNATURE, KeyEvent};
     use lang_switcher::inject::{self, Modifiers};
     use lang_switcher::settings::ReplacementMethod;
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SetFocus,
         VIRTUAL_KEY,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, DispatchMessageW, GetForegroundWindow, GetWindowTextW, MSG,
-        PM_REMOVE, PeekMessageW, SW_SHOW, SetForegroundWindow, ShowWindow, TranslateMessage,
-        WINDOW_EX_STYLE, WINDOW_STYLE, WS_BORDER, WS_POPUP, WS_VISIBLE,
+        BringWindowToTop, CreateWindowExW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
+        GetWindowTextW, GetWindowThreadProcessId, MSG, PM_REMOVE, PeekMessageW, SW_SHOW,
+        SetForegroundWindow, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WS_BORDER, WS_POPUP, WS_VISIBLE,
     };
     use windows::core::{PCWSTR, w};
 
@@ -1501,18 +1505,43 @@ mod behavioural {
     /// check is about is that a portioned packet still arrives in order, not how long it takes.
     const POINT_24_PAUSE_MS: u32 = 2;
 
-    /// How long the window is given to become the foreground one before the test gives up.
-    const FOREGROUND_ATTEMPTS: u32 = 200;
+    /// How many attempts the window is given to become the foreground one before the test gives
+    /// up. At the 50 ms pause of `open_foreground_window` this is about five seconds.
+    const FOREGROUND_ATTEMPTS: u32 = 100;
+
+    /// Only one of these tests may hold the foreground at a time.
+    ///
+    /// ⚠ **The second half of the §4.1а debt, and it is not about `SetForegroundWindow` at all.**
+    /// `cargo test` runs the test functions **in parallel**. Five of them each create a window
+    /// and each wait for *their own* to become foreground; they were competing with one another,
+    /// and the winner took the synthetic input meant for all five. Measured: with the foreground
+    /// finally being won reliably but without this lock, three tests passed and two read an empty
+    /// window — `left: ""`, `right: "ghbdtn"` — because their keystrokes had gone to a sibling's
+    /// window.
+    ///
+    /// The fence inside [`open_foreground_window`] cannot fix that on its own: it proves our
+    /// window is foreground at the moment it returns, and a sibling can take the foreground in
+    /// the gap between that moment and the `SendInput` in the test body. So the lock is held by
+    /// [`TestWindow`] itself and released only when the window is dropped — that is, at the end
+    /// of the test body, after the last send and the last read.
+    static FOREGROUND: Mutex<()> = Mutex::new(());
 
     /// A window this test owns, destroyed when the value is dropped.
-    struct TestWindow(HWND);
+    ///
+    /// Carries the [`FOREGROUND`] guard so that the whole test — asking for the foreground,
+    /// sending, and reading back — is serialised against the other four.
+    struct TestWindow {
+        handle: HWND,
+        /// Held, never read: dropping it at the end of the test is the entire purpose.
+        _foreground: MutexGuard<'static, ()>,
+    }
 
     impl Drop for TestWindow {
         fn drop(&mut self) {
             // SAFETY: the handle came from a successful `CreateWindowExW` on this thread and is
             // destroyed exactly once — the type is neither `Copy` nor `Clone`. `DestroyWindow`
             // requires the calling thread to have created the window, and it did.
-            let _ = unsafe { DestroyWindow(self.0) };
+            let _ = unsafe { DestroyWindow(self.handle) };
         }
     }
 
@@ -1538,6 +1567,13 @@ mod behavioural {
     /// has returned, and it only returns once `GetForegroundWindow` has answered with our own
     /// window. If the window never becomes foreground the test fails here, having sent nothing.
     fn open_foreground_window() -> TestWindow {
+        // Taken before the window exists, so that two tests never even have windows up at the
+        // same time. A panicking test poisons the lock; its result is still a usable guard, and
+        // failing every later test because an earlier one failed would hide the real cause.
+        let guard = FOREGROUND
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         // SAFETY: `EDIT` is a system window class that exists in every process; the window name
         // is null, which asks for empty content; no parent, no menu, no module handle and no
         // creation parameter are passed, which is the documented way to ask for a top-level
@@ -1560,18 +1596,21 @@ mod behavioural {
         }
         .expect("the EDIT class is registered in every process");
 
-        let window = TestWindow(handle);
+        let window = TestWindow {
+            handle,
+            _foreground: guard,
+        };
 
-        // SAFETY: `handle` is the live window this frame owns. All three calls take it by value
-        // and touch no memory of ours; `ShowWindow` and `SetForegroundWindow` return a `BOOL`
-        // that is deliberately not treated as fatal here — the loop below is what decides.
+        // SAFETY: `handle` is the live window this frame owns. Both calls take it by value and
+        // touch no memory of ours; the returned `BOOL`s are deliberately not treated as fatal —
+        // the loop below is what decides.
         unsafe {
             let _ = ShowWindow(handle, SW_SHOW);
-            let _ = SetForegroundWindow(handle);
             let _ = SetFocus(Some(handle));
         }
 
         for _ in 0..FOREGROUND_ATTEMPTS {
+            ask_for_foreground(handle);
             pump();
 
             // SAFETY: takes no arguments, returns a handle by value, touches no memory of ours.
@@ -1579,18 +1618,89 @@ mod behavioural {
                 return window;
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(10));
-
-            // SAFETY: as above.
-            unsafe {
-                let _ = SetForegroundWindow(handle);
-            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         panic!(
             "the test window did not become the foreground window; nothing was sent, which is \
              the point of this check"
         );
+    }
+
+    /// Asks the system to put our own window in front — **task T-04-3, debt §4.1а of `STATE.md`**.
+    ///
+    /// # Why this is not `SetForegroundWindow` alone any more
+    ///
+    /// These five tests used to ask with `SetForegroundWindow` and nothing else, and they passed
+    /// early in a session and stopped passing later on the very same commit. Rake 3 of §2 of
+    /// `TOOLCHAIN.md` names the cause: **Windows ignores `SetForegroundWindow` from a process
+    /// that is not itself in the foreground.** Not an error — ignored, and only sometimes,
+    /// depending on whether the desktop happens to be willing to hand focus over.
+    ///
+    /// The acceptance bench of task T-04-3 hit the same wall and settled it with
+    /// `WScript.Shell.AppActivate` by process id, which goes through the shell's own foreground
+    /// arbitration instead of around it. That is the technique these tests are moved onto, and
+    /// this function is the whole of the change: **what the five tests check is untouched.**
+    ///
+    /// # Why not `AppActivate` itself, letter for letter
+    ///
+    /// It was tried here first, and it does not work **for this window**: `AppActivate` locates
+    /// a window by process id or by title, and the window these tests create is a `WS_POPUP`
+    /// `EDIT` control with **no title at all**. Measured — the five tests still failed on the
+    /// same line, single-threaded, with `AppActivate` being called: it had nothing to find.
+    ///
+    /// So the bench's *mechanism* does not transfer, but the bench's *lesson* does, and the
+    /// lesson is the part that matters. The bench drives **other** processes, where the only way
+    /// in is the shell's arbitration. A test drives **its own** window, where the documented way
+    /// past the foreground lock is to attach this thread's input queue to the queue of whichever
+    /// thread currently owns the foreground: while the two are attached they share foreground
+    /// rights, `SetForegroundWindow` stops being ignored, and the attachment is undone
+    /// immediately afterwards. No child process, no PowerShell, and it works from a background
+    /// process — which is exactly what `SetForegroundWindow` alone would not do.
+    ///
+    /// ⚠ **The half that actually decides is not here but in the caller:** the loop waits for
+    /// `GetForegroundWindow` to answer with our window and refuses to send anything until it
+    /// does. Asking better without checking the answer would leave the same race that §4.1а
+    /// recorded.
+    fn ask_for_foreground(handle: HWND) {
+        // SAFETY: `GetForegroundWindow` takes no arguments and returns a handle by value.
+        let foreground = unsafe { GetForegroundWindow() };
+
+        // SAFETY: `foreground` may be null, which `GetWindowThreadProcessId` answers with zero —
+        // examined below. `None` for the optional out-parameter asks only for the thread id.
+        let owner = unsafe { GetWindowThreadProcessId(foreground, None) };
+        // SAFETY: takes no arguments, returns this thread's id.
+        let ours = unsafe { GetCurrentThreadId() };
+
+        // Attaching a thread to itself is an error, and a zero owner means there is no
+        // foreground window at this instant — in both cases the plain call below is all there is.
+        let attached = owner != 0 && owner != ours;
+
+        if attached {
+            // SAFETY: both ids name live threads — ours by construction, the other one obtained
+            // from the current foreground window a moment ago. A failed attach is not fatal: the
+            // call below is then simply the unprivileged attempt, and the caller re-reads the
+            // fact either way.
+            unsafe {
+                let _ = AttachThreadInput(ours, owner, true);
+            }
+        }
+
+        // SAFETY: `handle` is the live window the caller owns. Both calls take it by value and
+        // touch no memory of ours; their `BOOL`s are deliberately not fatal — the caller re-reads
+        // `GetForegroundWindow`, which is the only thing the next `SendInput` depends on.
+        unsafe {
+            let _ = BringWindowToTop(handle);
+            let _ = SetForegroundWindow(handle);
+        }
+
+        if attached {
+            // SAFETY: undoes exactly the attachment made above, with the same two ids. Leaving
+            // input queues attached would make this thread share the fate of another one.
+            unsafe {
+                let _ = AttachThreadInput(ours, owner, false);
+            }
+        }
     }
 
     /// Runs this thread's message queue dry, translating key messages into characters.
@@ -1624,11 +1734,11 @@ mod behavioural {
     fn window_text(window: &TestWindow) -> String {
         let mut buffer = [0u16; 256];
 
-        // SAFETY: `window.0` is the live window this frame owns and `buffer` is a live, properly
-        // aligned array owned by this frame; the call is given its true length and writes no
+        // SAFETY: `window.handle` is the live window this frame owns and `buffer` is a live,
+        // properly aligned array owned by this frame; the call is given its true length and writes no
         // more than that, NUL included. The return value is the length written, which is what
         // bounds the slice below.
-        let written = unsafe { GetWindowTextW(window.0, &mut buffer) };
+        let written = unsafe { GetWindowTextW(window.handle, &mut buffer) };
 
         String::from_utf16_lossy(&buffer[..written.max(0) as usize])
     }
