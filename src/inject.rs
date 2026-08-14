@@ -5,14 +5,18 @@
 //! Requirements this module covers: FR-40 (the order of operations of a recognised hotkey
 //! press, and the ban on `SendInput` inside the callback), FR-41 (one `SendInput` call with the
 //! whole array, `N` backspaces by *characters*, the recoded text through `KEYEVENTF_UNICODE`,
-//! surrogate pairs), FR-43 (the replacement is formed and sent **before** the layout is
-//! switched), FR-44 (the configurable pause between events), FR-45 (the return value of
-//! `SendInput` is compared with the number of events sent).
-//! Boundary: **FR-42**, the compatibility mode through a selection, belongs to task T-04-2 and
-//! is not started here; the layout switch of FR-50 that FR-40 step 5 asks for belongs to task
-//! T-05-1 and is left as a marked connection point in [`replace`]; the *choice* of the target
-//! layout belongs to task T-05-2 and arrives here as a parameter.
-//! Implemented by backlog tasks: T-04-1 (this one), T-04-2.
+//! surrogate pairs), **FR-42** (the compatibility mode: `N` × `Shift+Left` and an insertion that
+//! replaces the selection, instead of `N` × `Backspace`), FR-43 (the replacement is formed and
+//! sent **before** the layout is switched), FR-44 (the configurable pause between events),
+//! FR-45 (the return value of `SendInput` is compared with the number of events sent).
+//! Boundary: the layout switch of FR-50 that FR-40 step 5 asks for belongs to task T-05-1 and is
+//! left as a marked connection point in [`replace_in_with`]; the *choice* of the target layout
+//! belongs to task T-05-2 and arrives here as a parameter; the **selection path of FR-60 to
+//! FR-65 is a different requirement and a different task (T-07-2)** — there the text is one the
+//! *user* has already selected and it travels through the clipboard, whereas FR-42 selects the
+//! program's own freshly typed run and no line of this module opens, reads or writes the
+//! clipboard.
+//! Implemented by backlog tasks: T-04-1, T-04-2.
 //!
 //! # Why the work is split into building and sending
 //!
@@ -58,19 +62,20 @@
 //! one other place a keystroke exists in memory.
 
 use std::fmt;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_BACK,
-    VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
 
 use crate::convert::{self, ConvertError, Keystroke};
 use crate::hook::INJECTED_SIGNATURE;
 use crate::layouts::{LayoutId, LayoutMap};
+use crate::settings::ReplacementMethod;
 
 // ---------------------------------------------------------------------------------------
 // Errors
@@ -409,6 +414,225 @@ pub fn build_replacement(
 }
 
 // ---------------------------------------------------------------------------------------
+// FR-42 — the compatibility mode, through a selection
+// ---------------------------------------------------------------------------------------
+
+/// Virtual key of the left arrow, the key the compatibility mode of FR-42 selects with.
+///
+/// Sent as an **extended** key: the arrow of the navigation block carries the `E0` prefix and
+/// the numeric keypad's `4` does not, and the two are the same virtual key. Without the flag the
+/// application would be told the keypad key moved the caret, which is the same movement but the
+/// wrong event, and FR-05 holds this program to naming the key it means on the recording side.
+const LEFT_ARROW: VIRTUAL_KEY = VK_LEFT;
+
+/// The `Shift` the compatibility mode presses **itself** — not the user's.
+///
+/// Left rather than right for no deeper reason than that a key had to be chosen and the table of
+/// [`MODIFIER_KEYS`] names this one first. Which one it is does not matter, and *whose* it is
+/// matters entirely: see [`build_selection`].
+const SELECTION_SHIFT: VIRTUAL_KEY = VK_LSHIFT;
+
+/// The two events that bracket the selection: `Shift` down before it, `Shift` up after it.
+const SELECTION_SHIFT_EVENTS: usize = 2;
+
+/// How many `INPUT` structures the compatibility packet of FR-42 takes.
+///
+/// `erase * 2` for the `Left` presses (down and up, as with `Backspace` in FR-41), plus the two
+/// events of the bracketing `Shift`, plus one event per UTF-16 code unit of the insertion.
+///
+/// Nothing typed is nothing to select: with `erase` at zero there is no selection to make and
+/// therefore no `Shift` to press, and the packet is the insertion alone. A `Shift+Left` sent
+/// then would select the character *before* the caret — someone else's text — and the insertion
+/// would replace it.
+pub const fn selection_events(erase: usize, units: usize) -> usize {
+    if erase == 0 {
+        units
+    } else {
+        SELECTION_SHIFT_EVENTS + erase * 2 + units
+    }
+}
+
+/// **FR-42, the compatibility mode.** Builds the whole packet into `out`: `N` × `Shift+Left`,
+/// then the insertion that replaces the selection.
+///
+/// Returns how many events were written, which is always [`selection_events`] of the two
+/// lengths. `out` shorter than that is [`InjectError::OutputTooSmall`] and **nothing is
+/// written** — the rule and the reason are [`build_replacement`]'s.
+///
+/// # Why the mode exists
+///
+/// §4.5 and constraint 3 of §10: in an application with autocompletion or autocorrection — an
+/// IDE, a browser field with suggestions, Word — one `Backspace` may delete not one character
+/// but the whole token that was substituted, so `N` backspaces stop corresponding to `N`
+/// characters. A selection does not have that failure mode: `N` × `Shift+Left` selects exactly
+/// `N` characters whatever the application thinks a word is, and the insertion replaces the
+/// selection in one go rather than erasing anything.
+///
+/// # What is in the packet, and why it is one `Shift` and not `N`
+///
+/// ```text
+/// Shift down                       one event, ours
+/// Left down, Left up               × N, extended keys
+/// Shift up                         one event, ours — before a single character is inserted
+/// the recoded text                 one KEYEVENTF_UNICODE event per UTF-16 code unit
+/// ```
+///
+/// `N` × `Shift+Left` is `N` repetitions of the *keystroke*, which is what a person does when
+/// they hold `Shift` and tap `Left` `N` times: the modifier goes down once, the arrow repeats,
+/// the modifier comes up once. Releasing and re-pressing `Shift` between the arrows would send
+/// `4N` events instead of `2N + 2` for the same selection, and every application that watches
+/// modifier transitions would see `N` of them where the user made one.
+///
+/// `N` is the same `N` as in FR-41 — [`typed_chars`], the number of **characters** the strokes
+/// put on the screen and not the number of keys pressed — so a ligature is selected whole,
+/// exactly as it is erased whole in the other mode.
+///
+/// The insertion is the same `KEYEVENTF_UNICODE` run [`build_replacement`] ends with, and it is
+/// what FR-42 means by "выделение заменяется одним событием": the first character event replaces
+/// the whole selection by itself, so no `Delete` and no `Backspace` is sent at all. **The
+/// clipboard is not involved** — that is the selection path of FR-60 to FR-65 and task T-07-2,
+/// a different requirement about text the user selected.
+///
+/// # ⚠ The user's `Shift` and ours
+///
+/// Two `Shift`s meet on this path and confusing them breaks the feature in both directions.
+///
+/// * The **user's** `Shift` is released by FR-40 step 3, in a packet of its own, *before* this
+///   one is sent — [`run_steps`]. It has to be: a user `Shift` still down when the arrows go out
+///   would be indistinguishable from ours, and one still down when the characters go out would
+///   turn the insertion into capitals.
+/// * **Ours** goes down inside this packet and comes back up inside it, before the first
+///   character. That is what makes the insertion an insertion and not a further selection, and
+///   it is also what keeps FR-40 step 6 honest: step 6 restores what
+///   [`Environment::held`] reports at that moment, and a `Shift` of ours left down would be
+///   reported as the user's and pressed again — a `Shift` stuck down for good, on a machine
+///   whose owner is holding nothing.
+///
+/// So the packet is balanced by construction: the only `Shift` events in it are one down and one
+/// up, in that order, and both are behind the last arrow and in front of the first character.
+pub fn build_selection(
+    erase: usize,
+    text: &[u16],
+    out: &mut [INPUT],
+) -> Result<usize, InjectError> {
+    let needed = selection_events(erase, text.len());
+
+    if out.len() < needed {
+        return Err(InjectError::OutputTooSmall { needed });
+    }
+
+    let mut written = 0;
+
+    if erase > 0 {
+        // Ours goes down here and comes up below — see the warning above.
+        out[written] = key_event(SELECTION_SHIFT, false, false);
+        written += 1;
+
+        for _ in 0..erase {
+            out[written] = key_event(LEFT_ARROW, true, false);
+            out[written + 1] = key_event(LEFT_ARROW, true, true);
+            written += 2;
+        }
+
+        // Up **before** the insertion, and inside the same packet, so that no ordering anywhere
+        // else in the program has to be trusted for it.
+        out[written] = key_event(SELECTION_SHIFT, false, true);
+        written += 1;
+    }
+
+    for &unit in text {
+        out[written] = unicode_event(unit);
+        written += 1;
+    }
+
+    Ok(written)
+}
+
+// ---------------------------------------------------------------------------------------
+// The two modes as one choice — FR-42, section 7
+// ---------------------------------------------------------------------------------------
+
+/// `[replacement] method` of section 7 — FR-42, published by the UI thread.
+///
+/// Held as a code rather than as the enum because an atomic is the only way the input thread may
+/// learn it (section 6.3), and there is no atomic of an enum. [`method_from_code`] is total, so
+/// no value this can hold is a value the replacement path has to reason about.
+static REPLACEMENT_METHOD: AtomicU8 = AtomicU8::new(BACKSPACE_CODE);
+
+/// [`ReplacementMethod::Backspace`] — the default of section 7, and the value this starts at.
+const BACKSPACE_CODE: u8 = 0;
+
+/// [`ReplacementMethod::Selection`].
+const SELECTION_CODE: u8 = 1;
+
+/// Publishes `[replacement] method` — FR-42.
+///
+/// Section 6.3 fixes the direction, and it is the same one [`set_inter_event_delay_ms`] follows:
+/// the UI thread read the file and publishes, the input thread reads the atomic. **The mode is
+/// never read from the file on the replacement path** — NFR-09 leaves no room for a file read
+/// between the hotkey and the last event of the replacement.
+///
+/// The type comes from [`crate::settings`] rather than being re-derived here: section 7 already
+/// closes the set of values and `settings` already refuses anything outside it, so a second
+/// spelling of the same two words in this module would be a second thing to keep in step.
+pub fn set_replacement_method(method: ReplacementMethod) {
+    REPLACEMENT_METHOD.store(method_code(method), Ordering::Relaxed);
+}
+
+/// The replacement mode as it stands. [`ReplacementMethod::Backspace`] — the default of section 7
+/// and of `settings` — until the UI thread publishes something else.
+pub fn replacement_method() -> ReplacementMethod {
+    method_from_code(REPLACEMENT_METHOD.load(Ordering::Relaxed))
+}
+
+/// The code a mode is stored as.
+const fn method_code(method: ReplacementMethod) -> u8 {
+    match method {
+        ReplacementMethod::Backspace => BACKSPACE_CODE,
+        ReplacementMethod::Selection => SELECTION_CODE,
+    }
+}
+
+/// The mode a stored code means.
+///
+/// Total on purpose: only [`set_replacement_method`] ever writes the atomic and it writes only
+/// the two codes above, but a mode that could not be decided is not something the replacement
+/// path may have to handle, so anything else reads as the documented default of section 7.
+const fn method_from_code(code: u8) -> ReplacementMethod {
+    match code {
+        SELECTION_CODE => ReplacementMethod::Selection,
+        _ => ReplacementMethod::Backspace,
+    }
+}
+
+/// How many `INPUT` structures the packet of `method` takes — [`replacement_events`] or
+/// [`selection_events`].
+pub const fn packet_events(method: ReplacementMethod, erase: usize, units: usize) -> usize {
+    match method {
+        ReplacementMethod::Backspace => replacement_events(erase, units),
+        ReplacementMethod::Selection => selection_events(erase, units),
+    }
+}
+
+/// Builds the packet of `method` — [`build_replacement`] (FR-41) or [`build_selection`] (FR-42).
+///
+/// The one place the two modes are chosen between. Everything downstream of it — the signature
+/// of FR-03, the single call of FR-41, the portions of FR-44, the modifier hygiene of FR-40 and
+/// the position of the layout switch of FR-43 — is shared by both modes and knows nothing about
+/// which one it is carrying, which is the whole reason the choice is made here and not there.
+pub fn build_packet(
+    method: ReplacementMethod,
+    erase: usize,
+    text: &[u16],
+    out: &mut [INPUT],
+) -> Result<usize, InjectError> {
+    match method {
+        ReplacementMethod::Backspace => build_replacement(erase, text, out),
+        ReplacementMethod::Selection => build_selection(erase, text, out),
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Building one `INPUT` — FR-03
 // ---------------------------------------------------------------------------------------
 
@@ -569,8 +793,9 @@ impl Dispatched {
 /// at step 6 is put back — without a keyboard, without a foreground window and without sending
 /// one event into the machine. There is no other honest way to check an order.
 ///
-/// It is also the seam the next two tasks attach to: **T-05-1** fills in [`switch_layout`], and
-/// **T-04-2** builds a different packet for the same three steps.
+/// It is also the seam the neighbouring tasks attach to: **T-05-1** fills in [`switch_layout`],
+/// and the compatibility mode of FR-42 (task T-04-2) is a different packet handed to these very
+/// same steps — which is why the order below is checked once and holds for both modes.
 ///
 /// [`switch_layout`]: Environment::switch_layout
 pub trait Environment {
@@ -763,7 +988,11 @@ fn sleep_ms(delay_ms: u32) {
 /// What one replacement did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Replaced {
-    /// Characters erased — the `N` of FR-41, by [`typed_chars`].
+    /// Characters taken off the screen — the `N` of FR-41, by [`typed_chars`].
+    ///
+    /// The same number in both modes and counted the same way: erased by `N` backspaces in the
+    /// `backspace` mode, selected by `N` × `Shift+Left` and replaced by the insertion in the
+    /// compatibility mode of FR-42.
     pub erased: usize,
     /// UTF-16 code units typed back.
     pub typed: usize,
@@ -814,15 +1043,48 @@ pub fn replace(
 
 /// **FR-40, steps 3 to 6**, against any [`Environment`] — see [`replace`] for the requirement.
 ///
-/// This is the function the order lives in, and the order is the requirement, so this is what
-/// `tests\inject.rs` drives.
+/// The `backspace` mode of FR-41, which is the default of section 7. [`replace_in_with`] is the
+/// same steps for a mode chosen by the caller.
 pub fn replace_in(
     env: &mut impl Environment,
     strokes: &[Keystroke],
     target: &LayoutMap,
     delay_ms: u32,
 ) -> Result<Replaced, InjectError> {
-    // FR-41: `N` is the number of characters on the screen, not the number of keys pressed.
+    replace_in_with(env, strokes, target, delay_ms, ReplacementMethod::Backspace)
+}
+
+/// **FR-40, steps 3 to 6, in the mode of `method`** — the `backspace` packet of FR-41 or the
+/// compatibility packet of FR-42.
+///
+/// This is the function the order lives in, and the order is the requirement, so this is what
+/// `tests\inject.rs` drives. `method` is a parameter and not a read of [`replacement_method`]
+/// for the same reason `delay_ms` is: what the configuration says is decided once, by
+/// [`on_hotkey`], and everything below it is then a pure function of its arguments.
+///
+/// Only the *packet* depends on the mode. Steps 3, 5 and 6, the pause of FR-44, the single call
+/// of FR-41, the signature of FR-03 and the position FR-43 fixes are shared, and deliberately:
+/// a mode that could quietly do without the modifier hygiene of FR-40 would be a second
+/// requirement, not a second packet.
+pub fn replace_with(
+    strokes: &[Keystroke],
+    target: &LayoutMap,
+    delay_ms: u32,
+    method: ReplacementMethod,
+) -> Result<Replaced, InjectError> {
+    replace_in_with(&mut System, strokes, target, delay_ms, method)
+}
+
+/// [`replace_with`] against any [`Environment`].
+pub fn replace_in_with(
+    env: &mut impl Environment,
+    strokes: &[Keystroke],
+    target: &LayoutMap,
+    delay_ms: u32,
+    method: ReplacementMethod,
+) -> Result<Replaced, InjectError> {
+    // FR-41 and FR-42: `N` is the number of characters on the screen, not the number of keys
+    // pressed, and it is the same `N` in both modes.
     let erased = typed_chars(strokes);
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
@@ -832,8 +1094,8 @@ pub fn replace_in(
     let typed = convert::convert_strokes(strokes, target, &mut text)
         .map_err(|ConvertError::BufferTooSmall { needed }| InjectError::TextTooLong { needed })?;
 
-    let mut events = vec![INPUT::default(); replacement_events(erased, typed)];
-    let built = build_replacement(erased, &text[..typed], &mut events);
+    let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
+    let built = build_packet(method, erased, &text[..typed], &mut events);
 
     // The working buffers hold the user's text in plain form and are the only place outside
     // module `buffer` that ever does. Whatever happens below, they are zeroed before this frame
@@ -928,16 +1190,33 @@ fn run_steps(
 ///
 /// # Boundaries
 ///
+/// # What the configuration decides, and where it is read
+///
+/// Both of the published values of section 7 that reach this module are read **here**, once per
+/// press, out of the atomics the UI thread stores into: `[replacement] method` through
+/// [`replacement_method`] and `[replacement] inter_event_delay_ms` through
+/// [`inter_event_delay_ms`]. Nothing below this line reads a configuration and nothing anywhere
+/// on this path opens a file — NFR-09 gives the whole path from the hotkey to the last event of
+/// the replacement thirty milliseconds, and a file read does not fit into that budget.
+///
+/// # Boundaries
+///
 /// * the target layout is task **T-05-2**'s choice; until it exists, [`interim_target`] stands
 ///   in and is documented there as the interim it is;
-/// * `[replacement] method = "selection"` (FR-42) branches here in task **T-04-2**; this
-///   version always takes the `backspace` mode of FR-41;
-/// * the layout switch of FR-40 step 5 is task **T-05-1**'s and is marked inside [`replace`].
+/// * the layout switch of FR-40 step 5 is task **T-05-1**'s and is marked inside
+///   [`replace_in_with`].
 pub fn on_hotkey() -> Option<Replaced> {
     let (mut strokes, active) = take_strokes()?;
 
     let outcome = interim_target(active)
-        .map(|target| replace(&strokes, &target, inter_event_delay_ms()))
+        .map(|target| {
+            replace_with(
+                &strokes,
+                &target,
+                inter_event_delay_ms(),
+                replacement_method(),
+            )
+        })
         .and_then(Result::ok);
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02.
@@ -1009,10 +1288,16 @@ fn interim_target(active: LayoutId) -> Option<LayoutMap> {
 // Tests of what needs no Win32 at all
 // ---------------------------------------------------------------------------------------
 
-/// The private helpers `tests\inject.rs` cannot reach.
+/// The private helpers `tests\inject.rs` cannot reach, and the one test that must not run beside
+/// it.
 ///
-/// Everything a requirement is stated about is public and is tested there; these three are
-/// implementation details whose behaviour the public functions rest on.
+/// Almost everything a requirement is stated about is public and is tested in `tests\inject.rs`;
+/// what is here is implementation details whose behaviour the public functions rest on — plus
+/// [`the_replacement_section_of_the_configuration_reaches_this_module`], which is here for a
+/// different reason, given at the test itself.
+///
+/// [`the_replacement_section_of_the_configuration_reaches_this_module`]:
+///     tests::the_replacement_section_of_the_configuration_reaches_this_module
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,5 +1333,87 @@ mod tests {
         // The low bit — "was pressed since the last call" — is not the state and must not be
         // read as one: it would make the answer depend on who called before us.
         assert!(!is_held(1));
+    }
+
+    /// The stored code and the mode it means are one mapping, and reading it back can never
+    /// fail — FR-42, section 7.
+    #[test]
+    fn a_code_that_names_no_mode_reads_as_the_default_of_section_seven() {
+        assert_eq!(method_code(ReplacementMethod::Backspace), BACKSPACE_CODE);
+        assert_eq!(method_code(ReplacementMethod::Selection), SELECTION_CODE);
+        assert_eq!(
+            method_from_code(BACKSPACE_CODE),
+            ReplacementMethod::Backspace
+        );
+        assert_eq!(
+            method_from_code(SELECTION_CODE),
+            ReplacementMethod::Selection
+        );
+
+        // Nothing but `set_replacement_method` writes the atomic and it writes only those two,
+        // so this is unreachable — and the replacement path must have a mode rather than a
+        // question even so, which is what makes the fallback the *documented* default.
+        assert_eq!(method_from_code(200), ReplacementMethod::Backspace);
+        assert_eq!(method_from_code(u8::MAX), ReplacementMethod::Backspace);
+    }
+
+    /// **Section 7 reaches this module.** `[replacement] method` and
+    /// `[replacement] inter_event_delay_ms` travel from a real `config.toml` into the two
+    /// atomics the replacement path reads, through exactly the two calls
+    /// `app::publish_configuration_to_input_thread` makes — FR-42, FR-44.
+    ///
+    /// # Why this test is here and not in `tests\inject.rs`
+    ///
+    /// Both values are process-wide statics, and the tests of one binary run in parallel.
+    /// `tests\inject.rs` already owns a test that publishes a pause and puts it back
+    /// (`the_pause_of_fr44_defaults_to_zero_and_can_be_published`, task T-04-1), and a second
+    /// test writing the same atomic in the same process would be asserting on that test's
+    /// timing rather than on a requirement. The unit tests of the library are a **different test
+    /// binary** and therefore a different process, so here the two atomics are this test's
+    /// alone. It still puts back what it found, for the same reason.
+    #[test]
+    fn the_replacement_section_of_the_configuration_reaches_this_module() {
+        // The default of section 7 is one word in three places: the schema says `backspace`,
+        // `settings` derives it, and this module starts at it without being told.
+        assert_eq!(
+            crate::settings::Replacement::default().method,
+            ReplacementMethod::Backspace
+        );
+        assert_eq!(replacement_method(), ReplacementMethod::Backspace);
+        assert_eq!(inter_event_delay_ms(), 0);
+
+        let directory =
+            std::env::temp_dir().join(format!("lang_switcher_t04_2_{}", std::process::id()));
+        let path = crate::settings::config_path_in(&directory);
+        let parent = path
+            .parent()
+            .expect("the configuration path names a directory");
+
+        std::fs::create_dir_all(parent).expect("a directory of our own under the temporary one");
+        std::fs::write(
+            &path,
+            "[replacement]\nmethod = \"selection\"\ninter_event_delay_ms = 37\n",
+        )
+        .expect("a file in a directory created a line above");
+
+        let (config, _) = crate::settings::read_from(&path).expect("the file is valid TOML");
+
+        // Only `[replacement]` was written; everything else came from the defaults of section 7,
+        // which is the ordinary shape of a hand-edited file.
+        assert_eq!(config.replacement.method, ReplacementMethod::Selection);
+        assert_eq!(config.replacement.inter_event_delay_ms, 37);
+
+        // The two calls of `app::publish_configuration_to_input_thread`, on that value.
+        set_replacement_method(config.replacement.method);
+        set_inter_event_delay_ms(config.replacement.inter_event_delay_ms);
+
+        // And they are what the replacement path would read on the next hotkey press.
+        assert_eq!(replacement_method(), ReplacementMethod::Selection);
+        assert_eq!(inter_event_delay_ms(), 37);
+
+        set_replacement_method(ReplacementMethod::Backspace);
+        set_inter_event_delay_ms(0);
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

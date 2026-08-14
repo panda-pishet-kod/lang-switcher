@@ -1041,8 +1041,8 @@ pub(crate) fn post_to_input_thread(message: u32) {
     post_to(Role::Input, message);
 }
 
-/// Hands the input thread the three settings it reacts to — FR-02 and FR-95 for the hook, and
-/// FR-07 for the buffer.
+/// Hands the input thread the settings it reacts to — FR-02 and FR-95 for the hook, FR-07 for
+/// the buffer, and FR-42 with FR-44 for the replacement of module `inject`.
 ///
 /// Runs on the UI thread, right after the tray has been attached, because the tray is where
 /// the configuration of section 7 lives: it read the file, it owns `general.enabled`, and it
@@ -1057,10 +1057,12 @@ fn publish_configuration_to_input_thread() {
             tray.enabled(),
             crate::hook::vk_from_name(&tray.config().hotkey.key),
             tray.config().buffer.capacity,
+            tray.config().replacement.method,
+            tray.config().replacement.inter_event_delay_ms,
         )
     });
 
-    let Some((active, hotkey, capacity)) = published else {
+    let Some((active, hotkey, capacity, method, inter_event_delay_ms)) = published else {
         return;
     };
 
@@ -1074,6 +1076,16 @@ fn publish_configuration_to_input_thread() {
     if let Some(vk) = hotkey {
         crate::hook::set_hotkey_vk(vk);
     }
+
+    // Section `[replacement]` of section 7 — FR-42 and FR-44, task T-04-2. This is the only
+    // place either value may be published from: section 6.3 gives the configuration to the UI
+    // thread, module `inject` runs on the input thread, and NFR-09 forbids the replacement path
+    // from reading a file to find out. Both are plain stores into atomics `inject` owns; there
+    // is no message to post, because unlike the buffer capacity of FR-07 neither value is
+    // *applied* to anything the input thread has already built — the next hotkey press reads
+    // whatever stands here at that moment.
+    crate::inject::set_replacement_method(method);
+    crate::inject::set_inter_event_delay_ms(inter_event_delay_ms);
 
     publish_buffer_capacity(capacity);
 }

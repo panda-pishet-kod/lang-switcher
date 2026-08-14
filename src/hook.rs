@@ -753,9 +753,10 @@ pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> O
         // message loop, with the callback long returned — which is what section 6.1 means by
         // "Выполнение SendInput (вне callback хука)".
         //
-        // TODO(T-03-2): read the ring buffer here and decide what to convert.
-        // TODO(T-04-1): send the replacement from here, stamping every `INPUT` with
-        // `INJECTED_SIGNATURE` so that FR-03 recognises it coming back.
+        // Both of those are done, and deliberately not here: `app::window_proc` reads the ring
+        // buffer and sends the replacement through module `inject` — every `INPUT` stamped with
+        // `INJECTED_SIGNATURE` so that FR-03 recognises it coming back — immediately **before**
+        // it calls this function, which goes on counting every handoff below (T-03-2, T-04-1).
         WM_APP_HOTKEY => {
             HOTKEY_HANDOFFS.fetch_add(1, Ordering::Relaxed);
 
