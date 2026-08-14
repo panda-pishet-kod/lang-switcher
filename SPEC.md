@@ -77,12 +77,15 @@ edition = "2024"
 [dependencies]
 windows = { version = "0.6x", features = [
   "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Input",
   "Win32_UI_Accessibility",
   "Win32_UI_Shell",
   "Win32_UI_TextServices",
+  "Win32_System_Com",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Threading",
@@ -103,6 +106,8 @@ codegen-units = 1
 panic         = "abort"
 strip         = true
 ```
+
+Три feature — `Win32_Security`, `Win32_Graphics_Gdi`, `Win32_System_Com` — добавлены 2026-08-14 по решению пользователя. Без них требования спецификации невыполнимы: `CreateMutexW` (FR-82) закрыт feature `Win32_Security`; все варианты `RegisterClass*` и все структуры `WNDCLASS*`, то есть любое собственное окно (§6.1, FR-90, FR-91, FR-92), закрыты `Win32_Graphics_Gdi`; `CoInitializeEx` для COM-квартиры STA потока наблюдения (§6.1, SEC-06) живёт в модуле под `Win32_System_Com`. Состав крейтов при этом не меняется: у крейта `windows` нет опциональных зависимостей, поэтому вывод `cargo tree` остаётся прежним и SEC-03 не затрагивается.
 
 Крейты `tray-icon`, `native-windows-gui` и любые GUI-фреймворки **не используются**: трей реализуется напрямую через `Shell_NotifyIcon`, окно настроек — диалоговым шаблоном из `.rc`-ресурса. Обоснование: цикл сообщений и окно в программе присутствуют по необходимости, дополнительные зависимости не дают выигрыша и увеличивают поверхность сопровождения.
 
