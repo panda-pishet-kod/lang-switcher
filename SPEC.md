@@ -94,6 +94,8 @@ windows = { version = "0.6x", features = [
   "Win32_System_Pipes",
   "Win32_System_Registry",
   "Win32_System_Performance",
+  "Win32_System_IO",
+  "Win32_Storage_FileSystem",
   "Win32_UI_Controls",
   "Win32_Globalization",
 ] }
@@ -110,6 +112,8 @@ codegen-units = 1
 panic         = "abort"
 strip         = true
 ```
+
+Ещё две feature — `Win32_System_IO` и `Win32_Storage_FileSystem` — добавлены 2026-08-14 по решению пользователя, третьим дополнением, и обе нужны тому же требованию SEC-04a. Причина не в расположении функций, а в типах их параметров: `CreateNamedPipeW` принимает `FILE_FLAGS_AND_ATTRIBUTES` из модуля `Storage::FileSystem` и потому закрыт `#[cfg(all(feature = "Win32_Security", feature = "Win32_Storage_FileSystem"))]`; `ConnectNamedPipe` принимает `OVERLAPPED` из модуля `System::IO` и закрыт `#[cfg(feature = "Win32_System_IO")]`. Обе функции объявлены в модуле `Win32::System::Pipes`, открытом добавленной ранее `Win32_System_Pipes`, но сами закрыты дополнительно. Этими же двумя feature открываются все константы канала (`PIPE_ACCESS_OUTBOUND`, `FILE_FLAG_OVERLAPPED`) и средства корректного завершения (`GetOverlappedResult`, `CancelIoEx`, `FlushFileBuffers`). Состав крейтов снова не меняется — теперь это подтверждено не только рассуждением, но и практикой: после внесения четырёх feature предыдущего дополнения вывод `cargo tree` не изменился ни на строку.
 
 Ещё четыре feature — `Win32_System_Pipes`, `Win32_System_Registry`, `Win32_System_Performance`, `Win32_UI_Controls` — добавлены 2026-08-14 по решению пользователя, вторым таким дополнением. Без них требования спецификации невыполнимы: отладочный канал контроля SEC-04a есть именованный канал, а `CreateNamedPipeW`, `ConnectNamedPipe` и `DisconnectNamedPipe` доступны только под `Win32_System_Pipes`, и замены им в `std` нет; автозапуск FR-93 определён как запись в `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, а `RegSetValueExW` живёт под `Win32_System_Registry`; список раскладок с галочками участия и порядком и разделы диалога FR-92 суть элементы общих элементов управления — `InitCommonControlsEx` и константы `LVM_*`, `TCM_*` под `Win32_UI_Controls`; критерий приёмки 2 §13 называет `QueryPerformanceCounter` поимённо, а он объявлен под `Win32_System_Performance`. Состав крейтов не меняется по той же причине, что и в первом дополнении.
 
