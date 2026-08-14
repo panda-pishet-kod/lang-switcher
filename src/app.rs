@@ -9,13 +9,18 @@
 //! each: `watchdog` restores a hook, it does not start a process.
 //!
 //! Requirements this module covers: FR-82 (single instance), FR-97 (debug build timeout),
-//! FR-98 (panic hook) — implemented here by task T-01-2.
+//! FR-98 (panic hook) — implemented here by task T-01-2 and completed by task T-03-1, which
+//! added the removal of the keyboard hook to both and rewrote the timeout so that it works
+//! while the UI thread is blocked.
 //! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
 //! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
 //! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
 //! "release the mutex" action of FR-83 is the one part of it that lives here, in
-//! [`SingleInstance`]'s `Drop`.
-//! Implemented by backlog tasks: T-01-2 (done), T-01-4 (done).
+//! [`SingleInstance`]'s `Drop`, and the "снятие хуков" action is the other, in
+//! [`window_proc`], because `src\tray.rs` was outside the file scope of task T-03-1.
+//! FR-01's "one hook on the input thread" is installed here, in [`serve_window`], and
+//! implemented in [`crate::hook`].
+//! Implemented by backlog tasks: T-01-2 (done), T-01-4 (done), T-03-1 (done).
 //!
 //! # Thread model — section 6.1
 //!
@@ -77,11 +82,13 @@ use windows::Win32::Foundation::{
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
+#[cfg(debug_assertions)]
+use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
     MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
     RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
-    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -173,6 +180,28 @@ pub fn request_shutdown() {
 /// Whether shutdown has been requested. Every message loop consults this and nothing else.
 pub fn shutdown_requested() -> bool {
     SHUTDOWN_REQUESTED.load(Ordering::Acquire)
+}
+
+/// The UI thread's window as a raw value, or zero when that thread has none right now.
+///
+/// Exists for FR-99: the fail-safe transition is decided on the input thread, inside the
+/// hook callback, and the icon that has to show it belongs to the UI thread. A window handle
+/// is the only thing the two threads can exchange without a lock, and `PostMessageW` is the
+/// only call `hook` is allowed to make with it (NFR-04).
+///
+/// Raw rather than an `HWND` on purpose: `HWND` is a raw pointer and therefore not `Send`,
+/// and a type that promised otherwise would be a lie about a value that really does cross
+/// threads. The conversion back is exact, and `hook` performs it inside the `unsafe` block
+/// whose safety comment accounts for it.
+///
+/// Compiled only where FR-99 is: under `panic = "abort"`, which is what the Release profile
+/// of section 3.2 sets, a panic in the callback ends the process instead of being absorbed,
+/// there is no fail-safe transition to signal, and this accessor would be a function nobody
+/// calls. The `cfg` is the same one `hook::guarded_decision` is selected on, and keeping the
+/// two identical is what leaves the Release build free of unreachable code.
+#[cfg(panic = "unwind")]
+pub(crate) fn ui_window_raw() -> usize {
+    WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -405,8 +434,27 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
     // nothing on its own, since `strip = true` and `lto = "fat"` would remove it anyway.
     #[cfg(debug_assertions)]
     {
-        debug_timeout::wait_for_deadline();
+        let expired = debug_timeout::wait_for_deadline();
+
         request_shutdown();
+
+        if expired {
+            // FR-97 as task T-03-1 rewrote it, and the reason is in that task's point 7.
+            // Until there was a hook, this path was a convenience: ask the threads to stop
+            // and wait for them. With a hook it is the guarantee that a wedged debug build
+            // lets go of the keyboard, and "wait for the threads" is exactly the assumption
+            // that fails — the UI thread inside `TrackPopupMenuEx` runs a modal message loop
+            // of its own and does not leave it for a posted wake-up. Measured before this
+            // change: a 45-second deadline, a menu left open, and a process still alive 89
+            // seconds in.
+            //
+            // So this thread, which is the one counting the time and is by construction not
+            // blocked, does the two things that matter itself and in this order: the hook
+            // comes off first, releasing the keyboard whatever happens afterwards, and only
+            // then are the other threads given their chance.
+            crate::hook::uninstall();
+            debug_timeout::terminate_unless_threads_stop(&threads);
+        }
     }
 
     // A Release build has no deadline: it waits here until something requests shutdown —
@@ -508,8 +556,32 @@ fn serve_window(role: Role) -> WinResult<()> {
     // the cleanup path of FR-83, and removing the icon needs the window it was added under
     // to still exist.
     let _tray = match role {
-        Role::Ui => Some(crate::tray::attach(_window.handle, instance)?),
+        Role::Ui => {
+            let attachment = crate::tray::attach(_window.handle, instance)?;
+
+            // Section 6.3, "Конфигурация публикуется потоком UI": the tray has just read
+            // `config.toml`, and this is the moment the input thread's hook learns what is
+            // in it. It cannot read the file itself — NFR-08 gives the hook fifty
+            // milliseconds from start-up and a file read is exactly the kind of thing task
+            // T-03-1 was told to keep off that path.
+            publish_configuration_to_hook();
+
+            Some(attachment)
+        }
         Role::Input | Role::Watcher => None,
+    };
+
+    // Task T-03-1, FR-01: one `WH_KEYBOARD_LL` hook, on the input thread, and on no other.
+    // The window above already exists, which is what the hook needs in two ways — the
+    // callback posts `hook::WM_APP_HOTKEY` to it (FR-02), and a low-level hook is only
+    // called back on a thread that pumps messages, which `pump` below does.
+    //
+    // Declared after `_window` so that it is dropped *before* it: the callback may post to
+    // that window until the moment the hook comes off, so the window has to outlive the hook
+    // and not the other way round.
+    let _hook = match role {
+        Role::Input => Some(crate::hook::install(_window.handle, instance)?),
+        Role::Ui | Role::Watcher => None,
     };
 
     // Re-read the flag after the window has been published, and before the first
@@ -522,6 +594,39 @@ fn serve_window(role: Role) -> WinResult<()> {
     }
 
     pump()
+}
+
+/// Hands the hook of task T-03-1 the two settings it reacts to — FR-02 and FR-95.
+///
+/// Runs on the UI thread, right after the tray has been attached, because the tray is where
+/// the configuration of section 7 lives: it read the file, it owns `general.enabled`, and it
+/// is the thread allowed to touch a file at all (section 6.1). The hook only ever reads the
+/// two published atomics.
+///
+/// `with_tray` answers `None` on any thread that is not the UI thread, so a stray call from
+/// elsewhere would publish nothing rather than publish something wrong.
+fn publish_configuration_to_hook() {
+    let published = crate::tray::with_tray(|tray| {
+        (
+            tray.enabled(),
+            crate::hook::vk_from_name(&tray.config().hotkey.key),
+        )
+    });
+
+    let Some((active, hotkey)) = published else {
+        return;
+    };
+
+    crate::hook::set_active(active);
+
+    // A name this program does not know leaves the default of section 7 in place — `Pause`.
+    // A resident utility whose hotkey silently ceased to exist because of a typo in a file
+    // would be a worse answer than one that keeps answering to the documented default. The
+    // settings dialog is where a bad name is reported to the user; that is FR-92, task
+    // T-08-1.
+    if let Some(vk) = hotkey {
+        crate::hook::set_hotkey_vk(vk);
+    }
 }
 
 /// The message loop. Returns when [`PostQuitMessage`] has been reached, that is, when this
@@ -739,26 +844,57 @@ unsafe extern "system" fn window_proc(
         // through nothing else.
         WM_CLOSE => LRESULT(0),
 
-        // Task T-01-4. The tray of the UI thread gets its look at the message next: the
-        // icon's callback, the registered `TaskbarCreated` of FR-81 and the two session
-        // messages of FR-83 are all values that cannot be written as a `match` arm here,
-        // because one of them is only known at run time. `handle_ui_message` answers `None`
-        // for everything it does not handle — and on the input and watcher threads it
-        // answers `None` to everything, because those threads have no tray.
+        // Tasks T-01-4 and T-03-1. Two modules get their look at the message next, because
+        // between them they own values that cannot be written as a `match` arm here: one of
+        // the tray's is only known at run time (`RegisterWindowMessage`), and the hook's are
+        // constants of another module. Each answers `None` for everything it does not
+        // handle, and on a thread that owns neither a tray nor a hook they answer `None` to
+        // everything.
         //
-        // SEC-05 is unaffected: the list of messages `tray` acts on is closed and explicit,
-        // and none of them initiates a privileged action. The menu is tracked with
-        // `TPM_RETURNCMD`, so there is no `WM_COMMAND` handler anywhere in this process for
-        // a foreign message to aim at.
-        _ => match crate::tray::handle_ui_message(message, wparam, lparam) {
-            Some(result) => result,
+        // SEC-05 is unaffected: both lists are closed and explicit, and nothing on either of
+        // them initiates a privileged action. The menu is tracked with `TPM_RETURNCMD`, so
+        // there is no `WM_COMMAND` handler anywhere in this process for a foreign message to
+        // aim at.
+        _ => {
+            // FR-01 and FR-83, "снятие хуков". `Tray::shut_down` carries a marked place for
+            // this call — task T-01-4 left it as a `TODO(T-03-1)` — but `src\tray.rs` is
+            // outside the file scope of task T-03-1, so the call is made here instead, in
+            // the window procedure the message arrives at and before the tray is given it.
+            // The rest of FR-83's cleanup stays where T-01-4 put it. `wparam` is `TRUE` only
+            // if the session really is ending; a `WM_QUERYENDSESSION` that is later refused
+            // must not cost the program its hook.
+            if message == WM_ENDSESSION && wparam.0 != 0 {
+                crate::hook::uninstall();
+            }
 
-            // SAFETY: forwarding the message unchanged to the default procedure, which is
-            // what every message not named above must get. The arguments are the ones the
-            // OS just passed in and are handed on unmodified; nothing is dereferenced on
-            // the way.
-            None => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
-        },
+            if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
+                return result;
+            }
+
+            let handled = crate::tray::handle_ui_message(message, wparam, lparam);
+
+            // FR-90 and FR-95. `general.enabled` is the tray's, the menu of FR-91 can flip
+            // it inside the call above, and the hook has to be told — a program the user has
+            // just suspended must stop swallowing the hotkey at once. Re-reading it here,
+            // after every message the UI thread sees, is the whole of that wiring: it costs
+            // one thread-local read, it cannot miss a change however the change was made,
+            // and it needs no notification channel between the two modules. `with_tray`
+            // answers `None` on the input and watcher threads, which is why this is correct
+            // to run for every window of the process.
+            if let Some(active) = crate::tray::with_tray(|tray| tray.enabled()) {
+                crate::hook::set_active(active);
+            }
+
+            match handled {
+                Some(result) => result,
+
+                // SAFETY: forwarding the message unchanged to the default procedure, which
+                // is what every message not named above must get. The arguments are the ones
+                // the OS just passed in and are handed on unmodified; nothing is
+                // dereferenced on the way.
+                None => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+            }
+        }
     }
 }
 
@@ -815,8 +951,10 @@ impl Drop for ComApartment {
 #[cfg(debug_assertions)]
 mod debug_timeout {
     use std::sync::OnceLock;
-    use std::thread::{self, Thread};
+    use std::thread::{self, JoinHandle, Thread};
     use std::time::{Duration, Instant};
+
+    use windows::core::Result as WinResult;
 
     /// Environment variable that overrides the deadline, in seconds — FR-97.
     const TIMEOUT_ENV_VAR: &str = "LANGSW_DEBUG_TIMEOUT_SEC";
@@ -829,11 +967,35 @@ mod debug_timeout {
     /// it instead of being noticed a poll interval later.
     static MAIN_THREAD: OnceLock<Thread> = OnceLock::new();
 
-    /// Blocks until the deadline passes or shutdown is requested, whichever comes first.
+    /// How long the deadline path gives the other threads to come down on their own before
+    /// it ends the process from here.
+    ///
+    /// Long enough that an ordinary shutdown — which takes milliseconds — always finishes
+    /// inside it and leaves through the clean path, and short enough that acceptance point
+    /// 11a's "с точностью в несколько секунд" holds for a process whose UI thread is wedged.
+    const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+
+    /// How often the grace period above is re-examined.
+    const GRACE_POLL: Duration = Duration::from_millis(20);
+
+    /// Exit code of a debug build that had to end itself because its threads would not stop.
+    ///
+    /// Distinct from every other way this process can end — `EXIT_ALREADY_RUNNING` is 2 and
+    /// `hook::EXIT_EMERGENCY` is 3 — so that an acceptance run can tell the FR-97 deadline
+    /// firing on a wedged process apart from the same deadline firing on a healthy one,
+    /// which leaves through `join_all` with a code of zero.
+    const EXIT_DEBUG_TIMEOUT: u32 = 4;
+
+    /// Blocks until the deadline passes or shutdown is requested, whichever comes first, and
+    /// reports which of the two happened.
+    ///
+    /// `true` means the deadline expired — the FR-97 case, and the one that must not rely on
+    /// any other thread. `false` means somebody else asked the program to stop, and the
+    /// ordinary shutdown path is in charge.
     ///
     /// Parks rather than polls: an idle debug build must be as invisible to NFR-10 as an
     /// idle release build, and a parked thread costs exactly nothing until it is woken.
-    pub fn wait_for_deadline() {
+    pub fn wait_for_deadline() -> bool {
         // Registered here rather than before the threads start because it does not need to
         // be earlier: the flag is re-read at the top of every iteration below, so a request
         // that arrives before the registration is seen without any wake-up at all.
@@ -843,17 +1005,52 @@ mod debug_timeout {
 
         loop {
             if super::shutdown_requested() {
-                return;
+                return false;
             }
 
             let now = Instant::now();
             if now >= deadline {
-                return;
+                return true;
             }
 
             // `park_timeout` may return early and for no reason; both conditions above are
             // re-checked on every pass, so a spurious wake-up costs one loop iteration.
             thread::park_timeout(deadline - now);
+        }
+    }
+
+    /// Gives the three threads [`SHUTDOWN_GRACE`] to leave their message loops and ends the
+    /// process if they have not — the second half of FR-97.
+    ///
+    /// Returns normally when every thread has finished, and the caller then leaves through
+    /// `join_all` exactly as it always did: the tray icon is removed, the configuration is
+    /// saved, the class is unregistered and the mutex is released. That is the ordinary case
+    /// and it costs one poll interval.
+    ///
+    /// It does not return when a thread is wedged. `JoinHandle::is_finished` is what makes
+    /// the distinction possible without a second bookkeeping channel — `join` itself has no
+    /// timed form and would be the very thing that hangs.
+    ///
+    /// ⚠ Ending the process here skips the unwinding of whatever the wedged thread owns: the
+    /// tray icon can be left in the notification area as a ghost until the shell repaints it,
+    /// and the configuration is not saved. That is the trade FR-97 makes deliberately. The
+    /// alternative is a debug build that keeps a low-level keyboard hook for as long as a
+    /// menu stays open, and §4.11 of SPEC exists to say that this is the worse outcome. The
+    /// hook itself is already gone by the time this is called: the caller removes it first.
+    pub fn terminate_unless_threads_stop(threads: &[JoinHandle<WinResult<()>>]) {
+        let grace_ends = Instant::now() + SHUTDOWN_GRACE;
+
+        loop {
+            if threads.iter().all(JoinHandle::is_finished) {
+                return;
+            }
+
+            if Instant::now() >= grace_ends {
+                super::terminate_this_process(EXIT_DEBUG_TIMEOUT);
+                return;
+            }
+
+            thread::sleep(GRACE_POLL);
         }
     }
 
@@ -915,6 +1112,28 @@ mod debug_timeout {
     }
 }
 
+/// Ends this process immediately, with the given exit code — the last resort of FR-97.
+///
+/// `TerminateProcess` on the process pseudo-handle and not `std::process::exit`: the point of
+/// reaching this line is that another thread is wedged, and `exit` runs the at-exit handlers
+/// and can be made to wait by exactly the kind of thread that got us here.
+///
+/// Debug-only, like the whole of FR-97. The emergency combination of FR-96 has a termination
+/// of its own in module `hook`, because that one must be present in both configurations and
+/// must be reachable from inside the hook callback.
+#[cfg(debug_assertions)]
+fn terminate_this_process(code: u32) {
+    // SAFETY: `GetCurrentProcess` returns the process pseudo-handle, a constant naming the
+    // calling process; it needs no closing and cannot be invalid. `TerminateProcess` on it is
+    // the documented way for a process to end itself at once. Both arguments are values and
+    // neither call dereferences anything of ours.
+    if let Err(error) = unsafe { TerminateProcess(GetCurrentProcess(), code) } {
+        // NFR-13: examined. Nothing can be done about it — the caller has already removed
+        // the hook, so the machine has its keyboard back either way.
+        report_non_critical("TerminateProcess", &error);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // FR-98 — the panic hook
 // ---------------------------------------------------------------------------------------
@@ -924,25 +1143,46 @@ mod debug_timeout {
 /// The hook runs before the process is torn down, and it runs even under `panic = "abort"`,
 /// which is what the Release profile sets: abort happens after the hook, not instead of it.
 ///
-/// There is no hook to remove yet. `SetWindowsHookEx` arrives with task **T-03-1**, and
-/// **T-03-1 adds the `UnhookWindowsHookEx` call to this hook body** — that is the whole
-/// point of FR-98, and until then "release what has been taken" means "ask the three
-/// threads to come down in order".
+/// Task **T-03-1** added the `UnhookWindowsHookEx` call this body exists for, and the
+/// exception in front of it.
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
 
     std::panic::set_hook(Box::new(move |info| {
-        // Nothing here blocks: an atomic store, three non-blocking posts and an unpark. A
-        // panic hook that waited on a lock could deadlock against the very thread that
-        // panicked while holding it.
+        // FR-99, and the one case in which this hook must do nothing at all. A panic raised
+        // inside the callback of the keyboard hook is caught by the callback itself, counted,
+        // and answered by letting the stroke through — the program "остаётся запущенной" by
+        // the plain words of FR-99. Tearing the process down here would make that impossible,
+        // because this hook runs *before* the `catch_unwind` that is about to absorb the
+        // panic. Returning early also keeps the callback free of I/O on the panic path
+        // (NFR-05): the standard hook below prints, and nothing here prints.
+        //
+        // In a `panic = "abort"` build — the Release profile — this is always false: nothing
+        // unwinds, nothing can be absorbed, and the branch below is the only one taken.
+        if crate::hook::panic_is_absorbed() {
+            return;
+        }
+
+        // FR-98, and first, before anything else in this body. Whatever happens next, the
+        // machine gets its keyboard back: a panicking process that still holds a
+        // `WH_KEYBOARD_LL` hook is the exact failure §4.11 of SPEC was written against.
+        // `hook::uninstall` is callable from any thread, takes the handle out of an atomic
+        // with a single swap and blocks on nothing, which is what a panic hook needs — one
+        // that waited on a lock could deadlock against the thread that panicked while
+        // holding it.
+        crate::hook::uninstall();
+
+        // Nothing here blocks either: an atomic store, three non-blocking posts and an
+        // unpark.
         request_shutdown();
 
         // SEC-01 and SEC-07: a panic message must never carry a keystroke, a key code or
-        // buffer contents — not now, and not when the hook callback of T-03-1 starts
-        // panicking for real. The previous hook is the standard library's, which prints the
+        // buffer contents. The previous hook is the standard library's, which prints the
         // payload the program itself wrote, so the requirement is a rule about what this
         // program is allowed to put into a panic message, and it is stated here because
-        // this is where it would be violated.
+        // this is where it would be violated. Module `hook` holds up its end: there is no
+        // `panic!`, `assert!`, `unwrap` or `expect` anywhere on its callback path, and the
+        // payload FR-99 catches is dropped unread rather than formatted.
         previous(info);
     }));
 }
