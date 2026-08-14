@@ -9,9 +9,15 @@
 //! of 256 strokes that evicts the oldest), FR-10 (the four LL-hook rows of the flush table),
 //! FR-11 (a layout change flushes nothing) and SEC-02 (the memory is overwritten with zeroes,
 //! never merely marked empty) — task T-03-2.
-//! Still to come: FR-12, the resolution of asynchronous flush races against the timestamps
-//! this module already records, and FR-13, Raw Input — task T-03-3.
-//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3.
+//! Task **T-03-3** added FR-12, the resolution of asynchronous flush races against the
+//! timestamps this module was already recording: [`Recorder::reset_up_to`] and the wrap-safe
+//! comparison [`is_newer_than`] it rests on.
+//! FR-13, Raw Input, is **not** here and is not this module's: the module table of section 6.2
+//! gives "подписки на системные события" to `watchdog`, which is where task T-03-3 put the
+//! `RegisterRawInputDevices` registration and the `WM_INPUT` parsing. What arrives here is the
+//! flush that subscription produces, through [`reset_up_to`], exactly as the flush produced by
+//! the `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions does.
+//! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done).
 //! Task T-03-2a took the physical half of the stroke out of a thread-local of its own and put
 //! it into the fields of [`KeyEvent`], where it belonged all along, and wired this module into
 //! the running program: `app` installs the buffer, publishes the cache of FR-20 into it and
@@ -29,8 +35,8 @@
 //!
 //! [`Stroke`] therefore carries the physical key, the modifier mask, the layout that was
 //! active at the time (FR-26 decides direction from it, and FR-11 is the reason it is stored
-//! per stroke rather than once for the buffer), the timestamp FR-12 will resolve races
-//! against, and what the key produced when it was pressed.
+//! per stroke rather than once for the buffer), the timestamp FR-12 resolves races against,
+//! and what the key produced when it was pressed.
 //!
 //! # Why decoding is a table read and not a call — FR-06
 //!
@@ -347,7 +353,13 @@ impl Stroke {
         self.hkl
     }
 
-    /// `KBDLLHOOKSTRUCT.time` — the timestamp FR-12 resolves flush races against (T-03-3).
+    /// `KBDLLHOOKSTRUCT.time` — the timestamp [`Recorder::reset_up_to`] resolves flush races
+    /// against (FR-12).
+    ///
+    /// Documented by Windows as "equivalent to what `GetMessageTime` would return", that is,
+    /// the value of the system tick counter at the moment the keystroke was generated. That
+    /// identity is what makes it comparable with the timestamps of the two asynchronous flush
+    /// sources; see [`is_newer_than`].
     pub const fn time(self) -> u32 {
         self.time
     }
@@ -508,6 +520,97 @@ impl Ring {
 
         self.head = 0;
         self.len = 0;
+    }
+
+    /// Drops every stroke recorded at or before `event_time` and reports how many survived —
+    /// FR-12.
+    ///
+    /// Every slot the removal frees is zeroed, and so is every slot a surviving stroke is moved
+    /// out of: SEC-02 says the memory is overwritten and not merely marked empty, and a partial
+    /// flush frees memory exactly as a full one does. The slot a survivor is moved *into* is
+    /// zeroed before it is written as well — the same discipline [`Ring::push`] follows, and for
+    /// the same reason: a slot covered by the value replacing it meets SEC-02 by luck.
+    ///
+    /// # Two passes, and why the second one exists
+    ///
+    /// Strokes enter the ring in the order the system generated them and each carries the tick
+    /// count of that moment, so the strokes an event covers are a **prefix** of the ring, and
+    /// the first pass removes it the cheap way: zero the slots, move `head` past them. That is
+    /// the only pass that ever does anything in this program.
+    ///
+    /// The second pass is there because FR-12 says "все нажатия с `time <= T`" and not "первые
+    /// нажатия": it compacts anything the event covers that is left deeper in the ring. Nothing
+    /// in this program can produce such a ring today — it would take a clock that ran backwards
+    /// between two keystrokes — and the requirement is met by construction rather than by that
+    /// argument, which costs one comparison per live stroke on a path that runs in the message
+    /// loop and not in the callback.
+    fn retain_after(&mut self, event_time: u32) -> usize {
+        let capacity = self.capacity();
+
+        // Pass one: the leading run of strokes the event covers.
+        let mut leading = 0;
+        while leading < self.len
+            && !is_newer_than(
+                self.slots[(self.head + leading) % capacity].time,
+                event_time,
+            )
+        {
+            leading += 1;
+        }
+
+        for offset in 0..leading {
+            self.zero_slot((self.head + offset) % capacity);
+        }
+
+        self.head = (self.head + leading) % capacity;
+        self.len -= leading;
+
+        // Pass two: anything the event covers that is not in that run.
+        let mut kept = 0;
+
+        for offset in 0..self.len {
+            let slot = (self.head + offset) % capacity;
+            let stroke = self.slots[slot];
+
+            if !is_newer_than(stroke.time, event_time) {
+                continue;
+            }
+
+            let target = (self.head + kept) % capacity;
+
+            if target != slot {
+                self.zero_slot(target);
+                self.slots[target] = stroke;
+            }
+
+            kept += 1;
+        }
+
+        for offset in kept..self.len {
+            self.zero_slot((self.head + offset) % capacity);
+        }
+
+        self.len = kept;
+
+        kept
+    }
+
+    /// How many live strokes were made strictly after `event_time` — FR-12.
+    ///
+    /// Asked before anything is removed, because the answer is what decides between the two
+    /// halves of the requirement: zero survivors means the event is newer than every stroke and
+    /// the flush is the full one, anything else means the flush is partial at most.
+    ///
+    /// Every live stroke is examined rather than the newest one alone. The newest stroke is the
+    /// last one only while the clock runs forward, and this way the count owes that nothing.
+    fn newer_than(&self, event_time: u32) -> usize {
+        let capacity = self.capacity();
+
+        (0..self.len)
+            .filter(|offset| {
+                is_newer_than(self.slots[(self.head + offset) % capacity].time, event_time)
+            })
+            .count()
     }
 
     /// Writes zeroes over one slot so that no optimiser may remove the write — SEC-02.
@@ -673,6 +776,76 @@ const EDITING_KEYS: [u16; 10] = [
 /// Whether `vk` is one of the keys FR-10 flushes the whole buffer on.
 fn flushes(vk: u16) -> bool {
     BOUNDARY_KEYS.contains(&vk) || EDITING_KEYS.contains(&vk)
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-12 — the race between the synchronous hook and the asynchronous flush sources
+// ---------------------------------------------------------------------------------------
+
+/// Whether `time` is strictly newer than `reference` on the 32-bit millisecond counter both
+/// come from — the comparison the whole of FR-12 rests on.
+///
+/// # Why this is not `time > reference`
+///
+/// The counter is `GetTickCount`: milliseconds since the machine started, in 32 bits, which
+/// wraps to zero every 49 days 17 hours. A plain `>` gets exactly one thing wrong, and it gets
+/// it wrong at the worst possible moment: for the roughly one minute around the wrap, strokes
+/// recorded just before it hold values near `u32::MAX` and every event arriving just after it
+/// holds a value near zero, so `>` would call every one of those events *older* than every
+/// stroke in the buffer — and FR-12 would keep a buffer that a click was supposed to flush.
+///
+/// The fix is the arithmetic of RFC 1982, serial numbers: the difference is taken modulo 2³²
+/// and read as a **signed** number, so "newer" means "a positive distance forward", and the
+/// wrap is simply not a special case — `0x0000_0064.wrapping_sub(0xFFFF_FF9C)` is `200`, which
+/// is the true distance in milliseconds across the wrap.
+///
+/// The construction is correct as long as the two values are less than 2³¹ ms — 24 days 20
+/// hours — apart, which is a bound this program is nowhere near: a stroke in the buffer is at
+/// most a few minutes old, because every flush rule of FR-10 empties it long before that, and
+/// a flush event is processed within milliseconds of being generated. The exact half-way case,
+/// a difference of precisely 2³¹, reads as "not newer", that is, as "the event covers the
+/// stroke", which is the side that loses a buffer rather than the side that keeps one it
+/// should have dropped.
+///
+/// `const` and free of Win32 on purpose: it is the one piece of FR-12 that can be exhaustively
+/// tested, wrap included, without a clock.
+pub const fn is_newer_than(time: u32, reference: u32) -> bool {
+    (time.wrapping_sub(reference) as i32) > 0
+}
+
+/// What a flush carrying a timestamp did to the buffer — FR-12.
+///
+/// Returned rather than kept, for the same reason [`Recorded`] is: the rule can be driven from
+/// a test one event at a time, and the debug channel of SEC-04a has something to report that is
+/// a count and never a stroke (SEC-07).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetOutcome {
+    /// The event was newer than every stroke, so the whole buffer went — the "полная очистка"
+    /// of FR-12, which is what the unconditional flush of FR-10 would have done anyway.
+    ///
+    /// An empty buffer takes this arm too, with `removed` zero: "newer than all of them" is
+    /// vacuously true of no strokes at all, and the whole backing array is zeroed either way
+    /// (SEC-02).
+    Cleared {
+        /// How many strokes were live when the event arrived.
+        removed: usize,
+    },
+    /// Some strokes were at or before the event and some after it: the first group was removed
+    /// and its slots zeroed, the second group **survived**. This is the arm FR-12 exists for.
+    Partial {
+        /// How many strokes the event took out.
+        removed: usize,
+        /// How many were made after the event and are still in the buffer.
+        kept: usize,
+    },
+    /// Every stroke was made after the event: nothing was removed.
+    ///
+    /// The case a naive "a click empties the buffer" would have got wrong outright — the user
+    /// clicked, then typed, and the click is only being processed now.
+    Kept {
+        /// How many strokes are still in the buffer.
+        kept: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------------------
@@ -973,17 +1146,73 @@ impl Recorder {
     /// Flushes the buffer and overwrites it with zeroes — FR-10, SEC-02.
     ///
     /// **This is the entry point the other flush sources of the FR-10 table attach to** and
-    /// the reason it is public: mouse clicks over Raw Input and the `EVENT_SYSTEM_FOREGROUND`,
-    /// `EVENT_OBJECT_FOCUS` and `WM_WTSSESSION_CHANGE` subscriptions (tasks T-03-3 and T-06-2),
-    /// and the "приостановка пользователем" of the tray. Subscribing to those events is not
-    /// this task's work; having one flush for all of them to call, which zeroes the memory
-    /// exactly once and in one place, is.
+    /// the reason it is public: the `WM_WTSSESSION_CHANGE` subscription (task T-06-2) and the
+    /// "приостановка пользователем" of the tray, both of which flush unconditionally, and the
+    /// full-clearance arm of [`Recorder::reset_up_to`], which is where the three asynchronous
+    /// sources of the table — the mouse click of FR-13 and the two `WinEvent` subscriptions —
+    /// end up whenever FR-12 says the event is newer than everything in the buffer. Having one
+    /// flush for all of them to call, which zeroes the memory exactly once and in one place, is
+    /// what keeps SEC-02 a property of the module rather than of each caller.
     ///
     /// The conversion session ends with it. Task T-05-2 owns FR-34 and hangs its cycle counter
     /// on this call, which is why the flush is one function and not one per caller.
     pub fn reset(&mut self) {
         self.ring.clear();
         self.converted = false;
+    }
+
+    /// Flushes the buffer of everything typed at or before `event_time` — **FR-12**.
+    ///
+    /// This is the flush the *asynchronous* sources of the FR-10 table use, and the difference
+    /// from [`Recorder::reset`] is the whole of FR-12. A mouse click over Raw Input and a
+    /// `WinEvent` are delivered to a message queue and are processed whenever that queue is
+    /// pumped; the hook callback, by contrast, runs synchronously, inside the system's own
+    /// keystroke delivery. So the order in which the two reach this module is **not** the order
+    /// in which they happened: a click can arrive here after a keystroke the user made after
+    /// the click, and an unconditional flush would then erase text the user typed *later* than
+    /// the event that is supposedly flushing it.
+    ///
+    /// The requirement resolves it with the timestamps this module has been recording since
+    /// task T-03-2: every stroke with `time <= event_time` is removed, and the whole buffer is
+    /// cleared **only** if `event_time` is newer than every stroke in it. Strokes made after the
+    /// event survive, which is the point.
+    ///
+    /// SEC-02 is unaffected by any of this: every slot the removal frees is overwritten with
+    /// zeroes, and a full clearance goes through [`Recorder::reset`], which zeroes the whole
+    /// backing array including the slots outside the live window.
+    ///
+    /// The conversion session of the last row of FR-10 ends with a **full** clearance and
+    /// survives a partial one. A session is about the strokes that were converted: while some
+    /// of them are still in the buffer, the next key still ends a session that is still open,
+    /// and when none of them are left there is no session to end.
+    ///
+    /// Timestamps come from three different Win32 sources — `KBDLLHOOKSTRUCT.time` for the
+    /// stroke, `GetMessageTime` for the `WM_INPUT` of a click and `dwmsEventTime` for a
+    /// `WinEvent`. All three are the same 32-bit millisecond tick counter; see
+    /// [`is_newer_than`] for what makes them comparable across its wrap.
+    pub fn reset_up_to(&mut self, event_time: u32) -> ResetOutcome {
+        let live = self.ring.len();
+        let newer = self.ring.newer_than(event_time);
+
+        if newer == 0 {
+            // The event is newer than every stroke — including the case of no strokes at all.
+            // FR-12: "Полная очистка выполняется только если метка события новее всех нажатий".
+            self.reset();
+            return ResetOutcome::Cleared { removed: live };
+        }
+
+        if newer == live {
+            // Everything in the buffer was typed after the event. Nothing to remove, and this
+            // is exactly the situation the requirement was written for.
+            return ResetOutcome::Kept { kept: live };
+        }
+
+        let kept = self.ring.retain_after(event_time);
+
+        ResetOutcome::Partial {
+            removed: live - kept,
+            kept,
+        }
     }
 
     /// Copies the live strokes into `out`, oldest first, and returns how many.
@@ -1173,6 +1402,16 @@ pub fn record(key: KeyEvent) -> Recorded {
 /// The public flush the other sources of the FR-10 table attach to; see [`Recorder::reset`].
 pub fn reset() -> bool {
     with(Recorder::reset).is_some()
+}
+
+/// Flushes the buffer of the calling thread of everything typed at or before `event_time`, and
+/// answers `None` on a thread that has no buffer — **FR-12**, SEC-02.
+///
+/// The entry point of the asynchronous flush sources of the FR-10 table: the mouse click of
+/// FR-13 over Raw Input and the `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS`
+/// subscriptions, all three of which module `watchdog` owns. See [`Recorder::reset_up_to`].
+pub fn reset_up_to(event_time: u32) -> Option<ResetOutcome> {
+    with(|recorder| recorder.reset_up_to(event_time))
 }
 
 /// Records that a conversion has run — the last row of FR-10.

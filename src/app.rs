@@ -19,6 +19,13 @@
 //! table of module `convert` instead of taking the program down), FR-21 (the cache is rebuilt
 //! on the two messages `layouts::needs_rebuild` names) and FR-11 (neither of those flushes the
 //! buffer, and neither may ever be made to).
+//! Task **T-03-3** put the subscriptions of module [`crate::watchdog`] on the threads section
+//! 6.1 assigns them to — Raw Input on the input thread (FR-13), `SetWinEventHook` on the watcher
+//! thread (two rows of the FR-10 table) — routed their messages through [`window_proc`] into the
+//! time-ordered flush of FR-12, and made FR-21 **actually happen**: neither message FR-21 names
+//! can reach a program whose windows are hidden and never focused, so the rebuild is driven by
+//! `WM_INPUT_DEVICE_CHANGE` and by the layout probe of [`refresh_layout_and_cache`] instead.
+//! FR-11 holds across all of it and is checked separately.
 //! Boundary: FR-83 (`WM_QUERYENDSESSION` / `WM_ENDSESSION`, unhooking, removing the tray
 //! icon, wiping the buffer, saving the configuration) is handled in [`crate::tray`] by task
 //! T-01-4, which attached itself to [`request_shutdown`] and [`shutdown_requested`]; the
@@ -35,11 +42,14 @@
 //!
 //! * **input** — owns a message-only window; task T-03-1 put `WH_KEYBOARD_LL` on it, task
 //!   T-03-2a added the typing buffer and T-02-1's layout cache, which is rebuilt on this
-//!   thread's messages, and `SendInput` will run here;
+//!   thread's messages, task T-03-3 added the Raw Input registration of FR-13 and the
+//!   time-ordered flush of FR-12 that its `WM_INPUT` feeds, and `SendInput` will run here;
 //! * **UI** — owns a hidden top-level window; task T-01-4 attached the tray icon and menu
 //!   to it, and they run on this thread and on no other;
-//! * **watcher** — owns a message-only window and a COM STA apartment; tasks T-06-1 and
-//!   T-06-2 add `SetWinEventHook` and the UI Automation password-field probe.
+//! * **watcher** — owns a message-only window and a COM STA apartment; task T-03-3 put the
+//!   `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions here, where section 6.1
+//!   puts them, and tasks T-06-1 and T-06-2 add the rest of `SetWinEventHook` and the UI
+//!   Automation password-field probe.
 //!
 //! The split is not decoration. Section 6.1 states outright that a UI thread stalled for a
 //! few seconds makes the system drop the low-level hook silently (FR-80), so nothing that
@@ -668,6 +678,28 @@ fn serve_window(role: Role) -> WinResult<()> {
         Role::Ui | Role::Watcher => None,
     };
 
+    // Task T-03-3: the subscriptions of module `watchdog`. Declared after `_window` for the
+    // same reason `_tray` and `_hook` are — each of them names that window and each must be
+    // undone before the window stops existing — and after `_hook` because NFR-08 measures the
+    // distance from start-up to the installed hook and nothing that is not the hook belongs
+    // in front of it.
+    //
+    // Section 6.1 decides which thread gets which and the `match`es below are that table:
+    // `RegisterRawInputDevices (RIDEV_INPUTSINK)` is listed under the input thread, and
+    // `SetWinEventHook` under the watcher thread. A failure of either ends the thread and so
+    // the program: FR-13 and two rows of the FR-10 flush table are not optional extras, and a
+    // program that silently stopped flushing the buffer on a click would be worse than one
+    // that refuses to start.
+    let _raw_input = match role {
+        Role::Input => Some(crate::watchdog::register_raw_input(_window.handle)?),
+        Role::Ui | Role::Watcher => None,
+    };
+
+    let _win_events = match role {
+        Role::Watcher => Some(crate::watchdog::watch()?),
+        Role::Input | Role::Ui => None,
+    };
+
     // Re-read the flag after the window has been published, and before the first
     // `GetMessageW`. This closes the only race in the shutdown design: a `request_shutdown`
     // that ran before the window existed found `NO_WINDOW`, posted nothing, and would
@@ -832,6 +864,86 @@ fn publish_active_layout(layout: LayoutId) {
     crate::buffer::with(|recorder| recorder.set_active_layout(layout));
 }
 
+/// Re-reads the layout of the foreground window and rebuilds the cache if it really changed —
+/// **the delivery of FR-21**, task T-03-3.
+///
+/// # Why the program has to ask instead of being told
+///
+/// FR-21 rebuilds the cache "по сообщениям `WM_INPUTLANGCHANGE` и `WM_DEVICECHANGE`", and task
+/// T-03-2a established by measurement that neither message reaches this program:
+/// `WM_INPUTLANGCHANGE` is sent to the window with the keyboard **focus**, and all three windows
+/// of this process are hidden and never focused. The handler was written and correct; it was
+/// never called, and the cache was therefore built once at start-up and never rebuilt.
+///
+/// The layout is a property of the **thread that owns the foreground window**, and that is what
+/// makes the question answerable without the message:
+/// `GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow()))` is what
+/// [`foreground_layout`] already computed for FR-04. Module `watchdog` provides the moments worth
+/// asking at — `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS`, the two events the FR-10 table
+/// already has this program subscribed to — and both arrive here as
+/// [`crate::watchdog::WM_APP_LAYOUT`].
+///
+/// The known limit of asking at those two moments is written down rather than left implicit: a
+/// user who switches layout with `Alt+Shift` **without leaving the window they are typing in**
+/// changes no foreground and moves no focus, so the program learns of it at the next window or
+/// focus change and not before. The two mechanisms that would close that gap were measured and
+/// rejected in the report of task T-03-3 — `RegisterShellHookWindow` does not deliver
+/// `HSHELL_LANGUAGE` in its documented shape on this system, and the TSF sink that would is a
+/// COM interface needing the `implement` feature of the `windows` crate, which is outside
+/// section 3.2 of SPEC and therefore the controller's decision, not this task's.
+///
+/// # Why the rebuild is conditional
+///
+/// FR-20 is a sweep of virtual keys `0x08..=0xFF` against eight modifier combinations for every
+/// layout in the session — thousands of `ToUnicodeEx` calls, five milliseconds on the machine
+/// this was measured on. `EVENT_SYSTEM_FOREGROUND` fires on every `Alt+Tab`, and the window the
+/// user switched to is nearly always running the same layout as the one they left, so rebuilding
+/// unconditionally would pay the whole sweep for nothing many times a minute. The comparison is
+/// against the layout the buffer is recording under, which is the value the rebuild would change
+/// anyway.
+///
+/// A zero answer — no foreground window at all, which happens while the desktop switches and on
+/// the secure desktop — is not a change and is not treated as one: publishing it would tell the
+/// buffer to record under a layout no cache contains.
+///
+/// ⚠ **FR-11: nothing here flushes the buffer**, and nothing that does may ever be added. The
+/// buffer *is* flushed on a foreground change, but by the row of the FR-10 table that says so
+/// and through [`crate::watchdog::apply_flush`], which is a different event that happens to
+/// arrive at the same time.
+fn refresh_layout_and_cache() {
+    let observed = foreground_layout();
+
+    if !layout_refresh_needed(
+        observed,
+        crate::buffer::with(|recorder| recorder.active_layout()),
+    ) {
+        return;
+    }
+
+    publish_active_layout(observed);
+    rebuild_layout_cache();
+}
+
+/// The decision of [`refresh_layout_and_cache`], as a function of its two inputs.
+///
+/// Split out for the same reason [`apply_capacity`] is: the rule can then be driven from a test
+/// without a foreground window and, more to the point, without running a real `LayoutCache::build`
+/// beside every other test in this binary.
+///
+/// `recorded` is what [`crate::buffer::with`] answered: `None` on a thread that owns no buffer,
+/// which is not a reason to rebuild anything — that thread has no cache to rebuild.
+fn layout_refresh_needed(observed: LayoutId, recorded: Option<LayoutId>) -> bool {
+    if observed == LayoutId::default() {
+        // No foreground window, or a window that vanished between two calls. Not a change.
+        return false;
+    }
+
+    match recorded {
+        None => false,
+        Some(recorded) => recorded != observed,
+    }
+}
+
 /// The keyboard layout of the window the user is typing into.
 ///
 /// Not `GetKeyboardLayout(0)`: that answers for the *calling* thread, and the input thread of
@@ -907,6 +1019,21 @@ fn post_to(role: Role, message: u32) {
         // between the load above and this call, that is, it is already leaving.
         report_non_critical("PostMessageW", &error);
     }
+}
+
+/// Posts `message` to the input thread's window, if that thread has one right now.
+///
+/// The one thing module `watchdog` needs from this module and the only way it gets it. Its
+/// `WinEvent` callback runs on the watcher thread and the buffer it has news for is a
+/// thread-local of the input thread (section 6.3), so the news has to travel; the register of
+/// which thread owns which window is [`WAKE_TARGETS`], and it stays here rather than being
+/// copied into a second module.
+///
+/// Callable from a callback the system drives, which is the property that matters: it is
+/// [`post_to`] and therefore one atomic load and one `PostMessageW`, and `PostMessageW` queues
+/// and returns without blocking (NFR-04).
+pub(crate) fn post_to_input_thread(message: u32) {
+    post_to(Role::Input, message);
 }
 
 /// Hands the input thread the three settings it reacts to — FR-02 and FR-95 for the hook, and
@@ -1226,6 +1353,40 @@ unsafe extern "system" fn window_proc(
             if crate::layouts::needs_rebuild(message) && crate::buffer::is_installed() {
                 publish_active_layout(foreground_layout());
                 rebuild_layout_cache();
+            }
+
+            // FR-10, FR-12, FR-13 — task T-03-3. The two asynchronous flush sources of the
+            // FR-10 table arrive here: a mouse button as the `WM_INPUT` of Raw Input, and the
+            // `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions as the private
+            // `watchdog::WM_APP_FLUSH` the watcher thread posts. `apply_flush` answers `None`
+            // for every other message and on every thread that owns no buffer, which is every
+            // thread but the input one (section 6.3).
+            //
+            // The result is deliberately dropped: FR-12 decides how much of the buffer goes,
+            // module `watchdog` counts what happened, and there is nothing for the window
+            // procedure to do with the answer. SEC-07 — it is a count, never a stroke.
+            crate::watchdog::apply_flush(message, lparam);
+
+            // **FR-21, the delivery** — task T-03-3, and the point of that half of the task.
+            // Neither message FR-21 names can reach this program: `WM_INPUTLANGCHANGE` goes to
+            // the window with the keyboard focus and ours never have it, and `WM_DEVICECHANGE`
+            // is only sent to windows that asked for device notifications. `watchdog` asks for
+            // them in the two ways that do work — `RIDEV_DEVNOTIFY`, which turns a keyboard
+            // arrival into `WM_INPUT_DEVICE_CHANGE` at this very window, and the layout probe
+            // behind `WM_APP_LAYOUT` — and `rebuild_for` maps each to what it deserves.
+            //
+            // ⚠ **FR-11: not one of these paths flushes the buffer.** A layout change is not a
+            // reason to throw away what the user has typed; every stroke carries the layout it
+            // was typed under precisely so that it does not have to be.
+            if crate::buffer::is_installed() {
+                match crate::watchdog::rebuild_for(message) {
+                    Some(crate::watchdog::Rebuild::Unconditional) => {
+                        publish_active_layout(foreground_layout());
+                        rebuild_layout_cache();
+                    }
+                    Some(crate::watchdog::Rebuild::IfLayoutChanged) => refresh_layout_and_cache(),
+                    None => {}
+                }
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
@@ -1604,8 +1765,13 @@ mod acceptance {
             return;
         };
 
+        // Task T-03-3 added the eight counts of module `watchdog`. Every one of them is a
+        // count of events — SEC-07 allows those and nothing else, and there is no stroke, key
+        // code or character anywhere in this structure to put here even by mistake.
+        let subscriptions = crate::watchdog::counters();
+
         let report = format!(
-            "hook_ready_us={}\ncache_ready_us={}\ncache_builds={}\nbuffer_len={}\nlayout_cache_failures={}\nhotkey_handoffs={}\npost_failures={}\n",
+            "hook_ready_us={}\ncache_ready_us={}\ncache_builds={}\nbuffer_len={}\nlayout_cache_failures={}\nhotkey_handoffs={}\npost_failures={}\nmouse_packets={}\nmouse_flushes={}\nwindow_flushes={}\nwindow_flushes_taken={}\nfull_clears={}\npartial_clears={}\nkept_events={}\nstrokes_removed={}\ndevice_changes={}\nlayout_probes={}\n",
             HOOK_READY_US.load(Ordering::Relaxed),
             CACHE_READY_US.load(Ordering::Relaxed),
             CACHE_BUILDS.load(Ordering::Relaxed),
@@ -1613,6 +1779,16 @@ mod acceptance {
             super::layout_cache_failures(),
             crate::hook::hotkey_handoffs(),
             crate::hook::post_failures(),
+            subscriptions.mouse_packets,
+            subscriptions.mouse_flushes,
+            subscriptions.window_flushes,
+            subscriptions.window_flushes_taken,
+            subscriptions.full_clears,
+            subscriptions.partial_clears,
+            subscriptions.kept_events,
+            subscriptions.strokes_removed,
+            subscriptions.device_changes,
+            subscriptions.layout_probes,
         );
 
         // A failed write is not worth ending on: the process is already leaving, and the run
@@ -1870,5 +2046,35 @@ mod tests {
         publish_cache(crate::convert::fallback_cache());
 
         assert!(!buffer::is_installed());
+    }
+
+    /// **FR-21 delivery**, task T-03-3: when the layout probe behind `WM_APP_LAYOUT` is worth a
+    /// rebuild and when it is not.
+    ///
+    /// The sweep of FR-20 is thousands of `ToUnicodeEx` calls and `EVENT_SYSTEM_FOREGROUND`
+    /// fires on every `Alt+Tab`, so "the foreground changed" and "the layout changed" have to be
+    /// different questions. The decision is driven here rather than by calling
+    /// `refresh_layout_and_cache`, which would run a real cache build in a test binary whose
+    /// other tests assert on the process-wide failure counter of FR-25.
+    #[test]
+    fn a_rebuild_is_asked_for_only_when_the_layout_really_moved() {
+        let other = LayoutId::from_raw(0x0419_0419);
+
+        // The ordinary case: the user switched window and the new one runs the same layout.
+        assert!(!layout_refresh_needed(SOME_LAYOUT, Some(SOME_LAYOUT)));
+
+        // The case FR-21 is about.
+        assert!(layout_refresh_needed(other, Some(SOME_LAYOUT)));
+
+        // No foreground window at all — while the desktop switches, and on the secure desktop.
+        // Publishing that would tell the buffer to record under a layout no cache contains.
+        assert!(!layout_refresh_needed(
+            LayoutId::default(),
+            Some(SOME_LAYOUT)
+        ));
+
+        // A thread that owns no buffer owns no cache either, so there is nothing to rebuild.
+        assert!(!layout_refresh_needed(other, None));
+        assert!(!layout_refresh_needed(LayoutId::default(), None));
     }
 }

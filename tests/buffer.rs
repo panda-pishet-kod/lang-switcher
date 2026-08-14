@@ -29,7 +29,8 @@ use core::cell::Cell;
 use std::alloc::System;
 
 use lang_switcher::buffer::{
-    self, DEFAULT_CAPACITY, MAX_CAPACITY, ReadError, Recorded, Recorder, Stroke, StrokeMods,
+    self, DEFAULT_CAPACITY, MAX_CAPACITY, ReadError, Recorded, Recorder, ResetOutcome, Stroke,
+    StrokeMods,
 };
 use lang_switcher::convert::{Keystroke, convert_stroke, max_units};
 use lang_switcher::hook::{self, Decision, Edge, HotkeyState, INJECTED_SIGNATURE, KeyEvent, Mode};
@@ -1194,4 +1195,244 @@ fn a_resize_keeps_the_cache_and_the_layout_and_leaves_no_strokes_behind() {
     assert_eq!(recorder.capacity(), DEFAULT_CAPACITY);
     recorder.set_capacity(usize::MAX);
     assert_eq!(recorder.capacity(), MAX_CAPACITY);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-03-3, points 14 to 18 — FR-12: the flush that carries a timestamp
+// -------------------------------------------------------------------------------------
+//
+// The whole of FR-12 is decidable here, with no mouse, no window and no clock: the buffer
+// stores the timestamp of every stroke, the flush takes the timestamp of the event, and what
+// happens between them is arithmetic. The live half of the requirement — that the timestamps
+// of the three Win32 sources really are the same counter — is argued in the report of task
+// T-03-3 and shown on the running program; it is not something a test can assert.
+
+/// Types one ordinary key stamped `time`.
+fn press_at(recorder: &mut Recorder, time: u32) {
+    assert_eq!(
+        deliver(recorder, VK_A, SCAN_A, 0, time, Edge::Down),
+        Recorded::Stored
+    );
+}
+
+/// The timestamps of the live strokes, oldest first.
+///
+/// A timestamp is not a keystroke: it carries no key code, no scan code and no character, so
+/// printing it in an assertion message is not the thing SEC-07 forbids.
+fn times(recorder: &Recorder) -> Vec<u32> {
+    (0..recorder.len())
+        .map(|index| {
+            recorder
+                .stroke(index)
+                .expect("index below the length")
+                .time()
+        })
+        .collect()
+}
+
+#[test]
+fn a_flush_removes_only_the_strokes_that_are_not_newer_than_the_event() {
+    let mut recorder = fresh_of(8);
+
+    for time in [100, 200, 300, 400, 500] {
+        press_at(&mut recorder, time);
+    }
+
+    // FR-12: "при обработке события сброса с меткой `T` из буфера удаляются все нажатия с
+    // `time <= T`". The click is stamped 300, so the three strokes made at or before it go and
+    // the two made after it stay.
+    assert_eq!(
+        recorder.reset_up_to(300),
+        ResetOutcome::Partial {
+            removed: 3,
+            kept: 2
+        }
+    );
+    assert_eq!(times(&recorder), vec![400, 500]);
+    assert_eq!(recorder.len(), 2);
+}
+
+#[test]
+fn the_whole_buffer_goes_only_when_the_event_is_newer_than_every_stroke() {
+    let mut recorder = fresh_of(8);
+
+    for time in [100, 200, 300] {
+        press_at(&mut recorder, time);
+    }
+
+    // One millisecond short of the newest stroke: FR-12's "полная очистка выполняется только
+    // если метка события новее всех нажатий" is not satisfied, so this is not a full clear.
+    assert_eq!(
+        recorder.reset_up_to(299),
+        ResetOutcome::Partial {
+            removed: 2,
+            kept: 1
+        }
+    );
+    assert_eq!(times(&recorder), vec![300]);
+
+    // The newest stroke's own timestamp: `time <= T` holds for it, nothing is left, and the
+    // flush is the full one.
+    assert_eq!(
+        recorder.reset_up_to(300),
+        ResetOutcome::Cleared { removed: 1 }
+    );
+    assert_eq!(recorder.len(), 0);
+
+    // An empty buffer takes the same arm — "newer than all of them" is vacuously true of no
+    // strokes — and the whole backing array is zeroed for it (SEC-02).
+    assert_eq!(
+        recorder.reset_up_to(0),
+        ResetOutcome::Cleared { removed: 0 }
+    );
+    assert_eq!(non_zero_slots(&recorder), 0);
+}
+
+#[test]
+fn a_click_processed_late_does_not_erase_what_was_typed_after_it() {
+    let mut recorder = fresh_of(8);
+
+    // The situation FR-12 was written for. The user clicked at millisecond 1000; the `WM_INPUT`
+    // for it is still sitting in the input thread's queue. The keyboard hook, which is called
+    // synchronously, has meanwhile delivered three keystrokes made *after* the click.
+    for time in [1_001, 1_002, 1_003] {
+        press_at(&mut recorder, time);
+    }
+
+    // The naive reading of the FR-10 row — "нажатие любой кнопки мыши: полный сброс" — would
+    // throw all three away here, which is precisely the defect FR-12 exists to forbid.
+    assert_eq!(recorder.reset_up_to(1_000), ResetOutcome::Kept { kept: 3 });
+    assert_eq!(times(&recorder), vec![1_001, 1_002, 1_003]);
+    assert_eq!(typed(&recorder), "aaa");
+}
+
+#[test]
+fn a_partial_flush_zeroes_the_slots_it_frees() {
+    let mut recorder = fresh_of(8);
+
+    for time in [10, 20, 30, 40, 50] {
+        press_at(&mut recorder, time);
+    }
+
+    assert_eq!(
+        non_zero_slots(&recorder),
+        5,
+        "the strokes are really in the array before the flush"
+    );
+
+    assert_eq!(
+        recorder.reset_up_to(30),
+        ResetOutcome::Partial {
+            removed: 3,
+            kept: 2
+        }
+    );
+
+    // SEC-02: "перезаписывается нулями, а не просто помечается пустым" is a rule about every
+    // flush, and a partial one frees memory exactly as a full one does. Two strokes are live,
+    // and there are exactly two slots in the whole array that are not zero — so the three the
+    // removal freed hold zeroes and not the strokes that were in them.
+    assert_eq!(recorder.len(), 2);
+    assert_eq!(non_zero_slots(&recorder), 2);
+    assert_eq!(times(&recorder), vec![40, 50]);
+
+    // And the rest of the array goes when the last two do.
+    assert_eq!(
+        recorder.reset_up_to(50),
+        ResetOutcome::Cleared { removed: 2 }
+    );
+    assert_eq!(non_zero_slots(&recorder), 0);
+}
+
+#[test]
+fn the_wrap_of_the_millisecond_counter_is_not_a_special_case() {
+    // The comparison on its own, at the four places it can go wrong.
+    assert!(buffer::is_newer_than(2, 1));
+    assert!(!buffer::is_newer_than(1, 2));
+    assert!(!buffer::is_newer_than(7, 7), "equal is not newer");
+    assert!(
+        buffer::is_newer_than(100, u32::MAX - 100),
+        "201 ms later, across the turn of the counter"
+    );
+    assert!(!buffer::is_newer_than(u32::MAX - 100, 100));
+
+    // And the buffer straddling the wrap: three strokes in the last three milliseconds before
+    // the counter turned over, two in the first two after it.
+    let mut recorder = fresh_of(8);
+
+    for time in [u32::MAX - 2, u32::MAX - 1, u32::MAX, 0, 1] {
+        press_at(&mut recorder, time);
+    }
+
+    // A click stamped `u32::MAX` — the last millisecond before the turn. A plain `time <= T`
+    // would have called all five strokes older than it and emptied the buffer, throwing away
+    // two keystrokes the user made after the click.
+    assert_eq!(
+        recorder.reset_up_to(u32::MAX),
+        ResetOutcome::Partial {
+            removed: 3,
+            kept: 2
+        }
+    );
+    assert_eq!(times(&recorder), vec![0, 1]);
+}
+
+#[test]
+fn the_conversion_session_ends_with_a_full_clearance_and_survives_a_partial_one() {
+    let mut recorder = fresh_of(8);
+
+    for time in [10, 20] {
+        press_at(&mut recorder, time);
+    }
+
+    recorder.note_conversion();
+    assert!(recorder.in_conversion());
+
+    // One of the converted strokes is still in the buffer, so the session it belongs to is
+    // still open and the next key still ends it (the last row of FR-10).
+    assert_eq!(
+        recorder.reset_up_to(10),
+        ResetOutcome::Partial {
+            removed: 1,
+            kept: 1
+        }
+    );
+    assert!(recorder.in_conversion());
+
+    // Nothing of it is left: there is no session to end any more.
+    assert_eq!(
+        recorder.reset_up_to(20),
+        ResetOutcome::Cleared { removed: 1 }
+    );
+    assert!(!recorder.in_conversion());
+}
+
+#[test]
+fn the_thread_local_flush_reaches_the_buffer_of_the_calling_thread() {
+    // Every thread but the input one owns no buffer (section 6.3), and the window procedure
+    // runs on all three, so the flush has to be harmless there.
+    assert_eq!(buffer::reset_up_to(1_000), None);
+
+    let mut recorder = fresh_of(8);
+    press_at(&mut recorder, 100);
+    press_at(&mut recorder, 200);
+    buffer::install_recorder(recorder);
+
+    assert_eq!(
+        buffer::reset_up_to(100),
+        Some(ResetOutcome::Partial {
+            removed: 1,
+            kept: 1
+        })
+    );
+    assert_eq!(buffer::len(), 1);
+
+    assert_eq!(
+        buffer::reset_up_to(200),
+        Some(ResetOutcome::Cleared { removed: 1 })
+    );
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
+    assert_eq!(buffer::reset_up_to(300), None);
 }
