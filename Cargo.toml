@@ -16,6 +16,21 @@ path = "src/lib.rs"
 name = "LangSwitcher"
 path = "src/main.rs"
 
+# The end-to-end acceptance bench of SPEC section 11.5. Task T-04-3.
+#
+# The entry point is deliberately named e2e.rs and not main.rs: cargo auto-discovers
+# tests\*\main.rs as an integration test, which would build and run the bench — and with it
+# Microsoft Word — on every `cargo test`. The name e2e.rs is not subject to that discovery,
+# and this section is the only way the bench is ever built.
+#
+# required-features is not decoration either: without it `cargo build` of the shipping
+# configuration would try to build the bench, which links against the `testing`-only module
+# `control`, and the product build would fail.
+[[bin]]
+name = "langsw-e2e"
+path = "tests/e2e/e2e.rs"
+required-features = ["testing"]
+
 # The full dependency list of SPEC section 3.2, all four crates at once. serde and toml are
 # only needed by task T-01-3, but filling Cargo.toml in one go keeps it from becoming a
 # shared edit point between tasks that run in parallel. Decision R-14.
