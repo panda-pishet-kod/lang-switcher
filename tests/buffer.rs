@@ -137,6 +137,8 @@ const SCAN_2: u16 = 0x03;
 const SCAN_SLASH: u16 = 0x35;
 /// Scan code of the `Z` key, which carries the four-unit ligature below.
 const SCAN_Z: u16 = 0x2C;
+/// Scan code of the space bar — the `Space` of `Win+Space`, task T-03-3b.
+const SCAN_SPACE: u16 = 0x39;
 
 /// A key of the main block: the `LLKHF_EXTENDED` of FR-05 is clear.
 const MAIN_BLOCK: bool = false;
@@ -634,6 +636,79 @@ fn ctrl_alt_and_win_combinations_are_commands_and_flush() {
         release(&mut recorder, modifier);
         assert_eq!(recorder.len(), 0);
     }
+}
+
+/// **Which of the three layout switchers reaches the command row of FR-10** — task T-03-3b,
+/// and the measurement decision Р-40 rests on.
+///
+/// Р-40 proposes to re-read the keyboard layout whenever the FR-10 row "`Ctrl`/`Alt`/`Win` +
+/// клавиша — полный сброс (команда, а не текст)" fires, on the stated ground that all three
+/// layout switchers of Windows — `Alt+Shift`, `Ctrl+Shift` and `Win+Space` — pass through it.
+/// Two of the three do not, and this is the measurement rather than the claim.
+///
+/// A switcher made of modifiers alone never reaches the row. [`Recorder::record`] recognises a
+/// modifier key before any rule of FR-10 is consulted and answers [`Recorded::Modifier`],
+/// because holding `Ctrl` is not yet a command and `Shift` is not text. Only `Win+Space` has a
+/// non-modifier in it.
+///
+/// And the outcome does not identify the row even for `Win+Space`: `Space` is a boundary key
+/// of FR-10 in its own right, so the plain `Space` at the end of this test answers
+/// [`Recorded::Flushed`] with no modifier held at all. The two rows are one value from the
+/// outside, which is what the last block records.
+///
+/// Nothing here is a defect. FR-11 says a layout change must not flush the buffer, and the two
+/// switchers that leave it untouched are FR-11 working exactly as written. The test exists so
+/// that the next reader of Р-40 has the fact measured instead of assumed.
+#[test]
+fn only_one_of_the_three_layout_switchers_reaches_the_command_row_of_fr10() {
+    // `Alt+Shift`. Two modifiers and no key: the row is never reached and the buffer, which
+    // FR-11 protects, survives the switch intact.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    assert_eq!(hold(&mut recorder, VK_LMENU), Recorded::Modifier);
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LMENU), Recorded::Modifier);
+    assert_eq!(recorder.len(), 3, "Alt+Shift is modifiers and nothing else");
+
+    // `Ctrl+Shift`. The same shape, the same answer.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    assert_eq!(hold(&mut recorder, VK_LCONTROL), Recorded::Modifier);
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LCONTROL), Recorded::Modifier);
+    assert_eq!(
+        recorder.len(),
+        3,
+        "Ctrl+Shift is modifiers and nothing else"
+    );
+
+    // `Win+Space`. `Space` is not a modifier, so this one is a command and the buffer goes.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed,
+        "Win+Space is the one switcher of the three that is a command"
+    );
+    assert_eq!(recorder.len(), 0);
+    release(&mut recorder, VK_LWIN);
+
+    // And `Space` alone answers the same, from the boundary-key row instead. A caller that
+    // watched the outcome could not tell a command from an ordinary word break.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed,
+        "a bare Space is a flush too, and an indistinguishable one"
+    );
 }
 
 #[test]
