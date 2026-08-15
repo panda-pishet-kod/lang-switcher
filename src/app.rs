@@ -1184,6 +1184,29 @@ pub(crate) fn post_to_watcher_thread(message: u32) -> bool {
     true
 }
 
+/// Posts `message` to the UI thread's window, and answers whether that thread had one.
+///
+/// **The handover of task T-07-2**, and the third of its kind in this program. The primitives of
+/// module `selection` refuse the thread that owns the hook outright — `OpenClipboard` takes a
+/// system-wide lock, the retries of FR-62 cost up to 180 ms and step 3 of FR-61 waits up to 300,
+/// against the hundred microseconds NFR-01 gives the hook callback and the few seconds FR-80
+/// says the system waits before removing the hook silently. So the input thread decides *whether*
+/// the press belongs to the selection path and posts this; the work is done on the **UI** thread,
+/// which section 6.1 already gives the process's slow, deadline-free work and which is the thread
+/// `selection::listen` published as the one allowed to block.
+///
+/// The answer matters, which is why this returns something and [`post_to_input_thread`] does not:
+/// with no UI window there is no selection path, and module `selection` has to take its pending
+/// plan back and let the press go down the typing-buffer path of FR-60 instead.
+pub(crate) fn post_to_ui_thread(message: u32) -> bool {
+    if WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire) == NO_WINDOW {
+        return false;
+    }
+
+    post_to(Role::Ui, message);
+    true
+}
+
 /// Whether `hwnd` is the watcher thread's own window.
 ///
 /// **Section 6.1 in one line.** Method 3 of FR-50 may run on the watcher thread and on no other,
@@ -1356,6 +1379,10 @@ fn publish_configuration_to_input_thread() {
             tray.config().replacement.method,
             tray.config().replacement.inter_event_delay_ms,
             crate::layouts::Configured::from_settings(&tray.config().layouts),
+            // Section `[selection]` of section 7 — FR-65 and the two timings of FR-61 steps 3
+            // and 8, task T-07-2. Cloned for the same reason the exclusion list below is: the
+            // borrow ends with the closure and the publication happens outside it.
+            tray.config().selection.clone(),
             // Section `[exclusions]` of section 7 — FR-84, task T-06-3. Cloned rather than
             // borrowed because the borrow ends with the closure: `with_tray` lends the tray for
             // the length of the call, and the publication below runs outside it. One `Vec` of a
@@ -1365,8 +1392,16 @@ fn publish_configuration_to_input_thread() {
         )
     });
 
-    let Some((active, hotkey, capacity, method, inter_event_delay_ms, layouts, exclusions)) =
-        published
+    let Some((
+        active,
+        hotkey,
+        capacity,
+        method,
+        inter_event_delay_ms,
+        layouts,
+        selection,
+        exclusions,
+    )) = published
     else {
         return;
     };
@@ -1400,6 +1435,17 @@ fn publish_configuration_to_input_thread() {
     // Nothing is applied to anything already built: the next press reads whatever stands there
     // at that moment, exactly as it does for the replacement method.
     crate::layouts::publish(layouts);
+
+    // **Section `[selection]` of section 7 — FR-65, task T-07-2.** Published for the reason
+    // everything above it is, and for one more that is this section's own: FR-65 says a switched
+    // off selection path leaves the hotkey working «только по буферу набора», which means the
+    // **input** thread has to be able to decide it without asking anybody. A flag it could only
+    // learn by posting a message to the UI thread would make a disabled feature depend on the
+    // availability of a thread it must not need, and NFR-09 gives the typing-buffer path thirty
+    // milliseconds for the whole of itself. So the switch and the two timings of FR-61 steps 3
+    // and 8 go into atomics module `selection` owns, exactly as `[replacement]` and `[layouts]`
+    // do one and two lines above.
+    crate::selection::publish(&selection);
 
     // **Section `[exclusions]` of section 7 — FR-84, task T-06-3.** Published for the reason
     // everything above it is: the list is the UI thread's to read out of the file and the watcher
@@ -1755,7 +1801,25 @@ unsafe extern "system" fn window_proc(
             // The result is dropped: module `inject` counts what FR-45 asks to be counted and
             // there is nothing for a window procedure to do with the answer. SEC-01, SEC-07 —
             // what is dropped is counts and lengths, never a stroke.
-            if message == crate::hook::WM_APP_HOTKEY && crate::buffer::is_installed() {
+            //
+            // ⚠ **FR-60 — task T-07-2.** One hotkey, one meaning, two sources of data, and this
+            // is where the source is chosen. `selection::wants_selection_path` answers `true`
+            // only when it has handed the press to the UI thread; every reason it answers `false`
+            // — `[selection] enabled = false` (FR-65), a password field (SEC-06), no mapping
+            // cache, no UI window — is settled without a single system call made on the user's
+            // behalf, and the line below then runs exactly as it ran before this task existed.
+            //
+            // `WM_APP_BUFFER_PATH` is the same branch arriving late: the selection path ran,
+            // step 3 of FR-61 found the clipboard sequence number unmoved, and "there is no
+            // selection" is FR-60's other half. It is a message of its own rather than a re-post
+            // of `WM_APP_HOTKEY`, which would be offered the selection path again and loop.
+            let hotkey = message == crate::hook::WM_APP_HOTKEY;
+            let handed_back = message == crate::selection::WM_APP_BUFFER_PATH;
+
+            if (hotkey || handed_back)
+                && crate::buffer::is_installed()
+                && !(hotkey && crate::selection::wants_selection_path())
+            {
                 let _ = crate::inject::on_hotkey();
             }
 
@@ -1838,6 +1902,28 @@ unsafe extern "system" fn window_proc(
             // opened, written or decided. SEC-01, SEC-07 — a sequence number and one of two
             // words, never a byte of the clipboard.
             let _ = crate::selection::handle_clipboard_message(hwnd, message);
+
+            // **FR-61 — task T-07-2.** The far end of the handoff the branch above made: the
+            // eight steps run *here*, on the UI thread, because the clipboard primitives refuse
+            // the thread that owns the hook and because section 6.1 gives this thread the
+            // process's slow work. `handle_selection_message` answers `None` for every other
+            // message and at every window that is not the registered one, which is every window
+            // of the input and watcher threads.
+            //
+            // The one thing done with the answer is FR-60's other half: an outcome that is not a
+            // conversion — no selection, or a refusal — hands the press back to the input thread,
+            // where the typing-buffer path runs it. Nothing is waited for: `post_to` queues and
+            // returns.
+            //
+            // SEC-05: the message carries nothing and what it is about travels in a slot only
+            // this process writes, so a forged `WM_APP_SELECTION` finds no plan and is refused
+            // before the clipboard is opened. SEC-01, SEC-07 — what crosses here is an outcome
+            // out of three and two counts, never a character.
+            if let Some(outcome) = crate::selection::handle_selection_message(hwnd, message)
+                && outcome.falls_back()
+            {
+                post_to(Role::Input, crate::selection::WM_APP_BUFFER_PATH);
+            }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
                 return result;

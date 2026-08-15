@@ -522,6 +522,7 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             10 => scenarios::position_10(&context),
             11 => scenarios::position_11(&context),
             12 => scenarios::position_12(&context),
+            15 => scenarios::position_15(&context),
             16 => scenarios::position_16(&context),
             14 => scenarios::position_14(&context),
             22 => scenarios::position_22(&context),
@@ -634,7 +635,7 @@ fn selected_positions(arguments: &[String]) -> Vec<u8> {
     // task T-04-3-3, decision Р-52. Position 17 is deliberately **last**: it is the only one
     // that rewrites the user's `config.toml`, and the shorter that file spends replaced the
     // fewer ways a run can end with it still replaced.
-    const DEFAULT: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 16, 22, 24, 17];
+    const DEFAULT: [u8; 17] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 24, 17];
 
     let mut iterator = arguments.iter();
     while let Some(argument) = iterator.next() {

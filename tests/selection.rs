@@ -1,6 +1,7 @@
-//! Integration checks of module `selection` — the clipboard primitives, FR-62, FR-63, FR-64.
+//! Integration checks of module `selection` — the clipboard primitives of FR-62, FR-63 and
+//! FR-64, and the selection path of FR-60, FR-61 and FR-65 built on top of them.
 //!
-//! Task **T-07-1**.
+//! Tasks **T-07-1** (the primitives) and **T-07-2** (the path).
 //!
 //! # ⚠ The clipboard in this file belongs to whoever is at the machine
 //!
@@ -28,18 +29,33 @@
 //!
 //! What needs a live clipboard, a live window and more than one thread is here.
 //!
-//! What is **not** here: the selection path itself. FR-60, FR-61 as a whole and FR-65 are task
-//! T-07-2, and the last group of tests in this file is a sweep that checks this task did not
-//! start it.
+//! # The selection path — task T-07-2
+//!
+//! The eight steps of FR-61 are an **order**, and an order is not observable from outside the
+//! function that performs it. Module `selection` therefore puts the outside world behind a trait
+//! — `selection::Path`, the same device `inject::Environment` is for FR-40 — and the second half
+//! of this file drives the eight steps against a [`Bench`] that records every call, can be told
+//! to fail at any step and can be told to panic at any step. **No clipboard, no keyboard and no
+//! foreground window are involved in any of it**, which is what lets the checks that matter most
+//! — that step 8 runs when steps 4 to 7 did not — run on every `cargo test`.
+//!
+//! Step 5 is a pure function of its arguments and is driven directly, against the hardwired
+//! RU/EN maps of FR-25 (`convert::fallback_map`), so that what is asserted about scripts,
+//! unmapped characters and reversibility is asserted about real layouts rather than about
+//! whatever happens to be installed.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{fs, path::Path};
 
+use lang_switcher::convert;
+use lang_switcher::inject::{self, Dispatched, Modifiers};
+use lang_switcher::layouts::{Cycle, LayoutId, LayoutMap};
 use lang_switcher::selection::{
-    self, CF_UNICODETEXT, ClipboardError, OPEN_ATTEMPTS, OPEN_RETRY_INTERVAL, Origin,
-    SNAPSHOT_BUDGET_BYTES, Snapshot, Update, WORST_CASE_OPEN, Wait,
+    self, CF_UNICODETEXT, CHORD_EVENTS, ClipboardError, OPEN_ATTEMPTS, OPEN_RETRY_INTERVAL, Origin,
+    Outcome, Path as SelectionPath, Plan, Refusal, SNAPSHOT_BUDGET_BYTES, Snapshot, Update,
+    WORST_CASE_OPEN, Wait,
 };
 use lang_switcher::settings;
 
@@ -1287,36 +1303,48 @@ fn nothing_of_the_clipboard_can_reach_the_journal() {
     assert!(product.contains("impl fmt::Debug for Snapshot"));
 }
 
-/// **The border of the task.** T-07-1 builds primitives; the selection path of FR-60, FR-61 and
-/// FR-65 is T-07-2, and `Ctrl+C` and `Ctrl+V` are not sent from here.
+/// **The border of the task, as task T-07-2 leaves it.**
+///
+/// T-07-1 wrote this test to say the selection path had *not* been started: no `SendInput`, no
+/// `VK_CONTROL`, no reach into `inject`, `convert`, `layouts` or `switch`. T-07-2 is the task
+/// that starts it, so the same statement is made the other way round — the path is here, and it
+/// is built out of the accepted modules rather than out of a second copy of them.
+///
+/// The list is the point. Every one of the four names below is a module this task is **forbidden
+/// to modify**, and its presence here is what says the work went through the accepted engine:
+/// the reverse index of step 5 is `layouts::LayoutMap::find_key`, the forward half is
+/// `convert::convert_stroke` (FR-22), the two chords go out through `inject::dispatch` and the
+/// layout switch of step 7 is `switch::to` (§4.6).
 #[test]
-fn the_selection_path_of_the_next_task_has_not_been_started() {
+fn the_selection_path_is_built_out_of_the_accepted_modules() {
     let source = source_of("selection.rs");
     let product = source
         .split("mod tests {")
         .next()
         .expect("the module has a body before its tests");
 
-    for forbidden in [
-        "SendInput",
-        "INPUT_KEYBOARD",
-        "VK_CONTROL",
+    for required in [
         "crate::inject",
         "crate::convert",
         "crate::layouts",
         "crate::switch",
     ] {
-        let hits = code_lines_with(product, forbidden);
-
         assert!(
-            hits.is_empty(),
-            "T-07-1 must not start the selection path; found {forbidden}: {hits:?}"
+            !code_lines_with(product, required).is_empty(),
+            "the selection path reaches {required} instead of re-implementing it"
         );
     }
+
+    // And it re-implements neither the injection nor the conversion: `SendInput` is called by
+    // module `inject` and by nobody else in this program, and there is no character table here.
+    let sends = code_lines_with(product, "SendInput");
+    assert!(
+        sends.is_empty(),
+        "SendInput belongs to module inject: {sends:?}"
+    );
 }
 
-/// The module header names the requirements the backlog gives this task — decision R-17, and the
-/// task specification asks for the line to be brought into line with it.
+/// The module header names the requirements the backlog gives both tasks — decision R-17.
 #[test]
 fn the_module_header_names_the_requirements_of_the_backlog() {
     let source = source_of("selection.rs");
@@ -1326,35 +1354,986 @@ fn the_module_header_names_the_requirements_of_the_backlog() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // T-07-1 covers FR-62, FR-63 and FR-64 — the backlog row for this task.
-    for covered in ["FR-62", "FR-63", "FR-64", "T-07-1"] {
+    // T-07-1 covers FR-62, FR-63 and FR-64; T-07-2 covers FR-60, FR-61 and FR-65.
+    for covered in [
+        "FR-60", "FR-61", "FR-62", "FR-63", "FR-64", "FR-65", "T-07-1", "T-07-2",
+    ] {
         assert!(header.contains(covered), "the header must name {covered}");
-    }
-
-    // And says which are still to come, and whose they are.
-    for pending in ["FR-60", "FR-61", "FR-65", "T-07-2"] {
-        assert!(header.contains(pending), "the header must name {pending}");
     }
 }
 
-/// `src\app.rs` carries the registration and the message, and nothing else of this task.
+/// **The border in `src\app.rs`** — four places, and the task names every one of them.
+///
+/// T-07-1 was allowed the registration and the message and this test counted two. Task T-07-2 is
+/// allowed «ветвление источника данных на пути горячей клавиши И передача работы потоку UI», and
+/// that is the other four: the branch of FR-60, the message it hands back, the far end of the
+/// handoff and the publication of `[selection]` the branch reads.
 #[test]
-fn the_wiring_in_app_is_the_registration_and_the_message() {
+fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
     let source = source_of("app.rs");
 
-    let registrations = code_lines_with(&source, "selection::listen");
-    let handlers = code_lines_with(&source, "selection::handle_clipboard_message");
-    let everything = code_lines_with(&source, "selection::");
+    for (needle, expected) in [
+        // T-07-1.
+        ("selection::listen", 1),
+        ("selection::handle_clipboard_message", 1),
+        // T-07-2: FR-65 published to the thread that branches.
+        ("selection::publish(", 1),
+        // T-07-2: the branch of FR-60, and the message that carries the other half back.
+        ("selection::wants_selection_path", 1),
+        ("selection::WM_APP_BUFFER_PATH", 2),
+        // T-07-2: the far end of the handoff.
+        ("selection::handle_selection_message", 1),
+    ] {
+        let hits = code_lines_with(&source, needle);
 
-    assert_eq!(
-        registrations.len(),
-        1,
-        "one registration: {registrations:?}"
-    );
-    assert_eq!(handlers.len(), 1, "one handler: {handlers:?}");
+        assert_eq!(
+            hits.len(),
+            expected,
+            "{needle} appears {expected} times: {hits:?}"
+        );
+    }
+
+    // And nothing else of module `selection` reaches `app.rs`: seven lines, all named above.
+    let everything = code_lines_with(&source, "selection::");
     assert_eq!(
         everything.len(),
-        2,
-        "and nothing else of module selection reaches app.rs: {everything:?}"
+        7,
+        "nothing else of module selection reaches app.rs: {everything:?}"
     );
+}
+
+// =========================================================================================
+// The selection path — FR-60, FR-61, FR-65. Task T-07-2
+// =========================================================================================
+
+// ---------------------------------------------------------------------------------------
+// A bench for the eight steps
+// ---------------------------------------------------------------------------------------
+
+/// One call through `selection::Path`, as [`Bench`] records it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    /// Step 1 of FR-61.
+    Snapshot,
+    /// Step 3 of FR-40 — the user's modifiers come off.
+    Release,
+    /// Step 2 of FR-61 — `Ctrl+C`.
+    Copy,
+    /// Step 3 of FR-61 — the sequence number.
+    Wait,
+    /// Step 4 of FR-61 — read `CF_UNICODETEXT`.
+    Read,
+    /// Step 6 of FR-61, first half.
+    Write,
+    /// Step 6 of FR-61, second half — `Ctrl+V`.
+    Paste,
+    /// Step 7 of FR-61 — the layout switch.
+    Switch,
+    /// Step 6 of FR-40 — the user's modifiers go back.
+    RestoreModifiers,
+    /// **Step 8 of FR-61** — the user's clipboard goes back.
+    RestoreClipboard,
+}
+
+/// The eight steps with the outside world replaced by a tape recorder.
+struct Bench {
+    /// Every call, in the order it was made. This *is* the assertion of acceptance point 9.
+    steps: Vec<Step>,
+    /// The step that is to answer with a failure, if any.
+    fail_at: Option<Step>,
+    /// The step that is to panic, if any — acceptance point 10 on the unwinding path.
+    panic_at: Option<Step>,
+    /// What step 3 answers.
+    wait: Wait,
+    /// The baseline step 3 was given — acceptance point 11.
+    baseline_seen: Option<u32>,
+    /// What step 4 answers.
+    reads: Option<String>,
+    /// What step 6 wrote.
+    written: Option<String>,
+    /// What step 7 was asked to switch to.
+    switched: Option<LayoutId>,
+}
+
+impl Bench {
+    /// A bench where every step succeeds and there **is** a selection.
+    fn with_selection(text: &str) -> Self {
+        Self {
+            steps: Vec::new(),
+            fail_at: None,
+            panic_at: None,
+            wait: Wait::Changed {
+                sequence: 1,
+                waited: Duration::from_millis(7),
+            },
+            baseline_seen: None,
+            reads: Some(text.to_owned()),
+            written: None,
+            switched: None,
+        }
+    }
+
+    /// A bench where step 3 times out — there is no selection.
+    fn without_selection() -> Self {
+        Self {
+            wait: Wait::TimedOut {
+                waited: Duration::from_millis(300),
+            },
+            reads: None,
+            ..Self::with_selection("")
+        }
+    }
+
+    fn failing_at(mut self, step: Step) -> Self {
+        self.fail_at = Some(step);
+        self
+    }
+
+    fn panicking_at(mut self, step: Step) -> Self {
+        self.panic_at = Some(step);
+        self
+    }
+
+    /// Records `step` and answers whether it is the one told to fail.
+    fn note(&mut self, step: Step) -> bool {
+        self.steps.push(step);
+
+        if self.panic_at == Some(step) {
+            panic!("the bench was told to panic at {step:?}");
+        }
+
+        self.fail_at == Some(step)
+    }
+
+    fn ran(&self, step: Step) -> bool {
+        self.steps.contains(&step)
+    }
+
+    fn position_of(&self, step: Step) -> Option<usize> {
+        self.steps.iter().position(|&seen| seen == step)
+    }
+}
+
+impl SelectionPath for Bench {
+    fn snapshot(&mut self) -> Result<Snapshot, ClipboardError> {
+        if self.note(Step::Snapshot) {
+            return Err(ClipboardError::Busy);
+        }
+
+        Ok(Snapshot::empty())
+    }
+
+    fn release_modifiers(&mut self) -> Modifiers {
+        self.note(Step::Release);
+
+        Modifiers::NONE
+    }
+
+    fn copy(&mut self) -> Dispatched {
+        self.note(Step::Copy);
+
+        Dispatched {
+            calls: 1,
+            requested: CHORD_EVENTS,
+            accepted: CHORD_EVENTS,
+        }
+    }
+
+    fn wait(&mut self, baseline: u32) -> Wait {
+        self.note(Step::Wait);
+        self.baseline_seen = Some(baseline);
+
+        self.wait
+    }
+
+    fn read(&mut self) -> Result<Option<String>, ClipboardError> {
+        if self.note(Step::Read) {
+            return Err(ClipboardError::Busy);
+        }
+
+        Ok(self.reads.clone())
+    }
+
+    fn write(&mut self, text: &str) -> Result<(), ClipboardError> {
+        if self.note(Step::Write) {
+            return Err(ClipboardError::Busy);
+        }
+
+        self.written = Some(text.to_owned());
+        Ok(())
+    }
+
+    fn paste(&mut self) -> Dispatched {
+        self.note(Step::Paste);
+
+        Dispatched {
+            calls: 1,
+            requested: CHORD_EVENTS,
+            accepted: CHORD_EVENTS,
+        }
+    }
+
+    fn switch(&mut self, target: LayoutId) {
+        self.note(Step::Switch);
+        self.switched = Some(target);
+    }
+
+    fn restore_modifiers(&mut self) -> Modifiers {
+        self.note(Step::RestoreModifiers);
+
+        Modifiers::NONE
+    }
+
+    fn restore_clipboard(&mut self, _snapshot: &Snapshot) {
+        self.note(Step::RestoreClipboard);
+    }
+}
+
+/// The RU/EN pair of FR-25 as a plan — the layouts of the machine this product was written for.
+///
+/// `foreground` is the tie-break of step 5; the two maps come from `convert::fallback_map`, so
+/// nothing here depends on which layouts happen to be installed on the machine running the test.
+fn pair_plan(foreground: LayoutId) -> Plan {
+    let maps: Vec<LayoutMap> = [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|id| convert::fallback_map(id).expect("the hardwired map of FR-25"))
+        .collect();
+
+    let cycle = Cycle::from_layouts(&[convert::FALLBACK_US, convert::FALLBACK_RUSSIAN])
+        .expect("a cycle of the two layouts of FR-25");
+
+    Plan::new(
+        maps,
+        cycle,
+        foreground,
+        Duration::from_millis(300),
+        Duration::from_millis(200),
+        0,
+    )
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance point 9 — the eight steps, in the order FR-61 writes them
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 9.** The eight steps of FR-61 run, once each, in the order of the
+/// requirement, with the two of FR-40 bracketing them.
+#[test]
+fn the_eight_steps_of_fr61_run_in_the_order_the_requirement_writes_them() {
+    let mut bench = Bench::with_selection("ghbdtn");
+    let plan = pair_plan(convert::FALLBACK_US);
+
+    let outcome = selection::run(&mut bench, &plan);
+
+    assert_eq!(
+        bench.steps,
+        vec![
+            Step::Snapshot,         // 1 — save the clipboard, FR-64
+            Step::Release,          // FR-40 step 3
+            Step::Copy,             // 2 — Ctrl+C
+            Step::Wait,             // 3 — the sequence number
+            Step::Read,             // 4 — CF_UNICODETEXT
+            Step::Write,            // 6a — the recoded text
+            Step::Paste,            // 6b — Ctrl+V
+            Step::Switch,           // 7 — the layout
+            Step::RestoreModifiers, // FR-40 step 6
+            Step::RestoreClipboard, // 8 — the user's clipboard, with its delay
+        ],
+        "the order of FR-61 is the requirement"
+    );
+
+    // Step 5 has no call of its own: it is a pure function between steps 4 and 6, and what it
+    // did is visible in what step 6 was given.
+    assert_eq!(bench.written.as_deref(), Some("привет"));
+    assert_eq!(bench.switched, Some(convert::FALLBACK_RUSSIAN));
+    assert_eq!(
+        outcome,
+        Outcome::Converted {
+            mapped: 6,
+            carried: 0
+        }
+    );
+    assert!(!outcome.falls_back());
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance point 10 — step 8 runs when steps 4 to 7 did not
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 10, the behavioural half.** Every step from 4 to 7 is made to fail in turn,
+/// and step 8 runs every time.
+#[test]
+fn step_eight_runs_however_steps_four_to_seven_end() {
+    for failing in [Step::Read, Step::Write] {
+        let mut bench = Bench::with_selection("ghbdtn").failing_at(failing);
+        let plan = pair_plan(convert::FALLBACK_US);
+
+        let outcome = selection::run(&mut bench, &plan);
+
+        assert!(
+            bench.ran(Step::RestoreClipboard),
+            "step 8 must run when step {failing:?} failed: {:?}",
+            bench.steps
+        );
+        assert!(
+            bench.ran(Step::RestoreModifiers),
+            "FR-40 step 6 must run when step {failing:?} failed"
+        );
+        assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
+        assert!(outcome.falls_back());
+    }
+
+    // Step 4 answering "there is no text at all" — the application copied a picture.
+    let mut empty = Bench::with_selection("");
+    let outcome = selection::run(&mut empty, &pair_plan(convert::FALLBACK_US));
+    assert!(empty.ran(Step::RestoreClipboard));
+    assert_eq!(outcome, Outcome::Refused(Refusal::NoText));
+
+    // Step 5 unable to decide a direction: nothing distinguishes a layout and the foreground
+    // window is in neither of them.
+    let mut undecidable = Bench::with_selection("123");
+    let outcome = selection::run(&mut undecidable, &pair_plan(LayoutId::default()));
+    assert!(undecidable.ran(Step::RestoreClipboard));
+    assert_eq!(outcome, Outcome::Refused(Refusal::NoDirection));
+}
+
+/// **Acceptance point 10, the hardest path.** A panic between steps 4 and 7 still restores.
+///
+/// `panic = "abort"` is set for `[profile.release]` only, so a Debug build unwinds — and the
+/// unwind runs `Session::drop`, which is the whole mechanism. In Release the process ends and
+/// the clipboard is freed by the system with the owning thread, which T-07-1 measured.
+#[test]
+fn a_panic_between_steps_four_and_seven_still_restores_the_clipboard() {
+    for panicking in [Step::Read, Step::Write, Step::Paste, Step::Switch] {
+        // The bench has to survive the unwind to be read afterwards, so it is moved into the
+        // caught frame behind a pointer the frame gives back.
+        let bench = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut bench = Bench::with_selection("ghbdtn").panicking_at(panicking);
+            let plan = pair_plan(convert::FALLBACK_US);
+            let _ = selection::run(&mut bench, &plan);
+            bench
+        }));
+
+        // The panic escaped, which is the point: nothing in the module caught it.
+        assert!(
+            bench.is_err(),
+            "the bench was told to panic at {panicking:?}"
+        );
+    }
+
+    // And now the same thing with the tape kept outside the frame, so that it can be read.
+    let tape = std::sync::Arc::new(Mutex::new(Vec::<Step>::new()));
+    let recorder = std::sync::Arc::clone(&tape);
+
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let mut bench = Bench::with_selection("ghbdtn").panicking_at(Step::Write);
+        let plan = pair_plan(convert::FALLBACK_US);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            selection::run(&mut bench, &plan)
+        }));
+        recorder
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(&bench.steps);
+        outcome
+    }));
+    std::panic::set_hook(previous);
+
+    assert!(result.is_ok(), "the outer frame did not panic");
+    let steps = tape.lock().unwrap_or_else(PoisonError::into_inner).clone();
+
+    assert!(
+        steps.contains(&Step::RestoreClipboard),
+        "step 8 must run on the unwinding path too: {steps:?}"
+    );
+}
+
+/// **Acceptance point 10, the structural half — what guarantees it.**
+///
+/// Step 8 is reached from exactly one place in the module, and that place is a destructor. A
+/// future edit that restored by hand somewhere, or that added an early `return` past a hand-written
+/// restore, has to break this test first. The same device, and the same argument, as
+/// [`the_clipboard_is_opened_in_one_place_and_closed_only_from_drop`].
+#[test]
+fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
+    let source = source_of("selection.rs");
+    let product = source
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    for (call, owner) in [
+        ("path.restore_clipboard(", "impl<P: Path> Drop for Session"),
+        ("path.restore_modifiers(", "impl<P: Path> Drop for Session"),
+    ] {
+        let hits = code_lines_with(product, call);
+
+        assert_eq!(hits.len(), 1, "{call} is called from one place: {hits:?}");
+
+        let after = product
+            .split(owner)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{owner} exists"));
+        let body = after.split("// ------").next().unwrap_or(after);
+
+        assert!(body.contains(call), "and that one place is inside {owner}");
+    }
+
+    // And `run` itself contains no restore at all: the guard owns both of them.
+    let run_body = product
+        .split("pub fn run<P: Path>")
+        .nth(1)
+        .expect("run exists")
+        .split("\n/// ")
+        .next()
+        .unwrap_or_default();
+
+    assert!(
+        !run_body.contains("restore_clipboard(") && !run_body.contains("restore_modifiers("),
+        "the eight steps must not restore by hand — the guard does it"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance points 11 and 12 — how "there is a selection" is decided
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 11.** The presence of a selection is the answer of step 3 and nothing else:
+/// the baseline handed to the wait is the sequence number of the snapshot, and no other question
+/// is asked of the system.
+#[test]
+fn a_selection_is_recognised_by_the_sequence_number_and_by_nothing_else() {
+    let mut bench = Bench::with_selection("ghbdtn");
+    let plan = pair_plan(convert::FALLBACK_US);
+
+    let _ = selection::run(&mut bench, &plan);
+
+    // The baseline came from step 1's snapshot, taken before `Ctrl+C` went out.
+    assert_eq!(bench.baseline_seen, Some(Snapshot::empty().sequence()));
+
+    // And the order is the proof that the question is "did it change": the snapshot is read
+    // before the copy, and the wait comes after it.
+    assert!(bench.position_of(Step::Snapshot) < bench.position_of(Step::Copy));
+    assert!(bench.position_of(Step::Copy) < bench.position_of(Step::Wait));
+
+    // There is no other way of asking, and the module does not invent one: nothing in it looks
+    // at a window, a selection or an accessibility interface.
+    let product = source_of("selection.rs");
+    let product = product
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    for absent in [
+        "GetFocus",
+        "EM_GETSEL",
+        "IUIAutomation",
+        "TextPattern",
+        "SendMessageTimeout",
+    ] {
+        assert!(
+            code_lines_with(product, absent).is_empty(),
+            "there is no way to ask whether a selection exists; {absent} must not appear"
+        );
+    }
+}
+
+/// **Acceptance point 12.** No change within the timeout is "there is no selection", the press
+/// falls back to the typing-buffer path — and **nothing was written to the clipboard**, so what
+/// the user has there is what they had before.
+#[test]
+fn no_change_within_the_timeout_means_no_selection_and_falls_back() {
+    let mut bench = Bench::without_selection();
+    let plan = pair_plan(convert::FALLBACK_US);
+
+    let outcome = selection::run(&mut bench, &plan);
+
+    assert_eq!(outcome, Outcome::NoSelection);
+    assert!(
+        outcome.falls_back(),
+        "FR-60: the press goes down the typing-buffer path"
+    );
+
+    assert_eq!(
+        bench.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::Wait,
+            Step::RestoreModifiers,
+        ],
+        "steps 4 to 8 do not run when there is no selection"
+    );
+
+    // ⚠ And step 8 is deliberately **not** among them. Nothing changed the clipboard, so putting
+    // the snapshot back would replace the user's clipboard with this program's copy of it —
+    // losing precisely the formats FR-64 admits it cannot capture.
+    assert!(!bench.ran(Step::RestoreClipboard));
+    assert!(!bench.ran(Step::Write));
+    assert!(bench.written.is_none());
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance point 13 — the two chords
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 13.** `Ctrl+C` and `Ctrl+V` carry the signature of FR-03, are balanced, and
+/// leave through module `inject`.
+#[test]
+fn the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject() {
+    for (name, chord, key) in [
+        ("Ctrl+C", selection::copy_chord(), u16::from(b'C')),
+        ("Ctrl+V", selection::paste_chord(), u16::from(b'V')),
+    ] {
+        assert_eq!(chord.len(), CHORD_EVENTS, "{name} is four events");
+
+        let keyboard: Vec<_> = chord
+            .iter()
+            .map(|event| inject::keyboard(event).expect("every event is a keyboard event"))
+            .collect();
+
+        // FR-03 — the whole point of the check.
+        for event in &keyboard {
+            assert_eq!(
+                event.dwExtraInfo,
+                lang_switcher::hook::INJECTED_SIGNATURE,
+                "{name}: every event carries the signature of FR-03"
+            );
+            assert_eq!(event.time, 0, "{name}: the system stamps the event (FR-12)");
+            assert_eq!(
+                event.wScan, 0,
+                "{name}: the system derives the scan code from the virtual key"
+            );
+        }
+
+        // Modifier down, key down, key up, modifier up — and the modifier is balanced, so
+        // FR-40 step 6 cannot mistake ours for the user's.
+        let control = windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL.0;
+        assert_eq!(keyboard[0].wVk.0, control);
+        assert_eq!(keyboard[1].wVk.0, key);
+        assert_eq!(keyboard[2].wVk.0, key);
+        assert_eq!(keyboard[3].wVk.0, control);
+
+        let up = windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_KEYUP;
+        assert!(!keyboard[0].dwFlags.contains(up), "{name}: Ctrl goes down");
+        assert!(!keyboard[1].dwFlags.contains(up));
+        assert!(keyboard[2].dwFlags.contains(up));
+        assert!(
+            keyboard[3].dwFlags.contains(up),
+            "{name}: Ctrl comes back up"
+        );
+    }
+
+    // And the sending itself is `inject`'s: the module calls `inject::dispatch`, which is what
+    // counts FR-45 and paces FR-44, rather than `SendInput` of its own.
+    let source = source_of("selection.rs");
+    let product = source
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    assert_eq!(
+        code_lines_with(product, "crate::inject::dispatch(").len(),
+        4,
+        "four dispatches: the modifier release, the two chords and the modifier restore"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance points 14, 15 and 16 — step 5
+// ---------------------------------------------------------------------------------------
+
+/// Recodes `text` the way step 5 does, and answers what came out.
+fn step_five(text: &str, foreground: LayoutId) -> String {
+    let plan = pair_plan(foreground);
+    let mut bench = Bench::with_selection(text);
+    let _ = selection::run(&mut bench, &plan);
+
+    bench.written.unwrap_or_default()
+}
+
+/// **Acceptance point 14.** The script is decided by which layout the characters belong to, and
+/// a mixed selection is converted whole, in the one direction the majority names.
+#[test]
+fn the_script_of_the_selection_decides_the_direction() {
+    // Latin text: only the English layout produces those six characters.
+    assert_eq!(step_five("ghbdtn", convert::FALLBACK_US), "привет");
+    // …and the foreground layout does not change the answer, because the text does.
+    assert_eq!(step_five("ghbdtn", convert::FALLBACK_RUSSIAN), "привет");
+
+    // Cyrillic text: the same press, the other way.
+    assert_eq!(step_five("привет", convert::FALLBACK_US), "ghbdtn");
+    assert_eq!(step_five("привет", convert::FALLBACK_RUSSIAN), "ghbdtn");
+
+    // Case is carried: `find_key` answers `Shift` and the target key answers with its own.
+    assert_eq!(step_five("Ghbdtn", convert::FALLBACK_US), "Привет");
+    assert_eq!(step_five("ПРИВЕТ", convert::FALLBACK_US), "GHBDTN");
+
+    // Digits, spaces and punctuation of both layouts decide nothing, so the letters do.
+    assert_eq!(step_five("ghbdtn 123", convert::FALLBACK_US), "привет 123");
+    assert_eq!(step_five("привет 123", convert::FALLBACK_US), "ghbdtn 123");
+
+    // ⚠ **Mixed text.** Six characters distinguish English and six distinguish Russian, so
+    // nothing decides and the foreground layout breaks the tie. The whole selection is then
+    // converted in that one direction: the half that belongs to it is recoded, the other half
+    // has no reverse mapping there and is carried over unchanged (FR-23 read backwards).
+    assert_eq!(
+        step_five("ghbdtn привет 123", convert::FALLBACK_US),
+        "привет привет 123"
+    );
+    assert_eq!(
+        step_five("ghbdtn привет 123", convert::FALLBACK_RUSSIAN),
+        "ghbdtn ghbdtn 123"
+    );
+
+    // A selection with nothing to decide by and a foreground layout outside the pair is refused
+    // rather than converted in a direction nobody chose — FR-30, «остальные раскладки
+    // игнорируются».
+    let maps: Vec<LayoutMap> = [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|id| convert::fallback_map(id).expect("the hardwired map"))
+        .collect();
+    assert_eq!(
+        selection::detect_source("123", &maps, LayoutId::default()),
+        None
+    );
+    assert_eq!(
+        selection::detect_source("123", &maps, convert::FALLBACK_US),
+        Some(0)
+    );
+}
+
+/// **Acceptance point 15.** A character with no reverse mapping in the source layout is carried
+/// over unchanged and conversion goes on — FR-23 read backwards.
+#[test]
+fn a_character_without_a_reverse_mapping_is_carried_over() {
+    let maps: Vec<LayoutMap> = [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|id| convert::fallback_map(id).expect("the hardwired map"))
+        .collect();
+
+    // An em dash, a currency sign and an emoji: no keyboard layout of this pair produces any of
+    // them, so all three come through untouched and the letters around them still convert.
+    let recoded = selection::recode("gh—bd€tn😀", &maps[0], &maps[1]);
+
+    assert_eq!(recoded.text(), "пр—ив€ет😀");
+    assert_eq!(recoded.mapped(), 6, "the six letters were recoded");
+    assert_eq!(recoded.carried(), 3, "the three others were carried over");
+
+    // A surrogate pair is one character and survives whole.
+    assert_eq!(recoded.text().chars().count(), 9);
+
+    // Nothing is ever dropped: every character of the input is accounted for.
+    assert_eq!(recoded.mapped() + recoded.carried(), 9);
+}
+
+/// **Acceptance point 16 — reversibility, and the boundary of it, honestly.**
+///
+/// On the typing-buffer path FR-32 makes a double press exact **by construction**: the buffer
+/// keeps the original scan codes and rendering them into the layout they were typed under gives
+/// back what was typed, bit for bit. There is no buffer here. The second press reads the text the
+/// first press produced, decides its script again and converts it back — so reversibility is a
+/// property of the *mapping*, and it holds exactly where the mapping is injective on the
+/// selection.
+#[test]
+fn a_double_press_comes_back_where_the_mapping_allows_it_and_not_where_it_does_not() {
+    // ---- where it holds ----------------------------------------------------------------
+    //
+    // A run of one script, with the digits, spaces and punctuation of the main block: every
+    // character has a reverse mapping in the source layout and a distinct image in the target.
+    for (original, once) in [
+        ("ghbdtn", "привет"),
+        // `,` sits on `Shift` + the `/?` key in Russian, whose English reading is `?` — the very
+        // «`Shift+2` = `@` в EN и `"` в RU» correspondence FR-04 gives as the reason scan codes
+        // are stored, arriving here through the reverse index instead.
+        ("Привет, мир!", "Ghbdtn? vbh!"),
+        ("ghbdtn 123", "привет 123"),
+        ("Ghbdtn!", "Привет!"),
+        // Punctuation that moves between keys: `,` and `.` are on the letter block in Russian
+        // and next to it in English, and both directions still come back.
+        ("q,w.e/", "йбцюу."),
+    ] {
+        let there = step_five(original, convert::FALLBACK_US);
+        assert_eq!(there, once, "first press of {original:?}");
+
+        let back = step_five(&there, convert::FALLBACK_US);
+        assert_eq!(back, original, "second press must give {original:?} back");
+    }
+
+    // ---- where it does not, and why ----------------------------------------------------
+    //
+    // 1. **Mixed scripts.** Each press converts the *whole* selection in one direction, so the
+    //    half that was already in the target script is dragged across with it. The second press
+    //    drags both halves back the other way, and the text that comes out is not the text that
+    //    went in.
+    let mixed = "ghbdtn привет";
+    let once = step_five(mixed, convert::FALLBACK_US);
+    assert_eq!(once, "привет привет");
+    let twice = step_five(&once, convert::FALLBACK_US);
+    assert_eq!(twice, "ghbdtn ghbdtn");
+    assert_ne!(twice, mixed, "a mixed selection does not come back");
+
+    // 2. **A character only one of the two layouts can produce, standing next to the image of
+    //    another.** `.` is on a key of both layouts, `ю` is on none of the English ones — so in
+    //    the English direction `.` becomes `ю` and a `ю` that was already there stays `ю`. Two
+    //    different characters have become one, and no second press can tell them apart.
+    let maps: Vec<LayoutMap> = [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|id| convert::fallback_map(id).expect("the hardwired map"))
+        .collect();
+
+    let collided = selection::recode(".ю", &maps[0], &maps[1]);
+    assert_eq!(collided.text(), "юю", "two characters became one");
+
+    let back = selection::recode(collided.text(), &maps[1], &maps[0]);
+    assert_eq!(back.text(), "..", "and the pair cannot be told apart again");
+    assert_ne!(back.text(), ".ю");
+
+    // 3. **A character neither layout produces** is not a counter-example: it is carried over
+    //    both times and comes back untouched.
+    let dash = step_five("gh—bdtn", convert::FALLBACK_US);
+    assert_eq!(dash, "пр—ивет");
+    assert_eq!(step_five(&dash, convert::FALLBACK_US), "gh—bdtn");
+}
+
+// ---------------------------------------------------------------------------------------
+// Acceptance points 16в, 17, 18 — the branch, and what it does not do
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 17 — FR-65.** With `[selection] enabled = false` the branch answers "not
+/// mine" without opening, reading or writing the clipboard, and without sending `Ctrl+C`.
+#[test]
+fn a_disabled_selection_path_does_not_touch_the_clipboard_even_once() {
+    let _serialised = serialised();
+
+    let before = selection::counters();
+    let path_before = selection::path_counters();
+
+    let off = settings::Selection {
+        enabled: false,
+        ..settings::Selection::default()
+    };
+    selection::publish(&off);
+
+    assert!(!selection::path_enabled(), "FR-65: the path is off");
+
+    // The branch of FR-60, called exactly as `app::window_proc` calls it.
+    assert!(
+        !selection::wants_selection_path(),
+        "a disabled path never takes a press"
+    );
+
+    let after = selection::counters();
+
+    // ⚠ The whole of acceptance point 17: not one clipboard access of any kind.
+    assert_eq!(after.opens, before.opens, "the clipboard was not opened");
+    assert_eq!(after.closes, before.closes);
+    assert_eq!(after.open_retries, before.open_retries);
+    assert_eq!(after.wrong_thread_refusals, before.wrong_thread_refusals);
+
+    // And nothing was handed over, so nothing on the UI thread could have sent `Ctrl+C` either.
+    let path_after = selection::path_counters();
+    assert_eq!(path_after.handovers, path_before.handovers);
+
+    // The refusal is not even counted: a switched-off feature is not a failure.
+    assert_eq!(path_after.refusals, path_before.refusals);
+
+    // Put the default of section 7 back for whatever runs next.
+    selection::publish(&settings::Selection::default());
+    assert!(selection::path_enabled());
+}
+
+/// **Acceptance point 17, the structural half.** FR-65 is decided before anything else in the
+/// branch, so no later condition can let a disabled path reach the clipboard.
+#[test]
+fn fr65_is_the_first_thing_the_branch_asks() {
+    let source = source_of("selection.rs");
+    let body = source
+        .split("pub fn wants_selection_path()")
+        .nth(1)
+        .expect("the branch exists");
+
+    let enabled = body.find("path_enabled()").expect("FR-65 is asked");
+
+    for later in [
+        "password_field()",
+        "plan_for_press()",
+        "publish_pending(",
+        "post_to_ui_thread(",
+    ] {
+        let position = body
+            .find(later)
+            .unwrap_or_else(|| panic!("{later} is asked"));
+
+        assert!(enabled < position, "FR-65 must be decided before {later}");
+    }
+}
+
+/// **Acceptance point 18 — SEC-06, FR-70.** The selection path does not start in a password
+/// field.
+#[test]
+fn the_selection_path_does_not_start_in_a_password_field() {
+    let source = source_of("selection.rs");
+    let body = source
+        .split("pub fn wants_selection_path()")
+        .nth(1)
+        .expect("the branch exists");
+
+    // The flag module `guard` publishes from the watcher thread (FR-71), read on the input
+    // thread as one atomic — the same way the typing buffer's own gate reads it.
+    assert!(
+        body.contains("crate::guard::password_field()"),
+        "the branch asks module guard whether the focus is in a password field"
+    );
+
+    // And it asks before it hands anything over.
+    let asked = body
+        .find("password_field()")
+        .expect("the question is asked");
+    let handed = body
+        .find("post_to_ui_thread(")
+        .expect("the handover exists");
+
+    assert!(asked < handed, "SEC-06 is decided before the handover");
+}
+
+/// **Acceptance point 16в.** The clipboard is never touched by the thread that owns the hook —
+/// the branch on that thread posts a message and does nothing else.
+///
+/// The primitives refusing that thread is T-07-1's guarantee and is checked by
+/// [`nothing_that_can_block_runs_on_the_thread_that_owns_the_hook`]. What is checked here is
+/// this task's half: that the path built on top of them **hands the work over** rather than
+/// running it where the press arrives.
+#[test]
+fn the_press_is_handed_to_the_ui_thread_and_the_clipboard_is_not_touched_where_it_arrives() {
+    let source = source_of("selection.rs");
+    let product = source
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    // The branch the input thread runs contains no step of FR-61: it publishes a plan and posts.
+    let branch = product
+        .split("pub fn wants_selection_path()")
+        .nth(1)
+        .expect("the branch exists")
+        .split("\n/// ")
+        .next()
+        .unwrap_or_default();
+
+    for forbidden in [
+        "snapshot(",
+        "read_unicode_text(",
+        "write_unicode_text(",
+        "wait_for_change(",
+    ] {
+        assert!(
+            !branch.contains(forbidden),
+            "the input thread's branch must not call {forbidden}"
+        );
+    }
+
+    assert!(
+        branch.contains("crate::app::post_to_ui_thread(WM_APP_SELECTION)"),
+        "the branch hands the work to the UI thread"
+    );
+
+    // And the far end is confined to the window the listener was registered on, which is the UI
+    // thread's — the same test `handle_clipboard_message` makes.
+    let far_end = product
+        .split("pub fn handle_selection_message(")
+        .nth(1)
+        .expect("the far end exists");
+
+    assert!(
+        far_end.contains("LISTENER_WINDOW.load(Ordering::Acquire)"),
+        "the eight steps run at the registered window and nowhere else"
+    );
+
+    // The two messages are distinct numbers, and neither collides with anything already taken.
+    assert_ne!(selection::WM_APP_SELECTION, selection::WM_APP_BUFFER_PATH);
+    for taken in [
+        lang_switcher::hook::WM_APP_HOTKEY,
+        lang_switcher::switch::WM_APP_SWITCH,
+        lang_switcher::guard::WM_APP_PROBE,
+        lang_switcher::guard::WM_APP_FIELD,
+        lang_switcher::watchdog::WM_APP_FLUSH,
+        lang_switcher::watchdog::WM_APP_LAYOUT,
+        lang_switcher::watchdog::WM_APP_REHOOK,
+    ] {
+        assert_ne!(selection::WM_APP_SELECTION, taken);
+        assert_ne!(selection::WM_APP_BUFFER_PATH, taken);
+    }
+}
+
+/// **Acceptance point 16г — SEC-07.** The clipboard event has a name in the journal's closed
+/// vocabulary, and prints under it rather than as `unlisted`.
+#[test]
+fn the_clipboard_event_has_a_name_in_the_journal() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let operation = Operation::from_name("clipboard snapshot truncated");
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "the row T-07-1 asked for is in the table"
+    );
+    assert_eq!(operation.name(), "clipboard snapshot truncated");
+    assert_eq!(operation.kind(), Kind::Selection);
+    assert_eq!(operation.kind().name(), "selection");
+
+    // And nothing of the clipboard can be named: an operation built from content is `unlisted`
+    // and the content is dropped unread — the mechanism SEC-07 rests on, unchanged.
+    assert_eq!(Operation::from_name("ghbdtn"), Operation::UNLISTED);
+}
+
+/// **Acceptance point 19 — SEC-01, SEC-07.** Nothing of the selection reaches the journal, a
+/// message or a panic.
+#[test]
+fn nothing_of_the_selection_can_reach_the_journal_or_a_panic() {
+    let source = source_of("selection.rs");
+    let product = source
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    // The sweep of T-07-1 still holds for the whole module, the selection path included.
+    for forbidden in [
+        "format!(",
+        "println!",
+        "panic!(",
+        ".unwrap()",
+        ".expect(",
+        "unreachable!(",
+        "todo!(",
+    ] {
+        let hits = code_lines_with(product, forbidden);
+
+        assert!(hits.is_empty(), "the module uses {forbidden}: {hits:?}");
+    }
+
+    // The recoded text is content, so its `Debug` is hand-written and prints counts.
+    let maps: Vec<LayoutMap> = [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|id| convert::fallback_map(id).expect("the hardwired map"))
+        .collect();
+
+    let recoded = selection::recode("ghbdtn", &maps[0], &maps[1]);
+    let printed = format!("{recoded:?}");
+
+    assert!(!printed.contains("привет"), "the Debug prints no content");
+    assert!(!printed.contains("ghbdtn"));
+    assert!(printed.contains("chars"), "it prints counts: {printed}");
+
+    // And the outcome that crosses into `app` carries two counts and nothing else.
+    let outcome = Outcome::Converted {
+        mapped: 6,
+        carried: 0,
+    };
+    let printed = format!("{outcome:?}");
+    assert!(!printed.contains("привет") && !printed.contains("ghbdtn"));
 }

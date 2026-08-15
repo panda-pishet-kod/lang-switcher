@@ -5,10 +5,10 @@
 //! Requirements this module covers: **FR-62** (retries around every clipboard access),
 //! **FR-63** (`AddClipboardFormatListener` and telling our own changes from the user's) and
 //! **FR-64** (the snapshot and the restore of every listed format under one four-megabyte
-//! budget) — task **T-07-1**, together with the sequence-number wait step 3 of FR-61 asks for.
-//! Requirements this module will cover: **FR-60**, **FR-61** as a whole and **FR-65** — task
-//! **T-07-2**, which is the single user of everything below.
-//! Implemented by backlog tasks: T-07-1 (done), T-07-2.
+//! budget) — task **T-07-1**, together with the sequence-number wait step 3 of FR-61 asks for;
+//! **FR-60** (which of the two sources a press converts), **FR-61** (the eight steps, whole) and
+//! **FR-65** (the switch of section 7) — task **T-07-2**, built on top of those primitives.
+//! Implemented by backlog tasks: T-07-1 (done), T-07-2 (done).
 //!
 //! # The one sentence this module is built around
 //!
@@ -82,8 +82,9 @@
 
 use core::fmt;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use core::time::Duration;
+use std::sync::{Mutex, PoisonError};
 use std::thread::sleep;
 use std::time::Instant;
 
@@ -97,9 +98,17 @@ use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
 };
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::WindowsAndMessaging::WM_CLIPBOARDUPDATE;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    VK_C, VK_CONTROL, VK_V,
+};
+use windows::Win32::UI::WindowsAndMessaging::{WM_APP, WM_CLIPBOARDUPDATE};
 use windows::core::{Error as WinError, Free, Result as WinResult};
 
+use crate::convert::Keystroke;
+use crate::hook::INJECTED_SIGNATURE;
+use crate::inject::{Dispatched, Modifiers};
+use crate::layouts::{Cycle, LayoutId, LayoutMap};
 use crate::settings::Selection;
 
 // ---------------------------------------------------------------------------------------
@@ -1499,6 +1508,991 @@ pub fn listener_window_raw() -> usize {
 /// The thread the blocking primitives are confined to, or zero. For the tests.
 pub fn worker_thread_id() -> u32 {
     WORKER_THREAD.load(Ordering::Acquire)
+}
+
+// =========================================================================================
+// T-07-2 — the selection path itself: FR-60, FR-61, FR-65
+// =========================================================================================
+
+// ---------------------------------------------------------------------------------------
+// FR-65 — `[selection]` of section 7, published to the thread that has to branch
+// ---------------------------------------------------------------------------------------
+
+/// `[selection] enabled` — FR-65. Section 7 has it `true`, and so does this.
+///
+/// # Why it is published and not read where it is needed
+///
+/// The branch of FR-60 is taken on the **input thread**, in the window procedure, one message
+/// after the hotkey. `[selection]` lives in the configuration, the configuration belongs to the
+/// UI thread (section 6.1) and section 6.3 says a value that crosses threads is *published*
+/// rather than fetched — the same route `[replacement]`, `[layouts]` and `[exclusions]` already
+/// take.
+///
+/// It matters more here than for any of those three, and the reason is FR-65 itself. With the
+/// path switched off the program has to behave **exactly** as it did before this task: the
+/// hotkey goes down the typing-buffer path, on the input thread, with nothing waited for and
+/// nobody asked. A flag the input thread could only learn by asking the UI thread would make a
+/// disabled feature depend on the availability of a thread it must not need — and NFR-09 gives
+/// the whole typing-buffer path thirty milliseconds.
+static PATH_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// `[selection] clipboard_timeout_ms` — step 3 of FR-61, published for the same reason.
+static TIMEOUT_MS: AtomicU32 = AtomicU32::new(0);
+
+/// `[selection] clipboard_restore_delay_ms` — step 8 of FR-61.
+static RESTORE_DELAY_MS: AtomicU32 = AtomicU32::new(0);
+
+/// Whether a published value has ever been stored.
+///
+/// Distinguishes "the configuration says zero" from "nothing has been published yet"; without
+/// it, a program whose UI thread has not reached the configuration would run step 3 with a zero
+/// timeout, which answers `TimedOut` before the application has had any chance to copy.
+static PUBLISHED: AtomicBool = AtomicBool::new(false);
+
+/// Publishes `[selection]` of section 7 — FR-65 and the two timings of steps 3 and 8.
+///
+/// Called by the UI thread from `app::publish_configuration_to_input_thread`, beside the
+/// publications of `[replacement]`, `[layouts]` and `[exclusions]`. Three plain stores; nothing
+/// is applied to anything already built, so the next press reads whatever stands here then.
+pub fn publish(selection: &Selection) {
+    TIMEOUT_MS.store(selection.clipboard_timeout_ms, Ordering::Relaxed);
+    RESTORE_DELAY_MS.store(selection.clipboard_restore_delay_ms, Ordering::Relaxed);
+    PUBLISHED.store(true, Ordering::Release);
+
+    // Last, and with a release fence behind it: a thread that sees the path enabled must also
+    // see the timings that go with it.
+    PATH_ENABLED.store(is_enabled(selection), Ordering::Release);
+}
+
+/// Whether the selection path is switched on — **FR-65**, as the input thread reads it.
+pub fn path_enabled() -> bool {
+    PATH_ENABLED.load(Ordering::Acquire)
+}
+
+/// The timeout of step 3 as it stands, or the default of section 7 before anything is published.
+pub fn published_timeout() -> Duration {
+    if PUBLISHED.load(Ordering::Acquire) {
+        Duration::from_millis(u64::from(TIMEOUT_MS.load(Ordering::Relaxed)))
+    } else {
+        timeout_of(&Selection::default())
+    }
+}
+
+/// The delay of step 8 as it stands, or the default of section 7.
+pub fn published_restore_delay() -> Duration {
+    if PUBLISHED.load(Ordering::Acquire) {
+        Duration::from_millis(u64::from(RESTORE_DELAY_MS.load(Ordering::Relaxed)))
+    } else {
+        restore_delay_of(&Selection::default())
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Steps 2 and 6 — `Ctrl+C` and `Ctrl+V`
+// ---------------------------------------------------------------------------------------
+
+/// How many `INPUT` structures one chord takes: modifier down, key down, key up, modifier up.
+pub const CHORD_EVENTS: usize = 4;
+
+/// One keyboard `INPUT` for a virtual key — **FR-03**.
+///
+/// ⚠ **Why this exists here rather than in `inject`.** Module `inject` owns the two `INPUT`
+/// builders of this program and says so in its own documentation; this is a third, and it is
+/// here only because `src\inject.rs` is closed to task T-07-2 and its builders are private. The
+/// one thing that must not differ is the one thing FR-03 is about: `dwExtraInfo` is
+/// [`INJECTED_SIGNATURE`], the same constant, taken from the same module — so `hook::classify`
+/// recognises these four events as this program's own, passes them to the application and keeps
+/// them out of the typing buffer. `tests\selection.rs` checks every field of every event this
+/// function produces against `inject`'s own rules.
+///
+/// `time` is zero so that the system stamps the event, which FR-12 needs to be able to compare
+/// timestamps; `wScan` is zero so that the system derives the scan code from `wVk` in the layout
+/// of the receiving thread, which this thread does not know.
+fn key_event(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+    let mut flags = KEYBD_EVENT_FLAGS(0);
+
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: INJECTED_SIGNATURE,
+            },
+        },
+    }
+}
+
+/// Writes `Ctrl` + `key` into `out` and answers how many events it wrote.
+///
+/// Four events in the order a person makes them: the modifier goes down, the key goes down and
+/// up, the modifier comes up. The chord is **balanced inside the packet** — the only `Ctrl`
+/// events in it are one down and one up, in that order — which is what keeps step 6 of FR-40
+/// honest: a `Ctrl` of ours left down would be reported by `GetAsyncKeyState` as the user's and
+/// pressed again, leaving a modifier stuck down on a machine whose owner is holding nothing.
+///
+/// `VK_CONTROL` and not `VK_LCONTROL`: the aggregate is what an application testing
+/// `GetKeyState(VK_CONTROL)` for its own accelerator sees, and the two `Ctrl` keys of the
+/// modifier table of `inject` are about the keys the **user** is physically holding.
+fn build_chord(key: VIRTUAL_KEY, out: &mut [INPUT]) -> usize {
+    if out.len() < CHORD_EVENTS {
+        return 0;
+    }
+
+    out[0] = key_event(VK_CONTROL, false);
+    out[1] = key_event(key, false);
+    out[2] = key_event(key, true);
+    out[3] = key_event(VK_CONTROL, true);
+
+    CHORD_EVENTS
+}
+
+/// The four events of `Ctrl+C` — **step 2 of FR-61**.
+pub fn copy_chord() -> [INPUT; CHORD_EVENTS] {
+    let mut events = [INPUT::default(); CHORD_EVENTS];
+    let _ = build_chord(VK_C, &mut events);
+
+    events
+}
+
+/// The four events of `Ctrl+V` — **step 6 of FR-61**.
+pub fn paste_chord() -> [INPUT; CHORD_EVENTS] {
+    let mut events = [INPUT::default(); CHORD_EVENTS];
+    let _ = build_chord(VK_V, &mut events);
+
+    events
+}
+
+// ---------------------------------------------------------------------------------------
+// Step 5 of FR-61 — the only place in the program where content is looked at
+// ---------------------------------------------------------------------------------------
+
+/// The result of step 5, and the buffer holding it.
+///
+/// The text is overwritten with zeroes when this value is dropped — the treatment
+/// [`crate::buffer`] gives the typing buffer for SEC-02 and [`Snapshot`] gives captured
+/// clipboard blocks. It is the user's text and it lives in this process for a few hundred
+/// milliseconds; it does not have to be left in the allocator afterwards.
+pub struct Recoded {
+    text: String,
+    target: LayoutId,
+    mapped: usize,
+    carried: usize,
+}
+
+impl Recoded {
+    /// The recoded text — what step 6 puts on the clipboard.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The layout step 7 switches the foreground window to.
+    pub fn target(&self) -> LayoutId {
+        self.target
+    }
+
+    /// Characters that had a reverse mapping in the source layout and were recoded.
+    pub fn mapped(&self) -> usize {
+        self.mapped
+    }
+
+    /// Characters carried over unchanged — **FR-23 read backwards**, see [`recode`].
+    pub fn carried(&self) -> usize {
+        self.carried
+    }
+}
+
+impl fmt::Debug for Recoded {
+    /// Counts, never characters — SEC-01, SEC-07. A derived `Debug` would print the text.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Recoded")
+            .field("chars", &self.text.chars().count())
+            .field("target", &self.target)
+            .field("mapped", &self.mapped)
+            .field("carried", &self.carried)
+            .finish()
+    }
+}
+
+impl Drop for Recoded {
+    fn drop(&mut self) {
+        // SAFETY: every byte is overwritten with `0x00`, and a run of NUL bytes is valid UTF-8,
+        // so the invariant `String` carries is preserved. The length is not changed.
+        unsafe { self.text.as_mut_vec() }.fill(0);
+    }
+}
+
+/// Whether `ch` is worth counting when the script of a text is being decided.
+///
+/// Spaces, line breaks and control characters carry no information about which layout the text
+/// was typed under: every layout has a space bar and the reverse index of every layout answers
+/// for it. Counting them would add the same number to every candidate and dilute the letters
+/// that actually decide.
+fn decides_script(ch: char) -> bool {
+    !ch.is_whitespace() && !ch.is_control()
+}
+
+/// **Which layout the text was typed under — the script test of step 5 of FR-61.**
+///
+/// Returns an index into `maps`, or `None` when nothing decides and `fallback` is not among the
+/// candidates either.
+///
+/// # How the script is decided, and why it is counted rather than classified by Unicode block
+///
+/// FR-61 says «определить письменность текста (кириллица / латиница)». The direct reading —
+/// count Cyrillic code points against Latin ones — answers that one question and no other: it
+/// would have to be rewritten the day a third layout is Greek, and it would say nothing at all
+/// about digits, punctuation or the `ё`/`` ` `` key.
+///
+/// What is counted instead is the property the *program* cares about, and for the RU/EN pair it
+/// gives exactly the answer the requirement asks for. A character **distinguishes** a layout
+/// when that layout's reverse index answers for it and no other candidate's does. `привет` is
+/// six characters that only the Russian layout can produce, `ghbdtn` is six only the English one
+/// can, and `123` is three that both produce and that therefore decide nothing. The candidate
+/// with the strict maximum of distinguishing characters is the source layout.
+///
+/// # The tie, and what it means
+///
+/// A tie — no distinguishing characters at all (`123`, `!!!`, an empty selection) or the same
+/// number for two candidates (`ghbdtn привет`, six each) — is not an error and not a guess. It
+/// is resolved by `fallback`, the layout of the foreground window at the moment the hotkey was
+/// pressed, which is the same input FR-52 already uses and the closest thing to the user's
+/// intent that exists without asking them. A `fallback` that is not one of the candidates
+/// (FR-30: «остальные раскладки игнорируются») leaves the answer `None`, and step 5 then does
+/// nothing rather than convert in a direction nobody chose.
+pub fn detect_source(text: &str, maps: &[LayoutMap], fallback: LayoutId) -> Option<usize> {
+    if maps.is_empty() {
+        return None;
+    }
+
+    let mut scores = vec![0usize; maps.len()];
+
+    for ch in text.chars().filter(|&ch| decides_script(ch)) {
+        let mut only = None;
+
+        for (index, map) in maps.iter().enumerate() {
+            if map.find_key(ch).is_none() {
+                continue;
+            }
+
+            if only.is_some() {
+                // A second candidate produces it, so it distinguishes nobody.
+                only = None;
+                break;
+            }
+
+            only = Some(index);
+        }
+
+        if let Some(index) = only {
+            scores[index] += 1;
+        }
+    }
+
+    let best = scores.iter().copied().max().unwrap_or(0);
+    let winners = scores.iter().filter(|&&score| score == best).count();
+
+    if best > 0 && winners == 1 {
+        return scores.iter().position(|&score| score == best);
+    }
+
+    maps.iter().position(|map| map.layout() == fallback)
+}
+
+/// **Recodes `text` from `source` into `target` — the second half of step 5 of FR-61.**
+///
+/// Two lookups per character and nothing else:
+///
+/// 1. **backwards**, `source.find_key(ch)` — which physical key produces this character in the
+///    layout the text was typed under. This is the step the main path never has to take: the
+///    typing buffer *holds* scan codes (FR-04), and FR-32 rests on that. Here there is only
+///    text, so the scan code is reconstructed from the character, and that reconstruction is
+///    ambiguous in principle — the specification says as much where it says «скан-коды здесь
+///    недоступны»;
+/// 2. **forwards**, [`crate::convert::convert_stroke`] — what the same physical key gives in the
+///    target layout. That is FR-22 unchanged, the accepted engine of section 11.1, reached
+///    through its own public function and not re-implemented here.
+///
+/// # A character with no reverse mapping
+///
+/// It is **carried over unchanged**, and conversion continues — FR-23 read backwards, and the
+/// same answer the forward direction gives to a key the target layout has nothing on. Three
+/// kinds of character arrive here: text of the other script (the Cyrillic half of a mixed
+/// selection, once the source has been decided as Latin), characters no keyboard layout
+/// produces at all (an em dash, a currency sign, an emoji), and characters of a layout that is
+/// not a participant. Dropping any of them would silently delete the user's text; refusing the
+/// whole selection over one of them would make the feature useless on any real sentence.
+///
+/// Allocates one string of the result's size and nothing per character.
+pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
+    let mut units: Vec<u16> = Vec::with_capacity(text.len() + 1);
+    let mut mapped = 0usize;
+    let mut carried = 0usize;
+
+    for ch in text.chars() {
+        match source.find_key(ch) {
+            Some(key) => {
+                let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+                units.extend_from_slice(crate::convert::convert_stroke(stroke, target).units());
+                mapped += 1;
+            }
+            None => {
+                let mut buffer = [0u16; 2];
+                units.extend_from_slice(ch.encode_utf16(&mut buffer));
+                carried += 1;
+            }
+        }
+    }
+
+    let recoded = String::from_utf16_lossy(&units);
+
+    // The working buffer held the user's text — SEC-01, SEC-02.
+    units.fill(0);
+
+    Recoded {
+        text: recoded,
+        target: target.layout(),
+        mapped,
+        carried,
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// What one press of the hotkey hands over to the UI thread
+// ---------------------------------------------------------------------------------------
+
+/// Everything the selection path needs, decided on the input thread and carried to the UI one.
+///
+/// # Why the maps travel rather than being built where they are used
+///
+/// The mapping cache of FR-20 belongs to the input thread: section 6.3 gives it to the thread
+/// that owns the typing buffer, FR-21 rebuilds it there on `WM_INPUTLANGCHANGE`, and no other
+/// thread can reach a thread-local. The UI thread could sweep `ToUnicodeEx` for itself, which is
+/// thousands of calls and about five milliseconds — for a second copy of a table that already
+/// exists and that FR-21 would then have to keep in step twice.
+///
+/// So the press copies the participating layouts out of the live cache, exactly as
+/// `inject::take_press` copies the one map the typing-buffer path needs, and hands them over.
+/// Which of them the text was typed under is **not** decided here: that is step 5, it needs the
+/// text, and the text does not exist until step 4 has run.
+///
+/// Public with a constructor so that `tests\selection.rs` can build one out of the hardwired
+/// RU/EN maps of FR-25 ([`crate::convert::fallback_map`]) and drive the eight steps without a
+/// keyboard, a clipboard or a foreground window.
+pub struct Plan {
+    /// The participating layouts of section 4.4, in the order of the cycle.
+    maps: Vec<LayoutMap>,
+    /// The cycle those layouts form — FR-30, FR-31, so that step 5 asks it for the target
+    /// instead of restating the rule.
+    cycle: Cycle,
+    /// The layout of the foreground window when the hotkey was pressed — the tie-break of
+    /// [`detect_source`] and the origin FR-26 would use if there were strokes.
+    foreground: LayoutId,
+    /// Step 3 of FR-61, out of section 7.
+    timeout: Duration,
+    /// Step 8 of FR-61, out of section 7.
+    restore_delay: Duration,
+    /// FR-44, so that the two chords are paced the way every other injection of this program is.
+    delay_ms: u32,
+}
+
+impl Plan {
+    /// A plan over `maps`, whose order is the order of `cycle`.
+    pub fn new(
+        maps: Vec<LayoutMap>,
+        cycle: Cycle,
+        foreground: LayoutId,
+        timeout: Duration,
+        restore_delay: Duration,
+        delay_ms: u32,
+    ) -> Self {
+        Self {
+            maps,
+            cycle,
+            foreground,
+            timeout,
+            restore_delay,
+            delay_ms,
+        }
+    }
+}
+
+/// The plan the input thread published, waiting for the UI thread to take it.
+///
+/// A mutex and not a set of atomics, unlike [`crate::switch::publish_pending`]: what travels
+/// here is a `Vec` of layout maps and not a handle, and there is no atomic of one. It is locked
+/// on the input thread in its **message loop** — never in the hook callback, which is the whole
+/// of NFR-04 — and held for the length of one `Option::take`.
+static PENDING: Mutex<Option<Plan>> = Mutex::new(None);
+
+/// Stores `plan`, replacing whatever the previous press left.
+fn publish_pending(plan: Plan) {
+    let mut slot = PENDING.lock().unwrap_or_else(PoisonError::into_inner);
+
+    *slot = Some(plan);
+}
+
+/// Takes the plan, if there is one.
+fn take_pending() -> Option<Plan> {
+    let mut slot = PENDING.lock().unwrap_or_else(PoisonError::into_inner);
+
+    slot.take()
+}
+
+/// Builds the plan out of the live cache — the input thread's half of the hand-over.
+///
+/// `None` when there is nothing to hand over, and then FR-60 has nothing to decide: no typing
+/// buffer on this thread (which is every thread but the input one), no mapping cache yet, or a
+/// refusal from module `layouts` — an IME among the participants (FR-35), fewer than two
+/// layouts, or a foreground layout that is not a participant (FR-30). Every one of those is
+/// counted where it is decided.
+fn plan_for_press() -> Option<Plan> {
+    let foreground = crate::switch::current();
+
+    crate::buffer::with(|recorder| {
+        let cache = recorder.cache()?;
+
+        let mut available = [LayoutId::default(); crate::layouts::MAX_CYCLE];
+        let count = cache.layouts(&mut available);
+
+        let cycle =
+            crate::layouts::cycle_for(crate::layouts::published(), &available[..count]).ok()?;
+
+        let mut maps = Vec::with_capacity(cycle.len());
+        for &layout in cycle.layouts() {
+            maps.push(cache.get(layout)?.clone());
+        }
+
+        Some(Plan {
+            maps,
+            cycle,
+            foreground,
+            timeout: published_timeout(),
+            restore_delay: published_restore_delay(),
+            delay_ms: crate::inject::inter_event_delay_ms(),
+        })
+    })
+    .flatten()
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-61 — the eight steps, against a seam
+// ---------------------------------------------------------------------------------------
+
+/// Everything the eight steps need from outside this module.
+///
+/// # Why it is a trait
+///
+/// FR-61 is an **order**, and an order is not observable from outside a function that performs
+/// it — the same argument module `inject` makes for [`crate::inject::Environment`] and FR-40.
+/// With the outside world behind this trait, `tests\selection.rs` can watch the sequence the
+/// eight steps really produce, and can make any one of them fail and see what the rest do —
+/// which is the only honest way to check that **step 8 runs when steps 4 to 7 did not**.
+///
+/// The two members that are not numbered steps are steps 3 and 6 of **FR-40**: the modifiers the
+/// user is holding come off before anything is injected and go back on afterwards. Without them
+/// a `Shift` held over the hotkey would turn the `Ctrl+C` of step 2 into `Ctrl+Shift+C`, which is
+/// a different command in half the applications on the machine.
+pub trait Path {
+    /// **Step 1** — the snapshot of FR-64.
+    fn snapshot(&mut self) -> Result<Snapshot, ClipboardError>;
+
+    /// **FR-40 step 3** — release the modifiers the user is holding. Answers which.
+    fn release_modifiers(&mut self) -> Modifiers;
+
+    /// **Step 2** — `Ctrl+C`, through `inject`, with the signature of FR-03.
+    fn copy(&mut self) -> Dispatched;
+
+    /// **Step 3** — wait for the clipboard sequence number to leave `baseline`.
+    fn wait(&mut self, baseline: u32) -> Wait;
+
+    /// **Step 4** — read `CF_UNICODETEXT`.
+    fn read(&mut self) -> Result<Option<String>, ClipboardError>;
+
+    /// **Step 6, first half** — put the recoded text on the clipboard.
+    fn write(&mut self, text: &str) -> Result<(), ClipboardError>;
+
+    /// **Step 6, second half** — `Ctrl+V`.
+    fn paste(&mut self) -> Dispatched;
+
+    /// **Step 7** — switch the layout of the foreground window, §4.6.
+    fn switch(&mut self, target: LayoutId);
+
+    /// **FR-40 step 6** — press again whatever the user is holding *now*.
+    fn restore_modifiers(&mut self) -> Modifiers;
+
+    /// **Step 8** — put the user's clipboard back, after the delay of section 7.
+    fn restore_clipboard(&mut self, snapshot: &Snapshot);
+}
+
+/// Why the eight steps did not convert anything.
+///
+/// The reasons that stop a press **before** the eight steps begin — FR-65, a password field, no
+/// mapping cache, no UI window — are not here: they are answered by [`wants_selection_path`] on
+/// the input thread, which returns a `bool` because at that point nothing has happened yet and
+/// there is nothing to describe. Every variant below is a state [`run`] can reach.
+///
+/// SEC-01, SEC-07: not one variant carries a character.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The message arrived with no plan behind it — the press was taken back, or the message was
+    /// posted by somebody else (SEC-05).
+    NoPlan,
+    /// A clipboard call refused — a thread that may not block, or another process holding it
+    /// through all ten attempts of FR-62.
+    Clipboard,
+    /// Step 4 found no `CF_UNICODETEXT`, or found it empty. The application answered `Ctrl+C`
+    /// with something that is not text — a picture, a file list, a spreadsheet range.
+    NoText,
+    /// Step 5 could not decide a direction: nothing in the selection distinguishes a layout and
+    /// the foreground window is not in one of the participants either.
+    NoDirection,
+}
+
+/// What one press did — **FR-60 and FR-61 in one value**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// All eight steps ran. `mapped` and `carried` are the two halves of step 5.
+    Converted { mapped: usize, carried: usize },
+    /// **Step 3 timed out — there is no selection.** FR-60 sends the press down the
+    /// typing-buffer path, and this is the ordinary outcome for a press made while nothing is
+    /// selected, not a failure.
+    NoSelection,
+    /// The path did not run, or ran and could not finish. The clipboard is the user's either
+    /// way — see [`Session`].
+    Refused(Refusal),
+}
+
+impl Outcome {
+    /// Whether the typing-buffer path of FR-60 is the one that should run now.
+    ///
+    /// Everything except a completed conversion: no selection is the ordinary case, and every
+    /// refusal means the selection path produced nothing, so the press must still do what it did
+    /// before this task existed rather than be swallowed.
+    pub const fn falls_back(self) -> bool {
+        !matches!(self, Self::Converted { .. })
+    }
+}
+
+/// The eight steps in progress — **and the guarantee that steps 6 of FR-40 and 8 of FR-61 run.**
+///
+/// # What this type is for, and why it is a type
+///
+/// FR-61 step 8 says the clipboard is restored, and the task specification adds that it is
+/// restored **even when something between steps 4 and 7 failed**. There are seven places in
+/// [`run`] where the work can stop early, plus the `?`-shaped ones inside them, plus a panic in
+/// a Debug build. A restore written at each of them would be a convention: correct today, and
+/// one early `return` away from being wrong.
+///
+/// So it is not written at any of them. The whole of the body below runs **through** this value,
+/// the borrow of the [`Path`] lives in it, and the two put-backs are in `Drop`:
+///
+/// | Way out of [`run`] | What restores | Why |
+/// |---|---|---|
+/// | the conversion finished | `Drop` | end of scope |
+/// | step 4 found no text | `Drop` | early `return`, scope ends |
+/// | step 5 could not decide | `Drop` | early `return`, scope ends |
+/// | step 6 could not write | `Drop` | early `return`, scope ends |
+/// | step 3 said there is no selection | `Drop`, and there is nothing to put back — see `armed` |
+/// | a panic, Debug build | `Drop`, run by the unwind |
+/// | a panic, Release build (`panic = "abort"`) | nothing here; the system frees the clipboard with the owning thread, measured in T-07-1 |
+///
+/// `tests\selection.rs` checks that mechanically: `restore_clipboard(` and `restore_modifiers(`
+/// each appear **once** in the module outside the trait and the bench, and that once is inside
+/// `impl Drop for Session`.
+///
+/// # `armed`, and why a restore is not always right
+///
+/// Before step 3 answers, the clipboard **is still the user's**: step 1 only read it and step 2
+/// asked the application to copy. Putting the snapshot back at that point would replace the
+/// user's clipboard with this program's copy of it — losing exactly the formats FR-64 admits it
+/// cannot capture, the metafiles and the delay-rendered ones. So the restore is armed at the
+/// instant the clipboard stops being the user's, which is the instant step 3 reports the
+/// sequence number moved, and at no other.
+struct Session<'a, P: Path> {
+    path: &'a mut P,
+    snapshot: Snapshot,
+    /// Whether the clipboard has been changed by anybody since the snapshot was taken.
+    armed: bool,
+    /// Whether FR-40 step 3 has taken the user's modifiers down.
+    hygiene: bool,
+}
+
+impl<P: Path> Drop for Session<'_, P> {
+    fn drop(&mut self) {
+        // FR-40 step 6 first: it is one `SendInput` and the user is waiting for their `Shift`
+        // back, while step 8 begins by sleeping for the delay of section 7.
+        if self.hygiene {
+            self.path.restore_modifiers();
+        }
+
+        if self.armed {
+            self.path.restore_clipboard(&self.snapshot);
+        }
+    }
+}
+
+/// **FR-61, all eight steps, in the order the requirement writes them.**
+///
+/// The order is the requirement, so this function is the requirement: every step is one call
+/// through [`Path`], they are in the order 1, 2, 3, 4, 5, 6, 7, 8, and the two of FR-40 bracket
+/// them. Nothing else in this module performs a step.
+pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
+    // ---- step 1 — save the clipboard, FR-64 ---------------------------------------------
+    //
+    // Before anything is sent. A snapshot taken after `Ctrl+C` would be a snapshot of the
+    // selection, and the user's clipboard would be gone with nothing to put back.
+    let snapshot = match path.snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(_) => return Outcome::Refused(Refusal::Clipboard),
+    };
+
+    // The baseline of step 3, read inside the same access that took the snapshot.
+    let baseline = snapshot.sequence();
+
+    let mut session = Session {
+        path,
+        snapshot,
+        armed: false,
+        hygiene: false,
+    };
+
+    // ---- FR-40 step 3 — the user's modifiers come off -----------------------------------
+    session.path.release_modifiers();
+    session.hygiene = true;
+
+    // ---- step 2 — Ctrl+C ----------------------------------------------------------------
+    session.path.copy();
+
+    // ---- step 3 — did the clipboard move? -----------------------------------------------
+    //
+    // **This is the whole of FR-60's question.** There is no call that answers "does the
+    // foreground window have a selection"; the answer is the result of this wait and of nothing
+    // else. No change means no selection, and the press goes down the typing-buffer path.
+    match session.path.wait(baseline) {
+        Wait::Changed { .. } => {}
+        Wait::TimedOut { .. } => return Outcome::NoSelection,
+        Wait::WrongThread => return Outcome::Refused(Refusal::Clipboard),
+    }
+
+    // From here the clipboard holds the selection and not what the user put there. Step 8 is
+    // now owed, whatever happens below — see [`Session`].
+    session.armed = true;
+
+    // ---- step 4 — read CF_UNICODETEXT ---------------------------------------------------
+    let text = match session.path.read() {
+        Ok(Some(text)) if !text.is_empty() => text,
+        Ok(_) => return Outcome::Refused(Refusal::NoText),
+        Err(_) => return Outcome::Refused(Refusal::Clipboard),
+    };
+
+    // ---- step 5 — the script, and the recoding ------------------------------------------
+    let Some(source) = detect_source(&text, &plan.maps, plan.foreground) else {
+        return Outcome::Refused(Refusal::NoDirection);
+    };
+
+    let Some(recoded) = recode_with(&text, source, plan) else {
+        return Outcome::Refused(Refusal::NoDirection);
+    };
+
+    // ---- step 6 — write, then Ctrl+V ----------------------------------------------------
+    if session.path.write(recoded.text()).is_err() {
+        return Outcome::Refused(Refusal::Clipboard);
+    }
+
+    session.path.paste();
+
+    // ---- step 7 — switch the layout, §4.6 -----------------------------------------------
+    //
+    // After the paste and never before it, for the reason FR-43 gives the same ordering on the
+    // typing-buffer path: everything the application still has to process was sent under the
+    // layout it was formed for.
+    session.path.switch(recoded.target());
+
+    Outcome::Converted {
+        mapped: recoded.mapped(),
+        carried: recoded.carried(),
+    }
+
+    // ---- FR-40 step 6 and step 8 happen here, in `Session::drop` ------------------------
+}
+
+/// The second half of step 5 for the source layout `index` of `plan`.
+///
+/// `None` when the cycle has no target for that source — the refusals of FR-30 and FR-35, all of
+/// them counted inside module `layouts`.
+fn recode_with(text: &str, index: usize, plan: &Plan) -> Option<Recoded> {
+    let source = plan.maps.get(index)?;
+
+    // The step is always one: the selection path keeps no counter of its own. It does not need
+    // one — the text it converts is in the user's document, not in a buffer of ours, so the
+    // second press reads back what the first press produced and step 5 detects *that* as the
+    // source. See the report on where this is reversible and where it is not.
+    let target = plan.cycle.target(source.layout(), 1).ok()?;
+    let target = plan.maps.iter().find(|map| map.layout() == target)?;
+
+    Some(recode(text, source, target))
+}
+
+// ---------------------------------------------------------------------------------------
+// The real machine
+// ---------------------------------------------------------------------------------------
+
+/// The [`Path`] the program runs on — every member is a system call.
+struct Machine {
+    /// The window every clipboard access is opened against. T-07-1: it must be a live window of
+    /// the calling thread, because `EmptyClipboard` clears the owner otherwise and every
+    /// `SetClipboardData` after it refuses.
+    owner: HWND,
+    /// FR-44.
+    delay_ms: u32,
+    /// Step 8 of FR-61, out of section 7.
+    restore_delay: Duration,
+    /// Step 3 of FR-61, out of section 7.
+    timeout: Duration,
+}
+
+impl Path for Machine {
+    fn snapshot(&mut self) -> Result<Snapshot, ClipboardError> {
+        snapshot(self.owner)
+    }
+
+    fn release_modifiers(&mut self) -> Modifiers {
+        let held = crate::inject::held_modifiers();
+        let mut events = [INPUT::default(); crate::inject::MODIFIER_COUNT];
+
+        if let Ok(len) = crate::inject::build_release(held, &mut events) {
+            let _ = crate::inject::dispatch(&events[..len], self.delay_ms);
+        }
+
+        held
+    }
+
+    fn copy(&mut self) -> Dispatched {
+        crate::inject::dispatch(&copy_chord(), self.delay_ms)
+    }
+
+    fn wait(&mut self, baseline: u32) -> Wait {
+        wait_for_change(baseline, self.timeout)
+    }
+
+    fn read(&mut self) -> Result<Option<String>, ClipboardError> {
+        read_unicode_text(self.owner)
+    }
+
+    fn write(&mut self, text: &str) -> Result<(), ClipboardError> {
+        write_unicode_text(self.owner, text)
+    }
+
+    fn paste(&mut self) -> Dispatched {
+        crate::inject::dispatch(&paste_chord(), self.delay_ms)
+    }
+
+    fn switch(&mut self, target: LayoutId) {
+        // The chain of §4.6, module `switch`. The verdict is dropped because that module counts
+        // every refused method itself, and there is nothing the selection path could do about a
+        // layout that would not change. SEC-01, SEC-07 — a layout handle, never a character.
+        let _ = crate::switch::to(target);
+    }
+
+    fn restore_modifiers(&mut self) -> Modifiers {
+        // Asked again rather than remembered — FR-40 step 6: «модификаторы, которые пользователь
+        // удерживает **физически**» at *this* moment. The selection path is the longest gap this
+        // program has between the two questions, so the answer differing is the ordinary case
+        // here rather than the exception.
+        let held = crate::inject::held_modifiers();
+        let mut events = [INPUT::default(); crate::inject::MODIFIER_COUNT];
+
+        if let Ok(len) = crate::inject::build_restore(held, &mut events) {
+            let _ = crate::inject::dispatch(&events[..len], self.delay_ms);
+        }
+
+        held
+    }
+
+    fn restore_clipboard(&mut self, snapshot: &Snapshot) {
+        // The result is dropped: `Restored` counts what went back and what the clipboard
+        // refused, this module counts the refusals of FR-62, and there is nothing a caller could
+        // do with the answer that it is not already doing. What must not happen is an early
+        // return that skips this, and there is none — this is the whole body.
+        let _ = restore_after(self.owner, snapshot, self.restore_delay);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-60 — the branch, and the two messages that carry it
+// ---------------------------------------------------------------------------------------
+
+/// Asks the UI thread to run the selection path — posted by the input thread.
+///
+/// `WM_APP + 12`, the next free number: `+ 1` is the wake-up of [`crate::app`], `+ 2` the tray
+/// callback, `+ 3` and `+ 4` are [`crate::hook`]'s, `+ 5` the configuration nudge, `+ 6` and
+/// `+ 7` are [`crate::watchdog`]'s, `+ 8` is [`crate::switch`]'s, `+ 9` the rehook and `+ 10`
+/// and `+ 11` are [`crate::guard`]'s.
+///
+/// **SEC-05.** The message carries nothing — `wparam` and `lparam` are zero — and what it is
+/// about travels in [`PENDING`], which only this process writes. A forged one finds no plan and
+/// does nothing at all.
+pub const WM_APP_SELECTION: u32 = WM_APP + 12;
+
+/// Hands the press back to the typing-buffer path — posted by the UI thread.
+///
+/// `WM_APP + 13`. This is FR-60's other branch arriving late: the selection path found no
+/// selection (step 3 timed out) or could not run, and the press has to do what it would have
+/// done before this task existed. It is a message of its own rather than a re-post of
+/// [`crate::hook::WM_APP_HOTKEY`] because a re-post would be offered the selection path again
+/// and would loop.
+///
+/// **SEC-05.** Carries nothing, and buys a sender exactly what a forged `WM_APP_HOTKEY` already
+/// bought: one conversion of text the sender can neither see nor influence.
+pub const WM_APP_BUFFER_PATH: u32 = WM_APP + 13;
+
+/// Presses handed to the UI thread.
+static HANDOVERS: AtomicU32 = AtomicU32::new(0);
+
+/// Presses the selection path converted.
+static CONVERSIONS: AtomicU32 = AtomicU32::new(0);
+
+/// Presses that went to the typing-buffer path because there was no selection.
+static NO_SELECTION: AtomicU32 = AtomicU32::new(0);
+
+/// Presses the selection path refused, for any of the reasons of [`Refusal`].
+static REFUSALS: AtomicU32 = AtomicU32::new(0);
+
+/// The counters of the selection path — SEC-01, SEC-07: four counts of program events.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PathCounters {
+    /// Presses handed to the UI thread.
+    pub handovers: u32,
+    /// Presses converted through the selection.
+    pub conversions: u32,
+    /// Presses that found no selection and fell back — FR-60.
+    pub no_selection: u32,
+    /// Presses the path refused.
+    pub refusals: u32,
+}
+
+/// The counters of the selection path as they stand.
+pub fn path_counters() -> PathCounters {
+    PathCounters {
+        handovers: HANDOVERS.load(Ordering::Relaxed),
+        conversions: CONVERSIONS.load(Ordering::Relaxed),
+        no_selection: NO_SELECTION.load(Ordering::Relaxed),
+        refusals: REFUSALS.load(Ordering::Relaxed),
+    }
+}
+
+/// **FR-60, on the input thread: does this press belong to the selection path?**
+///
+/// Answers `true` when the press has been handed over and the input thread must do nothing more
+/// with it; `false` when the typing-buffer path is to run **right here, right now**, exactly as
+/// it did before this task existed.
+///
+/// Four reasons to answer `false`, and all four are settled before a single system call is made
+/// on the user's behalf:
+///
+/// | Reason | Requirement | What was touched |
+/// |---|---|---|
+/// | `[selection] enabled = false` | **FR-65** | nothing. No `Ctrl+C`, no clipboard, no message |
+/// | the focus is in a password field | **SEC-06, FR-70** | nothing |
+/// | no cache, or no target layout | FR-30, FR-35 | nothing |
+/// | the UI thread has no window | — | nothing |
+///
+/// ⚠ **The first row is the whole of acceptance point 17.** With the path switched off this
+/// function reads one atomic and returns, and the clipboard of the machine is not opened, not
+/// read and not written — not even for step 1.
+pub fn wants_selection_path() -> bool {
+    // FR-65, first, and before anything else can have an opinion.
+    if !path_enabled() {
+        return false;
+    }
+
+    // SEC-06 and FR-70. The typing buffer is already switched off in a password field; sending
+    // `Ctrl+C` into one and reading what comes back would put the very thing SEC-06 protects on
+    // the clipboard, which would be worse than not having the feature. One atomic read — the
+    // flag module `guard` publishes from the watcher thread (FR-71).
+    if crate::guard::password_field() {
+        REFUSALS.fetch_add(1, Ordering::Relaxed);
+
+        return false;
+    }
+
+    let Some(plan) = plan_for_press() else {
+        REFUSALS.fetch_add(1, Ordering::Relaxed);
+
+        return false;
+    };
+
+    // Published before the message is posted, so a thread woken by it cannot find an empty slot
+    // — the order `app::publish_buffer_capacity` uses for the same reason.
+    publish_pending(plan);
+
+    if !crate::app::post_to_ui_thread(WM_APP_SELECTION) {
+        // No UI window: the program is starting or leaving. The plan is taken back rather than
+        // left for a later message to act on — the shape `switch::hand_over_to_watcher` uses.
+        let _ = take_pending();
+        REFUSALS.fetch_add(1, Ordering::Relaxed);
+
+        return false;
+    }
+
+    HANDOVERS.fetch_add(1, Ordering::Relaxed);
+
+    true
+}
+
+/// **Runs the selection path — the UI thread's half of the hand-over.**
+///
+/// Called from `app::window_proc` for every message of every window; answers `None` for
+/// everything that is not [`WM_APP_SELECTION`] at the window [`listen`] registered, which is
+/// every window of the input and watcher threads.
+///
+/// The caller acts on the answer in one way and one way only: [`Outcome::falls_back`] means the
+/// press has to be given back to the input thread as [`WM_APP_BUFFER_PATH`].
+///
+/// # SEC-05
+///
+/// A process at the same integrity level can post [`WM_APP_SELECTION`] to this window. What that
+/// buys it is a look into [`PENDING`], which is empty unless this program's own input thread put
+/// something there one message ago — and an empty plan is answered with a refusal before the
+/// clipboard is opened.
+pub fn handle_selection_message(hwnd: HWND, message: u32) -> Option<Outcome> {
+    if message != WM_APP_SELECTION {
+        return None;
+    }
+
+    if hwnd.0 as usize != LISTENER_WINDOW.load(Ordering::Acquire) {
+        return None;
+    }
+
+    let Some(plan) = take_pending() else {
+        REFUSALS.fetch_add(1, Ordering::Relaxed);
+
+        return Some(Outcome::Refused(Refusal::NoPlan));
+    };
+
+    let mut machine = Machine {
+        owner: hwnd,
+        delay_ms: plan.delay_ms,
+        restore_delay: plan.restore_delay,
+        timeout: plan.timeout,
+    };
+
+    let outcome = run(&mut machine, &plan);
+
+    match outcome {
+        Outcome::Converted { .. } => CONVERSIONS.fetch_add(1, Ordering::Relaxed),
+        Outcome::NoSelection => NO_SELECTION.fetch_add(1, Ordering::Relaxed),
+        Outcome::Refused(_) => REFUSALS.fetch_add(1, Ordering::Relaxed),
+    };
+
+    Some(outcome)
 }
 
 // ---------------------------------------------------------------------------------------

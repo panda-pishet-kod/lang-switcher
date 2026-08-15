@@ -39,8 +39,14 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_CONTROL, VK_DELETE, VK_SHIFT, VK_TAB};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VK_A, VK_CONTROL, VK_DELETE, VK_HOME, VK_SHIFT, VK_TAB,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, HWND_MESSAGE, PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WM_CLOSE,
+};
+use windows::core::w;
 
 use crate::report::{Assertion, Row, Verdict};
 use crate::uia::{Automation, Element, normalise};
@@ -901,6 +907,497 @@ fn notepad_position(
             Ok(launched("Блокнот", child, CloseWith::Terminate, None))
         },
     )
+}
+
+// ---------------------------------------------------------------------------------------
+// Position 15 — the selection path, §4.7: FR-60, FR-61, FR-64
+// ---------------------------------------------------------------------------------------
+
+/// What the third row of position 15 is about, in the report.
+const CLIPBOARD_ASSERTION: &str = "буфер обмена восстановлен";
+
+/// The application name of position 15's three rows.
+const APP_15: &str = "Путь выделения (окно стенда)";
+
+/// What the bench puts on the clipboard before the scenario.
+///
+/// The third row of position 15 has to compare something the bench **chose** against something
+/// the bench chose. Comparing whatever the person at the machine happened to have copied would
+/// pass vacuously on an empty clipboard, which is the one state a scenario about restoring the
+/// clipboard must not be allowed to pass in.
+const SEEDED: &str = "T-07-2 clipboard sentinel";
+
+/// A message-only window of the bench's own, for the two clipboard accesses of position 15.
+///
+/// `OpenClipboard` wants a window of the **calling thread** — the report of T-07-1 explains why
+/// a null one is not good enough — so the bench makes itself one. The predefined `STATIC` class
+/// is used, so no window class of ours is registered and no window procedure of ours can be
+/// reached.
+struct ClipWindow(HWND);
+
+impl ClipWindow {
+    fn create() -> Option<Self> {
+        // SAFETY: `STATIC` is a predefined class that is always registered; both strings are
+        // `'static` literals; the parent is `HWND_MESSAGE`, which asks for a message-only
+        // window; no `lpParam` is passed, so nothing of ours reaches the class's procedure.
+        // NFR-13: the binding turns a null handle into `Err`, which is examined here.
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                w!("langsw-e2e-position-15"),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )
+        }
+        .ok()
+        .map(Self)
+    }
+}
+
+impl Drop for ClipWindow {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from a successful `CreateWindowExW` on this thread and is
+        // destroyed exactly once — the type is neither `Copy` nor `Clone`.
+        let _ = unsafe { DestroyWindow(self.0) };
+    }
+}
+
+/// All three rows of position 15 when the scenario could not reach the hotkey.
+fn selection_failed(reason: &str) -> Vec<Row> {
+    vec![
+        Row::new(15, APP_15, Assertion::Text, Verdict::Fail, reason, EXPECTED),
+        Row::new(
+            15,
+            APP_15,
+            Assertion::Layout,
+            Verdict::Fail,
+            reason,
+            layout::describe(layout::RUSSIAN),
+        ),
+        Row::new(
+            15,
+            APP_15,
+            Assertion::Other(CLIPBOARD_ASSERTION),
+            Verdict::Fail,
+            reason,
+            format!("{SEEDED:?}"),
+        ),
+    ]
+}
+
+/// **Position 15 — «выделить фразу → горячая клавиша → фраза конвертирована, буфер обмена
+/// восстановлен».**
+///
+/// # Why this is not position 1 with one extra key
+///
+/// The seven steps of [`replacement`] type `ghbdtn` and press the hotkey, and the *typing buffer*
+/// is what converts it. Position 15 is about the other source of data, so the scenario has to
+/// make sure the typing buffer cannot be the one that answers — otherwise a product whose
+/// selection path did nothing at all would pass it.
+///
+/// It is made sure of by the selection itself. `Ctrl+A` is a `Ctrl` combination, and the fourth
+/// row of the FR-10 table says a `Ctrl` combination is «полный сброс (команда, а не текст)» — so
+/// selecting the text **empties the typing buffer**, and the SEC-04a channel is read to show it
+/// really did. What is left for the hotkey to convert is the selection and nothing else.
+///
+/// # Three assertions
+///
+/// | Row | Expected |
+/// |---|---|
+/// | text | `привет` — the phrase was converted |
+/// | layout | RU in the active window — step 7 of FR-61 |
+/// | clipboard | what it held before the scenario, character for character — step 8 |
+///
+/// The third row is the one the matrix names beside the conversion, and it is asserted against a
+/// reading taken **before the product was given anything to do**: [`clip::Guard`] captures on the
+/// way in, `unchanged` compares afterwards, and its `Drop` puts the text back whatever happens.
+/// ⚠ The guard round-trips `CF_UNICODETEXT` only — that limit is `clip.rs`'s and is stated there
+/// — so the bench seeds the clipboard with a phrase of its own first. That makes the comparison
+/// exact and, more to the point, means the run never depends on what the person at the machine
+/// happened to have copied.
+///
+/// # Requirement 1 of §11.5
+///
+/// Every wait is on a condition. The selection is waited for by reading the element back through
+/// UI Automation, the conversion by waiting for `привет`, the layout by waiting for RU. The one
+/// place a clock is unavoidable is the clipboard row: step 8 of FR-61 restores **after a delay**
+/// of 200 ms by section 7, so the bench waits for the clipboard to come back rather than
+/// asserting immediately — a condition again, with the timeout as its bound.
+pub fn position_15(ctx: &Context) -> Vec<Row> {
+    // Requirement 5 of §11.5: the clipboard of whoever is at the machine is captured before
+    // anything and put back by the guard's `Drop`, including on the path where this returns
+    // early. The seed below is written **after** the capture, so the guard still holds the
+    // user's own content.
+    let _clipboard = clip::Guard::capture();
+
+    // ⚠ **The window that writes the seed is destroyed the moment the seed is written**, and
+    // that is not tidiness — it is the difference between this position working and taking five
+    // seconds to fail.
+    //
+    // `EmptyClipboard` makes the window passed to `OpenClipboard` the **owner** of the
+    // clipboard, and when somebody else later empties it the system delivers
+    // `WM_DESTROYCLIPBOARD` to that owner with a **blocking** send. The bench's main thread is a
+    // console loop and pumps no messages, so the application's `Ctrl+C` would sit in
+    // `EmptyClipboard` until the system's hung-window timeout — measured at 5091 ms, against the
+    // 300 ms step 3 of FR-61 gives it. The product would then correctly report "there is no
+    // selection", and the position would be measuring the bench.
+    //
+    // A destroyed window cannot be sent to, so the notification is dropped and the copy is
+    // immediate. The clipboard *data* is unaffected: it lives in global memory the clipboard
+    // owns, not in the window.
+    {
+        let Some(seeder) = ClipWindow::create() else {
+            return selection_failed("не удалось создать окно стенда для доступа к буферу обмена");
+        };
+
+        if lang_switcher::selection::write_unicode_text(seeder.0, SEEDED).is_err() {
+            return selection_failed("не удалось положить в буфер обмена контрольную строку");
+        }
+    }
+
+    // Reading never makes anybody the owner, so this one may live for the whole position.
+    let Some(clip_window) = ClipWindow::create() else {
+        return selection_failed("не удалось создать окно стенда для чтения буфера обмена");
+    };
+
+    let mut app = match launch_selection_window() {
+        Ok(app) => app,
+        Err(error) => return selection_failed(&error),
+    };
+
+    let mut rows = match adopt_window(ctx.automation, &mut app, &|element: &Element| {
+        element.name().starts_with(SELECTION_WINDOW_TITLE)
+    }) {
+        Err(reason) => selection_failed(&reason),
+        Ok(window) => {
+            let content =
+                ctx.automation
+                    .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e));
+
+            match (app.window, content) {
+                (None, _) => selection_failed("у окна нет дескриптора"),
+                (_, None) => selection_failed("элемент ввода не найден в дереве UI Automation"),
+                (Some(hwnd), Some(content)) => {
+                    selection_body(ctx, app.pid, hwnd, &window, &content, clip_window.0)
+                }
+            }
+        }
+    };
+
+    let closed = app.close();
+    for row in &mut rows {
+        row.note = format!("{}; закрытие: {closed}", row.note);
+    }
+
+    rows
+}
+
+/// Reads `CF_UNICODETEXT` through the accepted primitive of module `selection`.
+fn clipboard_text(owner: HWND) -> Option<String> {
+    lang_switcher::selection::read_unicode_text(owner)
+        .ok()
+        .flatten()
+}
+
+/// Title of the bench's own window for position 15 — the string the position adopts by.
+const SELECTION_WINDOW_TITLE: &str = "LangSw-Selection-15";
+
+/// ⛔ **The window of position 15 is the bench's own** — the shape position 14 already uses.
+///
+/// Requirements A to E are not relaxed here. The process is started by this function and is
+/// therefore in the registry as a **root**, so `claim_window_process` answers on the first
+/// question it asks and never has to walk a parent chain that has already lost its parent. That
+/// is not a convenience: on this machine a `Notepad.exe` that the bench did not start is running,
+/// the System32 `notepad.exe` is a stub whose process exits as soon as the packaged application
+/// takes over, and a position that adopted by window class would be deciding between two
+/// strangers' windows. A window of the bench's own removes the question instead of answering it
+/// better.
+///
+/// One plain multiline text box, nothing masked, nothing saved anywhere.
+///
+/// ⚠ **The window publishes the length of its own selection in its title**, the way position
+/// 14's publishes the length of its password box, and stops doing so as soon as there is one.
+/// That is what lets the scenario wait for the selection **on a condition** (requirement 1 of
+/// §11.5) instead of on a clock, and it matters more here than anywhere else in the matrix: step
+/// 3 of FR-61 waits 300 ms for the clipboard to move, so a hotkey pressed while the application
+/// was still making the selection would measure that race and report "there is no selection".
+/// The timer stops itself once the selection exists, so the window is idle from that moment on.
+fn launch_selection_window() -> Result<App, String> {
+    let scratch = scratch_dir("selection");
+    let script = scratch.join("selection-window.ps1");
+
+    let body = format!(
+        "Add-Type -AssemblyName System.Windows.Forms\n\
+         $form = New-Object System.Windows.Forms.Form\n\
+         $form.Text = '{SELECTION_WINDOW_TITLE} sel=0'\n\
+         $form.Width = 640\n\
+         $form.Height = 260\n\
+         $form.StartPosition = 'CenterScreen'\n\
+         $form.TopMost = $true\n\
+         $box = New-Object System.Windows.Forms.TextBox\n\
+         $box.Multiline = $true\n\
+         $box.Left = 20\n\
+         $box.Top = 30\n\
+         $box.Width = 580\n\
+         $box.Height = 150\n\
+         $box.TabIndex = 0\n\
+         $form.Controls.Add($box)\n\
+         $tick = New-Object System.Windows.Forms.Timer\n\
+         $tick.Interval = 150\n\
+         $tick.Add_Tick({{ $form.Text = '{SELECTION_WINDOW_TITLE} sel=' + $box.SelectionLength; \
+         if ($box.SelectionLength -gt 0) {{ $tick.Stop() }} }})\n\
+         $tick.Start()\n\
+         $form.Add_Shown({{ $form.Activate(); [void]$box.Focus() }})\n\
+         [void]$form.ShowDialog()\n"
+    );
+
+    std::fs::write(&script, body)
+        .map_err(|error| format!("не удалось записать {}: {error}", script.display()))?;
+
+    let child = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-STA",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script)
+        .spawn()
+        .map_err(|error| format!("запуск окна позиции 15: {error}"))?;
+
+    Ok(launched(
+        "Путь выделения (окно стенда)",
+        child,
+        CloseWith::WmClose,
+        Some(scratch),
+    ))
+}
+
+/// The body of position 15, for a window that has already been adopted.
+fn selection_body(
+    ctx: &Context,
+    pid: u32,
+    window: HWND,
+    window_element: &Element,
+    content: &Element,
+    clip_window: HWND,
+) -> Vec<Row> {
+    // Step 1 — forward. Rake 3, and requirement B has already been satisfied by `adopt_window`.
+    if let Err(error) = shell::activate_window(pid, Some(window)) {
+        return selection_failed(&format!("вывод окна вперёд: {error}"));
+    }
+
+    let target = input::Target { pid, hwnd: window };
+
+    // Step 2 — the precondition of §11.3: the English layout.
+    let source_layout = match layout::ensure(window, layout::US, Duration::from_secs(5)) {
+        Ok(id) => id,
+        Err(error) => return selection_failed(&format!("исходная раскладка: {error}")),
+    };
+
+    // Step 3 — type the phrase. The window is the bench's own and was launched empty for this
+    // position, so there is nothing to clear first.
+    if let Err(error) = input::type_text(TYPED, &target) {
+        return selection_failed(&format!("ввод {TYPED:?}: {error}"));
+    }
+
+    // Step 4 — wait until the application really has it. A condition, not a clock.
+    if wait::until(wait::TEXT_TIMEOUT, || {
+        content
+            .read()
+            .map(|(raw, _)| normalise(&raw))
+            .filter(|text| text.contains(TYPED))
+    })
+    .is_none()
+    {
+        return selection_failed("введённое не дошло до приложения");
+    }
+
+    // ⚠ **Step 5 — select it, and by selecting it empty the typing buffer.** `Shift+Home` and
+    // not `Ctrl+A`: a WinForms `TextBox` does not answer `Ctrl+A` with select-all of its own
+    // accord (measured on this machine), and `Shift+Home` is the gesture every edit control
+    // implements. `input::chord` sends `Home` with the `E0` prefix of FR-05, which is what makes
+    // it a *shifted* `Home` — injected without it the same key reaches the application as
+    // `Shift+Numpad7`, Windows suppresses the `Shift`, and the caret moves without selecting.
+    //
+    // Either way the row of the FR-10 table that matters here is the same: `Home` is «полный
+    // сброс», so the typing buffer is **empty** from this point and the selection is the only
+    // thing the hotkey can possibly convert.
+    if let Err(error) = input::chord(&[VK_SHIFT.0], VK_HOME.0, &target) {
+        return selection_failed(&format!("выделение: {error}"));
+    }
+
+    // ⚠ **Requirement 1 of §11.5, and it is not a formality here.** The hotkey must not be sent
+    // until the selection really exists: the product answers `Ctrl+C` and waits 300 ms (§7) for
+    // the clipboard to move, so a press that arrived while the application was still making the
+    // selection would measure that race and report "there is no selection". The window publishes
+    // the length of its own selection in its title — the shape position 14 uses for `pass=N` —
+    // and this waits for it. A condition, published by the application, never a pause.
+    let selected = wait::until_true(wait::TEXT_TIMEOUT, || {
+        window_element.name().contains("sel=6")
+    });
+
+    if !selected {
+        return selection_failed(&format!(
+            "выделение не состоялось: заголовок окна {:?}, ожидалось sel=6",
+            window_element.name()
+        ));
+    }
+
+    // And that is read back from the product itself rather than assumed — SEC-04a, and it is
+    // what tells "the selection path converted the selection" from "the typing buffer did".
+    let buffer_after_select = wait::until(Duration::from_secs(2), || {
+        crate::channel::read()
+            .ok()
+            .and_then(|snapshot| snapshot.get("buffer_len").map(str::to_owned))
+            .filter(|length| length == "0")
+    })
+    .unwrap_or_else(|| {
+        crate::channel::read()
+            .ok()
+            .and_then(|snapshot| snapshot.get("buffer_len").map(str::to_owned))
+            .unwrap_or_else(|| "?".to_owned())
+    });
+
+    // Step 7 — the hotkey.
+    let sequence_before = lang_switcher::selection::sequence_number();
+
+    if let Err(error) = input::tap(ctx.hotkey_vk, &target) {
+        return selection_failed(&format!("горячая клавиша: {error}"));
+    }
+
+    // ⚠ **Step 8 — wait for the application to answer the product's `Ctrl+C`, and wait for it on
+    // the clipboard sequence number rather than by asking the application anything.**
+    //
+    // This is requirement 1 of §11.5 applied to a place where the obvious reading of it is
+    // actively harmful. Step 3 of FR-61 gives the application 300 ms to put the selection on the
+    // clipboard, and the application here is a single-threaded WinForms window: UI Automation
+    // calls are marshalled onto that same thread, so a bench that started polling the element
+    // the instant the hotkey went out would be **competing with the very keystroke it is waiting
+    // for** — measured, and it is what made this position report "the text was not converted"
+    // while the clipboard plainly held the copied phrase.
+    //
+    // `GetClipboardSequenceNumber` costs one read of a window-station counter, needs no clipboard
+    // lock and cannot block anybody, so watching it disturbs neither side. Its first move after
+    // the press *is* the application answering `Ctrl+C` — which is the same fact step 3 of FR-61
+    // reads, from the other side of the same machine.
+    let pressed_at = Instant::now();
+    let copied = wait::until_true(wait::TEXT_TIMEOUT, || {
+        lang_switcher::selection::sequence_number() != sequence_before
+    });
+    let answered_in = pressed_at.elapsed();
+
+    if !copied {
+        return selection_failed(
+            "буфер обмена не изменился после горячей клавиши: приложение не ответило на Ctrl+C",
+        );
+    }
+
+    // Step 9 — the conversion. A condition, and the timeout has to cover the rest of FR-61:
+    // the read, the recoding, the paste and the 200 ms delay of step 8.
+    let converted = wait::until(wait::TEXT_TIMEOUT, || {
+        content
+            .read()
+            .map(|(raw, _)| normalise(&raw))
+            .filter(|text| text.contains(EXPECTED))
+    });
+
+    let shown = converted
+        .clone()
+        .or_else(|| content.read().map(|(raw, _)| normalise(&raw)))
+        .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    // Step 10 — the layout of FR-61 step 7.
+    let observed = wait::until(wait::TEXT_TIMEOUT, || {
+        layout::of_window(window)
+            .map(layout::id_of)
+            .filter(|id| id & 0xFFFF == layout::RUSSIAN & 0xFFFF)
+    })
+    .or_else(|| layout::of_window(window).map(layout::id_of));
+
+    // Step 11 — the clipboard of FR-61 step 8. A condition with a bound, because the restore is
+    // deliberately delayed by 200 ms (§7) and asserting immediately would measure the delay
+    // instead of the restore.
+    let restored = wait::until_true(wait::TEXT_TIMEOUT, || {
+        clipboard_text(clip_window).as_deref() == Some(SEEDED)
+    });
+    let clipboard_now =
+        clipboard_text(clip_window).unwrap_or_else(|| "<нет текста в буфере обмена>".to_owned());
+
+    let counters = crate::channel::read()
+        .ok()
+        .map(|snapshot| {
+            format!(
+                "buffer_len={}, hotkey_handoffs={}, post_failures={}, send_mismatches={}",
+                snapshot.get("buffer_len").unwrap_or("?"),
+                snapshot.get("hotkey_handoffs").unwrap_or("?"),
+                snapshot.get("post_failures").unwrap_or("?"),
+                snapshot.get("send_mismatches").unwrap_or("?"),
+            )
+        })
+        .unwrap_or_else(|| "канал не ответил".to_owned());
+
+    vec![
+        Row::new(
+            15,
+            APP_15,
+            Assertion::Text,
+            if converted.is_some() {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            format!("{shown:?}"),
+            format!("{EXPECTED:?}"),
+        )
+        .with_note(format!(
+            "выделение через Shift+Home (с префиксом E0, FR-05); буфер набора после выделения: \
+             {buffer_after_select} — FR-10 «Home — полный сброс», поэтому конвертировать могла \
+             только выделенная фраза; приложение ответило на Ctrl+C продукта за {} мс (шаг 3 \
+             FR-61 ждёт 300 мс, §7); исходная раскладка окна {}; {counters}",
+            answered_in.as_millis(),
+            layout::describe(source_layout)
+        )),
+        Row::new(
+            15,
+            APP_15,
+            Assertion::Layout,
+            match observed {
+                Some(id) if id & 0xFFFF == layout::RUSSIAN & 0xFFFF => Verdict::Pass,
+                _ => Verdict::Fail,
+            },
+            observed.map_or("<чтение не удалось>".to_owned(), layout::describe),
+            layout::describe(layout::RUSSIAN),
+        )
+        .with_note("шаг 7 FR-61 — переключение раскладки, §4.6"),
+        Row::new(
+            15,
+            APP_15,
+            Assertion::Other(CLIPBOARD_ASSERTION),
+            if restored {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            format!("{clipboard_now:?}"),
+            format!("{SEEDED:?}"),
+        )
+        .with_note(
+            "шаг 8 FR-61 с задержкой 200 мс (§7); контрольная строка положена стендом до \
+             сценария, буфер обмена пользователя снят до неё и возвращается стражем clip::Guard",
+        ),
+    ]
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2855,14 +3352,11 @@ pub fn pending_positions() -> Vec<Row> {
             &scenario,
         )
         .with_note("не реализуется вовсе — решение по вопросу 31; позиция необязательная"),
-        Row::pending(
-            15,
-            "Путь выделения",
-            Assertion::Other("фраза конвертирована, буфер обмена восстановлен"),
-            "T-07-2",
-            "конвертированная фраза",
-        )
-        .with_note("путь выделения §4.7 не реализован"),
+        // ⚠ **Position 15 is no longer here.** The selection path of §4.7 exists — task T-07-2,
+        // FR-60, FR-61 and FR-65 — and the bench runs the position: see [`position_15`]. A row
+        // that still called it `pending` on a task that has finished would be the same kind of
+        // untruth this list exists to prevent.
+        //
         // ⚠ **Positions 16 and 17 are no longer here.** Both are run by the bench now: task
         // T-04-3-3 added the list entry and the `match` arm that task T-05-2a was not allowed to
         // write (decision Р-52), and gave the bench the two abilities position 17 needed — the

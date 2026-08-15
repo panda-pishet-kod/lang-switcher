@@ -191,6 +191,8 @@ pub enum Kind {
     /// An operation name that is not in [`OPERATIONS`]. **Nothing of the name is kept.**
     #[default]
     Unlisted = 7,
+    /// The selection path and the clipboard — FR-60 to FR-65.
+    Selection = 8,
 }
 
 impl Kind {
@@ -205,6 +207,7 @@ impl Kind {
             Self::Tray => "tray",
             Self::Channel => "channel",
             Self::Unlisted => "unlisted",
+            Self::Selection => "selection",
         }
     }
 }
@@ -274,6 +277,8 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("write(control channel)", Kind::Channel),
     ("FlushFileBuffers", Kind::Channel),
     ("CloseHandle(pipe)", Kind::Channel),
+    // `selection` — the clipboard and the selection path of §4.7.
+    ("clipboard snapshot truncated", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
