@@ -151,33 +151,48 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     }
 }
 
-/// **The one reserved key is missing, not zero.** SEC-06, and the shape the future needs.
+/// **A reserved key is missing from the payload, not answered with a zero.** SEC-06, and the
+/// shape the future needs.
 ///
 /// A bench that read `password_field=0` would record "no buffering in a password field" for a
-/// build that cannot tell. Absence is the honest answer until task T-06-1 arrives.
+/// build that cannot tell. Absence was the honest answer for as long as no task could tell.
 ///
-/// The list held two keys until task **T-05-2a**, which published `cycle_position` and took it
-/// out of the reservation. The assertion is on the whole array rather than on "contains", so
-/// the day T-06-1 publishes its key this test fails and somebody looks — which is what a
-/// reservation is for.
+/// The list held two keys until task **T-05-2a**, which published `cycle_position`, and one until
+/// task **T-06-1**, which published `password_field`; task **T-06-3** made the two edits that
+/// emptied it, this one and the constant, because they are one change and `assert_eq!` over two
+/// arrays of different lengths is a compilation error rather than a failing test.
+///
+/// The assertion is still on the **whole array** and not on "contains", which is what keeps this a
+/// review gate now that the array is empty: a key added to the reservation, or one left in it
+/// after its task published it, fails here and somebody looks. That is what a reservation is for,
+/// and it is why the constant outlives the last key that stood in it.
 #[test]
 fn the_reserved_keys_are_absent_rather_than_answered_with_a_zero() {
+    /// Spelled out rather than written `[]` at the call site: `assert_eq!` needs the element type,
+    /// and an empty literal has none to infer from.
+    const NOTHING: [&str; 0] = [];
+
     let text = control::render(&control::snapshot());
 
     assert_eq!(
         control::RESERVED_KEYS,
-        ["password_field"],
-        "the reserved list names the one key SEC-04a still reserves"
+        NOTHING,
+        "every key SEC-04a reserved is published now"
     );
 
-    assert!(
-        !control::RESERVED_KEYS.contains(&"cycle_position"),
-        "cycle_position is published by task T-05-2a and is no longer reserved"
-    );
-    assert!(
-        control::KEYS.contains(&"cycle_position"),
-        "and it is in the emitted key list instead"
-    );
+    // The two keys that left the reservation, each in the change that started emitting it. A key
+    // in neither list would be one nothing answers and nothing reserves — which is the hole this
+    // pair of assertions exists to keep shut.
+    for published in ["cycle_position", "password_field"] {
+        assert!(
+            !control::RESERVED_KEYS.contains(&published),
+            "{published} is published and is no longer reserved"
+        );
+        assert!(
+            control::KEYS.contains(&published),
+            "{published} is in the emitted key list instead"
+        );
+    }
 
     for reserved in control::RESERVED_KEYS {
         assert!(
@@ -697,6 +712,18 @@ fn the_channel_serves_the_owner_of_this_process_and_stops_when_asked() {
         assert!(
             !answer.contains(reserved),
             "point 22 holds on the wire too: {reserved} is absent, not zero"
+        );
+    }
+
+    // Nothing is reserved any more, so the loop above is vacuous, and this is what carries its
+    // meaning on the wire in its place: the two keys that left the reservation arrive **with a
+    // value** rather than being dropped on the way out of the process. Absence used to be the
+    // assertion; presence is its counterpart, and between them the wire is pinned in both
+    // directions for every key the reservation has ever named.
+    for published in ["cycle_position", "password_field"] {
+        assert!(
+            !value_of(&answer, published).is_empty(),
+            "{published} left the reservation and arrives over the channel with a value"
         );
     }
 

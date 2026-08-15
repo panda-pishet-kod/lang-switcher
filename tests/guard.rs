@@ -34,6 +34,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use lang_switcher::guard::{self, Field};
 
@@ -42,6 +43,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, ES_PASSWORD, WINDOW_EX_STYLE, WINDOW_STYLE, WS_POPUP,
 };
 use windows::core::w;
+
+/// Serialises the tests that write the **process-global** state of module `guard` — the published
+/// field, the counters, the pending-probe flag and the exclusion table.
+///
+/// `cargo test` runs the tests of a binary in parallel, and every one of those is one location
+/// for the whole process. The three tests below that write any of them take this first; the rest
+/// of the file reads sources and asserts on pure functions and needs nothing.
+///
+/// The same device, and the same reason, as `MIRROR` in `tests\control.rs`. Task **T-06-3** added
+/// it when it added a third writer: two of the three were already sharing the pending-probe flag
+/// without saying so.
+static GLOBAL_STATE: Mutex<()> = Mutex::new(());
 
 // ---------------------------------------------------------------------------------------
 // A control of our own — the only password field this project ever creates
@@ -212,6 +225,8 @@ fn a_window_that_is_not_an_edit_does_not_reach_level_two() {
 /// itself in the same body.
 #[test]
 fn a_focus_change_with_no_watcher_thread_ends_in_the_fr73_default() {
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
     let before = guard::counters();
 
     guard::note_focus_moved();
@@ -246,6 +261,8 @@ fn a_focus_change_with_no_watcher_thread_ends_in_the_fr73_default() {
 /// same integrity level. What that buys the sender is this: `false`, and not one Win32 call.
 #[test]
 fn a_probe_that_was_not_asked_for_does_nothing() {
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
     assert!(
         !guard::run_pending_probe(),
         "nothing is pending in a test process, so the forged message finds nothing"
@@ -303,6 +320,23 @@ fn sources() -> Vec<(PathBuf, String)> {
 
     assert!(out.len() >= 12, "every module of section 6.2 was read");
     out
+}
+
+/// The file name of a path under `src\`, as the assertion messages spell it.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// One named module of `src\`, read as text.
+fn source_of(module: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join(module);
+
+    fs::read_to_string(&path).unwrap_or_else(|_| panic!("src\\{module} must be readable"))
 }
 
 /// Lines of `text` that contain `needle` and are not comment lines.
@@ -515,6 +549,303 @@ fn every_unsafe_in_module_guard_carries_a_safety_note() {
     assert!(
         blocks > 0,
         "the sweep found the unsafe blocks it was aimed at"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-84 — the process exclusion list (task T-06-3)
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 9, as a sweep rather than as a grep somebody ran once.**
+///
+/// The chain that answers "which process owns the foreground window" —
+/// `GetForegroundWindow`, `GetWindowThreadProcessId`, `OpenProcess`,
+/// `QueryFullProcessImageNameW` — does not fit in the hundred microseconds NFR-01 gives the
+/// callback, and `OpenProcess` can be refused, which costs the same as a success. So the check is
+/// the strongest checkable form of "not on the hook path": **not one of those names occurs in
+/// `src\hook.rs` at all**, in code or in prose.
+///
+/// `GetGUIThreadInfo` rides along for the same reason: it is level 2's way of asking another
+/// thread what has the focus, and it is another cross-thread call the callback must not make.
+///
+/// The reading of the *name* is narrower still and is asserted as such:
+/// `QueryFullProcessImageNameW` occurs in `src\guard.rs` and in no other module of the program.
+#[test]
+fn no_call_that_reads_a_process_name_occurs_anywhere_near_the_hook() {
+    const PROCESS_NAMES: [&str; 5] = [
+        "GetForegroundWindow",
+        "GetWindowThreadProcessId",
+        "OpenProcess(",
+        "QueryFullProcessImageNameW",
+        "GetGUIThreadInfo",
+    ];
+
+    for (path, text) in sources() {
+        let module = file_name(&path);
+
+        for symbol in PROCESS_NAMES {
+            let hits: Vec<usize> = text
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| line.contains(symbol))
+                .map(|(index, _)| index + 1)
+                .collect();
+
+            if hits.is_empty() {
+                continue;
+            }
+
+            assert_ne!(
+                module, "hook.rs",
+                "NFR-01: {symbol} occurs in src\\hook.rs at lines {hits:?}; determining the \
+                 process is the watcher thread's work and never the callback's"
+            );
+
+            if symbol == "QueryFullProcessImageNameW" {
+                assert_eq!(
+                    module, "guard.rs",
+                    "the name of a process is read in module guard and nowhere else; {symbol} \
+                     occurs in src\\{module} at lines {hits:?}"
+                );
+            }
+        }
+    }
+}
+
+/// **Acceptance point 10, and it holds in a form stronger than the point asks for.**
+///
+/// The point is that the callback reads only an atomic flag. What is asserted is that the
+/// callback reads **nothing of module `guard` whatever**: `src\hook.rs` names no item of it, so
+/// there is no flag on the hook path to read, correctly or otherwise.
+///
+/// The flag is read one thread-hop away, by `app::apply_buffering_gate`, on the input thread's
+/// message loop — which is where section 6.3 puts the reader — and what the gate does with it is
+/// take the typing buffer away. A stroke in a password field or an excluded process therefore
+/// meets the presence check `buffer::record` performs for every stroke on the machine and takes
+/// its shorter arm: FR-70 and FR-84 cost the callback **less** than the ordinary case, not more.
+#[test]
+fn the_hook_callback_names_nothing_of_module_guard() {
+    let hook = source_of("hook.rs");
+
+    let hits = code_lines_with(&hook, "guard::");
+
+    assert!(
+        hits.is_empty(),
+        "§6.3: src\\hook.rs reaches into module guard at {hits:?}; the flag is read by the input \
+         thread's message loop and not by the callback"
+    );
+
+    // And the reader really is where this claims it is.
+    let app = source_of("app.rs");
+
+    assert!(
+        !code_lines_with(&app, "guard::buffering_allowed()").is_empty(),
+        "the gate on the input thread is what reads the published state"
+    );
+}
+
+/// **Acceptance point 16 — FR-96 works in an excluded process, and it is a property of position.**
+///
+/// The emergency combination is handled at the top of `keyboard_hook_proc`, before `classify` is
+/// reached and therefore before `buffer::record` exists as a possibility. Nothing of this task can
+/// stand in front of it, because nothing of this task is in that file at all (see the test above),
+/// and what FR-84 does — take the typing buffer away — happens below the return that FR-96 never
+/// gets to.
+///
+/// So the check is on the order of the lines: within `keyboard_hook_proc`, the test of FR-96
+/// precedes the decision, and no call into `buffer` or `guard` precedes either.
+#[test]
+fn the_emergency_combination_is_reached_before_any_logic_this_task_touches() {
+    let hook = source_of("hook.rs");
+
+    let callback = hook
+        .split_once("unsafe extern \"system\" fn keyboard_hook_proc")
+        .map(|(_, after)| after)
+        .expect("src\\hook.rs must contain the callback of FR-01");
+
+    let first = |needle: &str| {
+        code_lines_with(callback, needle)
+            .first()
+            .map(|(line, _)| *line)
+    };
+
+    let emergency = first("is_emergency_key").expect("FR-96 is tested in the callback");
+    let exit = first("emergency_exit()").expect("and acted on there");
+    let decision = first("guarded_decision").expect("the ordinary decision follows it");
+
+    assert!(
+        emergency < exit && exit < decision,
+        "FR-96: the emergency test is at {emergency}, the exit at {exit} and the decision at \
+         {decision}; the combination is handled first, before any other logic of the callback"
+    );
+
+    for later in ["buffer::", "guard::", "classify("] {
+        for (line, text) in code_lines_with(callback, later) {
+            assert!(
+                line > emergency,
+                "FR-96: {text:?} at line {line} of the callback stands before the emergency test \
+                 at {emergency}"
+            );
+        }
+    }
+}
+
+/// **Acceptance points 12 and 19.** The heavy part is out of the `WinEvent` callback, and nothing
+/// on the path that reads the exclusion list takes a lock.
+///
+/// Point 12 is the same sweep as the one for `SetWinEventHook` above, read from the other side:
+/// module `guard` contains no `WinEvent` callback, so the heavy part cannot be in one. Where it
+/// *is* — the watcher thread's message loop, reached through the `WM_APP_FLUSH` the subscription
+/// of task T-03-3 already posts — is asserted by `app.rs` naming `run_pending_probe` on the
+/// watcher window.
+///
+/// Point 19 is NFR-04 and section 6.3: the list is **published** into a table of atomics and
+/// searched without a lock, so an update cannot block a reader and a reader cannot block the
+/// program. A module that names no blocking primitive cannot put one on a read path.
+#[test]
+fn the_list_is_published_and_the_heavy_part_is_out_of_the_callback() {
+    let guard_source = source_of("guard.rs");
+
+    let product = guard_source
+        .split_once("mod tests {")
+        .map_or(guard_source.as_str(), |(before, _)| before);
+
+    for blocking in [
+        "Mutex", "RwLock", "Condvar", "OnceLock", "LazyLock", ".lock(", "Barrier", "mpsc",
+    ] {
+        let hits = code_lines_with(product, blocking);
+
+        assert!(
+            hits.is_empty(),
+            "NFR-04, §6.3: {blocking} occurs in the product half of src\\guard.rs at {hits:?}; the \
+             exclusion list is published, not shared"
+        );
+    }
+
+    // Nor does the module go to the file itself: §6.1 gives the configuration to the UI thread,
+    // and what crosses to the watcher thread is a published value.
+    for reader in ["fs::", "File::", "read_to_string", "settings::"] {
+        let hits = code_lines_with(product, reader);
+
+        assert!(
+            hits.is_empty(),
+            "§6.1: {reader} occurs in the product half of src\\guard.rs at {hits:?}"
+        );
+    }
+
+    // And the module raises no subscription of its own — point 11 from this side.
+    assert!(
+        code_lines_with(product, "SetWinEventHook").is_empty(),
+        "the subscription of EVENT_SYSTEM_FOREGROUND is the one task T-03-3 made"
+    );
+
+    // The heavy part runs on the watcher window, which is what puts it off both callbacks.
+    let app = source_of("app.rs");
+
+    let probe: Vec<(usize, &str)> = code_lines_with(&app, "run_pending_probe");
+
+    assert!(
+        !probe.is_empty(),
+        "the probe is dispatched from the window procedure"
+    );
+
+    assert!(
+        app.contains("crate::guard::WM_APP_PROBE && is_watcher_window(hwnd)"),
+        "NFR-10, §6.1: the probe runs on the watcher window and on no other"
+    );
+}
+
+/// **The live half of the name read, against a name that is known** — NFR-13.
+///
+/// `OpenProcess` and `QueryFullProcessImageNameW` are what level 1 of FR-72 and the whole of
+/// FR-84 stand on, and until this task a `None` from them was invisible: it let the chain fall
+/// through to levels 2 and 3, which is what a correct read of an ordinary process does as well.
+/// FR-84 has no level to fall through to, so the read is checked here against the one process
+/// whose name a test knows for certain — its own.
+#[test]
+fn the_live_process_name_read_answers_for_this_process() {
+    let expected = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .expect("a running test binary has a file name");
+
+    let read = guard::process_file_name(std::process::id())
+        .expect("NFR-13: this process can read its own image name");
+
+    assert_eq!(
+        guard::fold_process_name(&read),
+        guard::fold_process_name(&expected),
+        "the name Win32 reports for this process is the name of its own binary"
+    );
+
+    // And the value really is a bare name rather than the path it was cut out of.
+    assert!(!read.contains('\\') && !read.contains('/'), "{read:?}");
+}
+
+/// **The exclusion list against this process's own name** — acceptance point 18, and acceptance
+/// point 23 in the small.
+///
+/// The name is the one Windows would report for this very binary, taken from `current_exe`, so
+/// what is checked is the real string and not a convenient one. Nothing is excluded before the
+/// list names it, everything the list names is matched however it is spelled, and the default of
+/// section 7 is put back at the end.
+#[test]
+fn the_published_list_recognises_this_process_by_its_own_name() {
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let exe = std::env::current_exe().expect("a running test binary has a path");
+
+    let name = exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("and a name")
+        .to_owned();
+
+    // Section 7's default: `processes = []`, and nothing is excluded.
+    assert_eq!(guard::publish_exclusions(&[]), 0);
+    assert!(
+        !guard::is_excluded_name(&name),
+        "FR-84: the default list excludes nothing, this process included"
+    );
+
+    // The user writes the name in whatever case they please.
+    assert_eq!(guard::publish_exclusions(&[name.to_uppercase()]), 1);
+
+    for spelling in [name.clone(), name.to_uppercase(), name.to_lowercase()] {
+        assert!(
+            guard::is_excluded_name(&spelling),
+            "FR-84: {spelling} is the name that was published, in another case"
+        );
+    }
+
+    // Or writes the whole path, which FR-84 says is the same program: «имён процессов».
+    let path = exe.to_string_lossy().into_owned();
+
+    assert_eq!(guard::publish_exclusions(&[path]), 1);
+    assert!(
+        guard::is_excluded_name(&name),
+        "FR-84: a configured path is compared by its last component"
+    );
+
+    // A neighbour of the same name plus something is a different program.
+    let mut neighbour = name.clone();
+    neighbour.push_str(".exe");
+
+    assert!(!guard::is_excluded_name(&neighbour));
+    assert!(!guard::is_excluded_name("notepad.exe"));
+
+    // Section 7's default put back — this is process-global state and the rest of the run must see
+    // the program as it starts.
+    assert_eq!(guard::publish_exclusions(&[]), 0);
+    assert!(!guard::is_excluded_name(&name));
+    assert_eq!(
+        guard::counters().exclusion_read_retries,
+        0,
+        "no search had to be repeated: nothing else in this process publishes"
     );
 }
 

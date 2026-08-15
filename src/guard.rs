@@ -2,10 +2,10 @@
 //!
 //! Responsibility taken from the module table in section 6.2 of SPEC.
 //!
-//! Requirements this module covers: FR-70, FR-71, FR-72, FR-73, SEC-06 — task **T-06-1**.
-//! Still to come: FR-84, the process exclusion list, task T-06-3, which reuses the publication
-//! built here rather than raising a second one.
-//! Implemented by backlog tasks: T-06-1 (done), T-06-3.
+//! Requirements this module covers: FR-70, FR-71, FR-72, FR-73, SEC-06 — task **T-06-1** — and
+//! FR-84, the process exclusion list — task **T-06-3**, which reuses the publication built by
+//! T-06-1 rather than raising a second one.
+//! Implemented by backlog tasks: T-06-1 (done), T-06-3 (done).
 //!
 //! # What SEC-06 costs, and why the whole shape of this module follows from one sentence
 //!
@@ -22,11 +22,11 @@
 //! | Where | What runs there | Cost |
 //! |---|---|---|
 //! | hook callback (input thread) | **nothing of this module** — see below | zero |
-//! | input thread, message loop | reads the published state once per message and switches the typing buffer on or off | one relaxed load |
-//! | watcher thread, message loop | the three levels of FR-72, UI Automation included | tens of milliseconds |
+//! | input thread, message loop | reads the published state once per message and switches the typing buffer on or off | two relaxed loads |
+//! | watcher thread, message loop | the three levels of FR-72 and the name comparison of FR-84, UI Automation included | tens of milliseconds |
 //!
-//! **The callback does not even read the flag**, and that is stronger than FR-71 asks rather
-//! than weaker. The flag is read by the input thread — which is what section 6.3 prescribes,
+//! **The callback does not even read the flags**, and that is stronger than FR-71 asks rather
+//! than weaker. They are read by the input thread — which is what section 6.3 prescribes,
 //! «Флаг «поле пароля» пишется потоком наблюдения, **читается потоком ввода**» — and what the
 //! input thread does with it is to take the typing buffer away, so that the one operation left
 //! on the callback path is the thread-local presence check [`crate::buffer::record`] already
@@ -55,12 +55,14 @@
 //! The chain is therefore:
 //!
 //! ```text
-//!   EVENT_OBJECT_FOCUS                     (system)
+//!   EVENT_SYSTEM_FOREGROUND / EVENT_OBJECT_FOCUS      (system)
 //!     └─ watchdog::win_event_proc          (watcher thread, unchanged)
 //!          └─ WM_APP_FLUSH ──────────────► input thread
 //!               └─ guard::note_focus_moved  state := Pending, buffering off, buffer wiped
 //!                    └─ WM_APP_PROBE ────► watcher thread
-//!                         └─ guard::run_pending_probe   the three levels of FR-72
+//!                         └─ guard::run_pending_probe
+//!                              one read of the process name, then
+//!                              FR-84's comparison and the three levels of FR-72
 //!                              └─ WM_APP_FIELD ───────► input thread
 //!                                   └─ app::apply_buffering_gate   buffering on or off
 //! ```
@@ -104,6 +106,97 @@
 //! uninstalling it. The default is [`buffering_allowed`] answering `true` for
 //! [`Field::Undetermined`], and it is not to be tightened.
 //!
+//! # FR-84 — the process exclusion list, task T-06-3
+//!
+//! > Настраиваемый список имён процессов, в которых буферизация не ведётся (по умолчанию пуст).
+//! > Назначение: игры с системами защиты от читерства и приложения, использующие Raw Input
+//! > в обход стандартного ввода.
+//!
+//! **It is the same construction, deliberately, and not a second one.** The question "which
+//! process owns the foreground window" is answered by
+//! `GetForegroundWindow` → `GetWindowThreadProcessId` → `OpenProcess` →
+//! `QueryFullProcessImageNameW`, and that chain is one to two orders of magnitude over the
+//! hundred microseconds NFR-01 gives the callback — `OpenProcess` alone is a kernel object
+//! creation that can be refused, and a refusal costs the same as a success. Level 1 of FR-72 pays
+//! it already, on the watcher thread, once per focus change; FR-84 asks the same question of the
+//! same string, so it is answered **in the same pass** and published into a flag beside the one
+//! FR-70 publishes into. See [`EXCLUDED`] for the flag and [`determine`] for the single read.
+//!
+//! What the callback does with it is nothing, in the exact sense of the previous section: the
+//! flag is read by the input thread, in [`crate::app::apply_buffering_gate`], and what the gate
+//! does with it is take the typing buffer away. A stroke in an excluded process therefore meets
+//! the same thread-local presence check it always met, takes the shorter arm of it, and is
+//! **passed on to the application untouched** — [`crate::buffer::record`] neither records nor
+//! suppresses when there is no buffer, and no return value of it reaches the decision of
+//! [`crate::hook::classify`] at all.
+//!
+//! ⚠ **"Не ведётся" is "we do not remember", not "we do not let through".** FR-84 exists for
+//! programs that read input in ways this one must stay out of; suppressing their keystrokes would
+//! be the opposite of staying out of the way. Nothing on this path can return
+//! [`crate::hook::Decision::Suppress`].
+//!
+//! ⚠ **FR-96 is unaffected, and that is a property of where it sits rather than a promise made
+//! here.** The emergency combination is handled at the top of
+//! [`crate::hook::keyboard_hook_proc`], before `classify` is called and before anything of this
+//! module could be consulted even in principle — there is no flag of this module on that path to
+//! read. See the check in `tests\guard.rs`.
+//!
+//! ## How the list gets from the file to the watcher thread — section 6.3
+//!
+//! Section 6.3 gives two mechanisms for publishing configuration: «через `arc_swap`-подобный
+//! механизм на базе `Atomic` указателя либо через `PostMessage`». What is used here is the first
+//! one with the pointer removed, which is what module [`crate::layouts`] already does for the
+//! `cycle` list of section 7: a **fixed table of atomics** written by the UI thread and read by
+//! the watcher thread, with no allocation and no lock on either side. See
+//! [`publish_exclusions`].
+//!
+//! A pointer would buy an unbounded list at the price of a reclamation problem — a reader may be
+//! inside the old list when the writer swaps, and a resident program under NFR-06's eight
+//! megabytes cannot answer that by never freeing. A bounded table has no such question to answer:
+//! [`MAX_EXCLUSIONS`] names and [`MAX_EXCLUSION_NAME_BYTES`] bytes each, four kilobytes of `.bss`,
+//! and an entry that does not fit is **refused and counted** rather than truncated — a truncated
+//! name is a name that matches a different program.
+//!
+//! ⚠ **One thing is added over [`crate::layouts::publish`]: a generation counter**, and the
+//! difference that asks for it is real. There, every entry is one `usize` and a reader that
+//! races the writer sees the old value or the new one, both of which existed. Here an entry is a
+//! row of bytes read one at a time, and a reader that raced the writer could assemble a name that
+//! was never in either list. [`EXCLUSIONS_GENERATION`] is odd while the table is being written and
+//! is re-read after the search; a reader that sees it move discards what it read and asks again.
+//! Requirement: no mutex on the read path (NFR-04, section 6.3), and there is none — the reader
+//! takes no lock, waits for nothing and can be preempted anywhere without holding anything up.
+//!
+//! ## Comparison — the name, case-insensitively
+//!
+//! FR-84 says «имён процессов», so what is compared is the last component of the image path and
+//! never the path: see [`file_name_of`], which level 1 of FR-72 uses for the same reason. Both
+//! sides go through [`fold_process_name`], which takes the file name, trims it and lower-cases it
+//! with `str::to_lowercase` — the configured names once, at publication, and the observed name
+//! once per probe, both on threads that are allowed to allocate.
+//!
+//! ⚠ **`to_lowercase` and not `eq_ignore_ascii_case`, and this is the one place this module
+//! departs from level 1's comparison.** Level 1 compares against three names that are ASCII by
+//! construction. This list is written by a user, and `Игра.exe` in a configuration file has to
+//! match `ИГРА.EXE` on the disk, because that is what «регистр в именах файлов Windows незначим»
+//! means to the person writing the file. What the fold does **not** reproduce exactly is NTFS's
+//! own `$UpCase` table, which is a per-volume snapshot of Unicode taken when the volume was
+//! formatted; the residual disagreements are exotic (Cherokee, Deseret, the Turkish dotted and
+//! dotless `I`, which `to_lowercase` folds locale-independently and Windows folds the same way
+//! for file names) and none of them is reachable by an executable name a user would type.
+//!
+//! ## The default, and the direction an unknown answer takes
+//!
+//! Section 7 gives `processes = []`, and an empty list excludes nothing: [`is_excluded_name`]
+//! searches an empty table and answers `false`, [`excluded`] stays `false` for the life of the
+//! process, and every path of tasks T-06-1 and earlier is reached exactly as it was. **The
+//! default is not to be changed.**
+//!
+//! A process whose name **cannot be read** — `OpenProcess` refused across an integrity level, no
+//! foreground window at all — is likewise not excluded. That is the opposite direction from
+//! FR-73's, and the asymmetry is the point: FR-73's unknown answer keeps a *feature* on, while
+//! guessing "excluded" here would switch the whole program off silently for every window this
+//! process may not open. The failure that costs the user something is the loud one.
+//!
 //! # SEC-01, SEC-02, SEC-07
 //!
 //! Nothing that passes through this module is a keystroke or is derived from one. What it
@@ -117,7 +210,11 @@
 //!
 //! The process names of [`CREDENTIAL_PROCESSES`] are compared and discarded; none of them
 //! reaches a journal, a file or a panic message, and neither does the name of any other
-//! process. SEC-02 is met by [`crate::app::apply_buffering_gate`], which flushes through
+//! process. The observed name of the foreground window is read into a local, folded, compared
+//! against [`CREDENTIAL_PROCESSES`] and against the published list, and dropped when the probe
+//! returns — the only names this module **stores** are the ones the user wrote into their own
+//! `[exclusions] processes`, and even those never leave it. What leaves is two bits.
+//! SEC-02 is met by [`crate::app::apply_buffering_gate`], which flushes through
 //! [`crate::buffer::reset`] — the one function of module `buffer` that overwrites the ring with
 //! zeroes — before the buffer is taken away.
 //!
@@ -128,7 +225,7 @@
 //! concerned, and a UI Automation call that fails is [`Field::Undetermined`], which FR-73 fixes
 //! the meaning of. Every `unsafe` block carries a `// SAFETY:` comment.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
 use std::cell::RefCell;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
@@ -318,18 +415,85 @@ pub const fn buffering_allowed_for(field: Field) -> bool {
     }
 }
 
+/// Whether the typing buffer may be kept for `field` in a process `excluded` says this much
+/// about — **FR-70, FR-73 and FR-84 in one function**.
+///
+/// FR-84 is a veto and not a fourth kind of field: «в которых буферизация не ведётся» admits of
+/// no state of the focused control that would put it back on, so the exclusion is `&&`-ed over
+/// the field rule rather than folded into [`Field`]. Keeping them apart is also what keeps
+/// [`password_field`] — the flag of SEC-04a — meaning what it says: an excluded process is not a
+/// password field, it is a process this program does not record in.
+///
+/// A `const fn` of its arguments so that all eight combinations are reachable from a test without
+/// a window, a focus, a process or a keyboard.
+pub const fn buffering_allowed_in(field: Field, excluded: bool) -> bool {
+    !excluded && buffering_allowed_for(field)
+}
+
+/// **Both published answers, taken in one load** — the field of FR-70 and the exclusion of FR-84.
+///
+/// ⚠ **One atomic and not two, and that is the whole of the concurrency argument of this task.**
+/// The two facts are read together by [`buffering_allowed`] and the gate acts on the pair, so a
+/// reader that saw one of them updated and the other not would act on a state that never existed.
+/// The dangerous half is exact: buffering is switched **on** only for `excluded == false` and a
+/// field of FR-73 or `Ordinary`, so a reader that got the new field beside the previous window's
+/// `excluded == false` would keep recording inside a process FR-84 says nothing may be recorded
+/// in. Two `Relaxed` atomics do not forbid that — `Relaxed` orders nothing between two locations —
+/// and the answer is not to reach for `Acquire`/`Release`, which would make the pair consistent by
+/// paying for an ordering nothing here needs. The answer is to have one location, and then there
+/// is no pair to be inconsistent.
+///
+/// So [`FIELD`] carries the field code in its low bits and the exclusion in [`EXCLUDED_BIT`], and
+/// this is the one place either is decoded. Section 6.3 is met to the letter — one flag, one
+/// atomic, `Relaxed` — and the gate got **cheaper** rather than dearer for FR-84: one load, where
+/// task T-06-1 already paid one.
+fn state() -> (Field, bool) {
+    unpack(FIELD.load(Ordering::Relaxed))
+}
+
+/// The two answers as the one byte [`FIELD`] holds — the inverse of [`unpack`].
+///
+/// A `const fn` of its arguments, like every other decision in this module that could be made
+/// one, so that the packing is checked against the unpacking for all eight combinations without a
+/// window, a focus or a process.
+pub const fn pack(field: Field, excluded: bool) -> u8 {
+    let bit = if excluded { EXCLUDED_BIT } else { 0 };
+
+    field as u8 | bit
+}
+
+/// The two answers a byte of [`FIELD`] carries — the inverse of [`pack`].
+///
+/// Total, for the reason [`Field::from_code`] is: the value comes out of an atomic, and a total
+/// function is one less thing that can panic on a path the window procedure runs. A code the mask
+/// leaves that this build does not understand is FR-73's arm, which is also what
+/// [`Field::from_code`] answers on its own.
+pub const fn unpack(raw: u8) -> (Field, bool) {
+    (Field::from_code(raw & FIELD_MASK), raw & EXCLUDED_BIT != 0)
+}
+
 /// The state as published — one relaxed load, which is what section 6.3 prescribes for this
 /// flag and what FR-71 means by «одной операцией».
 pub fn field() -> Field {
-    Field::from_code(FIELD.load(Ordering::Relaxed))
+    state().0
+}
+
+/// Whether the foreground process is one of `[exclusions] processes` — **FR-84**, as published.
+///
+/// One relaxed load, out of the same word [`field`] comes from: see [`state`].
+pub fn excluded() -> bool {
+    state().1
 }
 
 /// Whether the typing buffer may be kept right now — the question
 /// [`crate::app::apply_buffering_gate`] asks once per message of the input thread.
 ///
 /// One relaxed load and one `match`; no allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05).
+/// FR-84 added no load to this path at all — see [`state`].
 pub fn buffering_allowed() -> bool {
-    buffering_allowed_for(field())
+    let (field, excluded) = state();
+
+    buffering_allowed_in(field, excluded)
 }
 
 /// The flag of SEC-04a: `1` in a password field, `0` everywhere else.
@@ -367,6 +531,16 @@ pub struct Counters {
     pub level2_timeouts: u32,
     /// Level 3 calls that failed or ran out of time — the FR-73 source.
     pub level3_failures: u32,
+    /// Probes that found the foreground process in `[exclusions] processes` — **FR-84**.
+    pub excluded_verdicts: u32,
+    /// Names published into the table by the last [`publish_exclusions`] — **FR-84**, section 7.
+    pub exclusions: u32,
+    /// Names the last [`publish_exclusions`] refused: empty, over
+    /// [`MAX_EXCLUSION_NAME_BYTES`], or past [`MAX_EXCLUSIONS`].
+    pub exclusions_refused: u32,
+    /// Searches that gave up because the table moved under every attempt — see
+    /// [`EXCLUSIONS_GENERATION`]. Expected to stay at zero for the life of a process.
+    pub exclusion_read_retries: u32,
 }
 
 /// What the probe has done so far.
@@ -382,6 +556,10 @@ pub fn counters() -> Counters {
         level2_verdicts: LEVEL2_VERDICTS.load(Ordering::Relaxed),
         level2_timeouts: LEVEL2_TIMEOUTS.load(Ordering::Relaxed),
         level3_failures: LEVEL3_FAILURES.load(Ordering::Relaxed),
+        excluded_verdicts: EXCLUDED_VERDICTS.load(Ordering::Relaxed),
+        exclusions: EXCLUSIONS_PUBLISHED.load(Ordering::Relaxed),
+        exclusions_refused: EXCLUSIONS_REFUSED.load(Ordering::Relaxed),
+        exclusion_read_retries: EXCLUSION_READ_RETRIES.load(Ordering::Relaxed),
     }
 }
 
@@ -389,7 +567,8 @@ pub fn counters() -> Counters {
 // Process-wide state
 // ---------------------------------------------------------------------------------------
 
-/// The published state, as a [`Field`] code.
+/// **The published state**: a [`Field`] code in [`FIELD_MASK`] and FR-84's answer in
+/// [`EXCLUDED_BIT`].
 ///
 /// Section 6.3 names the ordering: «`AtomicBool` с упорядочением `Relaxed`». It is an
 /// `AtomicU8` rather than an `AtomicBool` because the requirement's two answers turned out to be
@@ -398,9 +577,35 @@ pub fn counters() -> Counters {
 /// is no other datum whose visibility has to be ordered against it. The reader acts on the value
 /// alone.
 ///
-/// Starts at [`Field::Undetermined`], which is FR-73's answer and therefore buffering on: before
-/// the first focus event this program has determined nothing.
+/// ⚠ **Task T-06-3 put FR-84's flag in the top bit of this same word rather than beside it**, and
+/// the reason is the sentence above turned around: the moment there are two published facts the
+/// gate acts on **together**, "no other datum whose visibility has to be ordered against it" stops
+/// being true of either of them taken alone. One word restores it. [`state`] carries the whole
+/// argument; it is the only place this value is decoded, and [`publish`] and
+/// [`note_focus_moved`] are the only two that write it.
+///
+/// Starts at [`Field::Undetermined`] with the bit clear, which is FR-73's answer and therefore
+/// buffering on, beside section 7's `processes = []` and therefore nothing excluded: before the
+/// first focus event this program has determined nothing and has been told nothing.
 static FIELD: AtomicU8 = AtomicU8::new(Field::Undetermined as u8);
+
+/// Bit of [`FIELD`] that carries FR-84's answer: set while the foreground process is one of
+/// `[exclusions] processes`.
+///
+/// The top bit, so that the field codes keep the values [`Field`] gives them and
+/// `Field::from_code` keeps meaning what it meant — see [`state`] for why the two facts share a
+/// word at all.
+const EXCLUDED_BIT: u8 = 0b1000_0000;
+
+/// The bits of [`FIELD`] that carry the field code — everything [`EXCLUDED_BIT`] does not.
+const FIELD_MASK: u8 = !EXCLUDED_BIT;
+
+/// The interval state is the zero code, which is what lets [`note_focus_moved`] reach it with a
+/// single `fetch_and` that keeps [`EXCLUDED_BIT`] and clears everything else.
+///
+/// Checked here rather than trusted: the discriminant is written out in [`Field`], and a future
+/// edit that renumbered the arms would turn that one line into a silent bug.
+const _: () = assert!(Field::Pending as u8 == 0);
 
 /// Whether a probe has been asked for and not yet run.
 ///
@@ -453,6 +658,9 @@ static LEVEL2_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 /// Level 3 calls that failed or ran out of time.
 static LEVEL3_FAILURES: AtomicU32 = AtomicU32::new(0);
 
+/// Probes that found the foreground process excluded — FR-84.
+static EXCLUDED_VERDICTS: AtomicU32 = AtomicU32::new(0);
+
 // ---------------------------------------------------------------------------------------
 // The input thread's half — FR-71's race
 // ---------------------------------------------------------------------------------------
@@ -485,23 +693,82 @@ pub fn note_focus_moved() {
 
     // Order matters: the state is published **before** the probe is asked for, so a watcher
     // thread that answers instantly cannot have its verdict overwritten by this store.
-    FIELD.store(Field::Pending as u8, Ordering::Relaxed);
+    //
+    // ⚠ A `fetch_and` and not a `store`, task **T-06-3**: FR-84's answer shares this word (see
+    // `FIELD`), and `Field::Pending` is the zero code, so keeping `EXCLUDED_BIT` and clearing
+    // everything else *is* "publish `Pending`". One read-modify-write rather than a load and a
+    // store, because the watcher thread may publish a verdict between the two halves of the
+    // second form and this thread would then put the previous field back.
+    //
+    // The exclusion bit is **carried over** rather than cleared, and that is the honest value:
+    // FR-84's answer for the window now arriving is not known yet either, and until the probe
+    // says otherwise the last thing this program was told is the best it has. Nothing rests on
+    // the choice — `Pending` switches buffering off through `buffering_allowed_in` whatever the
+    // bit says — so what decides it is that clearing it would be a claim, and this is the one
+    // moment when the program is entitled to none.
+    FIELD.fetch_and(EXCLUDED_BIT, Ordering::Relaxed);
 
-    PROBE_PENDING.store(true, Ordering::Relaxed);
-
-    if !crate::app::post_to_watcher_thread(WM_APP_PROBE) {
+    if !request_probe() {
         // The watcher thread has no window — it has not created one yet, or it is already gone.
         // There is nobody to answer, and leaving the state at `Pending` would mean a program
         // that never buffers again. FR-73 covers exactly this: the field cannot be determined,
         // so buffering is on.
-        PROBE_PENDING.store(false, Ordering::Relaxed);
-        publish(Field::Undetermined);
+        //
+        // FR-84 answers `false` on the same path and for the same kind of reason: with no thread
+        // to compare the name on, this program has not been shown an excluded process. Guessing
+        // `true` would leave a program that never records again — see the module documentation on
+        // which way an unknown answer goes for each of the two requirements, and why they differ.
+        publish(Probe {
+            field: Field::Undetermined,
+            excluded: false,
+        });
     }
+}
+
+/// Asks the watcher thread to run a probe. Answers whether the request reached a window.
+///
+/// The two callers ask for the same thing for different reasons — [`note_focus_moved`] because the
+/// focus moved, [`publish_exclusions`] because the list the last probe compared against has been
+/// replaced — and both need the same care on failure, which is why the request is one function and
+/// not two copies of four lines.
+///
+/// ⚠ **A failed request restores the flag rather than clearing it.** The two callers run on
+/// different threads (section 6.1 puts the configuration on the UI thread and the focus on the
+/// input thread), so one of them finding no watcher window must not cancel a probe the other has
+/// already asked for and had accepted. SEC-05 is why it is put back at all rather than simply left
+/// set: [`WM_APP_PROBE`] carries nothing, and a flag left standing for nobody is a flag a forged
+/// message could spend.
+fn request_probe() -> bool {
+    let previous = PROBE_PENDING.swap(true, Ordering::Relaxed);
+
+    if crate::app::post_to_watcher_thread(WM_APP_PROBE) {
+        return true;
+    }
+
+    PROBE_PENDING.store(previous, Ordering::Relaxed);
+    false
 }
 
 // ---------------------------------------------------------------------------------------
 // The watcher thread's half — the three levels of FR-72
 // ---------------------------------------------------------------------------------------
+
+/// What one probe found — **the two answers of one pass over the foreground window**.
+///
+/// Together, and not one after the other, because they are read out of the same string: FR-84
+/// asks whether the name of the foreground process is in a list and level 1 of FR-72 asks whether
+/// it is in a different list, and reading it twice would pay `OpenProcess` twice for one focus
+/// change.
+///
+/// **SEC-01, SEC-07.** One of four named states and one boolean. The name they were derived from
+/// does not survive the function that read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Probe {
+    /// What kind of field has the focus — FR-70 to FR-73.
+    field: Field,
+    /// Whether the process that owns it is excluded — FR-84.
+    excluded: bool,
+}
 
 /// Runs the three levels of FR-72 and publishes the verdict — **the heavy part**, on the
 /// watcher thread and on no other.
@@ -538,8 +805,8 @@ pub fn run_pending_probe() -> bool {
 }
 
 /// Publishes a verdict and tells the input thread to act on it.
-fn publish(verdict: Field) {
-    match verdict {
+fn publish(verdict: Probe) {
+    match verdict.field {
         Field::Password => PASSWORD_VERDICTS.fetch_add(1, Ordering::Relaxed),
         Field::Ordinary => ORDINARY_VERDICTS.fetch_add(1, Ordering::Relaxed),
         Field::Undetermined => UNDETERMINED_VERDICTS.fetch_add(1, Ordering::Relaxed),
@@ -549,14 +816,20 @@ fn publish(verdict: Field) {
         Field::Pending => return,
     };
 
-    FIELD.store(verdict as u8, Ordering::Relaxed);
+    if verdict.excluded {
+        EXCLUDED_VERDICTS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // **Both answers in one store**, which is what makes them impossible to observe apart — see
+    // `state` and `FIELD`. There is no order to get right here, because there is no second store.
+    FIELD.store(pack(verdict.field, verdict.excluded), Ordering::Relaxed);
 
     // The buffer is a thread-local of the input thread (section 6.3), so the thread that owns it
     // has to be the one that switches it. One `PostMessageW`, which queues and returns.
     crate::app::post_to_input_thread(WM_APP_FIELD);
 }
 
-/// **The three levels of FR-72, in the order FR-72 fixes.**
+/// **FR-84's comparison and the three levels of FR-72, over one read of the process name.**
 ///
 /// > 1. Имя процесса активного окна в списке системных окон учётных данных … → буферизация
 /// >    отключена.
@@ -578,21 +851,62 @@ fn publish(verdict: Field) {
 /// UI Automation answering `false` is [`Field::Ordinary`] and UI Automation not answering at all
 /// is [`Field::Undetermined`], which is FR-73.
 ///
+/// # ⚠ FR-84 comes before all three, and ends the probe when it answers
+///
+/// The exclusion is decided from the same string level 1 needs, so it costs nothing beyond a
+/// search of a table that is empty by default. When it answers **yes**, the probe stops there and
+/// the two remaining levels are not run at all, and that is a decision rather than an
+/// optimisation:
+///
+/// * they exist to decide whether to keep a typing buffer, and FR-84 has already decided it —
+///   «в которых буферизация не ведётся» admits of no control that would put it back on;
+/// * level 2 sends a window message into that process and level 3 opens a cross-process COM
+///   channel to it, and the programs FR-84 is written for are «игры с системами защиты от
+///   читерства» — a program asked to stay out of the way should not be probing the accessibility
+///   tree of an anti-cheat every time the game takes the foreground;
+/// * and it is the only way FR-84 also buys back what it is supposed to buy: tens of milliseconds
+///   of UI Automation per focus change, in exactly the program the user excluded (NFR-10).
+///
+/// With the default list of section 7 nothing is ever excluded, this branch is never taken, and
+/// every path below it is reached exactly as task T-06-1 left it.
+///
 /// # Threading
 ///
 /// Watcher thread only. Level 3 needs the COM single-threaded apartment section 6.1 puts there,
 /// and levels 1 and 2 need to be nowhere near the hook (FR-71).
-fn determine() -> Field {
+fn determine() -> Probe {
     let Some(window) = foreground_window() else {
         // No foreground window at all — which happens while the desktop switches and on the
-        // secure desktop. Nothing can be determined, and FR-73 says what that means.
-        return Field::Undetermined;
+        // secure desktop. Nothing can be determined, and FR-73 says what that means; nothing is
+        // excluded either, because there is no process here to be in a list.
+        return Probe {
+            field: Field::Undetermined,
+            excluded: false,
+        };
     };
 
+    // **The one read of the process name.** `OpenProcess` and `QueryFullProcessImageNameW` are
+    // paid here, once, on the watcher thread, and both questions below are answered from the
+    // result. `None` is a name that could not be read — a process of another user or a higher
+    // integrity level — and it is not a failure: it is "not recognised" for level 1 and "not
+    // excluded" for FR-84, which is what each of them does with a name it does not know.
+    let process = process_name_of(window);
+
+    // ---- FR-84: the exclusion list ---------------------------------------------------
+    if process.as_deref().is_some_and(is_excluded_name) {
+        return Probe {
+            field: Field::Undetermined,
+            excluded: true,
+        };
+    }
+
     // ---- Level 1: the process behind the active window -------------------------------
-    if is_credential_process(window) {
+    if process.as_deref().is_some_and(is_credential_process_name) {
         LEVEL1_VERDICTS.fetch_add(1, Ordering::Relaxed);
-        return Field::Password;
+        return Probe {
+            field: Field::Password,
+            excluded: false,
+        };
     }
 
     // ---- Level 2: a classic `Edit`, asked for its mask character ----------------------
@@ -605,17 +919,25 @@ fn determine() -> Field {
         && field_for_password_char(password_char(focused)) == Some(Field::Password)
     {
         LEVEL2_VERDICTS.fetch_add(1, Ordering::Relaxed);
-        return Field::Password;
+        return Probe {
+            field: Field::Password,
+            excluded: false,
+        };
     }
 
     // ---- Level 3: UI Automation ------------------------------------------------------
-    match is_password_element() {
+    let field = match is_password_element() {
         Some(true) => Field::Password,
         Some(false) => Field::Ordinary,
         None => {
             LEVEL3_FAILURES.fetch_add(1, Ordering::Relaxed);
             Field::Undetermined
         }
+    };
+
+    Probe {
+        field,
+        excluded: false,
     }
 }
 
@@ -639,16 +961,21 @@ fn foreground_window() -> Option<HWND> {
     Some(window)
 }
 
-/// Whether the process behind `window` is one of [`CREDENTIAL_PROCESSES`] — **level 1 of
-/// FR-72**.
+/// The bare executable name of the process behind `window`, or `None` when it cannot be read.
 ///
-/// A failure to read the name is `false` and not an error: level 1 is a *recogniser*, and a
-/// process whose name cannot be read is simply not recognised. The chain then goes on to levels
-/// 2 and 3, which is the behaviour FR-72 prescribes for a field level 1 says nothing about.
+/// **The single read both requirements are answered from** — level 1 of FR-72 and the list of
+/// FR-84. Task T-06-1 read it for level 1 alone; task T-06-3 lifted the read out of that test so
+/// that adding a second question added no second `OpenProcess`. See [`determine`].
 ///
-/// SEC-01, SEC-07: the name is compared and dropped. Nothing here reaches a journal or a panic
-/// message, and no name of any process is stored anywhere in this module.
-fn is_credential_process(window: HWND) -> bool {
+/// `None` is not an error and is never escalated into one: a window that died between the two
+/// calls, a process this one may not open, a name Windows will not report. Each caller decides
+/// what an unknown name means to it, and the two of them decide differently on purpose — see the
+/// module documentation.
+///
+/// SEC-01, SEC-07: the name is returned to the one caller, compared and dropped. Nothing here
+/// reaches a journal or a panic message, and no name of any observed process is stored anywhere
+/// in this module.
+fn process_name_of(window: HWND) -> Option<String> {
     let mut pid = 0u32;
 
     // SAFETY: `window` is the live foreground window the caller obtained and checked. The second
@@ -658,14 +985,10 @@ fn is_credential_process(window: HWND) -> bool {
     let thread = unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
 
     if thread == 0 || pid == 0 {
-        return false;
+        return None;
     }
 
-    let Some(name) = process_file_name(pid) else {
-        return false;
-    };
-
-    is_credential_process_name(&name)
+    process_file_name(pid)
 }
 
 /// Whether a bare executable name is one of [`CREDENTIAL_PROCESSES`].
@@ -692,7 +1015,16 @@ pub fn is_credential_process_name(name: &str) -> bool {
 /// the one that is granted across integrity levels, which is the whole point — an elevated
 /// credential window is exactly the case level 1 exists for. Asking for more than is needed
 /// would turn "the name is unreadable" into the ordinary outcome.
-fn process_file_name(pid: u32) -> Option<String> {
+///
+/// ⚠ **Public so that a test can drive the live read**, the same reason [`class_name`] and
+/// [`password_char`] are, and a sharper one: **both** things this module decides from a process
+/// name stand on these two Win32 calls — level 1 of FR-72 and the whole of FR-84 — and neither of
+/// them can be driven from a test any other way. Level 1 needs a credential process, which
+/// limitation 1 of section 10 puts on the secure desktop, and until task T-06-3 a `None` from here
+/// was **invisible**: it merely let the chain fall through to levels 2 and 3, which is also what a
+/// correct read of an ordinary process does. A test process asking for its own name is the one
+/// place the answer can be checked against something known.
+pub fn process_file_name(pid: u32) -> Option<String> {
     // SAFETY: `OpenProcess` takes three values and returns a handle or an error; it dereferences
     // nothing of ours. `false` for the inheritance flag is what a handle that must not leave this
     // process needs. NFR-13: the result is a `Result` and is examined here — a refusal is the
@@ -758,6 +1090,246 @@ impl Drop for OwnedProcess {
             crate::app::report_non_critical("CloseHandle(process)", &error);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-84 — the process exclusion list (task T-06-3)
+// ---------------------------------------------------------------------------------------
+
+/// Names `[exclusions] processes` may publish before the rest are refused.
+///
+/// A bound is what lets the list live in a table of atomics instead of behind a pointer, and
+/// therefore what removes the reclamation problem a published pointer would bring with it — see
+/// the module documentation. Thirty-two is far past what the requirement is for: FR-84 names
+/// «игры с системами защиты от читерства и приложения, использующие Raw Input», of which a machine
+/// has a handful, and the default of section 7 is none at all.
+///
+/// `pub` so that a test can drive the refusal rather than take this number on trust.
+pub const MAX_EXCLUSIONS: usize = 32;
+
+/// Bytes one published name may occupy, in the UTF-8 of [`fold_process_name`].
+///
+/// A hundred and twenty-eight, against a `MAX_PATH` of two hundred and sixty for a whole *path*:
+/// what is stored here is the last component of one, and an executable whose bare name does not
+/// fit in this does not exist outside a test.
+///
+/// ⚠ **A name that does not fit is refused, never truncated.** A truncated name is a name that
+/// matches a *different* program, and matching the wrong program here means silently not
+/// recording in it.
+pub const MAX_EXCLUSION_NAME_BYTES: usize = 128;
+
+/// How many times [`is_excluded_name`] re-reads a table that moved under it.
+///
+/// Four, and the number is not load-bearing: a publication is a few dozen stores by the UI thread
+/// and the only reader runs once per focus change, so a single collision is already a coincidence
+/// and four in a row is not reachable in practice. What matters is that the loop is **bounded** —
+/// this runs on the watcher thread, which holds the `WinEvent` subscriptions of section 6.1, and a
+/// thread that spins there stops delivering focus events to the whole program.
+const EXCLUSION_READ_ATTEMPTS: u32 = 4;
+
+/// The published `[exclusions] processes`, as a table of atomics — **section 6.3**.
+///
+/// One row per name, [`MAX_EXCLUSION_NAME_BYTES`] bytes each, holding the UTF-8 of
+/// [`fold_process_name`]. Written by the UI thread in [`publish_exclusions`] and read by the
+/// watcher thread in [`is_excluded_name`]; no other thread touches it, and the input thread — the
+/// one NFR-04 is about — never reads it at all.
+static EXCLUSION_NAMES: [[AtomicU8; MAX_EXCLUSION_NAME_BYTES]; MAX_EXCLUSIONS] =
+    [const { [const { AtomicU8::new(0) }; MAX_EXCLUSION_NAME_BYTES] }; MAX_EXCLUSIONS];
+
+/// Bytes in use in each row of [`EXCLUSION_NAMES`].
+static EXCLUSION_LENS: [AtomicUsize; MAX_EXCLUSIONS] =
+    [const { AtomicUsize::new(0) }; MAX_EXCLUSIONS];
+
+/// Rows of [`EXCLUSION_NAMES`] that hold a name. **Zero is the default of section 7.**
+static EXCLUSION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// **Odd while [`publish_exclusions`] is writing the table, even when it is readable.**
+///
+/// Every cell of the table is an atomic, so no choice of orderings here can be a data race or
+/// undefined behaviour; what the counter guards against is narrower and real — a search that ran
+/// across a publication and assembled its answer out of **two different lists**, matching a name
+/// that was in neither. [`is_excluded_name`] reads this before and after its search and throws the
+/// answer away if it moved.
+///
+/// This is what module [`crate::layouts`] does not need and this does. There, a published entry is
+/// one `usize` and a racing reader sees the old value or the new one — both of which existed here.
+/// Here an entry is a row of bytes read one at a time.
+///
+/// `AcqRel` on the writer's two bumps and `Acquire` on the reader's two loads is what puts the
+/// data stores of one publication between them on every architecture this program is built for.
+static EXCLUSIONS_GENERATION: AtomicU32 = AtomicU32::new(0);
+
+/// Names the last [`publish_exclusions`] accepted — see [`Counters`].
+static EXCLUSIONS_PUBLISHED: AtomicU32 = AtomicU32::new(0);
+
+/// Names the last [`publish_exclusions`] refused.
+static EXCLUSIONS_REFUSED: AtomicU32 = AtomicU32::new(0);
+
+/// Searches abandoned because the table moved under them.
+static EXCLUSION_READ_RETRIES: AtomicU32 = AtomicU32::new(0);
+
+/// The form a process name is compared in — **the whole of FR-84's comparison rule**.
+///
+/// Three steps, and each is a sentence of the requirement or of the task specification:
+///
+/// 1. `trim`, because `processes = [" game.exe "]` is a person writing a list in a text file;
+/// 2. [`file_name_of`], because FR-84 says «имён процессов» and not of paths — a user who wrote
+///    `C:\Games\game.exe` meant the same program the system reports as `game.exe`, and level 1 of
+///    FR-72 already reads the observed side the same way and for the same reason;
+/// 3. `to_lowercase`, because file names in Windows are case-insensitive.
+///
+/// ⚠ **Unicode lowercasing and not `eq_ignore_ascii_case`.** The three names of level 1 are ASCII
+/// by construction and are compared with the ASCII fold; this list is written by a user and
+/// `Игра.exe` has to match `ИГРА.EXE`, which an ASCII fold leaves apart. `str::to_lowercase`
+/// applies the Unicode default case conversion, is locale-independent — the Turkish dotted and
+/// dotless `I` included, which is the case a locale-aware fold would get *differently* from the
+/// way Windows treats file names — and allocates, which is why this is called on the UI thread
+/// once per publication and on the watcher thread once per focus change, and nowhere else.
+///
+/// What it does not reproduce exactly is NTFS's own `$UpCase` table, a per-volume snapshot of
+/// Unicode taken when the volume was formatted. The residual disagreements are confined to
+/// characters no executable name a user would type contains.
+///
+/// Public so that both sides of the comparison and the whole rule can be driven from a test
+/// without a process.
+pub fn fold_process_name(name: &str) -> String {
+    file_name_of(name.trim()).to_lowercase()
+}
+
+/// **Whether `name` is in the published `[exclusions] processes` — FR-84.**
+///
+/// `name` is the observed executable name, in whatever spelling Windows reported it;
+/// [`fold_process_name`] puts it into the form the table holds.
+///
+/// Watcher thread, once per focus change, from [`determine`]. **Not on the hook path and not in a
+/// `WinEvent` callback**: the string it is given cost an `OpenProcess`, and where that is paid is
+/// the whole subject of this module.
+///
+/// # NFR-04
+///
+/// No lock, no mutex, no wait. A table of atomics, a bounded retry, and an answer.
+///
+/// # An empty list
+///
+/// [`EXCLUSION_COUNT`] is zero, the search examines nothing and answers `false` — which is section
+/// 7's default reached by doing nothing, rather than by a special case somebody has to remember to
+/// keep correct.
+pub fn is_excluded_name(name: &str) -> bool {
+    let folded = fold_process_name(name);
+    let wanted = folded.as_bytes();
+
+    if wanted.is_empty() || wanted.len() > MAX_EXCLUSION_NAME_BYTES {
+        // Neither could have been published: `publish_exclusions` refuses both. Answering here
+        // saves the search and, more to the point, says so.
+        return false;
+    }
+
+    for _ in 0..EXCLUSION_READ_ATTEMPTS {
+        let before = EXCLUSIONS_GENERATION.load(Ordering::Acquire);
+
+        if before.is_multiple_of(2) {
+            let found = search_published(wanted);
+
+            // Unmoved: what was searched was one list, and the answer stands.
+            if EXCLUSIONS_GENERATION.load(Ordering::Acquire) == before {
+                return found;
+            }
+        }
+
+        EXCLUSION_READ_RETRIES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // A publication in flight through every attempt — see `EXCLUSION_READ_ATTEMPTS` for why this
+    // is not reachable in practice. The answer is the default of section 7, which is the direction
+    // an unknown answer takes for FR-84: not excluded, so the program goes on recording, and the
+    // fresh probe `publish_exclusions` asks for on its way out settles it a moment later.
+    false
+}
+
+/// One pass over the table. Split out so that [`is_excluded_name`] reads as the generation check
+/// it is.
+fn search_published(wanted: &[u8]) -> bool {
+    let count = EXCLUSION_COUNT.load(Ordering::Relaxed).min(MAX_EXCLUSIONS);
+
+    (0..count).any(|index| {
+        EXCLUSION_LENS[index].load(Ordering::Relaxed) == wanted.len()
+            && EXCLUSION_NAMES[index]
+                .iter()
+                .zip(wanted)
+                .all(|(cell, byte)| cell.load(Ordering::Relaxed) == *byte)
+    })
+}
+
+/// **Publishes `[exclusions] processes` to the watcher thread — FR-84, section 6.3.**
+///
+/// Called on the **UI thread**, which is the thread section 6.1 lets touch a file and the one that
+/// owns the configuration, together with the other published values of section 7. Returns how many
+/// names were accepted, so that a caller — and a test — can see the refusals rather than infer
+/// them.
+///
+/// Idempotent and repeatable: the settings dialog of FR-92 (task T-08-1) calls it again with a new
+/// list and nothing else has to be told. Publishing an empty slice is how the list is emptied, and
+/// it is the state the program starts in.
+///
+/// # What is refused, and why refusing is right
+///
+/// An empty name after folding, a name over [`MAX_EXCLUSION_NAME_BYTES`], and everything past
+/// [`MAX_EXCLUSIONS`]. All three are counted into [`Counters::exclusions_refused`] and none is
+/// truncated or silently accepted in part: this list decides whether the program records at all,
+/// and a half-stored name is a name that matches the wrong program.
+///
+/// # The probe on the way out
+///
+/// The flag describes the window that had the focus when the *previous* list was compared, so a
+/// new list that nobody re-compared would not take effect until the user happened to change
+/// windows. The last line asks the watcher thread for a fresh probe — the same request
+/// [`note_focus_moved`] makes, through the same message, and it is a request and not a command:
+/// a program with no watcher window yet leaves the answer to the first focus change, which is
+/// exactly what start-up looks like.
+///
+/// **The buffer is not touched.** Unlike [`note_focus_moved`] this does not move the focus
+/// generation and does not publish [`Field::Pending`]: a user editing a list of process names has
+/// not moved the caret, and emptying their typing buffer for it would be a reset FR-10 does not
+/// list.
+pub fn publish_exclusions(names: &[String]) -> usize {
+    // Odd for the whole of the write — see `EXCLUSIONS_GENERATION`.
+    EXCLUSIONS_GENERATION.fetch_add(1, Ordering::AcqRel);
+
+    let mut written = 0usize;
+    let mut refused = 0u32;
+
+    for name in names {
+        let folded = fold_process_name(name);
+        let bytes = folded.as_bytes();
+
+        if written == MAX_EXCLUSIONS || bytes.is_empty() || bytes.len() > MAX_EXCLUSION_NAME_BYTES {
+            refused = refused.saturating_add(1);
+            continue;
+        }
+
+        for (cell, byte) in EXCLUSION_NAMES[written].iter().zip(bytes) {
+            cell.store(*byte, Ordering::Relaxed);
+        }
+
+        // After the bytes it bounds, which is the order module `layouts` publishes its own list
+        // in: a row is described only once it is written.
+        EXCLUSION_LENS[written].store(bytes.len(), Ordering::Relaxed);
+        written += 1;
+    }
+
+    EXCLUSION_COUNT.store(written, Ordering::Relaxed);
+    EXCLUSIONS_PUBLISHED.store(
+        u32::try_from(written).unwrap_or(u32::MAX),
+        Ordering::Relaxed,
+    );
+    EXCLUSIONS_REFUSED.store(refused, Ordering::Relaxed);
+
+    // Even again: the table is a list rather than a state somebody is in the middle of writing.
+    EXCLUSIONS_GENERATION.fetch_add(1, Ordering::AcqRel);
+
+    request_probe();
+
+    written
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1230,6 +1802,216 @@ mod tests {
     #[test]
     fn the_level_two_timeout_is_the_fifty_milliseconds_of_fr72() {
         assert_eq!(PASSWORD_CHAR_TIMEOUT_MS, 50);
+    }
+
+    /// **FR-84 is a veto over FR-70 and FR-73, and it is one in all eight combinations.**
+    ///
+    /// The table is written out rather than derived, because what is being checked is that no
+    /// state of the focused control puts buffering back on inside an excluded process — and a
+    /// check that computed the expectation the same way the code does would check nothing.
+    #[test]
+    fn an_excluded_process_buffers_in_no_state_of_the_field() {
+        for field in [
+            Field::Pending,
+            Field::Ordinary,
+            Field::Password,
+            Field::Undetermined,
+        ] {
+            assert!(
+                !buffering_allowed_in(field, true),
+                "FR-84: «буферизация не ведётся» in {}, whatever the field",
+                field.name()
+            );
+        }
+
+        // And with nothing excluded the rule is exactly the one task T-06-1 wrote — this is
+        // acceptance point 17, that an empty list leaves the previous behaviour alone.
+        assert!(!buffering_allowed_in(Field::Password, false), "FR-70");
+        assert!(!buffering_allowed_in(Field::Pending, false), "FR-71");
+        assert!(buffering_allowed_in(Field::Ordinary, false));
+        assert!(buffering_allowed_in(Field::Undetermined, false), "FR-73");
+
+        for field in [
+            Field::Pending,
+            Field::Ordinary,
+            Field::Password,
+            Field::Undetermined,
+        ] {
+            assert_eq!(
+                buffering_allowed_in(field, false),
+                buffering_allowed_for(field),
+                "with nothing excluded the two rules answer alike for {}",
+                field.name()
+            );
+        }
+    }
+
+    /// **The two published facts share one word and survive the round trip** — all eight
+    /// combinations.
+    ///
+    /// This is the assertion the whole concurrency argument of task T-06-3 rests on: there is one
+    /// atomic, so a reader cannot see one fact updated and the other not. If the packing lost a
+    /// state the argument would be worth nothing.
+    #[test]
+    fn the_field_and_the_exclusion_share_one_word_without_colliding() {
+        for field in [
+            Field::Pending,
+            Field::Ordinary,
+            Field::Password,
+            Field::Undetermined,
+        ] {
+            for excluded in [false, true] {
+                assert_eq!(
+                    unpack(pack(field, excluded)),
+                    (field, excluded),
+                    "{} / {excluded}",
+                    field.name()
+                );
+            }
+        }
+
+        // No field code reaches the bit the exclusion lives in, which is what makes the two
+        // independent rather than merely usually independent.
+        for field in [
+            Field::Pending,
+            Field::Ordinary,
+            Field::Password,
+            Field::Undetermined,
+        ] {
+            assert_eq!(field as u8 & EXCLUDED_BIT, 0, "{}", field.name());
+        }
+
+        assert_eq!(
+            EXCLUDED_BIT & FIELD_MASK,
+            0,
+            "the two halves do not overlap"
+        );
+
+        // `note_focus_moved` reaches `Pending` with a single `fetch_and(EXCLUDED_BIT)`, which is
+        // only "publish Pending, keep the bit" while the interval state is the zero code.
+        assert_eq!(pack(Field::Pending, false), 0);
+        assert_eq!(pack(Field::Pending, true), EXCLUDED_BIT);
+    }
+
+    /// **The comparison rule of FR-84, as a function of a string.**
+    ///
+    /// Acceptance point 18: the name and not the path, case-insensitively, and what happens to a
+    /// name that is not ASCII.
+    #[test]
+    fn the_exclusion_comparison_is_by_name_and_ignores_case() {
+        // The name, never the path — FR-84 says «имён процессов».
+        assert_eq!(fold_process_name(r"C:\Games\Game.exe"), "game.exe");
+        assert_eq!(fold_process_name("game.exe"), "game.exe");
+        assert_eq!(
+            fold_process_name(r"\Device\HarddiskVolume3\Games\GAME.EXE"),
+            "game.exe"
+        );
+
+        // A person writing a list in a text file.
+        assert_eq!(fold_process_name("  Game.exe  "), "game.exe");
+        assert_eq!(fold_process_name(""), "");
+        assert_eq!(fold_process_name("   "), "");
+
+        // Case, in every spelling the same program is reported in.
+        for spelling in ["Game.exe", "GAME.EXE", "gAmE.ExE", "game.exe"] {
+            assert_eq!(fold_process_name(spelling), "game.exe", "{spelling}");
+        }
+
+        // ⚠ Not ASCII, and the reason this module folds with `to_lowercase` rather than with the
+        // `eq_ignore_ascii_case` level 1 of FR-72 uses: an ASCII fold leaves these three apart,
+        // and a user who wrote a Cyrillic executable name into their configuration means the
+        // program of that name however Windows happens to report its case.
+        for spelling in ["Игра.exe", "ИГРА.EXE", "игра.EXE"] {
+            assert_eq!(fold_process_name(spelling), "игра.exe", "{spelling}");
+        }
+
+        assert_eq!(fold_process_name("ÜBERSETZER.EXE"), "übersetzer.exe");
+
+        // Different programs stay different: the comparison is on the whole name and matches no
+        // prefix, suffix or substring of one.
+        for other in ["game", "game.exe.exe", "mygame.exe", "game.ex", "gameexe"] {
+            assert_ne!(fold_process_name(other), "game.exe", "{other}");
+        }
+    }
+
+    /// **The published list, end to end without a window** — FR-84 and section 6.3.
+    ///
+    /// One test and not five, on the pattern `tests\control.rs` set: the table is process-wide
+    /// state, `cargo test` runs the tests of a binary in parallel, and two of these would collide
+    /// over it. Everything asserted here is asserted about a list this body published itself, and
+    /// the body ends by putting the default of section 7 back.
+    #[test]
+    fn the_published_list_is_searched_by_name_and_defaults_to_empty() {
+        // The default of section 7, before anything is published: nothing is excluded, and the
+        // program behaves exactly as it did before this requirement existed.
+        assert_eq!(publish_exclusions(&[]), 0);
+        assert!(!is_excluded_name("game.exe"));
+        assert!(!is_excluded_name("anything.exe"));
+        assert_eq!(counters().exclusions, 0);
+
+        // A list, in the spellings a configuration file arrives in.
+        let published = publish_exclusions(&[
+            "Game.exe".to_owned(),
+            r"C:\Games\Second.exe".to_owned(),
+            "  Третья.EXE  ".to_owned(),
+        ]);
+
+        assert_eq!(published, 3);
+        assert_eq!(counters().exclusions, 3);
+        assert_eq!(counters().exclusions_refused, 0);
+
+        for name in ["game.exe", "GAME.EXE", "Game.Exe"] {
+            assert!(is_excluded_name(name), "FR-84: {name} is in the list");
+        }
+
+        assert!(
+            is_excluded_name("second.exe"),
+            "the path lost its directory"
+        );
+        assert!(is_excluded_name("ТРЕТЬЯ.exe"), "and its case, past ASCII");
+
+        // And nothing else is.
+        for name in ["notepad.exe", "game", "gam.exe", "game.exe.exe", ""] {
+            assert!(!is_excluded_name(name), "{name} is not in the list");
+        }
+
+        // Refusals are counted rather than truncated — a truncated name matches a different
+        // program. Two of them here: the empty one and the over-long one.
+        let long = "a".repeat(MAX_EXCLUSION_NAME_BYTES + 1);
+        let accepted = publish_exclusions(&["ok.exe".to_owned(), String::new(), long.clone()]);
+
+        assert_eq!(accepted, 1);
+        assert_eq!(counters().exclusions_refused, 2);
+        assert!(is_excluded_name("ok.exe"));
+        assert!(
+            !is_excluded_name(&long),
+            "the over-long name was not stored"
+        );
+
+        // The previous list is gone rather than merged into the new one.
+        assert!(!is_excluded_name("game.exe"), "a publication replaces");
+
+        // Everything past `MAX_EXCLUSIONS` is refused, and the ones that fit still work.
+        let many: Vec<String> = (0..MAX_EXCLUSIONS + 4)
+            .map(|index| {
+                let mut name = index.to_string();
+                name.push_str(".exe");
+                name
+            })
+            .collect();
+
+        assert_eq!(publish_exclusions(&many), MAX_EXCLUSIONS);
+        assert_eq!(counters().exclusions_refused, 4);
+        assert!(is_excluded_name("0.exe"));
+        assert!(!is_excluded_name("999.exe"));
+
+        // No search ever had to be repeated: nothing else in this process publishes.
+        assert_eq!(counters().exclusion_read_retries, 0);
+
+        // Section 7's default put back, so that whatever runs after this sees the program as it
+        // starts.
+        assert_eq!(publish_exclusions(&[]), 0);
+        assert!(!is_excluded_name("ok.exe"));
     }
 
     /// The words the channel would print are four distinct ones and carry nothing but a state.

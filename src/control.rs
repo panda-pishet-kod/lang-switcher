@@ -59,11 +59,11 @@
 //! would: one field of [`Snapshot`], one line of [`render`], one entry of [`KEYS`], and no
 //! change to the format or to the server.
 //!
-//! ⚠ **[`RESERVED_KEYS`] still names `password_field` and should not.** Emptying it is one line
-//! here and one assertion in `tests\control.rs`, and that file is outside the file scope of task
-//! T-06-1: `assert_eq!(control::RESERVED_KEYS, ["password_field"])` there compares two arrays,
-//! so shortening the constant is a **compilation** error in a file this task may not repair. The
-//! two edits have to be made together; the report of task T-06-1 carries both of them verbatim.
+//! [`RESERVED_KEYS`] is therefore **empty**, and task **T-06-3** emptied it — the one edit task
+//! T-06-1 could not make, because `tests\control.rs` compared the constant against a
+//! one-element array with `assert_eq!` and that file was outside its scope, so shortening the
+//! constant was a compilation error rather than a failing test. The two edits were one change
+//! and were made together.
 //!
 //! # The server — task T-03-4-2
 //!
@@ -522,8 +522,8 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is fifteen short `key=value` lines — some two hundred and fifty bytes — and a
-/// page is comfortably more than the widest it could grow to when task T-06-1 adds its key.
+/// The payload is sixteen short `key=value` lines — some two hundred and seventy bytes — and a
+/// page is comfortably more than the widest it could grow to.
 /// Sizing it above the payload is what lets [`publish`] hand the bytes over without waiting
 /// for the client to read them.
 const PIPE_OUT_BUFFER_BYTES: u32 = 4096;
@@ -1207,10 +1207,13 @@ pub const KEYS: [&str; 16] = [
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module
 /// documentation.
 ///
-/// ⚠ **Stale, and deliberately left so.** `password_field` is published by task **T-06-1** and
-/// belongs in [`KEYS`], where it now is; this list should be empty. It is not, because
-/// `tests\control.rs` asserts its exact contents with `assert_eq!` against a one-element array
-/// and that file is outside the file scope of task T-06-1 — shortening this constant turns that
-/// assertion into a type error, that is, into a build failure of a file this task may not
-/// repair. The two edits are one change and have to be made together.
-pub const RESERVED_KEYS: [&str; 1] = ["password_field"];
+/// **Empty: every key SEC-04a reserved is published now.** `cycle_position` arrived with task
+/// T-05-2a and `password_field` with task T-06-1, and each moved from here into [`KEYS`] in the
+/// same change that started emitting it.
+///
+/// The constant stays rather than being deleted, because it is what the reservation *means* that
+/// is worth keeping: a key named here is one [`render`] must not emit and [`KEYS`] must not
+/// list, and `tests\control.rs` asserts both of those over whatever this array holds. Empty, that
+/// pair of assertions is vacuous and costs nothing; the day a key is reserved again it is one
+/// entry here and no new test.
+pub const RESERVED_KEYS: [&str; 0] = [];

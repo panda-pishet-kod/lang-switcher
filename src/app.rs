@@ -1310,7 +1310,8 @@ fn restore_buffer() {
 }
 
 /// Hands the input thread the settings it reacts to — FR-02 and FR-95 for the hook, FR-07 for
-/// the buffer, and FR-42 with FR-44 for the replacement of module `inject`.
+/// the buffer, FR-42 with FR-44 for the replacement of module `inject`, and FR-84 for the
+/// exclusion list of module `guard`.
 ///
 /// Runs on the UI thread, right after the tray has been attached, because the tray is where
 /// the configuration of section 7 lives: it read the file, it owns `general.enabled`, and it
@@ -1328,10 +1329,18 @@ fn publish_configuration_to_input_thread() {
             tray.config().replacement.method,
             tray.config().replacement.inter_event_delay_ms,
             crate::layouts::Configured::from_settings(&tray.config().layouts),
+            // Section `[exclusions]` of section 7 — FR-84, task T-06-3. Cloned rather than
+            // borrowed because the borrow ends with the closure: `with_tray` lends the tray for
+            // the length of the call, and the publication below runs outside it. One `Vec` of a
+            // handful of short strings, once per publication, on the thread section 6.1 already
+            // lets read a file.
+            tray.config().exclusions.processes.clone(),
         )
     });
 
-    let Some((active, hotkey, capacity, method, inter_event_delay_ms, layouts)) = published else {
+    let Some((active, hotkey, capacity, method, inter_event_delay_ms, layouts, exclusions)) =
+        published
+    else {
         return;
     };
 
@@ -1364,6 +1373,18 @@ fn publish_configuration_to_input_thread() {
     // Nothing is applied to anything already built: the next press reads whatever stands there
     // at that moment, exactly as it does for the replacement method.
     crate::layouts::publish(layouts);
+
+    // **Section `[exclusions]` of section 7 — FR-84, task T-06-3.** Published for the reason
+    // everything above it is: the list is the UI thread's to read out of the file and the watcher
+    // thread's to compare against, and section 6.3 says a value that crosses threads is published
+    // rather than fetched. `guard::publish_exclusions` puts it into the table of atomics the
+    // watcher thread reads and asks for a fresh probe; nothing here waits for that answer, and
+    // nothing on the hook path is touched by it.
+    //
+    // The names are folded and stored once, here, so that the comparison on the watcher thread
+    // parses nothing — the same rule `[layouts]` follows one line above, where the strings of
+    // section 7 are turned into numbers at publication time.
+    crate::guard::publish_exclusions(&exclusions);
 
     publish_buffer_capacity(capacity);
 }
