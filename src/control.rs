@@ -13,8 +13,11 @@
 //! Task **T-05-2a** added the `cycle_position` key of FR-32 and FR-33, which is the position
 //! counter task T-05-2 put in [`crate::buffer::Recorder`] made visible from outside the
 //! process; the choice of the target layout is section 4.4's and is not this module's.
+//! Task **T-06-1a** added `focus_changes` and `password_probes`, the two counts that say whether
+//! the verdict behind `password_field` is about the window in front of the user right now — see
+//! [`Snapshot::focus_changes`].
 //! Implemented by backlog tasks: T-03-4 (name, descriptor, snapshot), T-03-4-2 (the server),
-//! T-05-2a (`cycle_position`).
+//! T-05-2a (`cycle_position`), T-06-1a (`focus_changes`, `password_probes`).
 //!
 //! # The four conditions of SEC-04a, and where each of them is met
 //!
@@ -522,7 +525,7 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is sixteen short `key=value` lines — some two hundred and seventy bytes — and a
+/// The payload is eighteen short `key=value` lines — some three hundred bytes — and a
 /// page is comfortably more than the widest it could grow to.
 /// Sizing it above the payload is what lets [`publish`] hand the bytes over without waiting
 /// for the client to read them.
@@ -1081,6 +1084,31 @@ pub struct Snapshot {
     /// reachable from outside by the design of Windows. Without this key, SEC-06 is not provable
     /// by automated means.
     pub password_field: bool,
+    /// Focus changes module [`crate::guard`] has been told about — **SEC-06**, task **T-06-1a**.
+    ///
+    /// The input thread's end of the chain: `guard::note_focus_moved` counts one for every
+    /// `watchdog::WM_APP_FLUSH` that reaches the input window, which is one for every
+    /// `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` the subscription of task T-03-3
+    /// delivered.
+    ///
+    /// ⚠ **Why a bench needs it.** `password_field` alone cannot tell "the verdict is about the
+    /// window you are looking at" from "the verdict is about the window before it": both are one
+    /// bit, and a stale bit reads exactly like a fresh one. This counter and
+    /// [`Snapshot::password_probes`] are what turn that into an observable — a focus change that
+    /// does not raise the first, or does not raise the second after it, is a caret the program
+    /// did not follow.
+    ///
+    /// SEC-01, SEC-07: a count of events. Not a window, not a title, not a stroke.
+    pub focus_changes: u32,
+    /// Probes carried out at the far end of that chain — **SEC-06**, task **T-06-1a**.
+    ///
+    /// `guard::run_pending_probe` counts one for every `guard::WM_APP_PROBE` that reached the
+    /// watcher window with a probe actually pending. Lower than [`Snapshot::focus_changes`]
+    /// whenever two focus changes coalesced into one probe, which is the design (see
+    /// `guard::PROBE_PENDING`); lower by a widening margin is the chain no longer running.
+    ///
+    /// SEC-01, SEC-07: a count of events.
+    pub password_probes: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1092,6 +1120,7 @@ pub struct Snapshot {
 pub fn snapshot() -> Snapshot {
     let (send_mismatches, events_lost) = crate::inject::send_mismatches();
     let watchdog = crate::watchdog::health();
+    let guard = crate::guard::counters();
 
     Snapshot {
         buffer_len: BUFFER_LEN.load(Ordering::Relaxed),
@@ -1111,6 +1140,8 @@ pub fn snapshot() -> Snapshot {
         watchdog_recoveries: watchdog.recoveries,
         watchdog_last_reason: watchdog.last_reason,
         password_field: crate::guard::password_field(),
+        focus_changes: guard.focus_changes,
+        password_probes: guard.probes,
     }
 }
 
@@ -1132,6 +1163,11 @@ pub fn snapshot() -> Snapshot {
 /// `password_field` of task **T-06-1** is appended for the same reason, and it is the key
 /// SEC-04a was written for: footnote 2 of section 11.3 makes position 14 provable through it and
 /// through nothing else. It is a flag — `0` or `1` — and never the content of the field.
+///
+/// `focus_changes` and `password_probes` of task **T-06-1a** are appended after it, and they are
+/// what makes that flag *readable*: one bit cannot say whose window it describes, and a bench
+/// that cannot tell a fresh verdict from a stale one cannot confirm SEC-06 at all — see
+/// [`Snapshot::focus_changes`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1149,7 +1185,9 @@ pub fn render(state: &Snapshot) -> String {
          cycle_position={}\n\
          watchdog_recoveries={}\n\
          watchdog_last_reason={}\n\
-         password_field={}\n",
+         password_field={}\n\
+         focus_changes={}\n\
+         password_probes={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1166,6 +1204,8 @@ pub fn render(state: &Snapshot) -> String {
         state.watchdog_recoveries,
         state.watchdog_last_reason.name(),
         u8::from(state.password_field),
+        state.focus_changes,
+        state.password_probes,
     )
 }
 
@@ -1185,7 +1225,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 16] = [
+pub const KEYS: [&str; 18] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1202,6 +1242,8 @@ pub const KEYS: [&str; 16] = [
     "watchdog_recoveries",
     "watchdog_last_reason",
     "password_field",
+    "focus_changes",
+    "password_probes",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

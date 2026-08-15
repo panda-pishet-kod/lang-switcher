@@ -206,6 +206,56 @@ fn the_reserved_keys_are_absent_rather_than_answered_with_a_zero() {
     }
 }
 
+/// **The two counts task T-06-1a added come from module `guard` and are the ones it holds** —
+/// SEC-06, and the reason the pair exists at all.
+///
+/// `password_field` is one bit, and one bit cannot say *whose* window it describes. A bench
+/// reading `password_field=0` beside a caret that has just moved into a password box cannot tell
+/// "this field is ordinary" from "the program was never told the focus moved" — and those two
+/// differ by exactly the thing SEC-06 is about. `focus_changes` and `password_probes` are what
+/// separate them: the first is the input thread's end of the chain (`guard::note_focus_moved`),
+/// the second the watcher thread's (`guard::run_pending_probe`), and a change that raises neither
+/// is a caret the program did not follow.
+///
+/// Asserted against `guard::counters()` rather than against a literal, because what has to hold
+/// is that the snapshot reports **these** counters and not two numbers that merely look like
+/// them. Monotone counters cannot be pinned to an equality across two reads — the program keeps
+/// running — so the assertion is that the snapshot never lags behind a reading taken before it
+/// and never runs ahead of one taken after it.
+#[test]
+fn the_focus_and_probe_counts_are_the_ones_module_guard_holds() {
+    let before = lang_switcher::guard::counters();
+    let state = control::snapshot();
+    let after = lang_switcher::guard::counters();
+
+    assert!(
+        state.focus_changes >= before.focus_changes && state.focus_changes <= after.focus_changes,
+        "focus_changes is guard's own count of focus changes"
+    );
+    assert!(
+        state.password_probes >= before.probes && state.password_probes <= after.probes,
+        "password_probes is guard's own count of probes carried out"
+    );
+
+    // On the wire, in the documented place, as plain decimal counts. SEC-01 and SEC-07: what
+    // leaves here is how many times something happened, never what was typed.
+    let text = control::render(&state);
+
+    for (key, value) in [
+        ("focus_changes", state.focus_changes),
+        ("password_probes", state.password_probes),
+    ] {
+        assert!(
+            control::KEYS.contains(&key),
+            "{key} is one of the documented keys"
+        );
+        assert!(
+            text.contains(&format!("{key}={value}\n")),
+            "{key} is rendered as the count the snapshot carries"
+        );
+    }
+}
+
 /// The two configuration values of FR-42 and FR-44 really do come from what was published.
 ///
 /// This is the point of putting them on the channel at all: today there is no way to see from

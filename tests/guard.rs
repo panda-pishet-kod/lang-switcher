@@ -755,6 +755,89 @@ fn the_list_is_published_and_the_heavy_part_is_out_of_the_callback() {
     );
 }
 
+/// **The probe is not in the `WinEvent` callback either, and it is dispatched from one place** —
+/// task **T-06-1a**, and the third of the three places FR-71 and section 6.1 keep it out of.
+///
+/// Two tests already hold the other two: `the_hook_callback_names_nothing_of_module_guard` keeps
+/// it out of the keyboard callback, and `the_list_is_published_and_the_heavy_part_is_out_of_the_
+/// callback` asserts the dispatch line names the watcher window. What was never asserted is the
+/// middle one — that `watchdog::win_event_proc`, which the system calls **synchronously from
+/// inside the delivery of every focus event in the session**, does not reach module `guard`.
+/// Tens of milliseconds of UI Automation there would be paid by whichever program raised the
+/// event, not by this one.
+///
+/// The check is on the body of the callback and on the dispatch site together, because either
+/// half alone can be satisfied while the property is false: a callback that names nothing of
+/// `guard` still runs the probe if `app.rs` calls `run_pending_probe` from somewhere the watcher
+/// window test does not cover, and one guarded dispatch line proves nothing if there is a second,
+/// unguarded one.
+#[test]
+fn the_winevent_callback_names_nothing_of_module_guard_and_the_probe_has_one_dispatch_site() {
+    let watchdog = source_of("watchdog.rs");
+
+    let start = watchdog
+        .find("unsafe extern \"system\" fn win_event_proc(")
+        .expect("src\\watchdog.rs carries the WinEvent callback");
+
+    // To the first brace that closes at column zero — the end of the function, and the end of
+    // everything the system runs inside its own event delivery.
+    let body = &watchdog[start..];
+    let body = body
+        .find("\n}\n")
+        .map_or(body, |end| &body[..end + "\n}\n".len()]);
+
+    for name in [
+        "guard::",
+        "run_pending_probe",
+        "note_focus_moved",
+        "determine",
+        "WM_APP_PROBE",
+    ] {
+        let hits = code_lines_with(body, name);
+
+        assert!(
+            hits.is_empty(),
+            "FR-71, §6.1: {name} occurs in the body of win_event_proc at {hits:?}; the callback \
+             the system drives holds up every source of focus events in the session"
+        );
+    }
+
+    // One dispatch site, and it is the guarded one. `run_pending_probe` is the entry to the
+    // three levels of FR-72, so counting its callers counts the ways the probe can start.
+    for (path, text) in sources() {
+        let name = file_name(&path);
+        let hits = code_lines_with(&text, "run_pending_probe");
+
+        match name.as_str() {
+            "guard.rs" => {}
+            "app.rs" => {
+                assert_eq!(
+                    hits.len(),
+                    1,
+                    "the probe is started from exactly one place in src\\app.rs, and it is {hits:?}"
+                );
+
+                let (line, _) = hits[0];
+                let guard_is_above = text
+                    .lines()
+                    .skip(line.saturating_sub(3))
+                    .take(3)
+                    .any(|above| above.contains("is_watcher_window(hwnd)"));
+
+                assert!(
+                    guard_is_above,
+                    "§6.1: the one dispatch of the probe stands under the watcher-window test"
+                );
+            }
+            _ => assert!(
+                hits.is_empty(),
+                "run_pending_probe occurs in src\\{name} at {hits:?}; only the window procedure \
+                 may start a probe"
+            ),
+        }
+    }
+}
+
 /// **The live half of the name read, against a name that is known** — NFR-13.
 ///
 /// `OpenProcess` and `QueryFullProcessImageNameW` are what level 1 of FR-72 and the whole of
