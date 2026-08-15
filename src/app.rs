@@ -156,6 +156,13 @@ pub fn run() -> ExitCode {
     #[cfg(feature = "testing")]
     crate::control::note_start();
 
+    // The ring journal of section 6.2, task T-06-4. First of the three edits that task makes
+    // to this file, and it is here rather than later because everything below reports into it:
+    // `report_non_critical` at the bottom of this function already does, and the panic hook
+    // installed on the next line runs on paths that do. The ring itself is a `static` and
+    // needs no allocating — what this fixes is the zero the timestamps are measured from.
+    crate::diag::init();
+
     install_panic_hook();
 
     match SingleInstance::acquire() {
@@ -655,7 +662,25 @@ fn thread_body(role: Role) -> WinResult<()> {
             let _apartment = ComApartment::enter_sta()?;
             serve_window(role)
         }
-        Role::Input | Role::Ui => serve_window(role),
+        // Second of the three edits of task T-06-4. Section 6.1 gives file input-output to
+        // the UI thread and forbids it to the input thread, so the one place the journal may
+        // reach a file is here, on this thread, once, after `serve_window` has returned.
+        //
+        // After and not inside: the tray attachment, the window and the watchdog
+        // subscriptions are undone by `Drop` implementations *inside* that call, and those
+        // are precisely the paths that report into the journal last. Dumping before they ran
+        // would leave their failures in a ring nobody reads.
+        //
+        // Off unless `[diagnostics] log_enabled` says otherwise — section 7 — in which case
+        // this creates nothing at all.
+        Role::Ui => {
+            let served = serve_window(role);
+
+            crate::diag::dump_on_shutdown();
+
+            served
+        }
+        Role::Input => serve_window(role),
     }
 }
 
@@ -2018,17 +2043,38 @@ fn install_panic_hook() {
 /// that cannot propagate a `Result` — the `Drop` implementations and the wake-up posts —
 /// converges here, so that wiring in the journal is one edit instead of a dozen.
 ///
-/// The in-memory ring journal is module `diag`, task **T-06-4**; the body stays empty until
-/// it exists. SEC-01 and SEC-07: only an operation name and an OS error code ever reach
-/// this function, and nothing that could carry a keystroke, a key code or buffer contents
-/// may ever be added to its arguments.
+/// The in-memory ring journal is module `diag`, task **T-06-4**, and this is the third and
+/// last edit that task makes to this file.
 ///
 /// `pub(crate)` rather than private since task T-01-4: `tray` has the same kind of failures
 /// to record — a shell that is not up yet, a handle that will not free — and a second copy
 /// of this function there would defeat the whole point of having one place to wire the
 /// journal into.
+///
+/// # SEC-01, SEC-07 — what crosses into the journal here
+///
+/// `operation` is a `&str` and the journal has no field a `&str` could go into. This line is
+/// where the two meet, and the meeting is a **narrowing**: `Operation::from_name` maps the
+/// name onto the closed table of module `diag` and answers `Operation::UNLISTED` for anything
+/// that is not in it, keeping none of the text. So the requirement does not depend on every
+/// caller of this function passing something harmless — one of them already passes a
+/// `format!` — it depends on the type on the other side of the call, which has no room for a
+/// character whatever is passed here.
+///
+/// `error` contributes its `HRESULT` and nothing else. The message inside a
+/// `windows::core::Error` is text and is dropped unread, for the same reason the panic
+/// payload is dropped unread in `join_all`.
+///
+/// # NFR-01 to NFR-05
+///
+/// Both calls below are allocation-free, lock-free and free of input-output, which is what
+/// lets this function keep being called from `Drop` implementations and from code next to the
+/// hook callback. Nothing is formatted here; module `diag` formats only when it dumps.
 pub(crate) fn report_non_critical(operation: &str, error: &WinError) {
-    let _ = (operation, error);
+    crate::diag::record(
+        crate::diag::Operation::from_name(operation),
+        crate::diag::OsCode::of(error),
+    );
 }
 
 // ---------------------------------------------------------------------------------------
