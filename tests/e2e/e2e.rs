@@ -21,6 +21,7 @@
 //! | [`uia`] | UI Automation: window readiness, `ValuePattern`, `TextPattern` |
 //! | [`layout`] | FR-52 layout of a window; the bench's position on footnote 3 |
 //! | [`clip`] | the user's clipboard, saved and restored |
+//! | [`config`] | ⚠ the user's `config.toml`, borrowed and given back byte for byte |
 //! | [`channel`] | client of the SEC-04a debug channel |
 //! | [`sut`] | the product under test: job object, FR-96, the safety net |
 //! | [`shell`] | `AppActivate` — rake 3, for every application |
@@ -38,6 +39,7 @@
 
 mod channel;
 mod clip;
+mod config;
 mod input;
 mod layout;
 mod own;
@@ -88,12 +90,24 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         return std::process::ExitCode::from(1);
     }
 
+    // ⚠ The path no code of a killed run could take. If a previous run was ended from outside
+    // between borrowing `config.toml` and giving it back, its copy is still on disk and this is
+    // where it goes home. Before any mode, because every mode may start the product, and the
+    // product reads that file.
+    if let Some(said) = config::recover() {
+        println!("{said}\n");
+    }
+    if let Some(said) = layout::recover_temporary() {
+        println!("{said}\n");
+    }
+
     match arguments.first().map(String::as_str) {
         Some("--experiment-panic") => experiment_panic(),
         Some("--experiment-kill") => experiment_kill(),
         Some("--channel-only") => channel_only(),
         Some("--experiment-foreign") => experiment_foreign(arguments),
         Some("--classify") => scenarios::classify(&|| uia::Automation::new().ok()),
+        Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
 }
@@ -317,6 +331,35 @@ fn experiment_foreign(arguments: &[String]) -> std::process::ExitCode {
     }
 }
 
+/// The measurement of position 11 — rule Р-39, and see [`scenarios::measure_layout`].
+///
+/// Kept as a mode of the bench rather than thrown away with the task that needed it: the
+/// question it answers — what layout a newly created window of this session starts in — is a
+/// property of the *machine*, and a later run on a differently configured one will need the
+/// number again rather than the conclusion drawn from it here.
+/// `langsw-e2e --measure-layout [ru|en]` — the optional argument is the layout the session is
+/// **left** in, which is how the machine is put back into the state position 11 used to fail in.
+/// Without it the measurement restores what it found, as every mode of this bench does.
+fn measure_layout(leave: Option<&str>) -> std::process::ExitCode {
+    let leave = match leave {
+        Some("ru") => Some(layout::RUSSIAN),
+        Some("en") => Some(layout::US),
+        Some(other) => {
+            eprintln!("не понимаю {other:?}: ожидается ru, en или ничего");
+            return std::process::ExitCode::from(2);
+        }
+        None => None,
+    };
+
+    let Ok(automation) = uia::Automation::new() else {
+        eprintln!("UI Automation недоступна");
+        return std::process::ExitCode::from(1);
+    };
+
+    scenarios::measure_layout(&automation, leave);
+    std::process::ExitCode::SUCCESS
+}
+
 /// Reads the channel once and prints it — used to show what SEC-04a hands over.
 fn channel_only() -> std::process::ExitCode {
     let mut sut = match sut::Sut::launch() {
@@ -337,7 +380,7 @@ fn channel_only() -> std::process::ExitCode {
                 snapshot.present_keys().join(", ")
             );
             println!(
-                "Зарезервированные ключи (T-06-1, T-05-2): {:?} — присутствуют: {:?}",
+                "Зарезервированные ключи (T-06-1): {:?} — присутствуют: {:?}",
                 lang_switcher::control::RESERVED_KEYS,
                 snapshot.reserved_present()
             );
@@ -362,6 +405,12 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
     let layouts_before = layout::attached();
     let stray_before = sut::any_running();
 
+    // ⛔ Read through a window of the bench's **own**, opened and closed for the reading — a new
+    // window inherits the layout of the session, so asking one *is* the reading. See the header
+    // of `layout.rs` for the measurement behind that, and `layout::set_ambient` for why the
+    // window is not kept.
+    let ambient_before = layout::ambient();
+
     println!("Состояние машины до прогона:");
     println!(
         "  подключённые раскладки: {:?}",
@@ -369,6 +418,10 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             .iter()
             .map(|id| layout::describe(*id))
             .collect::<Vec<_>>()
+    );
+    println!(
+        "  окружающая раскладка (в ней открывается новое окно): {}",
+        ambient_before.map_or("<не читается>".to_owned(), layout::describe)
     );
     println!("  буфер обмена: {}", clipboard_before.saved().describe());
     println!("  процессы LangSwitcher: {stray_before:?}");
@@ -399,6 +452,7 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
     let context = scenarios::Context {
         automation: &automation,
         hotkey_vk: hotkey,
+        ambient_before,
     };
 
     let mut report = Report::default();
@@ -439,6 +493,20 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
         }
 
         let rows = match position {
+            // ⚠ Position 17 rewrites `config.toml` and needs the product to have **read** it, and
+            // §7 says the file is read at start-up. So the copy this loop just launched goes
+            // down first and the position raises its own — see `scenarios::position_17`. The
+            // `product.stop()` at the end of the iteration then finds it already gone and only
+            // reports the exit code.
+            17 => {
+                match product.stop() {
+                    Ok(code) => {
+                        println!("  продукт остановлен до подмены конфигурации, код {code}")
+                    }
+                    Err(error) => println!("  ⚠ {error}"),
+                }
+                scenarios::position_17(&context)
+            }
             1 => scenarios::position_1(&context),
             2 => {
                 let (rows, protocol) = scenarios::position_2(&context);
@@ -454,6 +522,7 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             10 => scenarios::position_10(&context),
             11 => scenarios::position_11(&context),
             12 => scenarios::position_12(&context),
+            16 => scenarios::position_16(&context),
             14 => scenarios::position_14(&context),
             22 => scenarios::position_22(&context),
             24 => scenarios::position_24(&context),
@@ -490,6 +559,16 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             Ok(code) => println!("  продукт завершён, код возврата {code}"),
             Err(error) => println!("  ⚠ {error}"),
         }
+
+        // ⚠ **Requirement 5 of §11.5, the half that was missing.** The position has just left
+        // the session in whatever layout its window ended in — RU, because that is what the
+        // product does for a living. The next position's window would be *created* in it, and
+        // a position whose window cannot be moved afterwards (the system dialog of position 11)
+        // would then fail for a reason belonging to the position before it.
+        //
+        // So the ambient goes back to what the run found, after **every** position. That is what
+        // makes the order of the positions stop mattering, which is the point of the exercise.
+        println!("  {}", scenarios::restore_ambient(&context));
     }
 
     // The positions that wait for a task that does not exist yet — always, whatever was asked
@@ -501,6 +580,19 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
 
     // ---- put the machine back ----
     println!("--- восстановление состояния (§11.5 п. 5) ---");
+
+    println!("  {}", scenarios::restore_ambient(&context));
+    let ambient_after = layout::ambient();
+    println!(
+        "  окружающая раскладка: была {}, стала {} — совпала: {}",
+        ambient_before.map_or("<не читается>".to_owned(), layout::describe),
+        ambient_after.map_or("<не читается>".to_owned(), layout::describe),
+        if ambient_after == ambient_before {
+            "да"
+        } else {
+            "НЕТ"
+        }
+    );
 
     let layouts_after = layout::attached();
     println!(
@@ -538,8 +630,11 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
 
 /// Which positions to run: everything the task lists, or what `--positions` names.
 fn selected_positions(arguments: &[String]) -> Vec<u8> {
-    // The task, section 4: the positions runnable after T-04-1 and T-03-4.
-    const DEFAULT: [u8; 14] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 22, 24];
+    // The task, section 4: the positions runnable after T-04-1 and T-03-4, plus 16 and 17 —
+    // task T-04-3-3, decision Р-52. Position 17 is deliberately **last**: it is the only one
+    // that rewrites the user's `config.toml`, and the shorter that file spends replaced the
+    // fewer ways a run can end with it still replaced.
+    const DEFAULT: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 16, 22, 24, 17];
 
     let mut iterator = arguments.iter();
     while let Some(argument) = iterator.next() {

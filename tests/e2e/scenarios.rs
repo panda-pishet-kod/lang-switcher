@@ -57,6 +57,13 @@ pub struct Context<'a> {
     pub automation: &'a Automation,
     /// Virtual-key code of the hotkey, read from the product's own configuration.
     pub hotkey_vk: u16,
+    /// The ambient layout the run found before it changed anything, and the value every position
+    /// is put back to — requirement 5 of §11.5.
+    ///
+    /// The layout itself is written through [`layout::set_ambient`], which opens a window of the
+    /// bench's **own** for the purpose and closes it again. ⛔ No window of anybody else's is
+    /// asked anything, and there is no shared handle here that a scenario could reach past.
+    pub ambient_before: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -764,20 +771,29 @@ fn run_position(
     // `Drop`, which also covers the path where the scenario ends early.
     let _clipboard = clip::Guard::capture();
 
+    // A position that could not even be set up still has to report itself in **its own** shape:
+    // two rows expecting `привет` for the ordinary scenario, three expecting the original text
+    // for the rollback of position 16. `replacement` already chooses between them for failures
+    // that happen inside it; before this line the choice was `both_failed` for everybody, so a
+    // position 16 that never found its window claimed to have expected `привет`.
+    let failed = |reason: &str| -> Vec<Row> {
+        if plan.rollback {
+            rollback_failed(plan.number, plan.name, reason)
+        } else {
+            both_failed(plan.number, plan.name, reason)
+        }
+    };
+
     let mut app = match launch() {
         Ok(app) => app,
-        Err(error) => return both_failed(plan.number, plan.name, &format!("запуск: {error}")),
+        Err(error) => return failed(&format!("запуск: {error}")),
     };
 
     let mut rows = match adopt_window(ctx.automation, &mut app, plan.window_is) {
-        Err(reason) => both_failed(plan.number, plan.name, &reason),
+        Err(reason) => failed(&reason),
         Ok(window) => match (app.window, (plan.content_in)(ctx.automation, &window)) {
-            (None, _) => both_failed(plan.number, plan.name, "у окна нет дескриптора"),
-            (_, None) => both_failed(
-                plan.number,
-                plan.name,
-                "элемент ввода не найден в дереве UI Automation",
-            ),
+            (None, _) => failed("у окна нет дескриптора"),
+            (_, None) => failed("элемент ввода не найден в дереве UI Automation"),
             (Some(hwnd), Some(content)) => replacement(
                 ctx,
                 Scene {
@@ -843,18 +859,14 @@ pub fn position_22(ctx: &Context) -> Vec<Row> {
 ///
 /// The three assertions and the reason there are three of them are in [`rolled_back`].
 ///
-/// # ⚠ `allow(dead_code)`, and it is a finding rather than a shrug
+/// # The two lines of wiring this function waited for — decision Р-52
 ///
-/// Nothing calls this function today, and that is not because it is unfinished. The run walks
-/// the positions in `tests\e2e\e2e.rs`: a `DEFAULT` list and a `match` that maps a number to the
-/// function that performs it. Position 16 is in neither, and adding it there is two lines — one
-/// in the list, one arm reading `16 => scenarios::position_16(&context)`.
-///
-/// **That file was outside the permissions of task T-05-2a**, which wrote this function, so the
-/// task stopped at the boundary and put the two lines in its report instead of taking the file
-/// (rule 5 of §3 of the controller's brief). The attribute keeps the build free of warnings
-/// while the wiring is decided, and it comes off with the same commit that adds the arm.
-#[allow(dead_code)]
+/// Task T-05-2a wrote the scenario and could not run it: the list of positions and the `match`
+/// that maps a number to a function both live in `tests\e2e\e2e.rs`, and that file was outside
+/// its permissions, so it stopped at the boundary and wrote the two lines into its report
+/// instead of widening its own area. That was an error of the controller's boundaries rather
+/// than an omission of the task — decision Р-52 — and task T-04-3-3 added the list entry and the
+/// arm, which is where the `allow(dead_code)` that used to sit here went.
 pub fn position_16(ctx: &Context) -> Vec<Row> {
     notepad_position(ctx, 16, "Откат двойным нажатием (Блокнот)", &[], true)
 }
@@ -889,6 +901,343 @@ fn notepad_position(
             Ok(launched("Блокнот", child, CloseWith::Terminate, None))
         },
     )
+}
+
+// ---------------------------------------------------------------------------------------
+// Position 17 — the cycle over three layouts, FR-31, FR-32
+// ---------------------------------------------------------------------------------------
+
+/// **Position 17 — "три нажатия горячей клавиши возвращают исходный текст побитово; раскладка
+/// вернулась к исходной."**
+///
+/// # What has to be true before a single key is pressed
+///
+/// | Precondition | How it is arranged | Undone by |
+/// |---|---|---|
+/// | a third layout attached to the session | [`layout::Temporary`], footnote 3 of §11.3 | `detach`, and its `Drop` |
+/// | `mode = "cycle"` over three layouts | [`crate::config::Borrowed`] — the user's own file with one section changed | `give_back`, its `Drop`, and the stash on disk |
+/// | the product running **on that file** | a copy launched here, after the write: §7 reads the configuration at start-up and never again | `stop`, and the job object |
+///
+/// That last row is why this position launches its own product instead of using the one the run
+/// starts for every position: a configuration written under a running program changes nothing.
+///
+/// # Three assertions, and why the third is not a duplicate of the first
+///
+/// | Row | Expected |
+/// |---|---|
+/// | text | `ghbdtn` **bit for bit** — `==`, not "contains" (FR-32) |
+/// | layout | back at `0x00000409` |
+/// | `cycle_position` | `0` |
+///
+/// `ghbdtn` renders into the German layout as the same six characters, so after the *second*
+/// press the field already reads `ghbdtn` — which is exactly the accident the third row exists to
+/// catch. `cycle_position` is the product's own statement of where in the cycle it is, and only
+/// `0` means the third press really happened and really came round.
+///
+/// # Requirement 1 of §11.5 — waiting between the presses
+///
+/// Never on a clock. Each press is followed by a wait for `cycle_position` to reach the value
+/// that press produces — `1`, then `2`, then `0` — read from the SEC-04a channel. It is a
+/// condition, it is published by the product rather than guessed at by the bench, and it is what
+/// makes the next press a *next* press instead of half of a race.
+pub fn position_17(ctx: &Context) -> Vec<Row> {
+    const APP: &str = "Цикл при трёх раскладках";
+
+    // ---- the third layout, before anything else, so that the product enumerates it ----
+    let mut third = match layout::Temporary::attach() {
+        Ok(third) => third,
+        Err(error) => {
+            return rollback_failed(17, APP, &format!("третья раскладка: {error}"));
+        }
+    };
+    let third_handle = third.handle();
+
+    // ---- the configuration ----
+    let Some(path) = lang_switcher::settings::default_config_path() else {
+        return rollback_failed(
+            17,
+            APP,
+            "путь %APPDATA%\\Lang_Switcher\\config.toml не определён",
+        );
+    };
+    let text = match crate::config::cycle_of_three(&path, third_handle) {
+        Ok(text) => text,
+        Err(error) => return rollback_failed(17, APP, &error),
+    };
+    let mut borrowed = match crate::config::Borrowed::take(&path, &text) {
+        Ok(borrowed) => borrowed,
+        Err(error) => return rollback_failed(17, APP, &format!("подмена config.toml: {error}")),
+    };
+    let borrowed_note = borrowed.describe_original();
+
+    let mut rows = cycle_body(ctx, APP, third_handle);
+
+    // ---- and back, in the order that makes the unload possible ----
+    //
+    // The ambient goes first: a layout that is still the session's current one is a layout the
+    // system may refuse to unload, and this is also requirement 5 of §11.5 for this position.
+    let ambient = restore_ambient(ctx);
+
+    let detached = third.detach();
+    let returned = borrowed.give_back();
+
+    for row in &mut rows {
+        row.note = format!(
+            "{}; третья раскладка {}; {ambient}; {detached}; {borrowed_note}; {returned}",
+            row.note,
+            layout::describe(third_handle)
+        );
+    }
+
+    rows
+}
+
+/// The body of position 17: its own product, its own window, three presses.
+///
+/// Split out so that every early return still passes through the restoration in
+/// [`position_17`] — the third layout and the user's file are given back on this function's way
+/// out whatever it returns.
+fn cycle_body(ctx: &Context, app_name: &str, third_handle: u32) -> Vec<Row> {
+    // A local `data:` URL with a textarea — position 4's field, for the same reasons: no network
+    // (SEC-03, NFR-11), and a process of the bench's own with a throwaway profile. Notepad is
+    // deliberately not used here: the packaged Notepad is a single process that a second launch
+    // joins, so a copy already running on the machine would make this position report a refusal
+    // of requirement B instead of anything about the cycle.
+    const PAGE: &str = "data:text/html,<textarea id=t rows=8 cols=40 autofocus></textarea>";
+
+    let failed = |reason: &str| rollback_failed(17, app_name, reason);
+
+    // Requirement 5: the clipboard, as every other position captures it.
+    let _clipboard = clip::Guard::capture();
+
+    // ---- the product, launched **after** the configuration was written ----
+    let mut product = match crate::sut::Sut::launch() {
+        Ok(product) => product,
+        Err(error) => return failed(&format!("продукт не запустился: {error}")),
+    };
+    let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+        return failed("продукт не сообщил о готовности через канал SEC-04a за 30 с");
+    };
+    let started = format!(
+        "продукт поднят заново под подменённой конфигурацией, PID {}, hook_installed={}",
+        product.pid,
+        ready.get("hook_installed").unwrap_or("?")
+    );
+    println!("  {started}");
+
+    let mut app = match launch_chrome("chrome17", &[PAGE]) {
+        Ok(app) => app,
+        Err(error) => return failed(&format!("запуск: {error}")),
+    };
+
+    let window = match adopt_window(ctx.automation, &mut app, &is_chrome_window) {
+        Ok(window) => window,
+        Err(reason) => return failed(&reason),
+    };
+    let Some(hwnd) = app.window else {
+        return failed("у окна нет дескриптора");
+    };
+    let Some(content) =
+        ctx.automation
+            .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| {
+                e.control_type() == Some(UIA_EditControlTypeId)
+                    && e.class() != "Chrome_OmniboxView"
+                    && !e.name().contains("Адресная строка")
+                    && !e.name().to_lowercase().contains("address")
+            })
+    else {
+        return failed("элемент ввода не найден в дереве UI Automation");
+    };
+
+    let mut rows = cycle_presses(ctx, app.pid, hwnd, &content, third_handle, &started);
+
+    let closed = app.close();
+    let stopped = match product.stop() {
+        Ok(code) => format!("продукт завершён, код возврата {code}"),
+        Err(error) => format!("⚠ {error}"),
+    };
+    for row in &mut rows {
+        row.note = format!("{}; закрытие: {closed}; {stopped}", row.note);
+    }
+
+    rows
+}
+
+/// The seven steps and then three presses — the measuring part of position 17.
+fn cycle_presses(
+    ctx: &Context,
+    pid: u32,
+    window: HWND,
+    content: &Element,
+    third_handle: u32,
+    started: &str,
+) -> Vec<Row> {
+    const APP: &str = "Цикл при трёх раскладках";
+    /// The cycle is `[en-US, ru-RU, de-DE]`, so the counter goes 1, 2, 0 — FR-31.
+    const EXPECTED_POSITIONS: [usize; 3] = [1, 2, 0];
+
+    let failed = |reason: &str| rollback_failed(17, APP, reason);
+
+    if let Err(error) = shell::activate_window(pid, Some(window)) {
+        return failed(&format!("вывод окна вперёд: {error}"));
+    }
+    let target = input::Target { pid, hwnd: window };
+
+    let source_layout = match layout::ensure(window, layout::US, Duration::from_secs(5)) {
+        Ok(id) => id,
+        Err(error) => return failed(&format!("исходная раскладка: {error}")),
+    };
+
+    if let Err(error) = input::chord(&[VK_CONTROL.0], VK_A.0, &target) {
+        return failed(&format!("очистка поля: {error}"));
+    }
+    if let Err(error) = input::tap(VK_DELETE.0, &target) {
+        return failed(&format!("очистка поля: {error}"));
+    }
+    if let Err(error) = input::type_text(TYPED, &target) {
+        return failed(&format!("ввод {TYPED:?}: {error}"));
+    }
+
+    // The keystrokes have landed when the field reads them back — a condition, not a pause.
+    if wait::until(wait::TEXT_TIMEOUT, || {
+        content
+            .read()
+            .map(|(raw, _)| normalise(&raw))
+            .filter(|text| text.contains(TYPED))
+    })
+    .is_none()
+    {
+        return failed("введённое не дошло до приложения");
+    }
+
+    // ---- three presses, each waited out on the product's own counter ----
+    let mut walked = Vec::new();
+    for expected in EXPECTED_POSITIONS {
+        if let Err(error) = input::tap(ctx.hotkey_vk, &target) {
+            return failed(&format!("нажатие {}: {error}", walked.len() + 1));
+        }
+
+        let reached = wait::until(wait::TEXT_TIMEOUT, || {
+            crate::channel::read()
+                .ok()
+                .and_then(|snapshot| snapshot.get(CYCLE_KEY).map(str::to_owned))
+                .filter(|value| value.trim() == expected.to_string())
+        });
+
+        match reached {
+            Some(value) => walked.push(value),
+            None => {
+                let now = crate::channel::read()
+                    .ok()
+                    .and_then(|snapshot| snapshot.get(CYCLE_KEY).map(str::to_owned))
+                    .unwrap_or_else(|| "нет ответа".to_owned());
+                return failed(&format!(
+                    "после нажатия {} счётчик цикла не дошёл до {expected}: {CYCLE_KEY}={now}",
+                    walked.len() + 1
+                ));
+            }
+        }
+    }
+
+    // ---- what the field holds now ----
+    let restored = wait::until(wait::TEXT_TIMEOUT, || {
+        content
+            .read()
+            .map(|(raw, _)| normalise(&raw))
+            .filter(|text| text == TYPED)
+    });
+    let shown = restored
+        .clone()
+        .or_else(|| content.read().map(|(raw, _)| normalise(&raw)))
+        .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    // ---- and the layout, on the same condition-and-never-a-clock rule ----
+    let observed = wait::until(wait::TEXT_TIMEOUT, || {
+        layout::of_window(window)
+            .map(layout::id_of)
+            .filter(|id| id & 0xFFFF == layout::US & 0xFFFF)
+    })
+    .or_else(|| layout::of_window(window).map(layout::id_of));
+
+    let snapshot = crate::channel::read();
+    let cycle = snapshot
+        .as_ref()
+        .ok()
+        .and_then(|snapshot| snapshot.get(CYCLE_KEY).map(str::to_owned));
+    let counters = snapshot
+        .as_ref()
+        .ok()
+        .map(|snapshot| {
+            format!(
+                "buffer_len={}, hotkey_handoffs={}, post_failures={}, send_mismatches={}",
+                snapshot.get("buffer_len").unwrap_or("?"),
+                snapshot.get("hotkey_handoffs").unwrap_or("?"),
+                snapshot.get("post_failures").unwrap_or("?"),
+                snapshot.get("send_mismatches").unwrap_or("?"),
+            )
+        })
+        .unwrap_or_else(|| "канал не ответил".to_owned());
+
+    let walk = walked.join(" -> ");
+
+    vec![
+        Row::new(
+            17,
+            APP,
+            Assertion::Text,
+            if restored.is_some() {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            format!("{shown:?}"),
+            format!("{TYPED:?} побитово"),
+        )
+        .with_note(format!(
+            "{started}; цикл из трёх: {}, {}, {}; счётчик прошёл {walk}; \
+             сравнение — равенство целиком, не «содержит» (FR-32); продукт: {counters}",
+            layout::describe(layout::US),
+            layout::describe(layout::RUSSIAN),
+            layout::describe(third_handle)
+        )),
+        Row::new(
+            17,
+            APP,
+            Assertion::Layout,
+            match observed {
+                Some(id) if id & 0xFFFF == layout::US & 0xFFFF => Verdict::Pass,
+                _ => Verdict::Fail,
+            },
+            observed.map_or("<чтение не удалось>".to_owned(), layout::describe),
+            layout::describe(layout::US),
+        )
+        .with_note(format!(
+            "исходная раскладка окна {}; после трёх нажатий цикл длины 3 возвращает её же \
+             (FR-31), переключение — FR-40 шаг 5 и §4.6",
+            layout::describe(source_layout)
+        )),
+        Row::new(
+            17,
+            APP,
+            Assertion::Other(CYCLE_ASSERTION),
+            match cycle.as_deref() {
+                Some("0") => Verdict::Pass,
+                _ => Verdict::Fail,
+            },
+            match &cycle {
+                Some(value) => format!("{CYCLE_KEY}={value}"),
+                None => match &snapshot {
+                    Ok(_) => format!("ключ {CYCLE_KEY} в снимке отсутствует"),
+                    Err(error) => format!("канал SEC-04a не ответил: {error}"),
+                },
+            },
+            format!("{CYCLE_KEY}=0"),
+        )
+        .with_note(format!(
+            "FR-31, FR-32: цикл длины 3 вернулся в начало; счётчик прошёл {walk}; \
+             прочие счётчики: {counters}"
+        )),
+    ]
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1554,6 +1903,349 @@ fn measure_shell_owned(number: u8, title: &str, owner: &str, classes: &[&str]) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Staging the ambient layout with an application window — task T-04-3-3
+// ---------------------------------------------------------------------------------------
+
+/// ⛔ Puts the **session** into `language`, using an application window of the bench's own.
+///
+/// # Why this exists and `layout::Ambient` was not enough
+///
+/// Position 11's window — the system dialog `#32770` — takes its layout when it is created and
+/// honours no request afterwards, so its precondition has to be arranged **before** it exists.
+/// That means changing what a newly created window is born with, and the measurement of
+/// `--measure-layout` says what does and does not do it:
+///
+/// | Tried | Result |
+/// |---|---|
+/// | `ActivateKeyboardLayout` on the bench's thread | moves the thread, and a new window is born in the session's language anyway |
+/// | a `WS_OVERLAPPEDWINDOW` of the bench's own, raised and moved to en-US | `GetForegroundWindow` returns it, and the next window is **still** born in the old layout |
+/// | an application window of a process the bench started, moved to en-US | **the next window is born in en-US** |
+///
+/// So the bench uses an application. Chrome, because it is the one the matrix already launches
+/// with a throwaway profile of its own (positions 3 and 4), which means no state of the user's
+/// is touched and requirement A covers the process by construction.
+///
+/// Returns the launched application — the caller **must keep it alive** until the window that has
+/// to inherit the layout exists — and a sentence for the report.
+fn stage_ambient(ctx: &Context, language: u32) -> Result<(App, String), String> {
+    let mut app = launch_chrome("stage", &["about:blank"])?;
+
+    adopt_window(ctx.automation, &mut app, &is_chrome_window)?;
+    let Some(hwnd) = app.window else {
+        return Err("у окна подготовки нет дескриптора".to_owned());
+    };
+
+    shell::activate_window(app.pid, Some(hwnd))?;
+    let settled = layout::ensure(hwnd, language, Duration::from_secs(5))?;
+
+    let said = format!(
+        "окружающая раскладка выставлена в {} окном подготовки",
+        layout::describe(settled)
+    );
+    Ok((app, said))
+}
+
+/// **Requirement 5 of §11.5 for the ambient layout** — puts the session back where the run found
+/// it, after every position and at the end of the run.
+///
+/// # Why it reads before it writes
+///
+/// The reading is cheap — one window of the bench's own, born, asked what layout it was given,
+/// and closed — and it is almost always already right: only a position that ran to the point of
+/// the product switching a layout leaves the session moved. Reading first turns the ordinary case
+/// into no work at all, and it means the sentence in the report is a **measurement** of the state
+/// rather than a claim about an action.
+pub fn restore_ambient(ctx: &Context) -> String {
+    let Some(wanted) = ctx.ambient_before else {
+        return "окружающая раскладка не читалась — возвращать не к чему".to_owned();
+    };
+
+    let now = layout::ambient();
+    if now == Some(wanted) {
+        return format!(
+            "окружающая раскладка на месте: {}",
+            layout::describe(wanted)
+        );
+    }
+
+    let staged = match stage_ambient(ctx, wanted) {
+        Ok((mut app, _)) => {
+            let closed = app.close();
+            format!("возвращена окном подготовки ({closed})")
+        }
+        Err(error) => format!("⚠ вернуть не удалось: {error}"),
+    };
+
+    format!(
+        "окружающая раскладка была {}, стала {} — {staged}; сейчас {}",
+        layout::describe(wanted),
+        now.map_or("<не читается>".to_owned(), layout::describe),
+        layout::ambient().map_or("<не читается>".to_owned(), layout::describe)
+    )
+}
+
+// ---------------------------------------------------------------------------------------
+// The measurement position 11 rests on — rule Р-39
+// ---------------------------------------------------------------------------------------
+
+/// ⚠ **A measurement, not a scenario.** Answers the two questions position 11 turns on, with
+/// numbers rather than with reasoning — `langsw-e2e --measure-layout`.
+///
+/// | Question | How it is answered |
+/// |---|---|
+/// | does the system dialog `#32770` honour `WM_INPUTLANGCHANGEREQUEST`? | the message is posted to it and the layout is read afterwards |
+/// | does it honour the **second** link of the FR-50 chain? | `AttachThreadInput` + `ActivateKeyboardLayout`, and the layout is read again |
+/// | does a *newly opened* window inherit the layout of the one in front, or the session default? | a **second** dialog is opened once the first has been moved, and the layout it opens in is read |
+///
+/// ⛔ Every window here belongs to a process the bench started — two copies of the Run dialog,
+/// launched by `rundll32` exactly as position 11 launches it. The measurement deliberately does
+/// **not** use Notepad: on this machine the packaged Notepad is a single process that a second
+/// launch joins, so if any copy is already running the window belongs to somebody else and
+/// requirement B refuses it, which is a fact about Notepad and not about layouts.
+///
+/// # `leave`
+///
+/// Which layout the session is left in. `None` means "the one it was found in", which is what
+/// requirement 5 of §11.5 asks of every mode of this bench. Naming one instead is how the
+/// machine is put **into** the state position 11 used to fail in, so that the fix can be shown
+/// to work rather than asserted to: `langsw-e2e --measure-layout ru`.
+pub fn measure_layout(automation: &Automation, leave: Option<u32>) {
+    println!("--- ИЗМЕРЕНИЕ: окружающая раскладка и системный диалог #32770 ---\n");
+
+    // The anchor is opened first and closed last: it is both the instrument of the last two
+    // steps and the reading of what the session's layout was before any of this ran.
+    let anchor = layout::Ambient::open().ok();
+    let ambient_before = anchor.as_ref().and_then(layout::Ambient::observed);
+
+    println!(
+        "Подключённые раскладки: {:?}",
+        layout::attached()
+            .iter()
+            .map(|id| layout::describe(*id))
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "Окружающая раскладка до измерения: {}",
+        ambient_before.map_or("<не читается>".to_owned(), layout::describe)
+    );
+    println!(
+        "Раскладка потока стенда (в ней открывается новое окно этого процесса): {}\n",
+        layout::describe(layout::id_of(layout::of_this_thread()))
+    );
+
+    let Some((mut first, first_hwnd)) = measure_open_dialog(automation, "первый") else {
+        measure_leave_ambient(anchor.as_ref(), leave.or(ambient_before));
+        return;
+    };
+
+    println!(
+        "1. Первый диалог #32770 открылся в раскладке {}",
+        layout::of_window(first_hwnd).map_or("<не читается>".to_owned(), |h| {
+            layout::describe(layout::id_of(h))
+        })
+    );
+
+    let _ = shell::activate_window(first.pid, Some(first_hwnd));
+    match layout::ensure(first_hwnd, layout::US, Duration::from_secs(5)) {
+        Ok(id) => println!(
+            "2. WM_INPUTLANGCHANGEREQUEST (FR-50 звено 1): перешёл в {}",
+            layout::describe(id)
+        ),
+        Err(error) => println!("2. WM_INPUTLANGCHANGEREQUEST (FR-50 звено 1): ОТКАЗ — {error}"),
+    }
+
+    match layout::attach_activate(first_hwnd, first.pid, layout::US, Duration::from_secs(5)) {
+        Ok(id) => println!(
+            "3. AttachThreadInput + ActivateKeyboardLayout (FR-50 звено 2): перешёл в {}",
+            layout::describe(id)
+        ),
+        Err(error) => println!("3. FR-50 звено 2: ОТКАЗ — {error}"),
+    }
+
+    println!(
+        "4. Раскладка потока стенда после звена 2: {}",
+        layout::describe(layout::id_of(layout::of_this_thread()))
+    );
+
+    // ---- the second dialog: what does a window opened *now* start in? ----
+    let second = measure_open_dialog(automation, "второй");
+
+    if let Some((mut second, second_hwnd)) = second {
+        println!(
+            "\n5. Второй диалог, открытый уже после того, как первый оказался в {}, \
+             открылся в раскладке {}",
+            layout::of_window(first_hwnd).map_or("<не читается>".to_owned(), |h| {
+                layout::describe(layout::id_of(h))
+            }),
+            layout::of_window(second_hwnd).map_or("<не читается>".to_owned(), |h| {
+                layout::describe(layout::id_of(h))
+            })
+        );
+        println!("Закрытие: {}", second.close());
+    }
+
+    println!("Закрытие: {}", first.close());
+
+    // ---- the confound step 5 leaves open, and the one number that settles requirement 1а ----
+    //
+    // Both windows above were in RU, so "a new window inherits the session default" and "a new
+    // window inherits the layout of the window in front" predict the same answer. This step
+    // separates them: a window that **does** honour the request is put into en-US and left in
+    // front, and a fresh dialog is opened behind it.
+    measure_ambient_after_english(automation);
+
+    // ---- and the same thing again, through the instrument the run actually uses ----
+    measure_ambient_through_anchor(automation);
+
+    // Requirement 5 of §11.5 holds over a measurement too: the session goes back to the layout
+    // it was in, unless the caller asked for a particular one on purpose.
+    measure_leave_ambient(anchor.as_ref(), leave.or(ambient_before));
+
+    println!(
+        "Подключённые раскладки после измерения: {:?}",
+        layout::attached()
+            .iter()
+            .map(|id| layout::describe(*id))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// ⚠ **The measurement requirement 1а of the task stands or falls on.**
+///
+/// "Restore the ambient layout after every position" only means something if a newly opened
+/// window takes its layout from the window that was in front. Chrome is used as the window that
+/// *does* honour `WM_INPUTLANGCHANGEREQUEST` — positions 3 and 4 rest on that — so it can be put
+/// into en-US and left holding the foreground while a fresh Run dialog is opened behind it.
+///
+/// * dialog opens in en-US → the ambient really is inherited, and restoring it between positions
+///   is both meaningful and sufficient;
+/// * dialog opens in ru-RU → a new window takes the **session default input language**, which is
+///   a setting of the user's own and nothing the bench may write.
+fn measure_ambient_after_english(automation: &Automation) {
+    let mut chrome = match launch_chrome("measure", &["about:blank"]) {
+        Ok(app) => app,
+        Err(error) => {
+            println!("\n6. Chrome не запустился, шаг не выполнен: {error}");
+            return;
+        }
+    };
+
+    if let Err(reason) = adopt_window(automation, &mut chrome, &is_chrome_window) {
+        println!("\n6. окно Chrome не усыновлено: {reason}");
+        return;
+    }
+    let Some(chrome_hwnd) = chrome.window else {
+        println!("\n6. у окна Chrome нет дескриптора");
+        return;
+    };
+
+    let _ = shell::activate_window(chrome.pid, Some(chrome_hwnd));
+    let english = layout::ensure(chrome_hwnd, layout::US, Duration::from_secs(5));
+    match &english {
+        Ok(id) => println!(
+            "\n6. Окно Chrome переведено в {} — обычное окно запрос выполняет",
+            layout::describe(*id)
+        ),
+        Err(error) => println!("\n6. Окно Chrome в en-US не перешло: {error}"),
+    }
+
+    if let Some((mut dialog, dialog_hwnd)) = measure_open_dialog(automation, "третий") {
+        println!(
+            "7. ⚠ ГЛАВНОЕ ЧИСЛО. Впереди окно в {}; открытый в этот момент диалог #32770 \
+             открылся в раскладке {}",
+            layout::of_window(chrome_hwnd).map_or("<не читается>".to_owned(), |h| {
+                layout::describe(layout::id_of(h))
+            }),
+            layout::of_window(dialog_hwnd).map_or("<не читается>".to_owned(), |h| {
+                layout::describe(layout::id_of(h))
+            })
+        );
+        println!("Закрытие: {}", dialog.close());
+    }
+
+    println!("Закрытие: {}", chrome.close());
+}
+
+/// The same question as [`measure_ambient_after_english`], asked of [`layout::Ambient`] — the
+/// instrument the run really uses, so that the run rests on a measured fact and not on the
+/// expectation that a window of our own behaves like Chrome's.
+fn measure_ambient_through_anchor(automation: &Automation) {
+    let anchor = match layout::Ambient::open() {
+        Ok(anchor) => anchor,
+        Err(error) => {
+            println!("\n8. окно-якорь не создалось: {error}");
+            return;
+        }
+    };
+
+    for language in [layout::RUSSIAN, layout::US] {
+        match anchor.set(language, Duration::from_secs(5)) {
+            Ok(id) => println!(
+                "\n8. Окно-якорь стенда переведено в {}",
+                layout::describe(id)
+            ),
+            Err(error) => {
+                println!(
+                    "\n8. Окно-якорь в {}: ОТКАЗ — {error}",
+                    layout::describe(language)
+                );
+                continue;
+            }
+        }
+
+        if let Some((mut dialog, dialog_hwnd)) = measure_open_dialog(automation, "якорный") {
+            println!(
+                "9. ⚠ ГЛАВНОЕ ЧИСЛО. {}; открытый в этот момент диалог #32770 открылся \
+                 в раскладке {}",
+                anchor.describe_now(),
+                layout::of_window(dialog_hwnd).map_or("<не читается>".to_owned(), |h| {
+                    layout::describe(layout::id_of(h))
+                })
+            );
+            println!("Закрытие: {}", dialog.close());
+        }
+    }
+}
+
+/// Leaves the session in `wanted`, and says which one that was.
+fn measure_leave_ambient(anchor: Option<&layout::Ambient>, wanted: Option<u32>) {
+    match (anchor, wanted) {
+        (Some(anchor), Some(id)) => match anchor.set(id, Duration::from_secs(5)) {
+            Ok(now) => println!(
+                "\nОкружающая раскладка сеанса оставлена в {}",
+                layout::describe(now)
+            ),
+            Err(error) => println!("\n⚠ окружающая раскладка не выставлена: {error}"),
+        },
+        _ => println!("\n⚠ окружающая раскладка не выставлялась: якоря или значения нет"),
+    }
+}
+
+/// One copy of the Run dialog, launched and adopted — the building block of [`measure_layout`].
+fn measure_open_dialog(automation: &Automation, which: &str) -> Option<(App, HWND)> {
+    let child = match Command::new("rundll32.exe").arg("shell32.dll,#61").spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            println!("{which} диалог не запустился: {error}");
+            return None;
+        }
+    };
+
+    let mut app = launched("Диалог «Выполнить»", child, CloseWith::WmClose, None);
+
+    if let Err(reason) = adopt_window(automation, &mut app, &|element: &Element| {
+        element.class() == "#32770"
+            && (element.name().contains("Выполнить") || element.name().contains("Run"))
+    }) {
+        println!("{which} диалог не усыновлён: {reason}");
+        return None;
+    }
+
+    let hwnd = app.window?;
+    Some((app, hwnd))
+}
+
+// ---------------------------------------------------------------------------------------
 // Position 11 — the Run dialog
 // ---------------------------------------------------------------------------------------
 
@@ -1566,6 +2258,30 @@ fn measure_shell_owned(number: u8, title: &str, owner: &str, classes: &[&str]) {
 pub fn position_11(ctx: &Context) -> Vec<Row> {
     let clipboard = clip::Guard::capture();
 
+    // ⚠ **The precondition, and it has to be set before the window exists.** Measured with
+    // `--measure-layout`: the dialog `#32770` takes its layout at the instant it is created and
+    // honours neither link of the FR-50 chain afterwards — not
+    // `PostMessage(WM_INPUTLANGCHANGEREQUEST)`, not `AttachThreadInput` +
+    // `ActivateKeyboardLayout`. What it *does* honour is the layout of the session, which is the
+    // layout of the window that was in front.
+    //
+    // Every other position sets the same precondition with `layout::ensure` after its window is
+    // up. This one sets it a moment earlier, and it needs a window to set it **with**.
+    //
+    // ⚠ **An application window, and not a window of the bench's own** — both were measured, and
+    // only one works. A window this process creates, raised until `GetForegroundWindow` returns
+    // it and moved to en-US, leaves the next window created still opening in the old layout: the
+    // layout follows the *thread* there, and a window born on that thread takes the session's
+    // language again regardless. An ordinary application window of a process the bench started,
+    // asked the same thing with the same message, **does** change what the next window is born
+    // with. ⛔ Both are equally within A–E — the point of the choice is that one of them is a
+    // fact and the other was a theory.
+    let mut stage = stage_ambient(ctx, layout::US);
+    let staged = match &stage {
+        Ok((_, said)) => said.clone(),
+        Err(error) => format!("⚠ окружающая раскладка не выставлена: {error}"),
+    };
+
     let child = match Command::new("rundll32.exe").arg("shell32.dll,#61").spawn() {
         Ok(child) => child,
         Err(error) => return both_failed(11, "Диалог «Выполнить»", &format!("запуск: {error}")),
@@ -1577,6 +2293,19 @@ pub fn position_11(ctx: &Context) -> Vec<Row> {
         element.class() == "#32770"
             && (element.name().contains("Выполнить") || element.name().contains("Run"))
     });
+
+    // The dialog exists now and has taken its layout for good, so the window that staged the
+    // ambient has done its work and goes — it must not hold the foreground while the scenario
+    // types into the dialog.
+    let opened_in = app
+        .window
+        .and_then(layout::of_window)
+        .map(layout::id_of)
+        .map_or("<не читается>".to_owned(), layout::describe);
+    let stage_closed = match &mut stage {
+        Ok((app, _)) => app.close(),
+        Err(_) => "окна подготовки не было".to_owned(),
+    };
 
     let mut rows = match (window, app.window) {
         (Ok(window), Some(hwnd)) => {
@@ -1617,7 +2346,8 @@ pub fn position_11(ctx: &Context) -> Vec<Row> {
     let closed = app.close();
     for row in &mut rows {
         row.note = format!(
-            "{}; закрытие: {closed}; буфер обмена не изменился: {}",
+            "{}; {staged}; диалог открылся в {opened_in}; окно подготовки — {stage_closed}; \
+             закрытие: {closed}; буфер обмена не изменился: {}",
             row.note,
             clipboard.unchanged()
         );
@@ -1912,38 +2642,12 @@ pub fn pending_positions() -> Vec<Row> {
             "конвертированная фраза",
         )
         .with_note("путь выделения §4.7 не реализован"),
-        // ⚠ **Position 16 is no longer pending on a missing requirement.** The scenario is
-        // written and lives in this file — [`position_16`], the seven steps of [`replacement`]
-        // plus the second press. What it waits for is not a task of the product but two lines of
-        // wiring in `tests\e2e\e2e.rs`: the list of positions the run walks by default, and the
-        // arm of its `match` that would call [`position_16`]. That file was outside the
-        // permissions of task T-05-2a, so the task stopped and wrote it in its report rather
-        // than widening its own area, and this row says the same thing where the matrix is read.
-        Row::pending(
-            16,
-            "Откат двойным нажатием (Блокнот)",
-            Assertion::Other("исходный текст восстановлен побитово"),
-            "T-05-2a",
-            format!("{TYPED:?} побитово"),
-        )
-        .with_note(
-            "FR-30…FR-34 реализованы, сценарий написан — scenarios::position_16, три \
-             утверждения: текст побитово, раскладка en-US, cycle_position=0; не запускается \
-             потому, что диспетчер позиций в tests\\e2e\\e2e.rs не имеет ветки 16, а этот файл \
-             задаче T-05-2a запрещён",
-        ),
-        Row::pending(
-            17,
-            "Цикл при трёх раскладках",
-            Assertion::Other("три нажатия возвращают исходный текст"),
-            "T-04-3-3",
-            format!("{TYPED:?} побитово"),
-        )
-        .with_note(
-            "режим «Цикл» (FR-31) реализован задачей T-05-2; стенд пока не умеет подготовить \
-             окружение из трёх раскладок — записать config.toml с mode = \"cycle\", подключить \
-             третью раскладку и снять её после (сноска 3 §11.3); config.toml стенд только читает",
-        ),
+        // ⚠ **Positions 16 and 17 are no longer here.** Both are run by the bench now: task
+        // T-04-3-3 added the list entry and the `match` arm that task T-05-2a was not allowed to
+        // write (decision Р-52), and gave the bench the two abilities position 17 needed — the
+        // temporary third layout of footnote 3 and the borrowing of `config.toml`. A row that
+        // still called them `pending` would be the same kind of untruth this list exists to
+        // prevent: a matrix that reports a position as waiting for a task that has finished.
         Row::pending(
             18,
             "Переключение рабочего стола",

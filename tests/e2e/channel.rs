@@ -12,10 +12,13 @@
 //! is the same function the server names itself with — the bench and the product run in one
 //! session, so the identifier matches by construction rather than by agreement.
 //!
-//! Line-oriented `key=value`. Twelve keys, listed in [`lang_switcher::control::KEYS`]. Two
-//! more — `password_field` and `cycle_position` — arrive with tasks T-06-1 and T-05-2 and are
-//! **absent today**; the position 14 stub is written to survive their absence, which is what
-//! the task requires of it and what [`Snapshot::get`] returning an `Option` expresses.
+//! Line-oriented `key=value`. The keys are listed in [`lang_switcher::control::KEYS`] — thirteen
+//! when this client was written, fifteen today, and the count is deliberately **not** written
+//! into the code below: [`Snapshot::present_keys`] reads the product's own list. One key is still
+//! reserved and absent, `password_field`, which arrives with task T-06-1; `cycle_position` was
+//! reserved with it until task T-05-2a published it. The position 14 stub is written to survive
+//! an absent key, which is what the task requires of it and what [`Snapshot::get`] returning an
+//! `Option` expresses.
 //!
 //! The server end is `PIPE_ACCESS_OUTBOUND`, so the client can only read. [`write_is_refused`]
 //! confirms that from this side rather than taking the report's word for it.
@@ -27,7 +30,7 @@ use std::time::Duration;
 
 use crate::wait;
 
-/// One reading of the twelve numbers.
+/// One reading of the channel — every key the running product published.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     values: BTreeMap<String, String>,
@@ -54,7 +57,7 @@ impl Snapshot {
             .collect()
     }
 
-    /// Which of the reserved keys of T-06-1 and T-05-2 have appeared.
+    /// Which of the reserved keys have appeared — one is left, `password_field` of T-06-1.
     pub fn reserved_present(&self) -> Vec<&'static str> {
         lang_switcher::control::RESERVED_KEYS
             .iter()

@@ -1072,6 +1072,18 @@ impl Recorder {
         // its cycle in the middle, which is the one way FR-32 could be broken without anybody
         // writing back into the buffer at all.
         self.cycle = 0;
+
+        // ⚠ **The third place the counter is written, and the mirror of SEC-04a has to see it.**
+        // `Ring::with_capacity` builds its length through `set_len`, so the length mirror is
+        // published as zero a line above; without this line the position mirror would keep
+        // whatever it said before, and a snapshot could show `buffer_len=0` beside a non-zero
+        // `cycle_position` — a pair that cannot happen in the program and would be read as truth
+        // by the bench of §11.5, which needs both numbers for positions 16 and 17.
+        //
+        // Task T-05-2a found the gap and was not permitted to close it; the counter's own logic
+        // is untouched here — this adds the publication and nothing else.
+        #[cfg(feature = "testing")]
+        crate::control::note_cycle_position(self.cycle);
     }
 
     /// How many strokes are live. The one number SEC-04a allows the debug channel to publish.
@@ -1370,12 +1382,12 @@ impl Recorder {
     /// [`Ring::set_len`] does it the other way — `len` is private to a single setter, so the
     /// length cannot be changed without publishing — and that is the stronger construction.
     /// Task T-05-2a was permitted to add the publication at `advance_cycle` and here, and
-    /// **not** to change how the counter is written, so it did not build the setter. There is a
-    /// third assignment to `self.cycle`, in [`Recorder::set_capacity`], which therefore does not
-    /// publish; it is reached only from the configuration message of `app`, where the counter is
-    /// already zero, so nothing lags in the product today. The report of T-05-2a puts the
-    /// choice — widen the permission, or make the counter single-writer like `len` — to the
-    /// controller rather than taking it.
+    /// **not** to change how the counter is written, so it did not build the setter; the third
+    /// assignment to `self.cycle`, in [`Recorder::set_capacity`], was left unpublished and put to
+    /// the controller as a choice. Task T-04-3-3 was given the one line and took the narrower
+    /// half of it: **all three places now publish**, and how the counter is written is still
+    /// untouched. Making it single-writer like `len` remains open and belongs to whoever is
+    /// allowed to change the shape of this type.
     ///
     /// NFR-01 to NFR-05: this function is reached from inside the hook callback, and what the
     /// feature adds to that path is one relaxed atomic store. In a build without it — every
