@@ -525,7 +525,7 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is eighteen short `key=value` lines — some three hundred bytes — and a
+/// The payload is twenty short `key=value` lines — some three hundred bytes — and a
 /// page is comfortably more than the widest it could grow to.
 /// Sizing it above the payload is what lets [`publish`] hand the bytes over without waiting
 /// for the client to read them.
@@ -818,9 +818,9 @@ fn await_client(pipe: HANDLE) -> WinResult<bool> {
 ///
 /// # SEC-01, SEC-07, condition 2 of SEC-04a
 ///
-/// The bytes are [`render`] of one [`snapshot`], which is thirteen counts, one word of section 7
-/// and one of the five words of [`crate::watchdog::Reason`]. Nothing else can be sent from here:
-/// there is no other write in this module.
+/// The bytes are [`render`] of one [`snapshot`], which is fifteen counts, three flags, one word
+/// of section 7 and one of the five words of [`crate::watchdog::Reason`]. Nothing else can be
+/// sent from here: there is no other write in this module.
 fn publish(pipe: HANDLE) {
     let payload = render(&snapshot());
 
@@ -1109,6 +1109,26 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: a count of events.
     pub password_probes: u32,
+    /// Whether FR-99 has disarmed buffering — task **T-08-3**, point 5 of its exclusion list.
+    ///
+    /// The flag [`crate::hook::fail_safe`] publishes. It is the second half of the panic
+    /// question: a program that has gone fail-safe answers `Outcome::PASS` to everything, so a
+    /// bench measuring "the product did not react" has to be able to tell that state from a
+    /// callback that was never called at all.
+    ///
+    /// SEC-01, SEC-07: one bit about the program's own mode. Not a stroke.
+    pub fail_safe: bool,
+    /// Panics inside the callback since the last one that returned normally — **FR-99**.
+    ///
+    /// Task **T-08-3**, point 5. The claim it exists to settle is "FR-96 does not fire in state
+    /// X", and one of the five things that had to be excluded before the product could be blamed
+    /// is that three panics in a row had already disarmed the program. From outside the process
+    /// that is not observable at all, which is the same argument decision Р-37 makes for
+    /// [`Snapshot::watchdog_recoveries`].
+    ///
+    /// SEC-01, SEC-07: a count. The payload of a panic is dropped unread in `hook`, so there is
+    /// nothing here that could carry a key code even in principle.
+    pub consecutive_panics: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1142,6 +1162,8 @@ pub fn snapshot() -> Snapshot {
         password_field: crate::guard::password_field(),
         focus_changes: guard.focus_changes,
         password_probes: guard.probes,
+        fail_safe: crate::hook::fail_safe(),
+        consecutive_panics: crate::hook::consecutive_panics(),
     }
 }
 
@@ -1168,6 +1190,11 @@ pub fn snapshot() -> Snapshot {
 /// what makes that flag *readable*: one bit cannot say whose window it describes, and a bench
 /// that cannot tell a fresh verdict from a stale one cannot confirm SEC-06 at all — see
 /// [`Snapshot::focus_changes`].
+///
+/// `fail_safe` and `consecutive_panics` of task **T-08-3** are appended last, for the same reason
+/// as everything above them, and they exist for one job: point 5 of that task's exclusion list
+/// asks whether FR-99 had already disarmed the program in the state under investigation, and
+/// there is no other way to ask that from outside the process.
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1187,7 +1214,9 @@ pub fn render(state: &Snapshot) -> String {
          watchdog_last_reason={}\n\
          password_field={}\n\
          focus_changes={}\n\
-         password_probes={}\n",
+         password_probes={}\n\
+         fail_safe={}\n\
+         consecutive_panics={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1206,6 +1235,8 @@ pub fn render(state: &Snapshot) -> String {
         u8::from(state.password_field),
         state.focus_changes,
         state.password_probes,
+        u8::from(state.fail_safe),
+        state.consecutive_panics,
     )
 }
 
@@ -1225,7 +1256,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 18] = [
+pub const KEYS: [&str; 20] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1244,6 +1275,8 @@ pub const KEYS: [&str; 18] = [
     "password_field",
     "focus_changes",
     "password_probes",
+    "fail_safe",
+    "consecutive_panics",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

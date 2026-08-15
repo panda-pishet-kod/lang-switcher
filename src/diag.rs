@@ -302,6 +302,35 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("RegCloseKey", Kind::Process),
     ("FindResourceExW", Kind::Process),
     ("LoadResource", Kind::Process),
+    // The debt task T-08-2 found and had no mandate to pay — its report, section 18, problem 2.
+    // Seven operations reached the journal as `Operation::UNLISTED`; **four of them are here and
+    // three are deliberately not**, and the reason is a requirement, not an oversight.
+    //
+    // Kinds follow the same rule the rows above follow — the subject the call serves, out of the
+    // kinds that already exist. **No new `Kind` is added**: task T-08-3 opens this file for
+    // names, and a variant of an enumeration is not a name.
+    //
+    // * the three clipboard rows take `Kind::Selection`, which is "the selection path and the
+    //   clipboard, FR-60 to FR-65", and that is exactly what they are. `AddClipboardFormatListener`
+    //   lives in `app` and `RemoveClipboardFormatListener` in `selection`, but they are the two
+    //   halves of one registration and must not read as two different subjects in a dump;
+    // * `CloseHandle(process)` takes `Kind::Process`, the same kind the plain `CloseHandle` row
+    //   above already has, because it is the same operation on the same kind of handle.
+    //
+    // ⚠ **The three the password-field probe of FR-71 reports under are absent on purpose.**
+    // They are `CoCreateInstance(…)`, `QueryInterface(…)` and the timeout setter of the automation
+    // interface, and every one of those names *contains* a UI Automation symbol. Acceptance point
+    // 9 of FR-71 — enforced by `tests\guard.rs`, `no_ui_automation_name_occurs_anywhere_near_the_hook`
+    // — requires that no such symbol occur anywhere under `src\` except in `src\guard.rs`, in code
+    // or in prose alike, so that a future edit putting UI Automation on the hook's path would have
+    // to write one of those symbols into `hook.rs` first. Adding the rows would put them here, and
+    // spelling them in pieces to slip past the sweep would defeat a guard rather than satisfy it.
+    // The three therefore stay `UNLISTED` until the owner of that requirement decides how a
+    // journal name and that sweep are to live together. See the report of task T-08-3.
+    ("AddClipboardFormatListener", Kind::Selection),
+    ("RemoveClipboardFormatListener", Kind::Selection),
+    ("CloseClipboard", Kind::Selection),
+    ("CloseHandle(process)", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

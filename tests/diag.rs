@@ -480,3 +480,146 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .windows(needle.len())
             .any(|window| window == needle)
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-08-3 — the seven names task T-08-2 found and had no mandate to add
+// -------------------------------------------------------------------------------------
+
+/// Four of the seven rows of the debt, each resolving to itself and landing in its group.
+///
+/// Task T-08-2 swept the sources, found seven operations reaching the journal as
+/// [`Operation::UNLISTED`], printed them and left them standing, because its mandate covered the
+/// settings code and nothing else — its report, section 18, problem 2.
+///
+/// The kinds are the ones that already existed. **No new `Kind` was added**: the task opens
+/// `diag.rs` for names, and a variant of an enumeration is not a name.
+///
+/// ⚠ **Three of the seven are not here**, and the sibling test below is where that is asserted
+/// rather than merely stated: the names the password-field probe reports under each contain a UI
+/// Automation symbol, and acceptance point 9 of FR-71 forbids such a symbol anywhere under `src\`
+/// outside `src\guard.rs`.
+#[test]
+fn the_names_of_the_t_08_2_debt_that_could_be_added_are_in_the_vocabulary() {
+    let cases = [
+        ("AddClipboardFormatListener", Kind::Selection),
+        ("RemoveClipboardFormatListener", Kind::Selection),
+        ("CloseClipboard", Kind::Selection),
+        ("CloseHandle(process)", Kind::Process),
+    ];
+
+    for (name, kind) in cases {
+        let operation = Operation::from_name(name);
+
+        println!(
+            "{name} -> {} ({})",
+            operation.name(),
+            operation.kind().name()
+        );
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "«{name}» still reaches the journal as a code with no name"
+        );
+        assert_eq!(operation.name(), name);
+        assert_eq!(operation.kind(), kind, "{name} landed in the wrong group");
+    }
+
+    // The two halves of one registration must read as one subject in a dump: the `Add` lives in
+    // `app` and the `Remove` in `selection`, and a reader diffing a dump should not have to know
+    // that to see they belong together.
+    assert_eq!(
+        Operation::from_name("AddClipboardFormatListener").kind(),
+        Operation::from_name("RemoveClipboardFormatListener").kind()
+    );
+}
+
+/// **What is still unnamed is exactly three names, and each of them is blocked by FR-71.**
+///
+/// The sibling test `every_operation_name_of_the_settings_code_is_in_the_vocabulary` prints the
+/// gap and asserts it only for the two files task T-08-2 was allowed to touch, which was correct
+/// for a task with no mandate elsewhere. This one asserts the whole of `src`, and it is the check
+/// that stops the debt coming back: a new `report_non_critical("…")` with no row in the table
+/// fails here, in the task that introduces it, instead of being discovered two tasks later.
+///
+/// ⚠ **Why the expected set is three and not none.** Every one of the three is a name the
+/// password-field probe of FR-71 reports under, and every one of them *contains* a UI Automation
+/// symbol. Acceptance point 9 of FR-71 — `tests\guard.rs`,
+/// `no_ui_automation_name_occurs_anywhere_near_the_hook` — requires that no such symbol occur
+/// anywhere under `src\` outside `src\guard.rs`, in code or in prose, so that an edit putting UI
+/// Automation on the hook's path has to write one into `hook.rs` first. A row in `diag.rs` would
+/// put one there; spelling it in fragments to slip past the sweep would defeat the guard instead
+/// of satisfying it. Task T-08-3 therefore left them and asked the question in its report.
+///
+/// They are matched by shape rather than written out here, for that same reason: this file is
+/// under `tests\` and not `src\`, so the sweep does not read it, but repeating the symbols would
+/// make the next reader think they are allowed somewhere.
+///
+/// One further name is absent by design and never reaches this scan: `app` builds a single name
+/// with `format!` (`thread::spawn: {error}`), which is *meant* to narrow to
+/// [`Operation::UNLISTED`] because it carries text not chosen at compile time — exactly what
+/// SEC-07 keeps out of the journal. This is a literal-only scan, so that name is never seen here.
+#[test]
+fn what_still_reaches_the_journal_unnamed_is_only_what_fr_71_blocks() {
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut checked = 0;
+    let mut unnamed = Vec::new();
+
+    for entry in std::fs::read_dir(&sources).expect("the source directory must be readable") {
+        let path = entry.expect("a directory entry must be readable").path();
+
+        if path.extension().is_none_or(|kind| kind != "rs") {
+            continue;
+        }
+
+        let file = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let text = std::fs::read_to_string(&path).expect("a source file must be readable");
+
+        for occurrence in text.split("report_non_critical(\"").skip(1) {
+            let Some(name) = occurrence.split('"').next() else {
+                continue;
+            };
+
+            checked += 1;
+
+            if Operation::from_name(name) == Operation::UNLISTED {
+                unnamed.push(format!("{file}: {name}"));
+            }
+        }
+    }
+
+    println!("{checked} operation names found in the sources");
+    println!("still unnamed: {unnamed:?}");
+
+    assert!(checked > 40, "the scan found suspiciously few call sites");
+
+    // The symbols acceptance point 9 of FR-71 keeps out of every file but `src\guard.rs`, spelled
+    // here without their leading letter so that this file does not itself become a place they
+    // occur — the sweep reads `src\` only, but a reader should not have to check that.
+    let blocked_by_fr_71 = |name: &String| {
+        ["UIAutomation", "UIAutomationCore"]
+            .iter()
+            .any(|symbol| name.contains(symbol))
+    };
+
+    let (blocked, rest): (Vec<String>, Vec<String>) =
+        unnamed.into_iter().partition(blocked_by_fr_71);
+
+    println!("of those, blocked by acceptance point 9 of FR-71: {blocked:?}");
+
+    assert!(
+        rest.is_empty(),
+        "these reach the journal as a code with no name and nothing prevents naming them: {rest:?}"
+    );
+    assert_eq!(
+        blocked.len(),
+        3,
+        "the three names FR-71 blocks are {blocked:?}; if this number changed, the question task \
+         T-08-3 put to the controller has been answered one way or the other and this test has to \
+         be brought into line with the answer"
+    );
+}

@@ -851,3 +851,79 @@ fn the_channel_serves_the_owner_of_this_process_and_stops_when_asked() {
 
     buffer::uninstall();
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-08-3 — the two keys point 5 of its exclusion list needed
+// -------------------------------------------------------------------------------------
+
+/// `fail_safe` and `consecutive_panics` are published, and they are a flag and a count.
+///
+/// # Why they exist at all
+///
+/// Task T-08-3 had to settle a claim of the form "FR-96 does not fire in state X". Five things
+/// had to be excluded before the product could be blamed for that, and one of them was FR-99:
+/// three panics in a row inside the callback disarm the program, and a disarmed program answers
+/// `Outcome::PASS` to everything — which from outside looks exactly like a callback that was
+/// never called. Neither the flag nor the streak is observable from outside the process by any
+/// other means, which is the same argument decision Р-37 makes for `watchdog_recoveries`.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A bit and a count. The payload of a panic is dropped **unread** in `hook::guarded_decision`,
+/// so there is nothing on this path that could carry a key code even in principle — which is
+/// asserted below by parsing both values as numbers and refusing anything else.
+#[test]
+fn the_fail_safe_and_panic_keys_of_t_08_3_are_published_as_a_flag_and_a_count() {
+    let text = control::render(&control::snapshot());
+
+    let value = |key: &str| -> String {
+        text.lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .unwrap_or_else(|| panic!("the channel does not publish {key}"))
+            .to_owned()
+    };
+
+    let fail_safe = value("fail_safe");
+    let panics = value("consecutive_panics");
+
+    println!("fail_safe={fail_safe} consecutive_panics={panics}");
+
+    // A flag is exactly one of two bytes. Anything else — a word, a name, a character — fails.
+    assert!(
+        fail_safe == "0" || fail_safe == "1",
+        "fail_safe must be a flag, not {fail_safe:?}"
+    );
+
+    // A count is a decimal number and nothing else.
+    assert!(
+        panics.parse::<u32>().is_ok(),
+        "consecutive_panics must be a count, not {panics:?}"
+    );
+
+    // Both are reviewed keys, which is what `KEYS` means, and neither is reserved.
+    assert!(control::KEYS.contains(&"fail_safe"));
+    assert!(control::KEYS.contains(&"consecutive_panics"));
+    assert!(!control::RESERVED_KEYS.contains(&"fail_safe"));
+    assert!(!control::RESERVED_KEYS.contains(&"consecutive_panics"));
+
+    // They are appended, not inserted: twelve tasks' worth of readers diff these lines by eye.
+    assert_eq!(control::KEYS[control::KEYS.len() - 2], "fail_safe");
+    assert_eq!(control::KEYS[control::KEYS.len() - 1], "consecutive_panics");
+}
+
+/// The two new keys say what `hook` says, and not something of the channel's own.
+#[test]
+fn the_two_new_keys_mirror_the_state_of_the_hook() {
+    let state = control::snapshot();
+
+    assert_eq!(state.fail_safe, lang_switcher::hook::fail_safe());
+    assert_eq!(
+        state.consecutive_panics,
+        lang_switcher::hook::consecutive_panics()
+    );
+
+    // A program that has not panicked reports no panics. This is the value task T-08-3 read in
+    // the state under investigation, and the reason point 5 of its list came out "not the cause".
+    assert!(!state.fail_safe);
+    assert_eq!(state.consecutive_panics, 0);
+}

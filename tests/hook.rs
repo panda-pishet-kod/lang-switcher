@@ -761,3 +761,164 @@ fn the_program_starts_armed_on_the_default_hotkey() {
     assert!(!hook::emergency_terminate_failed());
     assert!(!hook::panic_is_absorbed());
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-08-3 — FR-96 is decided first, and it is not subject to FR-03
+// -------------------------------------------------------------------------------------
+
+/// **FR-96 is answered before any other logic of the callback** — the text of the requirement.
+///
+/// # Why this test reads the source
+///
+/// The property is an *ordering* inside `keyboard_hook_proc`, and that function is `unsafe
+/// extern "system"`, is called by the system with a pointer only the system can produce, and
+/// ends in `TerminateProcess`. There is no way to call it from a test and no way to observe the
+/// order from its return value. What can be checked, and checked honestly, is the shape of the
+/// function itself — which is also what a reviewer checks, and this puts a failing test under
+/// the reviewer's judgement instead of leaving it to memory.
+///
+/// # What is asserted
+///
+/// Inside the body of `keyboard_hook_proc`, the emergency test stands before:
+///
+/// * `edge_of(message)` — the first thing that can decide the stroke is none of ours;
+/// * the construction of the `KeyEvent`, which is where `dwExtraInfo` is first read;
+/// * `guarded_decision`, which is `catch_unwind`, `classify`, FR-03, FR-90 and the hotkey.
+///
+/// Only two things may precede it, and both are asserted to be exactly what they are: the
+/// `code != HC_ACTION` test, which is the system's contract and the precondition of the
+/// dereference, and the dereference itself, which is what makes there be a key to speak of.
+///
+/// It also asserts there is **no `cfg` on the emergency block**. §4.11 calls FR-96 a safeguard
+/// for the user rather than a debugging aid, and the decision on question 18 makes its presence
+/// in both build configurations the condition of running the program at all.
+#[test]
+fn fr_96_is_decided_before_any_other_logic_of_the_callback() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable");
+
+    let body = source
+        .split_once("unsafe extern \"system\" fn keyboard_hook_proc")
+        .expect("the callback must be in this file")
+        .1;
+
+    let at = |needle: &str| -> usize {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("the callback no longer contains {needle:?}"))
+    };
+
+    let emergency = at("if is_emergency_key(vk, message) && emergency_modifiers_held()");
+    let hc_action = at("if code != HC_ACTION as i32");
+    let deref = at("let event = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) }");
+    let edge = at("let Some(edge) = edge_of(message)");
+    let key_event = at("let key = KeyEvent {");
+    let decision = at("let outcome = guarded_decision(key)");
+
+    println!(
+        "offsets in the callback: HC_ACTION={hc_action} deref={deref} FR-96={emergency} \
+         edge_of={edge} KeyEvent={key_event} guarded_decision={decision}"
+    );
+
+    assert!(
+        emergency < edge,
+        "FR-96 must be answered before the message is classified as an edge"
+    );
+    assert!(
+        emergency < key_event,
+        "FR-96 must be answered before dwExtraInfo is even read — it is not subject to FR-03"
+    );
+    assert!(
+        emergency < decision,
+        "FR-96 must be answered before catch_unwind, classify, FR-03, FR-90 and the hotkey"
+    );
+
+    // The only two things allowed in front of it, and they are there.
+    assert!(hc_action < emergency, "the system's contract comes first");
+    assert!(
+        deref < emergency && hc_action < deref,
+        "the dereference is what makes there be a key event, and it is guarded by HC_ACTION"
+    );
+
+    // Nothing else stands between the dereference and FR-96 but the two field reads it needs.
+    // Comments are dropped first: this is about what the callback *does*, and a prose line
+    // containing the word "for" is not a loop.
+    let between: String = body[deref..emergency]
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    println!("what really stands between the dereference and FR-96:\n{between}");
+
+    // Asserted as the exact list rather than as the absence of a few keywords: a keyword list
+    // is a guess about what a later edit might add, and this is not a guess. Three statements —
+    // the dereference and the two field reads FR-96 needs — and an emergency exit standing
+    // behind anything that can fail, loop or block is not an emergency exit.
+    let statements: Vec<&str> = between.lines().filter(|line| !line.is_empty()).collect();
+
+    assert_eq!(
+        statements,
+        vec![
+            "let event = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };",
+            "let vk = event.vkCode as u16;",
+            "let message = wparam.0 as u32;",
+        ],
+        "something new stands between the dereference and FR-96"
+    );
+
+    // FR-96 in both configurations — no `cfg` anywhere in the block.
+    let block = &body[emergency..edge];
+    assert!(
+        !block.contains("#[cfg"),
+        "the FR-96 block must carry no cfg: §4.11 and the decision on question 18"
+    );
+}
+
+/// FR-96 asks nothing about `dwExtraInfo`, so the filter of FR-03 cannot silence it.
+///
+/// The half of FR-96 that does not need Win32 is [`hook::is_emergency_key`], and its signature is
+/// the proof: it takes a virtual-key code and a message and has no way to see a signature. This
+/// pins that, so that a later task cannot "tidy" the emergency test into `classify`, where
+/// FR-03 would swallow the program's own injected input — and with it the one way out of a
+/// wedged hook.
+///
+/// Measured against the running program as well: task T-08-3 sent the combination stamped with
+/// `INJECTED_SIGNATURE` itself and the process still ended with `EXIT_EMERGENCY`.
+#[test]
+fn fr_96_is_not_subject_to_the_filter_of_fr_03() {
+    // The emergency key, going down, is the emergency key whatever else is true of the stroke.
+    assert!(hook::is_emergency_key(0x7B, WM_KEYDOWN));
+    assert!(hook::is_emergency_key(0x7B, WM_SYSKEYDOWN));
+    assert!(!hook::is_emergency_key(0x7B, WM_KEYUP));
+    assert!(!hook::is_emergency_key(0x7B, WM_SYSKEYUP));
+    assert!(!hook::is_emergency_key(VK_A, WM_KEYDOWN));
+
+    // And `classify` — which is where FR-03 lives — never gets a say: a stroke carrying the
+    // product's own signature is passed on by it, which is exactly why the emergency test
+    // cannot live there.
+    let mut state = HotkeyState::default();
+    let signed = KeyEvent {
+        vk: 0x7B,
+        edge: Edge::Down,
+        extra_info: INJECTED_SIGNATURE,
+        scan: 0,
+        flags: 0,
+        time: 0,
+    };
+
+    let outcome = hook::classify(hook::current_mode(), &mut state, signed);
+
+    assert_eq!(
+        outcome.decision,
+        Decision::Pass,
+        "FR-03 passes our own injected input on — so FR-96 must be answered before this point"
+    );
+    assert!(!outcome.fire_hotkey);
+    assert!(!outcome.probe_layout);
+    assert_eq!(hook::EXIT_EMERGENCY, 3);
+}
