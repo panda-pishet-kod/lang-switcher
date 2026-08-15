@@ -36,6 +36,77 @@
 #define IDI_APP_ACTIVE  101
 #define IDI_APP_PAUSED  102
 
+// Identifier of the settings dialog of FR-92, task T-08-1. Above the icons and well clear of
+// them: a resource identifier is only unique within its type, but keeping the numbering
+// distinct makes a mismatched constant in the Rust source visible as a missing resource
+// rather than as the wrong one.
+#define IDD_SETTINGS 200
+
+// The two identifiers the dialog manager itself acts on. Named here for the same reason
+// VS_VERSION_INFO is defined above: they are macros of windows.h, this script deliberately
+// does not include it, and their values are fixed by the window manager.
+#define IDOK 1
+#define IDCANCEL 2
+
+// Control identifiers of the settings dialog. They start at 1001 because the dialog manager
+// owns the small numbers: IDOK is 1, IDCANCEL is 2, and IDHELP is 9.
+#define IDC_AUTOSTART          1001
+#define IDC_LANGUAGE           1002
+#define IDC_HOTKEY             1010
+#define IDC_HOTKEY_NOTE        1011
+#define IDC_MODE_PAIR          1020
+#define IDC_MODE_CYCLE         1021
+#define IDC_PAIR_SOURCE        1022
+#define IDC_PAIR_TARGET        1023
+#define IDC_CYCLE_LIST         1024
+#define IDC_CYCLE_UP           1025
+#define IDC_CYCLE_DOWN         1026
+#define IDC_LAYOUT_NOTE        1027
+#define IDC_METHOD_BACKSPACE   1030
+#define IDC_METHOD_SELECTION   1031
+#define IDC_DELAY              1032
+#define IDC_SELECTION_ENABLED  1040
+#define IDC_CLIPBOARD_TIMEOUT  1041
+#define IDC_CLIPBOARD_RESTORE  1042
+#define IDC_EXCLUSIONS         1050
+#define IDC_EXCLUSION_NAME     1051
+#define IDC_EXCLUSION_ADD      1052
+#define IDC_EXCLUSION_REMOVE   1053
+#define IDC_LOG_ENABLED        1060
+#define IDC_LOG_OPEN           1061
+#define IDC_LOG_DIR            1062
+#define IDC_STATE_HOOK         1070
+#define IDC_STATE_LAYOUTS      1071
+#define IDC_STATE_AUTOSTART    1072
+#define IDC_APPLY              1080
+
+// Window and control styles, spelled out numerically for the reason given at the top of this
+// file: there is no #include <windows.h> here, so every name below would otherwise be an
+// undefined symbol. The values are those of winuser.h and commctrl.h and cannot change --
+// they are part of the binary interface of the window manager.
+#define DS_SETFONT             0x0040
+#define DS_MODALFRAME          0x0080
+#define DS_CENTER              0x0800
+#define WS_TABSTOP             0x00010000L
+#define WS_GROUP               0x00020000L
+#define WS_SYSMENU             0x00080000L
+#define WS_VSCROLL             0x00200000L
+#define WS_BORDER              0x00800000L
+#define WS_CAPTION             0x00C00000L
+#define WS_POPUP               0x80000000L
+#define ES_AUTOHSCROLL         0x0080
+#define ES_READONLY            0x0800
+#define ES_NUMBER              0x2000
+#define CBS_DROPDOWNLIST       0x0003
+#define CBS_HASSTRINGS         0x0200
+#define LBS_NOTIFY             0x0001
+#define LBS_HASSTRINGS         0x0040
+#define LBS_NOINTEGRALHEIGHT   0x0100
+#define LVS_REPORT             0x0001
+#define LVS_SINGLESEL          0x0004
+#define LVS_SHOWSELALWAYS      0x0008
+#define LVS_NOCOLUMNHEADER     0x4000
+
 // FR-90: two visually distinct tray states, each icon carrying the 16/20/24/32 px frames.
 // The paths are relative to this file, which sits next to Cargo.toml -- exactly the layout
 // proven by the H-9 control build. rc.exe resolves paths inside .rc files in a non-obvious
@@ -83,4 +154,102 @@ BEGIN
     BEGIN
         VALUE "Translation", 0x409, 1200
     END
+END
+
+// ---------------------------------------------------------------------------------------
+// FR-92 -- the settings dialog. Task T-08-1.
+// ---------------------------------------------------------------------------------------
+//
+// Every section of the FR-92 table is a group box below, in the order the requirement prints
+// them: Общие, Горячая клавиша, Раскладки, Замена, Выделение, Исключения, Диагностика. The
+// eighth group, Состояние, is not from that table: it shows what the modules `watchdog`,
+// `guard`, `diag` and `layouts` publish through their public readers, which the file cannot
+// carry because it is not configuration.
+//
+// ⚠ Every string here is Russian, which is exactly the trap fact 6 of section 9 of STATE.md
+// describes: without the `#pragma code_page(65001)` at the top of this file rc.exe reads it
+// in the system ANSI code page, cp1251 here, and the Cyrillic ends up as mojibake in the
+// binary -- with no error at build time and with green tests. The pragma is at the top of
+// this file, and `tests\settings.rs` reads these very strings back out of the built
+// LangSwitcher.exe and compares them against the expected ones.
+//
+// The strings are literals in the template rather than entries in a string table on purpose:
+// FR-94, the RU and EN string tables, is task T-08-2, and it is the task that decides how
+// they are laid out. What this task owes it is strings that can be lifted into a table
+// without being rewritten, which a dialog template gives.
+//
+// Coordinates are dialog units, so the layout follows the system font instead of a pixel
+// grid. Two columns, 200 units wide each, at x = 7 and x = 213.
+IDD_SETTINGS DIALOGEX 0, 0, 420, 356
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Lang Switcher — настройки"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    // -- Общие: автозапуск и язык интерфейса ---------------------------------------------
+    GROUPBOX        "Общие", -1, 7, 7, 200, 50
+    AUTOCHECKBOX    "Запускать при входе в систему", IDC_AUTOSTART, 14, 19, 186, 10
+    LTEXT           "Язык интерфейса:", -1, 14, 34, 58, 9
+    COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "вступит в силу после перезапуска", -1, 132, 34, 70, 18
+
+    // -- Горячая клавиша -----------------------------------------------------------------
+    GROUPBOX        "Горячая клавиша", -1, 7, 61, 200, 48
+    LTEXT           "Клавиша:", -1, 14, 76, 32, 9
+    EDITTEXT        IDC_HOTKEY, 48, 74, 64, 12, ES_AUTOHSCROLL | ES_READONLY
+    LTEXT           "Пока меняется только в файле настроек.", -1, 116, 76, 88, 18
+    LTEXT           "", IDC_HOTKEY_NOTE, 14, 90, 186, 16
+
+    // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
+    GROUPBOX        "Раскладки", -1, 7, 113, 200, 132
+    AUTORADIOBUTTON "Пара", IDC_MODE_PAIR, 14, 125, 60, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "Несколько раскладок", IDC_MODE_CYCLE, 78, 125, 122, 10
+    LTEXT           "Источник:", -1, 14, 141, 38, 9
+    COMBOBOX        IDC_PAIR_SOURCE, 54, 139, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цель:", -1, 14, 157, 38, 9
+    COMBOBOX        IDC_PAIR_TARGET, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", -1, 14, 172, 186, 9
+    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 183, 142, 44
+    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 183, 40, 14
+    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 200, 40, 14
+    LTEXT           "", IDC_LAYOUT_NOTE, 14, 230, 186, 10
+
+    // -- Замена: FR-41, FR-42, FR-44 -----------------------------------------------------
+    GROUPBOX        "Замена", -1, 213, 7, 200, 58
+    AUTORADIOBUTTON "Backspace", IDC_METHOD_BACKSPACE, 220, 19, 180, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "Выделение (совместимость)", IDC_METHOD_SELECTION, 220, 32, 180, 10
+    LTEXT           "Задержка между событиями, мс:", -1, 220, 48, 110, 9
+    EDITTEXT        IDC_DELAY, 334, 46, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
+
+    // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
+    GROUPBOX        "Выделение", -1, 213, 69, 200, 62
+    AUTOCHECKBOX    "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, 220, 81, 186, 10
+    LTEXT           "Таймаут буфера обмена, мс:", -1, 220, 97, 110, 9
+    EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 95, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "Задержка восстановления, мс:", -1, 220, 113, 110, 9
+    EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 111, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
+
+    // -- Исключения: FR-84 ---------------------------------------------------------------
+    GROUPBOX        "Исключения", -1, 213, 135, 200, 84
+    LISTBOX         IDC_EXCLUSIONS, 220, 147, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_BORDER | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 147, 60, 14
+    EDITTEXT        IDC_EXCLUSION_NAME, 220, 194, 120, 12, ES_AUTOHSCROLL
+    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 193, 60, 14
+    LTEXT           "Имя процесса, например game.exe", -1, 220, 208, 186, 9
+
+    // -- Диагностика: SEC-07 -------------------------------------------------------------
+    GROUPBOX        "Диагностика", -1, 213, 223, 200, 58
+    AUTOCHECKBOX    "Вести журнал", IDC_LOG_ENABLED, 220, 235, 90, 10
+    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 233, 86, 14
+    LTEXT           "Папка журнала:", -1, 220, 251, 60, 9
+    LTEXT           "", IDC_LOG_DIR, 220, 262, 186, 16
+
+    // -- Состояние: читатели модулей, не конфигурация -------------------------------------
+    GROUPBOX        "Состояние", -1, 7, 285, 406, 44
+    LTEXT           "", IDC_STATE_HOOK, 14, 297, 392, 9
+    LTEXT           "", IDC_STATE_LAYOUTS, 14, 308, 392, 9
+    LTEXT           "", IDC_STATE_AUTOSTART, 14, 319, 392, 9
+
+    DEFPUSHBUTTON   "ОК", IDOK, 253, 335, 50, 14
+    PUSHBUTTON      "Отмена", IDCANCEL, 307, 335, 50, 14
+    PUSHBUTTON      "Применить", IDC_APPLY, 361, 335, 52, 14
 END

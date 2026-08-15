@@ -1371,49 +1371,41 @@ fn restore_buffer() {
 /// `with_tray` answers `None` on any thread that is not the UI thread, so a stray call from
 /// elsewhere would publish nothing rather than publish something wrong.
 fn publish_configuration_to_input_thread() {
-    let published = crate::tray::with_tray(|tray| {
-        (
-            tray.enabled(),
-            crate::hook::vk_from_name(&tray.config().hotkey.key),
-            tray.config().buffer.capacity,
-            tray.config().replacement.method,
-            tray.config().replacement.inter_event_delay_ms,
-            crate::layouts::Configured::from_settings(&tray.config().layouts),
-            // Section `[selection]` of section 7 — FR-65 and the two timings of FR-61 steps 3
-            // and 8, task T-07-2. Cloned for the same reason the exclusion list below is: the
-            // borrow ends with the closure and the publication happens outside it.
-            tray.config().selection.clone(),
-            // Section `[exclusions]` of section 7 — FR-84, task T-06-3. Cloned rather than
-            // borrowed because the borrow ends with the closure: `with_tray` lends the tray for
-            // the length of the call, and the publication below runs outside it. One `Vec` of a
-            // handful of short strings, once per publication, on the thread section 6.1 already
-            // lets read a file.
-            tray.config().exclusions.processes.clone(),
-        )
-    });
+    // Cloned rather than read field by field, because the borrow ends with the closure and the
+    // publication below runs outside it — `with_tray` lends the tray for the length of the call
+    // only. One clone of a structure of a few scalars and a handful of short strings, once per
+    // publication, on the thread section 6.1 already lets read a file.
+    let published = crate::tray::with_tray(|tray| tray.config().clone());
 
-    let Some((
-        active,
-        hotkey,
-        capacity,
-        method,
-        inter_event_delay_ms,
-        layouts,
-        selection,
-        exclusions,
-    )) = published
-    else {
+    let Some(config) = published else {
         return;
     };
 
-    crate::hook::set_active(active);
+    publish_configuration(&config);
+}
+
+/// Hands the input thread the settings of an **arbitrary** configuration — the same publication
+/// [`publish_configuration_to_input_thread`] makes, without asking the tray what it holds.
+///
+/// **This is what the settings dialog of FR-92 reaches for** (task T-08-1). A setting the dialog
+/// wrote to the file but did not bring to the module that acts on it is, from where the user
+/// stands, a setting that does not work: rule R-52, a requirement closes where it closes. So the
+/// apply path of the dialog writes the file *and* calls this, and the change takes effect on the
+/// next keystroke rather than on the next start of the program.
+///
+/// Every store below is into an atomic another module owns, which is section 6.3's rule for
+/// state that crosses a thread boundary, and none of them is a lock (NFR-04). Nothing is applied
+/// to anything already built except `[buffer] capacity`, which is a live allocation and is
+/// therefore the one value that needs the message at the end.
+pub fn publish_configuration(config: &settings::Config) {
+    crate::hook::set_active(config.general.enabled);
 
     // A name this program does not know leaves the default of section 7 in place — `Pause`.
     // A resident utility whose hotkey silently ceased to exist because of a typo in a file
     // would be a worse answer than one that keeps answering to the documented default. The
     // settings dialog is where a bad name is reported to the user; that is FR-92, task
     // T-08-1.
-    if let Some(vk) = hotkey {
+    if let Some(vk) = crate::hook::vk_from_name(&config.hotkey.key) {
         crate::hook::set_hotkey_vk(vk);
     }
 
@@ -1424,8 +1416,8 @@ fn publish_configuration_to_input_thread() {
     // is no message to post, because unlike the buffer capacity of FR-07 neither value is
     // *applied* to anything the input thread has already built — the next hotkey press reads
     // whatever stands here at that moment.
-    crate::inject::set_replacement_method(method);
-    crate::inject::set_inter_event_delay_ms(inter_event_delay_ms);
+    crate::inject::set_replacement_method(config.replacement.method);
+    crate::inject::set_inter_event_delay_ms(config.replacement.inter_event_delay_ms);
 
     // Section `[layouts]` of section 7 — FR-30, FR-31, task T-05-2. Published for the same
     // reason and by the same rule as `[replacement]` above: the configuration belongs to the UI
@@ -1434,7 +1426,7 @@ fn publish_configuration_to_input_thread() {
     // per publication, so that the hotkey path reads numbers out of atomics and parses nothing.
     // Nothing is applied to anything already built: the next press reads whatever stands there
     // at that moment, exactly as it does for the replacement method.
-    crate::layouts::publish(layouts);
+    crate::layouts::publish(crate::layouts::Configured::from_settings(&config.layouts));
 
     // **Section `[selection]` of section 7 — FR-65, task T-07-2.** Published for the reason
     // everything above it is, and for one more that is this section's own: FR-65 says a switched
@@ -1445,7 +1437,7 @@ fn publish_configuration_to_input_thread() {
     // milliseconds for the whole of itself. So the switch and the two timings of FR-61 steps 3
     // and 8 go into atomics module `selection` owns, exactly as `[replacement]` and `[layouts]`
     // do one and two lines above.
-    crate::selection::publish(&selection);
+    crate::selection::publish(&config.selection);
 
     // **Section `[exclusions]` of section 7 — FR-84, task T-06-3.** Published for the reason
     // everything above it is: the list is the UI thread's to read out of the file and the watcher
@@ -1457,9 +1449,9 @@ fn publish_configuration_to_input_thread() {
     // The names are folded and stored once, here, so that the comparison on the watcher thread
     // parses nothing — the same rule `[layouts]` follows one line above, where the strings of
     // section 7 are turned into numbers at publication time.
-    crate::guard::publish_exclusions(&exclusions);
+    crate::guard::publish_exclusions(&config.exclusions.processes);
 
-    publish_buffer_capacity(capacity);
+    publish_buffer_capacity(config.buffer.capacity);
 }
 
 /// Publishes `[buffer] capacity` to the input thread and nudges it into applying it — FR-07.

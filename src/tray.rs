@@ -5,12 +5,15 @@
 //! Requirements this module covers: FR-90 (the icon and its two states), FR-91 (the context
 //! menu), FR-81 (`TaskbarCreated`), and the part of FR-83 that exists today — removing the
 //! icon and saving the configuration. The other three actions of FR-83 belong elsewhere:
-//! releasing the mutex is already done by [`crate::app`], unhooking arrives with T-03-1 and
-//! wiping the buffer with T-03-2, and both have a marked place in [`Tray::shut_down`].
+//! releasing the mutex is already done by [`crate::app`], unhooking by [`crate::app`]'s window
+//! procedure (task T-03-1), and wiping the buffer by `park_buffer` and by the drop of the
+//! recorder the input thread owns (task T-03-2) — see [`Tray::shut_down`].
 //! The list follows the backlog rather than the stub line this file used to carry —
 //! decision R-17: FR-83 is the backlog's and the backlog names T-01-4.
-//! Implemented by backlog tasks: T-01-4 (done); T-08-1 replaces the two marked stubs
-//! (FR-92, FR-93).
+//! Implemented by backlog tasks: T-01-4 (done); T-08-1 (done) filled the two marked stubs —
+//! the menu now opens the settings dialog of FR-92, which lives in [`crate::settings`], and
+//! the check mark of FR-93 now writes and removes the value under
+//! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -37,7 +40,10 @@
 //! Only the messages named in [`Tray::handle_message`] are handled; everything else is
 //! answered with [`Reaction::Ignored`] and goes to `DefWindowProcW`. The callback message of
 //! the icon can be posted by any process at the same integrity level, and all that achieves
-//! is a menu on the screen. There is deliberately **no `WM_COMMAND` handler**: the menu is
+//! is a menu on the screen — or, for the double click, the settings dialog of FR-92, which is
+//! the same kind of thing: a window that changes nothing until the person in front of it
+//! presses «Применить». Neither is a privileged action, neither writes anything anywhere, and
+//! both are dismissed by pressing `Esc`. There is deliberately **no `WM_COMMAND` handler**: the menu is
 //! tracked with `TPM_RETURNCMD`, so the chosen command comes back as the return value of
 //! `TrackPopupMenuEx` instead of arriving as a message. A forged `WM_COMMAND` therefore
 //! cannot pause the program or shut it down — no privileged action is reachable by message.
@@ -189,6 +195,12 @@ pub enum Reaction {
         /// Screen y of the cursor, taken from `wParam`.
         y: i32,
     },
+    /// Handled, except that the settings dialog of FR-92 has to be opened.
+    ///
+    /// A variant for the same reason [`Reaction::ShowMenu`] is one: the dialog is modal, it runs
+    /// a message loop that comes back into this module, and it must therefore not be opened
+    /// while the tray is borrowed.
+    ShowSettings,
 }
 
 /// The tray of one thread: the icon, its state, and the configuration behind it.
@@ -293,8 +305,12 @@ impl Tray {
         self.config.general.enabled
     }
 
-    /// Whether `general.autostart` is set. The check mark of FR-91 shows this and nothing
-    /// else; changing it is FR-93 and belongs to task T-08-1.
+    /// Whether `general.autostart` is set. The check mark of FR-91 shows this.
+    ///
+    /// What the *system* will actually do is [`settings::autostart_registered`], and the two are
+    /// kept equal by [`Tray::set_autostart`] — FR-93. They are read separately on purpose: the
+    /// settings dialog shows both, so that a value somebody removed from the registry by hand
+    /// is visible rather than merely wrong.
     pub fn autostart(&self) -> bool {
         self.config.general.autostart
     }
@@ -399,12 +415,12 @@ impl Tray {
                 y: coordinate(high_word(wparam.0)),
             },
 
-            // A double click is deliberately not the settings dialog: the dialog is FR-92
-            // and does not exist yet. With the mouse this arm is not even reached — the
-            // first click of the pair has already opened the menu and the second is consumed
-            // by the menu's own modal loop.
-            // TODO(T-08-1): open the settings dialog of FR-92 from here.
-            WM_LBUTTONDBLCLK => Reaction::Handled(LRESULT(0)),
+            // A double click opens the settings dialog of FR-92, which is the convention every
+            // resident program on this system follows. With the mouse this arm is not usually
+            // reached — the first click of the pair has already opened the menu and the second
+            // is consumed by the menu's own modal loop — so «Настройки…» in the menu stays the
+            // documented way in, and this is the shortcut for whoever expects it to work.
+            WM_LBUTTONDBLCLK => Reaction::ShowSettings,
 
             // Every other notification of the icon: balloon events, the hover notifications
             // of version 4, the raw button messages that accompany the ones above. A
@@ -421,6 +437,32 @@ impl Tray {
     /// flag; until then the state is the icon, the tooltip and the file.
     pub fn toggle_state(&mut self) {
         self.config.general.enabled = !self.config.general.enabled;
+        self.refresh_icon();
+        self.save_config();
+    }
+
+    /// Records `general.autostart` and saves it — the file half of FR-93.
+    ///
+    /// The registry half is [`settings::set_autostart`] and is made to succeed *before* this is
+    /// called: a file that claims the program starts with the session while the registry says
+    /// otherwise is the one outcome worth avoiding, and the order is what avoids it.
+    pub fn set_autostart(&mut self, autostart: bool) {
+        self.config.general.autostart = autostart;
+        self.save_config();
+    }
+
+    /// Takes the configuration the settings dialog of FR-92 produced.
+    ///
+    /// The whole structure is replaced rather than patched field by field, because the dialog
+    /// starts from a copy of this very configuration and returns it with the sections of FR-92
+    /// changed and everything else — `general.enabled`, `[buffer] capacity`, `schema_version` —
+    /// exactly as it found them.
+    ///
+    /// Saving is not optional here: the tray is the in-memory owner of the configuration and
+    /// writes it out again at shutdown (FR-83), so a change kept only in the file would be
+    /// overwritten by this copy on the way out.
+    pub fn replace_config(&mut self, config: Config) {
+        self.config = config;
         self.refresh_icon();
         self.save_config();
     }
@@ -454,8 +496,14 @@ impl Tray {
         // the message before this cleanup is reached, because `src\tray.rs` was outside that
         // task's file scope. The code there is correct; only this note was stale.
         //
-        // FR-83, "обнуление буфера" — TODO(T-03-2): there is no keystroke buffer yet, and
-        // this is where it is wiped (SEC-07) when there is one.
+        // FR-83, "обнуление буфера" — already done, and deliberately not from here. The typing
+        // buffer is a thread-local of the **input** thread (section 6.3), which this thread
+        // cannot reach at all: `buffer::with` on the UI thread finds nothing. It is zeroed by
+        // `buffer::reset` — the ring is overwritten, SEC-02 — on every flush of FR-10, by
+        // `app::park_buffer` when the focus enters a password field (FR-70), and by the drop of
+        // the recorder when the input thread leaves `serve_window`. Task T-03-2 put it there and
+        // this note was the stale half of that move (documentation debt, section 4.3 of
+        // STATE.md, paid by task T-08-1).
         //
         // FR-83, "освобождение мьютекса" — already done, and deliberately not from here: the
         // mutex is owned by `app::SingleInstance` and released by its `Drop` in
@@ -721,6 +769,12 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
             show_menu(x, y);
             Some(LRESULT(0))
         }
+        // Outside the borrow for the same reason: the dialog of FR-92 is modal.
+        Reaction::ShowSettings => {
+            let hwnd = with_tray(|tray| tray.hwnd)?;
+            open_settings(hwnd);
+            Some(LRESULT(0))
+        }
     }
 }
 
@@ -894,18 +948,12 @@ fn dispatch_command(hwnd: HWND, command: u32) {
             let _ = with_tray(Tray::toggle_state);
         }
 
-        // FR-92, task T-08-1. Marked stub: the settings dialog is a `.rc` resource plus a
-        // dialog procedure, neither of which exists yet, and a placeholder window invented
-        // here would only have to be deleted again.
-        // TODO(T-08-1): open the settings dialog of FR-92.
-        CMD_SETTINGS => {}
+        // FR-92, task T-08-1. Outside any borrow of the tray, like the about box below and for
+        // the same reason: the dialog is modal and pumps messages.
+        CMD_SETTINGS => open_settings(hwnd),
 
-        // FR-93, task T-08-1. Marked stub, and deliberately not implemented here: FR-93 is
-        // autostart through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, that is, a
-        // write to the registry, and task T-01-4 is not allowed to make one. The check mark
-        // shows `general.autostart`; choosing the item changes nothing.
-        // TODO(T-08-1): write the `Run` value and update `general.autostart`.
-        CMD_AUTOSTART => {}
+        // FR-93, task T-08-1.
+        CMD_AUTOSTART => toggle_autostart(),
 
         // Outside any borrow of the tray: `MessageBoxW` is modal and pumps messages.
         CMD_ABOUT => show_about(hwnd),
@@ -920,6 +968,82 @@ fn dispatch_command(hwnd: HWND, command: u32) {
         // turn up here: the identifiers are ours and the menu is built two frames up.
         _ => {}
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// The settings dialog — FR-92, and the autostart of FR-93
+// ---------------------------------------------------------------------------------------
+
+/// Opens the settings dialog of FR-92 and applies whatever it produces.
+///
+/// Called with **no borrow of the tray held**: `DialogBoxParamW` runs a modal message loop that
+/// dispatches back into this module, exactly as `TrackPopupMenuEx` does. The configuration the
+/// dialog starts from is therefore *copied* out of the tray first, and what comes back arrives
+/// through [`apply_settings`].
+fn open_settings(hwnd: HWND) {
+    let Some(config) = with_tray(|tray| tray.config().clone()) else {
+        return;
+    };
+
+    // SAFETY: `None` asks for the handle of the file used to create the calling process, which
+    // is the running executable — the module `app.rc` was linked into, and therefore the one
+    // holding the dialog template. The handle is borrowed and must not be freed; nothing here
+    // frees it.
+    let module = match unsafe { GetModuleHandleW(PCWSTR::null()) } {
+        Ok(module) => module,
+        Err(error) => {
+            app::report_non_critical("GetModuleHandleW", &error);
+            return;
+        }
+    };
+
+    let mut apply = apply_settings;
+
+    if let Err(error) = settings::show_dialog(hwnd, HINSTANCE(module.0), &config, &mut apply) {
+        // NFR-13. The dialog either came up or it did not, and if it did not the user is told
+        // by the absence of a window; the reason goes to the journal.
+        app::report_non_critical("DialogBoxParamW", &error);
+    }
+}
+
+/// Takes a configuration the dialog produced and makes it the program's — the «Применить» of
+/// FR-92.
+///
+/// **Three destinations, and all three are the requirement.** The tray holds the configuration
+/// in memory and writes the file (section 6.1: the UI thread is the one that may); `app`
+/// publishes it into the modules that act on it, which is what makes a changed setting take
+/// effect without a restart (rule R-52); and the registry is made to agree with
+/// `general.autostart`, which is FR-93 and is the one part of the configuration that lives
+/// outside the file.
+fn apply_settings(config: &Config) {
+    // FR-93 first: if the registry refuses, the file is not made to claim otherwise.
+    if let Err(error) = settings::set_autostart(config.general.autostart) {
+        app::report_non_critical("RegSetValueExW", &error);
+    }
+
+    with_tray(|tray| tray.replace_config(config.clone()));
+
+    app::publish_configuration(config);
+}
+
+/// The check mark of FR-91, made to do what FR-93 says.
+///
+/// The registry is written **first** and the file only if that succeeded: the check mark
+/// describes what the system will do at the next logon, and a file that disagrees with the
+/// system would make the tray show a state that is not true.
+fn toggle_autostart() {
+    let Some(wanted) = with_tray(|tray| !tray.autostart()) else {
+        return;
+    };
+
+    if let Err(error) = settings::set_autostart(wanted) {
+        // NFR-13. Nothing is recorded anywhere: the state the user asked for was not reached,
+        // and the check mark stays where it was.
+        app::report_non_critical("RegSetValueExW", &error);
+        return;
+    }
+
+    with_tray(|tray| tray.set_autostart(wanted));
 }
 
 // ---------------------------------------------------------------------------------------
