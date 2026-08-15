@@ -15,6 +15,7 @@ use std::fs;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use lang_switcher::settings::{self, CONFIG_FILE_NAME};
 use lang_switcher::tray::{self, Menu, Reaction, Tray};
@@ -38,7 +39,7 @@ use windows::core::{PCWSTR, w};
 /// The menu of FR-91 as its block prints, top to bottom. `None` is one of the two rules.
 ///
 /// Written out here on purpose. These seven lines are the requirement; the module's own
-/// constants are the implementation, and a test must not check one against itself.
+/// resources are the implementation, and a test must not check one against itself.
 const FR_91: [Option<&str>; 7] = [
     Some("Приостановить"),
     None,
@@ -49,8 +50,50 @@ const FR_91: [Option<&str>; 7] = [
     Some("Выход"),
 ];
 
+/// The same seven lines in the other locale of FR-94 — task T-08-2.
+///
+/// ⚠ The **composition** is identical and only the words move: five commands and the same two
+/// rules in the same places. A translation that quietly dropped or added an entry would be a
+/// different menu, and FR-91 fixes the menu.
+const FR_91_ENGLISH: [Option<&str>; 7] = [
+    Some("Suspend"),
+    None,
+    Some("Settings…"),
+    Some("Start when I sign in"),
+    None,
+    Some("About"),
+    Some("Exit"),
+];
+
+/// Serialises the tests that publish an interface locale — it is process-wide, and the tests of
+/// one binary run on parallel threads.
+static LOCALE: Mutex<()> = Mutex::new(());
+
+/// The mapping [`product_strings`] hands out, loaded once and never unmapped.
+static SHARED_IMAGE: OnceLock<usize> = OnceLock::new();
+
+/// Points `settings` at the string tables of the built binary and publishes `language`.
+///
+/// ⚠ Without the redirection every label would come back empty: `embed-resource` links `app.rc`
+/// into the **binary** targets of the crate, so this test executable has no resource section of
+/// its own — section 4.4 of STATE.md, the same barrier the icons above are loaded around. What
+/// the menu is checked against is therefore the table that ships.
+fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
+    let guard = LOCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let raw = *SHARED_IMAGE.get_or_init(|| ProductImage::load().0 as usize);
+
+    settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
+    settings::set_ui_language(language);
+
+    guard
+}
+
 #[test]
 fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
+    let _locale = product_strings(settings::Language::Ru);
     let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
 
     assert_eq!(
@@ -83,7 +126,49 @@ fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
 }
 
 #[test]
+fn the_menu_of_fr_91_is_the_same_menu_in_english() {
+    // **Criterion 12.** FR-94 translates the labels; FR-91 fixes what the menu *is*, and the
+    // second must survive the first — same seven entries, same two rules, same places.
+    let _locale = product_strings(settings::Language::En);
+    let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
+
+    assert_eq!(item_count(menu.handle()), 7);
+
+    for (position, expected) in FR_91_ENGLISH.iter().enumerate() {
+        let index = u32::try_from(position).expect("a menu position fits in a u32");
+        let label = label_at(menu.handle(), index);
+        let separator = is_separator(menu.handle(), index);
+
+        println!("{position}: separator={separator} label={label:?}");
+
+        match expected {
+            Some(text) => {
+                assert!(
+                    !separator,
+                    "entry {position} of FR-91 is a command, not a rule"
+                );
+                assert_eq!(
+                    label, *text,
+                    "entry {position} reads differently in English"
+                );
+            }
+            None => {
+                assert!(separator, "entry {position} of FR-91 is a rule");
+                assert_eq!(label, "", "a rule carries no text");
+            }
+        }
+    }
+
+    // The suspended state moves the same entry in this locale as in the other one.
+    let suspended = Menu::build(false, true).expect("the menu must be creatable");
+    assert_eq!(label_at(suspended.handle(), 0), "Resume");
+
+    settings::set_ui_language(settings::Language::Ru);
+}
+
+#[test]
 fn the_first_entry_follows_the_state() {
+    let _locale = product_strings(settings::Language::Ru);
     let active = Menu::build(true, true).expect("the menu must be creatable");
     let suspended = Menu::build(false, true).expect("the menu must be creatable");
 
@@ -102,6 +187,7 @@ fn the_first_entry_follows_the_state() {
 
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
+    let _locale = product_strings(settings::Language::Ru);
     let on = Menu::build(true, true).expect("the menu must be creatable");
     let off = Menu::build(true, false).expect("the menu must be creatable");
 
@@ -422,6 +508,13 @@ struct ProductImage {
 
 impl ProductImage {
     fn open() -> Self {
+        Self {
+            module: Self::load(),
+        }
+    }
+
+    /// Maps the shipped binary for resource reading.
+    fn load() -> HMODULE {
         // `cargo test` puts the test executables in `<target>\debug\deps` and the binary
         // target one level up.
         let exe = std::env::current_exe()
@@ -448,12 +541,10 @@ impl ProductImage {
         // signature demands. `LOAD_LIBRARY_AS_DATAFILE` maps the image for resource reading
         // only: no entry point runs, nothing is relocated and no dependency is loaded, which
         // is what makes it safe to open a binary that would refuse to execute here. The
-        // handle is freed exactly once, in `Drop`.
-        let module =
-            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
-                .expect("the product binary must be openable as a data file");
-
-        Self { module }
+        // handle is freed exactly once, in `Drop` — or never, for the one mapping
+        // `product_strings` keeps alive for the whole run.
+        unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+            .expect("the product binary must be openable as a data file")
     }
 
     /// The module handle as an `HINSTANCE`, for `LoadImageW`.

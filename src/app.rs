@@ -711,6 +711,19 @@ fn serve_window(role: Role) -> WinResult<()> {
         Role::Ui => {
             let attachment = crate::tray::attach(_window.handle, instance)?;
 
+            // **FR-94, task T-08-2 — the one publication that happens exactly once.**
+            //
+            // The tray has just read `config.toml`; this is where `general.language` reaches
+            // the module that turns string identifiers into text. It is deliberately *not* in
+            // `publish_configuration` below, which runs again on every «Применить»: the note
+            // beside the language combo box says the choice takes effect after a restart, and
+            // it is only true if nothing re-publishes the locale under the user's hands. A menu
+            // that changed language halfway through a session while the window that was open
+            // did not would be a worse answer than the honest one.
+            crate::tray::with_tray(|tray| {
+                crate::settings::set_ui_language(tray.config().general.language);
+            });
+
             // Section 6.3, "Конфигурация публикуется потоком UI": the tray has just read
             // `config.toml`, and this is the moment the input thread learns what is in it. It
             // cannot read the file itself — NFR-08 gives the hook fifty milliseconds from

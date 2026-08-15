@@ -7,10 +7,26 @@
 //! Requirements covered here: the configuration schema of section 7 of SPEC, in full
 //! (task T-01-3); **FR-92**, the settings dialog with every section of its table, and
 //! **FR-93**, autostart through `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-//! (task T-08-1). Still to come: FR-94, hotkey capture with RU and EN string tables
-//! (task T-08-2) — the hotkey field of the dialog therefore *shows* the configured key
-//! and does not capture one. The distribution of requirements over modules follows the
+//! (task T-08-1); **FR-94**, the interface in Russian and English and the hotkey captured by
+//! pressing it (task T-08-2). The distribution of requirements over modules follows the
 //! backlog, which is its source of truth (decision R-17).
+//!
+//! # FR-94 — where the interface text comes from
+//!
+//! Out of the two string tables of `app.rc`, one per locale, chosen by `general.language` of
+//! section 7 and by nothing else — not by the user's Windows UI language, which section 7 does
+//! not mention. [`text`] reads one string out of the running program's own image with
+//! `FindResourceExW`, giving it the language identifier explicitly; [`set_ui_language`] is what
+//! `app` publishes at start-up, once, which is what makes «вступит в силу после перезапуска»
+//! beside the combo box a true statement rather than a hopeful one.
+//!
+//! # FR-94 — where the keystrokes of a capture come from
+//!
+//! From window messages on the UI thread, through a window procedure this module puts in front
+//! of the hotkey field's own — see [`subclass_hotkey_field`] for why not from the low-level
+//! hook, and [`CaptureSession`] for what happens to the ordinary work of FR-02 while a capture
+//! is armed. **FR-96 is untouched by all of it**: the emergency combination is handled at the
+//! top of the hook callback, before anything this module can influence is even read.
 //!
 //! SEC-01 and SEC-07. This is the only module of the program that writes to disk at all.
 //! Nothing derived from a keystroke, from a converted character or from the clipboard is
@@ -44,10 +60,16 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, HINSTANCE, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
+};
+use windows::Win32::System::LibraryLoader::{
+    FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
+};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE,
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
@@ -60,14 +82,21 @@ use windows::Win32::UI::Controls::{
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE,
     LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
+    VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+    VK_SCROLL, VK_SHIFT, VK_SNAPSHOT,
+};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, DialogBoxParamW, EndDialog,
-    GWLP_USERDATA, GetClientRect, GetDlgItem, GetDlgItemTextW, GetWindowLongPtrW, IDCANCEL, IDOK,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW,
-    WM_COMMAND, WM_INITDIALOG,
+    CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS,
+    DefWindowProcW, DialogBoxParamW, EndDialog, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
+    GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW, IDCANCEL, IDOK, LB_ADDSTRING,
+    LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT,
+    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
+    WM_CHAR, WM_COMMAND, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -110,6 +139,46 @@ pub enum Language {
     Ru,
     /// English.
     En,
+}
+
+impl Language {
+    /// The Windows language identifier of this locale — the number `app.rc` tags its string
+    /// table with and the number [`text`] asks `FindResourceExW` for.
+    ///
+    /// `LANG_RUSSIAN` (0x19) and `LANG_ENGLISH` (0x09) with `SUBLANG_DEFAULT` (0x01) in the high
+    /// four bits, which is how a `LANGID` is built. Spelled out rather than computed for the same
+    /// reason `app.rc` spells them out: the two files have no shared header, and these two
+    /// numbers are the joint between them.
+    pub const fn langid(self) -> u16 {
+        match self {
+            Self::Ru => 0x0419,
+            Self::En => 0x0409,
+        }
+    }
+
+    /// The two-word name of section 7, for a message and for a test.
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::Ru => "ru",
+            Self::En => "en",
+        }
+    }
+
+    /// This locale as the number [`UI_LANGUAGE`] stores.
+    const fn index(self) -> u32 {
+        match self {
+            Self::Ru => 0,
+            Self::En => 1,
+        }
+    }
+
+    /// The locale [`Self::index`] came from. Anything else is the default of section 7.
+    const fn from_index(index: u32) -> Self {
+        match index {
+            1 => Self::En,
+            _ => Self::Ru,
+        }
+    }
 }
 
 /// Layout switching mode, `layouts.mode` of section 7. Values `pair` and `cycle`.
@@ -876,8 +945,676 @@ pub fn set_autostart(enabled: bool) -> windows::core::Result<()> {
 }
 
 // =========================================================================================
-// FR-92 — the settings dialog
+// FR-94 — the interface strings, RU and EN
 // =========================================================================================
+
+/// Identifiers of the interface strings, mirrored by hand from `app.rc`.
+///
+/// ⚠ Same rule as the control identifiers below, and the same reason: a `.rc` file and a Rust
+/// file share no header. A number that drifts is not silent — the string comes back empty, the
+/// refusal is recorded through [`crate::app::report_non_critical`], and
+/// `tests\settings.rs` reads both tables out of the **built** `LangSwitcher.exe` and compares
+/// them, string by string, against literals written out there.
+pub const IDS_DIALOG_CAPTION: u16 = 3000;
+/// «Общие» — the first group of FR-92.
+pub const IDS_GROUP_GENERAL: u16 = 3001;
+/// The autostart tick of FR-93.
+pub const IDS_AUTOSTART: u16 = 3002;
+/// The label of the language combo box.
+pub const IDS_LANGUAGE_LABEL: u16 = 3003;
+/// The note that says the language takes effect after a restart — and it now does.
+pub const IDS_LANGUAGE_RESTART: u16 = 3004;
+/// «Горячая клавиша» — the second group of FR-92.
+pub const IDS_GROUP_HOTKEY: u16 = 3005;
+/// The label of the hotkey field.
+pub const IDS_HOTKEY_LABEL: u16 = 3006;
+/// The capture button while no capture is armed.
+pub const IDS_HOTKEY_SET: u16 = 3007;
+/// The capture button while a capture is armed — pressing it again cancels.
+pub const IDS_HOTKEY_STOP: u16 = 3008;
+/// «Раскладки» — the third group of FR-92.
+pub const IDS_GROUP_LAYOUTS: u16 = 3009;
+/// The «Пара» mode of FR-30.
+pub const IDS_MODE_PAIR: u16 = 3010;
+/// The «Несколько раскладок» mode of FR-31.
+pub const IDS_MODE_CYCLE: u16 = 3011;
+/// The label of the pair source combo box.
+pub const IDS_PAIR_SOURCE: u16 = 3012;
+/// The label of the pair target combo box.
+pub const IDS_PAIR_TARGET: u16 = 3013;
+/// The line explaining what the tick and the buttons of the cycle list do.
+pub const IDS_CYCLE_HINT: u16 = 3014;
+/// The «up» button of the cycle order.
+pub const IDS_CYCLE_UP: u16 = 3015;
+/// The «down» button of the cycle order.
+pub const IDS_CYCLE_DOWN: u16 = 3016;
+/// «Замена» — the fourth group of FR-92.
+pub const IDS_GROUP_REPLACEMENT: u16 = 3017;
+/// The `Backspace` method of FR-41.
+pub const IDS_METHOD_BACKSPACE: u16 = 3018;
+/// The selection method of FR-42.
+pub const IDS_METHOD_SELECTION: u16 = 3019;
+/// The label of the inter-event delay field of FR-44.
+pub const IDS_DELAY_LABEL: u16 = 3020;
+/// «Выделение» — the fifth group of FR-92.
+pub const IDS_GROUP_SELECTION: u16 = 3021;
+/// The tick of FR-65.
+pub const IDS_SELECTION_ENABLED: u16 = 3022;
+/// The label of the clipboard timeout field.
+pub const IDS_CLIPBOARD_TIMEOUT: u16 = 3023;
+/// The label of the clipboard restore delay field.
+pub const IDS_CLIPBOARD_RESTORE: u16 = 3024;
+/// «Исключения» — the sixth group of FR-92.
+pub const IDS_GROUP_EXCLUSIONS: u16 = 3025;
+/// The button that takes a process name out of the list of FR-84.
+pub const IDS_EXCLUSION_REMOVE: u16 = 3026;
+/// The button that puts one in.
+pub const IDS_EXCLUSION_ADD: u16 = 3027;
+/// The line saying what a process name looks like.
+pub const IDS_EXCLUSION_HINT: u16 = 3028;
+/// «Диагностика» — the seventh group of FR-92.
+pub const IDS_GROUP_DIAGNOSTICS: u16 = 3029;
+/// The journal tick of SEC-07.
+pub const IDS_LOG_ENABLED: u16 = 3030;
+/// The button that opens the journal folder.
+pub const IDS_LOG_OPEN: u16 = 3031;
+/// The label in front of the journal folder path.
+pub const IDS_LOG_DIR_LABEL: u16 = 3032;
+/// «Состояние» — the group of module readers, which is not from the FR-92 table.
+pub const IDS_GROUP_STATE: u16 = 3033;
+/// The `IDOK` button.
+pub const IDS_OK: u16 = 3034;
+/// The `IDCANCEL` button.
+pub const IDS_CANCEL: u16 = 3035;
+/// The «Применить» button.
+pub const IDS_APPLY: u16 = 3036;
+/// The warning FR-92 asks for when the hotkey is a text key.
+pub const IDS_NOTE_TEXT_KEY: u16 = 3037;
+/// The warning for a key name this build does not know.
+pub const IDS_NOTE_UNKNOWN_KEY: u16 = 3038;
+/// What the note says while a capture is armed.
+pub const IDS_CAPTURE_PROMPT: u16 = 3039;
+/// [`Refusal::Modifier`].
+pub const IDS_CAPTURE_MODIFIER: u16 = 3040;
+/// [`Refusal::Combination`].
+pub const IDS_CAPTURE_COMBINATION: u16 = 3041;
+/// [`Refusal::Emergency`].
+pub const IDS_CAPTURE_EMERGENCY: u16 = 3042;
+/// [`Refusal::Nameless`].
+pub const IDS_CAPTURE_NAMELESS: u16 = 3043;
+/// [`Refusal::Reserved`].
+pub const IDS_CAPTURE_RESERVED: u16 = 3044;
+/// The first line of the «Состояние» group, with three places to fill in.
+pub const IDS_STATE_HOOK: u16 = 3045;
+/// The hook is installed.
+pub const IDS_HOOK_UP: u16 = 3046;
+/// The hook is not installed — FR-80.
+pub const IDS_HOOK_DOWN: u16 = 3047;
+/// The second line of the «Состояние» group.
+pub const IDS_STATE_LAYOUTS: u16 = 3048;
+/// The third line of the «Состояние» group.
+pub const IDS_STATE_AUTOSTART: u16 = 3049;
+/// The registry value of FR-93 is there.
+pub const IDS_AUTOSTART_PRESENT: u16 = 3050;
+/// It is not.
+pub const IDS_AUTOSTART_ABSENT: u16 = 3051;
+/// The note about a layout named in the file that this session does not have.
+pub const IDS_LAYOUT_NOTE: u16 = 3052;
+/// The word «источник» inside that note.
+pub const IDS_LAYOUT_WORD_SOURCE: u16 = 3053;
+/// The word «цель» inside that note.
+pub const IDS_LAYOUT_WORD_TARGET: u16 = 3054;
+/// What the journal folder line says when `%APPDATA%` is not set.
+pub const IDS_LOG_DIR_MISSING: u16 = 3055;
+/// First item of FR-91 while the program is active.
+pub const IDS_MENU_SUSPEND: u16 = 3072;
+/// First item of FR-91 while the program is suspended.
+pub const IDS_MENU_RESUME: u16 = 3073;
+/// Second item of FR-91.
+pub const IDS_MENU_SETTINGS: u16 = 3074;
+/// Third item of FR-91, the one carrying the check mark of `general.autostart`.
+pub const IDS_MENU_AUTOSTART: u16 = 3075;
+/// Fourth item of FR-91.
+pub const IDS_MENU_ABOUT: u16 = 3076;
+/// Fifth item of FR-91.
+pub const IDS_MENU_EXIT: u16 = 3077;
+
+/// Every identifier above, so that a test can walk the whole vocabulary of the interface.
+///
+/// Exported rather than rebuilt in the test: what the test must not import is the *text*, and
+/// it does not — it writes every string out itself. The list of identifiers is the contract
+/// between `app.rc` and this file, and a test that walked a list of its own would not be
+/// checking that contract at all.
+pub const INTERFACE_STRINGS: [u16; 62] = [
+    IDS_DIALOG_CAPTION,
+    IDS_GROUP_GENERAL,
+    IDS_AUTOSTART,
+    IDS_LANGUAGE_LABEL,
+    IDS_LANGUAGE_RESTART,
+    IDS_GROUP_HOTKEY,
+    IDS_HOTKEY_LABEL,
+    IDS_HOTKEY_SET,
+    IDS_HOTKEY_STOP,
+    IDS_GROUP_LAYOUTS,
+    IDS_MODE_PAIR,
+    IDS_MODE_CYCLE,
+    IDS_PAIR_SOURCE,
+    IDS_PAIR_TARGET,
+    IDS_CYCLE_HINT,
+    IDS_CYCLE_UP,
+    IDS_CYCLE_DOWN,
+    IDS_GROUP_REPLACEMENT,
+    IDS_METHOD_BACKSPACE,
+    IDS_METHOD_SELECTION,
+    IDS_DELAY_LABEL,
+    IDS_GROUP_SELECTION,
+    IDS_SELECTION_ENABLED,
+    IDS_CLIPBOARD_TIMEOUT,
+    IDS_CLIPBOARD_RESTORE,
+    IDS_GROUP_EXCLUSIONS,
+    IDS_EXCLUSION_REMOVE,
+    IDS_EXCLUSION_ADD,
+    IDS_EXCLUSION_HINT,
+    IDS_GROUP_DIAGNOSTICS,
+    IDS_LOG_ENABLED,
+    IDS_LOG_OPEN,
+    IDS_LOG_DIR_LABEL,
+    IDS_GROUP_STATE,
+    IDS_OK,
+    IDS_CANCEL,
+    IDS_APPLY,
+    IDS_NOTE_TEXT_KEY,
+    IDS_NOTE_UNKNOWN_KEY,
+    IDS_CAPTURE_PROMPT,
+    IDS_CAPTURE_MODIFIER,
+    IDS_CAPTURE_COMBINATION,
+    IDS_CAPTURE_EMERGENCY,
+    IDS_CAPTURE_NAMELESS,
+    IDS_CAPTURE_RESERVED,
+    IDS_STATE_HOOK,
+    IDS_HOOK_UP,
+    IDS_HOOK_DOWN,
+    IDS_STATE_LAYOUTS,
+    IDS_STATE_AUTOSTART,
+    IDS_AUTOSTART_PRESENT,
+    IDS_AUTOSTART_ABSENT,
+    IDS_LAYOUT_NOTE,
+    IDS_LAYOUT_WORD_SOURCE,
+    IDS_LAYOUT_WORD_TARGET,
+    IDS_LOG_DIR_MISSING,
+    IDS_MENU_SUSPEND,
+    IDS_MENU_RESUME,
+    IDS_MENU_SETTINGS,
+    IDS_MENU_AUTOSTART,
+    IDS_MENU_ABOUT,
+    IDS_MENU_EXIT,
+];
+
+/// How many strings one string table resource holds — fixed by the format, not by us.
+const STRINGS_PER_BLOCK: u16 = 16;
+
+/// `RT_STRING`, the resource type of a string table.
+///
+/// Spelled out because the `windows` crate does not export it: `RT_DIALOG`, `RT_VERSION` and
+/// the rest of the set are in `Win32::UI::WindowsAndMessaging`, and this one is missing from it.
+/// The value is 6 and is part of the binary interface of the resource loader — the same reason
+/// `app.rc` spells its constants out numerically.
+const RT_STRING: PCWSTR = PCWSTR(std::ptr::without_provenance(6));
+
+/// The image the string tables are read out of, or zero for «the running program's own».
+///
+/// An override exists for one reason, and it is not a preference: `embed-resource` links
+/// `app.rc` into the **binary** targets of this crate only (barrier §4.4 of `STATE.md`), so a
+/// test executable carries no resource section at all and would see every string as empty.
+/// A test points this at the built `LangSwitcher.exe`, opened with `LOAD_LIBRARY_AS_DATAFILE`,
+/// and then checks the strings the *shipping* binary carries rather than a copy of them.
+static RESOURCE_MODULE: AtomicUsize = AtomicUsize::new(0);
+
+/// The interface locale in force, as [`Language::index`] — `general.language` of section 7.
+///
+/// Published once, by `app`, at start-up, and not on every apply. That is what makes the note
+/// beside the combo box true: changing the language writes the file and takes effect when the
+/// program is started again, and nothing about the running program's language moves under the
+/// user's hands in the meantime.
+static UI_LANGUAGE: AtomicU32 = AtomicU32::new(0);
+
+/// Publishes the interface locale — FR-94. Called by `app` at start-up.
+pub fn set_ui_language(language: Language) {
+    UI_LANGUAGE.store(language.index(), Ordering::Relaxed);
+}
+
+/// The interface locale in force.
+pub fn ui_language() -> Language {
+    Language::from_index(UI_LANGUAGE.load(Ordering::Relaxed))
+}
+
+/// Points the string loader at a module other than the running program — see
+/// [`RESOURCE_MODULE`].
+pub fn set_resource_module(module: HMODULE) {
+    RESOURCE_MODULE.store(module.0 as usize, Ordering::Relaxed);
+}
+
+/// The module [`text`] reads from.
+fn resource_module() -> HMODULE {
+    let stored = RESOURCE_MODULE.load(Ordering::Relaxed);
+
+    if stored != 0 {
+        // A handle is not a pointer we dereference — it goes straight back to Win32 — which is
+        // exactly what `without_provenance_mut` says.
+        return HMODULE(std::ptr::without_provenance_mut(stored));
+    }
+
+    // SAFETY: a null name asks for the module handle of the running program's own image, which
+    // is the documented meaning of the argument and needs no memory of ours. The handle is
+    // borrowed, not owned: `GetModuleHandleW` does not add a reference and there is nothing to
+    // free.
+    match unsafe { GetModuleHandleW(PCWSTR::null()) } {
+        Ok(module) => module,
+        Err(error) => {
+            crate::app::report_non_critical("GetModuleHandleW", &error);
+            HMODULE::default()
+        }
+    }
+}
+
+/// One interface string in the locale in force — FR-94.
+///
+/// An empty string when the resource cannot be read, which is the one answer that cannot make
+/// things worse: a label that came out blank is visible, and the refusal is in the journal.
+pub fn text(id: u16) -> String {
+    string_from(resource_module(), ui_language(), id).unwrap_or_default()
+}
+
+/// [`text`] with `{0}`, `{1}`… replaced by `arguments`, in order.
+///
+/// A placeholder and not `format!`, because the sentence is a resource and `format!` needs a
+/// literal. **SEC-01, SEC-07:** everything substituted here is a number this program counted, a
+/// path, or a word out of the same string table — never a keystroke, a character or anything
+/// that came off the clipboard.
+pub fn format_text(id: u16, arguments: &[&str]) -> String {
+    let mut filled = text(id);
+
+    for (index, argument) in arguments.iter().enumerate() {
+        filled = filled.replace(&format!("{{{index}}}"), argument);
+    }
+
+    filled
+}
+
+/// One string of one string table of one module, decoded by hand.
+///
+/// The string table format, which is what the walk below follows: strings live sixteen to a
+/// resource, the resource identifier is `id / 16 + 1`, and the block is sixteen strings each
+/// stored as a `u16` length followed by that many UTF-16 units — counted, never
+/// NUL-terminated. `LoadStringW` would do the same walk, but it would choose the *language*
+/// itself, from the user's Windows UI language; section 7 says the choice is
+/// `general.language`, so the language is passed to `FindResourceExW` explicitly and this
+/// function does the rest.
+fn string_from(module: HMODULE, language: Language, id: u16) -> Option<String> {
+    let block = id / STRINGS_PER_BLOCK + 1;
+    let wanted = usize::from(id % STRINGS_PER_BLOCK);
+
+    // SAFETY: `module` is a live module handle — either the running image or one a test loaded
+    // with `LOAD_LIBRARY_AS_DATAFILE` and keeps alive. Both "strings" are integer identifiers in
+    // the `MAKEINTRESOURCE` form, a value below 65536 carried inside the pointer, so nothing is
+    // dereferenced as a string. The call reads no memory of ours.
+    let found = unsafe {
+        FindResourceExW(
+            Some(module),
+            RT_STRING,
+            resource_id(block),
+            language.langid(),
+        )
+    };
+
+    if found.0.is_null() {
+        crate::app::report_non_critical("FindResourceExW", &WinError::from_thread());
+        return None;
+    }
+
+    // SAFETY: `module` and `found` are the pair just established.
+    let size = unsafe { SizeofResource(Some(module), found) };
+
+    // SAFETY: the same pair. NFR-13: the crate turns a failure into an error, which the `?`
+    // below examines.
+    let block = unsafe { LoadResource(Some(module), found) }
+        .inspect_err(|error| crate::app::report_non_critical("LoadResource", error))
+        .ok()?;
+
+    // SAFETY: `block` came from the `LoadResource` directly above.
+    let start = unsafe { LockResource(block) };
+
+    if start.is_null() || size < u32::try_from(size_of::<u16>()).unwrap_or(u32::MAX) {
+        crate::app::report_non_critical("LoadResource", &WinError::from_thread());
+        return None;
+    }
+
+    let units = usize::try_from(size).ok()? / size_of::<u16>();
+
+    // SAFETY: `start` points at `size` bytes of read-only resource data inside the mapping of
+    // `module`, which is alive for the whole of this call; resource data is aligned to four
+    // bytes, so reading it as `u16` is aligned. The slice does not outlive the call and every
+    // byte taken out of it is copied into the `String` below.
+    let data = unsafe { std::slice::from_raw_parts(start.cast::<u16>(), units) };
+
+    let mut at = 0usize;
+
+    for slot in 0..usize::from(STRINGS_PER_BLOCK) {
+        let length = usize::from(*data.get(at)?);
+        at += 1;
+
+        if slot == wanted {
+            // Not `from_utf16_lossy`: a replacement character would hide exactly the damage a
+            // missing `#pragma code_page(65001)` produces.
+            return String::from_utf16(data.get(at..at.checked_add(length)?)?).ok();
+        }
+
+        at = at.checked_add(length)?;
+    }
+
+    None
+}
+
+// =========================================================================================
+// FR-94 — capturing the hotkey by pressing it
+// =========================================================================================
+
+/// The modifiers held at the moment a key went down.
+///
+/// A value rather than a query, so that the decision below is a function of its arguments and
+/// can be checked without a keyboard.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Modifiers {
+    /// Either `Ctrl`.
+    pub ctrl: bool,
+    /// Either `Alt`.
+    pub alt: bool,
+    /// Either `Shift`.
+    pub shift: bool,
+    /// Either `Windows` key.
+    pub win: bool,
+}
+
+impl Modifiers {
+    /// Whether anything at all is held.
+    pub const fn any(self) -> bool {
+        self.ctrl || self.alt || self.shift || self.win
+    }
+
+    /// The three modifiers of FR-96, read exactly as `hook::emergency_modifiers_held` reads
+    /// them: all three down, and the `Windows` key is not part of the question.
+    pub const fn emergency(self) -> bool {
+        self.ctrl && self.alt && self.shift
+    }
+
+    /// What is held right now, from the message queue.
+    ///
+    /// `GetKeyState` and not `GetAsyncKeyState`: the answer wanted is the state as of the
+    /// keystroke being handled, which is what the queue-synchronised call gives, and which is
+    /// what the user actually pressed together.
+    fn held_now() -> Self {
+        Self {
+            ctrl: key_is_down(VK_CONTROL),
+            alt: key_is_down(VK_MENU),
+            shift: key_is_down(VK_SHIFT),
+            win: key_is_down(VK_LWIN) || key_is_down(VK_RWIN),
+        }
+    }
+}
+
+/// Whether one virtual key is down, as the message queue sees it.
+fn key_is_down(key: VIRTUAL_KEY) -> bool {
+    // SAFETY: takes a virtual-key code by value and touches no memory of ours. The high bit of
+    // the `i16` it answers is "down", which for a signed value is "negative".
+    unsafe { GetKeyState(i32::from(key.0)) < 0 }
+}
+
+/// Why a press cannot become the hotkey — FR-94, FR-95, FR-96.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// A modifier on its own. `Ctrl` is not a hotkey, it is half of one.
+    Modifier,
+    /// A key with a modifier held. **Section 7 stores one key name and the callback compares
+    /// one code** (`hook::classify`, `key.vk != mode.hotkey_vk`), so `Ctrl+K` could only be
+    /// written down as `K` — and would then fire on a bare `K`. Refused rather than stored as
+    /// something else than what the user pressed. Widening it needs both a schema field and a
+    /// change to the callback, and this task is allowed neither.
+    Combination,
+    /// `Ctrl+Alt+Shift+F12`, the emergency exit of FR-96. Never assignable, in either build.
+    Emergency,
+    /// A key the system owns and an application never gets as a plain key.
+    Reserved,
+    /// A key section 7 has no name for, so it could not be written to the file and read back.
+    Nameless,
+}
+
+impl Refusal {
+    /// The interface string that says this to the user.
+    pub const fn string_id(self) -> u16 {
+        match self {
+            Self::Modifier => IDS_CAPTURE_MODIFIER,
+            Self::Combination => IDS_CAPTURE_COMBINATION,
+            Self::Emergency => IDS_CAPTURE_EMERGENCY,
+            Self::Reserved => IDS_CAPTURE_RESERVED,
+            Self::Nameless => IDS_CAPTURE_NAMELESS,
+        }
+    }
+}
+
+/// What one press during a capture amounts to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Capture {
+    /// The press is the hotkey. The value is the name section 7 stores, and
+    /// `hook::vk_from_name` reads it back to the same code it came from.
+    Taken(String),
+    /// The press cannot be the hotkey. The capture stays armed and the reason is shown.
+    Refused(Refusal),
+}
+
+/// The keys an application never receives as a plain key, because the shell takes them first.
+///
+/// Only the two `Windows` keys are here, and they are here because the shell acts on their
+/// *release* whatever anybody else does with the press. Everything else the system reserves —
+/// `Ctrl+Alt+Del`, `Win+L` — is taken below the level any window can see, so it never arrives
+/// at the capture at all: nothing to refuse, and the dialog simply goes on waiting.
+const SYSTEM_RESERVED: &[u16] = &[VK_LWIN.0, VK_RWIN.0];
+
+/// The three modifiers, in all their forms — the neutral code the queue reports and the two
+/// sided ones a keyboard can send.
+const MODIFIER_KEYS: &[u16] = &[
+    VK_CONTROL.0,
+    VK_LCONTROL.0,
+    VK_RCONTROL.0,
+    VK_MENU.0,
+    VK_LMENU.0,
+    VK_RMENU.0,
+    VK_SHIFT.0,
+    VK_LSHIFT.0,
+    VK_RSHIFT.0,
+];
+
+/// The whole capture decision, as a function of the key and of what was held with it.
+///
+/// The order of the tests is not free:
+///
+/// * **FR-96 first**, exactly as `hook::keyboard_hook_proc` puts it first, and for the same
+///   reason: the emergency combination is not a candidate hotkey under any circumstance. In
+///   practice the callback has already ended the process by the time this could run — this is
+///   the answer for the case where the hook is not installed at all;
+/// * then the `Windows` key, which is neither a modifier of this program's vocabulary nor a
+///   key an application ever gets;
+/// * then a modifier on its own, which is a press the user has not finished making;
+/// * then anything held with a modifier, for the reason [`Refusal::Combination`] gives;
+/// * and last the vocabulary of section 7, because a name that cannot be written to the file
+///   is a hotkey that would not survive a restart.
+///
+/// **SEC-01, SEC-07.** The value that comes out is a *name of a key* — `F8`, `Pause`, `A` —
+/// built from the virtual-key code and from nothing else. No character is produced, nothing is
+/// translated through a keyboard layout, and nothing here reaches the journal: the caller shows
+/// the name in the field and writes it to `[hotkey] key`, which is where section 7 keeps it
+/// anyway.
+pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
+    if vk == crate::hook::EMERGENCY_VK && modifiers.emergency() {
+        return Capture::Refused(Refusal::Emergency);
+    }
+
+    if SYSTEM_RESERVED.contains(&vk) {
+        return Capture::Refused(Refusal::Reserved);
+    }
+
+    if MODIFIER_KEYS.contains(&vk) {
+        return Capture::Refused(Refusal::Modifier);
+    }
+
+    if modifiers.any() {
+        return Capture::Refused(Refusal::Combination);
+    }
+
+    match key_name(vk) {
+        Some(name) => Capture::Taken(name),
+        None => Capture::Refused(Refusal::Nameless),
+    }
+}
+
+/// The named keys of section 7, in the spelling this program *writes*.
+///
+/// ⚠ The mirror of `hook::NAMED_KEYS`, narrowed to one spelling per code: that table accepts
+/// `Break`, `PgUp` and `Esc` because a person writes them by hand, and this one has to choose
+/// which of them a capture puts in the file. Kept honest by a test that runs every code this
+/// function names back through `hook::vk_from_name` and demands the same code out — the reverse
+/// direction of the one function that reads the file.
+const NAMED_KEYS: &[(&str, VIRTUAL_KEY)] = &[
+    ("Pause", VK_PAUSE),
+    ("Escape", VK_ESCAPE),
+    ("Insert", VK_INSERT),
+    ("Delete", VK_DELETE),
+    ("Home", VK_HOME),
+    ("End", VK_END),
+    ("PageUp", VK_PRIOR),
+    ("PageDown", VK_NEXT),
+    ("ScrollLock", VK_SCROLL),
+    ("NumLock", VK_NUMLOCK),
+    ("CapsLock", VK_CAPITAL),
+    ("PrintScreen", VK_SNAPSHOT),
+    ("Apps", VK_APPS),
+];
+
+/// Highest function key Windows has a virtual-key code for — `hook::HIGHEST_FUNCTION_KEY`.
+const HIGHEST_FUNCTION_KEY: u16 = 24;
+
+/// The name section 7 stores for a virtual-key code, or `None` when it has none.
+///
+/// The inverse of `hook::vk_from_name`, and it has to be written here rather than there:
+/// `src\hook.rs` is the accepted code of the hot path and this task does not touch it. What
+/// keeps the two from drifting is not discipline but a test — see [`NAMED_KEYS`].
+pub fn key_name(vk: u16) -> Option<String> {
+    // A single ASCII letter or digit is its own virtual-key code, which is the documented
+    // property `hook::vk_from_name` reads in the other direction.
+    if let Ok(byte) = u8::try_from(vk)
+        && (byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    {
+        return Some(char::from(byte).to_string());
+    }
+
+    if (VK_F1.0..VK_F1.0 + HIGHEST_FUNCTION_KEY).contains(&vk) {
+        return Some(format!("F{}", vk - VK_F1.0 + 1));
+    }
+
+    NAMED_KEYS
+        .iter()
+        .find(|(_, code)| code.0 == vk)
+        .map(|(name, _)| (*name).to_owned())
+}
+
+/// The virtual-key code a capture publishes while it is armed.
+///
+/// Zero is not a key: `KBDLLHOOKSTRUCT::vkCode` is documented to be in 1..=254, so no stroke can
+/// ever equal it and `hook::classify` takes the "ordinary key" branch for every press. That is
+/// exactly the state a capture needs — see [`CaptureSession`].
+const NO_HOTKEY_VK: u16 = 0;
+
+/// A capture in progress — and, for as long as it lives, the hotkey of FR-02 suspended.
+///
+/// # Why the ordinary work has to stop
+///
+/// The keys the user presses to *choose* a hotkey travel through the same global low-level hook
+/// as every other key on the machine. Two things would otherwise happen at once: pressing the
+/// current hotkey would run a conversion nobody asked for (FR-02), and it would be **suppressed
+/// by FR-95 before reaching this window**, so the one key the user is most likely to press
+/// first could never be captured at all.
+///
+/// # What is suspended, and why by two different switches
+///
+/// **The one that matters is the hotkey code.** Arming publishes [`NO_HOTKEY_VK`] through
+/// [`crate::hook::set_hotkey_vk`] — the interface this task is given for the hotkey — and
+/// dropping publishes back exactly what stood there before. No press can equal a code no
+/// keyboard produces, so nothing is converted and nothing is suppressed for as long as the
+/// capture is armed.
+///
+/// `hook::set_active(false)` is published as well, which additionally stops the stroke reaching
+/// the typing buffer, and it is deliberately **not** what the suspension rests on. ⚠ Measured
+/// during this task: `app::window_proc` re-publishes `tray.enabled()` into
+/// `hook::set_active` **after every message the UI thread sees**, so the active flag can be set
+/// back to `true` under a capture by nothing more than the tray icon being hovered over. The
+/// hotkey code is published from `app::publish_configuration` alone, which runs on «Применить»
+/// and at start-up and not from any message, so it stays where a capture puts it.
+///
+/// **FR-96 is not affected and cannot be.** The emergency combination is handled at the top of
+/// the callback, before either of these values is so much as read — see
+/// `hook::keyboard_hook_proc` — so `Ctrl+Alt+Shift+F12` ends the process during a capture
+/// exactly as it does at any other moment. That is the condition the decision on question 18
+/// puts on running a debug build at all, and nothing in this file weakens it.
+///
+/// The restoration is in `Drop` and not in a method on purpose: the program stays up after a
+/// panic (FR-98, FR-99), and a capture that swallowed a panic would leave the program with no
+/// hotkey at all and no way back short of a restart.
+pub struct CaptureSession {
+    /// `[hotkey] key` as it stood when the capture was armed — what «отмена» puts back.
+    previous_key: String,
+    /// The code the callback was comparing against when the capture was armed.
+    published_vk: u16,
+    /// `hook::is_active()` as it stood then.
+    hook_was_active: bool,
+}
+
+impl CaptureSession {
+    /// Arms a capture and suspends the hotkey for its duration.
+    pub fn arm(previous_key: String) -> Self {
+        let published_vk = crate::hook::hotkey_vk();
+        let hook_was_active = crate::hook::is_active();
+
+        crate::hook::set_hotkey_vk(NO_HOTKEY_VK);
+        crate::hook::set_active(false);
+
+        Self {
+            previous_key,
+            published_vk,
+            hook_was_active,
+        }
+    }
+
+    /// The key name to go back to if the capture is cancelled.
+    pub fn previous_key(&self) -> &str {
+        &self.previous_key
+    }
+
+    /// The hotkey code the callback will be given back when this capture ends.
+    pub fn published_vk(&self) -> u16 {
+        self.published_vk
+    }
+
+    /// Whether the callback was doing its ordinary work when this capture was armed.
+    pub fn hook_was_active(&self) -> bool {
+        self.hook_was_active
+    }
+}
+
+impl Drop for CaptureSession {
+    fn drop(&mut self) {
+        crate::hook::set_hotkey_vk(self.published_vk);
+        crate::hook::set_active(self.hook_was_active);
+    }
+}
 
 /// Resource identifier of the dialog template in `app.rc`.
 ///
@@ -891,6 +1628,7 @@ const IDC_AUTOSTART: i32 = 1001;
 const IDC_LANGUAGE: i32 = 1002;
 const IDC_HOTKEY: i32 = 1010;
 const IDC_HOTKEY_NOTE: i32 = 1011;
+const IDC_HOTKEY_CAPTURE: i32 = 1012;
 const IDC_MODE_PAIR: i32 = 1020;
 const IDC_MODE_CYCLE: i32 = 1021;
 const IDC_PAIR_SOURCE: i32 = 1022;
@@ -916,6 +1654,77 @@ const IDC_STATE_HOOK: i32 = 1070;
 const IDC_STATE_LAYOUTS: i32 = 1071;
 const IDC_STATE_AUTOSTART: i32 = 1072;
 const IDC_APPLY: i32 = 1080;
+
+// The static text of the dialog — group boxes and labels. They carried -1 until FR-94 needed
+// to replace their text, and a control identified by -1 is a control `GetDlgItem` cannot find.
+const IDC_GROUP_GENERAL: i32 = 1090;
+const IDC_LANGUAGE_LABEL: i32 = 1091;
+const IDC_LANGUAGE_RESTART: i32 = 1092;
+const IDC_GROUP_HOTKEY: i32 = 1093;
+const IDC_HOTKEY_LABEL: i32 = 1094;
+const IDC_GROUP_LAYOUTS: i32 = 1095;
+const IDC_PAIR_SOURCE_LABEL: i32 = 1096;
+const IDC_PAIR_TARGET_LABEL: i32 = 1097;
+const IDC_CYCLE_HINT: i32 = 1098;
+const IDC_GROUP_REPLACEMENT: i32 = 1099;
+const IDC_DELAY_LABEL: i32 = 1100;
+const IDC_GROUP_SELECTION: i32 = 1101;
+const IDC_CLIP_TIMEOUT_LABEL: i32 = 1102;
+const IDC_CLIP_RESTORE_LABEL: i32 = 1103;
+const IDC_GROUP_EXCLUSIONS: i32 = 1104;
+const IDC_EXCLUSION_HINT: i32 = 1105;
+const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
+const IDC_LOG_DIR_LABEL: i32 = 1107;
+const IDC_GROUP_STATE: i32 = 1108;
+
+/// Every control of the dialog whose text is a fixed string of the interface, and the string
+/// that belongs in it — FR-94.
+///
+/// A table and not thirty-eight calls, because this is exactly the list a reader wants to see
+/// in one place and exactly the list a test has to walk: `tests\settings.rs` checks that every
+/// control named here exists in the template of the built binary and that every string named
+/// here exists in **both** tables of it.
+///
+/// The caption of the window is not in the table — it is not a control — and neither are the
+/// two entries of the language combo box: a language is named in its own language in a language
+/// chooser, so «Русский» and «English» stand as they are in both locales.
+const LOCALISED_CONTROLS: &[(i32, u16)] = &[
+    (IDC_GROUP_GENERAL, IDS_GROUP_GENERAL),
+    (IDC_AUTOSTART, IDS_AUTOSTART),
+    (IDC_LANGUAGE_LABEL, IDS_LANGUAGE_LABEL),
+    (IDC_LANGUAGE_RESTART, IDS_LANGUAGE_RESTART),
+    (IDC_GROUP_HOTKEY, IDS_GROUP_HOTKEY),
+    (IDC_HOTKEY_LABEL, IDS_HOTKEY_LABEL),
+    (IDC_HOTKEY_CAPTURE, IDS_HOTKEY_SET),
+    (IDC_GROUP_LAYOUTS, IDS_GROUP_LAYOUTS),
+    (IDC_MODE_PAIR, IDS_MODE_PAIR),
+    (IDC_MODE_CYCLE, IDS_MODE_CYCLE),
+    (IDC_PAIR_SOURCE_LABEL, IDS_PAIR_SOURCE),
+    (IDC_PAIR_TARGET_LABEL, IDS_PAIR_TARGET),
+    (IDC_CYCLE_HINT, IDS_CYCLE_HINT),
+    (IDC_CYCLE_UP, IDS_CYCLE_UP),
+    (IDC_CYCLE_DOWN, IDS_CYCLE_DOWN),
+    (IDC_GROUP_REPLACEMENT, IDS_GROUP_REPLACEMENT),
+    (IDC_METHOD_BACKSPACE, IDS_METHOD_BACKSPACE),
+    (IDC_METHOD_SELECTION, IDS_METHOD_SELECTION),
+    (IDC_DELAY_LABEL, IDS_DELAY_LABEL),
+    (IDC_GROUP_SELECTION, IDS_GROUP_SELECTION),
+    (IDC_SELECTION_ENABLED, IDS_SELECTION_ENABLED),
+    (IDC_CLIP_TIMEOUT_LABEL, IDS_CLIPBOARD_TIMEOUT),
+    (IDC_CLIP_RESTORE_LABEL, IDS_CLIPBOARD_RESTORE),
+    (IDC_GROUP_EXCLUSIONS, IDS_GROUP_EXCLUSIONS),
+    (IDC_EXCLUSION_REMOVE, IDS_EXCLUSION_REMOVE),
+    (IDC_EXCLUSION_ADD, IDS_EXCLUSION_ADD),
+    (IDC_EXCLUSION_HINT, IDS_EXCLUSION_HINT),
+    (IDC_GROUP_DIAGNOSTICS, IDS_GROUP_DIAGNOSTICS),
+    (IDC_LOG_ENABLED, IDS_LOG_ENABLED),
+    (IDC_LOG_OPEN, IDS_LOG_OPEN),
+    (IDC_LOG_DIR_LABEL, IDS_LOG_DIR_LABEL),
+    (IDC_GROUP_STATE, IDS_GROUP_STATE),
+    (OK_COMMAND, IDS_OK),
+    (CANCEL_COMMAND, IDS_CANCEL),
+    (IDC_APPLY, IDS_APPLY),
+];
 
 /// `IDOK` as the number the dialog manager sends in `WM_COMMAND`.
 ///
@@ -1065,12 +1874,15 @@ pub fn is_text_key(vk: u16) -> bool {
 /// (`app::publish_configuration` says so in as many words), and a text key disappears from
 /// typing for as long as the program is active (FR-95). The dialog is where FR-92 puts the
 /// telling.
-pub fn hotkey_note(key: &str) -> Option<&'static str> {
+///
+/// The answer is the *identifier* of an interface string and not the string itself — FR-94. The
+/// decision of what to say is this function's; which language to say it in belongs to
+/// [`text`], and the two are separated so that a test can check the decision without a resource
+/// and check the resource without the decision.
+pub fn hotkey_note(key: &str) -> Option<u16> {
     match crate::hook::vk_from_name(key) {
-        None => Some("Имя клавиши не распознано — действует клавиша по умолчанию, Pause."),
-        Some(vk) if is_text_key(vk) => {
-            Some("Это текстовая клавиша: пока программа активна, она перестанет вводить символ.")
-        }
+        None => Some(IDS_NOTE_UNKNOWN_KEY),
+        Some(vk) if is_text_key(vk) => Some(IDS_NOTE_TEXT_KEY),
         Some(_) => None,
     }
 }
@@ -1129,6 +1941,7 @@ pub fn show_dialog(
         rows: layout_rows(&config.layouts, &session),
         session,
         apply,
+        capture: None,
     });
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`, and the
@@ -1181,6 +1994,9 @@ struct DialogState<'a> {
     session: Vec<LayoutId>,
     /// What to do with a configuration the user asked to apply.
     apply: &'a mut dyn FnMut(&Config),
+    /// The capture of FR-94, while one is armed. `Some` is the whole of "armed": the value
+    /// suspends the conversion path for as long as it lives and restores it when it is dropped.
+    capture: Option<CaptureSession>,
 }
 
 /// The dialog procedure of FR-92.
@@ -1257,8 +2073,31 @@ unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -
     Some(f(&mut state))
 }
 
+/// Puts the interface strings of the locale in force into the window — FR-94.
+///
+/// Runs before anything is filled in, so that a control is never seen carrying the literal the
+/// template shipped with. In the Russian locale the result is the same text the template
+/// already had — the table and the template are identical by construction, and a test asserts
+/// it — which is what makes this loop safe to run unconditionally rather than only for English.
+fn localise_dialog(hwnd: HWND) {
+    let caption = wide(&text(IDS_DIALOG_CAPTION));
+
+    // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer owned by
+    // this frame, neither moved nor dropped until the call returns; the call copies it.
+    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
+        crate::app::report_non_critical("SetWindowTextW", &error);
+    }
+
+    for (control, string) in LOCALISED_CONTROLS {
+        set_text(hwnd, *control, &text(*string));
+    }
+}
+
 /// Puts the configuration into the controls — the whole of `WM_INITDIALOG`.
 fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
+    localise_dialog(hwnd);
+    subclass_hotkey_field(hwnd);
+
     // Section «Общие» of FR-92.
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
     send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
@@ -1275,15 +2114,11 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
         0,
     );
 
-    // Section «Горячая клавиша» of FR-92. The field shows the key and does not capture one —
-    // capture is FR-94's neighbour in task T-08-2 — so it is read-only, and the note under it
-    // is the "предупреждение" the requirement asks for.
-    set_text(hwnd, IDC_HOTKEY, &state.working.hotkey.key);
-    set_text(
-        hwnd,
-        IDC_HOTKEY_NOTE,
-        hotkey_note(&state.working.hotkey.key).unwrap_or(""),
-    );
+    // Section «Горячая клавиша» of FR-92 and FR-94. The field is read-only because the key is
+    // not typed into it: the button beside it arms a capture and the field then shows the name
+    // of the key that was pressed. The note under it is the "предупреждение" the requirement
+    // asks for, and while a capture is armed it is what says what went wrong.
+    show_hotkey(hwnd, &state.working.hotkey.key);
 
     // Section «Раскладки» of FR-92 — FR-30, FR-31, FR-35.
     fill_layouts(hwnd, state);
@@ -1333,7 +2168,7 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
         hwnd,
         IDC_LOG_DIR,
         &crate::diag::log_dir().map_or_else(
-            || "%APPDATA% не задан — журнал писать некуда".to_owned(),
+            || text(IDS_LOG_DIR_MISSING),
             |dir| dir.display().to_string(),
         ),
     );
@@ -1365,11 +2200,14 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
 
     // The note of FR-92 for this section: a field of section 7 that names no layout of this
     // session is otherwise silent — `layouts::LayoutSpec` says as much and points here.
-    let unresolved = [(source, "источник"), (target, "цель")]
-        .into_iter()
-        .filter(|(spec, _)| spec.resolve(&state.session).is_none())
-        .map(|(_, name)| name)
-        .collect::<Vec<_>>();
+    let unresolved = [
+        (source, IDS_LAYOUT_WORD_SOURCE),
+        (target, IDS_LAYOUT_WORD_TARGET),
+    ]
+    .into_iter()
+    .filter(|(spec, _)| spec.resolve(&state.session).is_none())
+    .map(|(_, word)| text(word))
+    .collect::<Vec<_>>();
 
     set_text(
         hwnd,
@@ -1377,10 +2215,7 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
         &if unresolved.is_empty() {
             String::new()
         } else {
-            format!(
-                "В сеансе нет раскладки, названной в файле ({}) — выберите заново.",
-                unresolved.join(", ")
-            )
+            format_text(IDS_LAYOUT_NOTE, &[&unresolved.join(", ")])
         },
     );
 
@@ -1400,38 +2235,42 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
     set_text(
         hwnd,
         IDC_STATE_HOOK,
-        &format!(
-            "Перехват клавиатуры: {} · восстановлений хука: {} · отказов установки: {}",
-            if crate::watchdog::hook_down() {
-                "НЕ УСТАНОВЛЕН"
-            } else {
-                "установлен"
-            },
-            health.recoveries,
-            health.install_failures
+        &format_text(
+            IDS_STATE_HOOK,
+            &[
+                &text(if crate::watchdog::hook_down() {
+                    IDS_HOOK_DOWN
+                } else {
+                    IDS_HOOK_UP
+                }),
+                &health.recoveries.to_string(),
+                &health.install_failures.to_string(),
+            ],
         ),
     );
 
     set_text(
         hwnd,
         IDC_STATE_LAYOUTS,
-        &format!(
-            "Раскладок в сеансе: {} · исключений опубликовано: {} · записей в журнале: {}",
-            state.session.len(),
-            crate::guard::counters().exclusions,
-            crate::diag::recorded()
+        &format_text(
+            IDS_STATE_LAYOUTS,
+            &[
+                &state.session.len().to_string(),
+                &crate::guard::counters().exclusions.to_string(),
+                &crate::diag::recorded().to_string(),
+            ],
         ),
     );
 
     set_text(
         hwnd,
         IDC_STATE_AUTOSTART,
-        &format!(
-            "Автозапуск в реестре (HKCU\\…\\Run): {}",
-            match autostart_value() {
-                Some(command) => format!("есть, {command}"),
-                None => "нет".to_owned(),
-            }
+        &format_text(
+            IDS_STATE_AUTOSTART,
+            &[&match autostart_value() {
+                Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command]),
+                None => text(IDS_AUTOSTART_ABSENT),
+            }],
         ),
     );
 }
@@ -1527,6 +2366,12 @@ unsafe fn on_command(hwnd: HWND, control: i32, _notification: u16) {
             enable_by_mode(hwnd, mode);
         }
 
+        // FR-94. The one button of the dialog that is a mode and not an action: pressing it
+        // arms the capture, pressing it again cancels it.
+        //
+        // SAFETY: see the caller.
+        IDC_HOTKEY_CAPTURE => unsafe { toggle_capture(hwnd) },
+
         IDC_EXCLUSION_ADD => add_exclusion(hwnd),
         IDC_EXCLUSION_REMOVE => remove_exclusion(hwnd),
 
@@ -1547,6 +2392,14 @@ unsafe fn on_command(hwnd: HWND, control: i32, _notification: u16) {
 ///
 /// Called from [`dialog_proc`] only.
 unsafe fn apply_now(hwnd: HWND) {
+    // FR-94. A capture still armed when «Применить» is pressed is a capture the user has
+    // abandoned, and it has to end here rather than survive the publication: `apply` publishes
+    // `general.enabled` into the callback, and a capture ending afterwards would then publish
+    // its own idea of that flag back over it.
+    //
+    // SAFETY: see the caller.
+    unsafe { with_state(hwnd, |state| cancel_capture(hwnd, state)) };
+
     // The callback runs inside the borrow because it *is* part of the state — see
     // `DialogState`. It writes a file, stores into atomics and touches the registry; it does
     // not pump messages, and a re-entrant message would in any case be refused by the
@@ -1680,6 +2533,288 @@ unsafe fn move_cycle_row(hwnd: HWND, step: i32) {
             fill_cycle_list(hwnd, &state.rows, to);
         })
     };
+}
+
+// -----------------------------------------------------------------------------------------
+// FR-94 — the capture, as the dialog runs it
+// -----------------------------------------------------------------------------------------
+
+thread_local! {
+    /// The window procedure of the hotkey field before this module put its own in front.
+    ///
+    /// A thread-local because the dialog belongs to the UI thread and to no other (section 6.1),
+    /// and because only one dialog can be open at a time — the guard in [`show_dialog`] — so
+    /// there is never more than one field to remember. Re-opening the dialog builds a new
+    /// control and stores its own procedure over this one.
+    static HOTKEY_FIELD_PROC: Cell<WNDPROC> = const { Cell::new(None) };
+}
+
+/// Puts the key name and the note that belongs to it into the two controls of the section.
+fn show_hotkey(hwnd: HWND, key: &str) {
+    set_text(hwnd, IDC_HOTKEY, key);
+    set_text(
+        hwnd,
+        IDC_HOTKEY_NOTE,
+        &hotkey_note(key).map_or_else(String::new, text),
+    );
+}
+
+/// Puts this module's window procedure in front of the hotkey field's own.
+///
+/// # Where the keystrokes of a capture come from, and why from here
+///
+/// Not from the low-level hook. That callback is bound by NFR-01 to NFR-05 — no allocation, no
+/// blocking, no input-output, under a hundred microseconds — and everything a capture does is
+/// exactly what those rules forbid: build a string, set the text of two controls, decide what to
+/// show. It also lives in `src\hook.rs`, which this task must not change, and teaching the hot
+/// path of every keystroke in the machine about a window that is open once in a blue moon would
+/// be the wrong trade whatever the rules said.
+///
+/// So the keys arrive the ordinary way — as window messages, on the UI thread, to the control
+/// that has the focus — and this procedure reads them there. The dialog manager is the only
+/// thing in the way, because `IsDialogMessage` keeps Tab, Escape, Enter and the arrows for
+/// itself; answering `WM_GETDLGCODE` with `DLGC_WANTALLKEYS` while a capture is armed is what
+/// asks it to hand them over.
+///
+/// A thread-wide `WH_KEYBOARD` hook would have worked too and was rejected for the first reason
+/// above: it would make a *hook callback* out of code that sets window text, and NFR-05 forbids
+/// that in a hook callback whether the hook is global or not.
+fn subclass_hotkey_field(hwnd: HWND) {
+    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
+    let Ok(field) = (unsafe { GetDlgItem(Some(hwnd), IDC_HOTKEY) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `field` is the live edit control of this dialog, created by the dialog manager on
+    // this thread, and `GWLP_WNDPROC` is the documented way to put a procedure in front of its
+    // own. The value stored is a function of exactly the signature the window manager calls.
+    // The control is destroyed with the dialog, so there is no window left afterwards for the
+    // displaced procedure to be missing from.
+    let previous =
+        unsafe { SetWindowLongPtrW(field, GWLP_WNDPROC, hotkey_field_proc as *const () as isize) };
+
+    if previous == 0 {
+        // NFR-13. Not fatal: the field then behaves as it did before this task, showing the key
+        // and refusing to capture one, which is visible rather than silent.
+        crate::app::report_non_critical("SetWindowLongPtrW", &WinError::from_thread());
+        return;
+    }
+
+    // SAFETY: `previous` is what the window manager has just handed back as this control's
+    // window procedure. It is a pointer to a function of that exact signature, and it is not
+    // null — checked above — which is what makes the `Option` `Some`. The transmute converts
+    // between two representations of the same pointer and nothing else.
+    let previous = unsafe { std::mem::transmute::<isize, WNDPROC>(previous) };
+
+    HOTKEY_FIELD_PROC.with(|slot| slot.set(previous));
+}
+
+/// The window procedure the hotkey field runs while this dialog is up.
+///
+/// Everything it does is confined to `armed`: with no capture in progress every message goes
+/// straight to the procedure it displaced, so the field behaves exactly as an ordinary
+/// read-only edit control.
+///
+/// # Safety
+///
+/// Called by the window manager with the arguments of a window message, on the control
+/// [`subclass_hotkey_field`] installed it on.
+unsafe extern "system" fn hotkey_field_proc(
+    field: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    // SAFETY: `field` is that control, and the parent of a control of a dialog is the dialog.
+    // A window with no parent answers an error, which the default below turns into "no dialog"
+    // and therefore into "not armed".
+    let dialog = unsafe { GetParent(field) }.unwrap_or_default();
+
+    // SAFETY: `dialog` is the dialog `show_dialog` created, whose `GWLP_USERDATA` holds either
+    // zero or the pointer that function stored — the contract of `with_state`.
+    let armed = unsafe { with_state(dialog, |state| state.capture.is_some()) }.unwrap_or(false);
+
+    if armed {
+        match message {
+            // The whole reason this procedure exists. Without it `IsDialogMessage` takes Tab,
+            // Escape, Enter and the arrows for itself and the capture never sees them.
+            WM_GETDLGCODE => return LRESULT(DLGC_WANTALLKEYS as isize),
+
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                // `wparam` of a key message is the virtual-key code, which is the whole of what
+                // the capture reads. **SEC-01:** no character is asked for, no layout is
+                // consulted and `lparam` — where the scan code and the repeat count live — is
+                // not looked at.
+                //
+                // SAFETY: as above.
+                unsafe { on_capture_key(dialog, wparam.0 as u16) };
+
+                return LRESULT(0);
+            }
+
+            // Swallowed rather than forwarded: the release of a key whose press was taken must
+            // not reach the control, and `WM_CHAR` is the message that would put a *character*
+            // into a field this program promises never to show one in.
+            WM_KEYUP | WM_SYSKEYUP | WM_CHAR | WM_SYSCHAR => return LRESULT(0),
+
+            // Clicking somewhere else abandons the capture, because a capture nobody can see is
+            // a program with its conversion switched off for no visible reason. The one window
+            // that may take the focus without cancelling is the capture button itself: it is
+            // about to report that it was clicked, and cancelling here would turn that click
+            // into a fresh arming.
+            WM_KILLFOCUS => {
+                let taking = HWND(std::ptr::without_provenance_mut(wparam.0));
+
+                if !is_capture_button(dialog, taking) {
+                    // SAFETY: as above.
+                    unsafe { with_state(dialog, |state| cancel_capture(dialog, state)) };
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    match HOTKEY_FIELD_PROC.with(Cell::get) {
+        // SAFETY: `previous` is the procedure this one displaced on this very control, and the
+        // four arguments are the ones the window manager passed in, forwarded unchanged. This
+        // is what `CallWindowProcW` exists for.
+        previous @ Some(_) => unsafe { CallWindowProcW(previous, field, message, wparam, lparam) },
+
+        // Unreachable: this procedure is only ever installed together with the slot being
+        // filled. Answering the default rather than zero keeps a message from being silently
+        // eaten if it ever became reachable.
+        //
+        // SAFETY: the same four arguments, forwarded unchanged.
+        None => unsafe { DefWindowProcW(field, message, wparam, lparam) },
+    }
+}
+
+/// Whether `window` is the button that arms the capture.
+fn is_capture_button(dialog: HWND, window: HWND) -> bool {
+    // SAFETY: `dialog` is the live dialog; the crate turns a missing control into an error.
+    unsafe { GetDlgItem(Some(dialog), IDC_HOTKEY_CAPTURE) }.is_ok_and(|button| button == window)
+}
+
+/// Arms the capture, or cancels the one already armed — the button of the section.
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the `hwnd` of the dialog it belongs to.
+unsafe fn toggle_capture(hwnd: HWND) {
+    // SAFETY: see the caller.
+    unsafe {
+        with_state(hwnd, |state| {
+            if state.capture.is_some() {
+                cancel_capture(hwnd, state);
+            } else {
+                arm_capture(hwnd, state);
+            }
+        })
+    };
+}
+
+/// Arms a capture: the conversion path stops, the note says what to do, the field takes focus.
+fn arm_capture(hwnd: HWND, state: &mut DialogState<'_>) {
+    state.capture = Some(CaptureSession::arm(state.working.hotkey.key.clone()));
+
+    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));
+    set_text(hwnd, IDC_HOTKEY_NOTE, &text(IDS_CAPTURE_PROMPT));
+    focus_control(hwnd, IDC_HOTKEY);
+}
+
+/// Abandons the capture and puts back the key that stood there before it was armed.
+///
+/// Dropping the session is what restores the callback's `general.enabled`; the assignment below
+/// is what restores the *configuration*, and it matters even though nothing else has written to
+/// that field: a capture that was accepted and then armed again remembers the accepted name,
+/// and cancelling the second capture has to go back to it and not to the file's original.
+fn cancel_capture(hwnd: HWND, state: &mut DialogState<'_>) {
+    let Some(session) = state.capture.take() else {
+        return;
+    };
+
+    let previous = session.previous_key().to_owned();
+
+    drop(session);
+
+    state.working.hotkey.key = previous;
+
+    show_hotkey(hwnd, &state.working.hotkey.key);
+    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
+}
+
+/// Takes the captured key: the field shows its name and the configuration carries it.
+///
+/// Nothing is published to the hook from here. The dialog edits a copy and publishes on
+/// «Применить» like every other field — through `app::publish_configuration`, which is the one
+/// caller of `hook::set_hotkey_vk` there has ever been.
+fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, name: String) {
+    // Ends the capture and publishes the callback's previous `general.enabled` back.
+    state.capture = None;
+
+    state.working.hotkey.key = name;
+
+    show_hotkey(hwnd, &state.working.hotkey.key);
+    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
+}
+
+/// One key pressed while a capture is armed.
+///
+/// # Safety
+///
+/// Called from [`hotkey_field_proc`] only, with the `hwnd` of the dialog the field belongs to.
+unsafe fn on_capture_key(dialog: HWND, vk: u16) {
+    // Escape is the way out of the capture and is therefore the one key a capture cannot
+    // assign. It stays assignable by hand: `hook::vk_from_name` still reads `Escape` and `Esc`
+    // out of the file, and the dialog shows whatever it finds there.
+    if vk == VK_ESCAPE.0 {
+        // SAFETY: see the caller.
+        unsafe { with_state(dialog, |state| cancel_capture(dialog, state)) };
+        return;
+    }
+
+    let outcome = capture(vk, Modifiers::held_now());
+
+    // SAFETY: see the caller.
+    unsafe {
+        with_state(dialog, |state| match outcome {
+            Capture::Taken(name) => accept_capture(dialog, state, name),
+
+            // The capture stays armed: a refusal is a "not that one", not an end to the
+            // question. The note says which of the five reasons it was.
+            Capture::Refused(refusal) => {
+                set_text(dialog, IDC_HOTKEY_NOTE, &text(refusal.string_id()));
+            }
+        })
+    };
+}
+
+/// Moves the keyboard focus to one control of the dialog.
+///
+/// `SetFocus` and not the `WM_NEXTDLGCTL` message the dialog manager also understands, for a
+/// reason that has nothing to do with focus: **`SendMessage` is forbidden anywhere in `src\`**
+/// by acceptance point 17 of FR-72, and `tests\guard.rs` sweeps the whole directory for it. The
+/// call this window would make is to a window of its own thread and could not block — but the
+/// rule is a rule about the program and not about one call site, and a task that carved an
+/// exception into it would be weakening a guard the watcher thread depends on.
+///
+/// What is given up is small and named: the dialog manager's idea of the default button is not
+/// updated. While a capture is armed that costs nothing, because the field answers
+/// `DLGC_WANTALLKEYS` and Enter never reaches the manager in the first place.
+fn focus_control(hwnd: HWND, control: i32) {
+    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
+    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `window` is the live control just found, on this thread, which is what `SetFocus`
+    // requires of its argument. NFR-13: the crate turns "no window had the focus" into an error,
+    // and that is not a failure — the dialog has only just been shown in that case — so the
+    // result is examined and deliberately not reported.
+    let _ = unsafe { SetFocus(Some(window)) };
 }
 
 // -----------------------------------------------------------------------------------------

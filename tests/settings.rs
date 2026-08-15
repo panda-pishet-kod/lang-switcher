@@ -7,8 +7,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
@@ -548,13 +548,19 @@ use std::os::windows::ffi::OsStrExt;
 use lang_switcher::settings::LayoutRow;
 use lang_switcher::{app, guard, hook, inject, layouts, selection};
 
-use windows::Win32::Foundation::{FreeLibrary, HMODULE};
+use windows::Win32::Foundation::{FreeLibrary, HMODULE, HRSRC};
 use windows::Win32::System::LibraryLoader::{
-    FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource, LockResource,
-    SizeofResource,
+    FindResourceExW, FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
+    LockResource, SizeofResource,
 };
 use windows::Win32::UI::WindowsAndMessaging::RT_DIALOG;
 use windows::core::PCWSTR;
+
+/// `RT_STRING`, the resource type of a string table.
+///
+/// Spelled out because the `windows` crate does not export it, exactly as `src\settings.rs`
+/// has to. The value is 6 and belongs to the binary interface of the resource loader.
+const RT_STRING: PCWSTR = PCWSTR(std::ptr::without_provenance(6));
 
 /// Identifier `app.rc` gives the dialog of FR-92.
 const IDD_SETTINGS: u16 = 200;
@@ -586,7 +592,9 @@ const TEMPLATE_TEXT: [&str; 35] = [
     "вступит в силу после перезапуска",
     "Горячая клавиша",
     "Клавиша:",
-    "Пока меняется только в файле настроек.",
+    // Task T-08-2 replaced «Пока меняется только в файле настроек.» with the button that arms
+    // the capture: the sentence was true only for as long as the field could not capture a key.
+    "Задать",
     "Раскладки",
     "Пара",
     "Несколько раскладок",
@@ -619,11 +627,12 @@ const TEMPLATE_TEXT: [&str; 35] = [
 
 /// Identifiers `app.rc` gives the controls, and what each of them is for. One row per element
 /// FR-92 names, so that a section losing a control is a failing test and not a smaller window.
-const TEMPLATE_CONTROLS: [(u32, &str); 25] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 45] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1010, "Горячая клавиша: поле клавиши"),
     (1011, "Горячая клавиша: предупреждение"),
+    (1012, "Горячая клавиша: кнопка захвата — FR-94"),
     (1020, "Раскладки: режим «Пара»"),
     (1021, "Раскладки: режим «Несколько раскладок»"),
     (1022, "Раскладки: источник пары"),
@@ -645,6 +654,28 @@ const TEMPLATE_CONTROLS: [(u32, &str); 25] = [
     (1060, "Диагностика: вести журнал"),
     (1061, "Диагностика: открыть папку журнала"),
     (1062, "Диагностика: путь папки журнала"),
+    // The static text. It carried -1 until FR-94, and a control identified by -1 is a control
+    // whose text can never be replaced — so every one of these numbers is a precondition of the
+    // interface having a second language at all.
+    (1090, "Общие: заголовок группы"),
+    (1091, "Общие: подпись «Язык интерфейса»"),
+    (1092, "Общие: «вступит в силу после перезапуска»"),
+    (1093, "Горячая клавиша: заголовок группы"),
+    (1094, "Горячая клавиша: подпись «Клавиша»"),
+    (1095, "Раскладки: заголовок группы"),
+    (1096, "Раскладки: подпись «Источник»"),
+    (1097, "Раскладки: подпись «Цель»"),
+    (1098, "Раскладки: пояснение к списку цикла"),
+    (1099, "Замена: заголовок группы"),
+    (1100, "Замена: подпись задержки"),
+    (1101, "Выделение: заголовок группы"),
+    (1102, "Выделение: подпись таймаута буфера обмена"),
+    (1103, "Выделение: подпись задержки восстановления"),
+    (1104, "Исключения: заголовок группы"),
+    (1105, "Исключения: пояснение об имени процесса"),
+    (1106, "Диагностика: заголовок группы"),
+    (1107, "Диагностика: подпись «Папка журнала»"),
+    (1108, "Состояние: заголовок группы"),
 ];
 
 // -----------------------------------------------------------------------------------------
@@ -820,16 +851,27 @@ fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
     assert_eq!(settings::hotkey_note("ScrollLock"), None);
     assert_eq!(settings::hotkey_note("F9"), None);
 
-    // FR-92: «предупреждение при выборе текстовой клавиши».
+    // FR-92: «предупреждение при выборе текстовой клавиши». Since FR-94 the answer is the
+    // identifier of an interface string rather than the string itself, so the text is fetched
+    // out of the built binary — in both locales, because a warning that exists in one language
+    // only is half a warning.
+    let product = ProductImage::shared();
+
     let letter = settings::hotkey_note("A").expect("a letter must be warned about");
-    println!("A -> {letter}");
-    assert!(letter.contains("текстовая"));
+    let letter_ru = product.string(settings::Language::Ru, letter);
+    let letter_en = product.string(settings::Language::En, letter);
+    println!("A -> {letter} -> ru: {letter_ru}\n         -> en: {letter_en}");
+    assert!(letter_ru.contains("текстовая"));
+    assert!(letter_en.contains("text key"));
 
     // And the other silent failure: a name this build does not know leaves `Pause` in force,
     // which `app::publish_configuration` does without telling anybody. This is the telling.
     let unknown = settings::hotkey_note("Ктулху").expect("an unknown name must be reported");
-    println!("unknown -> {unknown}");
-    assert!(unknown.contains("не распознано"));
+    let unknown_ru = product.string(settings::Language::Ru, unknown);
+    let unknown_en = product.string(settings::Language::En, unknown);
+    println!("unknown -> {unknown} -> ru: {unknown_ru}\n               -> en: {unknown_en}");
+    assert!(unknown_ru.contains("не распознано"));
+    assert!(unknown_en.contains("not recognised"));
 
     // The classification itself, at the two edges that matter.
     assert!(settings::is_text_key(0x41), "A is a text key");
@@ -978,10 +1020,70 @@ fn the_autostart_value_appears_and_disappears_under_hkcu() {
 /// file that ships.
 struct ProductImage {
     module: HMODULE,
+    /// Whether dropping this value unmaps the image. The shared one is never unmapped: it is
+    /// handed to `settings::set_resource_module`, which keeps no lifetime, and the tests of one
+    /// binary run on parallel threads — one of them freeing the mapping another is reading from
+    /// would be a use-after-free in the test harness.
+    owned: bool,
 }
 
+/// The one mapping [`ProductImage::shared`] hands out, as a raw handle.
+static SHARED_IMAGE: OnceLock<usize> = OnceLock::new();
+
 impl ProductImage {
+    /// The mapping shared by every test that needs the product's strings, loaded once.
+    fn shared() -> Self {
+        let raw = *SHARED_IMAGE.get_or_init(|| Self::load().0 as usize);
+
+        Self {
+            module: HMODULE(std::ptr::without_provenance_mut(raw)),
+            owned: false,
+        }
+    }
+
+    /// One string of one locale, decoded straight out of the resource.
+    ///
+    /// Written from the documented layout of a string table rather than by calling the
+    /// module's own reader: a test that used `settings::text` to check what
+    /// `settings::text` reads would pass whatever the resource said. Sixteen strings to a
+    /// block, block `id / 16 + 1`, each string a `u16` length followed by that many UTF-16
+    /// units, counted and not NUL-terminated.
+    fn string(&self, language: settings::Language, id: u16) -> String {
+        let bytes = self.resource_of_language(RT_STRING, id / 16 + 1, language.langid());
+
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+
+        let wanted = usize::from(id % 16);
+        let mut at = 0usize;
+
+        for slot in 0..16 {
+            let length = usize::from(units[at]);
+            at += 1;
+
+            if slot == wanted {
+                // Not `from_utf16_lossy`: a replacement character would hide exactly the damage
+                // a missing `#pragma code_page(65001)` produces.
+                return String::from_utf16(&units[at..at + length])
+                    .expect("a string table entry must be valid UTF-16");
+            }
+
+            at += length;
+        }
+
+        panic!("string {id} is not in block {}", id / 16 + 1);
+    }
+
     fn open() -> Self {
+        Self {
+            module: Self::load(),
+            owned: true,
+        }
+    }
+
+    fn load() -> HMODULE {
         // `cargo test` puts the test executables in `<target>\debug\deps` and the binary
         // target one level up.
         let exe = std::env::current_exe()
@@ -1007,11 +1109,8 @@ impl ProductImage {
         // or dropped until the call returns. `LOAD_LIBRARY_AS_DATAFILE` maps the image for
         // resource reading only: no entry point runs, nothing is relocated and no dependency
         // is loaded. The handle is freed exactly once, in `Drop`.
-        let module =
-            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
-                .expect("the product binary must be openable as a data file");
-
-        Self { module }
+        unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+            .expect("the product binary must be openable as a data file")
     }
 
     /// A copy of one resource of the product binary, by type and numeric identifier.
@@ -1024,6 +1123,29 @@ impl ProductImage {
         let found = unsafe { FindResourceW(Some(self.module), name, kind) };
         assert!(!found.0.is_null(), "resource {id} must be present");
 
+        self.bytes_of(found, id)
+    }
+
+    /// The same, for a resource that exists once per language — FR-94's two string tables.
+    ///
+    /// `FindResourceExW` and not `FindResourceW`: the plain form asks for the language of the
+    /// *calling thread*, which would make the test pass or fail depending on the Windows
+    /// display language of whoever runs it. The language wanted is named outright.
+    fn resource_of_language(&self, kind: PCWSTR, id: u16, language: u16) -> Vec<u8> {
+        let name = PCWSTR(std::ptr::without_provenance(usize::from(id)));
+
+        // SAFETY: as in `resource`, with the language identifier passed by value.
+        let found = unsafe { FindResourceExW(Some(self.module), kind, name, language) };
+        assert!(
+            !found.0.is_null(),
+            "resource {id} must be present in language 0x{language:04X}"
+        );
+
+        self.bytes_of(found, id)
+    }
+
+    /// The bytes of a resource already found.
+    fn bytes_of(&self, found: HRSRC, id: u16) -> Vec<u8> {
         // SAFETY: `self.module` and `found` are the pair just established.
         let size = unsafe { SizeofResource(Some(self.module), found) };
 
@@ -1049,6 +1171,10 @@ impl ProductImage {
 
 impl Drop for ProductImage {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
+
         // SAFETY: `module` came from a successful `LoadLibraryExW` and is freed exactly once —
         // this type is neither `Copy` nor `Clone`, and every slice taken from it has already
         // been copied into a `Vec`.
@@ -1194,4 +1320,665 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
         }
         _ => Some(read_string(bytes, at)),
     }
+}
+
+// -----------------------------------------------------------------------------------------
+// FR-94 — the two string tables, read out of the built binary
+// -----------------------------------------------------------------------------------------
+//
+// ⚠ Same rule as the dialog template above, and it is the whole point of this section: every
+// string is written out here as a literal and compared against what the **built**
+// `LangSwitcher.exe` carries. Importing the strings from the crate and asserting the resource
+// contains them would pass whatever the resource said, and the failure being guarded against is
+// precisely a resource whose Cyrillic came out wrong — fact 6 of section 9 of STATE.md, which
+// costs nothing at build time and leaves the tests green.
+//
+// The English half is here for the same reason and for one more: FR-94 asks for two languages,
+// and a table nobody checks is a table that can be half empty.
+
+/// Every interface string of FR-94: identifier, Russian, English.
+///
+/// The identifiers come from the crate — they are the contract between `app.rc` and
+/// `src\settings.rs`, and checking that contract is the point. The text does not.
+const FR_94_STRINGS: [(u16, &str, &str); 62] = [
+    (
+        settings::IDS_DIALOG_CAPTION,
+        "Lang Switcher — настройки",
+        "Lang Switcher — Settings",
+    ),
+    (settings::IDS_GROUP_GENERAL, "Общие", "General"),
+    (
+        settings::IDS_AUTOSTART,
+        "Запускать при входе в систему",
+        "Start when I sign in",
+    ),
+    (
+        settings::IDS_LANGUAGE_LABEL,
+        "Язык интерфейса:",
+        "Interface language:",
+    ),
+    (
+        settings::IDS_LANGUAGE_RESTART,
+        "вступит в силу после перезапуска",
+        "takes effect after a restart",
+    ),
+    (settings::IDS_GROUP_HOTKEY, "Горячая клавиша", "Hotkey"),
+    (settings::IDS_HOTKEY_LABEL, "Клавиша:", "Key:"),
+    (settings::IDS_HOTKEY_SET, "Задать", "Set"),
+    (settings::IDS_HOTKEY_STOP, "Отменить", "Cancel"),
+    (settings::IDS_GROUP_LAYOUTS, "Раскладки", "Layouts"),
+    (settings::IDS_MODE_PAIR, "Пара", "Pair"),
+    (
+        settings::IDS_MODE_CYCLE,
+        "Несколько раскладок",
+        "Several layouts",
+    ),
+    (settings::IDS_PAIR_SOURCE, "Источник:", "Source:"),
+    (settings::IDS_PAIR_TARGET, "Цель:", "Target:"),
+    (
+        settings::IDS_CYCLE_HINT,
+        "Цикл: галочка — участие, кнопки — порядок",
+        "Cycle: the tick takes part, the buttons set the order",
+    ),
+    (settings::IDS_CYCLE_UP, "Выше", "Up"),
+    (settings::IDS_CYCLE_DOWN, "Ниже", "Down"),
+    (settings::IDS_GROUP_REPLACEMENT, "Замена", "Replacement"),
+    (settings::IDS_METHOD_BACKSPACE, "Backspace", "Backspace"),
+    (
+        settings::IDS_METHOD_SELECTION,
+        "Выделение (совместимость)",
+        "Selection (compatibility)",
+    ),
+    (
+        settings::IDS_DELAY_LABEL,
+        "Задержка между событиями, мс:",
+        "Delay between events, ms:",
+    ),
+    (settings::IDS_GROUP_SELECTION, "Выделение", "Selection"),
+    (
+        settings::IDS_SELECTION_ENABLED,
+        "Конвертировать выделенный текст",
+        "Convert the selected text",
+    ),
+    (
+        settings::IDS_CLIPBOARD_TIMEOUT,
+        "Таймаут буфера обмена, мс:",
+        "Clipboard timeout, ms:",
+    ),
+    (
+        settings::IDS_CLIPBOARD_RESTORE,
+        "Задержка восстановления, мс:",
+        "Restore delay, ms:",
+    ),
+    (settings::IDS_GROUP_EXCLUSIONS, "Исключения", "Exclusions"),
+    (settings::IDS_EXCLUSION_REMOVE, "Удалить", "Remove"),
+    (settings::IDS_EXCLUSION_ADD, "Добавить", "Add"),
+    (
+        settings::IDS_EXCLUSION_HINT,
+        "Имя процесса, например game.exe",
+        "Process name, for example game.exe",
+    ),
+    (
+        settings::IDS_GROUP_DIAGNOSTICS,
+        "Диагностика",
+        "Diagnostics",
+    ),
+    (settings::IDS_LOG_ENABLED, "Вести журнал", "Keep a journal"),
+    (
+        settings::IDS_LOG_OPEN,
+        "Открыть папку журнала",
+        "Open the journal folder",
+    ),
+    (
+        settings::IDS_LOG_DIR_LABEL,
+        "Папка журнала:",
+        "Journal folder:",
+    ),
+    (settings::IDS_GROUP_STATE, "Состояние", "State"),
+    (settings::IDS_OK, "ОК", "OK"),
+    (settings::IDS_CANCEL, "Отмена", "Cancel"),
+    (settings::IDS_APPLY, "Применить", "Apply"),
+    (
+        settings::IDS_NOTE_TEXT_KEY,
+        "Это текстовая клавиша: пока программа активна, она перестанет вводить символ.",
+        "This is a text key: while the program is active it will stop typing its character.",
+    ),
+    (
+        settings::IDS_NOTE_UNKNOWN_KEY,
+        "Имя клавиши не распознано — действует клавиша по умолчанию, Pause.",
+        "The key name is not recognised — the default key, Pause, is in force.",
+    ),
+    (
+        settings::IDS_CAPTURE_PROMPT,
+        "Нажмите клавишу. Esc — отмена.",
+        "Press a key. Esc cancels.",
+    ),
+    (
+        settings::IDS_CAPTURE_MODIFIER,
+        "Модификатор сам по себе горячей клавишей быть не может.",
+        "A modifier on its own cannot be a hotkey.",
+    ),
+    (
+        settings::IDS_CAPTURE_COMBINATION,
+        "Сочетания с модификаторами не поддерживаются: в файле настроек хранится одна клавиша.",
+        "Combinations with modifiers are not supported: the settings file holds a single key.",
+    ),
+    (
+        settings::IDS_CAPTURE_EMERGENCY,
+        "Ctrl+Alt+Shift+F12 — аварийный выход, эта комбинация не назначается.",
+        "Ctrl+Alt+Shift+F12 is the emergency exit; it cannot be assigned.",
+    ),
+    (
+        settings::IDS_CAPTURE_NAMELESS,
+        "У этой клавиши нет имени в файле настроек — выберите другую.",
+        "This key has no name in the settings file — choose another one.",
+    ),
+    (
+        settings::IDS_CAPTURE_RESERVED,
+        "Эту клавишу занимает система — выберите другую.",
+        "The system owns this key — choose another one.",
+    ),
+    (
+        settings::IDS_STATE_HOOK,
+        "Перехват клавиатуры: {0} · восстановлений хука: {1} · отказов установки: {2}",
+        "Keyboard hook: {0} · hook recoveries: {1} · install failures: {2}",
+    ),
+    (settings::IDS_HOOK_UP, "установлен", "installed"),
+    (settings::IDS_HOOK_DOWN, "НЕ УСТАНОВЛЕН", "NOT INSTALLED"),
+    (
+        settings::IDS_STATE_LAYOUTS,
+        "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}",
+        "Layouts in the session: {0} · exclusions published: {1} · journal entries: {2}",
+    ),
+    (
+        settings::IDS_STATE_AUTOSTART,
+        "Автозапуск в реестре (HKCU\\…\\Run): {0}",
+        "Autostart in the registry (HKCU\\…\\Run): {0}",
+    ),
+    (settings::IDS_AUTOSTART_PRESENT, "есть, {0}", "yes, {0}"),
+    (settings::IDS_AUTOSTART_ABSENT, "нет", "no"),
+    (
+        settings::IDS_LAYOUT_NOTE,
+        "В сеансе нет раскладки, названной в файле ({0}) — выберите заново.",
+        "The session has no layout named in the file ({0}) — choose again.",
+    ),
+    (settings::IDS_LAYOUT_WORD_SOURCE, "источник", "source"),
+    (settings::IDS_LAYOUT_WORD_TARGET, "цель", "target"),
+    (
+        settings::IDS_LOG_DIR_MISSING,
+        "%APPDATA% не задан — журнал писать некуда",
+        "%APPDATA% is not set — there is nowhere to write the journal",
+    ),
+    (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
+    (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
+    (settings::IDS_MENU_SETTINGS, "Настройки…", "Settings…"),
+    (
+        settings::IDS_MENU_AUTOSTART,
+        "Запускать при входе в систему",
+        "Start when I sign in",
+    ),
+    (settings::IDS_MENU_ABOUT, "О программе", "About"),
+    (settings::IDS_MENU_EXIT, "Выход", "Exit"),
+];
+
+/// Serialises the tests that publish an interface locale.
+///
+/// The locale is process-wide, as it has to be — one program, one interface — and `cargo test`
+/// runs the tests of one binary on parallel threads. Every test that moves it takes this first
+/// and puts the default of section 7 back when it is done.
+static LOCALE: Mutex<()> = Mutex::new(());
+
+/// Takes that gate and points the string loader at the built binary.
+///
+/// ⚠ The redirection is what makes any of this testable at all: `embed-resource` links `app.rc`
+/// into the **binary** targets of the crate, so this test executable carries no resource section
+/// and every string would come back empty. Section 4.4 of STATE.md.
+fn with_product_strings() -> MutexGuard<'static, ()> {
+    let guard = LOCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    settings::set_resource_module(ProductImage::shared().module);
+
+    guard
+}
+
+#[test]
+fn both_string_tables_of_fr_94_are_in_the_built_binary() {
+    let product = ProductImage::shared();
+
+    for (id, russian, english) in FR_94_STRINGS {
+        let in_binary_ru = product.string(settings::Language::Ru, id);
+        let in_binary_en = product.string(settings::Language::En, id);
+
+        println!("{id} ru: {in_binary_ru}");
+        println!("{id} en: {in_binary_en}");
+
+        assert_eq!(
+            in_binary_ru, russian,
+            "string {id} came out of rc.exe wrong in Russian — check #pragma code_page(65001)"
+        );
+        assert_eq!(
+            in_binary_en, english,
+            "string {id} came out of rc.exe wrong in English"
+        );
+    }
+}
+
+#[test]
+fn the_two_tables_hold_exactly_the_identifiers_the_crate_publishes() {
+    // The mirror between `app.rc` and `src\settings.rs` in one assertion: the crate says which
+    // identifiers the interface has, this file says what they read, and neither may grow a row
+    // the other does not know about.
+    let published: Vec<u16> = settings::INTERFACE_STRINGS.to_vec();
+    let checked: Vec<u16> = FR_94_STRINGS.iter().map(|(id, _, _)| *id).collect();
+
+    assert_eq!(
+        published, checked,
+        "every interface string must be checked against both locales"
+    );
+}
+
+#[test]
+fn the_russian_table_says_what_the_dialog_template_says() {
+    // Two independent witnesses to the same text, which is what makes either of them worth
+    // anything: the template is what ships in the window and the table is what the program puts
+    // into it, and a code page accident would have to corrupt both identically to pass here.
+    let product = ProductImage::shared();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let russian: Vec<String> = FR_94_STRINGS
+        .iter()
+        .map(|(id, _, _)| product.string(settings::Language::Ru, *id))
+        .collect();
+
+    assert_eq!(
+        template.caption,
+        product.string(settings::Language::Ru, settings::IDS_DIALOG_CAPTION),
+        "the caption of the template and of the Russian table have parted"
+    );
+
+    for text in &template.text {
+        assert!(
+            russian.contains(text),
+            "the template shows «{text}», which is in no row of the Russian table"
+        );
+    }
+}
+
+#[test]
+fn lang_switcher_is_spelled_the_same_in_both_locales() {
+    // Decision on question 7: the display name is not translated. It is the name in the caption
+    // of the window, the name of the value under `HKCU\…\Run` and the name in the about box.
+    let product = ProductImage::shared();
+
+    let ru = product.string(settings::Language::Ru, settings::IDS_DIALOG_CAPTION);
+    let en = product.string(settings::Language::En, settings::IDS_DIALOG_CAPTION);
+
+    println!("caption ru: {ru}");
+    println!("caption en: {en}");
+
+    assert!(ru.starts_with("Lang Switcher"), "{ru}");
+    assert!(en.starts_with("Lang Switcher"), "{en}");
+    assert_ne!(ru, en, "the rest of the caption is translated");
+}
+
+#[test]
+fn the_interface_speaks_the_language_the_configuration_names() {
+    // **Criterion 10.** The note beside the combo box says the choice takes effect after a
+    // restart; this is that choice taking effect. `set_ui_language` is what `app` calls once, at
+    // start-up, with `general.language` — and from that moment every string of the interface
+    // comes out of the other table.
+    let _guard = with_product_strings();
+
+    settings::set_ui_language(settings::Language::Ru);
+    let russian = settings::text(settings::IDS_GROUP_GENERAL);
+    let russian_menu = settings::text(settings::IDS_MENU_EXIT);
+    let russian_state = settings::format_text(settings::IDS_STATE_AUTOSTART, &["нет"]);
+
+    settings::set_ui_language(settings::Language::En);
+    let english = settings::text(settings::IDS_GROUP_GENERAL);
+    let english_menu = settings::text(settings::IDS_MENU_EXIT);
+    let english_state = settings::format_text(settings::IDS_STATE_AUTOSTART, &["no"]);
+
+    println!("ru: {russian} / {russian_menu} / {russian_state}");
+    println!("en: {english} / {english_menu} / {english_state}");
+
+    assert_eq!(russian, "Общие");
+    assert_eq!(english, "General");
+    assert_eq!(russian_menu, "Выход");
+    assert_eq!(english_menu, "Exit");
+
+    // The placeholder of a composed line is filled in and nothing of it is left over.
+    assert_eq!(russian_state, "Автозапуск в реестре (HKCU\\…\\Run): нет");
+    assert_eq!(
+        english_state,
+        "Autostart in the registry (HKCU\\…\\Run): no"
+    );
+
+    settings::set_ui_language(settings::Language::Ru);
+}
+
+#[test]
+fn the_language_identifiers_are_the_ones_the_resource_is_tagged_with() {
+    // The joint between `app.rc` and the loader, spelled out on both sides of it.
+    assert_eq!(settings::Language::Ru.langid(), 0x0419);
+    assert_eq!(settings::Language::En.langid(), 0x0409);
+    assert_eq!(settings::Language::Ru.tag(), "ru");
+    assert_eq!(settings::Language::En.tag(), "en");
+}
+
+// -----------------------------------------------------------------------------------------
+// FR-94 — the capture
+// -----------------------------------------------------------------------------------------
+
+/// No modifier at all.
+const BARE: settings::Modifiers = settings::Modifiers {
+    ctrl: false,
+    alt: false,
+    shift: false,
+    win: false,
+};
+
+#[test]
+fn a_captured_key_is_named_the_way_section_7_reads_it_back() {
+    // The round trip that keeps `settings::key_name` and `hook::vk_from_name` from drifting:
+    // whatever a capture writes into `[hotkey] key`, the reader of that file has to turn back
+    // into the very code the user pressed. Every code Windows has, not a chosen few.
+    let mut named = 0;
+
+    for vk in 0u16..=254 {
+        let Some(name) = settings::key_name(vk) else {
+            continue;
+        };
+
+        named += 1;
+
+        assert_eq!(
+            hook::vk_from_name(&name),
+            Some(vk),
+            "capture would write «{name}» for 0x{vk:02X}, which reads back as something else"
+        );
+    }
+
+    println!("{named} virtual keys have a name section 7 can carry");
+
+    // The three shapes of name, each pinned so that a silent narrowing of the vocabulary shows
+    // up here rather than in a user's file.
+    assert_eq!(settings::key_name(0x41).as_deref(), Some("A"));
+    assert_eq!(settings::key_name(0x30).as_deref(), Some("0"));
+    assert_eq!(settings::key_name(0x77).as_deref(), Some("F8"));
+    assert_eq!(settings::key_name(0x13).as_deref(), Some("Pause"));
+    assert!(
+        named >= 62,
+        "36 characters, 24 function keys and the named ones"
+    );
+}
+
+#[test]
+fn a_press_with_nothing_held_becomes_the_hotkey() {
+    // **Criterion 13, the half that needs no window.** The name that comes out is the name that
+    // goes into `[hotkey] key`, and it is built out of the virtual-key code alone: no character
+    // is produced and no keyboard layout is consulted (SEC-01).
+    assert_eq!(
+        settings::capture(0x77, BARE),
+        settings::Capture::Taken("F8".to_owned())
+    );
+    assert_eq!(
+        settings::capture(0x13, BARE),
+        settings::Capture::Taken("Pause".to_owned())
+    );
+
+    // A text key is taken and *warned about* — FR-92 asks for the warning, not for a refusal.
+    assert_eq!(
+        settings::capture(0x41, BARE),
+        settings::Capture::Taken("A".to_owned())
+    );
+    assert_eq!(
+        settings::hotkey_note("A"),
+        Some(settings::IDS_NOTE_TEXT_KEY)
+    );
+}
+
+#[test]
+fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
+    // **Criterion 16.** Five refusals, each with a sentence of its own in both locales.
+    let product = ProductImage::shared();
+
+    let cases = [
+        // A modifier on its own — the user has not finished pressing anything.
+        (0x11u16, BARE, settings::Refusal::Modifier, "Ctrl"),
+        (0x10, BARE, settings::Refusal::Modifier, "Shift"),
+        (0x12, BARE, settings::Refusal::Modifier, "Alt"),
+        // The `Windows` key: the shell acts on it whatever anybody else does.
+        (0x5B, BARE, settings::Refusal::Reserved, "Win"),
+        // Anything with a modifier held: section 7 stores one key name and the callback
+        // compares one code, so `Ctrl+K` could only be written down as `K`.
+        (
+            0x4B,
+            settings::Modifiers { ctrl: true, ..BARE },
+            settings::Refusal::Combination,
+            "Ctrl+K",
+        ),
+        (
+            0x77,
+            settings::Modifiers { alt: true, ..BARE },
+            settings::Refusal::Combination,
+            "Alt+F8",
+        ),
+        // A key section 7 has no name for: it could not be written to the file.
+        (0x08, BARE, settings::Refusal::Nameless, "Backspace"),
+        (0x0D, BARE, settings::Refusal::Nameless, "Enter"),
+        (0x20, BARE, settings::Refusal::Nameless, "Space"),
+        (0xBA, BARE, settings::Refusal::Nameless, "OEM 1"),
+    ];
+
+    for (vk, modifiers, expected, what) in cases {
+        let outcome = settings::capture(vk, modifiers);
+
+        println!(
+            "{what:9} -> {outcome:?} -> ru: {}",
+            product.string(settings::Language::Ru, expected.string_id())
+        );
+
+        assert_eq!(
+            outcome,
+            settings::Capture::Refused(expected),
+            "{what} must be refused as {expected:?}"
+        );
+    }
+
+    // Every refusal has something to say, in both languages, and none of them is empty.
+    for refusal in [
+        settings::Refusal::Modifier,
+        settings::Refusal::Combination,
+        settings::Refusal::Emergency,
+        settings::Refusal::Reserved,
+        settings::Refusal::Nameless,
+    ] {
+        for language in [settings::Language::Ru, settings::Language::En] {
+            let sentence = product.string(language, refusal.string_id());
+
+            assert!(
+                !sentence.is_empty(),
+                "{refusal:?} has nothing to say in {}",
+                language.tag()
+            );
+        }
+    }
+}
+
+#[test]
+fn the_emergency_combination_of_fr_96_is_never_captured() {
+    // **Criterion 14, the half a test can reach.** The other half — that `Ctrl+Alt+Shift+F12`
+    // ends the process *while a capture is armed* — is a property of the hook callback, which
+    // handles it before it reads anything this module can influence, and is shown on the running
+    // program in the behavioural run.
+    let all_three = settings::Modifiers {
+        ctrl: true,
+        alt: true,
+        shift: true,
+        win: false,
+    };
+
+    assert_eq!(
+        settings::capture(hook::EMERGENCY_VK, all_three),
+        settings::Capture::Refused(settings::Refusal::Emergency)
+    );
+
+    // The `Windows` key held as well changes nothing: `hook::emergency_modifiers_held` asks
+    // about three modifiers and this asks the same question.
+    assert_eq!(
+        settings::capture(
+            hook::EMERGENCY_VK,
+            settings::Modifiers {
+                win: true,
+                ..all_three
+            }
+        ),
+        settings::Capture::Refused(settings::Refusal::Emergency)
+    );
+
+    // F12 on its own is an ordinary key and is taken — the refusal is about the combination and
+    // not about the key.
+    assert_eq!(
+        settings::capture(hook::EMERGENCY_VK, BARE),
+        settings::Capture::Taken("F12".to_owned())
+    );
+}
+
+#[test]
+fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
+    // **Criterion 15.** While a capture is armed the callback is published as inactive, which
+    // `hook::classify` answers by passing every stroke through: no conversion is fired, nothing
+    // is suppressed, and nothing reaches the typing buffer either. The proof is the callback's
+    // own decision function, called with the mode the callback would really see.
+    let _guard = with_product_strings();
+
+    hook::set_active(true);
+    hook::set_hotkey_vk(hook::DEFAULT_HOTKEY_VK);
+
+    let press = hook::KeyEvent {
+        vk: hook::DEFAULT_HOTKEY_VK,
+        edge: hook::Edge::Down,
+        extra_info: 0,
+        scan: 0,
+        flags: 0,
+        time: 0,
+    };
+
+    let before = hook::classify(
+        hook::current_mode(),
+        &mut hook::HotkeyState::default(),
+        press,
+    );
+    println!("before the capture: {before:?}");
+    assert!(before.fire_hotkey, "the hotkey fires when nothing is armed");
+
+    {
+        let session = settings::CaptureSession::arm("Pause".to_owned());
+
+        assert!(session.hook_was_active());
+        assert_eq!(session.previous_key(), "Pause");
+        assert_eq!(session.published_vk(), hook::DEFAULT_HOTKEY_VK);
+        assert!(
+            !hook::is_active(),
+            "arming a capture must suspend the conversion path"
+        );
+        assert_eq!(
+            hook::hotkey_vk(),
+            0,
+            "and it must publish a code no keyboard can produce"
+        );
+
+        let during = hook::classify(
+            hook::current_mode(),
+            &mut hook::HotkeyState::default(),
+            press,
+        );
+        println!("during the capture: {during:?}");
+
+        assert!(
+            !during.fire_hotkey,
+            "a press made while choosing a hotkey must not convert anything"
+        );
+
+        // ⚠ And the same with the active flag put back to `true` under the capture, which is
+        // what `app::window_proc` really does after every message the UI thread sees. The
+        // suspension has to survive that, and it does, because it does not rest on that flag.
+        hook::set_active(true);
+
+        let clobbered = hook::classify(
+            hook::current_mode(),
+            &mut hook::HotkeyState::default(),
+            press,
+        );
+        println!("with the active flag re-published under it: {clobbered:?}");
+
+        assert!(
+            !clobbered.fire_hotkey,
+            "the suspension must not depend on a flag another module re-publishes"
+        );
+        assert_eq!(
+            clobbered.decision,
+            hook::Decision::Pass,
+            "and the stroke must still reach the window that is capturing it"
+        );
+    }
+
+    // Dropping the session — which is what cancelling, accepting and closing the dialog all do —
+    // publishes the previous state back.
+    assert!(hook::is_active(), "the conversion path comes back");
+    assert_eq!(
+        hook::hotkey_vk(),
+        hook::DEFAULT_HOTKEY_VK,
+        "and so does the hotkey"
+    );
+
+    let after = hook::classify(
+        hook::current_mode(),
+        &mut hook::HotkeyState::default(),
+        press,
+    );
+    println!("after the capture: {after:?}");
+    assert!(after.fire_hotkey);
+
+    // A capture armed while the program was suspended gives back "suspended" and not "active".
+    hook::set_active(false);
+    drop(settings::CaptureSession::arm("Pause".to_owned()));
+    assert!(!hook::is_active(), "a suspended program stays suspended");
+
+    hook::set_active(true);
+}
+
+#[test]
+fn the_captured_key_reaches_the_hook_through_publish_configuration() {
+    // **Criteria 13, 18 and 25.** The dialog publishes nothing itself: it puts the captured name
+    // into the configuration and «Применить» hands that configuration to
+    // `app::publish_configuration`, which is the one caller of `hook::set_hotkey_vk` there has
+    // ever been. `src\hook.rs` is not touched by this task.
+    let _guard = with_product_strings();
+
+    let mut config = Config::default();
+
+    let settings::Capture::Taken(name) = settings::capture(0x77, BARE) else {
+        panic!("F8 with nothing held must be capturable");
+    };
+
+    config.hotkey.key = name.clone();
+    app::publish_configuration(&config);
+
+    println!(
+        "captured «{name}» -> hook::hotkey_vk() = 0x{:02X}",
+        hook::hotkey_vk()
+    );
+
+    assert_eq!(name, "F8");
+    assert_eq!(hook::hotkey_vk(), 0x77);
+
+    // And back to the default of section 7, so that this test cannot leave the process with a
+    // hotkey another test did not ask for.
+    config.hotkey.key = "Pause".to_owned();
+    app::publish_configuration(&config);
+    assert_eq!(hook::hotkey_vk(), hook::DEFAULT_HOTKEY_VK);
 }

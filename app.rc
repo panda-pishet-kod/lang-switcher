@@ -54,6 +54,8 @@
 #define IDC_LANGUAGE           1002
 #define IDC_HOTKEY             1010
 #define IDC_HOTKEY_NOTE        1011
+// The button that arms the capture of FR-94, task T-08-2. Next to the field it fills.
+#define IDC_HOTKEY_CAPTURE     1012
 #define IDC_MODE_PAIR          1020
 #define IDC_MODE_CYCLE         1021
 #define IDC_PAIR_SOURCE        1022
@@ -79,6 +81,31 @@
 #define IDC_STATE_LAYOUTS      1071
 #define IDC_STATE_AUTOSTART    1072
 #define IDC_APPLY              1080
+
+// Identifiers of the static text of the dialog — the group boxes and the labels, which task
+// T-08-1 left as -1 because nothing addressed them. FR-94 addresses them: a control whose
+// identifier is -1 cannot be found by `GetDlgItem`, so a label with no number of its own is a
+// label that can never be translated. Numbered from 1090 so the block stays contiguous and
+// clear of everything above.
+#define IDC_GROUP_GENERAL      1090
+#define IDC_LANGUAGE_LABEL     1091
+#define IDC_LANGUAGE_RESTART   1092
+#define IDC_GROUP_HOTKEY       1093
+#define IDC_HOTKEY_LABEL       1094
+#define IDC_GROUP_LAYOUTS      1095
+#define IDC_PAIR_SOURCE_LABEL  1096
+#define IDC_PAIR_TARGET_LABEL  1097
+#define IDC_CYCLE_HINT         1098
+#define IDC_GROUP_REPLACEMENT  1099
+#define IDC_DELAY_LABEL        1100
+#define IDC_GROUP_SELECTION    1101
+#define IDC_CLIP_TIMEOUT_LABEL 1102
+#define IDC_CLIP_RESTORE_LABEL 1103
+#define IDC_GROUP_EXCLUSIONS   1104
+#define IDC_EXCLUSION_HINT     1105
+#define IDC_GROUP_DIAGNOSTICS  1106
+#define IDC_LOG_DIR_LABEL      1107
+#define IDC_GROUP_STATE        1108
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -173,10 +200,16 @@ END
 // this file, and `tests\settings.rs` reads these very strings back out of the built
 // LangSwitcher.exe and compares them against the expected ones.
 //
-// The strings are literals in the template rather than entries in a string table on purpose:
-// FR-94, the RU and EN string tables, is task T-08-2, and it is the task that decides how
-// they are laid out. What this task owes it is strings that can be lifted into a table
-// without being rewritten, which a dialog template gives.
+// ⚠ **The literals below are no longer what the window shows** — task T-08-2. Every one of
+// them is now also a row of the two string tables at the end of this file, and the dialog
+// sets the text of every control from the table of the locale in force (FR-94). They are kept
+// here, character for character identical to the Russian table, for three reasons: the window
+// is readable even if a string fails to load, the check task T-08-1 built against the built
+// binary keeps working unchanged, and a test asserts template and Russian table agree — which
+// is a second, independent witness that neither came out of rc.exe damaged.
+//
+// This is also why every static label below now carries an identifier of its own instead of
+// -1: a control that `GetDlgItem` cannot find is a control whose text cannot be replaced.
 //
 // Coordinates are dialog units, so the layout follows the system font instead of a pixel
 // grid. Two columns, 200 units wide each, at x = 7 and x = 213.
@@ -186,65 +219,70 @@ CAPTION "Lang Switcher — настройки"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     // -- Общие: автозапуск и язык интерфейса ---------------------------------------------
-    GROUPBOX        "Общие", -1, 7, 7, 200, 50
+    GROUPBOX        "Общие", IDC_GROUP_GENERAL, 7, 7, 200, 50
     AUTOCHECKBOX    "Запускать при входе в систему", IDC_AUTOSTART, 14, 19, 186, 10
-    LTEXT           "Язык интерфейса:", -1, 14, 34, 58, 9
+    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "вступит в силу после перезапуска", -1, 132, 34, 70, 18
+    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18
 
     // -- Горячая клавиша -----------------------------------------------------------------
-    GROUPBOX        "Горячая клавиша", -1, 7, 61, 200, 48
-    LTEXT           "Клавиша:", -1, 14, 76, 32, 9
+    //
+    // The field stays `ES_READONLY`: the key is not typed into it, it is *captured* — FR-94,
+    // task T-08-2. The button next to it arms the capture, the field then shows the name of
+    // the key that was pressed, and the label below it says what is wrong when the press
+    // cannot become a hotkey.
+    GROUPBOX        "Горячая клавиша", IDC_GROUP_HOTKEY, 7, 61, 200, 48
+    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 76, 32, 9
     EDITTEXT        IDC_HOTKEY, 48, 74, 64, 12, ES_AUTOHSCROLL | ES_READONLY
-    LTEXT           "Пока меняется только в файле настроек.", -1, 116, 76, 88, 18
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 73, 46, 14
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 90, 186, 16
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
-    GROUPBOX        "Раскладки", -1, 7, 113, 200, 132
+    GROUPBOX        "Раскладки", IDC_GROUP_LAYOUTS, 7, 113, 200, 132
     AUTORADIOBUTTON "Пара", IDC_MODE_PAIR, 14, 125, 60, 10, WS_GROUP | WS_TABSTOP
     AUTORADIOBUTTON "Несколько раскладок", IDC_MODE_CYCLE, 78, 125, 122, 10
-    LTEXT           "Источник:", -1, 14, 141, 38, 9
+    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 141, 38, 9
     COMBOBOX        IDC_PAIR_SOURCE, 54, 139, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цель:", -1, 14, 157, 38, 9
+    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 157, 38, 9
     COMBOBOX        IDC_PAIR_TARGET, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цикл: галочка — участие, кнопки — порядок", -1, 14, 172, 186, 9
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 172, 186, 9
     CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 183, 142, 44
     PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 183, 40, 14
     PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 200, 40, 14
     LTEXT           "", IDC_LAYOUT_NOTE, 14, 230, 186, 10
 
     // -- Замена: FR-41, FR-42, FR-44 -----------------------------------------------------
-    GROUPBOX        "Замена", -1, 213, 7, 200, 58
+    GROUPBOX        "Замена", IDC_GROUP_REPLACEMENT, 213, 7, 200, 58
     AUTORADIOBUTTON "Backspace", IDC_METHOD_BACKSPACE, 220, 19, 180, 10, WS_GROUP | WS_TABSTOP
     AUTORADIOBUTTON "Выделение (совместимость)", IDC_METHOD_SELECTION, 220, 32, 180, 10
-    LTEXT           "Задержка между событиями, мс:", -1, 220, 48, 110, 9
+    LTEXT           "Задержка между событиями, мс:", IDC_DELAY_LABEL, 220, 48, 110, 9
     EDITTEXT        IDC_DELAY, 334, 46, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
 
     // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
-    GROUPBOX        "Выделение", -1, 213, 69, 200, 62
+    GROUPBOX        "Выделение", IDC_GROUP_SELECTION, 213, 69, 200, 62
     AUTOCHECKBOX    "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, 220, 81, 186, 10
-    LTEXT           "Таймаут буфера обмена, мс:", -1, 220, 97, 110, 9
+    LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 97, 110, 9
     EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 95, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
-    LTEXT           "Задержка восстановления, мс:", -1, 220, 113, 110, 9
+    LTEXT           "Задержка восстановления, мс:", IDC_CLIP_RESTORE_LABEL, 220, 113, 110, 9
     EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 111, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
 
     // -- Исключения: FR-84 ---------------------------------------------------------------
-    GROUPBOX        "Исключения", -1, 213, 135, 200, 84
+    GROUPBOX        "Исключения", IDC_GROUP_EXCLUSIONS, 213, 135, 200, 84
     LISTBOX         IDC_EXCLUSIONS, 220, 147, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_BORDER | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 147, 60, 14
     EDITTEXT        IDC_EXCLUSION_NAME, 220, 194, 120, 12, ES_AUTOHSCROLL
     PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 193, 60, 14
-    LTEXT           "Имя процесса, например game.exe", -1, 220, 208, 186, 9
+    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 208, 186, 9
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
-    GROUPBOX        "Диагностика", -1, 213, 223, 200, 58
+    GROUPBOX        "Диагностика", IDC_GROUP_DIAGNOSTICS, 213, 223, 200, 58
     AUTOCHECKBOX    "Вести журнал", IDC_LOG_ENABLED, 220, 235, 90, 10
     PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 233, 86, 14
-    LTEXT           "Папка журнала:", -1, 220, 251, 60, 9
+    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 251, 60, 9
     LTEXT           "", IDC_LOG_DIR, 220, 262, 186, 16
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
-    GROUPBOX        "Состояние", -1, 7, 285, 406, 44
+    GROUPBOX        "Состояние", IDC_GROUP_STATE, 7, 285, 406, 44
     LTEXT           "", IDC_STATE_HOOK, 14, 297, 392, 9
     LTEXT           "", IDC_STATE_LAYOUTS, 14, 308, 392, 9
     LTEXT           "", IDC_STATE_AUTOSTART, 14, 319, 392, 9
@@ -252,4 +290,286 @@ BEGIN
     DEFPUSHBUTTON   "ОК", IDOK, 253, 335, 50, 14
     PUSHBUTTON      "Отмена", IDCANCEL, 307, 335, 50, 14
     PUSHBUTTON      "Применить", IDC_APPLY, 361, 335, 52, 14
+END
+
+// =======================================================================================
+// FR-94 -- the interface strings, one string table per locale. Task T-08-2.
+// =======================================================================================
+//
+// ⚠ **The code page again, and this is the file's sharpest case.** Both tables below are
+// full of Cyrillic, and `rc.exe` with no declaration reads a .rc in the system ANSI code
+// page — cp1251 on this machine — turning every Russian string into mojibake **with no error
+// at build time and with green tests**. The `#pragma code_page(65001)` at the top of this
+// file governs the whole of it, tables included, and it is repeated immediately below so
+// that the declaration is visible from the strings it protects rather than eight hundred
+// lines away. The pragma is idempotent; two of them cost nothing and the second one cannot
+// be lost by an edit that moves the tables to a file of their own.
+//
+// The result is not taken on trust: `tests\settings.rs` reads both tables back out of the
+// **built** `LangSwitcher.exe`, opened with `LOAD_LIBRARY_AS_DATAFILE`, and compares every
+// string against a literal written out in the test — the technique task T-08-1 established
+// for the dialog template (barrier §4.4 of STATE.md: `embed-resource` links resources into
+// binary targets only, so a test cannot look for them in its own image).
+#pragma code_page(65001)
+
+// The two locales of FR-94 as language identifiers. Spelled numerically for the reason given
+// at the top of this file — there is no `#include <windows.h>` here — and these are the
+// values `winnt.h` gives: LANG_RUSSIAN 0x19 with SUBLANG_DEFAULT 0x01 is LANGID 0x0419, and
+// LANG_ENGLISH 0x09 with SUBLANG_ENGLISH_US 0x01 is 0x0409. `settings::Language` carries the
+// same two numbers and `FindResourceExW` is asked for one of them by name of the locale the
+// configuration chose — never by the user's Windows UI language, which is not what section 7
+// says the choice is.
+//
+// The `LANGUAGE` statement below applies to the resources that follow it, and there are none
+// after the tables: the icons, the manifest, VERSIONINFO and the dialog template are all
+// above this line and keep the language they were emitted with.
+
+// Identifiers of the interface strings. The numbering starts at 3000, clear of the dialog
+// (200) and of the control identifiers (1001–1080), and it is contiguous: a string table
+// resource holds sixteen strings per block, so a gap costs a whole block of nothing.
+//
+// ⚠ Mirrored by hand in `src\settings.rs`, exactly as the control identifiers are, because a
+// .rc file and a Rust file share no header. A mismatch is not silent: the string comes back
+// empty, `report_non_critical("FindResourceExW")` records the refusal, and the test that
+// reads the tables out of the built binary compares them against the identifiers the crate
+// exports.
+#define IDS_DIALOG_CAPTION      3000
+#define IDS_GROUP_GENERAL       3001
+#define IDS_AUTOSTART           3002
+#define IDS_LANGUAGE_LABEL      3003
+#define IDS_LANGUAGE_RESTART    3004
+#define IDS_GROUP_HOTKEY        3005
+#define IDS_HOTKEY_LABEL        3006
+#define IDS_HOTKEY_SET          3007
+#define IDS_HOTKEY_STOP         3008
+#define IDS_GROUP_LAYOUTS       3009
+#define IDS_MODE_PAIR           3010
+#define IDS_MODE_CYCLE          3011
+#define IDS_PAIR_SOURCE         3012
+#define IDS_PAIR_TARGET         3013
+#define IDS_CYCLE_HINT          3014
+#define IDS_CYCLE_UP            3015
+#define IDS_CYCLE_DOWN          3016
+#define IDS_GROUP_REPLACEMENT   3017
+#define IDS_METHOD_BACKSPACE    3018
+#define IDS_METHOD_SELECTION    3019
+#define IDS_DELAY_LABEL         3020
+#define IDS_GROUP_SELECTION     3021
+#define IDS_SELECTION_ENABLED   3022
+#define IDS_CLIPBOARD_TIMEOUT   3023
+#define IDS_CLIPBOARD_RESTORE   3024
+#define IDS_GROUP_EXCLUSIONS    3025
+#define IDS_EXCLUSION_REMOVE    3026
+#define IDS_EXCLUSION_ADD       3027
+#define IDS_EXCLUSION_HINT      3028
+#define IDS_GROUP_DIAGNOSTICS   3029
+#define IDS_LOG_ENABLED         3030
+#define IDS_LOG_OPEN            3031
+#define IDS_LOG_DIR_LABEL       3032
+#define IDS_GROUP_STATE         3033
+#define IDS_OK                  3034
+#define IDS_CANCEL              3035
+#define IDS_APPLY               3036
+#define IDS_NOTE_TEXT_KEY       3037
+#define IDS_NOTE_UNKNOWN_KEY    3038
+#define IDS_CAPTURE_PROMPT      3039
+#define IDS_CAPTURE_MODIFIER    3040
+#define IDS_CAPTURE_COMBINATION 3041
+#define IDS_CAPTURE_EMERGENCY   3042
+#define IDS_CAPTURE_NAMELESS    3043
+#define IDS_CAPTURE_RESERVED    3044
+#define IDS_STATE_HOOK          3045
+#define IDS_HOOK_UP             3046
+#define IDS_HOOK_DOWN           3047
+#define IDS_STATE_LAYOUTS       3048
+#define IDS_STATE_AUTOSTART     3049
+#define IDS_AUTOSTART_PRESENT   3050
+#define IDS_AUTOSTART_ABSENT    3051
+#define IDS_LAYOUT_NOTE         3052
+#define IDS_LAYOUT_WORD_SOURCE  3053
+#define IDS_LAYOUT_WORD_TARGET  3054
+#define IDS_LOG_DIR_MISSING     3055
+
+// ---------------------------------------------------------------------------------------
+// Russian — the default of section 7, `[general] language = "ru"`.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ These strings are the same text the dialog template above carries as literals, character
+// for character, and a test asserts it. The template keeps its literals so that the window
+// is readable even before a single string is loaded and so that the check task T-08-1 built
+// keeps working; the table is what the program actually shows, in both locales.
+//
+// ⚠ A backslash is an escape character in an .rc string. `HKCU\…\Run` has to be written
+// `HKCU\\…\\Run`, and a `"` inside a string has to be doubled. Neither mistake is loud.
+//
+// `{0}`, `{1}`, `{2}` are filled in by `settings::format_text`; the substitution is textual
+// and takes numbers and names the program itself produced — never a keystroke (SEC-01).
+LANGUAGE 0x19, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — настройки"
+    IDS_GROUP_GENERAL       "Общие"
+    IDS_AUTOSTART           "Запускать при входе в систему"
+    IDS_LANGUAGE_LABEL      "Язык интерфейса:"
+    IDS_LANGUAGE_RESTART    "вступит в силу после перезапуска"
+    IDS_GROUP_HOTKEY        "Горячая клавиша"
+    IDS_HOTKEY_LABEL        "Клавиша:"
+    IDS_HOTKEY_SET          "Задать"
+    IDS_HOTKEY_STOP         "Отменить"
+    IDS_GROUP_LAYOUTS       "Раскладки"
+    IDS_MODE_PAIR           "Пара"
+    IDS_MODE_CYCLE          "Несколько раскладок"
+    IDS_PAIR_SOURCE         "Источник:"
+    IDS_PAIR_TARGET         "Цель:"
+    IDS_CYCLE_HINT          "Цикл: галочка — участие, кнопки — порядок"
+    IDS_CYCLE_UP            "Выше"
+    IDS_CYCLE_DOWN          "Ниже"
+    IDS_GROUP_REPLACEMENT   "Замена"
+    IDS_METHOD_BACKSPACE    "Backspace"
+    IDS_METHOD_SELECTION    "Выделение (совместимость)"
+    IDS_DELAY_LABEL         "Задержка между событиями, мс:"
+    IDS_GROUP_SELECTION     "Выделение"
+    IDS_SELECTION_ENABLED   "Конвертировать выделенный текст"
+    IDS_CLIPBOARD_TIMEOUT   "Таймаут буфера обмена, мс:"
+    IDS_CLIPBOARD_RESTORE   "Задержка восстановления, мс:"
+    IDS_GROUP_EXCLUSIONS    "Исключения"
+    IDS_EXCLUSION_REMOVE    "Удалить"
+    IDS_EXCLUSION_ADD       "Добавить"
+    IDS_EXCLUSION_HINT      "Имя процесса, например game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Диагностика"
+    IDS_LOG_ENABLED         "Вести журнал"
+    IDS_LOG_OPEN            "Открыть папку журнала"
+    IDS_LOG_DIR_LABEL       "Папка журнала:"
+    IDS_GROUP_STATE         "Состояние"
+    IDS_OK                  "ОК"
+    IDS_CANCEL              "Отмена"
+    IDS_APPLY               "Применить"
+    IDS_NOTE_TEXT_KEY       "Это текстовая клавиша: пока программа активна, она перестанет вводить символ."
+    IDS_NOTE_UNKNOWN_KEY    "Имя клавиши не распознано — действует клавиша по умолчанию, Pause."
+    IDS_CAPTURE_PROMPT      "Нажмите клавишу. Esc — отмена."
+    IDS_CAPTURE_MODIFIER    "Модификатор сам по себе горячей клавишей быть не может."
+    IDS_CAPTURE_COMBINATION "Сочетания с модификаторами не поддерживаются: в файле настроек хранится одна клавиша."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварийный выход, эта комбинация не назначается."
+    IDS_CAPTURE_NAMELESS    "У этой клавиши нет имени в файле настроек — выберите другую."
+    IDS_CAPTURE_RESERVED    "Эту клавишу занимает система — выберите другую."
+    IDS_STATE_HOOK          "Перехват клавиатуры: {0} · восстановлений хука: {1} · отказов установки: {2}"
+    IDS_HOOK_UP             "установлен"
+    IDS_HOOK_DOWN           "НЕ УСТАНОВЛЕН"
+    IDS_STATE_LAYOUTS       "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}"
+    IDS_STATE_AUTOSTART     "Автозапуск в реестре (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "есть, {0}"
+    IDS_AUTOSTART_ABSENT    "нет"
+    IDS_LAYOUT_NOTE         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново."
+    IDS_LAYOUT_WORD_SOURCE  "источник"
+    IDS_LAYOUT_WORD_TARGET  "цель"
+    IDS_LOG_DIR_MISSING     "%APPDATA% не задан — журнал писать некуда"
+END
+
+// ---------------------------------------------------------------------------------------
+// English — `[general] language = "en"`.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ **«Lang Switcher» is not translated** and reads the same in both locales — decision on
+// question 7. It is the display name of the product: the caption below, the value name under
+// `HKCU\…\Run` (`settings::AUTOSTART_VALUE_NAME`) and the about box all carry it unchanged.
+//
+// The two entries of the language combo box are **not** in either table on purpose: a
+// language is named in its own language in a language chooser, so «Русский» and «English»
+// stand as they are whichever locale is in force.
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — Settings"
+    IDS_GROUP_GENERAL       "General"
+    IDS_AUTOSTART           "Start when I sign in"
+    IDS_LANGUAGE_LABEL      "Interface language:"
+    IDS_LANGUAGE_RESTART    "takes effect after a restart"
+    IDS_GROUP_HOTKEY        "Hotkey"
+    IDS_HOTKEY_LABEL        "Key:"
+    IDS_HOTKEY_SET          "Set"
+    IDS_HOTKEY_STOP         "Cancel"
+    IDS_GROUP_LAYOUTS       "Layouts"
+    IDS_MODE_PAIR           "Pair"
+    IDS_MODE_CYCLE          "Several layouts"
+    IDS_PAIR_SOURCE         "Source:"
+    IDS_PAIR_TARGET         "Target:"
+    IDS_CYCLE_HINT          "Cycle: the tick takes part, the buttons set the order"
+    IDS_CYCLE_UP            "Up"
+    IDS_CYCLE_DOWN          "Down"
+    IDS_GROUP_REPLACEMENT   "Replacement"
+    IDS_METHOD_BACKSPACE    "Backspace"
+    IDS_METHOD_SELECTION    "Selection (compatibility)"
+    IDS_DELAY_LABEL         "Delay between events, ms:"
+    IDS_GROUP_SELECTION     "Selection"
+    IDS_SELECTION_ENABLED   "Convert the selected text"
+    IDS_CLIPBOARD_TIMEOUT   "Clipboard timeout, ms:"
+    IDS_CLIPBOARD_RESTORE   "Restore delay, ms:"
+    IDS_GROUP_EXCLUSIONS    "Exclusions"
+    IDS_EXCLUSION_REMOVE    "Remove"
+    IDS_EXCLUSION_ADD       "Add"
+    IDS_EXCLUSION_HINT      "Process name, for example game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnostics"
+    IDS_LOG_ENABLED         "Keep a journal"
+    IDS_LOG_OPEN            "Open the journal folder"
+    IDS_LOG_DIR_LABEL       "Journal folder:"
+    IDS_GROUP_STATE         "State"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Cancel"
+    IDS_APPLY               "Apply"
+    IDS_NOTE_TEXT_KEY       "This is a text key: while the program is active it will stop typing its character."
+    IDS_NOTE_UNKNOWN_KEY    "The key name is not recognised — the default key, Pause, is in force."
+    IDS_CAPTURE_PROMPT      "Press a key. Esc cancels."
+    IDS_CAPTURE_MODIFIER    "A modifier on its own cannot be a hotkey."
+    IDS_CAPTURE_COMBINATION "Combinations with modifiers are not supported: the settings file holds a single key."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 is the emergency exit; it cannot be assigned."
+    IDS_CAPTURE_NAMELESS    "This key has no name in the settings file — choose another one."
+    IDS_CAPTURE_RESERVED    "The system owns this key — choose another one."
+    IDS_STATE_HOOK          "Keyboard hook: {0} · hook recoveries: {1} · install failures: {2}"
+    IDS_HOOK_UP             "installed"
+    IDS_HOOK_DOWN           "NOT INSTALLED"
+    IDS_STATE_LAYOUTS       "Layouts in the session: {0} · exclusions published: {1} · journal entries: {2}"
+    IDS_STATE_AUTOSTART     "Autostart in the registry (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "yes, {0}"
+    IDS_AUTOSTART_ABSENT    "no"
+    IDS_LAYOUT_NOTE         "The session has no layout named in the file ({0}) — choose again."
+    IDS_LAYOUT_WORD_SOURCE  "source"
+    IDS_LAYOUT_WORD_TARGET  "target"
+    IDS_LOG_DIR_MISSING     "%APPDATA% is not set — there is nowhere to write the journal"
+END
+
+// ---------------------------------------------------------------------------------------
+// The menu of FR-91, both locales. Task T-08-2.
+// ---------------------------------------------------------------------------------------
+//
+// Separate blocks rather than more rows above, because these six identifiers belong to
+// `tray` and not to the dialog, and because a string table resource is sixteen strings wide:
+// starting the menu at 3072 puts it in a block of its own, so a string added to the dialog
+// cannot renumber the menu.
+#define IDS_MENU_SUSPEND        3072
+#define IDS_MENU_RESUME         3073
+#define IDS_MENU_SETTINGS       3074
+#define IDS_MENU_AUTOSTART      3075
+#define IDS_MENU_ABOUT          3076
+#define IDS_MENU_EXIT           3077
+
+LANGUAGE 0x19, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Приостановить"
+    IDS_MENU_RESUME         "Возобновить"
+    IDS_MENU_SETTINGS       "Настройки…"
+    IDS_MENU_AUTOSTART      "Запускать при входе в систему"
+    IDS_MENU_ABOUT          "О программе"
+    IDS_MENU_EXIT           "Выход"
+END
+
+LANGUAGE 0x09, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Suspend"
+    IDS_MENU_RESUME         "Resume"
+    IDS_MENU_SETTINGS       "Settings…"
+    IDS_MENU_AUTOSTART      "Start when I sign in"
+    IDS_MENU_ABOUT          "About"
+    IDS_MENU_EXIT           "Exit"
 END

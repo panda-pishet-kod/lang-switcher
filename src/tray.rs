@@ -84,23 +84,15 @@ use crate::{APP_NAME, app};
 // The menu of FR-91 — labels and commands
 // ---------------------------------------------------------------------------------------
 
-/// First item of FR-91 while the program is active.
-pub const LABEL_SUSPEND: &str = "Приостановить";
-
-/// First item of FR-91 while the program is suspended.
-pub const LABEL_RESUME: &str = "Возобновить";
-
-/// Second item of FR-91. The last character is U+2026, one ellipsis and not three dots.
-pub const LABEL_SETTINGS: &str = "Настройки…";
-
-/// Third item of FR-91, the one carrying the check mark of `general.autostart`.
-pub const LABEL_AUTOSTART: &str = "Запускать при входе в систему";
-
-/// Fourth item of FR-91.
-pub const LABEL_ABOUT: &str = "О программе";
-
-/// Fifth item of FR-91.
-pub const LABEL_EXIT: &str = "Выход";
+// ⚠ **The five labels of FR-91 are no longer literals here** — FR-94, task T-08-2. They are
+// rows of the two string tables of `app.rc`, and [`Menu::build`] reads them out of the table of
+// the locale `general.language` chose, exactly as the settings dialog reads its own. The
+// identifiers live in `settings` with the rest of the interface vocabulary, because the table
+// they index is one table and splitting its numbering across two modules is how numbering
+// drifts.
+//
+// The ellipsis of «Настройки…» is one character, U+2026, in both locales; that is a property of
+// the string table now and a test reads it back out of the built binary.
 
 /// Command identifier of the first item of FR-91.
 ///
@@ -805,16 +797,39 @@ impl Menu {
 
         let menu = Self { handle };
 
-        let first = if enabled { LABEL_SUSPEND } else { LABEL_RESUME };
+        // FR-94: every label out of the string table of the locale in force. The menu is built
+        // afresh on every click, so it carries the locale published at start-up without any
+        // state of its own.
+        let first = settings::text(if enabled {
+            settings::IDS_MENU_SUSPEND
+        } else {
+            settings::IDS_MENU_RESUME
+        });
         let autostart_mark = if autostart { MF_CHECKED } else { MF_UNCHECKED };
 
-        menu.append_command(MF_STRING, CMD_TOGGLE, first)?;
+        menu.append_command(MF_STRING, CMD_TOGGLE, &first)?;
         menu.append_separator()?;
-        menu.append_command(MF_STRING, CMD_SETTINGS, LABEL_SETTINGS)?;
-        menu.append_command(MF_STRING | autostart_mark, CMD_AUTOSTART, LABEL_AUTOSTART)?;
+        menu.append_command(
+            MF_STRING,
+            CMD_SETTINGS,
+            &settings::text(settings::IDS_MENU_SETTINGS),
+        )?;
+        menu.append_command(
+            MF_STRING | autostart_mark,
+            CMD_AUTOSTART,
+            &settings::text(settings::IDS_MENU_AUTOSTART),
+        )?;
         menu.append_separator()?;
-        menu.append_command(MF_STRING, CMD_ABOUT, LABEL_ABOUT)?;
-        menu.append_command(MF_STRING, CMD_EXIT, LABEL_EXIT)?;
+        menu.append_command(
+            MF_STRING,
+            CMD_ABOUT,
+            &settings::text(settings::IDS_MENU_ABOUT),
+        )?;
+        menu.append_command(
+            MF_STRING,
+            CMD_EXIT,
+            &settings::text(settings::IDS_MENU_EXIT),
+        )?;
 
         Ok(menu)
     }

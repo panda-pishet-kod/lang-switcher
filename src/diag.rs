@@ -279,6 +279,29 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("CloseHandle(pipe)", Kind::Channel),
     // `selection` — the clipboard and the selection path of §4.7.
     ("clipboard snapshot truncated", Kind::Selection),
+    // `settings` and `tray` — the dialog of FR-92, autostart FR-93 and the string tables of
+    // FR-94. Added by task T-08-2, which is the debt task T-08-1 recorded and could not pay:
+    // this file was closed to it, so every refusal from the settings code went into the ring as
+    // `Operation::UNLISTED` — the code of the failure with no name against it.
+    //
+    // The names are the Win32 calls themselves, which is the convention every row above
+    // follows. They take existing kinds rather than a new one: a dialog control is a window
+    // (`Kind::Window`) and the `Run` value and the resources of the image belong to the process
+    // (`Kind::Process`). A `Kind::Settings` would read better in a dump and is deliberately not
+    // added — the task opens this file for strings and for nothing else.
+    ("SetDlgItemTextW", Kind::Window),
+    ("SetWindowTextW", Kind::Window),
+    ("CheckDlgButton", Kind::Window),
+    ("CheckRadioButton", Kind::Window),
+    ("GetDlgItem", Kind::Window),
+    ("EndDialog", Kind::Window),
+    ("DialogBoxParamW", Kind::Window),
+    ("SetWindowLongPtrW", Kind::Window),
+    ("ShellExecuteW", Kind::Window),
+    ("RegSetValueExW", Kind::Process),
+    ("RegCloseKey", Kind::Process),
+    ("FindResourceExW", Kind::Process),
+    ("LoadResource", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

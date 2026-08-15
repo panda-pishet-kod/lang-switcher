@@ -113,6 +113,128 @@ fn the_names_the_program_really_reports_are_recognised() {
     }
 }
 
+/// Every name the program reports, taken out of the sources rather than out of a list.
+///
+/// The debt task T-08-1 recorded and task T-08-2 paid: the settings dialog reported failures
+/// under names that were not in the table, so they landed in the ring as
+/// [`Operation::UNLISTED`] — a code with nothing beside it. A list of names in a test would have
+/// gone stale the same way, so this reads the sources and checks what it finds there.
+///
+/// ⚠ **Asserted for `settings.rs` and `tray.rs` only, and that is deliberate.** Task T-08-2 is
+/// allowed to add rows for the operations of the settings code and for nothing else, so a gap in
+/// another module is *printed* here and left standing rather than quietly filled by a task that
+/// has no mandate for it. The scan finds every such gap, which is what makes it worth having.
+///
+/// Only the literal calls are found, which is the whole of them but one: `app` builds one name
+/// with `format!` (`thread::spawn: {error}`), and that one is *meant* to narrow to
+/// `UNLISTED` — it carries text that was not chosen at compile time, which is exactly what
+/// SEC-07 says must not reach the journal.
+#[test]
+fn every_operation_name_of_the_settings_code_is_in_the_vocabulary() {
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut checked = 0;
+    let mut elsewhere = Vec::new();
+
+    for entry in std::fs::read_dir(&sources).expect("the source directory must be readable") {
+        let path = entry.expect("a directory entry must be readable").path();
+
+        if path.extension().is_none_or(|kind| kind != "rs") {
+            continue;
+        }
+
+        let file = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let owned_by_this_task = file == "settings.rs" || file == "tray.rs";
+        let text = std::fs::read_to_string(&path).expect("a source file must be readable");
+
+        for occurrence in text.split("report_non_critical(\"").skip(1) {
+            let Some(name) = occurrence.split('"').next() else {
+                continue;
+            };
+
+            let operation = Operation::from_name(name);
+            checked += 1;
+
+            println!(
+                "{file}: {name} -> {} ({})",
+                operation.name(),
+                operation.kind().name()
+            );
+
+            if operation == Operation::UNLISTED {
+                assert!(
+                    !owned_by_this_task,
+                    "{file}: «{name}» reaches the journal without a name of its own"
+                );
+
+                elsewhere.push(format!("{file}: {name}"));
+                continue;
+            }
+
+            assert_eq!(operation.name(), name);
+        }
+    }
+
+    println!("{checked} operation names found in the sources");
+
+    if elsewhere.is_empty() {
+        println!("every one of them has a row in the table");
+    } else {
+        println!("still unnamed, in modules this task may not touch: {elsewhere:?}");
+    }
+
+    assert!(checked > 40, "the scan found suspiciously few call sites");
+}
+
+/// The names the settings dialog, autostart and the string tables report under — the rows task
+/// T-08-2 added, each in the group it belongs to.
+#[test]
+fn the_settings_dialog_reports_under_its_own_names() {
+    let cases = [
+        ("SetDlgItemTextW", Kind::Window),
+        ("SetWindowTextW", Kind::Window),
+        ("CheckDlgButton", Kind::Window),
+        ("CheckRadioButton", Kind::Window),
+        ("GetDlgItem", Kind::Window),
+        ("EndDialog", Kind::Window),
+        ("DialogBoxParamW", Kind::Window),
+        ("SetWindowLongPtrW", Kind::Window),
+        ("ShellExecuteW", Kind::Window),
+        ("RegSetValueExW", Kind::Process),
+        ("RegCloseKey", Kind::Process),
+        ("FindResourceExW", Kind::Process),
+        ("LoadResource", Kind::Process),
+    ];
+
+    let _guard = ring();
+
+    for (name, kind) in cases {
+        let operation = Operation::from_name(name);
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "{name} still has no row in the table"
+        );
+        assert_eq!(operation.name(), name);
+        assert_eq!(operation.kind(), kind, "{name} landed in the wrong group");
+
+        // And it comes back out of a dump under that name rather than as «(unlisted)».
+        diag::record(operation, OsCode::of(&WinError::from(ERROR_ACCESS_DENIED)));
+    }
+
+    let dump = diag::render();
+
+    for (name, _) in cases {
+        assert!(dump.contains(name), "the dump does not print {name}");
+    }
+
+    println!("{dump}");
+}
+
 /// **Point 9, the half a test can reach.** An error code comes from an operating system error
 /// and from nothing else.
 ///
