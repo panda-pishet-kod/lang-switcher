@@ -39,7 +39,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_CONTROL, VK_DELETE, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_CONTROL, VK_DELETE, VK_SHIFT, VK_TAB};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 
 use crate::report::{Assertion, Row, Verdict};
@@ -2560,53 +2560,274 @@ pub fn position_24(ctx: &Context) -> Vec<Row> {
 // The positions that wait for a task that does not exist yet
 // ---------------------------------------------------------------------------------------
 
-/// Position 14 — a password field, answered through the SEC-04a channel.
+/// Title of the bench's own password window — the string position 14 adopts by.
+///
+/// The window appends `len=N` to it on every change of the field, so the match is on the prefix.
+const PASSWORD_WINDOW_TITLE: &str = "LangSw-Password-14";
+
+/// Position 14 — **a password field, and the one position SEC-06 is proved by.**
 ///
 /// ⚠ This is the one position where the result is invisible from outside — requirement 4 of
-/// §11.5 names it. The assertion is "the buffer stays empty", and the only witness is the
-/// product's own `buffer_len`, published on the channel.
+/// §11.5 names it, and footnote 2 of §11.3 says how: «через тестовое приложение с полем
+/// `ES_PASSWORD` … и отладочный канал SEC-04a, подтверждающий нулевую длину буфера». The
+/// contents of a password field are not reachable from outside by the design of Windows, so the
+/// only witness there can be is the product's own `buffer_len`, and the only thing that says the
+/// product *recognised* the field is its own `password_field` — the key task T-06-1 added.
 ///
-/// The stub is wired to the channel **now**, and it survives the absence of `password_field`:
-/// that key arrives with T-06-1 and is listed in `control::RESERVED_KEYS` today. What the stub
-/// does is read the snapshot, report `buffer_len` as an observation, and give the verdict
-/// `pending` on T-06-1 — because until password-field detection exists there is nothing that
-/// could make the buffer stay empty, and a `pass` here would be an accident, not a check.
-pub fn position_14(_ctx: &Context) -> Vec<Row> {
+/// ⛔ **The window is the bench's own.** Requirements A to E are not relaxed for this position or
+/// for any other: nothing on this machine is searched for a password box, no window of anybody
+/// else's is adopted, and nothing is typed into one. The bench starts a process of its own, that
+/// process opens a form with a single masked text box, and the six keystrokes go there.
+///
+/// ⚠ **No password is typed.** What is typed is `ghbdtn`, the same six letters every other
+/// position types, into a box that happens to be masked. There is no secret anywhere in this
+/// scenario — the point is the *shape* of the control, not what is in it.
+///
+/// # What the three readings mean
+///
+/// | Reading | Says |
+/// |---|---|
+/// | the window title, `len=6` | the six keystrokes **reached the field** — FR-70's «ввод не подавляется» |
+/// | `password_field=1` | the product recognised the field — FR-72 |
+/// | `buffer_len=0` | the product recorded none of them — FR-70, SEC-06 |
+///
+/// All three are needed and none of them is enough alone: `buffer_len=0` beside a field that
+/// never received the keystrokes would be a scenario that proved nothing, and `buffer_len=0`
+/// beside `password_field=0` would mean the buffer was empty for some other reason.
+pub fn position_14(ctx: &Context) -> Vec<Row> {
+    const APP: &str = "Поле пароля (окно стенда)";
+
+    let assertion = Assertion::Other("буфер остаётся пустым");
+    let expected = "pass=6, password_field=1, buffer_len=0".to_owned();
+
+    let failed = |reason: String| -> Vec<Row> {
+        vec![Row::new(
+            14,
+            APP,
+            assertion,
+            Verdict::Fail,
+            reason,
+            expected.clone(),
+        )]
+    };
+
+    let mut app = match launch_password_window() {
+        Ok(app) => app,
+        Err(error) => return failed(error),
+    };
+
+    let window = match adopt_window(ctx.automation, &mut app, &|element: &Element| {
+        element.name().starts_with(PASSWORD_WINDOW_TITLE)
+    }) {
+        Ok(window) => window,
+        Err(reason) => return failed(reason),
+    };
+
+    let Some(hwnd) = app.window else {
+        return failed("у окна поля пароля нет дескриптора".to_owned());
+    };
+
+    if let Err(error) = shell::activate_window(app.pid, Some(hwnd)) {
+        return failed(error);
+    }
+
+    let target = input::Target { pid: app.pid, hwnd };
+
+    // ⚠ **`Tab` first, and it is not a formality.** The window opens with the focus in its
+    // *ordinary* box; this moves it into the password one. Measured: bringing a window forward
+    // and relying on the focus it restores by itself is not enough — the focus event that
+    // matters can be raised while the activation is still in flight, and the product then holds
+    // a verdict about the moment before. A `Tab` after everything has settled raises an
+    // `EVENT_OBJECT_FOCUS` whose subject is unambiguous, and it is also what a person does.
+    //
+    // It is also the reading of the ordinary box, which is what makes the position a
+    // *comparison* rather than an assertion about one field: the same window, the same process,
+    // the same keystrokes, and a different answer.
+    if let Err(error) = input::type_text(TYPED, &target) {
+        let closed = app.close();
+        return failed(format!(
+            "ввод в обычное поле не отправлен: {error}; закрытие: {closed}"
+        ));
+    }
+
+    let ordinary = wait::until(wait::TEXT_TIMEOUT, || {
+        crate::channel::read()
+            .ok()
+            .filter(|snapshot| snapshot.get("buffer_len") == Some("6"))
+    })
+    .is_some();
+
+    if let Err(error) = input::tap(VK_TAB.0, &target) {
+        let closed = app.close();
+        return failed(format!("Tab не отправлен: {error}; закрытие: {closed}"));
+    }
+
+    // The product needs its own moment: the focus change is delivered to it as a `WinEvent`, and
+    // the three levels of FR-72 run on its watcher thread afterwards. Waiting on the **answer**
+    // rather than on a clock is requirement 1 of §11.5 — and it is also the honest way to phrase
+    // it, because what is being waited for is a verdict and not a duration.
+    let recognised = wait::until(Duration::from_secs(10), || {
+        crate::channel::read()
+            .ok()
+            .filter(|snapshot| snapshot.get("password_field") == Some("1"))
+    })
+    .is_some();
+
+    if !recognised {
+        let seen = crate::channel::read().map_or_else(
+            |error| format!("канал недоступен: {error}"),
+            |snapshot| {
+                format!(
+                    "password_field={}",
+                    snapshot
+                        .get("password_field")
+                        .unwrap_or("<ключ отсутствует>")
+                )
+            },
+        );
+        let closed = app.close();
+        return failed(format!(
+            "продукт не признал поле паролем за 10 с: {seen}; закрытие: {closed}"
+        ));
+    }
+
+    if let Err(error) = input::type_text(TYPED, &target) {
+        let closed = app.close();
+        return failed(format!("ввод не отправлен: {error}; закрытие: {closed}"));
+    }
+
+    // The window puts the **length** of its password box into its own title on every change —
+    // never the text. Waiting for `pass=6` is how the bench knows the keystrokes landed instead
+    // of assuming they did, which is the same rule step 5 of every other position follows, and
+    // it is the whole of FR-70's «ввод не подавляется» for this position.
+    let landed = wait::until_true(wait::TEXT_TIMEOUT, || window.name().contains("pass=6"));
+
+    let typed_note = format!("заголовок окна: {:?}", window.name());
+
     let snapshot = crate::channel::read();
 
-    let (actual, note) = match &snapshot {
+    let closed = app.close();
+
+    let (verdict, actual, note) = match snapshot {
         Ok(snapshot) => {
-            let buffer_len = snapshot
-                .get("buffer_len")
-                .map_or("ключ отсутствует".to_owned(), str::to_owned);
-            let password = snapshot.get("password_field").map_or_else(
-                || "ключ password_field отсутствует, как и ожидается до T-06-1".to_owned(),
-                |value| format!("password_field={value}"),
-            );
+            let buffer_len = snapshot.get("buffer_len").unwrap_or("<ключ отсутствует>");
+            let password = snapshot
+                .get("password_field")
+                .unwrap_or("<ключ отсутствует>");
+
+            let verdict = if landed && buffer_len == "0" && password == "1" {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            };
+
             (
-                format!("buffer_len={buffer_len}"),
+                verdict,
+                format!("pass=6: {landed}, password_field={password}, buffer_len={buffer_len}"),
                 format!(
-                    "канал опрошен, присутствуют ключи: {}; {password}",
+                    "окно стенда: обычное поле и поле с ES_PASSWORD; в обычном поле те же \
+                     {TYPED:?} дали buffer_len=6: {ordinary}; после Tab фокус в поле пароля; \
+                     {typed_note}; присутствуют ключи: {}; закрытие: {closed}",
                     snapshot.present_keys().join(", ")
                 ),
             )
         }
         Err(error) => (
+            Verdict::Fail,
             format!("канал недоступен: {error}"),
-            "канал SEC-04a не ответил".to_owned(),
+            format!("{typed_note}; закрытие: {closed}"),
         ),
     };
 
-    vec![
-        Row::pending(
-            14,
-            "Любое поле пароля",
-            Assertion::Other("буфер остаётся пустым"),
-            "T-06-1",
-            "buffer_len=0 при вводе в поле пароля",
-        )
-        .with_note(format!("{note}; наблюдение: {actual}")),
-    ]
+    vec![Row::new(14, APP, assertion, verdict, actual, expected).with_note(note)]
+}
+
+/// Starts the bench's own window: one ordinary text box and one masked one — the "тестовое
+/// приложение с полем `ES_PASSWORD`" of footnote 2 of §11.3.
+///
+/// # Why a `WinForms` window driven by a child process
+///
+/// The bench needs a real `ES_PASSWORD` control in a process **requirements A to E allow it to
+/// type into**, and requirement E asks that the foreground window belong to a process the bench
+/// started. A window created inside the bench's own process would fail that check unless the
+/// bench's own process were put into registry A, which is a weakening of the very rule that
+/// exists because this bench once closed somebody's editor. A child process the bench spawns
+/// needs no such exception: it enters registry A through [`launched`], exactly as Chrome,
+/// Notepad and the Run dialog do.
+///
+/// `System.Windows.Forms.TextBox` with `UseSystemPasswordChar` is a Win32 `EDIT` with
+/// `ES_PASSWORD` — that is what the property sets — so level 2 of FR-72 sees precisely the
+/// control the requirement names, and level 3 would see `IsPassword` if level 2 ever stopped
+/// answering.
+///
+/// # Two boxes and not one
+///
+/// The window opens with the focus in the **ordinary** box, and the scenario tabs into the
+/// masked one. That buys two things: a focus event whose subject is unambiguous and which
+/// happens after the activation has completely settled, and a control reading — the same six
+/// keystrokes, in the same window, of the same process, one field apart, with opposite answers.
+///
+/// The title carries the **lengths** of the two fields and never a character of either. That is
+/// what lets the scenario show the keystrokes arrived without reading anything out of a masked
+/// box (SEC-01, SEC-07 — and the same rule the product holds itself to).
+///
+/// The script is written into the throwaway directory the `App` removes with the process, so the
+/// bench gains no permanent file and `tests\e2e\` gains no second script.
+fn launch_password_window() -> Result<App, String> {
+    let scratch = scratch_dir("password");
+    let script = scratch.join("password-window.ps1");
+
+    let body = format!(
+        "Add-Type -AssemblyName System.Windows.Forms\n\
+         $form = New-Object System.Windows.Forms.Form\n\
+         $form.Text = '{PASSWORD_WINDOW_TITLE} plain=0 pass=0'\n\
+         $form.Width = 460\n\
+         $form.Height = 220\n\
+         $form.StartPosition = 'CenterScreen'\n\
+         $form.TopMost = $true\n\
+         $plain = New-Object System.Windows.Forms.TextBox\n\
+         $plain.Left = 20\n\
+         $plain.Top = 40\n\
+         $plain.Width = 400\n\
+         $plain.TabIndex = 0\n\
+         $box = New-Object System.Windows.Forms.TextBox\n\
+         $box.UseSystemPasswordChar = $true\n\
+         $box.Left = 20\n\
+         $box.Top = 100\n\
+         $box.Width = 400\n\
+         $box.TabIndex = 1\n\
+         $retitle = {{ $form.Text = '{PASSWORD_WINDOW_TITLE} plain=' + $plain.Text.Length + ' pass=' + $box.Text.Length }}\n\
+         $plain.Add_TextChanged($retitle)\n\
+         $box.Add_TextChanged($retitle)\n\
+         $form.Controls.Add($plain)\n\
+         $form.Controls.Add($box)\n\
+         $form.Add_Shown({{ $form.Activate(); [void]$plain.Focus() }})\n\
+         [void]$form.ShowDialog()\n"
+    );
+
+    std::fs::write(&script, body)
+        .map_err(|error| format!("не удалось записать {}: {error}", script.display()))?;
+
+    let child = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-STA",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script)
+        .spawn()
+        .map_err(|error| format!("запуск окна поля пароля: {error}"))?;
+
+    Ok(launched(
+        "Поле пароля (окно стенда)",
+        child,
+        CloseWith::WmClose,
+        Some(scratch),
+    ))
 }
 
 /// Every position that cannot be run yet, with the task that owns it.

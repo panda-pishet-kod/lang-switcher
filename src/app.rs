@@ -660,7 +660,18 @@ fn thread_body(role: Role) -> WinResult<()> {
         // it; until then it belongs to whoever creates the thread.
         Role::Watcher => {
             let _apartment = ComApartment::enter_sta()?;
-            serve_window(role)
+
+            let served = serve_window(role);
+
+            // Task **T-06-1**. The UI Automation client of level 3 of FR-72 lives in a
+            // thread-local of this thread, and a COM interface must be released inside the
+            // apartment it was created in. A thread-local destructor runs at thread exit, which
+            // is **after** the `CoUninitialize` in `ComApartment::drop` — that is, after the
+            // apartment it belongs to has gone. This line is the release, at the one instant
+            // that is both after the last probe and before the apartment is left.
+            crate::guard::release_automation();
+
+            served
         }
         // Second of the three edits of task T-06-4. Section 6.1 gives file input-output to
         // the UI thread and forbids it to the input thread, so the one place the journal may
@@ -1163,6 +1174,141 @@ fn is_watcher_window(hwnd: HWND) -> bool {
     raw != NO_WINDOW && raw == hwnd.0 as usize
 }
 
+/// Whether `hwnd` is the input thread's own window — the counterpart of [`is_watcher_window`],
+/// task **T-06-1**.
+///
+/// # Why the buffer can no longer be the test
+///
+/// Everywhere else in this procedure "this is the input thread" is asked as
+/// `buffer::is_installed`, and section 6.3 makes that true: the typing buffer is a thread-local
+/// of that thread and of no other. FR-70 is the one requirement that **takes the buffer away** —
+/// see [`apply_buffering_gate`] — so during a password field the buffer is absent on the very
+/// thread the question is about, and asking it that way would answer "no" precisely when the
+/// answer has to be "yes, and switch it back on".
+///
+/// So the gate asks the register of windows instead, which is the same fact from the other side
+/// and is what [`is_watcher_window`] already does for method 3 of FR-50. The existing
+/// `buffer::is_installed` tests are left exactly as they are: each of them guards work that
+/// needs a buffer to act on, and skipping it while there is none is correct rather than merely
+/// harmless.
+///
+/// **SEC-05.** It is also what keeps a forged [`crate::guard::WM_APP_FIELD`] from reaching the
+/// gate on the UI or watcher window, where re-installing a typing buffer would put one on a
+/// thread section 6.3 gives none.
+fn is_input_window(hwnd: HWND) -> bool {
+    let raw = WAKE_TARGETS[Role::Input.index()].load(Ordering::Acquire);
+
+    raw != NO_WINDOW && raw == hwnd.0 as usize
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-70 — the typing buffer is switched off in a password field (task T-06-1)
+// ---------------------------------------------------------------------------------------
+
+thread_local! {
+    /// The typing buffer while module `guard` has buffering switched off — **FR-70**.
+    ///
+    /// # Why the buffer is parked rather than emptied on every stroke
+    ///
+    /// FR-70 says «буфер набора **не ведётся**», and the honest reading of that is that the
+    /// stroke never reaches the ring at all — not that it reaches it and is removed afterwards.
+    /// The only place a stroke could be turned away is [`crate::buffer::record`], which module
+    /// `hook` calls from inside the callback, and both of those files are accepted code that
+    /// this task may not touch. What *is* reachable is the thing `record` itself consults: it is
+    /// `with(…).unwrap_or(Recorded::Ignored)` over a thread-local, so a thread with no buffer
+    /// records nothing and suppresses nothing, which is exactly the pair FR-70 asks for.
+    ///
+    /// That is also the cheapest possible answer for NFR-01: nothing was added to the callback
+    /// path. The presence check `record` performs for every stroke on the machine is the same
+    /// one it always performed, and in a password field it now takes the shorter arm.
+    ///
+    /// # Why the recorder is kept instead of dropped
+    ///
+    /// `Recorder` owns the layout cache of FR-20 — thousands of `ToUnicodeEx` calls, rebuilt
+    /// only when the layout moves — and the `hkl` of FR-04. Dropping it on entering a password
+    /// field and building a fresh one on leaving would pay the whole sweep of FR-20 for every
+    /// password box the user ever focuses, and would leave the buffer without characters until
+    /// something happened to rebuild it.
+    ///
+    /// **SEC-02 is met before the value gets here**: [`park_buffer`] flushes through
+    /// `buffer::reset`, which is the one function of module `buffer` that overwrites the ring
+    /// with zeroes, and only then takes the recorder out. What is parked is an empty, zeroed
+    /// ring with a cache beside it.
+    static PARKED_BUFFER: std::cell::RefCell<Option<crate::buffer::Recorder>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Applies what module `guard` has published to the typing buffer of this thread — **FR-70,
+/// FR-71, FR-73**, task T-06-1.
+///
+/// Called from [`window_proc`] on every message of the **input** window, which is the same
+/// wiring [`apply_configured_capacity`] has and for the same reason: re-reading a published
+/// value after every message costs one relaxed load and one comparison, cannot miss a change
+/// however the change was made, and needs no channel between the two threads. The
+/// [`crate::guard::WM_APP_FIELD`] the watcher thread posts is therefore a **nudge** — it makes a
+/// message arrive — and this line is what decides.
+///
+/// The state is read with one operation, which is what FR-71 asks of the reader of the flag, and
+/// it is read here rather than in the callback because here is where the buffer lives.
+fn apply_buffering_gate() {
+    if crate::guard::buffering_allowed() {
+        restore_buffer();
+    } else {
+        park_buffer();
+    }
+}
+
+/// Takes the typing buffer away and wipes it — the "off" half of [`apply_buffering_gate`].
+///
+/// ⚠ **The wipe is not incidental.** SEC-02, and the task specification says why: without it,
+/// whatever the user typed before moving into the password field would sit in this process's
+/// memory for the whole time they are typing the password. `buffer::reset` is the one function
+/// that overwrites the ring with zeroes, and it runs **before** the recorder leaves the slot.
+///
+/// Idempotent: a thread whose buffer is already parked has none installed and returns at the
+/// first line. A thread that never had one — the UI and watcher threads, and this thread before
+/// [`start_input_pipeline`] — does the same.
+fn park_buffer() {
+    if !crate::buffer::is_installed() {
+        return;
+    }
+
+    // SEC-02, and FR-10's "полный сброс" in the one place FR-70 asks for one: everything typed
+    // before the focus moved is gone, and the memory it stood in is overwritten.
+    crate::buffer::reset();
+
+    // The recorder is *moved* out rather than dropped, so the cache of FR-20 survives. The
+    // one-slot recorder left behind is thrown away by the `uninstall` below and exists only
+    // because `buffer::with` lends a `&mut` and a value has to be put in its place; it is never
+    // recorded into, because the very next line removes it.
+    let Some(parked) = crate::buffer::with(|recorder| {
+        core::mem::replace(recorder, crate::buffer::Recorder::with_capacity(1))
+    }) else {
+        return;
+    };
+
+    crate::buffer::uninstall();
+
+    PARKED_BUFFER.with(|cell| {
+        cell.replace(Some(parked));
+    });
+}
+
+/// Puts the typing buffer back — the "on" half of [`apply_buffering_gate`].
+///
+/// Idempotent, and a no-op on every thread that never parked one.
+///
+/// ⚠ **Nothing is recovered.** What comes back is the ring as [`park_buffer`] left it: empty and
+/// zeroed. The strokes made while buffering was off were never stored, so there is nothing for
+/// this to restore even in principle — which is the point of the design, not a limitation of it.
+fn restore_buffer() {
+    let Some(parked) = PARKED_BUFFER.with(|cell| cell.replace(None)) else {
+        return;
+    };
+
+    crate::buffer::install_recorder(parked);
+}
+
 /// Hands the input thread the settings it reacts to — FR-02 and FR-95 for the hook, FR-07 for
 /// the buffer, and FR-42 with FR-44 for the replacement of module `inject`.
 ///
@@ -1590,6 +1736,28 @@ unsafe extern "system" fn window_proc(
                 let _ = crate::switch::run_pending();
             }
 
+            // **FR-71, the heavy half — task T-06-1.** The third handoff in this program, and it
+            // exists for the same class of reason the other two do: the three levels of FR-72 end
+            // in UI Automation, which is COM and takes tens of milliseconds, and section 6.1
+            // writes «Определение поля пароля (UI Automation, COM STA)» under the **watcher**
+            // thread — the only one of the three with an apartment. FR-71 calls doing it inside
+            // the hook «категорически запрещено», and doing it inside the `WinEvent` callback
+            // would hold up the source of every focus event in the session.
+            //
+            // `is_watcher_window` is what says "this is the watcher thread", the same test method
+            // 3 of FR-50 uses one arm above, and it is not decoration: without it a forged
+            // `WM_APP_PROBE` posted at the input window would run UI Automation on the thread
+            // that owns the keyboard hook.
+            //
+            // SEC-05: the message carries nothing — `wparam` and `lparam` are zero — and whether
+            // a probe is wanted travels in an atomic only this process writes, so a forged
+            // `WM_APP_PROBE` finds nothing pending and does nothing. The result is dropped:
+            // module `guard` counts what happened. SEC-01, SEC-07 — a state out of four, never a
+            // stroke.
+            if message == crate::guard::WM_APP_PROBE && is_watcher_window(hwnd) {
+                let _ = crate::guard::run_pending_probe();
+            }
+
             // **FR-80 — task T-06-2.** Four messages, and each is answered on one window only:
             // `WM_POWERBROADCAST` and `WM_WTSSESSION_CHANGE` on the UI window, which is the only
             // top-level window of this process and therefore the only one they can arrive at,
@@ -1622,6 +1790,48 @@ unsafe extern "system" fn window_proc(
             // to run for every window of the process.
             if let Some(active) = crate::tray::with_tray(|tray| tray.enabled()) {
                 crate::hook::set_active(active);
+            }
+
+            // **FR-70, FR-71, FR-73 — task T-06-1.** Two lines, and both on the input window
+            // only, because the buffer they are about is a thread-local of that thread
+            // (section 6.3).
+            //
+            // The first is the race of FR-71. `watchdog::WM_APP_FLUSH` is posted by the
+            // `WinEvent` callback for `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` and for
+            // nothing else — the two rows of the FR-10 table — so it is exactly "the focus
+            // moved", already delivered to this thread by the subscription task T-03-3 made.
+            // **No second subscription is raised**: module `guard` contains no
+            // `SetWinEventHook`. `note_focus_moved` publishes "no answer yet" and asks the
+            // watcher thread for one; the gate below then empties the buffer and switches
+            // recording off, so a stroke made between the focus moving and the verdict arriving
+            // is not kept — not even retroactively.
+            //
+            // Placed **after** `watchdog::apply_flush` above, which is the FR-10 flush of the
+            // same event resolved by the timestamps of FR-12. The order matters only in that the
+            // gate is stricter: FR-12 keeps what is newer than the event, and the gate then
+            // removes it as well. That is the trade the task specification prescribes for SEC-06
+            // and it is bounded by `guard::PROBE_BUDGET_MS`.
+            //
+            // The second is the gate itself, on every message and for the reason
+            // `apply_configured_capacity` below is: a published value re-read after every message
+            // cannot be missed, whichever way it changed.
+            if is_input_window(hwnd) {
+                if message == crate::watchdog::WM_APP_FLUSH {
+                    crate::guard::note_focus_moved();
+
+                    // ⚠ **The wipe is unconditional and is here rather than in the gate below.**
+                    // `note_focus_moved` publishes "no answer yet" and asks the watcher thread
+                    // for a verdict, and a verdict can in principle come back before the next
+                    // line runs — the two threads are not synchronised, which is the point.
+                    // Leaving the wipe to the gate would then mean an `Ordinary` verdict
+                    // arriving first and the strokes of the previous field surviving the focus
+                    // change. Parking here closes that: the buffer is emptied and its memory
+                    // overwritten (SEC-02) on the focus change itself, and the gate below only
+                    // decides whether to put it back.
+                    park_buffer();
+                }
+
+                apply_buffering_gate();
             }
 
             // FR-07, and exactly the same wiring for exactly the same reason: `[buffer]

@@ -46,22 +46,24 @@
 //! live process and a client; the file also serves the run that merely timed out under FR-97.
 //! Two sinks over one source is cheaper than two sources.
 //!
-//! # Keys that are deliberately absent
+//! # Keys that were deliberately absent
 //!
-//! [`render`] emits a key only when the value behind it exists. One key of SEC-04a is
-//! therefore **missing from the output rather than published as zero** — a stand that reports
-//! a fabricated zero would count it as the truth:
+//! [`render`] emits a key only when the value behind it exists, so a key whose owning task had
+//! not arrived was **missing from the output rather than published as zero** — a bench that
+//! reads a fabricated zero would count it as the truth.
 //!
-//! * `password_field` — SEC-06, FR-70 to FR-73, position 14 of the matrix of section 11.3.
-//!   Task **T-06-1**. This is the key SEC-04a exists for at all.
+//! Both such keys are published now. `cycle_position` arrived with task **T-05-2a**, built on
+//! the pattern [`note_buffer_len`] set — see [`CYCLE_POSITION`]. `password_field` — SEC-06,
+//! FR-70 to FR-73, position 14 of the matrix of section 11.3 — arrived with task **T-06-1**,
+//! and it is the key SEC-04a exists for at all. It cost exactly what task T-03-4 promised it
+//! would: one field of [`Snapshot`], one line of [`render`], one entry of [`KEYS`], and no
+//! change to the format or to the server.
 //!
-//! It is one line in [`Snapshot`] and one line in [`render`] when its owning task arrives;
-//! neither the format nor the server has to change to accept it.
-//!
-//! `cycle_position` was the second such key until task **T-05-2a**, which is the task this
-//! paragraph is being edited by. The counter itself is task T-05-2's and is not touched here:
-//! what T-05-2a added is the mirror that makes it observable, [`note_cycle_position`], built
-//! on the pattern [`note_buffer_len`] set — see [`CYCLE_POSITION`].
+//! ⚠ **[`RESERVED_KEYS`] still names `password_field` and should not.** Emptying it is one line
+//! here and one assertion in `tests\control.rs`, and that file is outside the file scope of task
+//! T-06-1: `assert_eq!(control::RESERVED_KEYS, ["password_field"])` there compares two arrays,
+//! so shortening the constant is a **compilation** error in a file this task may not repair. The
+//! two edits have to be made together; the report of task T-06-1 carries both of them verbatim.
 //!
 //! # The server — task T-03-4-2
 //!
@@ -1065,10 +1067,20 @@ pub struct Snapshot {
     /// Why the hook was last put back — one of the five words of
     /// [`crate::watchdog::Reason::name`], never anything else.
     pub watchdog_last_reason: crate::watchdog::Reason,
-    //
-    // Deliberately absent until its owning task exists, so that the bench cannot mistake a
-    // fabricated zero for an answer:
-    //   password_field — SEC-06, FR-70..FR-73, position 14 of section 11.3. Task T-06-1.
+    /// Whether the focused field is a password field — **SEC-06, FR-70 to FR-73**, and position
+    /// 14 of the matrix of section 11.3. Task **T-06-1**.
+    ///
+    /// ⚠ **Condition 2 of SEC-04a: a flag, and never the content.** This is one bit — `1` in a
+    /// password field, `0` everywhere else — derived from the four-state publication of module
+    /// [`crate::guard`]. The contents of a password field are read nowhere in this program, so
+    /// there is nothing else that could arrive here.
+    ///
+    /// The reason it is out here at all is the reason SEC-04a exists at all: footnote 2 of
+    /// section 11.3 makes the bench prove position 14 «через … отладочный канал SEC-04a,
+    /// подтверждающий нулевую длину буфера», and the contents of a password field are not
+    /// reachable from outside by the design of Windows. Without this key, SEC-06 is not provable
+    /// by automated means.
+    pub password_field: bool,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1098,6 +1110,7 @@ pub fn snapshot() -> Snapshot {
         cycle_position: CYCLE_POSITION.load(Ordering::Relaxed),
         watchdog_recoveries: watchdog.recoveries,
         watchdog_last_reason: watchdog.last_reason,
+        password_field: crate::guard::password_field(),
     }
 }
 
@@ -1116,8 +1129,9 @@ pub fn snapshot() -> Snapshot {
 /// program because decision Р-37 says what the bench of section 11.5 needs to confirm position
 /// 18 has to leave the process somehow.
 ///
-/// `password_field` is **not** here. See the module documentation: it arrives with task
-/// T-06-1, one line, and until then its absence is the honest answer.
+/// `password_field` of task **T-06-1** is appended for the same reason, and it is the key
+/// SEC-04a was written for: footnote 2 of section 11.3 makes position 14 provable through it and
+/// through nothing else. It is a flag — `0` or `1` — and never the content of the field.
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1134,7 +1148,8 @@ pub fn render(state: &Snapshot) -> String {
          replacement_method={}\n\
          cycle_position={}\n\
          watchdog_recoveries={}\n\
-         watchdog_last_reason={}\n",
+         watchdog_last_reason={}\n\
+         password_field={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1150,6 +1165,7 @@ pub fn render(state: &Snapshot) -> String {
         state.cycle_position,
         state.watchdog_recoveries,
         state.watchdog_last_reason.name(),
+        u8::from(state.password_field),
     )
 }
 
@@ -1169,7 +1185,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 15] = [
+pub const KEYS: [&str; 16] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1185,12 +1201,16 @@ pub const KEYS: [&str; 15] = [
     "cycle_position",
     "watchdog_recoveries",
     "watchdog_last_reason",
+    "password_field",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module
 /// documentation.
 ///
-/// One key, and it is task **T-06-1**'s. `cycle_position` was the other until task T-05-2a
-/// published it; the list shrinks as the tasks arrive, and a key that is *reserved* is one no
-/// build may answer with a fabricated zero.
+/// ⚠ **Stale, and deliberately left so.** `password_field` is published by task **T-06-1** and
+/// belongs in [`KEYS`], where it now is; this list should be empty. It is not, because
+/// `tests\control.rs` asserts its exact contents with `assert_eq!` against a one-element array
+/// and that file is outside the file scope of task T-06-1 — shortening this constant turns that
+/// assertion into a type error, that is, into a build failure of a file this task may not
+/// repair. The two edits are one change and have to be made together.
 pub const RESERVED_KEYS: [&str; 1] = ["password_field"];
