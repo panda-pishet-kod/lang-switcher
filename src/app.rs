@@ -799,6 +799,33 @@ fn serve_window(role: Role) -> WinResult<()> {
         Role::Ui | Role::Watcher => None,
     };
 
+    // **FR-63 — task T-07-1.** `AddClipboardFormatListener` posts `WM_CLIPBOARDUPDATE` to the
+    // window named in the call rather than broadcasting it, so any of the three would receive
+    // it; the choice is made on which thread is allowed to *do* the clipboard work, because
+    // registering here is also what publishes that thread to module `selection`.
+    //
+    // The **UI** thread, and not the other two. The input thread owns the `WH_KEYBOARD_LL` hook
+    // (FR-01) and a clipboard access costs up to 180 ms of FR-62 retries plus the 300 ms wait of
+    // FR-61 step 3 — three thousand times NFR-01, on the one thread FR-80 removes the hook from
+    // when it stops answering. The watcher thread owns the focus probe of FR-71 and FR-72, on
+    // whose answer SEC-06 holds the typing buffer switched off, and lengthening that window is
+    // paid for in the user's keystrokes. Section 6.1 already gives the UI thread the process's
+    // slow, deadline-free work — «Чтение и запись конфигурации» — and nothing on a budget.
+    //
+    // Declared after `_window` for the reason every guard above it is: the registration names
+    // that window and must be withdrawn before the window stops existing.
+    //
+    // A failure is **not** fatal, unlike the watchdog subscriptions above. FR-65 makes the
+    // selection path optional by configuration, so a program that could not register a clipboard
+    // listener is a program with one feature fewer, not one that must refuse to start; the
+    // journal takes the reason (NFR-13) and the rest of the process carries on.
+    let _clipboard = match role {
+        Role::Ui => crate::selection::listen(_window.handle)
+            .inspect_err(|error| report_non_critical("AddClipboardFormatListener", error))
+            .ok(),
+        Role::Input | Role::Watcher => None,
+    };
+
     // Re-read the flag after the window has been published, and before the first
     // `GetMessageW`. This closes the only race in the shutdown design: a `request_shutdown`
     // that ran before the window existed found `NO_WINDOW`, posted nothing, and would
@@ -1794,6 +1821,23 @@ unsafe extern "system" fn window_proc(
             if let Some(result) = crate::watchdog::handle_watchdog_message(hwnd, message, wparam) {
                 return result;
             }
+
+            // **FR-63 — task T-07-1.** The far end of the registration made in `serve_window`:
+            // `WM_CLIPBOARDUPDATE` arrives here, at the UI window, and `selection` classifies it
+            // as this program's own change or the user's by the sequence number FR-61 already
+            // names. `handle_clipboard_message` answers `None` for every other message and at
+            // every window that is not the registered one, which is every window of the input
+            // and watcher threads.
+            //
+            // The verdict is deliberately dropped: this task builds the primitives and the
+            // decision belongs to the selection path of T-07-2. Module `selection` counts what
+            // arrived, which is what acceptance points 16 and 27 measure.
+            //
+            // SEC-05: a process at the same integrity level can post `WM_CLIPBOARDUPDATE` here.
+            // What that buys it is one read of a system counter and one comparison — nothing is
+            // opened, written or decided. SEC-01, SEC-07 — a sequence number and one of two
+            // words, never a byte of the clipboard.
+            let _ = crate::selection::handle_clipboard_message(hwnd, message);
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
                 return result;
