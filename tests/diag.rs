@@ -120,10 +120,20 @@ fn the_names_the_program_really_reports_are_recognised() {
 /// [`Operation::UNLISTED`] — a code with nothing beside it. A list of names in a test would have
 /// gone stale the same way, so this reads the sources and checks what it finds there.
 ///
-/// ⚠ **Asserted for `settings.rs` and `tray.rs` only, and that is deliberate.** Task T-08-2 is
-/// allowed to add rows for the operations of the settings code and for nothing else, so a gap in
-/// another module is *printed* here and left standing rather than quietly filled by a task that
-/// has no mandate for it. The scan finds every such gap, which is what makes it worth having.
+/// ⚠ **Asserted for `settings.rs`, `tray.rs` and `watchdog.rs`, and that is deliberate.** Task
+/// T-08-2 was allowed to add rows for the operations of the settings code and for nothing else,
+/// so a gap in another module is *printed* here and left standing rather than quietly filled by a
+/// task that has no mandate for it. The scan finds every such gap, which is what makes it worth
+/// having. `watchdog.rs` was added by task T-09-1 on the strength of a measurement rather than a
+/// hope: the run of this test after the row for `UnregisterDeviceNotification` went into the
+/// vocabulary printed eight names for that file and none of them unnamed, so the module can carry
+/// the assertion, and from here on a new unnamed report there fails the build instead of being
+/// printed and forgotten.
+///
+/// `guard.rs` is **not** asserted and must not be: its three remaining names each contain a UI
+/// Automation symbol, and point 9 of FR-71 forbids such a symbol anywhere under `src\` outside
+/// `src\guard.rs` — the rows cannot be added without defeating that sweep. See the note in
+/// `src\diag.rs` and the report of task T-08-3.
 ///
 /// Only the literal calls are found, which is the whole of them but one: `app` builds one name
 /// with `format!` (`thread::spawn: {error}`), and that one is *meant* to narrow to
@@ -147,7 +157,8 @@ fn every_operation_name_of_the_settings_code_is_in_the_vocabulary() {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let owned_by_this_task = file == "settings.rs" || file == "tray.rs";
+        let owned_by_this_task =
+            file == "settings.rs" || file == "tray.rs" || file == "watchdog.rs";
         let text = std::fs::read_to_string(&path).expect("a source file must be readable");
 
         for occurrence in text.split("report_non_critical(\"").skip(1) {
@@ -187,6 +198,45 @@ fn every_operation_name_of_the_settings_code_is_in_the_vocabulary() {
     }
 
     assert!(checked > 40, "the scan found suspiciously few call sites");
+}
+
+/// **The positive control of the row task T-09-1 added** — the debt task T-08-4 recorded.
+///
+/// The failure of `UnregisterDeviceNotification` in `watchdog::Drop for DeviceNotice` counted
+/// itself and could not name itself, because `src\diag.rs` was closed to the task that wrote it.
+/// It now reaches `app::report_non_critical` like every neighbour, and this is what makes that
+/// worth anything: **the changed path is a failure path that a healthy run never executes**, so
+/// a green suite says nothing at all about it. What can be checked without provoking the failure
+/// is the seam the failure would go through — the narrowing of `Operation::from_name`, which is
+/// the one place the name could be lost, and the way it is lost is silent. That exact silent
+/// failure is the one task T-08-2 caught at the settings dialog.
+///
+/// The dump is checked too: a row that exists in the table but prints as «(unlisted)» would be
+/// the same defect one step further along.
+#[test]
+fn the_device_notification_withdrawal_reports_under_its_own_name() {
+    let name = "UnregisterDeviceNotification";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "{name} still has no row in the table — the failure would reach the ring as a bare code"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Hook,
+        "{name} landed in the wrong group"
+    );
+
+    let _guard = ring();
+
+    diag::record(operation, OsCode::of(&WinError::from(ERROR_ACCESS_DENIED)));
+
+    let dump = diag::render();
+
+    assert!(dump.contains(name), "the dump does not print {name}");
 }
 
 /// The names the settings dialog, autostart and the string tables report under — the rows task

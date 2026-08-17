@@ -801,28 +801,28 @@ impl Drop for DeviceNotice {
         // takes it first.
         let withdrawn = unsafe { UnregisterDeviceNotification(self.handle) };
 
-        if withdrawn.is_err() {
-            // **NFR-13: examined, and counted rather than journalled — deliberately, and the
-            // reason is a file boundary rather than a judgement about the failure.**
+        if let Err(error) = withdrawn {
+            // **NFR-13: examined, counted and journalled.** The repair the previous version of
+            // this comment described for whoever opened `src\diag.rs` next was made by task
+            // T-09-1: `("UnregisterDeviceNotification", Kind::Hook)` is a row of `OPERATIONS`,
+            // so the name survives `Operation::from_name` and this block is the ordinary
+            // `report_non_critical` every neighbour of it already is.
             //
-            // Every other guard in this module hands its failure to
-            // `app::report_non_critical`, whose first argument has to be one of the names in
-            // the vocabulary of [`crate::diag`]; a name that is not there reaches the log as a
-            // bare code, and `tests\diag.rs` fails the build over exactly that. The vocabulary
-            // lives in `src\diag.rs`, which the task that wrote this function may not touch, so
-            // the choice was between a journal line with no name and a count with a reason.
-            // The count is the record here, the same standing `mouse_button_time` gives its
-            // rejections, and [`Counters::device_notice_failures`] is where it is read.
+            // **Both records are kept, and that is the idiom of this module rather than
+            // redundancy.** `reinstall_hook` below does the same thing for the same reason: the
+            // journal is a ring of the last few hundred events and says *when* against
+            // everything else that happened, while the counter is a running total the snapshot
+            // of `Counters::device_notice_failures` reports, and one does not replace the
+            // other. Two accepted tests read the counter — `tests\watchdog.rs` and
+            // `tests\control.rs`.
             //
-            // ⚠ The one-line repair for whoever opens `src\diag.rs` next:
-            // `("UnregisterDeviceNotification", Kind::Hook)` in `OPERATIONS`, and this block
-            // becomes the ordinary `report_non_critical` every neighbour of it already is.
-            //
-            // What is lost by that is small and bounded: the call can only fail on a handle
-            // that is not a live registration, this one came from a successful
-            // `RegisterDeviceNotificationW` and is withdrawn once, and the process is on its
-            // way out with the window about to be destroyed under it either way.
+            // The failure itself stays non-critical, and what it can cost is small and bounded:
+            // the call can only fail on a handle that is not a live registration, this one came
+            // from a successful `RegisterDeviceNotificationW` and is withdrawn once, and the
+            // process is on its way out with the window about to be destroyed under it either
+            // way.
             DEVICE_NOTICE_FAILURES.fetch_add(1, Ordering::Relaxed);
+            crate::app::report_non_critical("UnregisterDeviceNotification", &error);
         }
     }
 }

@@ -253,6 +253,12 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("WTSUnRegisterSessionNotification", Kind::Hook),
     ("KillTimer", Kind::Hook),
     ("KillTimer (fault)", Kind::Hook),
+    // The debt task T-08-4 recorded and could not pay: this file was closed to it, so the
+    // withdrawal of the FR-21 device notification counted its failure and could not name it.
+    // `Kind::Hook` because the registration is one of the watchdog's subscriptions, which is
+    // what that kind already is; **no new `Kind` is added**, for the reason every note above
+    // gives — a variant of an enumeration is not a name.
+    ("UnregisterDeviceNotification", Kind::Hook),
     // `switch` — the chain of FR-50.
     ("SystemParametersInfoW", Kind::Layout),
     ("ActivateKeyboardLayout", Kind::Layout),
