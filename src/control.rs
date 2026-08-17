@@ -525,7 +525,7 @@ const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///
-/// The payload is twenty short `key=value` lines — some three hundred bytes — and a
+/// The payload is twenty-one short `key=value` lines — some three hundred bytes — and a
 /// page is comfortably more than the widest it could grow to.
 /// Sizing it above the payload is what lets [`publish`] hand the bytes over without waiting
 /// for the client to read them.
@@ -818,7 +818,7 @@ fn await_client(pipe: HANDLE) -> WinResult<bool> {
 ///
 /// # SEC-01, SEC-07, condition 2 of SEC-04a
 ///
-/// The bytes are [`render`] of one [`snapshot`], which is fifteen counts, three flags, one word
+/// The bytes are [`render`] of one [`snapshot`], which is sixteen counts, three flags, one word
 /// of section 7 and one of the five words of [`crate::watchdog::Reason`]. Nothing else can be
 /// sent from here: there is no other write in this module.
 fn publish(pipe: HANDLE) {
@@ -1129,6 +1129,22 @@ pub struct Snapshot {
     /// SEC-01, SEC-07: a count. The payload of a panic is dropped unread in `hook`, so there is
     /// nothing here that could carry a key code even in principle.
     pub consecutive_panics: u32,
+    /// Keyboard arrivals and removals the input thread answered — **FR-21**, task **T-08-4**.
+    ///
+    /// [`crate::watchdog::Counters::device_changes`]. The reason it is out here is that task
+    /// T-08-4 replaced the mechanism that delivers them: the keyboard entry of the Raw Input
+    /// registration was measured to take keyboard input away from every low-level hook in the
+    /// session while a window of this process is in front, so it is gone, and
+    /// `watchdog::register_device_notice` brings the same news as the `WM_DEVICECHANGE` FR-21
+    /// actually names. A replacement of a delivery mechanism has to be *shown* to deliver, and
+    /// from outside the process the only observable is this number moving when a keyboard is
+    /// plugged in. `cache_builds` is the other half of the same evidence: this counts the
+    /// message, that counts the rebuild it caused.
+    ///
+    /// SEC-01, SEC-07: a count of events. The `WM_DEVICECHANGE` behind it carries a device name
+    /// and that name is read nowhere in this program, so there is nothing here that could carry
+    /// one.
+    pub device_changes: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1140,6 +1156,7 @@ pub struct Snapshot {
 pub fn snapshot() -> Snapshot {
     let (send_mismatches, events_lost) = crate::inject::send_mismatches();
     let watchdog = crate::watchdog::health();
+    let subscriptions = crate::watchdog::counters();
     let guard = crate::guard::counters();
 
     Snapshot {
@@ -1164,6 +1181,7 @@ pub fn snapshot() -> Snapshot {
         password_probes: guard.probes,
         fail_safe: crate::hook::fail_safe(),
         consecutive_panics: crate::hook::consecutive_panics(),
+        device_changes: subscriptions.device_changes,
     }
 }
 
@@ -1191,10 +1209,14 @@ pub fn snapshot() -> Snapshot {
 /// that cannot tell a fresh verdict from a stale one cannot confirm SEC-06 at all — see
 /// [`Snapshot::focus_changes`].
 ///
-/// `fail_safe` and `consecutive_panics` of task **T-08-3** are appended last, for the same reason
-/// as everything above them, and they exist for one job: point 5 of that task's exclusion list
-/// asks whether FR-99 had already disarmed the program in the state under investigation, and
+/// `fail_safe` and `consecutive_panics` of task **T-08-3** are appended after them, for the same
+/// reason as everything above them, and they exist for one job: point 5 of that task's exclusion
+/// list asks whether FR-99 had already disarmed the program in the state under investigation, and
 /// there is no other way to ask that from outside the process.
+///
+/// `device_changes` of task **T-08-4** is appended last, and it is the one number that shows FR-21
+/// still being delivered after that task replaced the mechanism which delivered it. See
+/// [`Snapshot::device_changes`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1216,7 +1238,8 @@ pub fn render(state: &Snapshot) -> String {
          focus_changes={}\n\
          password_probes={}\n\
          fail_safe={}\n\
-         consecutive_panics={}\n",
+         consecutive_panics={}\n\
+         device_changes={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1237,6 +1260,7 @@ pub fn render(state: &Snapshot) -> String {
         state.password_probes,
         u8::from(state.fail_safe),
         state.consecutive_panics,
+        state.device_changes,
     )
 }
 
@@ -1256,7 +1280,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 20] = [
+pub const KEYS: [&str; 21] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1277,6 +1301,7 @@ pub const KEYS: [&str; 20] = [
     "password_probes",
     "fail_safe",
     "consecutive_panics",
+    "device_changes",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

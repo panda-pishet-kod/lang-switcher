@@ -33,20 +33,23 @@
 //! a test stage a **silent** removal — the system does that, on its own schedule, and the report
 //! of task T-06-2 says exactly which part of FR-80 is therefore argued rather than measured.
 
+use std::sync::Mutex;
+
 use lang_switcher::buffer::{self, Recorder, ResetOutcome};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{self, Counters, FLUSH_EVENTS, Rebuild, WM_APP_FLUSH, WM_APP_LAYOUT};
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::{GetRegisteredRawInputDevices, RAWINPUTDEVICE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, EVENT_OBJECT_FOCUS,
     EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, HWND_MESSAGE, MSG, PBT_APMRESUMEAUTOMATIC,
     PM_REMOVE, PeekMessageW, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
     RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN,
     RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL,
-    RI_MOUSE_WHEEL, WINDOW_STYLE, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE,
-    WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
+    RI_MOUSE_WHEEL, WINDOW_STYLE, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
+    WM_INPUTLANGCHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
 
@@ -187,8 +190,31 @@ impl Drop for TestWindow {
     }
 }
 
+/// The turn-taking lock for the two tests that hold a Raw Input registration — task T-08-4.
+///
+/// ⚠ **A Raw Input registration belongs to the process, not to a window.** A second
+/// `RegisterRawInputDevices` for the same usage page and usage does not add an entry, it
+/// *overwrites* the first one's target; and one `RIDEV_REMOVE` then takes the registration away
+/// from everybody. `cargo test` runs the tests of a binary in parallel, so without this the two
+/// tests below measure each other rather than the product — which is exactly how the test that
+/// reads the registration back first failed, reporting an empty list because its neighbour's
+/// guard had been dropped in the meantime.
+///
+/// The same property is why task T-08-4 could not cure the hook starvation by moving the keyboard
+/// entry to another window: there was no window to move it to.
+static RAW_INPUT_TURN: Mutex<()> = Mutex::new(());
+
+/// Takes the turn, ignoring poisoning: a panic in one of the two tests must fail that test and
+/// not turn its neighbour into a second failure with an unrelated message.
+fn raw_input_turn() -> std::sync::MutexGuard<'static, ()> {
+    RAW_INPUT_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn the_raw_input_registration_of_fr13_is_accepted_and_withdrawn() {
+    let _turn = raw_input_turn();
     let window = TestWindow::new();
 
     // The call FR-13 names, with the flag FR-13 names, on a message-only window that never has
@@ -208,6 +234,187 @@ fn the_raw_input_registration_of_fr13_is_accepted_and_withdrawn() {
     let again = watchdog::register_raw_input(window.handle).expect("and must register again");
 
     drop(again);
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-08-4 — the keyboard entry that is not there, and the delivery that replaced it
+// ---------------------------------------------------------------------------------------
+
+/// ⚠ **The registration this process holds contains no keyboard entry — FR-96, task T-08-4.**
+///
+/// # Why this is asserted against the system and not against our own array
+///
+/// Because the defect was invisible in our own array. A keyboard top-level collection in
+/// `RegisterRawInputDevices` makes this process a raw keyboard client, and a raw keyboard client
+/// takes the keystrokes away from **every low-level keyboard hook in the session** — its own and
+/// every other process's — for as long as any window of that process holds the foreground. That
+/// is what made `Ctrl+Alt+Shift+F12` do nothing with the settings dialog of FR-92 open, and FR-96
+/// is the only way out of a wedged hook.
+///
+/// `GetRegisteredRawInputDevices` asks the system what this process is registered for, which is
+/// the quantity that actually matters: an entry added anywhere, by any future edit, in any module,
+/// fails this test.
+///
+/// The measurement behind the rule is in the report of task T-08-4, and its shortest statement is
+/// that the flag did not matter: `RIDEV_DEVNOTIFY`, `RIDEV_INPUTSINK`, both, and a null target all
+/// starved the chain alike.
+#[test]
+fn no_keyboard_top_level_collection_is_registered_for_raw_input() {
+    let _turn = raw_input_turn();
+    let window = TestWindow::new();
+    let registration =
+        watchdog::register_raw_input(window.handle).expect("Raw Input must register");
+
+    let mut count = 0_u32;
+
+    // SAFETY: `None` with a zero count is the documented way to ask how many registrations there
+    // are; the call writes the number through `count` and touches nothing else. The size argument
+    // is the element size the call demands and is computed from the type.
+    let asked = unsafe {
+        GetRegisteredRawInputDevices(
+            None,
+            &raw mut count,
+            u32::try_from(size_of::<RAWINPUTDEVICE>()).expect("the element size fits in a u32"),
+        )
+    };
+
+    // The documented answer to "how many": zero written, with `count` filled in.
+    assert_eq!(asked, 0, "the counting call must not write any entries");
+
+    let mut devices = vec![RAWINPUTDEVICE::default(); count as usize];
+
+    // SAFETY: `devices` has exactly `count` elements, which is the number the call just reported,
+    // and `count` says how many may be written. The buffer is owned by this frame and outlives
+    // the call.
+    let written = unsafe {
+        GetRegisteredRawInputDevices(
+            Some(devices.as_mut_ptr()),
+            &raw mut count,
+            u32::try_from(size_of::<RAWINPUTDEVICE>()).expect("the element size fits in a u32"),
+        )
+    };
+
+    assert_ne!(
+        written,
+        u32::MAX,
+        "the read-back of the registrations failed"
+    );
+    devices.truncate(written as usize);
+
+    let ours: Vec<&RAWINPUTDEVICE> = devices
+        .iter()
+        .filter(|device| device.hwndTarget == window.handle)
+        .collect();
+
+    assert_eq!(
+        ours.len(),
+        1,
+        "FR-13 asks for one entry — the mouse — and task T-08-4 took the other one away; \
+         the system reports {ours:?}"
+    );
+    assert_eq!(ours[0].usUsagePage, 0x01, "the generic desktop page");
+    assert_eq!(ours[0].usUsage, 0x02, "usage 2 is the mouse");
+
+    // ⚠ The whole point, stated as its own assertion so that a failure names it: usage 6 of the
+    // generic page is the keyboard, and it must not be there.
+    assert!(
+        !devices
+            .iter()
+            .any(|device| device.usUsagePage == 0x01 && device.usUsage == 0x06),
+        "a keyboard entry in this process's Raw Input registration starves every low-level \
+         keyboard hook in the session while a window of ours is in front — FR-96, task T-08-4"
+    );
+
+    drop(registration);
+}
+
+/// The device notification of FR-21 registers on a message-only window and comes off again.
+///
+/// The window is the shape the input thread's is, because that is where it goes: a *registered*
+/// device notification reaches a message-only window, where the *broadcast* kind reaches only
+/// top-level ones. That is measured in the report of task T-08-4 with a real device arrival; what
+/// is checked here is the half a test can check without one — that the call is accepted, that the
+/// withdrawal is accepted, and that a second registration on the same window is accepted after it.
+#[test]
+fn the_device_notification_of_fr21_registers_and_comes_off() {
+    let window = TestWindow::new();
+    let before = watchdog::counters().device_notice_failures;
+
+    let notice = watchdog::register_device_notice(window.handle)
+        .expect("the keyboard device notification must register");
+
+    drop(notice);
+
+    let again = watchdog::register_device_notice(window.handle)
+        .expect("and must register again after the withdrawal");
+
+    drop(again);
+
+    // NFR-13: the withdrawal's result is examined by the `Drop`, and this is where the record it
+    // keeps is read. A refusal here would mean the program is leaving registrations behind.
+    assert_eq!(
+        watchdog::counters().device_notice_failures,
+        before,
+        "UnregisterDeviceNotification refused"
+    );
+}
+
+/// `note_device_change` counts the message FR-21 names and nothing else.
+///
+/// The other message of [`layouts::REBUILD_MESSAGES`] is `WM_INPUTLANGCHANGE`, which reaches the
+/// same branch of the window procedure and is not a device change; if this counted it, the number
+/// the report of task T-08-4 reads as "a keyboard arrived" would be reading layout switches.
+#[test]
+fn only_wm_devicechange_is_counted_as_a_device_change() {
+    let before = watchdog::counters().device_changes;
+
+    assert!(watchdog::note_device_change(WM_DEVICECHANGE));
+
+    assert_eq!(
+        watchdog::counters().device_changes,
+        before + 1,
+        "the message FR-21 names is counted"
+    );
+
+    for message in [
+        WM_INPUTLANGCHANGE,
+        WM_INPUT,
+        WM_APP_LAYOUT,
+        WM_APP_FLUSH,
+        WM_INPUT_DEVICE_CHANGE,
+        0x0000,
+        0xFFFF_FFFF,
+    ] {
+        assert!(
+            !watchdog::note_device_change(message),
+            "message {message:#x} is not a device change"
+        );
+    }
+
+    assert_eq!(
+        watchdog::counters().device_changes,
+        before + 1,
+        "and nothing else moved the count"
+    );
+}
+
+/// ⚠ **`WM_DEVICECHANGE` belongs to `layouts` and must never also be an arm of `rebuild_for`.**
+///
+/// The window procedure asks `layouts::needs_rebuild` first and `watchdog::rebuild_for` second, so
+/// a message answered by both would rebuild the cache twice for one event — thousands of
+/// `ToUnicodeEx` calls, twice, on the thread that owns the hook. Task T-08-4 made this message
+/// arrive for the first time, which is what turns a latent rule into a live one.
+#[test]
+fn the_message_fr21_names_is_answered_by_one_list_and_not_by_both() {
+    assert!(layouts::needs_rebuild(WM_DEVICECHANGE));
+    assert_eq!(watchdog::rebuild_for(WM_DEVICECHANGE), None);
+
+    // And the message the old delivery used is the mirror image: `watchdog`'s, never `layouts`'.
+    assert!(!layouts::needs_rebuild(WM_INPUT_DEVICE_CHANGE));
+    assert_eq!(
+        watchdog::rebuild_for(WM_INPUT_DEVICE_CHANGE),
+        Some(Rebuild::Unconditional)
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -315,6 +522,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         strokes_removed: after.strokes_removed - before.strokes_removed,
         device_changes: after.device_changes - before.device_changes,
         layout_probes: after.layout_probes - before.layout_probes,
+        device_notice_failures: after.device_notice_failures - before.device_notice_failures,
     }
 }
 

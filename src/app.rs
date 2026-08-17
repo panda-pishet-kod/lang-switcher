@@ -23,9 +23,16 @@
 //! 6.1 assigns them to — Raw Input on the input thread (FR-13), `SetWinEventHook` on the watcher
 //! thread (two rows of the FR-10 table) — routed their messages through [`window_proc`] into the
 //! time-ordered flush of FR-12, and made FR-21 **actually happen**: neither message FR-21 names
-//! can reach a program whose windows are hidden and never focused, so the rebuild is driven by
-//! `WM_INPUT_DEVICE_CHANGE` and by the layout probe of [`refresh_layout_and_cache`] instead.
-//! FR-11 holds across all of it and is checked separately.
+//! could reach a program whose windows are hidden and normally not focused, so the rebuild was
+//! driven by `WM_INPUT_DEVICE_CHANGE` and by the layout probe of [`refresh_layout_and_cache`]
+//! instead. FR-11 holds across all of it and is checked separately.
+//! Task **T-08-4** took the keyboard entry out of the Raw Input registration, because a process
+//! that holds one loses the whole low-level keyboard hook chain — its own and everybody else's —
+//! whenever a window of its own is in the foreground, which is what made FR-96 unreachable with
+//! the settings dialog of FR-92 open. The device half of FR-21 moved to
+//! `watchdog::register_device_notice`, so `WM_DEVICECHANGE` itself now arrives at the input
+//! window and the `layouts::needs_rebuild` branch of [`window_proc`] — written by T-03-2a and
+//! never once entered — is what answers it.
 //! Task **T-04-1** attached the far end of the FR-02 handoff to [`window_proc`]: a
 //! `hook::WM_APP_HOTKEY` taken off the input thread's queue runs steps 3 to 6 of FR-40 through
 //! [`crate::inject::on_hotkey`], which is where section 6.1 puts `SendInput` and the only place
@@ -779,6 +786,28 @@ fn serve_window(role: Role) -> WinResult<()> {
         Role::Ui | Role::Watcher => None,
     };
 
+    // **FR-21, the device half — task T-08-4.** Until that task this was the second entry of the
+    // registration above, `HID_USAGE_KEYBOARD` with `RIDEV_DEVNOTIFY`, and it was measured to
+    // take keyboard input away from every low-level hook in the session for as long as any window
+    // of this process was in front — the settings dialog of FR-92 among them, which is how FR-96
+    // came to be unreachable exactly when the user needed it. Module `watchdog` documents the
+    // measurement.
+    //
+    // The same news now arrives as the message FR-21 actually names. It goes to the **input**
+    // window because the cache the rebuild touches is a thread-local of that thread (section 6.3)
+    // and because a registered device notification reaches a message-only window, where the
+    // broadcast kind would not.
+    //
+    // Declared after `_window` for the reason every guard here is: the registration names that
+    // window and must be withdrawn before the window stops existing. A failure ends the thread
+    // and so the program, exactly as the raw input registration's does: FR-21 is not an optional
+    // extra, and a program that silently stopped noticing new keyboards would be worse than one
+    // that refuses to start.
+    let _device_notice = match role {
+        Role::Input => Some(crate::watchdog::register_device_notice(_window.handle)?),
+        Role::Ui | Role::Watcher => None,
+    };
+
     let _win_events = match role {
         Role::Watcher => Some(crate::watchdog::watch()?),
         Role::Input | Role::Ui => None,
@@ -1011,9 +1040,21 @@ fn publish_active_layout(layout: LayoutId) {
 ///
 /// FR-21 rebuilds the cache "по сообщениям `WM_INPUTLANGCHANGE` и `WM_DEVICECHANGE`", and task
 /// T-03-2a established by measurement that neither message reaches this program:
-/// `WM_INPUTLANGCHANGE` is sent to the window with the keyboard **focus**, and all three windows
-/// of this process are hidden and never focused. The handler was written and correct; it was
-/// never called, and the cache was therefore built once at start-up and never rebuilt.
+/// `WM_INPUTLANGCHANGE` is sent to the window with the keyboard **focus**, and the windows the
+/// user switches layout in are other people's. The handler was written and correct; it was never
+/// called, and the cache was therefore built once at start-up and never rebuilt.
+///
+/// ⚠ Task **T-08-4** corrected the other half of that sentence, which used to read "all three
+/// windows of this process are hidden and never focused". They are not: the UI window takes the
+/// foreground before the tray menu of FR-91, and the settings dialog of FR-92 is a window of ours
+/// that holds it for as long as the user has it open. That mistaken assumption cost this program
+/// every keystroke in that state, FR-96 included — module [`crate::watchdog`] documents the
+/// measurement. It changes nothing about `WM_INPUTLANGCHANGE`, which still cannot arrive for the
+/// window the user is *typing* into, and everything below stands.
+///
+/// The `WM_DEVICECHANGE` half is no longer in this position at all: since task T-08-4 the real
+/// message arrives at the input window, and the branch of [`window_proc`] that
+/// `layouts::needs_rebuild` guards is what answers it.
 ///
 /// The layout is a property of the **thread that owns the foreground window**, and that is what
 /// makes the question answerable without the message:
@@ -1726,6 +1767,14 @@ unsafe extern "system" fn window_proc(
             // a different scan code map — and offers `needs_rebuild` so that this line does not
             // have to restate the requirement. Until now nobody called it.
             //
+            // ⚠ **And until task T-08-4 it fired for neither message.** `WM_INPUTLANGCHANGE`
+            // still cannot arrive — it goes to the window with the keyboard focus — but
+            // `WM_DEVICECHANGE` now does: `watchdog::register_device_notice` asks for it at this
+            // very window, in place of the raw input keyboard entry that used to bring the same
+            // news as `WM_INPUT_DEVICE_CHANGE` and took the whole low-level hook chain with it.
+            // This branch is the handler task T-03-2a wrote for FR-21's own message, doing at
+            // last what it was written to do.
+            //
             // This is the message loop of the input thread, with the hook callback long
             // returned, which is where module `layouts` says a rebuild belongs and where NFR-01
             // and NFR-02 confine it: the sweep is thousands of `ToUnicodeEx` calls, three
@@ -1745,6 +1794,13 @@ unsafe extern "system" fn window_proc(
             // idempotent operation over memory of ours, which is the same standing the wake-up
             // message has.
             if crate::layouts::needs_rebuild(message) && crate::buffer::is_installed() {
+                // Task T-08-4: the count that lets a run *show* FR-21 being delivered rather
+                // than assert it. It answers `false` for `WM_INPUTLANGCHANGE`, which is the
+                // other message of the list and is not a device change; the result is dropped
+                // because the rebuild below happens for both alike. SEC-07 — a count of events,
+                // never a device name.
+                let _ = crate::watchdog::note_device_change(message);
+
                 publish_active_layout(foreground_layout());
                 rebuild_layout_cache();
             }
@@ -1762,12 +1818,16 @@ unsafe extern "system" fn window_proc(
             crate::watchdog::apply_flush(message, lparam);
 
             // **FR-21, the delivery** — task T-03-3, and the point of that half of the task.
-            // Neither message FR-21 names can reach this program: `WM_INPUTLANGCHANGE` goes to
-            // the window with the keyboard focus and ours never have it, and `WM_DEVICECHANGE`
-            // is only sent to windows that asked for device notifications. `watchdog` asks for
-            // them in the two ways that do work — `RIDEV_DEVNOTIFY`, which turns a keyboard
-            // arrival into `WM_INPUT_DEVICE_CHANGE` at this very window, and the layout probe
-            // behind `WM_APP_LAYOUT` — and `rebuild_for` maps each to what it deserves.
+            // `WM_INPUTLANGCHANGE` cannot reach this program: it goes to the window with the
+            // keyboard focus, and the windows that do the typing are other people's. `watchdog`
+            // stands in for it with the layout probe behind `WM_APP_LAYOUT`, and `rebuild_for`
+            // maps that to a rebuild only if the layout really moved.
+            //
+            // ⚠ The device half no longer comes through here. Task T-08-4 replaced
+            // `RIDEV_DEVNOTIFY` and its `WM_INPUT_DEVICE_CHANGE` with a device notification that
+            // delivers the real `WM_DEVICECHANGE`, which the `needs_rebuild` branch above
+            // answers; the arm for the old message stays in `rebuild_for` and answers the same
+            // way it always did, but nothing this program registers can produce it any more.
             //
             // ⚠ **FR-11: not one of these paths flushes the buffer.** A layout change is not a
             // reason to throw away what the user has typed; every stroke carries the layout it

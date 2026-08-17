@@ -15,7 +15,39 @@
 //! timestamp and nothing else.
 //! Moved out to match the backlog (decision R-17): FR-82 (single instance) to the process
 //! level, task T-01-2; FR-83 (clean shutdown) to the tray, task T-01-4, module `tray`.
-//! Implemented by backlog tasks: T-03-3 (done), T-06-2 (done).
+//! Implemented by backlog tasks: T-03-3 (done), T-06-2 (done), T-08-4 (done).
+//!
+//! # ⚠ Why there is no keyboard entry in the Raw Input registration — task T-08-4
+//!
+//! There was one until task T-08-4, and it cost this program every keystroke it was supposed to
+//! see. **A process that registers any keyboard top-level collection with
+//! `RegisterRawInputDevices` stops the whole chain of low-level keyboard hooks — its own and
+//! every other process's — for as long as a window of that process holds the foreground.** The
+//! keystroke is not lost: it is delivered to that process as `WM_INPUT`, by a road the hooks are
+//! not on.
+//!
+//! That is measured, on a dummy built out of PowerShell with no line of this program in it, and
+//! the measurement is in the report of task T-08-4. Three of its results decide the shape of
+//! this module:
+//!
+//! * **the flag is irrelevant.** `RIDEV_DEVNOTIFY`, `RIDEV_INPUTSINK`, both together, and even a
+//!   null `hwndTarget` all starve the chain alike. What does it is *being a raw keyboard client*,
+//!   not what one asks for as a client;
+//! * **the window is irrelevant.** The registration this program made named the input thread's
+//!   `HWND_MESSAGE` window, which can never be in the foreground, and it starved the chain
+//!   exactly the same. It is a property of the **process**;
+//! * **the mouse entry is innocent.** Mouse-only registrations, with `RIDEV_INPUTSINK` and even
+//!   with `RIDEV_DEVNOTIFY`, do not starve anything. FR-13 keeps the entry it always had.
+//!
+//! What the keyboard entry was *for* is the `WM_DEVICECHANGE` half of the FR-21 delivery, and
+//! that has not been given up: [`register_device_notice`] asks for the same news through
+//! `RegisterDeviceNotificationW`, which is not a raw input registration at all — see below.
+//!
+//! ⚠ The comment this module used to carry said the entry cost "exactly zero messages while the
+//! user types" because "our window never has the keyboard focus". Both halves were wrong: the
+//! settings dialog of FR-92 and the tray menu of FR-91 are windows of ours that do hold the
+//! foreground, and in that state the entry cost not zero messages but **all** of them, including
+//! the emergency combination of FR-96 — the one way out of a wedged hook.
 //!
 //! # Why Raw Input and not `WH_MOUSE_LL` — FR-13
 //!
@@ -32,6 +64,40 @@
 //! word "запрещён" in FR-13 is honoured mechanically: the string `WH_MOUSE_LL` does not occur
 //! anywhere under `src\`, and `SetWindowsHookExW` is called exactly once in this program, in
 //! [`crate::hook`], with `WH_KEYBOARD_LL`.
+//!
+//! # How FR-21 learns that a keyboard arrived — task T-08-4
+//!
+//! FR-21 says the cache is rebuilt "по сообщениям `WM_INPUTLANGCHANGE` и `WM_DEVICECHANGE`", and
+//! [`crate::layouts::REBUILD_MESSAGES`] is that list. Task T-03-2a wrote the handler for both and
+//! then found that neither message can reach this program on its own: `WM_INPUTLANGCHANGE` goes
+//! to the window with the keyboard focus, and `WM_DEVICECHANGE` at the interface level goes only
+//! to windows that asked for device notifications. Task T-03-3 answered the second half with the
+//! keyboard entry of the Raw Input registration, whose `RIDEV_DEVNOTIFY` turns a keyboard
+//! arrival into `WM_INPUT_DEVICE_CHANGE` — a stand-in for `WM_DEVICECHANGE` rather than the
+//! message itself.
+//!
+//! [`register_device_notice`] replaces the stand-in with the real thing: a
+//! `RegisterDeviceNotificationW` on the **input thread's window**, filtered to the keyboard
+//! device interface class, which delivers `WM_DEVICECHANGE` there and rebuilds through the
+//! handler task T-03-2a wrote for it and that had never once fired. Three properties, each
+//! measured rather than assumed (report of task T-08-4):
+//!
+//! * **it does not starve the hooks.** It is not a raw input registration; the witness hook in a
+//!   third process keeps getting its two calls per keystroke with our window in front;
+//! * **it reaches a message-only window.** Registered device notifications do, where the
+//!   *broadcast* ones reach top-level windows only — which is why this can stay on the input
+//!   thread's window and needs no cross-thread hand-off;
+//! * **it is precise.** Filtered to one interface class, it stays silent for every device that
+//!   is not a keyboard. The alternative — the free `DBT_DEVNODES_CHANGED` broadcast at the UI
+//!   window — would run FR-20's sweep of thousands of `ToUnicodeEx` calls every time anything at
+//!   all appeared in the machine's device tree.
+//!
+//! Task T-03-3 rejected `RegisterDeviceNotification` because the filter structure and the class
+//! GUID lived behind a `windows` feature outside section 3.2. In `windows` 0.62.2 — the version
+//! this program is pinned to — `RegisterDeviceNotificationW`, `UnregisterDeviceNotification`,
+//! `DEV_BROADCAST_DEVICEINTERFACE_W`, `DBT_DEVTYP_DEVICEINTERFACE` and
+//! `DEVICE_NOTIFY_WINDOW_HANDLE` are all in `Win32::UI::WindowsAndMessaging`, a feature this
+//! program already enables. `Cargo.toml` is untouched.
 //!
 //! # FR-80 — the watchdog, and why it cannot ask whether the hook is alive
 //!
@@ -105,8 +171,9 @@
 //!
 //! Section 6.1 puts each of these where it belongs and this module follows it exactly:
 //!
-//! * **input thread** — `RegisterRawInputDevices (RIDEV_INPUTSINK)` and the reception of
-//!   `WM_INPUT`. The registration is bound to that thread's message-only window, and the buffer
+//! * **input thread** — `RegisterRawInputDevices (RIDEV_INPUTSINK)`, the reception of `WM_INPUT`
+//!   and, from task T-08-4, the device notification of FR-21 and the `WM_DEVICECHANGE` it
+//!   delivers. The registration is bound to that thread's message-only window, and the buffer
 //!   the flush lands in is a thread-local of that same thread (section 6.3), so the whole path
 //!   from the click to the zeroed slot happens without a single cross-thread hand-off. Section
 //!   6.1 also puts "таймер сторожа" here in so many words, and [`start_liveness_timer`] is that
@@ -155,9 +222,12 @@
 //!   early return;
 //! * a forged [`WM_APP_FLUSH`] finds no pending request — the timestamp travels in an atomic of
 //!   this process and never in the message — and does nothing at all;
-//! * a forged [`WM_APP_LAYOUT`] or `WM_INPUT_DEVICE_CHANGE` buys the sender a re-read of the
-//!   system's own layout list into memory of ours, which is idempotent, and is the same standing
-//!   the wake-up message of [`crate::app`] has;
+//! * a forged [`WM_APP_LAYOUT`], `WM_DEVICECHANGE` or `WM_INPUT_DEVICE_CHANGE` buys the sender a
+//!   re-read of the system's own layout list into memory of ours, which is idempotent, and is the
+//!   same standing the wake-up message of [`crate::app`] has. The device notification of
+//!   [`register_device_notice`] changes nothing here: `WM_DEVICECHANGE` was already forgeable at
+//!   any of our windows before the registration existed, and all it has ever bought is that
+//!   re-read;
 //! * a forged [`WM_APP_REHOOK`], `WM_POWERBROADCAST` or `WM_WTSSESSION_CHANGE` buys the sender
 //!   one reinstallation of **our own** hook — an operation this program performs on itself
 //!   every thirty seconds anyway, which changes no state the sender can see and grants no
@@ -182,7 +252,7 @@ use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::RemoteDesktop::{
     NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
@@ -190,16 +260,18 @@ use windows::Win32::System::RemoteDesktop::{
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::{
     GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
-    RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
+    RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
+    DBT_DEVTYP_DEVICEINTERFACE, DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE,
     EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GetMessageTime,
-    KillTimer, PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN,
-    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN, SetTimer,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
+    HDEVNOTIFY, KillTimer, PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN,
+    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN,
+    RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
     WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
 };
-use windows::core::{Error as WinError, PCWSTR, Result as WinResult};
+use windows::core::{Error as WinError, GUID, PCWSTR, Result as WinResult};
 
 use crate::buffer::{ResetOutcome, is_newer_than};
 
@@ -287,10 +359,24 @@ pub const LIVENESS_TIMER_ID: usize = 1;
 const HID_USAGE_PAGE_GENERIC: u16 = 0x01;
 
 /// HID usage 2 of the generic page: a mouse.
+///
+/// ⚠ **Usage 6, the keyboard, deliberately has no constant here any more.** Task T-08-4 measured
+/// what a keyboard entry in this registration costs — the whole chain of low-level keyboard
+/// hooks, while any window of this process is in front — and took it out. A constant left behind
+/// would be an invitation to put the entry back; see the module documentation.
 const HID_USAGE_MOUSE: u16 = 0x02;
 
-/// HID usage 6 of the generic page: a keyboard.
-const HID_USAGE_KEYBOARD: u16 = 0x06;
+/// `GUID_DEVINTERFACE_KEYBOARD`, `{884b96c3-56ef-11d1-bc8c-00a0c91405dd}` — the device interface
+/// class [`register_device_notice`] filters on.
+///
+/// Written out rather than imported, and that is not a shortcut: the constant lives in
+/// `windows::Win32::Devices::HumanInterfaceDevice`, behind a feature section 3.2 does not list,
+/// and `Cargo.toml` is closed (SEC-03). What is written out is a **number of the operating
+/// system's own ABI**, not a dependency — the same standing the raw event code `0x0020` has in
+/// `tests\watchdog.rs`. That it is the right number is measured rather than trusted: the report
+/// of task T-08-4 enumerates the present device interfaces of this class and finds exactly the
+/// machine's keyboards, the same count the old `RIDEV_DEVNOTIFY` registration reported.
+const GUID_DEVINTERFACE_KEYBOARD: GUID = GUID::from_u128(0x884b96c3_56ef_11d1_bc8c_00a0c91405dd);
 
 /// The `usButtonFlags` bits that mean "a button went **down**" — the FR-10 row "нажатие любой
 /// кнопки мыши".
@@ -339,10 +425,21 @@ pub enum Rebuild {
 
 /// The rebuild `message` asks for — the delivery half of FR-21.
 ///
-/// `WM_INPUT_DEVICE_CHANGE` is what `RIDEV_DEVNOTIFY` turns a keyboard arrival or removal into,
-/// and it stands in for the `WM_DEVICECHANGE` of FR-21; [`WM_APP_LAYOUT`] stands in for its
-/// `WM_INPUTLANGCHANGE`. Both stand-ins exist because neither message of FR-21 can reach this
-/// program — see the module documentation of [`crate::app`] and the report of task T-03-3.
+/// [`WM_APP_LAYOUT`] stands in for the `WM_INPUTLANGCHANGE` of FR-21, which cannot reach this
+/// program because it goes to the window with the keyboard focus — see the module documentation
+/// of [`crate::app`] and the report of task T-03-3.
+///
+/// ⚠ `WM_INPUT_DEVICE_CHANGE` was the other stand-in, for `WM_DEVICECHANGE`, and **task T-08-4
+/// retired it**: the registration that produced it is gone, and the real `WM_DEVICECHANGE`
+/// arrives instead, through [`register_device_notice`], to be handled where FR-21's own messages
+/// are handled — the [`crate::layouts::needs_rebuild`] arm of the window procedure. The arm below
+/// stays because the answer it gives is still the right one for a message that says a keyboard
+/// arrived, and because deleting it would be a claim that no such message can ever arrive, which
+/// is a claim about the whole system rather than about this program.
+///
+/// **The two lists must not overlap.** `WM_DEVICECHANGE` is deliberately *not* an arm here: the
+/// window procedure asks [`crate::layouts::needs_rebuild`] first and this function second, so a
+/// message in both would be rebuilt twice. A test asserts the disjointness.
 ///
 /// The two arms are counted, so that a run can say **which** of the two delivery paths produced a
 /// rebuild rather than only that the number of rebuilds went up. Counting here rather than at the
@@ -441,14 +538,25 @@ static KEPT_EVENTS: AtomicU32 = AtomicU32::new(0);
 /// Strokes removed by all flushes together.
 static STROKES_REMOVED: AtomicU32 = AtomicU32::new(0);
 
-/// `WM_INPUT_DEVICE_CHANGE` messages the input thread answered — the `WM_DEVICECHANGE` half of
-/// the FR-21 delivery.
+/// Device changes the input thread answered — the `WM_DEVICECHANGE` half of the FR-21 delivery.
+///
+/// Since task T-08-4 that means the real `WM_DEVICECHANGE` of FR-21, counted by
+/// [`note_device_change`] and delivered by [`register_device_notice`]. The
+/// `WM_INPUT_DEVICE_CHANGE` arm of [`rebuild_for`] still adds to the same number: it is the same
+/// event under the name the old delivery gave it, and no registration of this program can produce
+/// it any more, so what it now counts is a forged message and nothing else.
 static DEVICE_CHANGES: AtomicU32 = AtomicU32::new(0);
 
 /// [`WM_APP_LAYOUT`] messages the input thread answered — the `WM_INPUTLANGCHANGE` half of the
 /// FR-21 delivery. Higher than the number of rebuilds they caused, because most of them find the
 /// layout unchanged.
 static LAYOUT_PROBES: AtomicU32 = AtomicU32::new(0);
+
+/// `UnregisterDeviceNotification` refusals — NFR-13, task T-08-4.
+///
+/// The record of a failure this module cannot journal by name; `DeviceNotice::drop` says why at
+/// length. Zero on every healthy run, and nothing in the program reads it as a decision.
+static DEVICE_NOTICE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
 /// Counts of what the subscriptions of this module have done — SEC-07 allows counts and nothing
 /// else, and these are counts.
@@ -471,10 +579,15 @@ pub struct Counters {
     pub kept_events: u32,
     /// Strokes removed by all flushes together.
     pub strokes_removed: u32,
-    /// Keyboard arrivals and removals the input thread answered — FR-21 delivery.
+    /// Keyboard arrivals and removals the input thread answered — FR-21 delivery. A count of
+    /// events, never a device name (SEC-01, SEC-07).
     pub device_changes: u32,
     /// Layout probes the input thread answered — FR-21 delivery.
     pub layout_probes: u32,
+    /// `UnregisterDeviceNotification` refusals — NFR-13, task T-08-4. See
+    /// [`DEVICE_NOTICE_FAILURES`] and the `Drop` of [`DeviceNotice`] for why this failure is a
+    /// count rather than a line in the journal.
+    pub device_notice_failures: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -490,6 +603,7 @@ pub fn counters() -> Counters {
         strokes_removed: STROKES_REMOVED.load(Ordering::Relaxed),
         device_changes: DEVICE_CHANGES.load(Ordering::Relaxed),
         layout_probes: LAYOUT_PROBES.load(Ordering::Relaxed),
+        device_notice_failures: DEVICE_NOTICE_FAILURES.load(Ordering::Relaxed),
     }
 }
 
@@ -502,52 +616,62 @@ pub fn counters() -> Counters {
 /// A registration belongs to the *process*, not to the window, which is why it is undone
 /// explicitly: leaving it in place while the window it names is destroyed would leave the system
 /// posting `WM_INPUT` to a handle that no longer exists.
+///
+/// ⚠ "Belongs to the process" is not a detail of the cleanup. It is also why task T-08-4 could
+/// not fix the keyboard starvation by moving the registration to another window of ours: there
+/// is no window it could have been moved to. See the module documentation.
 pub struct RawInput {
     /// Kept so that the removal names the same devices the registration did.
-    devices: [RAWINPUTDEVICE; 2],
+    devices: [RAWINPUTDEVICE; 1],
 }
 
-/// Registers for the raw mouse input of FR-13 and for keyboard device notifications, both
-/// delivered to `target` — FR-13, and the device half of the FR-21 delivery.
+/// Registers for the raw mouse input of FR-13, delivered to `target` — FR-13, and nothing else.
 ///
-/// # The two entries
+/// # The one entry
 ///
-/// * **mouse, `RIDEV_INPUTSINK`.** The flag is what FR-13 names, and what it means is "deliver
-///   this even when the target window is not in the foreground" — which is the only mode of any
-///   use to a program whose windows are hidden and never focused. `WM_INPUT` then arrives for
-///   every mouse packet, movement included; [`mouse_button_pressed`] is what separates the two.
-/// * **keyboard, `RIDEV_DEVNOTIFY`, and no `RIDEV_INPUTSINK`.** This entry asks for
-///   `WM_INPUT_DEVICE_CHANGE` when a keyboard arrives or leaves, and for nothing else: without
-///   `RIDEV_INPUTSINK` the raw keystrokes are delivered only to the window with the keyboard
-///   focus, which ours never is, so this costs exactly zero messages while the user types. It is
-///   how the `WM_DEVICECHANGE` half of FR-21 is delivered; see the report of task T-03-3 for why
-///   this and not `RegisterDeviceNotification`.
+/// **mouse, `RIDEV_INPUTSINK`.** The flag is what FR-13 names, and what it means is "deliver
+/// this even when the target window is not in the foreground" — which is the only mode of any
+/// use to a program whose windows are hidden and normally not focused. `WM_INPUT` then arrives
+/// for every mouse packet, movement included; [`mouse_button_pressed`] is what separates the two.
 ///
-/// Neither entry sets `RIDEV_NOLEGACY`, so ordinary mouse and keyboard messages continue to
+/// # ⚠ The keyboard entry that used to be here, and why it is gone — task T-08-4
+///
+/// Tasks T-03-3 through T-06-2 registered a second entry, `HID_USAGE_KEYBOARD` with
+/// `RIDEV_DEVNOTIFY`, to be told when a keyboard arrives or leaves. The comment beside it said
+/// that without `RIDEV_INPUTSINK` the raw keystrokes go only to the window with the keyboard
+/// focus, "which ours never is", so the entry cost "exactly zero messages while the user types".
+///
+/// Both halves were false, and the second one catastrophically. Our windows **do** hold the
+/// foreground — the settings dialog of FR-92 and the tray menu of FR-91 — and in that state a
+/// keyboard entry in this registration takes the keystrokes away from **every low-level keyboard
+/// hook in the session**, this program's and every other program's alike. The user pressed
+/// `Ctrl+Alt+Shift+F12` with the settings dialog open and nothing happened: FR-96, the only way
+/// out of a wedged hook, was unreachable exactly when a dialog of ours was in front.
+///
+/// The measurement is in the report of task T-08-4 and it is worth one line here: **the flag did
+/// not matter and the window did not matter.** `RIDEV_INPUTSINK` alone starves the chain just as
+/// `RIDEV_DEVNOTIFY` does, and so does a registration whose `hwndTarget` is the message-only
+/// window that can never be in the foreground. Being a raw keyboard client is what does it.
+///
+/// FR-21 keeps its news by another road — [`register_device_notice`].
+///
+/// The entry that remains does not set `RIDEV_NOLEGACY`, so ordinary mouse messages continue to
 /// reach every application, this one included, exactly as before. Registration is per-process
 /// and changes nothing for anybody else.
 pub fn register_raw_input(target: HWND) -> WinResult<RawInput> {
-    let devices = [
-        RAWINPUTDEVICE {
-            usUsagePage: HID_USAGE_PAGE_GENERIC,
-            usUsage: HID_USAGE_MOUSE,
-            dwFlags: RIDEV_INPUTSINK,
-            hwndTarget: target,
-        },
-        RAWINPUTDEVICE {
-            usUsagePage: HID_USAGE_PAGE_GENERIC,
-            usUsage: HID_USAGE_KEYBOARD,
-            dwFlags: RIDEV_DEVNOTIFY,
-            hwndTarget: target,
-        },
-    ];
+    let devices = [RAWINPUTDEVICE {
+        usUsagePage: HID_USAGE_PAGE_GENERIC,
+        usUsage: HID_USAGE_MOUSE,
+        dwFlags: RIDEV_INPUTSINK,
+        hwndTarget: target,
+    }];
 
     // SAFETY: `devices` is a fully initialised array owned by this frame for the whole call, and
     // the call only reads through it — the registration the system keeps is a copy. `target` is
-    // the caller's live window, which `RIDEV_INPUTSINK` and `RIDEV_DEVNOTIFY` both require to be
-    // non-null, and the guard returned here is dropped before that window is destroyed because
-    // `app::serve_window` declares it after the window. `size_of::<RAWINPUTDEVICE>()` is the
-    // element size the call demands and is computed rather than written out.
+    // the caller's live window, which `RIDEV_INPUTSINK` requires to be non-null, and the guard
+    // returned here is dropped before that window is destroyed because `app::serve_window`
+    // declares it after the window. `size_of::<RAWINPUTDEVICE>()` is the element size the call
+    // demands and is computed rather than written out.
     unsafe {
         RegisterRawInputDevices(
             &devices,
@@ -585,6 +709,145 @@ impl Drop for RawInput {
             crate::app::report_non_critical("RegisterRawInputDevices(RIDEV_REMOVE)", &error);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-21, the device half — task T-08-4
+// ---------------------------------------------------------------------------------------
+
+/// The keyboard device notification of FR-21, withdrawn when this value is dropped.
+///
+/// The registration is a resource the system holds **against the window**, exactly as
+/// [`SessionNotice`] is, which is why the withdrawal is explicit rather than left to the
+/// window's destruction.
+pub struct DeviceNotice {
+    /// The handle `RegisterDeviceNotificationW` returned, which is what withdraws it.
+    handle: HDEVNOTIFY,
+}
+
+/// Asks for `WM_DEVICECHANGE` at `window` whenever a keyboard arrives or leaves — the device
+/// half of the FR-21 delivery, and the replacement for the keyboard entry task T-08-4 took out
+/// of [`register_raw_input`].
+///
+/// # Why this and not `RIDEV_DEVNOTIFY`
+///
+/// Because `RIDEV_DEVNOTIFY` had to be paid for with a keyboard entry in the raw input
+/// registration, and that entry cost this program — and every other program in the session —
+/// the whole chain of low-level keyboard hooks whenever a window of ours was in front. The
+/// module documentation has the measurement. This call is not a raw input registration at all
+/// and costs nothing of the sort.
+///
+/// # ⚠ `window` must be the **input** thread's window
+///
+/// Not for the reason [`register_session_notice`] has, which is the opposite one. A *broadcast*
+/// device notification reaches top-level windows only, but a **registered** one is posted to the
+/// handle named here whatever kind of window it is — measured on a message-only window in the
+/// report of task T-08-4 — and the rebuild it asks for is FR-20's sweep over the layout cache,
+/// which is a thread-local of the input thread (section 6.3). Naming any other window would put
+/// the message on a thread that cannot act on it.
+///
+/// # The filter, and what it is worth
+///
+/// `DBT_DEVTYP_DEVICEINTERFACE` with [`GUID_DEVINTERFACE_KEYBOARD`] and not
+/// `DEVICE_NOTIFY_ALL_INTERFACE_CLASSES`: FR-21 is about keyboards, and the unfiltered
+/// registration would run the sweep of FR-20 — thousands of `ToUnicodeEx` calls — every time
+/// anything at all appeared in the machine's device tree. That is not a guess either: the
+/// measurement mounted a virtual CD-ROM and watched the filtered registration stay silent while
+/// the unfiltered one took three arrivals.
+///
+/// # NFR-13
+///
+/// `RegisterDeviceNotificationW` reports failure with a null handle, which the `windows` crate
+/// turns into `Err`, and it is propagated: a program that silently stopped rebuilding its cache
+/// when the user plugged in a keyboard is the failure FR-21 exists to prevent. `app::serve_window`
+/// makes that fatal to the thread, which is the same standing the raw input registration has.
+pub fn register_device_notice(window: HWND) -> WinResult<DeviceNotice> {
+    let filter = DEV_BROADCAST_DEVICEINTERFACE_W {
+        // The documented requirement: the size of the whole structure, not of the header.
+        dbcc_size: u32::try_from(size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>()).unwrap_or(0),
+        dbcc_devicetype: DBT_DEVTYP_DEVICEINTERFACE.0,
+        dbcc_reserved: 0,
+        dbcc_classguid: GUID_DEVINTERFACE_KEYBOARD,
+        // The name is an output field of the notifications, never an input to the filter; the
+        // structure carries one element of it and the system writes past it into the buffer it
+        // hands the recipient, not into this one.
+        dbcc_name: [0],
+    };
+
+    // SAFETY: `filter` is a fully initialised structure owned by this frame for the whole call,
+    // and the call only reads through the pointer — what the system keeps is a copy, which is
+    // why it may live on the stack. `dbcc_size` says how far the read may go and is computed
+    // from the type rather than written out. `window` is the caller's live window, and the guard
+    // returned here is dropped before that window is destroyed because `app::serve_window`
+    // declares it after the window. `DEVICE_NOTIFY_WINDOW_HANDLE` is what makes the first
+    // argument a window handle rather than a service handle, which is the only other thing it
+    // could be.
+    let handle = unsafe {
+        RegisterDeviceNotificationW(
+            HANDLE(window.0),
+            (&raw const filter).cast::<c_void>(),
+            DEVICE_NOTIFY_WINDOW_HANDLE,
+        )
+    }?;
+
+    Ok(DeviceNotice { handle })
+}
+
+impl Drop for DeviceNotice {
+    fn drop(&mut self) {
+        // SAFETY: `handle` came from a successful `RegisterDeviceNotificationW` and is withdrawn
+        // exactly once, because this type is neither `Copy` nor `Clone`. The window it names is
+        // still alive: `app::serve_window` declares this guard after the window and drop order
+        // takes it first.
+        let withdrawn = unsafe { UnregisterDeviceNotification(self.handle) };
+
+        if withdrawn.is_err() {
+            // **NFR-13: examined, and counted rather than journalled — deliberately, and the
+            // reason is a file boundary rather than a judgement about the failure.**
+            //
+            // Every other guard in this module hands its failure to
+            // `app::report_non_critical`, whose first argument has to be one of the names in
+            // the vocabulary of [`crate::diag`]; a name that is not there reaches the log as a
+            // bare code, and `tests\diag.rs` fails the build over exactly that. The vocabulary
+            // lives in `src\diag.rs`, which the task that wrote this function may not touch, so
+            // the choice was between a journal line with no name and a count with a reason.
+            // The count is the record here, the same standing `mouse_button_time` gives its
+            // rejections, and [`Counters::device_notice_failures`] is where it is read.
+            //
+            // ⚠ The one-line repair for whoever opens `src\diag.rs` next:
+            // `("UnregisterDeviceNotification", Kind::Hook)` in `OPERATIONS`, and this block
+            // becomes the ordinary `report_non_critical` every neighbour of it already is.
+            //
+            // What is lost by that is small and bounded: the call can only fail on a handle
+            // that is not a live registration, this one came from a successful
+            // `RegisterDeviceNotificationW` and is withdrawn once, and the process is on its
+            // way out with the window about to be destroyed under it either way.
+            DEVICE_NOTICE_FAILURES.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Counts a `WM_DEVICECHANGE` that the input thread answered — the device half of the FR-21
+/// delivery, seen from the outside through [`Counters::device_changes`].
+///
+/// Called by the window procedure of [`crate::app`] from the arm that
+/// [`crate::layouts::needs_rebuild`] guards, which is where the rebuild itself happens: FR-21
+/// names `WM_DEVICECHANGE` and `layouts` owns that list, so the message is not this module's to
+/// handle — only to count, because this module is the one that asked for it.
+///
+/// Answers whether it counted anything, so that the call site reads as a question and a test can
+/// drive it without a window, a keyboard or a registration.
+///
+/// **SEC-01, SEC-07.** A count and nothing else. The `WM_DEVICECHANGE` this counts carries a
+/// device name in its `lparam`, and that name is never read, never stored and never journalled:
+/// the only thing this program wants from the message is the fact that it happened.
+pub fn note_device_change(message: u32) -> bool {
+    if message != WM_DEVICECHANGE {
+        return false;
+    }
+
+    DEVICE_CHANGES.fetch_add(1, Ordering::Relaxed);
+    true
 }
 
 // ---------------------------------------------------------------------------------------

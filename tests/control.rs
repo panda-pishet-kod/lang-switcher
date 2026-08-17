@@ -907,8 +907,89 @@ fn the_fail_safe_and_panic_keys_of_t_08_3_are_published_as_a_flag_and_a_count() 
     assert!(!control::RESERVED_KEYS.contains(&"consecutive_panics"));
 
     // They are appended, not inserted: twelve tasks' worth of readers diff these lines by eye.
-    assert_eq!(control::KEYS[control::KEYS.len() - 2], "fail_safe");
-    assert_eq!(control::KEYS[control::KEYS.len() - 1], "consecutive_panics");
+    //
+    // ⚠ Task **T-08-4** appended `device_changes` after them, which is the same rule applied
+    // once more, so "last" and "one before last" is no longer what the rule says. What it says
+    // is that these two sit at the positions they were appended at and that nothing has been
+    // pushed in front of them — which is a stronger statement than the one it replaces, and one
+    // that will not have to be rewritten by the next task that appends a key.
+    assert_eq!(
+        control::KEYS.iter().position(|key| *key == "fail_safe"),
+        Some(18)
+    );
+    assert_eq!(
+        control::KEYS
+            .iter()
+            .position(|key| *key == "consecutive_panics"),
+        Some(19)
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-08-4 — the key that shows FR-21 still being delivered
+// -------------------------------------------------------------------------------------
+
+/// `device_changes` is published, it is a count, and it says what `watchdog` says.
+///
+/// # Why it exists at all
+///
+/// Task T-08-4 took the keyboard entry out of the Raw Input registration, because a process that
+/// holds one loses the whole low-level keyboard hook chain while a window of its own is in front —
+/// which is what made FR-96 unreachable with the settings dialog of FR-92 open. That entry was
+/// also half of the FR-21 delivery, so the delivery moved to `RegisterDeviceNotificationW` and the
+/// real `WM_DEVICECHANGE`.
+///
+/// A replacement of a delivery mechanism has to be **shown** to deliver, and from outside the
+/// process there is nothing else to look at: this number moving when a keyboard is plugged in is
+/// the whole of the evidence. `cache_builds` is its other half — this counts the message, that
+/// counts the rebuild it caused.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count. The `WM_DEVICECHANGE` behind it carries a device name in its `lparam` and that name is
+/// read nowhere in this program, which is asserted below by parsing the value as a number and
+/// refusing anything else.
+#[test]
+fn the_device_change_key_of_t_08_4_is_published_as_a_count() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("device_changes="))
+        .expect("the channel does not publish device_changes");
+
+    println!("device_changes={published}");
+
+    assert!(
+        published.parse::<u32>().is_ok(),
+        "device_changes must be a count, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"device_changes"));
+    assert!(!control::RESERVED_KEYS.contains(&"device_changes"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed.
+    assert_eq!(control::KEYS[control::KEYS.len() - 1], "device_changes");
+}
+
+/// The key mirrors `watchdog`, and is not a number of the channel's own making.
+#[test]
+fn the_device_change_key_mirrors_the_counter_of_the_watchdog() {
+    let state = control::snapshot();
+
+    assert_eq!(
+        state.device_changes,
+        lang_switcher::watchdog::counters().device_changes
+    );
+
+    // NFR-13, task T-08-4: `UnregisterDeviceNotification` refusals are counted rather than
+    // journalled, because the vocabulary of `diag` has no name for that call and the task that
+    // wrote it could not open `src\diag.rs`. A test process that never registered one must read
+    // zero, and a non-zero value here would mean the count had been wired to something else.
+    assert_eq!(
+        lang_switcher::watchdog::counters().device_notice_failures,
+        0
+    );
 }
 
 /// The two new keys say what `hook` says, and not something of the channel's own.
