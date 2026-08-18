@@ -193,17 +193,19 @@
 //! own delivery, exactly like a hook callback: a slow one holds up whatever generated the event.
 //! [`win_event_proc`] is therefore built to the same budget as the keyboard callback even though
 //! no requirement names a number for it — **two read-only window queries
-//! (`GetForegroundWindow` and `GetAncestor`, the gate of task T-10-0), one compare-and-swap on
-//! an atomic, two counter increments and one `PostMessageW`**, none of which blocks: the two
-//! queries read the window manager's session state without entering any other process and
-//! without taking any lock an application could hold, the same standing `GetMessageTime` has on
-//! the `WM_INPUT` path. No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), no Win32
-//! call that can be made to wait, and nothing that can panic across the `extern "system"`
-//! boundary. The work the event implies — flushing a ring of strokes, and possibly rebuilding
-//! the layout cache — is done later, by the input thread, in its message loop. For the
-//! overwhelmingly common event — the background churn [`concerns_the_foreground`] turns away —
-//! the callback now does *less* than it did before task T-10-0: the two queries and one
-//! increment, and neither post.
+//! (`GetForegroundWindow` and `GetAncestor`, the gate of task T-10-0), one atomic swap (the
+//! focus memory of task T-10-0e), one compare-and-swap on an atomic, two counter increments
+//! and one `PostMessageW`**, none of which blocks: the two queries read the window manager's
+//! session state without entering any other process and without taking any lock an
+//! application could hold, the same standing `GetMessageTime` has on the `WM_INPUT` path. No
+//! allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), no Win32 call that can be made to
+//! wait, and nothing that can panic across the `extern "system"` boundary. The work the event
+//! implies — flushing a ring of strokes, and possibly rebuilding the layout cache — is done
+//! later, by the input thread, in its message loop. For the overwhelmingly common event — the
+//! background churn [`concerns_the_foreground`] turns away — the callback now does *less*
+//! than it did before task T-10-0: the two queries and one increment, and neither post. The
+//! churn of the foreground window itself — task T-10-0e, [`focus_repeated`] — stops one step
+//! later, at the swap, and skips the compare-and-swap and both posts.
 //!
 //! The `WM_INPUT` path is not a callback at all: it is a message, handled in the message loop
 //! of the input thread. Its cost is one `GetRawInputData` into a stack buffer and a comparison
@@ -255,7 +257,7 @@
 
 use core::ffi::c_void;
 use core::mem::ManuallyDrop;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
@@ -535,6 +537,32 @@ static WINDOW_FLUSHES: AtomicU32 = AtomicU32::new(0);
 /// would prove only that nothing was delivered at all.
 static BACKGROUND_SKIPS: AtomicU32 = AtomicU32::new(0);
 
+/// The window of the last `EVENT_OBJECT_FOCUS` that concerned the user's foreground — the
+/// memory of [`focus_repeated`], task **T-10-0e**.
+///
+/// The handle is stored **as a value** (`HWND` is pointer-sized; an `AtomicIsize` holds it)
+/// and is never dereferenced: the only thing ever done with it is an equality comparison
+/// against the next event's handle. Zero — no focus event seen yet — equals no live handle,
+/// so the first event always differs and flushes.
+///
+/// Deliberately written only by focus events that **passed the gate** of
+/// [`concerns_the_foreground`]: the churn of a background window says nothing about where
+/// the user's input goes, so it must not overwrite the memory of where it actually goes.
+/// `EVENT_SYSTEM_FOREGROUND` does not write it either — a window change always flushes
+/// (it is not subject to the deduplication), and the focus event that follows it carries
+/// the new target and updates the memory itself.
+static LAST_FOCUS_TARGET: AtomicIsize = AtomicIsize::new(0);
+
+/// `EVENT_OBJECT_FOCUS` events of the foreground window skipped because their window was
+/// already the focus target — task **T-10-0e**.
+///
+/// The observable half of that repair, the same standing [`BACKGROUND_SKIPS`] has for task
+/// T-10-0: a test that stages the same-hwnd churn from a **foreign** process (the
+/// `WINEVENT_SKIPOWNPROCESS` trap again) reads growth here as its positive control — the
+/// churn was delivered and turned away — while `window_flushes` standing still beside it is
+/// the repair itself.
+static FOCUS_REPEATS: AtomicU32 = AtomicU32::new(0);
+
 /// Flush requests the input thread actually took out of [`PENDING_FLUSH`].
 ///
 /// Lower than [`WINDOW_FLUSHES`] whenever two events coalesced, which is exactly what the
@@ -609,6 +637,10 @@ pub struct Counters {
     /// [`BACKGROUND_SKIPS`]: growth here under a staged storm is the positive control that the
     /// storm was delivered and turned away rather than never seen.
     pub background_skips: u32,
+    /// Foreground focus events skipped because their window was already the focus target —
+    /// task T-10-0e. See [`FOCUS_REPEATS`]: growth here under a staged same-hwnd churn is
+    /// the positive control that the churn was delivered and turned away.
+    pub focus_repeats: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -626,6 +658,7 @@ pub fn counters() -> Counters {
         layout_probes: LAYOUT_PROBES.load(Ordering::Relaxed),
         device_notice_failures: DEVICE_NOTICE_FAILURES.load(Ordering::Relaxed),
         background_skips: BACKGROUND_SKIPS.load(Ordering::Relaxed),
+        focus_repeats: FOCUS_REPEATS.load(Ordering::Relaxed),
     }
 }
 
@@ -1208,6 +1241,65 @@ pub fn concerns_the_foreground(window: HWND) -> bool {
     root == foreground
 }
 
+/// Whether a flush event is an `EVENT_OBJECT_FOCUS` whose window is the one the focus is
+/// already on — the internal churn of the foreground window itself. Task **T-10-0e**.
+///
+/// # The defect this answers — measured, not assumed (Р-39)
+///
+/// The gate of task T-10-0 turns away the churn of *background* processes, but the frontmost
+/// window's own churn passes it legitimately — its root **is** the foreground. An Electron
+/// application in front (VS Code, measured) re-raises `EVENT_OBJECT_FOCUS` on the **same**
+/// window as a trailing echo of ordinary activity — a click, an Enter, this program's own
+/// injection — at 0.3–1.5 s delay, and every such echo flushed what the user had typed
+/// since: 11 of 36 strokes erased over six rounds, one hotkey press of six landing on a
+/// fully empty buffer (task report, section 3). On 24 recorded churn events of the
+/// frontmost window the handle was the same all 24 times — the same handle the *legitimate*
+/// focus event carried when the user entered the window — while every real focus transfer
+/// in a native application carried the hwnd of the newly focused control, different each
+/// time (task report, section 4).
+///
+/// # Why skipping a same-window event loses nothing
+///
+/// A focus event whose window equals the previous focus event's window does not move the
+/// user's input target: the strokes keep going where they went. Every gesture that *does*
+/// move the caret inside one window flushes by its own row of FR-10 — the mouse click over
+/// Raw Input, `Tab` and the navigation keys over the LL hook (`BOUNDARY_KEYS`,
+/// `EDITING_KEYS` of `crate::buffer`) — measured live in the task report: with the
+/// deduplication active, `Tab` and a click in the frontmost Electron window still empty the
+/// buffer. The only events lost are the ones that report no change, and the probe of FR-21
+/// is skipped with the flush for the same reason: the layout of a thread the focus never
+/// left cannot have changed by that event.
+///
+/// **`EVENT_SYSTEM_FOREGROUND` is deliberately not subject to this**: a window change
+/// always flushes, however often it lands on the same window — leaving a window and coming
+/// back *is* a change of the user's input context, whatever handle it reuses.
+///
+/// # Cost — NFR-01…NFR-05
+///
+/// One atomic swap, and on the skip path one counter increment; **no new system call** over
+/// what the callback already did (the budget of task T-10-0 stands). The handle is compared
+/// as a value and never dereferenced. A same-handle skip *saves* the compare-and-swap loop
+/// and both posts.
+///
+/// Public for the same reason [`concerns_the_foreground`] is: the verdict is the whole of
+/// what task T-10-0e changed, and `tests\watchdog.rs` drives it directly with handle values
+/// of its own alongside the staged-churn tests that drive it through a real subscription.
+pub fn focus_repeated(event: u32, window: HWND) -> bool {
+    if event != EVENT_OBJECT_FOCUS {
+        return false;
+    }
+
+    let handle = window.0 as isize;
+    let last = LAST_FOCUS_TARGET.swap(handle, Ordering::AcqRel);
+
+    if last == handle {
+        FOCUS_REPEATS.fetch_add(1, Ordering::Relaxed);
+        return true;
+    }
+
+    false
+}
+
 /// The `WinEvent` callback — FR-10, half of the FR-21 delivery, and the first mechanism of
 /// FR-80.
 ///
@@ -1270,6 +1362,17 @@ unsafe extern "system" fn win_event_proc(
         // question below is about the thread of the **foreground** window, which a background
         // event says nothing about. Every event that passes the gate still asks it.
         BACKGROUND_SKIPS.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+
+    if focus_repeated(event, window) {
+        // **Task T-10-0e: the frontmost window's own churn re-announces the focus it
+        // already has.** The window equals the previous focus event's window, so the user's
+        // input target has not moved and there is nothing to protect by flushing — while
+        // flushing here is exactly what erased the user's typing on the acceptance machine
+        // (VS Code in front, measured). Counted and dropped whole: no flush, and no layout
+        // probe either — the layout of a thread the focus never left has not changed.
+        // `EVENT_SYSTEM_FOREGROUND` never answers true here: a window change always flushes.
         return;
     }
 

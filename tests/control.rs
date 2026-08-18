@@ -1057,8 +1057,15 @@ fn the_background_skip_key_of_t_10_0_is_published_as_a_count() {
     assert!(control::KEYS.contains(&"background_skips"));
     assert!(!control::RESERVED_KEYS.contains(&"background_skips"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed.
-    assert_eq!(control::KEYS[control::KEYS.len() - 1], "background_skips");
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // T-10-0e appended `focus_repeats` after this one, so "last" became a fixed position,
+    // the same rewrite `device_changes` went through when this key arrived.
+    assert_eq!(
+        control::KEYS
+            .iter()
+            .position(|key| *key == "background_skips"),
+        Some(21)
+    );
 }
 
 /// The key mirrors `watchdog`, and is not a number of the channel's own making.
@@ -1075,5 +1082,65 @@ fn the_background_skip_key_mirrors_the_counter_of_the_watchdog() {
     assert!(
         state.background_skips >= before && state.background_skips <= after,
         "background_skips is watchdog's own count of ignored background events"
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-0e — the key that makes the frontmost-churn repair observable
+// -------------------------------------------------------------------------------------
+
+/// `focus_repeats` is published, it is a count, and it says what `watchdog` says.
+///
+/// # Why it exists at all
+///
+/// The gate of task T-10-0 turns away the churn of *background* processes, but the
+/// frontmost window's own churn passes it legitimately — its root is the foreground — and
+/// erased what the user had typed (VS Code, measured: 11 of 36 strokes over six rounds).
+/// Task T-10-0e remembers the hwnd of the last focus event and skips the repeats. The
+/// product subscribes with `WINEVENT_SKIPOWNPROCESS`, so the staged same-hwnd churn must
+/// come from a foreign process, and this number growing under it is the positive control
+/// that the churn was delivered and turned away — while `window_flushes` standing still
+/// beside it is the repair itself.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count. The handle behind it is compared as a value and dropped; nothing else of the
+/// event is read at all — asserted below by parsing the value as a number and refusing
+/// anything else.
+#[test]
+fn the_focus_repeat_key_of_t_10_0e_is_published_as_a_count() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("focus_repeats="))
+        .expect("the channel does not publish focus_repeats");
+
+    println!("focus_repeats={published}");
+
+    assert!(
+        published.parse::<u32>().is_ok(),
+        "focus_repeats must be a count, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"focus_repeats"));
+    assert!(!control::RESERVED_KEYS.contains(&"focus_repeats"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed.
+    assert_eq!(control::KEYS[control::KEYS.len() - 1], "focus_repeats");
+}
+
+/// The key mirrors `watchdog`, and is not a number of the channel's own making.
+#[test]
+fn the_focus_repeat_key_mirrors_the_counter_of_the_watchdog() {
+    let before = lang_switcher::watchdog::counters().focus_repeats;
+    let state = control::snapshot();
+    let after = lang_switcher::watchdog::counters().focus_repeats;
+
+    // The same bracket the background_skips mirror uses: a monotone counter cannot be
+    // pinned to an equality across two reads while other tests of this binary run.
+    assert!(
+        state.focus_repeats >= before && state.focus_repeats <= after,
+        "focus_repeats is watchdog's own count of skipped foreground repeats"
     );
 }

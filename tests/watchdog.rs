@@ -529,6 +529,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         layout_probes: after.layout_probes - before.layout_probes,
         device_notice_failures: after.device_notice_failures - before.device_notice_failures,
         background_skips: after.background_skips - before.background_skips,
+        focus_repeats: after.focus_repeats - before.focus_repeats,
     }
 }
 
@@ -978,6 +979,58 @@ fn the_gate_refuses_a_window_that_cannot_be_the_foreground_and_passes_the_one_th
     }
 }
 
+/// **Task T-10-0e, the decision level.** A focus event on the window the focus is already
+/// on is a repeat — the frontmost window's own churn, measured to erase the user's typing —
+/// and a repeat neither flushes nor probes. A focus event on another window is a transfer
+/// and keeps flushing; `EVENT_SYSTEM_FOREGROUND` is never a repeat, whatever handle it
+/// carries — a window change always flushes.
+///
+/// The handles below are made-up values: `focus_repeated` compares them and never
+/// dereferences them, which is the property the fix relies on for stale handles too. This
+/// is the one default-run test that touches the process-wide focus memory; the staged-churn
+/// tests below drive the same memory through a real subscription and are `#[ignore]`d, so
+/// the two never run together.
+#[test]
+fn a_focus_event_on_the_same_window_is_a_repeat_and_a_window_change_never_is() {
+    let first = HWND(0x1000_0F01_usize as *mut core::ffi::c_void);
+    let second = HWND(0x1000_0F02_usize as *mut core::ffi::c_void);
+
+    let before = watchdog::counters().focus_repeats;
+
+    // The first focus event ever seen: nothing is remembered yet, so it must flush.
+    assert!(
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, first),
+        "the first focus event is not a repeat"
+    );
+
+    // The same window again — the churn of task T-10-0e — is a repeat.
+    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, first));
+
+    // A transfer to another window is not, and it moves the memory.
+    assert!(
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second),
+        "a transfer to a different hwnd must keep flushing (FR-10)"
+    );
+    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second));
+
+    // A window change is never a repeat, same handle or not: leaving and coming back is a
+    // change of the user's input context (Р-60), and the flush must stay.
+    assert!(
+        !watchdog::focus_repeated(EVENT_SYSTEM_FOREGROUND, second),
+        "EVENT_SYSTEM_FOREGROUND is not subject to the deduplication"
+    );
+
+    // And it does not clobber the memory either: the focus is still where it was, so the
+    // frontmost churn that follows a foreground event is still recognised as churn.
+    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second));
+
+    assert_eq!(
+        watchdog::counters().focus_repeats,
+        before + 3,
+        "exactly the three repeats above were counted"
+    );
+}
+
 /// A helper process the test spawned, killed by the identifier the spawn returned — Р-42.
 ///
 /// The scripts live in the test process's temporary directory, not in the project tree; the
@@ -1392,6 +1445,279 @@ fn a_real_foreground_change_by_a_foreign_process_still_flushes() {
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Cleared { removed: 6 }),
         "FR-10 (Р-60): a real change of the user's window still flushes what was typed before it"
+    );
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
+    drop(watching);
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-0e — the focus memory against the frontmost window's own churn
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ The `WINEVENT_SKIPOWNPROCESS` trap of the section above applies with full force: the
+// generator of the same-hwnd events MUST be a foreign process, or the subscription never
+// sees them and a green test has checked nothing. `NotifyWinEvent` is what makes the
+// generator deterministic: a foreign helper raises `EVENT_OBJECT_FOCUS` with exactly the
+// hwnd it chooses, on exactly the schedule it chooses, without the focus actually moving.
+// The positive control is `focus_repeats`: growth there is the proof of delivery.
+
+/// The helper of the same-hwnd churn: takes the foreground honestly, holds it, and raises
+/// `EVENT_OBJECT_FOCUS` for its own top-level window every 40 ms — the frontmost-window
+/// churn of the acceptance machine (measured: same hwnd all 24 times), staged at a higher
+/// rate from a foreign process.
+const REPEATER_PS1: &str = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class RepeatNative
+{
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern void NotifyWinEvent(uint ev, IntPtr hwnd, int idObject, int idChild);
+    public static void TakeForeground(IntPtr hwnd)
+    {
+        IntPtr fg = GetForegroundWindow();
+        if (fg == hwnd) return;
+        uint pid;
+        uint fgTid = GetWindowThreadProcessId(fg, out pid);
+        uint myTid = GetCurrentThreadId();
+        bool attached = false;
+        if (fgTid != 0 && fgTid != myTid) attached = AttachThreadInput(myTid, fgTid, true);
+        SetForegroundWindow(hwnd);
+        if (attached) AttachThreadInput(myTid, fgTid, false);
+    }
+}
+'@
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'LangSw-T10e-repeater'
+$form.StartPosition = 'Manual'
+$form.Location = New-Object System.Drawing.Point(600, 40)
+$form.Size = New-Object System.Drawing.Size(240, 100)
+$hold = New-Object System.Windows.Forms.Timer
+$hold.Interval = 400
+$hold.Add_Tick({ [RepeatNative]::TakeForeground($form.Handle) })
+$churn = New-Object System.Windows.Forms.Timer
+$churn.Interval = 40
+$churn.Add_Tick({ [RepeatNative]::NotifyWinEvent(0x8005, $form.Handle, -4, 0) })
+$stop = New-Object System.Windows.Forms.Timer
+$stop.Interval = 60000
+$stop.Add_Tick({ [System.Windows.Forms.Application]::Exit() })
+$form.Add_Shown({ [RepeatNative]::TakeForeground($form.Handle); $hold.Start(); $churn.Start(); $stop.Start() })
+[System.Windows.Forms.Application]::Run($form)
+"#;
+
+/// The control helper: the same foreign foreground window, but the events alternate between
+/// the hwnds of its two child controls every 150 ms — every event a transfer to a
+/// *different* hwnd, which the memory must keep flushing on.
+const ALTERNATOR_PS1: &str = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class AltNative
+{
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern void NotifyWinEvent(uint ev, IntPtr hwnd, int idObject, int idChild);
+    public static void TakeForeground(IntPtr hwnd)
+    {
+        IntPtr fg = GetForegroundWindow();
+        if (fg == hwnd) return;
+        uint pid;
+        uint fgTid = GetWindowThreadProcessId(fg, out pid);
+        uint myTid = GetCurrentThreadId();
+        bool attached = false;
+        if (fgTid != 0 && fgTid != myTid) attached = AttachThreadInput(myTid, fgTid, true);
+        SetForegroundWindow(hwnd);
+        if (attached) AttachThreadInput(myTid, fgTid, false);
+    }
+}
+'@
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'LangSw-T10e-alternator'
+$form.StartPosition = 'Manual'
+$form.Location = New-Object System.Drawing.Point(600, 180)
+$form.Size = New-Object System.Drawing.Size(260, 140)
+$tb1 = New-Object System.Windows.Forms.TextBox
+$tb1.Location = New-Object System.Drawing.Point(10, 10)
+$tb2 = New-Object System.Windows.Forms.TextBox
+$tb2.Location = New-Object System.Drawing.Point(10, 40)
+$form.Controls.Add($tb1)
+$form.Controls.Add($tb2)
+$hold = New-Object System.Windows.Forms.Timer
+$hold.Interval = 400
+$hold.Add_Tick({ [AltNative]::TakeForeground($form.Handle) })
+$script:flip = $false
+$churn = New-Object System.Windows.Forms.Timer
+$churn.Interval = 150
+$churn.Add_Tick({
+    $script:flip = -not $script:flip
+    $target = if ($script:flip) { $tb1.Handle } else { $tb2.Handle }
+    [AltNative]::NotifyWinEvent(0x8005, $target, -4, 0)
+})
+$stop = New-Object System.Windows.Forms.Timer
+$stop.Interval = 60000
+$stop.Add_Tick({ [System.Windows.Forms.Application]::Exit() })
+$form.Add_Shown({ [AltNative]::TakeForeground($form.Handle); $hold.Start(); $churn.Start(); $stop.Start() })
+[System.Windows.Forms.Application]::Run($form)
+"#;
+
+/// **Criterion 12, the churn half.** A foreign process holds the foreground and re-raises
+/// `EVENT_OBJECT_FOCUS` for the same window over and over — the frontmost-window churn that
+/// erased the typing on the acceptance machine. The subscription must see every event
+/// (positive control: `focus_repeats` grows), raise not a single flush request, and leave
+/// the typed strokes exactly where they were.
+///
+/// Before the memory of task T-10-0e this scenario read `window_flushes` up with every
+/// event and the buffer emptied — section 3 of the task report carries the live pre-repair
+/// run (11 of 36 strokes erased, one hotkey press of six on an empty buffer).
+#[test]
+#[ignore = "spawns PowerShell helper windows and takes the foreground; run deliberately with --ignored --test-threads=1"]
+fn the_same_hwnd_churn_of_the_foreground_window_is_turned_away_and_the_strokes_survive() {
+    let repeater = SpawnedScript::spawn("langsw-t10e-repeater.ps1", REPEATER_PS1);
+
+    assert!(
+        wait_until(Duration::from_secs(10), || foreground_pid()
+            == repeater.id()),
+        "the repeater window never became the foreground; its churn would be background \
+         churn and the scenario would be the one of task T-10-0, not this one"
+    );
+
+    let watching = watchdog::watch().expect("the subscriptions must install");
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    // Priming: the first delivered event finds the memory empty (or stale) and legitimately
+    // flushes once while storing the hwnd; every event after it is a repeat. Growth of
+    // `focus_repeats` here is already the positive control that the churn is being
+    // delivered into this process.
+    let start = watchdog::counters();
+
+    assert!(
+        pump_until(Duration::from_secs(10), || {
+            watchdog::counters().focus_repeats - start.focus_repeats >= 1
+        }),
+        "positive control failed: the staged churn never reached the subscription — \
+         a green verdict here would have checked nothing (WINEVENT_SKIPOWNPROCESS)"
+    );
+
+    // Take whatever the priming event left pending, so the assertions below are about the
+    // steady churn and nothing else.
+    let _ = watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0));
+
+    // What the user had typed. The stamps do not matter: nothing may flush from here on.
+    for time in [10, 20, 30, 40, 50, 60] {
+        press_at(time);
+    }
+    assert_eq!(buffer::len(), 6);
+
+    let before = watchdog::counters();
+
+    let seen = pump_until(Duration::from_secs(12), || {
+        watchdog::counters().focus_repeats - before.focus_repeats >= 20
+    });
+
+    let counted = delta(before, watchdog::counters());
+
+    assert!(
+        seen,
+        "positive control failed: {} repeats in 12 s — the churn stopped being delivered",
+        counted.focus_repeats
+    );
+
+    assert_eq!(
+        counted.window_flushes, 0,
+        "the same-hwnd churn of the foreground window must not raise a single flush \
+         request (T-10-0e)"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        None,
+        "and must leave no flush pending for the input thread"
+    );
+    assert_eq!(
+        buffer::len(),
+        6,
+        "the strokes typed under the frontmost churn survived it — the defect of the \
+         acceptance session, repaired"
+    );
+
+    buffer::uninstall();
+    drop(watching);
+}
+
+/// **Criterion 12, the transfer half.** The same foreign foreground window, but every event
+/// names a *different* hwnd than the one before it — a real focus transfer between two
+/// controls. The memory must not eat these: each one is a change of the user's input
+/// target, and the flush of FR-10 must arrive and empty the buffer.
+#[test]
+#[ignore = "spawns PowerShell helper windows and takes the foreground; run deliberately with --ignored --test-threads=1"]
+fn a_focus_transfer_to_a_different_hwnd_by_a_foreign_process_still_flushes() {
+    let alternator = SpawnedScript::spawn("langsw-t10e-alternator.ps1", ALTERNATOR_PS1);
+
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            foreground_pid() == alternator.id()
+        }),
+        "the alternator window never became the foreground"
+    );
+
+    let watching = watchdog::watch().expect("the subscriptions must install");
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let start = watchdog::counters();
+
+    // Delivery first: without at least one flush request there is nothing to judge.
+    assert!(
+        pump_until(Duration::from_secs(15), || {
+            watchdog::counters().window_flushes - start.window_flushes >= 1
+        }),
+        "no alternating event was delivered; FR-10 cannot be judged by this run"
+    );
+
+    let _ = watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0));
+
+    // Strokes stamped from the message stream this thread has just pumped — the tick domain
+    // the event timestamps live in (FR-12).
+    //
+    // SAFETY: takes no arguments, touches no memory of ours, and returns the tick count of
+    // the last message this thread retrieved; the queue was pumped a moment ago. The
+    // `as u32` is the documented reinterpretation of a tick the system hands back signed.
+    let typed_at = unsafe { GetMessageTime() } as u32;
+
+    for _ in 0..6 {
+        press_at(typed_at);
+    }
+    assert_eq!(buffer::len(), 6);
+
+    let mid = watchdog::counters();
+
+    // Two more events guarantee at least one raised strictly after the strokes.
+    assert!(
+        pump_until(Duration::from_secs(15), || {
+            watchdog::counters().window_flushes - mid.window_flushes >= 2
+        }),
+        "the alternating churn stopped arriving"
+    );
+
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Cleared { removed: 6 }),
+        "FR-10: a focus transfer to a different hwnd still flushes what was typed before it"
     );
     assert_eq!(buffer::len(), 0);
 
