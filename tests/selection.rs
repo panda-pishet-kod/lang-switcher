@@ -2200,6 +2200,137 @@ fn the_selection_path_does_not_start_in_a_password_field() {
     assert!(asked < handed, "SEC-06 is decided before the handover");
 }
 
+// ---------------------------------------------------------------------------------------
+// Р-62 — a non-empty typing buffer takes the press to the backspace path, not the probe
+// ---------------------------------------------------------------------------------------
+
+/// **Decision Р-62, task T-10-0d.** A non-empty typing buffer proves no selection gesture has
+/// happened since the last stroke (FR-10), so FR-60 resolves to the typing-buffer path and the
+/// `Ctrl+C` probe of FR-61 must not run. The branch answers `false` — and, because that is the
+/// ordinary "convert what I typed" case and not a failure, it neither opens the clipboard nor
+/// counts a refusal.
+#[test]
+fn a_non_empty_buffer_takes_the_backspace_path_without_the_probe() {
+    use lang_switcher::buffer;
+    use lang_switcher::hook::{Edge, KeyEvent};
+
+    let _serialised = serialised();
+
+    // The path is on, so FR-65 cannot be the reason for the `false` below — the buffer is.
+    selection::publish(&settings::Selection::default());
+    assert!(selection::path_enabled());
+
+    // A buffer on this thread with one real stroke in it. `record` on an ordinary key stores a
+    // stroke even with no cache published (its characters are simply empty), which is all this
+    // test needs: `is_empty()` must read `false`.
+    buffer::install(&settings::Buffer::default());
+    let stored = buffer::record(KeyEvent {
+        vk: 0x41,
+        edge: Edge::Down,
+        extra_info: 0x00CA_FE01,
+        scan: 0x1E,
+        flags: 0,
+        time: 0,
+    });
+    assert_eq!(stored, buffer::Recorded::Stored);
+    assert!(!buffer::is_empty(), "the buffer holds a stroke");
+
+    let clip_before = selection::counters();
+    let path_before = selection::path_counters();
+
+    // The branch of FR-60, called exactly as `app::window_proc` calls it — on the input thread,
+    // which is the thread this test is standing in for by installing the buffer.
+    assert!(
+        !selection::wants_selection_path(),
+        "Р-62: a non-empty buffer means no selection, so the press takes the backspace path"
+    );
+
+    let clip_after = selection::counters();
+    let path_after = selection::path_counters();
+
+    // ⚠ The whole of criterion 9: not one clipboard access, so not one `Ctrl+C` probe.
+    assert_eq!(
+        clip_after.opens, clip_before.opens,
+        "the clipboard was not opened"
+    );
+    assert_eq!(clip_after.closes, clip_before.closes);
+    assert_eq!(clip_after.open_retries, clip_before.open_retries);
+
+    // Nothing handed over, and — unlike a password field or a missing cache — nothing counted as
+    // a refusal: converting typed text is the feature working, not the selection path failing.
+    assert_eq!(path_after.handovers, path_before.handovers);
+    assert_eq!(path_after.refusals, path_before.refusals);
+
+    // Leave the thread as clean as an ordinary input thread would be between presses.
+    buffer::uninstall();
+}
+
+/// **Р-62, the separating control.** With the buffer *empty* — the only state a real selection
+/// can share — the branch does **not** stop at the Р-62 check: it goes on to the reasons that
+/// existed before this task, and a thread with no mapping cache reaches the plan refusal. This
+/// is what proves position 15's selection path is left reachable and unchanged.
+#[test]
+fn an_empty_buffer_still_reaches_the_reasons_that_came_before_p62() {
+    use lang_switcher::buffer;
+
+    let _serialised = serialised();
+
+    selection::publish(&settings::Selection::default());
+    assert!(selection::path_enabled());
+
+    // An empty buffer on this thread: `is_empty()` is `true`, so the Р-62 check falls through.
+    buffer::install(&settings::Buffer::default());
+    assert!(buffer::is_empty(), "the buffer is empty");
+
+    let path_before = selection::path_counters();
+
+    // No cache was published into this buffer, so `plan_for_press` finds nothing and the branch
+    // answers `false` through the *plan* refusal — the pre-Р-62 reason, reached only because the
+    // empty buffer did not short-circuit first.
+    assert!(
+        !selection::wants_selection_path(),
+        "an empty buffer with no cache falls back through the plan refusal, as before"
+    );
+
+    let path_after = selection::path_counters();
+    assert_eq!(
+        path_after.refusals,
+        path_before.refusals + 1,
+        "the empty-buffer path reaches and counts the plan refusal — Р-62 did not intercept it"
+    );
+
+    buffer::uninstall();
+}
+
+/// **Р-62, the structural half.** FR-65 is still decided first; the emptiness of the buffer is
+/// decided next, and before the password check, the plan and the hand-over — so the `Ctrl+C`
+/// probe cannot be reached while the buffer holds text.
+#[test]
+fn p62_is_asked_after_fr65_and_before_the_probe_can_run() {
+    let source = source_of("selection.rs");
+    let body = source
+        .split("pub fn wants_selection_path()")
+        .nth(1)
+        .expect("the branch exists");
+
+    let fr65 = body.find("path_enabled()").expect("FR-65 is asked");
+    let p62 = body
+        .find("crate::buffer::is_empty()")
+        .expect("Р-62 reads the buffer length");
+
+    assert!(fr65 < p62, "FR-65 stays the first question");
+
+    for later in ["password_field()", "plan_for_press()", "post_to_ui_thread("] {
+        let position = body
+            .find(later)
+            .unwrap_or_else(|| panic!("{later} is asked"));
+        assert!(
+            p62 < position,
+            "Р-62 must be decided before {later}, so a non-empty buffer never reaches the probe"
+        );
+    }
+}
+
 /// **Acceptance point 16в.** The clipboard is never touched by the thread that owns the hook —
 /// the branch on that thread posts a message and does nothing else.
 ///

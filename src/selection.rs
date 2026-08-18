@@ -2394,12 +2394,13 @@ pub fn path_counters() -> PathCounters {
 /// with it; `false` when the typing-buffer path is to run **right here, right now**, exactly as
 /// it did before this task existed.
 ///
-/// Four reasons to answer `false`, and all four are settled before a single system call is made
+/// Five reasons to answer `false`, and all five are settled before a single system call is made
 /// on the user's behalf:
 ///
 /// | Reason | Requirement | What was touched |
 /// |---|---|---|
 /// | `[selection] enabled = false` | **FR-65** | nothing. No `Ctrl+C`, no clipboard, no message |
+/// | the typing buffer is not empty | **Р-62, FR-60, FR-10** | nothing |
 /// | the focus is in a password field | **SEC-06, FR-70** | nothing |
 /// | no cache, or no target layout | FR-30, FR-35 | nothing |
 /// | the UI thread has no window | — | nothing |
@@ -2407,9 +2408,44 @@ pub fn path_counters() -> PathCounters {
 /// ⚠ **The first row is the whole of acceptance point 17.** With the path switched off this
 /// function reads one atomic and returns, and the clipboard of the machine is not opened, not
 /// read and not written — not even for step 1.
+///
+/// # The second row — decision Р-62
+///
+/// The probe of steps 2–3 of FR-61 is a real `Ctrl+C`, and `Ctrl+C` is not "copy" everywhere:
+/// in a console it is an **interrupt** that can break a running process, and in editors such as
+/// VS Code it copies the *whole line* when nothing is selected, so the sequence number moves,
+/// the probe reads "there is a selection", and the replacement is pasted without erasing
+/// (`ghbdtnпривет`). T-10-0c measured both harms.
+///
+/// Р-62 rests on the flush table of FR-10: **every gesture that makes a selection empties the
+/// typing buffer** — a mouse click (Raw Input), the arrows and `Home`/`End` (the LL-hook rows),
+/// and `Shift+arrow`, the keyboard-selection gesture, which task T-10-0d measured on the live
+/// hook rather than assuming (buffer `6 → 0`). So a **non-empty buffer proves no selection
+/// gesture has happened since the last stroke**, which means there is nothing selected, and
+/// FR-60's rule "no selection → convert the typing buffer" is settled *without* the probe. The
+/// press then runs `inject::on_hotkey` exactly as it did before the selection path existed.
+///
+/// The read is [`crate::buffer::is_empty`], a thread-local read of the input thread's own
+/// buffer (section 6.3): this function is only ever reached on the input thread, because
+/// `app::window_proc` guards the call with `buffer::is_installed`. No atomic, no system call,
+/// no counter — a non-empty buffer is the ordinary "convert what I typed" case, not a refusal,
+/// so it is answered as quietly as FR-65 is. When the buffer is empty — the only state a real
+/// selection can coexist with — the function proceeds unchanged, which is why the selection
+/// path of position 15 is untouched.
 pub fn wants_selection_path() -> bool {
     // FR-65, first, and before anything else can have an opinion.
     if !path_enabled() {
+        return false;
+    }
+
+    // ⚠ **Р-62, FR-60, FR-10 — task T-10-0d.** A non-empty typing buffer proves no selection
+    // gesture has happened since the last stroke (every such gesture flushes the buffer by
+    // FR-10; `Shift+arrow` was measured on the live hook, not assumed). There is therefore no
+    // selection, FR-60 resolves to the typing-buffer path, and the destructive `Ctrl+C` probe
+    // of FR-61 must not run. Read of the input thread's own thread-local buffer — no system
+    // call, no clipboard, no message, and no counter, because this is the ordinary case and not
+    // a refusal. Empty buffer — the only state a selection can share — falls through unchanged.
+    if !crate::buffer::is_empty() {
         return false;
     }
 
