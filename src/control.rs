@@ -1145,6 +1145,21 @@ pub struct Snapshot {
     /// and that name is read nowhere in this program, so there is nothing here that could carry
     /// one.
     pub device_changes: u32,
+    /// `WinEvent` flush events ignored as background noise — **FR-10 as read by Р-60**, task
+    /// **T-10-0**.
+    ///
+    /// [`crate::watchdog::Counters::background_skips`]. The reason it is out here is the trap
+    /// that task's specification names: the product subscribes with `WINEVENT_SKIPOWNPROCESS`,
+    /// so a storm staged inside the product's own process is invisible to it and a test would
+    /// come out green having checked nothing. A storm staged by a **foreign** process is
+    /// visible, and this number growing under it is the positive control — the storm was
+    /// delivered and turned away — while `window_flushes` standing still is the repair itself.
+    /// One number cannot say both things, which is why the pair exists.
+    ///
+    /// SEC-01, SEC-07: a count of events. Not a window, not a title, not a stroke — the event
+    /// behind it is dropped whole and nothing of it is read but the handle relation that
+    /// decided it.
+    pub background_skips: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1182,6 +1197,7 @@ pub fn snapshot() -> Snapshot {
         fail_safe: crate::hook::fail_safe(),
         consecutive_panics: crate::hook::consecutive_panics(),
         device_changes: subscriptions.device_changes,
+        background_skips: subscriptions.background_skips,
     }
 }
 
@@ -1214,9 +1230,14 @@ pub fn snapshot() -> Snapshot {
 /// list asks whether FR-99 had already disarmed the program in the state under investigation, and
 /// there is no other way to ask that from outside the process.
 ///
-/// `device_changes` of task **T-08-4** is appended last, and it is the one number that shows FR-21
-/// still being delivered after that task replaced the mechanism which delivered it. See
+/// `device_changes` of task **T-08-4** is appended after them, and it is the one number that shows
+/// FR-21 still being delivered after that task replaced the mechanism which delivered it. See
 /// [`Snapshot::device_changes`].
+///
+/// `background_skips` of task **T-10-0** is appended last, by the same rule, and it is the number
+/// that makes the repair of the acceptance defect *observable*: a staged storm that reaches the
+/// product moves it, and `window_flushes` — read from `watchdog::counters()` by the file sink —
+/// standing still beside it is the repair. See [`Snapshot::background_skips`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1239,7 +1260,8 @@ pub fn render(state: &Snapshot) -> String {
          password_probes={}\n\
          fail_safe={}\n\
          consecutive_panics={}\n\
-         device_changes={}\n",
+         device_changes={}\n\
+         background_skips={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1261,6 +1283,7 @@ pub fn render(state: &Snapshot) -> String {
         u8::from(state.fail_safe),
         state.consecutive_panics,
         state.device_changes,
+        state.background_skips,
     )
 }
 
@@ -1280,7 +1303,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 21] = [
+pub const KEYS: [&str; 22] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1302,6 +1325,7 @@ pub const KEYS: [&str; 21] = [
     "fail_safe",
     "consecutive_panics",
     "device_changes",
+    "background_skips",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

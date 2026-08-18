@@ -968,8 +968,15 @@ fn the_device_change_key_of_t_08_4_is_published_as_a_count() {
     assert!(control::KEYS.contains(&"device_changes"));
     assert!(!control::RESERVED_KEYS.contains(&"device_changes"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed.
-    assert_eq!(control::KEYS[control::KEYS.len() - 1], "device_changes");
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task T-10-0
+    // appended `background_skips` after this one, so "last" became a fixed position, the same
+    // rewrite the fail_safe pair went through when this key arrived.
+    assert_eq!(
+        control::KEYS
+            .iter()
+            .position(|key| *key == "device_changes"),
+        Some(20)
+    );
 }
 
 /// The key mirrors `watchdog`, and is not a number of the channel's own making.
@@ -1007,4 +1014,66 @@ fn the_two_new_keys_mirror_the_state_of_the_hook() {
     // the state under investigation, and the reason point 5 of its list came out "not the cause".
     assert!(!state.fail_safe);
     assert_eq!(state.consecutive_panics, 0);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-0 — the key that makes the repair of the acceptance defect observable
+// -------------------------------------------------------------------------------------
+
+/// `background_skips` is published, it is a count, and it says what `watchdog` says.
+///
+/// # Why it exists at all
+///
+/// Task T-10-0 gated the flush of FR-10 on the event concerning the user's actual foreground
+/// (decision Р-60): the idle focus churn of background processes used to reach `request_flush`
+/// and erase what the user had typed — the defect that broke the acceptance session. The
+/// product subscribes with `WINEVENT_SKIPOWNPROCESS`, so a storm staged in the product's own
+/// process is invisible to it, and a test that staged one there would come out green having
+/// checked nothing. The storm therefore comes from a **foreign** process, and this number
+/// growing under it is the positive control that the storm was delivered and turned away —
+/// while `window_flushes` standing still beside it is the repair itself.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count. The event behind it is dropped whole; nothing of it is read but the handle
+/// relation that decided it, which is asserted below by parsing the value as a number and
+/// refusing anything else.
+#[test]
+fn the_background_skip_key_of_t_10_0_is_published_as_a_count() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("background_skips="))
+        .expect("the channel does not publish background_skips");
+
+    println!("background_skips={published}");
+
+    assert!(
+        published.parse::<u32>().is_ok(),
+        "background_skips must be a count, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"background_skips"));
+    assert!(!control::RESERVED_KEYS.contains(&"background_skips"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed.
+    assert_eq!(control::KEYS[control::KEYS.len() - 1], "background_skips");
+}
+
+/// The key mirrors `watchdog`, and is not a number of the channel's own making.
+#[test]
+fn the_background_skip_key_mirrors_the_counter_of_the_watchdog() {
+    let before = lang_switcher::watchdog::counters().background_skips;
+    let state = control::snapshot();
+    let after = lang_switcher::watchdog::counters().background_skips;
+
+    // Monotone counters cannot be pinned to an equality across two reads — another test of
+    // this binary may hold live subscriptions while this one runs — so the assertion is that
+    // the snapshot never lags behind a reading taken before it and never runs ahead of one
+    // taken after it, the same shape the focus-and-probe test uses for guard's counters.
+    assert!(
+        state.background_skips >= before && state.background_skips <= after,
+        "background_skips is watchdog's own count of ignored background events"
+    );
 }

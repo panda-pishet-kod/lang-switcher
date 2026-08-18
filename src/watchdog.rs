@@ -192,12 +192,18 @@
 //! A `WinEvent` callback is called by the system, synchronously, from inside the event source's
 //! own delivery, exactly like a hook callback: a slow one holds up whatever generated the event.
 //! [`win_event_proc`] is therefore built to the same budget as the keyboard callback even though
-//! no requirement names a number for it — **one compare-and-swap on an atomic, two counter
-//! increments and one `PostMessageW`**, which does not block. No allocation (NFR-03), no lock
-//! (NFR-04), no I/O (NFR-05), no Win32 call that can be made to wait, and nothing that can
-//! panic across the `extern "system"` boundary. The work the event implies — flushing a ring of
-//! strokes, and possibly rebuilding the layout cache — is done later, by the input thread, in
-//! its message loop.
+//! no requirement names a number for it — **two read-only window queries
+//! (`GetForegroundWindow` and `GetAncestor`, the gate of task T-10-0), one compare-and-swap on
+//! an atomic, two counter increments and one `PostMessageW`**, none of which blocks: the two
+//! queries read the window manager's session state without entering any other process and
+//! without taking any lock an application could hold, the same standing `GetMessageTime` has on
+//! the `WM_INPUT` path. No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), no Win32
+//! call that can be made to wait, and nothing that can panic across the `extern "system"`
+//! boundary. The work the event implies — flushing a ring of strokes, and possibly rebuilding
+//! the layout cache — is done later, by the input thread, in its message loop. For the
+//! overwhelmingly common event — the background churn [`concerns_the_foreground`] turns away —
+//! the callback now does *less* than it did before task T-10-0: the two queries and one
+//! increment, and neither post.
 //!
 //! The `WM_INPUT` path is not a callback at all: it is a message, handled in the message loop
 //! of the input thread. Its cost is one `GetRawInputData` into a stack buffer and a comparison
@@ -264,12 +270,12 @@ use windows::Win32::UI::Input::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DBT_DEVTYP_DEVICEINTERFACE, DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE,
-    EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GetMessageTime,
-    HDEVNOTIFY, KillTimer, PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN,
-    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN,
-    RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification, WINEVENT_OUTOFCONTEXT,
-    WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
-    WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
+    EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GA_ROOT, GetAncestor,
+    GetForegroundWindow, GetMessageTime, HDEVNOTIFY, KillTimer, PBT_APMRESUMEAUTOMATIC,
+    RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN,
+    RI_MOUSE_BUTTON_5_DOWN, RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT,
+    WM_INPUT_DEVICE_CHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
 };
 use windows::core::{Error as WinError, GUID, PCWSTR, Result as WinResult};
 
@@ -518,6 +524,17 @@ static MOUSE_FLUSHES: AtomicU32 = AtomicU32::new(0);
 /// `WinEvent` flush requests raised by [`win_event_proc`].
 static WINDOW_FLUSHES: AtomicU32 = AtomicU32::new(0);
 
+/// `WinEvent` flush events **ignored** because they did not concern the user's foreground —
+/// task T-10-0, decision Р-60.
+///
+/// The observable half of the repair: the storm this counter absorbs used to be
+/// [`WINDOW_FLUSHES`], 288 of them in the seven minutes of the acceptance run, and every one
+/// of them threw away what the user had typed. A test that stages the storm from a foreign
+/// process reads this number as its **positive control** — growth here is the proof that the
+/// storm reached the product and was turned away, where a green run with both counters flat
+/// would prove only that nothing was delivered at all.
+static BACKGROUND_SKIPS: AtomicU32 = AtomicU32::new(0);
+
 /// Flush requests the input thread actually took out of [`PENDING_FLUSH`].
 ///
 /// Lower than [`WINDOW_FLUSHES`] whenever two events coalesced, which is exactly what the
@@ -588,6 +605,10 @@ pub struct Counters {
     /// [`DEVICE_NOTICE_FAILURES`] and the `Drop` of [`DeviceNotice`] for why this failure is a
     /// count rather than a line in the journal.
     pub device_notice_failures: u32,
+    /// Flush events ignored as background noise — task T-10-0, decision Р-60. See
+    /// [`BACKGROUND_SKIPS`]: growth here under a staged storm is the positive control that the
+    /// storm was delivered and turned away rather than never seen.
+    pub background_skips: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -604,6 +625,7 @@ pub fn counters() -> Counters {
         device_changes: DEVICE_CHANGES.load(Ordering::Relaxed),
         layout_probes: LAYOUT_PROBES.load(Ordering::Relaxed),
         device_notice_failures: DEVICE_NOTICE_FAILURES.load(Ordering::Relaxed),
+        background_skips: BACKGROUND_SKIPS.load(Ordering::Relaxed),
     }
 }
 
@@ -1109,16 +1131,94 @@ impl Drop for Watching {
     }
 }
 
+/// Whether a flush event's window is part of the user's actual input context — the user's
+/// foreground window — rather than the internal churn of some background process. Task
+/// **T-10-0**, decision **Р-60**.
+///
+/// # Why this exists — the defect that broke the acceptance session
+///
+/// The `EVENT_OBJECT_FOCUS` subscription hears the whole session, and idle background
+/// Electron windows raise ~0.8 focus events a second without being touched (measured by two
+/// independent instruments — `ПРИЁМКА.md`). A human types for 2–3 seconds before pressing the
+/// hotkey, so a background event almost always landed inside that window and threw the typing
+/// away: `strokes_removed=18` of 18 over seven minutes, all nine hotkey presses on an empty
+/// buffer. Р-60 fixes the reading of FR-10: "смена активного окна и смена фокуса" is a change
+/// **at the user**, not the private business of any process in the session.
+///
+/// # The predicate, and why it is this one — measured, not assumed
+///
+/// The root of the event's window (`GetAncestor(GA_ROOT)`) is compared with
+/// `GetForegroundWindow()` at callback time. On 297 recorded events (task report, section 2)
+/// the predicate separated without a single error:
+///
+/// * background churn while another window held the foreground — root differs, **0 of 253**
+///   passed;
+/// * real foreground changes and the focus events that follow them — **10 of 10** passed: an
+///   out-of-context callback runs 0–32 ms after the event, by which time the foreground has
+///   already moved, so the event's root and the answer agree;
+/// * churn of the window that itself **is** the foreground — passes, and must: that is the
+///   FR-10 row «смена фокуса внутри окна», and Р-60 keeps it flushing.
+///
+/// The alternative reading of the hypothesis — compare the event's **process** with the
+/// foreground window's process — measured equivalent on the same data but coarser: a
+/// background window of the foreground process (a second editor window of the same
+/// application) would pass it wrongly, and it costs one Win32 call more.
+///
+/// # What a skipped event cannot lose
+///
+/// A transitional event whose window is no longer (or not yet) the foreground is skipped, and
+/// that is lossless the same way coalescing is: the change that completes raises its own event
+/// with a **newer** timestamp, and a flush stamped later removes everything the skipped one
+/// would have removed and more (`reset_up_to`). A null foreground — the moment between two
+/// windows, or a secure desktop — answers `false` for the same reason: the gain that follows
+/// carries the flush.
+///
+/// # Cost — NFR-01…NFR-05, NFR-10
+///
+/// Two read-only `user32` queries. `GetForegroundWindow` reads one pointer out of the session's
+/// window-manager state; `GetAncestor(GA_ROOT)` walks the parent chain in the same shared
+/// state. Neither enters another process, neither takes a lock an application could hold,
+/// neither can be made to wait — the same standing `GetMessageTime` already has on the
+/// `WM_INPUT` path. No allocation, no I/O, nothing that can panic.
+///
+/// # NFR-14
+///
+/// Both calls report failure with a null handle, and both nulls are examined by the one
+/// comparison: a null root never equals a live foreground, and a null foreground is refused
+/// outright before the second call is made.
+///
+/// Public because the verdict is the whole of what task T-10-0 changed, and the tests of
+/// `tests\watchdog.rs` drive it with real windows — their own, and the foreground's.
+pub fn concerns_the_foreground(window: HWND) -> bool {
+    // SAFETY: takes no arguments and touches no memory of ours; returns the current foreground
+    // window by value, or null when there is none — which the check below treats as "not the
+    // user's context", the conservative answer for a moment between two windows.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.0.is_null() {
+        return false;
+    }
+
+    // SAFETY: `window` is read by value; `GetAncestor` walks the ancestor chain in the window
+    // manager's own state and dereferences nothing of ours. A handle that is stale or null —
+    // both possible for an asynchronous event — comes back null, and null fails the comparison
+    // against a foreground that was just established to be non-null.
+    let root = unsafe { GetAncestor(window, GA_ROOT) };
+
+    root == foreground
+}
+
 /// The `WinEvent` callback — FR-10, half of the FR-21 delivery, and the first mechanism of
 /// FR-80.
 ///
 /// Runs on the watcher thread, called by the system out of that thread's message queue.
-/// **Everything it does is an atomic and a `PostMessageW`**, for the reason given in the module
-/// documentation: a `WinEvent` callback is as much in the system's way as a hook callback is.
-/// That applies with particular force to `EVENT_SYSTEM_DESKTOPSWITCH`, which the system raises
-/// while it is switching desktops: reinstalling the hook from here would put a
-/// `SetWindowsHookExW` inside the system's own desktop switch. The arm below marks and wakes,
-/// and [`reinstall_hook`] runs later, on the input thread, out of its ordinary message loop.
+/// **Everything it does is two read-only window queries, an atomic and a `PostMessageW`**, for
+/// the reason given in the module documentation: a `WinEvent` callback is as much in the
+/// system's way as a hook callback is. That applies with particular force to
+/// `EVENT_SYSTEM_DESKTOPSWITCH`, which the system raises while it is switching desktops:
+/// reinstalling the hook from here would put a `SetWindowsHookExW` inside the system's own
+/// desktop switch. The arm below marks and wakes, and [`reinstall_hook`] runs later, on the
+/// input thread, out of its ordinary message loop.
 ///
 /// The buffer cannot be flushed from here even if it were free to be: the buffer is a
 /// thread-local of the *input* thread (section 6.3), so the only correct thing to do with the
@@ -1126,14 +1226,16 @@ impl Drop for Watching {
 ///
 /// # Safety
 ///
-/// Called by the OS with the arguments of a `WinEvent`. Every argument is read by value, none is
-/// dereferenced — the window handle is not even looked at — so the caller owes this function
-/// nothing. Nothing in the body can panic, which is what keeps the `extern "system"` boundary
-/// sound: there is no allocation, no indexing, no `unwrap` and no arithmetic that can overflow.
+/// Called by the OS with the arguments of a `WinEvent`. Every argument is read by value, none
+/// is dereferenced — the window handle travels by value into [`concerns_the_foreground`],
+/// which hands it to the window manager and dereferences nothing — so the caller owes this
+/// function nothing. Nothing in the body can panic, which is what keeps the `extern "system"`
+/// boundary sound: there is no allocation, no indexing, no `unwrap` and no arithmetic that can
+/// overflow.
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
-    _window: HWND,
+    window: HWND,
     _object_id: i32,
     _child_id: i32,
     _thread_id: u32,
@@ -1156,6 +1258,18 @@ unsafe extern "system" fn win_event_proc(
     if !is_flush_event(event) {
         // A subscription is per event code, so this cannot happen; it is here because a callback
         // the system drives is the wrong place to assume anything.
+        return;
+    }
+
+    if !concerns_the_foreground(window) {
+        // **Task T-10-0, Р-60: the internal churn of a background process is not a change of
+        // the user's input context.** Before this gate, the idle focus traffic of background
+        // Electron windows — ~0.8 events a second, measured — flushed the buffer between the
+        // user's typing and the hotkey, and the acceptance session failed on it. The event is
+        // counted and dropped whole: no flush, and no layout probe either, because the layout
+        // question below is about the thread of the **foreground** window, which a background
+        // event says nothing about. Every event that passes the gate still asks it.
+        BACKGROUND_SKIPS.fetch_add(1, Ordering::Relaxed);
         return;
     }
 
