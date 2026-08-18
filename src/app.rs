@@ -1019,8 +1019,12 @@ fn cache_or_fallback(built: Result<LayoutCache, LayoutError>) -> LayoutCache {
 /// ⚠ **FR-11: this does not flush the buffer.** `Recorder::set_cache` re-resolves the position
 /// of the active layout and touches nothing else, which is the whole of what a rebuild owes the
 /// buffer. See [`publish_active_layout`] for the other half of the same rule.
+///
+/// Through [`with_recorder_wherever_it_is`] since task T-10-0f, so that a rebuild the probe of
+/// FR-21 asked for during the interval of FR-71 lands in the parked recorder instead of being
+/// swept and thrown away — see there for the measurement.
 fn publish_cache(cache: LayoutCache) {
-    crate::buffer::with(|recorder| recorder.set_cache(cache));
+    with_recorder_wherever_it_is(|recorder| recorder.set_cache(cache));
 }
 
 /// Publishes the layout strokes are recorded under — the `hkl` of FR-04.
@@ -1029,8 +1033,13 @@ fn publish_cache(cache: LayoutCache) {
 /// of a word is a normal thing to do and not a signal that what came before is void; every
 /// stroke carries the layout it was typed under precisely so that nothing has to be thrown
 /// away. There is no `reset` on this path and there must never be one.
+///
+/// Through [`with_recorder_wherever_it_is`] since task T-10-0f: the probe of FR-21 arrives
+/// during the interval of FR-71, when the recorder is parked, and the layout it carries is
+/// exactly the value the parked recorder must wake up with — the stale one is what stamped
+/// strokes with a direction that converted «в себя». See there for the measurement.
 fn publish_active_layout(layout: LayoutId) {
-    crate::buffer::with(|recorder| recorder.set_active_layout(layout));
+    with_recorder_wherever_it_is(|recorder| recorder.set_active_layout(layout));
 }
 
 /// Re-reads the layout of the foreground window and rebuilds the cache if it really changed —
@@ -1091,12 +1100,21 @@ fn publish_active_layout(layout: LayoutId) {
 /// buffer *is* flushed on a foreground change, but by the row of the FR-10 table that says so
 /// and through [`crate::watchdog::apply_flush`], which is a different event that happens to
 /// arrive at the same time.
+///
+/// ⚠ **Task T-10-0f: the recorder is read and written wherever FR-70 keeps it.** The probe
+/// behind `WM_APP_LAYOUT` is posted in the same breath as the `WM_APP_FLUSH` of the very focus
+/// change it is about, and answering that flush **parks** the recorder until the verdict of
+/// FR-71 comes back — so this function runs precisely inside the interval in which
+/// `buffer::with` answers `None`. Reading the recorded layout through `buffer::with` here made
+/// every focus-change probe compare against nothing and refresh nothing, measured live as
+/// `layout_probes=1` against `window_flushes=12` and a first press that converted a stale
+/// direction «в себя»; see [`with_recorder_wherever_it_is`] for the measurement that pinned it.
 fn refresh_layout_and_cache() {
     let observed = foreground_layout();
 
     if !layout_refresh_needed(
         observed,
-        crate::buffer::with(|recorder| recorder.active_layout()),
+        with_recorder_wherever_it_is(|recorder| recorder.active_layout()),
     ) {
         return;
     }
@@ -1411,6 +1429,48 @@ fn restore_buffer() {
     };
 
     crate::buffer::install_recorder(parked);
+}
+
+/// Applies `f` to the typing buffer of this thread wherever FR-70 currently keeps it —
+/// installed on the thread, or parked by [`apply_buffering_gate`] — and answers `None` on a
+/// thread that has neither, which is every thread but the input one.
+///
+/// # Task T-10-0f — why the parked recorder must be reachable
+///
+/// The layout probe of FR-21 rides `WM_APP_LAYOUT`, posted by the `WinEvent` callback in the
+/// same breath as the `WM_APP_FLUSH` of the very focus change it is about — and answering that
+/// flush is what *parks* the buffer: FR-71 publishes «ответа ещё нет» and [`park_buffer`]
+/// takes the recorder off the thread until the verdict comes back, milliseconds later. The
+/// probe is therefore dispatched into the one window of time in which `buffer::with` answers
+/// `None`, and a refresh routed only through it died there, silently and deterministically.
+///
+/// Measured on a live run before the repair: `layout_probes=1` against `window_flushes=12`,
+/// and pinned by a paired experiment on the running product — five bare `WM_APP_LAYOUT` all
+/// answered, five posted immediately behind a `WM_APP_FLUSH` all lost (report of task
+/// T-10-0f). The recorder those probes were for was not gone; it was in [`PARKED_BUFFER`],
+/// holding the stale `active` that stamped the next strokes and made the first press of FR-26
+/// convert «в себя» — the acceptance session's «первое нажатие моргает». So the publication
+/// reaches the recorder wherever it is, and the probe stops caring whether it arrived during
+/// the interval of FR-71.
+///
+/// # Why this is sound
+///
+/// A parked recorder is a value of this same thread: parking moves it between two
+/// thread-locals of the input thread and nothing else, both moves happen inside one message of
+/// the same message loop, and this helper runs in that loop too — so the borrow is
+/// single-threaded and can never observe the recorder half-moved. `is_installed` first, so a
+/// thread with a live buffer never pays the second thread-local access; NFR-01 to NFR-05 are
+/// untouched — nothing here runs in the hook callback.
+///
+/// ⚠ **FR-70 is not weakened.** What reaches a parked recorder through this helper is the
+/// layout of FR-04 and the cache of FR-20 — recording stays off, the ring stays empty and
+/// zeroed (SEC-02), and no stroke can be added to a recorder that is not installed.
+fn with_recorder_wherever_it_is<R>(f: impl FnOnce(&mut crate::buffer::Recorder) -> R) -> Option<R> {
+    if crate::buffer::is_installed() {
+        return crate::buffer::with(f);
+    }
+
+    PARKED_BUFFER.with(|cell| cell.borrow_mut().as_mut().map(f))
 }
 
 /// Hands the input thread the settings it reacts to — FR-02 and FR-95 for the hook, FR-07 for
@@ -1832,7 +1892,22 @@ unsafe extern "system" fn window_proc(
             // ⚠ **FR-11: not one of these paths flushes the buffer.** A layout change is not a
             // reason to throw away what the user has typed; every stroke carries the layout it
             // was typed under precisely so that it does not have to be.
-            if crate::buffer::is_installed() {
+            //
+            // ⚠ **Task T-10-0f: the gate is the window register, not the buffer.** This used
+            // to be `buffer::is_installed()`, and that was the loss the acceptance session
+            // felt as «первое нажатие моргает»: the probe behind `WM_APP_LAYOUT` follows the
+            // `WM_APP_FLUSH` of its own focus change, answering that flush parks the buffer
+            // for the interval of FR-71, and `is_installed` then answered «no» for exactly
+            // every probe a focus change ever posted — measured as `layout_probes=1` against
+            // `window_flushes=12`, and pinned by the paired experiment written up at
+            // `with_recorder_wherever_it_is`. `is_input_window` is the same fact from the
+            // other side — the register of windows — and it is the test built for precisely
+            // this trap: see its documentation, «FR-70 is the one requirement that takes the
+            // buffer away». SEC-05 stands as it was: a forged message at the UI or watcher
+            // window is refused by the register exactly as it was refused by the missing
+            // buffer, and what a forged one at the input window buys — a re-read of the
+            // system's own layout list into memory of ours — is unchanged.
+            if is_input_window(hwnd) {
                 match crate::watchdog::rebuild_for(message) {
                     Some(crate::watchdog::Rebuild::Unconditional) => {
                         publish_active_layout(foreground_layout());
@@ -2666,6 +2741,10 @@ mod tests {
 
     /// A thread with no buffer is every thread but the input one, and none of the three calls
     /// above may fail there — the window procedure runs on all of them.
+    ///
+    /// Since task T-10-0f "no buffer" means neither installed **nor parked**: the publications
+    /// look into [`PARKED_BUFFER`] too, and on every thread but the input one both slots are
+    /// forever empty, which is what this asserts by running on a thread that never had either.
     #[test]
     fn a_thread_without_a_buffer_is_left_alone() {
         assert!(!buffer::is_installed());
@@ -2675,6 +2754,81 @@ mod tests {
         publish_cache(crate::convert::fallback_cache());
 
         assert!(!buffer::is_installed());
+        assert_eq!(
+            with_recorder_wherever_it_is(|recorder| recorder.active_layout()),
+            None,
+            "a thread that never had a recorder has nothing parked either"
+        );
+    }
+
+    /// **Task T-10-0f: the layout probe's publication reaches a parked recorder.** The
+    /// regression behind «первое нажатие моргает»: the probe of FR-21 arrives during the
+    /// interval of FR-71 — the recorder is parked — and before this task the publications
+    /// went through `buffer::with` alone, so every focus-change probe refreshed nothing and
+    /// the recorder woke up with the stale layout that stamped the next strokes (FR-26
+    /// converting «в себя»). Driven here exactly as the window procedure drives it: park,
+    /// publish, restore, and the fresh layout must be what the restored recorder answers.
+    #[test]
+    fn the_layout_probe_publication_reaches_a_parked_recorder() {
+        let other = LayoutId::from_raw(0x0419_0419);
+
+        buffer::install_recorder(Recorder::with_capacity(8));
+        publish_cache(crate::convert::fallback_cache());
+        publish_active_layout(SOME_LAYOUT);
+
+        // The interval of FR-71: the focus moved, no verdict yet, the recorder is parked.
+        park_buffer();
+        assert!(!buffer::is_installed());
+
+        // The read half of `refresh_layout_and_cache` sees the parked recorder's layout —
+        // before this task it answered `None` here and the refresh was refused outright.
+        assert_eq!(
+            with_recorder_wherever_it_is(|recorder| recorder.active_layout()),
+            Some(SOME_LAYOUT)
+        );
+
+        // The write half, exactly as `refresh_layout_and_cache` makes it when the probe
+        // finds the foreground layout moved.
+        publish_active_layout(other);
+        publish_cache(crate::convert::fallback_cache());
+
+        // The verdict comes back, the recorder is restored — and it wakes up recording
+        // under the layout the probe delivered, not under the stale one it parked with.
+        restore_buffer();
+        assert!(buffer::is_installed());
+        assert_eq!(
+            buffer::with(|recorder| recorder.active_layout()),
+            Some(other),
+            "the restored recorder must carry the layout published while it was parked"
+        );
+        assert_eq!(buffer::with(|recorder| recorder.has_cache()), Some(true));
+
+        buffer::uninstall();
+    }
+
+    /// The counterpart rule of the test above: what reaches a parked recorder is the layout
+    /// of FR-04 and the cache of FR-20 and nothing else — FR-70 is not weakened. The ring
+    /// comes back exactly as [`park_buffer`] left it: empty and zeroed (SEC-02).
+    #[test]
+    fn a_publication_into_a_parked_recorder_stores_no_strokes() {
+        buffer::install_recorder(Recorder::with_capacity(8));
+        press();
+        assert_eq!(buffer::len(), 1);
+
+        // Parking wipes — that is FR-70's own rule, asserted here as the baseline.
+        park_buffer();
+
+        publish_active_layout(SOME_LAYOUT);
+        publish_cache(crate::convert::fallback_cache());
+
+        restore_buffer();
+        assert_eq!(
+            buffer::len(),
+            0,
+            "publications while parked must not resurrect or add strokes"
+        );
+
+        buffer::uninstall();
     }
 
     /// **FR-21 delivery**, task T-03-3: when the layout probe behind `WM_APP_LAYOUT` is worth a

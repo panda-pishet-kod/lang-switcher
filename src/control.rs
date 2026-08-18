@@ -1174,6 +1174,21 @@ pub struct Snapshot {
     /// SEC-01, SEC-07: a count of events. Not a window, not a title, not a stroke — the
     /// handle behind it is compared as a value and dropped.
     pub focus_repeats: u32,
+    /// Layout probes of FR-21 the input thread answered — `WM_APP_LAYOUT` arrivals at the
+    /// probe handler, task **T-10-0f**.
+    ///
+    /// [`crate::watchdog::Counters::layout_probes`], until now published through the file
+    /// report alone. The reason it moves onto the channel is the reason `focus_repeats` did:
+    /// the number is the observable of a repair. Before T-10-0f the probe posted for every
+    /// focus change died in the parking interval of FR-71 — measured as `layout_probes=1`
+    /// against `window_flushes=12`, felt as «первое нажатие моргает» — and the repair is
+    /// exactly this number growing beside [`Snapshot::focus_changes`] on a live run, press by
+    /// press, without waiting for the process to exit. Beside `cache_builds` it also splits
+    /// «the probe arrived» from «the layout really moved», which is the pair FR-21's delivery
+    /// is judged by.
+    ///
+    /// SEC-01, SEC-07: a count of messages. Not a layout name, not a window, not a stroke.
+    pub layout_probes: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1213,6 +1228,7 @@ pub fn snapshot() -> Snapshot {
         device_changes: subscriptions.device_changes,
         background_skips: subscriptions.background_skips,
         focus_repeats: subscriptions.focus_repeats,
+        layout_probes: subscriptions.layout_probes,
     }
 }
 
@@ -1254,10 +1270,14 @@ pub fn snapshot() -> Snapshot {
 /// reaches the product moves it, and `window_flushes` — read from `watchdog::counters()` by the
 /// file sink — standing still beside it is the repair. See [`Snapshot::background_skips`].
 ///
-/// `focus_repeats` of task **T-10-0e** is appended last, and it is the same shape one layer in:
-/// the churn of the *frontmost* window passes the gate of T-10-0 legitimately, and this is the
-/// number that shows it being turned away by the focus memory instead of erasing the user's
-/// typing. See [`Snapshot::focus_repeats`].
+/// `focus_repeats` of task **T-10-0e** is appended by the same rule, and it is the same shape
+/// one layer in: the churn of the *frontmost* window passes the gate of T-10-0 legitimately,
+/// and this is the number that shows it being turned away by the focus memory instead of
+/// erasing the user's typing. See [`Snapshot::focus_repeats`].
+///
+/// `layout_probes` of task **T-10-0f** is appended last, again by the same rule: it is the
+/// number whose refusal to grow beside `focus_changes` was the defect, and whose growth beside
+/// it is the repair. See [`Snapshot::layout_probes`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1282,7 +1302,8 @@ pub fn render(state: &Snapshot) -> String {
          consecutive_panics={}\n\
          device_changes={}\n\
          background_skips={}\n\
-         focus_repeats={}\n",
+         focus_repeats={}\n\
+         layout_probes={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1306,6 +1327,7 @@ pub fn render(state: &Snapshot) -> String {
         state.device_changes,
         state.background_skips,
         state.focus_repeats,
+        state.layout_probes,
     )
 }
 
@@ -1325,7 +1347,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 23] = [
+pub const KEYS: [&str; 24] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1349,6 +1371,7 @@ pub const KEYS: [&str; 23] = [
     "device_changes",
     "background_skips",
     "focus_repeats",
+    "layout_probes",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

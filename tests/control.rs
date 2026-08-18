@@ -1126,8 +1126,13 @@ fn the_focus_repeat_key_of_t_10_0e_is_published_as_a_count() {
     assert!(control::KEYS.contains(&"focus_repeats"));
     assert!(!control::RESERVED_KEYS.contains(&"focus_repeats"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed.
-    assert_eq!(control::KEYS[control::KEYS.len() - 1], "focus_repeats");
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // T-10-0f appended `layout_probes` after this one, so "last" became a fixed position,
+    // the same rewrite `background_skips` and `device_changes` each went through in turn.
+    assert_eq!(
+        control::KEYS.iter().position(|key| *key == "focus_repeats"),
+        Some(22)
+    );
 }
 
 /// The key mirrors `watchdog`, and is not a number of the channel's own making.
@@ -1142,5 +1147,65 @@ fn the_focus_repeat_key_mirrors_the_counter_of_the_watchdog() {
     assert!(
         state.focus_repeats >= before && state.focus_repeats <= after,
         "focus_repeats is watchdog's own count of skipped foreground repeats"
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-0f — the key that makes the layout-probe repair observable
+// -------------------------------------------------------------------------------------
+
+/// `layout_probes` is published, it is a count, and it says what `watchdog` says.
+///
+/// # Why it exists at all
+///
+/// The probe behind `WM_APP_LAYOUT` is posted beside the `WM_APP_FLUSH` of its own focus
+/// change, and answering that flush parks the typing buffer for the interval of FR-71 — so
+/// before task T-10-0f every focus-change probe arrived at a gate that read the parked
+/// buffer as "not the input thread" and was dropped whole: `layout_probes=1` against
+/// `window_flushes=12` on the live run, felt as «первое нажатие моргает» (FR-26 converting
+/// a stale direction «в себя»). The number was previously visible only in the file report,
+/// that is, only after the process had exited; the repair is precisely this count growing
+/// beside `focus_changes` on a live run, which is what moving it onto the channel makes
+/// observable press by press.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count of messages. Not a layout name, not a window, not a stroke — asserted below by
+/// parsing the value as a number and refusing anything else.
+#[test]
+fn the_layout_probe_key_of_t_10_0f_is_published_as_a_count() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("layout_probes="))
+        .expect("the channel does not publish layout_probes");
+
+    println!("layout_probes={published}");
+
+    assert!(
+        published.parse::<u32>().is_ok(),
+        "layout_probes must be a count, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"layout_probes"));
+    assert!(!control::RESERVED_KEYS.contains(&"layout_probes"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed.
+    assert_eq!(control::KEYS[control::KEYS.len() - 1], "layout_probes");
+}
+
+/// The key mirrors `watchdog`, and is not a number of the channel's own making.
+#[test]
+fn the_layout_probe_key_mirrors_the_counter_of_the_watchdog() {
+    let before = lang_switcher::watchdog::counters().layout_probes;
+    let state = control::snapshot();
+    let after = lang_switcher::watchdog::counters().layout_probes;
+
+    // The same bracket the two mirrors above use: a monotone counter cannot be pinned to
+    // an equality across two reads while other tests of this binary run.
+    assert!(
+        state.layout_probes >= before && state.layout_probes <= after,
+        "layout_probes is watchdog's own count of answered layout probes"
     );
 }
