@@ -3698,23 +3698,53 @@ fn launch_password_window() -> Result<App, String> {
     ))
 }
 
-/// Every position that cannot be run yet, with the task that owns it.
+/// Every position the bench cannot run, with who it now waits on.
 ///
-/// Positions 19 and 21 are **П** — locking the session and sleeping the machine are done by a
-/// person in the acceptance session of §11.6, and the task is explicit that no stub is to be
-/// written for them. They appear here so the summary counts them, and nowhere else.
+/// ⚠ **After task T-10-2 there is no `pending` row owned by a closed task.** The debt this list
+/// exists to prevent — a position reported as waiting for a task that has already finished — was
+/// carried by three rows: position 9 named the closed T-09-1, and positions 18 and 20 named the
+/// closed T-06-2. All three are corrected here to **П**, and every remaining `pending` is a
+/// position of the acceptance session of §11.6, verified by a person:
+///
+/// * **9** — the bench cannot drive an elevated (High-integrity) window: measured in T-10-2,
+///   `SetForegroundWindow` from medium integrity returns false and the elevated edit element is
+///   invisible to a medium UI Automation client, both UIPI. The product's `uiAccess` hook works
+///   over it; a person types into the elevated Notepad and watches the conversion.
+/// * **13** — RDP, optional (question 31), never implemented by choice.
+/// * **18, 20** — moved from А to П by the user (SPEC §11.3, `d063407`): the desktop switch and
+///   the shell restart are a person's actions (footnote 4 of §11.3, and `explorer` is on the
+///   protected list of `own.rs`).
+/// * **19, 21** — locking the session and sleeping the machine are done by a person, and the
+///   task was explicit that no stub is written for them.
+///
+/// They appear here so the summary counts them, and nowhere else.
 pub fn pending_positions() -> Vec<Row> {
     let scenario = format!("текст {EXPECTED:?} и раскладка RU");
 
     vec![
+        // ⚠ **Owner is «П», not «T-09-1».** T-09-1 is closed and its `uiAccess` mechanism is
+        // shipped (the installed product carries `UIAccess=1`), so a row that still named it as
+        // the missing owner would be the untruth this list exists to prevent. The position is
+        // pending because the **bench** cannot drive it, not because a task has not written it:
+        // task T-10-2 measured that a medium-integrity bench with no `uiAccess` can neither bring
+        // the elevated (High-integrity) Notepad forward — `SetForegroundWindow` returns false —
+        // nor read its edit element through UI Automation, both being UIPI consequences. The
+        // product with `uiAccess` works over the elevated window; a person verifies it in the
+        // acceptance session of §11.6, exactly as for positions 5, 6, 7, 10 and 12. SPEC §11.3
+        // still marks this position А¹; moving it to П there is the user's decision (T-10-2 report).
         Row::pending(
             9,
             "Блокнот от администратора",
             Assertion::Other("работа поверх элевированного окна"),
-            "T-09-1",
+            "П",
             &scenario,
         )
-        .with_note("механизм uiAccess (§8.1) не реализован"),
+        .with_note(
+            "П — приёмочная сессия §11.6: стенд (средняя целостность, без uiAccess) не может ни \
+             вывести вперёд, ни прочитать элевированное High-окно (UIPI), измерено T-10-2; \
+             продукт с uiAccess проверяется человеком. SPEC §11.3 помечает А¹ — перевод в П за \
+             пользователем",
+        ),
         Row::pending(
             13,
             "Сеанс RDP",
@@ -3734,14 +3764,24 @@ pub fn pending_positions() -> Vec<Row> {
         // temporary third layout of footnote 3 and the borrowing of `config.toml`. A row that
         // still called them `pending` would be the same kind of untruth this list exists to
         // prevent: a matrix that reports a position as waiting for a task that has finished.
+        // ⚠ **Owner is «П», not «T-06-2».** T-06-2 is closed and the watchdog of §4.9 is
+        // implemented; the user moved positions 18 and 20 from А to П by decision (SPEC §11.3,
+        // commit `d063407`). Footnote 4 of §11.3 is explicit that the desktop switch is verified
+        // by a person pressing `Ctrl+Alt+Del`, because the protected desktop it exercises is
+        // unreachable to the bench. A row still naming a closed task as owner would be the untruth
+        // this list exists to prevent — the same debt that positions 16 and 17 used to carry.
         Row::pending(
             18,
             "Переключение рабочего стола",
             Assertion::Other("хук восстановлен"),
-            "T-06-2",
+            "П",
             "хук восстановлен",
         )
-        .with_note("сторож хука (§4.9) не реализован"),
+        .with_note(
+            "П по решению пользователя (SPEC §11.3, d063407) — приёмочная сессия §11.6; сторож \
+             хука T-06-2 реализован, но защищённый рабочий стол требует живого Ctrl+Alt+Del \
+             (сноска 4 §11.3)",
+        ),
         Row::pending(
             19,
             "Блокировка и разблокировка сеанса",
@@ -3750,14 +3790,21 @@ pub fn pending_positions() -> Vec<Row> {
             "хук восстановлен",
         )
         .with_note("П — приёмочная сессия §11.6; заготовка не пишется по указанию задания"),
+        // ⚠ **Owner is «П», not «T-06-2».** As with position 18: the watchdog is implemented and
+        // the user moved this position to П (SPEC §11.3, `d063407`). Taking down `explorer.exe` is
+        // forbidden to the bench anyway — the name is on the protected list of `own.rs` — so the
+        // shell restart is a person's action in §11.6.
         Row::pending(
             20,
             "Перезапуск explorer.exe",
             Assertion::Other("иконка в трее восстановлена"),
-            "T-06-2",
+            "П",
             "иконка восстановлена",
         )
-        .with_note("сторож (§4.9) не реализован"),
+        .with_note(
+            "П по решению пользователя (SPEC §11.3, d063407) — приёмочная сессия §11.6; снятие \
+             explorer стенду запрещено (запретный список own.rs)",
+        ),
         Row::pending(
             21,
             "Сон и пробуждение",
