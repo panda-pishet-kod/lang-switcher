@@ -1191,8 +1191,14 @@ fn the_layout_probe_key_of_t_10_0f_is_published_as_a_count() {
     assert!(control::KEYS.contains(&"layout_probes"));
     assert!(!control::RESERVED_KEYS.contains(&"layout_probes"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed.
-    assert_eq!(control::KEYS[control::KEYS.len() - 1], "layout_probes");
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // T-10-1 appended the four `callback_` keys after this one, so "last" became a fixed
+    // position — the same rewrite `focus_repeats`, `background_skips` and `device_changes`
+    // each went through in turn.
+    assert_eq!(
+        control::KEYS.iter().position(|key| *key == "layout_probes"),
+        Some(23)
+    );
 }
 
 /// The key mirrors `watchdog`, and is not a number of the channel's own making.
@@ -1208,4 +1214,105 @@ fn the_layout_probe_key_mirrors_the_counter_of_the_watchdog() {
         state.layout_probes >= before && state.layout_probes <= after,
         "layout_probes is watchdog's own count of answered layout probes"
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-1 — the four keys of the callback-latency instrument, criterion 2 §13
+// -------------------------------------------------------------------------------------
+
+/// The four `callback_` keys are published, they are numbers, and they close the tail of
+/// `KEYS` together, in the order samples → p50 → p99 → max.
+///
+/// # Why they exist at all
+///
+/// Criterion 2 of §13 requires the callback's latency **measured** — `QueryPerformanceCounter`
+/// over at least 10 000 keystrokes — and the duration of a hook callback is not observable
+/// from outside the process even in principle, which is the argument of решение Р-37 that put
+/// `watchdog_recoveries` on this channel. Position 23 of §11.3 reads `callback_samples` to
+/// know the sample was taken, and judges the three durations against NFR-01 (p99 < 100 000 нс)
+/// and NFR-02 (max < 1 000 000 нс).
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count of invocations and three durations. Nothing about any stroke enters the instrument
+/// — the probe starts before the callback reads the stroke and its drop knows only the clock.
+/// Asserted below by parsing every value as a number and refusing anything else.
+#[test]
+fn the_callback_latency_keys_of_t_10_1_are_published_as_numbers() {
+    let text = control::render(&control::snapshot());
+
+    for key in [
+        "callback_samples",
+        "callback_p50_ns",
+        "callback_p99_ns",
+        "callback_max_ns",
+    ] {
+        let prefix = format!("{key}=");
+        let published = text
+            .lines()
+            .find_map(|line| line.strip_prefix(prefix.as_str()))
+            .unwrap_or_else(|| panic!("the channel does not publish {key}"));
+
+        println!("{key}={published}");
+
+        assert!(
+            published.parse::<u64>().is_ok(),
+            "{key} must be a number, not {published:?}"
+        );
+
+        assert!(control::KEYS.contains(&key));
+        assert!(!control::RESERVED_KEYS.contains(&key));
+    }
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. The four
+    // arrive together and close the list: one instrument, one block in the diff.
+    assert_eq!(
+        &control::KEYS[control::KEYS.len() - 4..],
+        &[
+            "callback_samples",
+            "callback_p50_ns",
+            "callback_p99_ns",
+            "callback_max_ns",
+        ]
+    );
+}
+
+/// The keys mirror the instrument in `hook`, and are not numbers of the channel's own making.
+#[test]
+fn the_callback_latency_keys_mirror_the_instrument_of_the_hook() {
+    let before = lang_switcher::hook::callback_latency().samples;
+    let state = control::snapshot();
+    let after = lang_switcher::hook::callback_latency().samples;
+
+    // The same bracket every mirror in this file uses: the sample count is monotone and
+    // cannot be pinned to an equality across two reads while other tests of this binary run.
+    assert!(
+        state.callback_samples >= before && state.callback_samples <= after,
+        "callback_samples is the instrument's own count of measured invocations"
+    );
+
+    // The percentile pair is ordered by construction — both are read off one histogram with
+    // one rank rule. (p99 against the exact maximum is deliberately NOT asserted: the
+    // percentiles are upper bounds of their cells and the maximum is exact, so a run whose
+    // every sample sits in one cell reports p99 one cell above max — documented in
+    // `hook::CallbackLatency`.)
+    assert!(
+        state.callback_p50_ns <= state.callback_p99_ns,
+        "the median cannot exceed the 99th percentile of the same histogram"
+    );
+
+    // No instrument has run in this test process — no hook is ever installed here (the
+    // header of tests\hook.rs says why) — so the published reading is the empty one: zeros
+    // across all four keys, not garbage and not a stale cell.
+    if state.callback_samples == 0 {
+        assert_eq!(
+            (
+                state.callback_p50_ns,
+                state.callback_p99_ns,
+                state.callback_max_ns
+            ),
+            (0, 0, 0),
+            "an empty instrument must publish zeros, not remnants"
+        );
+    }
 }

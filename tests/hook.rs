@@ -836,7 +836,11 @@ fn fr_96_is_decided_before_any_other_logic_of_the_callback() {
         "FR-96 must be answered before catch_unwind, classify, FR-03, FR-90 and the hotkey"
     );
 
-    // The only two things allowed in front of it, and they are there.
+    // The only two things allowed in front of it, and they are there. (Under the `testing`
+    // feature — and only there — task T-10-1's QPC probe stands above the HC_ACTION test
+    // too: one leaf counter read that cannot fail, loop or block, absent from every shipped
+    // build. The exact-list assertion below covers the stretch from the dereference to
+    // FR-96, which the probe does not enter.)
     assert!(hc_action < emergency, "the system's contract comes first");
     assert!(
         deref < emergency && hc_action < deref,
@@ -921,4 +925,68 @@ fn fr_96_is_not_subject_to_the_filter_of_fr_03() {
     assert!(!outcome.fire_hotkey);
     assert!(!outcome.probe_layout);
     assert_eq!(hook::EXIT_EMERGENCY, 3);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-1 — the QPC instrument of criterion 2 §13, feature `testing` only
+// -------------------------------------------------------------------------------------
+
+/// The histogram of the latency instrument, driven with a **known** distribution.
+///
+/// No test installs a hook (the header of this file says why), so the real probe cannot be
+/// exercised here; what can be, deterministically, is the arithmetic every verdict of
+/// position 23 rests on. `hook::record_callback_ticks` is the funnel the probe's drop feeds,
+/// so this drives the very path the measurement uses, minus the two QPC reads.
+///
+/// One test and not three, on purpose: the histogram is a process-wide static and the tests
+/// of one binary run concurrently, so the empty reading must be asserted before anything
+/// records, inside the same test. Three acts, in order.
+#[cfg(feature = "testing")]
+#[test]
+fn the_latency_instrument_reports_the_recorded_distribution() {
+    use windows::Win32::System::Performance::QueryPerformanceFrequency;
+
+    // Act 1 — an instrument nothing has touched reports zeros, not remnants.
+    let empty = hook::callback_latency();
+    assert_eq!(empty.samples, 0, "no callback has run in this process");
+    assert_eq!((empty.p50_ns, empty.p99_ns, empty.max_ns), (0, 0, 0));
+
+    // The same clock the instrument converts against, read the same way. The frequency is
+    // documented constant since boot, so the expected values below are exact, not close.
+    let mut frequency = 0i64;
+    // SAFETY: writes one `i64` through a pointer to a live local; nothing else is touched.
+    unsafe { QueryPerformanceFrequency(&mut frequency) }
+        .expect("QueryPerformanceFrequency is documented to succeed since Windows XP");
+    assert!(frequency > 0);
+    let to_ns = |ticks: u64| ticks * 1_000_000_000 / frequency as u64;
+
+    // Act 2 — a distribution whose percentiles are arithmetic: ninety-nine samples of two
+    // ticks and a single spike of five hundred.
+    for _ in 0..99 {
+        hook::record_callback_ticks(2);
+    }
+    hook::record_callback_ticks(500);
+
+    // Act 3 — the reading matches the arithmetic.
+    let read = hook::callback_latency();
+    assert_eq!(read.samples, 100);
+    assert_eq!(
+        read.p50_ns,
+        to_ns(3),
+        "rank 50 of 100 falls in the [2,3) cell, reported as its upper bound"
+    );
+    assert_eq!(
+        read.p99_ns,
+        to_ns(3),
+        "rank 99 of 100 is the ninety-ninth two-tick sample, still the [2,3) cell"
+    );
+    assert_eq!(
+        read.max_ns,
+        to_ns(500),
+        "the maximum is exact — the spike itself, not a cell bound"
+    );
+    assert!(
+        read.p50_ns <= read.p99_ns,
+        "one histogram, one rank rule: the median cannot exceed the 99th percentile"
+    );
 }

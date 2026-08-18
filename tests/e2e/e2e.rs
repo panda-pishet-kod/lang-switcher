@@ -526,6 +526,7 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             16 => scenarios::position_16(&context),
             14 => scenarios::position_14(&context),
             22 => scenarios::position_22(&context),
+            23 => scenarios::position_23(&context),
             24 => scenarios::position_24(&context),
             other => {
                 println!("  позиция {other} не выполняется стендом");
@@ -635,7 +636,12 @@ fn selected_positions(arguments: &[String]) -> Vec<u8> {
     // task T-04-3-3, decision Р-52. Position 17 is deliberately **last**: it is the only one
     // that rewrites the user's `config.toml`, and the shorter that file spends replaced the
     // fewer ways a run can end with it still replaced.
-    const DEFAULT: [u8; 17] = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 24, 17];
+    // Position 23 arrived with task T-10-1 and stands between 22 and 24: it is a Notepad
+    // position like its neighbours, and it stays ahead of 17 for the same reason everything
+    // does — 17 rewrites the user's `config.toml` and goes last.
+    const DEFAULT: [u8; 18] = [
+        1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 23, 24, 17,
+    ];
 
     let mut iterator = arguments.iter();
     while let Some(argument) = iterator.next() {

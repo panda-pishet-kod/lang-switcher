@@ -1188,6 +1188,245 @@ mod fault {
 }
 
 // ---------------------------------------------------------------------------------------
+// QPC instrumentation of the callback — criterion 2 of §13, task T-10-1. Feature `testing`.
+// ---------------------------------------------------------------------------------------
+
+/// Measures the wall time of [`keyboard_hook_proc`], entry to exit, on every invocation.
+///
+/// Criterion 2 of §13, word for word: «Задержка callback хука измеряется
+/// `QueryPerformanceCounter` на выборке не менее 10 000 нажатий». This module is that
+/// measurement. It is compiled **only** under the cargo feature `testing` — the same terms as
+/// [`fault`] and for the same reason: the shipped Release configuration carries no trace of
+/// it, and acceptance criterion 8 of §13 verifies that. No environment variable arms it
+/// (decision Р-53: the five-string list is closed); it is always on in a `testing` build and
+/// nonexistent in every other.
+///
+/// # The instrument obeys the NFRs it measures
+///
+/// NFR-01 to NFR-05 are properties of the callback, so anything added to the callback must
+/// hold them too, or the measurement poisons the measured:
+///
+/// * **No allocation (NFR-03).** The histogram is a `static` array of fixed cells; the probe
+///   is one `i64` on the callback's stack. Nothing is boxed, grown or formatted.
+/// * **No blocking (NFR-04).** Two relaxed atomic RMWs per sample — `fetch_add` on one cell,
+///   `fetch_max` on the maximum — and nothing that can wait.
+/// * **No I/O, no journalling (NFR-05).** `QueryPerformanceCounter` is not I/O: it is a leaf
+///   read of the counter the kernel maps into every process — no handle, no file, no
+///   syscall that can block. The pair of calls costs **≈ 22 ns on this machine** (measured
+///   by T-10-1's microbenchmark, 10⁷ pairs), which is the price the instrument adds to a
+///   callback whose budget is 100 µs — one part in four and a half thousand.
+/// * **Failure is examined (NFR-13).** Both QPC results are checked; a failed read discards
+///   the sample into [`DISCARDED`] rather than fabricating a zero.
+///
+/// # What one sample is
+///
+/// One invocation of the callback, whatever path it took — the forwarding of a foreign
+/// `code`, a suppressed hotkey, an ordinary recorded stroke, an absorbed panic. Down and up
+/// edges are two invocations and therefore two samples. The histogram is **one common
+/// sample**: strokes the conversion recorded and strokes that passed by are not separated,
+/// because separating them would put a classification branch on the instrumented path and
+/// grow the instrument beyond what the criterion asks. Stated plainly for the report of
+/// T-10-1, which the task requires to say so.
+///
+/// # Units
+///
+/// Cells are one QPC tick wide. The system's tick on this machine is 100 ns
+/// (`QueryPerformanceFrequency` = 10 MHz, measured); the conversion to nanoseconds happens
+/// in [`callback_latency`], outside the callback, against the frequency read at that moment
+/// — the callback itself never multiplies or divides. A sample beyond the last cell lands
+/// *in* the last cell, so a percentile that reaches it reads as the range's edge while
+/// [`MAX_TICKS`] keeps the exact maximum unclamped.
+///
+/// # SEC-01, SEC-07
+///
+/// A duration and a count. No virtual key, no scan code and nothing derived from one enters
+/// this module: the probe is constructed before the stroke is even read out of `lparam` and
+/// its drop knows only the clock.
+#[cfg(feature = "testing")]
+mod profile {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+    use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+
+    /// Cells of the histogram, one QPC tick each — 819.2 µs of range at the measured 10 MHz.
+    ///
+    /// Sized from the requirement, not from hope: NFR-01 puts p99 under 100 µs, so a range
+    /// eight times that keeps every percentile the verdicts need inside exact cells, and
+    /// only the absolute maximum — which [`MAX_TICKS`] carries exactly — could ever pass it.
+    const CELLS: usize = 8192;
+
+    /// Sentinel in [`Probe::start`]: the entry read failed, the sample must be discarded.
+    ///
+    /// `i64::MIN` is not a value `QueryPerformanceCounter` can return on a running system —
+    /// the counter starts near zero at boot and is documented monotone.
+    const NO_START: i64 = i64::MIN;
+
+    /// The fixed cells of criterion 2's histogram. Static: zero allocations (NFR-03).
+    ///
+    /// `u32` per cell: 2³² samples of one duration is over a day of continuous 40 000-a-second
+    /// typing, and the acceptance run is ten thousand.
+    static HISTOGRAM: [AtomicU32; CELLS] = [const { AtomicU32::new(0) }; CELLS];
+
+    /// The exact maximum, in ticks, unclamped — NFR-02's number.
+    static MAX_TICKS: AtomicU64 = AtomicU64::new(0);
+
+    /// Samples thrown away because a QPC read failed — NFR-13: examined and recorded, in an
+    /// atomic and not in a journal (NFR-05), the same terms as [`super::POST_FAILURES`].
+    /// Never observed non-zero; kept because a discarded sample that left no trace would be
+    /// a hole in a measurement whose whole point is to be trusted.
+    static DISCARDED: AtomicU32 = AtomicU32::new(0);
+
+    /// The stack half of the instrument: QPC at construction, QPC and one histogram cell at
+    /// drop. Dropping at the end of [`super::keyboard_hook_proc`]'s body is what makes every
+    /// return path — forward, suppress, pass — one sample without a line at each `return`.
+    pub(super) struct Probe {
+        start: i64,
+    }
+
+    impl Probe {
+        /// Reads the entry timestamp. The one call site is the first line of the callback.
+        #[inline]
+        pub(super) fn begin() -> Self {
+            let mut start = 0i64;
+
+            // SAFETY: `QueryPerformanceCounter` writes one `i64` through the pointer to a
+            // live local and touches nothing else of ours. It reads the counter page the
+            // kernel maps read-only into every process: no handle, no blocking, callable
+            // from any context including a hook callback (NFR-04, NFR-05).
+            let started = unsafe { QueryPerformanceCounter(&mut start) };
+
+            Self {
+                start: if started.is_ok() { start } else { NO_START },
+            }
+        }
+    }
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            if self.start == NO_START {
+                DISCARDED.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+
+            let mut end = 0i64;
+
+            // SAFETY: identical to the read in `begin`, and for the identical reason.
+            if unsafe { QueryPerformanceCounter(&mut end) }.is_err() {
+                DISCARDED.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+
+            // Monotone by documentation; a negative difference would mean the clock went
+            // backwards and is discarded rather than recorded as an enormous unsigned value.
+            match u64::try_from(end.wrapping_sub(self.start)) {
+                Ok(ticks) => record_callback_ticks(ticks),
+                Err(_) => {
+                    DISCARDED.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Records one sample, in ticks. Two relaxed RMWs; the whole of the recording path.
+    ///
+    /// `pub` for one reason: `tests\hook.rs` drives the histogram with a **known**
+    /// distribution and asserts the percentiles below against arithmetic, which no real
+    /// keyboard can do deterministically. The callback's [`Probe`] funnels through here, so
+    /// the test exercises the very path the measurement uses.
+    pub fn record_callback_ticks(ticks: u64) {
+        MAX_TICKS.fetch_max(ticks, Ordering::Relaxed);
+
+        let cell = usize::try_from(ticks).map_or(CELLS - 1, |t| t.min(CELLS - 1));
+        HISTOGRAM[cell].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One reading of the instrument, in nanoseconds — what the SEC-04a channel publishes.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CallbackLatency {
+        /// Callback invocations measured so far. Criterion 2 wants at least 10 000.
+        pub samples: u64,
+        /// Median, as the upper bound of its cell — never understated.
+        pub p50_ns: u64,
+        /// 99th percentile on the same terms — the number NFR-01 bounds by 100 µs.
+        pub p99_ns: u64,
+        /// The exact worst case — the number NFR-02 bounds by 1 ms.
+        ///
+        /// Exact where the percentiles are cell bounds, so a run whose every sample sits in
+        /// one cell can legitimately report `p99_ns` one cell **above** `max_ns`. The two
+        /// answer different questions against different ceilings and are never compared with
+        /// each other.
+        pub max_ns: u64,
+    }
+
+    /// Sums the histogram and converts to nanoseconds. Called outside the callback — by the
+    /// channel's `snapshot()` and by tests — where cost does not matter.
+    ///
+    /// Not a consistent cut, on the same terms as `control::snapshot()`: recording continues
+    /// while this reads, every cell is monotone, and a percentile can only be nudged upward
+    /// by a sample arriving mid-walk. The tick length comes from `QueryPerformanceFrequency`
+    /// read here and now — documented constant since boot, so reading it late is reading it
+    /// exactly (NFR-13: the result and the zero case are both examined).
+    pub fn callback_latency() -> CallbackLatency {
+        let empty = CallbackLatency {
+            samples: 0,
+            p50_ns: 0,
+            p99_ns: 0,
+            max_ns: 0,
+        };
+
+        let mut frequency = 0i64;
+
+        // SAFETY: writes one `i64` through a pointer to a live local; nothing else of ours
+        // is touched. Documented to succeed on anything since Windows XP; examined anyway.
+        if unsafe { QueryPerformanceFrequency(&mut frequency) }.is_err() || frequency <= 0 {
+            return empty;
+        }
+        let frequency = frequency as u64;
+
+        let samples: u64 = HISTOGRAM
+            .iter()
+            .map(|cell| u64::from(cell.load(Ordering::Relaxed)))
+            .sum();
+
+        if samples == 0 {
+            return empty;
+        }
+
+        let to_ns = |ticks: u64| ticks.saturating_mul(1_000_000_000) / frequency;
+
+        CallbackLatency {
+            samples,
+            p50_ns: to_ns(percentile_ticks(samples, 50)),
+            p99_ns: to_ns(percentile_ticks(samples, 99)),
+            max_ns: to_ns(MAX_TICKS.load(Ordering::Relaxed)),
+        }
+    }
+
+    /// The upper bound, in ticks, of the cell holding the sample of rank `⌈total·percent/100⌉`.
+    ///
+    /// The upper bound and not the index: a sample in cell `i` took **at least** `i` and
+    /// **less than** `i + 1` ticks, so `i + 1` is the statement "the percentile is under
+    /// this", which is the direction a bound checked against a ceiling must round.
+    fn percentile_ticks(total: u64, percent: u64) -> u64 {
+        let rank = (total * percent).div_ceil(100).max(1);
+        let mut cumulative = 0u64;
+
+        for (index, cell) in HISTOGRAM.iter().enumerate() {
+            cumulative += u64::from(cell.load(Ordering::Relaxed));
+
+            if cumulative >= rank {
+                return index as u64 + 1;
+            }
+        }
+
+        CELLS as u64
+    }
+}
+
+#[cfg(feature = "testing")]
+pub use profile::{CallbackLatency, callback_latency, record_callback_ticks};
+
+// ---------------------------------------------------------------------------------------
 // The callback — NFR-01 to NFR-05
 // ---------------------------------------------------------------------------------------
 
@@ -1213,6 +1452,11 @@ const SUPPRESS: LRESULT = LRESULT(1);
 ///   file, and no call into `diag`. Where NFR-13 requires the result of a Win32 call to be
 ///   examined, it is examined and recorded in an atomic counter.
 ///
+/// A build with the `testing` feature adds exactly one thing to this list: the QPC probe of
+/// module [`profile`] — criterion 2 of §13 — which is two counter reads and two relaxed
+/// atomics per invocation and holds every property above; the module's documentation argues
+/// each. Every build without the feature has no trace of it.
+///
 /// # Safety
 ///
 /// Called by the system with the arguments of a low-level keyboard hook. Two obligations are
@@ -1221,6 +1465,15 @@ const SUPPRESS: LRESULT = LRESULT(1);
 /// the duration of the call; and for any negative `code` the procedure must pass the event on
 /// without inspecting it, which is the first thing this body does.
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // T-10-1, criterion 2 of §13: the probe measures this function entry to exit, recording
+    // on drop so that every return path below is one sample. It stands above the FR-96
+    // section legitimately: the property that section states — nothing above it can fail,
+    // loop or block — still holds, because constructing the probe is one leaf read of the
+    // kernel's counter page (≈ 11 ns), with no branch that hangs and no lock. Compiled only
+    // under `testing`; the shipped callback starts, as before, at the `code` check.
+    #[cfg(feature = "testing")]
+    let _probe = profile::Probe::begin();
+
     // The system's contract, and the precondition of the dereference below: a negative `code`
     // means "do not process this", and `lparam` is then not a `KBDLLHOOKSTRUCT` at all. This
     // is not logic that FR-96 has to come before — it is the condition under which there is a

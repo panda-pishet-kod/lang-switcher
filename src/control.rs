@@ -1189,6 +1189,35 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: a count of messages. Not a layout name, not a window, not a stroke.
     pub layout_probes: u32,
+    /// Callback invocations the QPC instrument of criterion 2 §13 has measured — task
+    /// **T-10-1**.
+    ///
+    /// [`crate::hook::callback_latency`]. The criterion demands «не менее 10 000 нажатий»,
+    /// and this is the number that proves the sample was taken rather than assumed; position
+    /// 23 of §11.3 reads it before it trusts the three percentile keys below. One invocation
+    /// is one sample, whatever path the callback took; a press and its release are two.
+    ///
+    /// SEC-01, SEC-07: a count of invocations. Not a key, not a scan code, not a stroke.
+    pub callback_samples: u64,
+    /// Median duration of the callback, in nanoseconds — task **T-10-1**.
+    ///
+    /// The reason these are on the channel is the reason `watchdog_recoveries` is (решение
+    /// Р-37): from outside the process the duration of a hook callback is not observable
+    /// even in principle, and criterion 2 of §13 requires it *measured*. Reported as the
+    /// upper bound of the histogram cell — never understated. Nanoseconds and not
+    /// microseconds because the callback is routinely submicrosecond and an integer of
+    /// microseconds would publish zeros.
+    ///
+    /// SEC-01, SEC-07: a duration. Nothing about any stroke enters the instrument.
+    pub callback_p50_ns: u64,
+    /// 99th percentile of the callback duration, in nanoseconds — the number **NFR-01**
+    /// bounds by 100 µs (100 000 here). Task **T-10-1**, same terms as
+    /// [`Snapshot::callback_p50_ns`].
+    pub callback_p99_ns: u64,
+    /// Exact worst case of the callback duration, in nanoseconds — the number **NFR-02**
+    /// bounds by 1 ms (1 000 000 here). Unclamped, unlike the percentiles, which read from
+    /// fixed histogram cells. Task **T-10-1**, same terms as [`Snapshot::callback_p50_ns`].
+    pub callback_max_ns: u64,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1203,7 +1232,7 @@ pub fn snapshot() -> Snapshot {
     let subscriptions = crate::watchdog::counters();
     let guard = crate::guard::counters();
 
-    Snapshot {
+    let mut state = Snapshot {
         buffer_len: BUFFER_LEN.load(Ordering::Relaxed),
         buffer_len_at_exit: BUFFER_LEN_AT_EXIT.load(Ordering::Relaxed),
         hook_installed: crate::hook::is_installed(),
@@ -1229,7 +1258,27 @@ pub fn snapshot() -> Snapshot {
         background_skips: subscriptions.background_skips,
         focus_repeats: subscriptions.focus_repeats,
         layout_probes: subscriptions.layout_probes,
-    }
+        callback_samples: 0,
+        callback_p50_ns: 0,
+        callback_p99_ns: 0,
+        callback_max_ns: 0,
+    };
+
+    // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
+    // walks its eight thousand cells — tens of microseconds — where everything above is a
+    // handful of atomic loads. Put ahead of them it would sit between a caller's publish and
+    // this function's read of the cheap mirrors, widening a window that was previously a few
+    // loads wide; a test that publishes `cycle_position` and immediately snapshots — while
+    // other tests of its binary publish the same process-wide mirror in parallel — is exactly
+    // the caller that noticed. The instrument's own keys lose nothing: they are monotone
+    // counts of a histogram no other publisher writes.
+    let callback = crate::hook::callback_latency();
+    state.callback_samples = callback.samples;
+    state.callback_p50_ns = callback.p50_ns;
+    state.callback_p99_ns = callback.p99_ns;
+    state.callback_max_ns = callback.max_ns;
+
+    state
 }
 
 /// The channel's payload: one `key=value` per line, ASCII, newline-terminated.
@@ -1278,6 +1327,14 @@ pub fn snapshot() -> Snapshot {
 /// `layout_probes` of task **T-10-0f** is appended last, again by the same rule: it is the
 /// number whose refusal to grow beside `focus_changes` was the defect, and whose growth beside
 /// it is the repair. See [`Snapshot::layout_probes`].
+///
+/// The four `callback_` keys of task **T-10-1** are appended after it, by the same rule and
+/// for the oldest reason on this channel: criterion 2 of §13 requires the callback's latency
+/// *measured* on ten thousand keystrokes, the duration of a hook callback is not observable
+/// from outside the process even in principle (the argument of решение Р-37), and position 23
+/// of §11.3 takes its three verdicts from these numbers. Samples first, then the median, the
+/// 99th percentile and the exact maximum, all in nanoseconds — see
+/// [`Snapshot::callback_samples`] through [`Snapshot::callback_max_ns`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1303,7 +1360,11 @@ pub fn render(state: &Snapshot) -> String {
          device_changes={}\n\
          background_skips={}\n\
          focus_repeats={}\n\
-         layout_probes={}\n",
+         layout_probes={}\n\
+         callback_samples={}\n\
+         callback_p50_ns={}\n\
+         callback_p99_ns={}\n\
+         callback_max_ns={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1328,6 +1389,10 @@ pub fn render(state: &Snapshot) -> String {
         state.background_skips,
         state.focus_repeats,
         state.layout_probes,
+        state.callback_samples,
+        state.callback_p50_ns,
+        state.callback_p99_ns,
+        state.callback_max_ns,
     )
 }
 
@@ -1347,7 +1412,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 24] = [
+pub const KEYS: [&str; 28] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1372,6 +1437,10 @@ pub const KEYS: [&str; 24] = [
     "background_skips",
     "focus_repeats",
     "layout_probes",
+    "callback_samples",
+    "callback_p50_ns",
+    "callback_p99_ns",
+    "callback_max_ns",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
@@ -897,16 +897,387 @@ fn notepad_position(
             clear_first: true,
             rollback,
         },
-        || {
-            let child = Command::new("notepad.exe")
-                .spawn()
-                .map_err(|error| error.to_string())?;
-            // Terminating is safe here and it is not rake 5: unlike Word, Notepad keeps no
-            // recovery state that a kill would poison, and the document is the bench's own six
-            // characters. `WM_CLOSE` would raise a save prompt and leave a modal window behind.
-            Ok(launched("Блокнот", child, CloseWith::Terminate, None))
-        },
+        launch_notepad,
     )
+}
+
+/// Starts Notepad for the positions that type into it — 1, 16, 22, and 23.
+fn launch_notepad() -> Result<App, String> {
+    let child = Command::new("notepad.exe")
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    // Terminating is safe here and it is not rake 5: unlike Word, Notepad keeps no
+    // recovery state that a kill would poison, and the document is the bench's own six
+    // characters. `WM_CLOSE` would raise a save prompt and leave a modal window behind.
+    Ok(launched("Блокнот", child, CloseWith::Terminate, None))
+}
+
+// ---------------------------------------------------------------------------------------
+// Position 23 — performance: ≥10 000 presses, the callback percentiles, the working set
+// ---------------------------------------------------------------------------------------
+
+/// The application name of position 23's three rows.
+const APP_23: &str = "Производительность (Блокнот)";
+
+/// Presses of the main volley. The matrix says ten thousand; the extra two hundred are
+/// margin, not generosity — a criterion met exactly is a criterion one lost event away from
+/// unmet.
+const VOLLEY_PRESSES: usize = 10_200;
+
+/// Presses per `SendInput` batch — [`input::type_text`] sends each batch as one call, and
+/// the foreground guard inside it decides per batch: a stolen foreground refuses the whole
+/// remainder instead of typing into a stranger's window.
+const BATCH_PRESSES: usize = 300;
+
+/// Presses spent before the first memory snapshot, so that one-time costs — the first
+/// channel connections, the first pages the input path touches — are paid before the
+/// growth this position judges is measured.
+const WARMUP_PRESSES: usize = 300;
+
+/// How much the product's working set may grow over the volley and still count as
+/// «не растёт».
+///
+/// Not zero, because a working set is page-granular and the channel's server touches its
+/// stack on every one of this position's reads. 256 KiB is 64 pages of noise allowance —
+/// while a leak of even 26 bytes per press, summed over the volley, would already blow it.
+const WORKING_SET_TOLERANCE: u64 = 256 * 1024;
+
+/// What the three rows assert, in the report.
+const P99_ASSERTION: &str = "p50/p99 callback — NFR-01";
+const MAX_ASSERTION: &str = "максимум callback — NFR-02";
+const MEMORY_ASSERTION: &str = "рабочий набор не растёт";
+
+/// `PROCESS_MEMORY_COUNTERS` of `psapi.h`, declared by hand.
+///
+/// By hand and not through the `windows` crate, because the binding lives in the feature
+/// `Win32_System_ProcessStatus`, which is **outside the closed list of §3.2** — and that
+/// list is closed as the enforcement mechanism of SEC-03, the same reasoning footnote 4 of
+/// §11.3 applied to `Win32_System_StationsAndDesktops`. A hand declaration adds no crate
+/// and no feature: the function is exported by `kernel32.dll`, which every Windows process
+/// links already. Field names are this file's own; the layout is the contract.
+#[repr(C)]
+#[derive(Default)]
+struct ProcessMemoryCounters {
+    cb: u32,
+    page_fault_count: u32,
+    peak_working_set_size: usize,
+    working_set_size: usize,
+    quota_peak_paged_pool_usage: usize,
+    quota_paged_pool_usage: usize,
+    quota_peak_non_paged_pool_usage: usize,
+    quota_non_paged_pool_usage: usize,
+    pagefile_usage: usize,
+    peak_pagefile_usage: usize,
+}
+
+// SAFETY: the declaration matches the documented export of kernel32 — `K32GetProcessMemoryInfo`
+// is the kernel32 export behind psapi's `GetProcessMemoryInfo`, same signature, available
+// since Windows 7. The stdcall convention is what `extern "system"` means on this target.
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn K32GetProcessMemoryInfo(
+        process: HANDLE,
+        counters: *mut ProcessMemoryCounters,
+        cb: u32,
+    ) -> i32;
+}
+
+/// One reading of a process's memory, the fields position 23 judges and reports.
+#[derive(Clone, Copy)]
+struct MemoryReading {
+    /// The working set, in bytes — the number the matrix row is about.
+    working_set: u64,
+    /// Its peak, reported beside the verdict, never judged.
+    peak_working_set: u64,
+    /// Committed private bytes (`PagefileUsage`), reported for context.
+    commit: u64,
+}
+
+/// Reads the product's memory through `GetProcessMemoryInfo`, by process id.
+fn process_memory(pid: u32) -> Result<MemoryReading, String> {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    // SAFETY: `OpenProcess` takes three plain values and returns a handle or an error; it
+    // dereferences nothing of ours. The limited-information right is the least one that
+    // satisfies `K32GetProcessMemoryInfo`. NFR-13: the binding surfaces failure as `Err`.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
+        .map_err(|error| format!("OpenProcess({pid}): {error}"))?;
+
+    let mut counters = ProcessMemoryCounters {
+        cb: u32::try_from(std::mem::size_of::<ProcessMemoryCounters>()).unwrap_or(0),
+        ..ProcessMemoryCounters::default()
+    };
+
+    // SAFETY: `handle` is the live handle opened above with the right this call requires;
+    // `counters` is a live local whose true size is passed as `cb`, so the call cannot write
+    // past it. The return is examined below (NFR-13).
+    let ok = unsafe { K32GetProcessMemoryInfo(handle, &mut counters, counters.cb) };
+    let failure = std::io::Error::last_os_error();
+
+    // SAFETY: closing the handle opened above, exactly once. NFR-13: examined — a close that
+    // fails is reported rather than swallowed, and the reading is not trusted past it.
+    if let Err(error) = unsafe { CloseHandle(handle) } {
+        return Err(format!("CloseHandle({pid}): {error}"));
+    }
+
+    if ok == 0 {
+        return Err(format!("GetProcessMemoryInfo({pid}): {failure}"));
+    }
+
+    Ok(MemoryReading {
+        working_set: counters.working_set_size as u64,
+        peak_working_set: counters.peak_working_set_size as u64,
+        commit: counters.pagefile_usage as u64,
+    })
+}
+
+/// The four `callback_` keys of SEC-04a in one read: samples, p50, p99, max — nanoseconds.
+fn callback_reading() -> Result<(u64, u64, u64, u64), String> {
+    let snapshot = crate::channel::read().map_err(|error| format!("канал SEC-04a: {error}"))?;
+
+    let number = |key: &str| -> Result<u64, String> {
+        snapshot
+            .get(key)
+            .ok_or_else(|| format!("канал не публикует {key}"))?
+            .parse::<u64>()
+            .map_err(|error| format!("{key} не число: {error}"))
+    };
+
+    Ok((
+        number("callback_samples")?,
+        number("callback_p50_ns")?,
+        number("callback_p99_ns")?,
+        number("callback_max_ns")?,
+    ))
+}
+
+/// All three rows of position 23 when the measurement could not run.
+fn performance_failed(reason: &str) -> Vec<Row> {
+    let row = |assertion: &'static str, expected: &str| {
+        Row::new(
+            23,
+            APP_23,
+            Assertion::Other(assertion),
+            Verdict::Fail,
+            format!("измерение не состоялось: {reason}"),
+            expected,
+        )
+    };
+
+    vec![
+        row(P99_ASSERTION, "p99 < 100 000 нс (NFR-01)"),
+        row(MAX_ASSERTION, "максимум < 1 000 000 нс (NFR-02)"),
+        row(MEMORY_ASSERTION, "рост ≤ 256 КБ"),
+    ]
+}
+
+/// **Position 23 — «10 000 синтетических нажатий → p50/p99/максимум длительности callback
+/// в пределах NFR-01, NFR-02; рабочий набор памяти не растёт»** (footnote 5 of §11.3).
+///
+/// # Where the numbers come from
+///
+/// The durations come from the QPC instrument task T-10-1 put inside the callback — feature
+/// `testing`, criterion 2 of §13 — published as the four `callback_` keys of SEC-04a. The
+/// same rule as position 14: what happens inside a hook callback is not observable from
+/// outside the process even in principle, so the channel is not a convenience here, it is
+/// the only honest source. The bench does not merely read the three durations: it first
+/// reads `callback_samples` and refuses a verdict measured on fewer invocations than the
+/// criterion's ten thousand presses produce (two per press — down and up).
+///
+/// # The shape of the scenario
+///
+/// Notepad, the application of position 1, adopted through the same gates. A warm-up of
+/// [`WARMUP_PRESSES`] pays the one-time costs, **then** the first memory snapshot is taken;
+/// the volley of [`VOLLEY_PRESSES`] follows in [`BATCH_PRESSES`]-press batches, each batch
+/// one `SendInput` behind the foreground guard; then the bench waits on the condition — the
+/// sample having grown by two per press — never on a clock (§11.5 requirement 1), and takes
+/// the second memory snapshot. Memory is read with `GetProcessMemoryInfo` by the product's
+/// process id, and the growth is judged against [`WORKING_SET_TOLERANCE`].
+///
+/// The hotkey is never pressed: the matrix row is about the callback under load and the
+/// working set, not about conversion, and pressing it would put the product's own injected
+/// backspaces into the middle of the volley being counted.
+pub fn position_23(ctx: &Context) -> Vec<Row> {
+    let mut app = match launch_notepad() {
+        Ok(app) => app,
+        Err(error) => return performance_failed(&format!("запуск: {error}")),
+    };
+
+    let mut rows = match adopt_window(ctx.automation, &mut app, &|element: &Element| {
+        element.class() == "Notepad"
+    }) {
+        Err(reason) => performance_failed(&reason),
+        Ok(window) => {
+            let content =
+                ctx.automation
+                    .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e));
+
+            match (app.window, content) {
+                (None, _) => performance_failed("у окна нет дескриптора"),
+                (_, None) => performance_failed("элемент ввода не найден в дереве UI Automation"),
+                // The content element is the readiness gate of §11.5 requirement 1 — the
+                // window is up when its editor answers UI Automation — and is not read
+                // afterwards: nothing about this position compares text.
+                (Some(hwnd), Some(_)) => measure_performance(app.pid, hwnd),
+            }
+        }
+    };
+
+    let closed = app.close();
+    for row in &mut rows {
+        row.note = format!("{}; закрытие: {closed}", row.note);
+    }
+
+    rows
+}
+
+/// The measurement itself, once the window is up and adopted.
+fn measure_performance(pid: u32, window: HWND) -> Vec<Row> {
+    if let Err(error) = shell::activate_window(pid, Some(window)) {
+        return performance_failed(&format!("вывод окна вперёд: {error}"));
+    }
+
+    let target = input::Target { pid, hwnd: window };
+
+    // The product under test, by pid — for the memory half. Exactly one must be running:
+    // zero means the dispatcher's copy died, two means a stray is skewing every number.
+    let products = crate::sut::any_running();
+    let product = match products.as_slice() {
+        &[product] => product,
+        other => return performance_failed(&format!("продуктов не один: {other:?}")),
+    };
+
+    // Warm-up, condition-checked: the strokes must be *seen* by the product, not merely sent.
+    let chunk = TYPED.repeat(WARMUP_PRESSES / TYPED.len());
+    let before_warmup = match callback_reading() {
+        Ok((samples, ..)) => samples,
+        Err(error) => return performance_failed(&error),
+    };
+    if let Err(error) = input::type_text(&chunk, &target) {
+        return performance_failed(&format!("разминка: {error}"));
+    }
+    let warmup_target = before_warmup + 2 * WARMUP_PRESSES as u64;
+    if wait::until(Duration::from_secs(15), || {
+        callback_reading()
+            .ok()
+            .filter(|(samples, ..)| *samples >= warmup_target)
+    })
+    .is_none()
+    {
+        return performance_failed("разминка не дошла до callback за 15 с");
+    }
+
+    // The first snapshot — memory and sample count — after the warm-up, before the volley.
+    let memory_before = match process_memory(product) {
+        Ok(reading) => reading,
+        Err(error) => return performance_failed(&error),
+    };
+    let samples_before = match callback_reading() {
+        Ok((samples, ..)) => samples,
+        Err(error) => return performance_failed(&error),
+    };
+
+    // The volley. No sleep between batches: `SendInput` paces itself through the hook chain,
+    // and the wait below is on the condition, not on a clock.
+    let batch = TYPED.repeat(BATCH_PRESSES / TYPED.len());
+    let batches = VOLLEY_PRESSES / BATCH_PRESSES;
+    let started = Instant::now();
+    for _ in 0..batches {
+        if let Err(error) = input::type_text(&batch, &target) {
+            return performance_failed(&format!("залп: {error}"));
+        }
+    }
+    let injection = started.elapsed();
+
+    // §11.5 requirement 1: the wait is on "the sample covers the volley", never on a clock.
+    let volley_target = samples_before + 2 * VOLLEY_PRESSES as u64;
+    let Some((samples, p50_ns, p99_ns, max_ns)) = wait::until(Duration::from_secs(25), || {
+        callback_reading()
+            .ok()
+            .filter(|(samples, ..)| *samples >= volley_target)
+    }) else {
+        let seen = callback_reading().map(|(samples, ..)| samples);
+        return performance_failed(&format!(
+            "выборка не набралась за 25 с: нужно ≥ {volley_target}, канал показывает {seen:?}"
+        ));
+    };
+
+    let memory_after = match process_memory(product) {
+        Ok(reading) => reading,
+        Err(error) => return performance_failed(&error),
+    };
+
+    let delta = samples - samples_before;
+    let enough = delta >= 2 * VOLLEY_PRESSES as u64;
+    let growth = memory_after
+        .working_set
+        .saturating_sub(memory_before.working_set);
+    let kib = |bytes: u64| bytes / 1024;
+
+    let note = format!(
+        "продукт PID {product}; разминка {WARMUP_PRESSES}, залп {VOLLEY_PRESSES} нажатий \
+         пакетами по {BATCH_PRESSES}, инжекция {} мс; выборка залпа {delta} вызовов \
+         (всего {samples}); память до/после: рабочий набор {}/{} КБ (пик {} КБ), \
+         частная {}/{} КБ",
+        injection.as_millis(),
+        kib(memory_before.working_set),
+        kib(memory_after.working_set),
+        kib(memory_after.peak_working_set),
+        kib(memory_before.commit),
+        kib(memory_after.commit),
+    );
+
+    let percentile_row = Row::new(
+        23,
+        APP_23,
+        Assertion::Other(P99_ASSERTION),
+        if enough && p99_ns < 100_000 {
+            Verdict::Pass
+        } else {
+            Verdict::Fail
+        },
+        format!("p50={p50_ns} нс, p99={p99_ns} нс на выборке {delta}"),
+        format!(
+            "p99 < 100 000 нс (NFR-01) на ≥ {} вызовах",
+            2 * VOLLEY_PRESSES
+        ),
+    )
+    .with_note(note.clone());
+
+    let maximum_row = Row::new(
+        23,
+        APP_23,
+        Assertion::Other(MAX_ASSERTION),
+        if enough && max_ns < 1_000_000 {
+            Verdict::Pass
+        } else {
+            Verdict::Fail
+        },
+        format!("max={max_ns} нс"),
+        "максимум < 1 000 000 нс (NFR-02)",
+    )
+    .with_note(note.clone());
+
+    let memory_row = Row::new(
+        23,
+        APP_23,
+        Assertion::Other(MEMORY_ASSERTION),
+        if growth <= WORKING_SET_TOLERANCE {
+            Verdict::Pass
+        } else {
+            Verdict::Fail
+        },
+        format!(
+            "рост {} КБ (до {} КБ, после {} КБ)",
+            kib(growth),
+            kib(memory_before.working_set),
+            kib(memory_after.working_set)
+        ),
+        format!("рост ≤ {} КБ", kib(WORKING_SET_TOLERANCE)),
+    )
+    .with_note(note);
+
+    vec![percentile_row, maximum_row, memory_row]
 }
 
 // ---------------------------------------------------------------------------------------
@@ -3395,13 +3766,9 @@ pub fn pending_positions() -> Vec<Row> {
             "хук восстановлен",
         )
         .with_note("П — приёмочная сессия §11.6; заготовка не пишется по указанию задания"),
-        Row::pending(
-            23,
-            "Производительность, 10 000 нажатий",
-            Assertion::Other("p50/p99/максимум в пределах NFR-01, NFR-02"),
-            "T-10-1",
-            "в пределах NFR-01, NFR-02",
-        )
-        .with_note("профилирование задержки хука — задача T-10-1"),
+        // ⚠ **Position 23 is no longer here.** The QPC instrument of criterion 2 §13 exists —
+        // task T-10-1 — and the bench runs the position: see [`position_23`]. A row that
+        // still called it `pending` on a task that has finished would be the same kind of
+        // untruth this list exists to prevent.
     ]
 }
