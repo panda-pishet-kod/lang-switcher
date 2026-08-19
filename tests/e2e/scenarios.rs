@@ -4500,8 +4500,16 @@ pub fn pending_positions() -> Vec<Row> {
 /// the end — they are the ones the first hypothesis is decided by, and until this task they
 /// existed only in the file report the main thread writes *after the process exits*, which a
 /// scenario that requires the process to survive `Win+E` cannot read at all.
-const WATCHED_KEYS: [&str; 24] = [
+const WATCHED_KEYS: [&str; 25] = [
     "buffer_len",
+    // **Task T-10-10, and first in importance after `buffer_len` itself.** The hypothesis this
+    // run exists to test is that the gate of FR-70/FR-71 stays shut for ever, and that is the
+    // one thing the twenty-four keys below could not say: `password_field` reads `0` both for an
+    // ordinary field and for a gate still waiting on a verdict with buffering off, and the
+    // parking that follows goes past the flush counters, so `strokes_removed` stands in both
+    // cases too. A gate stuck in `pending` prints `pending` here while everything else looks
+    // healthy.
+    "field_state",
     "hotkey_handoffs",
     "cycle_position",
     "active_layout",
@@ -4532,11 +4540,62 @@ const WATCHED_KEYS: [&str; 24] = [
     "hook_installed",
 ];
 
+/// Where the full protocol of the experiment is written — **debt 4 of the verdict on T-10-9**.
+///
+/// ⚠ **A file and not the filtered output.** The one observation that would have decided the
+/// previous experiment — a single `gривет`, a stroke lost in the first seconds after `Win+E` —
+/// was seen on screen and then lost, because the counters of that round existed only in a
+/// console line that had been filtered on the way past. The verdict wrote that up as a debt.
+/// So every reading this experiment takes goes into a file **whole**: not [`WATCHED_KEYS`] but
+/// every key the product published, at every step of every round, whether or not anything
+/// interesting happened at the time. What is interesting is decided afterwards, and afterwards
+/// is exactly when a filtered line is gone.
+///
+/// A fixed path under the system temporary directory. No new environment variable (Р-53), and
+/// nothing written into the project tree, which has to stay clean for `git status`.
+fn protocol_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("langsw-experiment-explorer.log")
+}
+
+/// Appends one block to the protocol file, creating it on first use.
+///
+/// Failures are reported and never fatal: a run that cannot open its log is still a run, and
+/// losing the experiment because the log could not be written would be the wrong trade. The
+/// handle is opened per call rather than held, so a crash in the middle of the experiment leaves
+/// everything up to that point already on disk — which is the entire point of the file.
+fn protocol(block: &str) {
+    use std::io::Write;
+
+    let path = protocol_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Err(error) => eprintln!("⚠ протокол {} не открылся: {error}", path.display()),
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{block}") {
+                eprintln!("⚠ протокол не записался: {error}");
+            }
+        }
+    }
+}
+
 /// One reading of [`WATCHED_KEYS`], in one line, for the step-by-step protocol.
+///
+/// ⚠ **The line it returns is a summary; the file gets everything.** Every call writes the whole
+/// snapshot — all of `control::KEYS`, as the product rendered it — into [`protocol_path`] under
+/// the same label, so the console stays readable and nothing is lost to the filter. Debt 4.
 fn watched(label: &str) -> String {
     match crate::channel::read() {
-        Err(error) => format!("  [{label}] канал не ответил: {error}"),
+        Err(error) => {
+            protocol(&format!("[{label}] канал не ответил: {error}"));
+            format!("  [{label}] канал не ответил: {error}")
+        }
         Ok(snapshot) => {
+            protocol(&format!("[{label}]\n{}", snapshot.raw.trim_end()));
+
             let pairs: Vec<String> = WATCHED_KEYS
                 .iter()
                 .map(|key| format!("{key}={}", snapshot.get(key).unwrap_or("<нет>")))
@@ -4914,6 +4973,51 @@ fn empty_press(
     Ok(())
 }
 
+/// The product this experiment runs against — the debug copy, or the installed `uiAccess` one.
+///
+/// Two types and not one because they are ended by different mechanisms and only one of them can
+/// be a child of this bench; see `sut::Installed` for the three measurements that make that so.
+/// What the experiment needs of either is the same four questions, so they are asked through
+/// this and the body below does not branch.
+enum Product {
+    /// The debug build, launched as a child of the bench.
+    Debug(crate::sut::Sut),
+    /// ⭐ **The installed, signed, `uiAccess` copy** — task T-10-10, and the configuration the
+    /// defect was seen in. Raised by `ShellExecuteEx`; the bench does not father it.
+    Installed(crate::sut::Installed),
+}
+
+impl Product {
+    fn pid(&self) -> u32 {
+        match self {
+            Self::Debug(sut) => sut.pid,
+            Self::Installed(installed) => installed.pid,
+        }
+    }
+
+    fn await_ready(&self, timeout: Duration) -> Option<crate::channel::Snapshot> {
+        match self {
+            Self::Debug(sut) => sut.await_ready(timeout),
+            Self::Installed(installed) => installed.await_ready(timeout),
+        }
+    }
+
+    fn is_alive(&mut self) -> bool {
+        match self {
+            Self::Debug(sut) => sut.is_alive(),
+            Self::Installed(installed) => installed.is_alive(),
+        }
+    }
+
+    /// Ends the product through FR-96, reporting what was observed.
+    fn stop(&mut self) -> Result<String, String> {
+        match self {
+            Self::Debug(sut) => sut.stop().map(|code| format!("код {code}")),
+            Self::Installed(installed) => installed.stop().map(|()| "процесс ушёл".to_owned()),
+        }
+    }
+}
+
 /// **The experiment of task T-10-9** — «после открытия Проводника конвертация перестаёт
 /// работать ВЕЗДЕ», staged with the channel open at every step.
 ///
@@ -4953,12 +5057,38 @@ pub fn experiment_explorer(
     /// explicitly by pid at the end of the run — the deadline is a net, not a stopping mechanism.
     const DEADLINE_SECS: u32 = 240;
 
-    println!("--- ОПЫТ T-10-9: Win+E и конвертация после него ---\n");
+    println!("--- ОПЫТ T-10-9/T-10-10: Win+E и конвертация после него ---\n");
     println!(
         "Прибор: сравнение поля ДО и ПОСЛЕ нажатия. Совпадение с образцом {EXPECTED:?} \
-         сообщается рядом и НИКОГДА не является вердиктом.\n\
-         LANGSW_DEBUG_TIMEOUT_SEC = {DEADLINE_SECS}\n"
+         сообщается рядом и НИКОГДА не является вердиктом."
     );
+
+    // ⛔ Debt 4 of the verdict on T-10-9, announced before anything is measured so that the
+    // reader of the console knows where the unfiltered record is.
+    protocol(&format!(
+        "\n\n=========== ПРОГОН {} ===========\nустановленная сборка: {installed}, кругов после Проводника: {rounds}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    println!(
+        "Полный протокол каждого снимка канала (все ключи, каждый шаг каждого круга): {}",
+        protocol_path().display()
+    );
+
+    // ⚠ The synthetic FR-96 ends **any** copy in the session, so a second one is not a nuisance
+    // but a hazard: the run would end a process it did not start, and could not tell which of the
+    // two its own readings came from. Checked before anything is launched.
+    let already = crate::sut::any_running();
+    if already.is_empty() {
+        println!("экземпляров продукта до запуска: ни одного\n");
+    } else {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Синтетическая FR-96 сняла бы чужой экземпляр, \
+             а показания канала были бы неизвестно чьими. Опыт не ставится."
+        );
+        return std::process::ExitCode::from(1);
+    }
 
     let _clipboard = clip::Guard::capture();
 
@@ -4984,6 +5114,10 @@ pub fn experiment_explorer(
         }
         Ok(control) => {
             println!("  {}", control.describe());
+            protocol(&format!(
+                "ВЕРДИКТ отрицательный контроль (продукт не запущен): {}",
+                control.describe()
+            ));
             if control.changed() {
                 eprintln!(
                     "⛔ ПРИБОР НЕИСПРАВЕН: без продукта поле изменилось после нажатия ({})",
@@ -5004,13 +5138,26 @@ pub fn experiment_explorer(
     // product is started by autostart and every window they open is created under it. So the
     // product goes up first here, and the Notepad is created while it is watching.
     let launched = if installed {
+        // ⭐ **Task T-10-10: the last remaining difference from the конфигурация the defect was
+        // seen in, removed.** The copy in `%ProgramFiles%` is now built
+        // `--release --features testing` and signed with the same certificate, so it carries the
+        // Release manifest with `uiAccess="true"` **and** the channel of SEC-04a at once. The
+        // manifest is chosen by `PROFILE` in `build.rs` and the channel by the feature; they are
+        // independent, which is what makes this configuration reachable at all.
+        //
+        // It is raised by `ShellExecuteEx` and is **not** a child of this bench: `CreateProcess`
+        // answers 740 on a `uiAccess` binary. FR-97 is absent from it — `debug_timeout` is behind
+        // `#[cfg(debug_assertions)]` — so it lives the whole run and is ended by FR-96, exactly
+        // like the копия in front of the user.
         println!(
-            "⚠ ПРОДУКТ — УСТАНОВЛЕННЫЙ ПОДПИСАННЫЙ RELEASE из %ProgramFiles% (uiAccess=1).\n\
-             Канала SEC-04a у него нет по построению — прибор «до/после» его и не требует.\n"
+            "⚠ ПРОДУКТ — УСТАНОВЛЕННЫЙ ПОДПИСАННЫЙ RELEASE из %ProgramFiles% (uiAccess=1),\n\
+             собранный --release --features testing: манифест uiAccess И канал SEC-04a сразу.\n\
+             Поднят ShellExecuteEx, стендом НЕ порождён. Таймаута FR-97 в нём нет.\n"
         );
-        crate::sut::Sut::launch_installed()
+        crate::sut::Installed::launch().map(Product::Installed)
     } else {
-        crate::sut::Sut::launch_with(DEADLINE_SECS)
+        println!("LANGSW_DEBUG_TIMEOUT_SEC = {DEADLINE_SECS}\n");
+        crate::sut::Sut::launch_with(DEADLINE_SECS).map(Product::Debug)
     };
 
     let mut product = match launched {
@@ -5021,34 +5168,39 @@ pub fn experiment_explorer(
         }
     };
 
-    if installed {
-        // No channel to wait on. The readiness condition available from outside a Release copy
-        // is that the process is still alive — FR-02's hook goes up in its first milliseconds —
-        // and the rounds below would fail loudly if it were not there.
-        let alive = wait::until_true(Duration::from_secs(10), || {
-            shell::process_is_alive(product.pid)
-        });
-        println!(
-            "Продукт (Release) PID {}, процесс жив: {alive}",
-            product.pid
-        );
+    let ready = match product.await_ready(Duration::from_secs(30)) {
+        Some(ready) => ready,
+        None => {
+            eprintln!("продукт не сообщил о готовности за 30 с");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    println!(
+        "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+        product.pid(),
+        ready.get("hook_installed").unwrap_or("?"),
+        ready.present_keys().len()
+    );
+    println!(
+        "Снимок канала целиком, сразу после готовности:\n{}",
+        ready.raw
+    );
+    protocol(&format!(
+        "[готовность] PID {}\n{}",
+        product.pid(),
+        ready.raw.trim_end()
+    ));
+
+    // ⚠ The second copy is checked again **after** the launch and not only before it: an
+    // autostart entry or a copy raised by something else between the two lines would be caught
+    // here, and the synthetic FR-96 at the end must have exactly one process to take down.
+    let running = crate::sut::any_running();
+    if running.len() == 1 && running[0] == product.pid() {
+        println!("экземпляр продукта ровно один, и это наш: {running:?}\n");
     } else {
-        let ready = match product.await_ready(Duration::from_secs(30)) {
-            Some(ready) => ready,
-            None => {
-                eprintln!("продукт не сообщил о готовности за 30 с");
-                return std::process::ExitCode::from(1);
-            }
-        };
         println!(
-            "Продукт PID {}, hook_installed={}, ключей в снимке {}",
-            product.pid,
-            ready.get("hook_installed").unwrap_or("?"),
-            ready.present_keys().len()
-        );
-        println!(
-            "Снимок канала целиком, сразу после готовности:\n{}",
-            ready.raw
+            "⚠ экземпляров продукта {running:?}, наш {} — FR-96 в конце снимет любой из них\n",
+            product.pid()
         );
     }
 
@@ -5076,11 +5228,13 @@ pub fn experiment_explorer(
             for round in 1..=2 {
                 let source = round_layout(round);
                 let outcome = press_once(ctx, &target, &content, &format!("до-{round}"), source)?;
-                println!(
-                    "  круг {round} ({}): {}",
+                let line = format!(
+                    "круг до-{round} ({}): {}",
                     layout::describe(source),
                     outcome.describe()
                 );
+                println!("  {line}");
+                protocol(&format!("ВЕРДИКТ {line}"));
                 before_explorer.push(outcome);
             }
 
@@ -5173,6 +5327,10 @@ pub fn experiment_explorer(
             println!("\n=== ШАГ 3в: круг в темпе человека — пауза между набором и нажатием ===");
             let slow = slow_press(ctx, &target, &content, "медленно", layout::US)?;
             println!("  {}", slow.describe());
+            protocol(&format!(
+                "ВЕРДИКТ круг в темпе человека: {}",
+                slow.describe()
+            ));
 
             // ---- step 4: does it still work? -------------------------------------------
             println!("\n=== ШАГ 4: те же нажатия ПОСЛЕ Проводника, {rounds} кругов ===");
@@ -5181,11 +5339,13 @@ pub fn experiment_explorer(
                 let source = round_layout(round);
                 let outcome =
                     press_once(ctx, &target, &content, &format!("после-{round}"), source)?;
-                println!(
-                    "  круг {round} ({}): {}",
+                let line = format!(
+                    "круг после-{round} ({}): {}",
                     layout::describe(source),
                     outcome.describe()
                 );
+                println!("  {line}");
+                protocol(&format!("ВЕРДИКТ {line}"));
                 after_explorer.push(outcome);
             }
 
@@ -5229,9 +5389,33 @@ pub fn experiment_explorer(
             Ok(())
         })();
 
+        // ⛔ **«Продукт прожил весь опыт без перезапуска» — показано, а не заявлено.** The pid
+        // is compared against the one recorded at launch and the liveness is asked of the launch
+        // handle itself, not of the process table: a copy that had died and been replaced by an
+        // autostart would carry a different id, and one that had merely been restarted would not
+        // answer to this handle at all.
+        let alive = product.is_alive();
+        println!(
+            "\nпродукт PID {} к концу опыта: {}",
+            product.pid(),
+            if alive {
+                "ЖИВ, ни разу не перезапускался"
+            } else {
+                "⚠ УЖЕ НЕ ЖИВ — он ушёл посреди опыта, и это само по себе находка"
+            }
+        );
+        protocol(&format!("[конец опыта] PID {} жив: {alive}", product.pid()));
+
         match product.stop() {
-            Ok(code) => println!("\nпродукт остановлен по FR-96, код {code}"),
-            Err(error) => println!("\n⚠ остановка продукта: {error}"),
+            Ok(how) => println!("продукт остановлен по FR-96, {how}"),
+            Err(error) => println!("⚠ остановка продукта: {error}"),
+        }
+
+        let left = crate::sut::any_running();
+        if left.is_empty() {
+            println!("экземпляров продукта после опыта: ни одного");
+        } else {
+            println!("⚠ после опыта остались экземпляры продукта: {left:?}");
         }
 
         result

@@ -390,10 +390,15 @@ fn experiment_explorer(arguments: &[String]) -> std::process::ExitCode {
         .get(1)
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(10);
-    // ⚠ `--installed` runs the **signed Release copy in `%ProgramFiles%`** instead of the one
-    // built beside this bench. It is the only configuration the defect was ever seen in, it has
-    // no SEC-04a channel by construction, and it is ended by the synthetic FR-96 the task's
-    // environment section names.
+    // ⚠ `--installed` runs the **signed copy in `%ProgramFiles%`** instead of the one built
+    // beside this bench, and it is the only configuration the defect was ever seen in: Release
+    // manifest, `uiAccess="true"`, signed, out of `%ProgramFiles%`, no FR-97 deadline.
+    //
+    // ⭐ **Task T-10-10 made it readable.** T-10-9 could reach this копия only as a Release
+    // build with no channel, and could not start it at all (`CreateProcess` → 740). The
+    // installed copy is now built `--release --features testing` and signed with the same
+    // certificate — the manifest comes from `PROFILE`, the channel from the feature — and it is
+    // raised by `ShellExecuteEx`, so the bench reads its channel without fathering it.
     let installed = arguments.iter().any(|value| value == "--installed");
 
     let automation = match uia::Automation::new() {

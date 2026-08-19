@@ -25,6 +25,12 @@
 //! inside `tests\e2e\` add no crate, no feature and no entry to `cargo tree` — kernel32 is
 //! already linked by the product itself. The declarations are checked against the SDK headers
 //! and every call examines its return, as NFR-13 requires.
+//!
+//! Task **T-10-10** adds three more by the same argument and for [`Installed`]:
+//! `ShellExecuteExW` out of shell32 — which `Win32_UI_Shell` already links — plus
+//! `GetProcessId` and `WaitForSingleObject` out of kernel32. Same reasoning, same treatment:
+//! no crate, no feature, no line of `cargo tree`, a `// SAFETY:` on every call and every
+//! return examined. `cargo tree` was re-measured after the change and is still 83 lines.
 
 use std::os::windows::io::AsRawHandle;
 use std::process::{Child, Command};
@@ -276,61 +282,6 @@ impl Sut {
         Ok(Self { child, pid })
     }
 
-    /// ⚠ **The installed, signed Release copy in `%ProgramFiles%`** — task **T-10-9**, and the
-    /// one configuration the defect under investigation was ever seen in.
-    ///
-    /// It is a different program from the one every other mode of this bench runs, in the two
-    /// ways that could matter to a defect nobody has reproduced on the debug build: it is built
-    /// **without** the `testing` feature, so SEC-04a is not merely quiet but absent, and it
-    /// carries `uiAccess="true"` (§8.2), so it runs with the foreground and injection rights that
-    /// manifest grants. Neither can be had from the build tree — a debug binary embeds
-    /// `app-dev.manifest` and the manifests are outside this task's boundaries.
-    ///
-    /// ⛔ It is registered in registry A like every other process the bench starts, it is joined
-    /// to the job object like every other one, and it is taken down by the synthetic FR-96 of
-    /// [`Sut::stop`] — which is what the task's environment section names as the way to end it.
-    /// `LANGSW_DEBUG_TIMEOUT_SEC` is set all the same and is expected to do nothing: FR-97 is a
-    /// debug-only deadline. The job object is the net here.
-    pub fn launch_installed() -> Result<Self, String> {
-        let exe = std::path::PathBuf::from(r"C:\Program Files\Lang_Switcher")
-            .join(lang_switcher::EXE_NAME);
-
-        if !exe.exists() {
-            return Err(format!("{} не найден", exe.display()));
-        }
-
-        let child = Command::new(&exe)
-            .env("LANGSW_DEBUG_TIMEOUT_SEC", DEBUG_TIMEOUT_SECS.to_string())
-            .spawn()
-            .map_err(|error| format!("не удалось запустить {}: {error}", exe.display()))?;
-
-        Ok(Self::adopt(child))
-    }
-
-    /// Registers a freshly spawned product and joins it to the job — shared by both launchers.
-    fn adopt(child: Child) -> Self {
-        let pid = child.id();
-
-        // ⛔ Requirement A: the product is a process the bench started, and it enters the
-        // registry here, at the moment of launch.
-        crate::own::register_spawned(pid);
-
-        let job = JOB.load(Ordering::SeqCst);
-        if job != 0 {
-            // SAFETY: identical to the call in `launch_with` — a live job handle and the process
-            // handle the `Child` owns. NFR-13: examined.
-            let ok = unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as isize) };
-            if ok == 0 {
-                eprintln!(
-                    "warning: AssignProcessToJobObject не сработала: {}",
-                    std::io::Error::last_os_error()
-                );
-            }
-        }
-
-        Self { child, pid }
-    }
-
     /// Waits until the product reports its hook installed, through the SEC-04a channel.
     pub fn await_ready(&self, timeout: Duration) -> Option<channel::Snapshot> {
         channel::await_hook(timeout)
@@ -409,5 +360,231 @@ pub fn any_running() -> Vec<u32> {
             .filter_map(|id| id.trim().parse().ok())
             .collect(),
         Err(_) => Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The installed, signed, uiAccess copy — task T-10-10
+// ---------------------------------------------------------------------------------------
+
+/// `SEE_MASK_NOCLOSEPROCESS` — ask `ShellExecuteEx` to hand back a process handle.
+const SEE_MASK_NOCLOSEPROCESS: u32 = 0x0000_0040;
+
+/// `SEE_MASK_NOASYNC` — do not return until the invocation is complete.
+const SEE_MASK_NOASYNC: u32 = 0x0000_0100;
+
+/// `SW_SHOWNORMAL`.
+const SW_SHOWNORMAL: i32 = 1;
+
+/// `WAIT_TIMEOUT` — the object is not signalled, so the process is still running.
+const WAIT_TIMEOUT: u32 = 0x0000_0102;
+
+/// `SHELLEXECUTEINFOW`, x64 layout, checked against `shellapi.h` field by field.
+#[repr(C)]
+struct ShellExecuteInfoW {
+    cb_size: u32,
+    mask: u32,
+    hwnd: isize,
+    verb: *const u16,
+    file: *const u16,
+    parameters: *const u16,
+    directory: *const u16,
+    show: i32,
+    inst_app: isize,
+    id_list: *mut core::ffi::c_void,
+    class: *const u16,
+    key_class: isize,
+    hot_key: u32,
+    icon_or_monitor: isize,
+    process: isize,
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn ShellExecuteExW(info: *mut ShellExecuteInfoW) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetProcessId(process: isize) -> u32;
+    fn WaitForSingleObject(handle: isize, milliseconds: u32) -> u32;
+}
+
+/// The installed, signed copy in `%ProgramFiles%` carrying `uiAccess="true"` — task
+/// **T-10-10**, and the one configuration the defect under investigation was ever seen in.
+///
+/// # Why this is a separate type and not another constructor of [`Sut`]
+///
+/// [`Sut`] is built around [`Child`], and a `uiAccess` process cannot be a child of this bench.
+/// Three measured facts, each of which alone rules the ordinary path out:
+///
+/// | Measured | Consequence |
+/// |---|---|
+/// | `CreateProcess` on a `uiAccess` binary returns `ERROR_ELEVATION_REQUIRED`, 740 — T-10-9 §9.1 | `Command::spawn` cannot start it at all: the `uiAccess` flag is placed in the token by the AppInfo service, and only `ShellExecuteEx` reaches that service |
+/// | `Stop-Process` on the running copy answers **«Access is denied»** | `TerminateProcess` is refused — a `uiAccess` token sits above a plain medium-integrity one, so the bench cannot kill what it started |
+/// | joining a job needs `PROCESS_SET_QUOTA` on that same handle | the job object, the safety layer that survives the bench being killed, is not available here |
+///
+/// So the stopping mechanism is **FR-96 and only FR-96**. That is not a weakening: FR-96 is what
+/// the task's environment section names as the way to end this product, and it was measured
+/// against exactly this copy before the experiment was built.
+///
+/// # ⛔ Requirement A is honoured exactly, not relaxed
+///
+/// The pid is taken from the process handle `ShellExecuteEx` hands back **at the moment of
+/// launch** — `GetProcessId` on that handle and nothing else — and goes straight into registry
+/// A. This is the narrow exception the task grants and it stays narrow: no search for "any
+/// `LangSwitcher` in the session", no window-to-pid derivation, no path by which a copy this run
+/// did not start could enter the registry. [`any_running`] stays what it always was, a read-only
+/// diagnostic on the way in and out, and is never a source of pids to act on.
+pub struct Installed {
+    handle: isize,
+    pub pid: u32,
+}
+
+impl Installed {
+    /// Starts the installed copy through `ShellExecuteEx` and registers it under requirement A.
+    ///
+    /// `LANGSW_DEBUG_TIMEOUT_SEC` is **not** set, and could not help if it were: the FR-97
+    /// deadline lives behind `#[cfg(debug_assertions)]`, so a Release build carries none. The
+    /// product therefore lives until FR-96 ends it — which is the point of this experiment,
+    /// whose whole subject is a **long session** that is not restarted between rounds.
+    pub fn launch() -> Result<Self, String> {
+        use std::os::windows::ffi::OsStrExt;
+
+        let exe = std::path::PathBuf::from(r"C:\Program Files\Lang_Switcher")
+            .join(lang_switcher::EXE_NAME);
+
+        if !exe.exists() {
+            return Err(format!("{} не найден", exe.display()));
+        }
+
+        let file: Vec<u16> = exe
+            .as_os_str()
+            .encode_wide()
+            .chain(core::iter::once(0))
+            .collect();
+        let verb: Vec<u16> = "open".encode_utf16().chain(core::iter::once(0)).collect();
+
+        let mut info = ShellExecuteInfoW {
+            cb_size: core::mem::size_of::<ShellExecuteInfoW>() as u32,
+            mask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+            hwnd: 0,
+            verb: verb.as_ptr(),
+            file: file.as_ptr(),
+            parameters: core::ptr::null(),
+            directory: core::ptr::null(),
+            show: SW_SHOWNORMAL,
+            inst_app: 0,
+            id_list: core::ptr::null_mut(),
+            class: core::ptr::null(),
+            key_class: 0,
+            hot_key: 0,
+            icon_or_monitor: 0,
+            process: 0,
+        };
+
+        // SAFETY: `info` is a live local whose `cb_size` is its own size, and the two string
+        // pointers address `file` and `verb` — both alive across the call and both
+        // NUL-terminated by construction. Every other pointer field is null, which the
+        // documentation permits. NFR-13: a zero return is the documented failure and is
+        // examined below rather than discarded.
+        let ok = unsafe { ShellExecuteExW(&raw mut info) };
+
+        if ok == 0 {
+            return Err(format!(
+                "ShellExecuteEx не запустила {}: {}",
+                exe.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        if info.process == 0 {
+            return Err("ShellExecuteEx не вернула описатель процесса".to_owned());
+        }
+
+        // SAFETY: `info.process` is the process handle `ShellExecuteEx` has just returned, and
+        // `SEE_MASK_NOCLOSEPROCESS` makes this side its owner. NFR-13: a zero return means the
+        // id could not be read and is examined.
+        let pid = unsafe { GetProcessId(info.process) };
+
+        if pid == 0 {
+            let error = std::io::Error::last_os_error();
+            // SAFETY: closing the handle this call owns, on the one path that abandons it.
+            unsafe { CloseHandle(HANDLE(info.process as *mut core::ffi::c_void)) }.ok();
+            return Err(format!(
+                "не удалось прочитать pid запущенного процесса: {error}"
+            ));
+        }
+
+        // ⛔ Requirement A: the pid comes from the handle of the launch itself, and it enters
+        // the registry here, at that instant — before any window exists to be found by, and
+        // before anything in this run has looked at the process table.
+        crate::own::register_spawned(pid);
+
+        Ok(Self {
+            handle: info.process,
+            pid,
+        })
+    }
+
+    /// Waits until the product reports its hook installed, through the SEC-04a channel.
+    ///
+    /// ⭐ This is what task T-10-10 bought. The installed copy is now built
+    /// `--release --features testing`, so it carries the `uiAccess` manifest **and** the channel
+    /// at once — the manifest is chosen by `PROFILE` in `build.rs`, the channel by the feature,
+    /// and the two are independent. T-10-9 had to fall back on «процесс жив» here.
+    pub fn await_ready(&self, timeout: Duration) -> Option<channel::Snapshot> {
+        channel::await_hook(timeout)
+    }
+
+    /// Whether the process is still running — asked of the handle, never of the process table.
+    pub fn is_alive(&self) -> bool {
+        // SAFETY: `handle` is the live process handle this type owns, and a zero timeout makes
+        // the call a poll. NFR-13: the return is compared against `WAIT_TIMEOUT` rather than
+        // ignored — any other value means the object is signalled or the wait failed, and both
+        // of those mean the copy is no longer running.
+        unsafe { WaitForSingleObject(self.handle, 0) == WAIT_TIMEOUT }
+    }
+
+    /// Ends the product through FR-96 and confirms it went.
+    ///
+    /// ⚠ **The synthetic FR-96 takes down *any* copy in the session**, so the confirmation here
+    /// is not a formality: it is what says the copy that went is the one this handle names. The
+    /// caller checks there is no second copy before the run and none after it.
+    ///
+    /// There is deliberately no forcible fallback. `TerminateProcess` on this process answers
+    /// «Access is denied» — measured — so a fallback would be a line that cannot run, and the
+    /// job object that [`Sut::stop`] falls back to could not be joined in the first place. If
+    /// FR-96 does not end it, that is a finding and it is reported as one.
+    pub fn stop(&mut self) -> Result<(), String> {
+        if !self.is_alive() {
+            return Ok(());
+        }
+
+        input::emergency_combination().map_err(|error| format!("FR-96: {error}"))?;
+
+        if wait::until_true(Duration::from_secs(10), || !self.is_alive()) {
+            Ok(())
+        } else {
+            Err(format!(
+                "FR-96 не завершила установленный экземпляр {} за 10 с; снять его \
+                 принудительно нельзя — TerminateProcess на uiAccess-процессе отвечает \
+                 «Access is denied»",
+                self.pid
+            ))
+        }
+    }
+}
+
+impl Drop for Installed {
+    fn drop(&mut self) {
+        if self.is_alive() {
+            let _ = self.stop();
+        }
+
+        if self.handle != 0 {
+            // SAFETY: the handle this type owns, closed once, on the way out.
+            unsafe { CloseHandle(HANDLE(self.handle as *mut core::ffi::c_void)) }.ok();
+        }
     }
 }

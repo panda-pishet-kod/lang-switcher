@@ -1471,6 +1471,34 @@ pub struct Snapshot {
     /// SEC-01, SEC-07: a count of strokes removed, never a stroke. No scan code, no character
     /// and no layout of any of them enters this number.
     pub strokes_removed: u32,
+    /// Which of the four states of [`crate::guard::Field`] the gate is in — task **T-10-10**.
+    ///
+    /// [`crate::guard::field`], printed through [`crate::guard::Field::name`] — one of
+    /// `pending`, `ordinary`, `password`, `undetermined`, and never anything else. The same
+    /// shape [`Snapshot::watchdog_last_reason`] uses, and for the same reason: the list of
+    /// words lives beside the list of arms so the two cannot drift apart.
+    ///
+    /// ⚠ **Condition 2 of SEC-04a: this is the state of the gate, not the content of the
+    /// field.** The set of things it can say is closed and written out in `guard.rs`; the
+    /// contents of a password field are read nowhere in this program.
+    /// [`Snapshot::password_field`] is unchanged and remains the **flag** SEC-06 requires —
+    /// this key does not replace it and does not restate it.
+    ///
+    /// ⚠ **Why a bench needs it: `password_field` is `0` for two different situations.** It is
+    /// `0` for [`Field::Ordinary`](crate::guard::Field::Ordinary) — an ordinary field,
+    /// buffering on — and it is also `0` for [`Field::Pending`](crate::guard::Field::Pending),
+    /// where the focus has moved, no verdict exists yet, buffering is **off** and
+    /// `app::park_buffer` has emptied the buffer through `buffer::reset()` — past the flush
+    /// counters, so [`Snapshot::strokes_removed`] does not move either. On the channel those
+    /// two читаются одинаково: `password_field=0`, `buffer_len=0`, `strokes_removed` standing.
+    /// That is the first row of the break-down table of task T-10-9 — «нажатия не доходят
+    /// до буфера, потому что ворота держат буфер снятым» — and until this key it was the one
+    /// row of four that a live process could not be asked about directly. A gate that never
+    /// leaves `pending` prints `pending` here while everything else on the channel looks
+    /// healthy.
+    ///
+    /// SEC-01, SEC-07: one of four named constants.
+    pub field_state: crate::guard::Field,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1525,6 +1553,7 @@ pub fn snapshot() -> Snapshot {
         window_flushes: subscriptions.window_flushes,
         full_clears: subscriptions.full_clears,
         strokes_removed: subscriptions.strokes_removed,
+        field_state: crate::guard::field(),
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1620,6 +1649,14 @@ pub fn snapshot() -> Snapshot {
 /// process therefore could not read them at all, and they are precisely the three numbers that
 /// tell «набранное стирается сбросами» from «набранное не попадает в буфер». See
 /// [`Snapshot::window_flushes`].
+///
+/// `field_state` of task **T-10-10** is appended after them, by the same rule, and it is the
+/// blind spot those three left standing. They separate «буфер стирают сбросы» from «в буфер
+/// ничего не попадает»; they cannot say **why** nothing is going in, because `password_field`
+/// prints `0` both for an ordinary field and for a gate still waiting on a verdict with
+/// buffering off. This key names the gate's own state in one of four closed words, so a gate
+/// that never leaves `pending` is readable directly rather than by inference. See
+/// [`Snapshot::field_state`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1655,7 +1692,8 @@ pub fn render(state: &Snapshot) -> String {
          last_replacement_method={}\n\
          window_flushes={}\n\
          full_clears={}\n\
-         strokes_removed={}\n",
+         strokes_removed={}\n\
+         field_state={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1692,6 +1730,7 @@ pub fn render(state: &Snapshot) -> String {
         state.window_flushes,
         state.full_clears,
         state.strokes_removed,
+        state.field_state.name(),
     )
 }
 
@@ -1712,7 +1751,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 34] = [
+pub const KEYS: [&str; 35] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1747,6 +1786,7 @@ pub const KEYS: [&str; 34] = [
     "window_flushes",
     "full_clears",
     "strokes_removed",
+    "field_state",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

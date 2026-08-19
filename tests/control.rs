@@ -50,6 +50,7 @@ use std::sync::{Mutex, PoisonError};
 use lang_switcher::app;
 use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
+use lang_switcher::guard::Field;
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts::LayoutId;
 use lang_switcher::settings::ReplacementMethod;
@@ -112,6 +113,11 @@ fn the_payload_is_exactly_the_documented_keys_one_per_line() {
 /// held to a shape as closed as the two lists above: literally `0x` and exactly eight hex
 /// digits, so nothing of variable length can ride in it, and an `HKL` carries nothing of a
 /// keystroke in any case (module `switch` states the same thing about its own arguments).
+///
+/// Task **T-10-10** adds `field_state`, and it is no new shape at all — a fourth word-valued
+/// key held against its own closed list, the four arms of `guard::Field`, built here from the
+/// arms themselves rather than typed out. The exception stays an exception because every one
+/// of these lists is closed and none of them is "any word".
 #[test]
 fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     let text = control::render(&control::snapshot());
@@ -130,6 +136,16 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     ]
     .iter()
     .map(|reason| reason.name())
+    .collect();
+
+    let fields: Vec<&str> = [
+        Field::Pending,
+        Field::Ordinary,
+        Field::Password,
+        Field::Undetermined,
+    ]
+    .iter()
+    .map(|field| field.name())
     .collect();
 
     for line in text.lines() {
@@ -159,6 +175,17 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
             assert!(
                 reasons.contains(&value),
                 "watchdog_last_reason is one of {reasons:?}, and {value:?} is not"
+            );
+            continue;
+        }
+
+        // **Task T-10-10.** The third word-valued key, and held the same way: its own closed
+        // list, built from the arms of `guard::Field` rather than written out here, so the
+        // list of words and the list of arms cannot drift apart.
+        if key == "field_state" {
+            assert!(
+                fields.contains(&value),
+                "field_state is one of {fields:?}, and {value:?} is not"
             );
             continue;
         }
@@ -1773,7 +1800,6 @@ fn the_three_flush_keys_of_t_10_9_are_published_as_decimal_counts_at_the_tail() 
         &control::KEYS[31..34],
         &["window_flushes", "full_clears", "strokes_removed"]
     );
-    assert_eq!(control::KEYS.len(), 34);
 }
 
 /// The three keys mirror `watchdog::counters()` and are not invented here.
@@ -1807,6 +1833,135 @@ fn the_three_flush_keys_of_t_10_9_mirror_the_watchdog_counters() {
             "the channel publishes what watchdog holds: {published} is outside {low}..={high}"
         );
     }
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-10 — the gate's own state, the blind spot the three flush counters left
+// -------------------------------------------------------------------------------------
+
+/// `field_state` is published, it is one of the four closed words of `guard::Field::name`,
+/// and it closes the tail of `KEYS`.
+///
+/// # Why it exists at all
+///
+/// `password_field` — the flag SEC-06 requires — is `0` for **two different situations**:
+/// `Field::Ordinary`, where buffering is on, and `Field::Pending`, where the focus has moved,
+/// no verdict exists yet, buffering is off and `app::park_buffer` has already emptied the
+/// buffer through `buffer::reset()`. That path goes *past* the flush counters, so
+/// `strokes_removed` does not move either, and on the channel the two situations read
+/// identically: `password_field=0`, `buffer_len=0`, `strokes_removed` standing. That is the
+/// first of the four rows of the break-down table of task T-10-9 — «нажатия не доходят до
+/// буфера, потому что ворота держат буфер снятым» — and it was the one row of four that a
+/// **live** process could not be asked about directly. `window_flushes`, `full_clears` and
+/// `strokes_removed` separated «буфер стирают сбросы» from «в буфер ничего не попадает»; they
+/// cannot say why nothing is going in.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// **A word, and a word out of a closed list.** This is the state of the gate, never the
+/// content of the field — the contents of a password field are read nowhere in this program.
+/// The assertion below is membership of the four words of `guard::Field::name` and nothing
+/// weaker: any fifth value, however harmless-looking, fails it.
+#[test]
+fn the_field_state_key_of_t_10_10_is_one_of_four_closed_words_at_the_tail() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("field_state="))
+        .expect("the channel does not publish field_state");
+
+    println!("field_state={published}");
+
+    assert!(
+        ["pending", "ordinary", "password", "undetermined"].contains(&published),
+        "field_state must be one of the four words of guard::Field::name, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"field_state"));
+    assert!(!control::RESERVED_KEYS.contains(&"field_state"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed, written
+    // against a fixed index for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
+    // assertion travels with the last-appended key: it is the check that no key reached the
+    // channel without a review, and it belongs beside the key that currently closes the list.
+    assert_eq!(control::KEYS[34], "field_state");
+    assert_eq!(control::KEYS.len(), 35);
+}
+
+/// Every one of the four states of `guard::Field` renders as its own word, and `password_field`
+/// keeps saying what it said.
+///
+/// The channel is a mirror (decision Р-28), so the assertion that matters is not "some word
+/// appears" but "the word that appears is the one the state names". Driven over a `Snapshot`
+/// taken live and then re-pointed at each arm in turn, because the four arms cannot all be
+/// produced on a real gate inside one test: `Field::Pending` exists only for the few
+/// milliseconds between a focus change and the verdict of its probe.
+///
+/// The second half is the point of the key. `password_field` is `0` for **both** `Ordinary`
+/// and `Pending`, and this asserts that it still is — the flag of SEC-06 is not restated by
+/// the new key and not replaced by it. `field_state` is what tells those two apart.
+#[test]
+fn the_field_state_key_names_each_of_the_four_states_and_leaves_the_flag_alone() {
+    let mut state = control::snapshot();
+
+    for (field, word) in [
+        (Field::Pending, "pending"),
+        (Field::Ordinary, "ordinary"),
+        (Field::Password, "password"),
+        (Field::Undetermined, "undetermined"),
+    ] {
+        state.field_state = field;
+
+        assert_eq!(field.name(), word, "guard names the state {word}");
+        assert!(
+            control::render(&state).contains(&format!("field_state={word}\n")),
+            "the channel prints the word guard gives it for {word}"
+        );
+    }
+
+    // The blind spot itself, asserted rather than described: the flag cannot tell these two
+    // apart, and the new key can.
+    for field in [Field::Pending, Field::Ordinary] {
+        state.field_state = field;
+        state.password_field = false;
+        assert!(
+            control::render(&state).contains("password_field=0\n"),
+            "the flag of SEC-06 reads 0 for {} exactly as it did before",
+            field.name()
+        );
+    }
+    assert_ne!(
+        Field::Pending.name(),
+        Field::Ordinary.name(),
+        "and the new key is what separates them"
+    );
+}
+
+/// The key mirrors what `guard::field()` holds and is not invented by the channel.
+///
+/// Read twice around the snapshot: unlike the counters this is not monotone, so the bracket
+/// used elsewhere in this file does not apply. What is asserted instead is the property that
+/// does hold — the published word is the word of *some* state `guard` was in, and if the gate
+/// did not move across the three reads it is the word of that state exactly.
+#[test]
+fn the_field_state_key_mirrors_what_guard_holds() {
+    let before = lang_switcher::guard::field();
+    let state = control::snapshot();
+    let after = lang_switcher::guard::field();
+
+    if before == after {
+        assert_eq!(
+            state.field_state, before,
+            "the channel publishes the state guard holds"
+        );
+    }
+
+    assert!(
+        ["pending", "ordinary", "password", "undetermined"].contains(&state.field_state.name()),
+        "and it is a word of the closed list either way"
+    );
 }
 
 /// The key mirrors what `inject::on_hotkey` publishes into it, a register and not a counter —
