@@ -399,6 +399,42 @@ fn chars_in(units: &[u16]) -> usize {
             .count()
 }
 
+/// How many **different** UTF-16 code units the character events of a built packet carry — task
+/// **T-10-6**.
+///
+/// The measurement that tells a replacement of six different characters from a replacement of one
+/// character six times over, and the only thing about the text of a packet that ever leaves this
+/// module: it is a count, and no unit of the packet can be recovered from it (SEC-01, SEC-07).
+///
+/// ⚠ **Read off the `INPUT` structures and not off the text they were built from**, and that is
+/// the whole point of the function. A count taken from the text would answer "the conversion came
+/// out right", which was never in doubt; what the defect of this task needed answered is "the
+/// array handed to `SendInput` really carried six different characters", and the only honest
+/// place to ask that is the array. The keydown edge alone is counted, so that the pairing of
+/// T-10-4 does not double every unit.
+///
+/// Quadratic in the length of the packet and deliberately so. It is compiled under the `testing`
+/// feature alone — every Release build is without it, by condition 1 of SEC-04a — and even there
+/// the run is a word, a few dozen units at the very most, on a path that already allocates two
+/// vectors. A set would allocate a third for no gain that could be measured.
+#[cfg(feature = "testing")]
+fn distinct_units(packet: &[INPUT]) -> usize {
+    let units: Vec<u16> = packet
+        .iter()
+        .filter_map(keyboard)
+        .filter(|key| {
+            key.dwFlags.0 & KEYEVENTF_UNICODE.0 != 0 && key.dwFlags.0 & KEYEVENTF_KEYUP.0 == 0
+        })
+        .map(|key| key.wScan)
+        .collect();
+
+    units
+        .iter()
+        .enumerate()
+        .filter(|(index, unit)| !units[..*index].contains(unit))
+        .count()
+}
+
 /// Whether `unit` is the leading half of a surrogate pair.
 const fn is_high_surrogate(unit: u16) -> bool {
     unit >= HIGH_SURROGATE_FIRST && unit <= HIGH_SURROGATE_LAST
@@ -1270,6 +1306,20 @@ pub fn replace_in_with(
 
     let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
     let built = build_packet(method, erased, &text[..typed], &mut events);
+
+    // ⚠ **The shape of the packet, published before it is sent — task T-10-6, SEC-04a.**
+    //
+    // Everything the channel could say about a press said that the press had gone perfectly while
+    // the screen showed six copies of one letter, so there was no way to tell a product that built
+    // a collapsed packet from a product that built a correct one somebody else collapsed. Three
+    // counts settle it, and they are counts: how many characters are being taken off the screen,
+    // how many code units are going back, and how many of the character events of the built array
+    // are *different*. See [`crate::control::note_replacement`] — SEC-01 and SEC-07 are argued
+    // there — and [`distinct_units`] for why it is read off the array rather than off the text.
+    #[cfg(feature = "testing")]
+    if let Ok(len) = built {
+        crate::control::note_replacement(erased, typed, distinct_units(&events[..len]));
+    }
 
     // The working buffers hold the user's text in plain form and are the only place outside
     // module `buffer` that ever does. Whatever happens below, they are zeroed before this frame

@@ -82,7 +82,7 @@ use std::io::Write;
 use std::mem::ManuallyDrop;
 use std::os::windows::io::FromRawHandle;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -948,6 +948,42 @@ static CYCLE_POSITION: AtomicUsize = AtomicUsize::new(0);
 /// nothing about what the user typed can be recovered from it.
 static ACTIVE_LAYOUT: AtomicUsize = AtomicUsize::new(0);
 
+/// The **shape** of the last replacement packet FR-41 built: how many characters it erased, how
+/// many UTF-16 code units it typed back, and how many of those units were **distinct**.
+///
+/// # Why the shape, and why `distinct` — task T-10-6
+///
+/// The defect that task was given is a packet that came out as six copies of one character where
+/// six different ones were expected. Every key that existed said the press had gone perfectly:
+/// `buffer_len=6`, `cycle_position` alternating, `send_mismatches=0`. None of them could tell
+/// «продукт построил верный пакет, а приложение отобразило его схлопнутым» from «продукт построил
+/// схлопнутый пакет», and those are different defects in different modules. `distinct` separates
+/// them in one reading: six units and one distinct value is a collapsed packet, six and six is a
+/// correct one — whatever ends up on the screen.
+///
+/// `erase` and `units` travel with it because the other half of the same defect was «слово
+/// стёрлось»: FR-41 erases `N` characters and types the conversion back, and a packet whose
+/// `erase` and `units` disagree is exactly that report, seen from inside.
+///
+/// # One atomic and not three
+///
+/// The three numbers are read together and compared with each other, so a torn reading would be
+/// a *wrong* measurement rather than a slightly stale one — unlike every other mirror on this
+/// channel, which is a count that stands alone. Packed as three sixteen-bit fields of one
+/// `u64`, they are published by a single store and read by a single load, and cannot disagree.
+/// Each field saturates at `u16::MAX`; the ring of FR-07 holds 256 strokes, so nothing this
+/// program can build comes near it.
+///
+/// Zero — the value before the first replacement — renders as `0/0/0`.
+///
+/// **SEC-01, SEC-07.** Three counts. Not a character, not a code unit, not a scan code: which
+/// units the packet held is exactly what is *not* here, and «сколько среди них различных» cannot
+/// be turned back into any of them.
+static LAST_REPLACEMENT: AtomicU64 = AtomicU64::new(0);
+
+/// Width of one field of [`LAST_REPLACEMENT`].
+const REPLACEMENT_FIELD_BITS: u32 = 16;
+
 /// [`BUFFER_LEN`] as it stood when the input thread left its message loop.
 ///
 /// The file sink runs on the main thread after every thread has been joined, by which time
@@ -1043,6 +1079,46 @@ pub fn note_cycle_position(position: usize) {
 #[inline]
 pub fn note_active_layout(layout: usize) {
     ACTIVE_LAYOUT.store(layout, Ordering::Relaxed);
+}
+
+/// Publishes the shape of the replacement packet FR-41 has just built — called by module
+/// `inject` from the one place a packet is formed, and by nothing else.
+///
+/// `erase` is the `N` of FR-41, `units` the UTF-16 code units of the conversion, `distinct` how
+/// many different values those units take. See [`LAST_REPLACEMENT`] for why the third number is
+/// the one task T-10-6 needed and why the three travel in one atomic.
+///
+/// # NFR-01 to NFR-05
+///
+/// The caller sits on the input thread's message loop, never in the hook callback, and this is
+/// one relaxed atomic store over three shifts: no allocation (NFR-03), no lock (NFR-04), no I/O
+/// and nothing formatted (NFR-05). `Relaxed` for the reason [`note_buffer_len`] gives — the three
+/// fields are ordered against each other by being one word, and against nothing else.
+///
+/// # SEC-01, SEC-07
+///
+/// Three counts. See [`LAST_REPLACEMENT`].
+#[inline]
+pub fn note_replacement(erase: usize, units: usize, distinct: usize) {
+    let field = |value: usize| u64::from(u16::try_from(value).unwrap_or(u16::MAX));
+
+    let packed = (field(erase) << (2 * REPLACEMENT_FIELD_BITS))
+        | (field(units) << REPLACEMENT_FIELD_BITS)
+        | field(distinct);
+
+    LAST_REPLACEMENT.store(packed, Ordering::Relaxed);
+}
+
+/// Unpacks [`LAST_REPLACEMENT`] into the three numbers it carries — erase, units, distinct.
+fn last_replacement() -> (u16, u16, u16) {
+    let packed = LAST_REPLACEMENT.load(Ordering::Relaxed);
+    let field = |shift: u32| ((packed >> shift) & u64::from(u16::MAX)) as u16;
+
+    (
+        field(2 * REPLACEMENT_FIELD_BITS),
+        field(REPLACEMENT_FIELD_BITS),
+        field(0),
+    )
 }
 
 /// Latches the live length for the file sink — see [`BUFFER_LEN_AT_EXIT`].
@@ -1279,6 +1355,13 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: a layout handle. Not a scan code, not a character, not a stroke.
     pub active_layout: usize,
+    /// Characters the last replacement packet erased — the `N` of **FR-41**. Task **T-10-6**.
+    pub replacement_erase: u16,
+    /// UTF-16 code units that packet typed back — **FR-41**. Task **T-10-6**.
+    pub replacement_units: u16,
+    /// How many of those units were **distinct** — the number that tells a correct packet from a
+    /// collapsed one. Task **T-10-6**; see [`LAST_REPLACEMENT`].
+    pub replacement_distinct: u16,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1292,6 +1375,8 @@ pub fn snapshot() -> Snapshot {
     let watchdog = crate::watchdog::health();
     let subscriptions = crate::watchdog::counters();
     let guard = crate::guard::counters();
+    // One load, three fields — see [`LAST_REPLACEMENT`] for why they may not be read apart.
+    let replacement = last_replacement();
 
     let mut state = Snapshot {
         buffer_len: BUFFER_LEN.load(Ordering::Relaxed),
@@ -1324,6 +1409,9 @@ pub fn snapshot() -> Snapshot {
         callback_p99_ns: 0,
         callback_max_ns: 0,
         active_layout: ACTIVE_LAYOUT.load(Ordering::Relaxed),
+        replacement_erase: replacement.0,
+        replacement_units: replacement.1,
+        replacement_distinct: replacement.2,
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1432,7 +1520,8 @@ pub fn render(state: &Snapshot) -> String {
          callback_p50_ns={}\n\
          callback_p99_ns={}\n\
          callback_max_ns={}\n\
-         active_layout={:#010x}\n",
+         active_layout={:#010x}\n\
+         last_replacement={}/{}/{}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1462,6 +1551,9 @@ pub fn render(state: &Snapshot) -> String {
         state.callback_p99_ns,
         state.callback_max_ns,
         state.active_layout,
+        state.replacement_erase,
+        state.replacement_units,
+        state.replacement_distinct,
     )
 }
 
@@ -1481,7 +1573,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 29] = [
+pub const KEYS: [&str; 30] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1511,6 +1603,7 @@ pub const KEYS: [&str; 29] = [
     "callback_p99_ns",
     "callback_max_ns",
     "active_layout",
+    "last_replacement",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

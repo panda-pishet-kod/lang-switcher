@@ -107,6 +107,8 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--channel-only") => channel_only(),
         Some("--experiment-foreign") => experiment_foreign(arguments),
         Some("--classify") => scenarios::classify(&|| uia::Automation::new().ok()),
+        Some("--experiment-unicode") => experiment_unicode(),
+        Some("--experiment-modes") => experiment_modes(),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -329,6 +331,51 @@ fn experiment_foreign(arguments: &[String]) -> std::process::ExitCode {
     } else {
         std::process::ExitCode::from(1)
     }
+}
+
+/// **Task T-10-6** — the delivery experiment, with no product anywhere near it.
+///
+/// The arm is here and the experiment is in `scenarios.rs` for the reason every position is split
+/// the same way: this file owns the list of what can be run and `scenarios.rs` owns what running
+/// it means. See [`scenarios::experiment_unicode`] for what it separates.
+fn experiment_unicode() -> std::process::ExitCode {
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_unicode(&context)
+}
+
+/// **Task T-10-6** — the same series under three configurations of §7.
+///
+/// See [`scenarios::experiment_modes`]; this arm only builds the context, exactly as
+/// [`experiment_unicode`] does.
+fn experiment_modes() -> std::process::ExitCode {
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_modes(&context)
 }
 
 /// The measurement of position 11 — rule Р-39, and see [`scenarios::measure_layout`].

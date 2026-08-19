@@ -1692,8 +1692,8 @@ mod behavioural {
     use windows::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, CreateWindowExW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
         GetWindowTextW, GetWindowThreadProcessId, MSG, PM_REMOVE, PeekMessageW, SW_SHOW,
-        SetForegroundWindow, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
-        WS_BORDER, WS_POPUP, WS_VISIBLE,
+        SetForegroundWindow, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CHAR,
+        WM_KEYDOWN, WS_BORDER, WS_POPUP, WS_VISIBLE,
     };
     use windows::core::{PCWSTR, w};
 
@@ -2065,6 +2065,141 @@ mod behavioural {
         assert_eq!(outcome.erased, 6);
         assert_eq!(outcome.typed, 6);
         assert_eq!(window_text(&window), "привет");
+
+        buffer::uninstall();
+    }
+
+    /// **Task T-10-6 — what the system really delivers for one packet of FR-41.**
+    ///
+    /// The other half of the separating measurement of that task. The channel says the product
+    /// builds six *distinct* character events; this says what arrives at the far end when the
+    /// application does **not** retrieve a single message until the whole packet has been
+    /// injected — the state a busy application is in, and the state the collapse happens in.
+    ///
+    /// The queue is left to fill for eighty milliseconds and then drained by hand, and the
+    /// messages are examined rather than the text: six separate `WM_KEYDOWN` of `VK_PACKET`, each
+    /// with **repeat count 1**, and six `WM_CHAR` carrying six **different** characters. That is
+    /// what rules out the reading the shape of the defect suggests first — that Windows merges a
+    /// run of injected characters into one message with a repeat count, which an application
+    /// honouring that count would render as N copies of one character.
+    ///
+    /// ⚠ It asserts the message stream and not merely the final text: the text alone would pass
+    /// on a queue that had merged and been un-merged by the control.
+    #[test]
+    #[ignore = "sends synthetic input; run with --ignored --test-threads=1"]
+    fn a_stalled_queue_still_receives_every_character_separately() {
+        let window = open_foreground_window();
+
+        install_buffer();
+        type_ghbdtn("ghbdtn");
+        assert_eq!(window_text(&window), "ghbdtn", "the run to be replaced");
+
+        let units: Vec<u16> = EXPECTED_UNITS.to_vec();
+        let mut events = vec![INPUT::default(); inject::replacement_events(6, units.len())];
+        let len = inject::build_replacement(6, &units, &mut events).expect("sized");
+        inject::dispatch(&events[..len], 0);
+
+        // Not a wait on a condition and deliberately so: the condition **is** the delay. Nothing
+        // is retrieved until the whole packet is certainly injected, because the question is what
+        // a queue that filled up before anybody looked at it holds.
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        let mut message = MSG::default();
+        let mut characters = Vec::new();
+        let mut packets = Vec::new();
+
+        loop {
+            // SAFETY: `message` is a live, properly aligned `MSG` owned by this frame and the only
+            // buffer written to; `None` asks for every message of this thread.
+            let present = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) };
+            if !present.as_bool() {
+                break;
+            }
+
+            let repeat = (message.lParam.0 as u32) & 0xFFFF;
+            match message.message {
+                WM_KEYDOWN if message.wParam.0 == VK_PACKET => packets.push(repeat),
+                WM_CHAR if repeat == 1 && message.wParam.0 > 0x20 => {
+                    characters.push(message.wParam.0 as u16);
+                }
+                _ => {}
+            }
+
+            // SAFETY: `message` was filled by the `PeekMessageW` above and is read, not written.
+            unsafe {
+                let _ = TranslateMessage(&message);
+                let _ = DispatchMessageW(&message);
+            }
+        }
+
+        assert_eq!(
+            packets,
+            vec![1; units.len()],
+            "one WM_KEYDOWN of VK_PACKET per code unit, none of them a repeat"
+        );
+        assert_eq!(
+            characters, units,
+            "and the characters arrive whole and in order, however long the queue stood"
+        );
+        assert_eq!(window_text(&window), "привет");
+
+        buffer::uninstall();
+    }
+
+    /// `VK_PACKET` — the virtual key `KEYEVENTF_UNICODE` arrives as.
+    const VK_PACKET: usize = 0x00E7;
+
+    /// `привет` in UTF-16, which is what the packet of the check above carries.
+    const EXPECTED_UNITS: [u16; 6] = [0x043F, 0x0440, 0x0438, 0x0432, 0x0435, 0x0442];
+
+    /// **Task T-10-6 — four presses in a row, in a window this test owns.**
+    ///
+    /// The defect the user found is a press whose result is six copies of the **last** character
+    /// of the text that should have appeared: `nnnnnn` for `ghbdtn`, `тттттт` for `привет`. The
+    /// bench reproduces it in Notepad, and the channel of SEC-04a says the packet the product
+    /// built on those very presses carried six **distinct** code units — so what this check is
+    /// for is the other end: a plain `EDIT`, driven by the same `on_hotkey`, with the message
+    /// queue pumped by this thread between presses.
+    ///
+    /// Every press is asserted, not only the last: the collapse is intermittent, and a check that
+    /// looked at the end state alone would pass on a run in which press 2 collapsed and press 3
+    /// put the right text back.
+    #[test]
+    #[ignore = "sends synthetic input and switches the layout; run with --ignored --test-threads=1"]
+    fn four_presses_in_a_row_alternate_and_never_collapse() {
+        let window = open_foreground_window();
+
+        install_buffer();
+        type_ghbdtn("ghbdtn");
+
+        assert_eq!(window_text(&window), "ghbdtn", "the run to be replaced");
+
+        let expected = ["привет", "ghbdtn", "привет", "ghbdtn"];
+        let mut seen = Vec::new();
+
+        for press in 1..=expected.len() {
+            let outcome = inject::on_hotkey()
+                .unwrap_or_else(|| panic!("press {press}: the buffer still holds six strokes"));
+            pump();
+
+            seen.push((outcome.erased, outcome.typed, window_text(&window)));
+        }
+
+        for (index, want) in expected.iter().enumerate() {
+            let (erased, typed, shown) = &seen[index];
+            assert_eq!(
+                (*erased, *typed),
+                (6, 6),
+                "press {}: FR-41 erases as many characters as it types back; whole run {seen:?}",
+                index + 1
+            );
+            assert_eq!(
+                shown,
+                want,
+                "press {}: the alternation of FR-33 over a cycle of two; whole run {seen:?}",
+                index + 1
+            );
+        }
 
         buffer::uninstall();
     }

@@ -163,6 +163,26 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
             continue;
         }
 
+        // **Task T-10-6.** The one compound value on the channel: three counts, `erase/units/
+        // distinct`, describing the last replacement packet of FR-41. They travel together
+        // because they are read together — see `control::LAST_REPLACEMENT` — and the shape is
+        // asserted here so that a fourth field or a stray separator cannot appear unnoticed.
+        if key == "last_replacement" {
+            let fields: Vec<&str> = value.split('/').collect();
+            assert_eq!(
+                fields.len(),
+                3,
+                "last_replacement is erase/units/distinct, and {value:?} is not"
+            );
+            for field in fields {
+                assert!(
+                    !field.is_empty() && field.bytes().all(|byte| byte.is_ascii_digit()),
+                    "every field of last_replacement is a decimal count, {field:?} is not"
+                );
+            }
+            continue;
+        }
+
         assert!(
             !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),
             "{key} is a plain decimal count, and {value:?} is not"
@@ -1280,12 +1300,12 @@ fn the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle() {
     assert!(control::KEYS.contains(&"active_layout"));
     assert!(!control::RESERVED_KEYS.contains(&"active_layout"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one
-    // is genuinely last, and the next task to append will rewrite this line as its
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // **T-10-6** appended `last_replacement` after it and rewrote this line, as its
     // predecessors each rewrote theirs.
     assert_eq!(
         control::KEYS.iter().position(|key| *key == "active_layout"),
-        Some(control::KEYS.len() - 1)
+        Some(control::KEYS.len() - 2)
     );
 }
 
@@ -1321,6 +1341,114 @@ fn the_active_layout_key_mirrors_what_was_published_into_it() {
     // and the second publication replaces the first rather than adding to it.
     control::note_active_layout(0x0409_0409);
     assert_eq!(control::snapshot().active_layout, 0x0409_0409);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-6 — the key that tells a collapsed packet from a collapsed screen
+// -------------------------------------------------------------------------------------
+
+/// `last_replacement` is published, it is `erase/units/distinct`, and it closes the tail of
+/// `KEYS`.
+///
+/// # Why it exists at all
+///
+/// The defect of task T-10-6 is a replacement of six different characters that reaches the screen
+/// as six copies of one of them. Every key that existed said that press had gone perfectly:
+/// `buffer_len=6`, `cycle_position` alternating, `send_mismatches=0`, `events_lost=0`. None of
+/// them could separate «продукт построил схлопнутый пакет» from «продукт построил верный пакет,
+/// а схлопнул его получатель», and those are defects of different modules — of `buffer` and
+/// `convert` in the first case, of nothing this program owns in the second. `distinct` separates
+/// them in one reading, and the answer it gave was **6**: the array handed to `SendInput` carried
+/// six different characters on the very presses whose result on the screen was `тттттт`.
+///
+/// `erase` and `units` travel with it because the other half of the same report was «слово
+/// стёрлось»: a packet whose erasure and insertion disagree is that report seen from inside.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// Three counts. Which characters the packet held is exactly what is not here, and «сколько среди
+/// них различных» cannot be turned back into any of them. Asserted below as three decimal fields
+/// separated by `/` — a closed shape nothing of variable length can ride in.
+#[test]
+fn the_last_replacement_key_of_t_10_6_is_published_as_three_counts() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("last_replacement="))
+        .expect("the channel does not publish last_replacement");
+
+    let fields: Vec<&str> = published.split('/').collect();
+    assert_eq!(
+        fields.len(),
+        3,
+        "last_replacement is erase/units/distinct, not {published:?}"
+    );
+    for field in &fields {
+        assert!(
+            !field.is_empty() && field.bytes().all(|byte| byte.is_ascii_digit()),
+            "every field is a decimal count, {field:?} is not"
+        );
+    }
+
+    assert!(control::KEYS.contains(&"last_replacement"));
+    assert!(!control::RESERVED_KEYS.contains(&"last_replacement"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one is
+    // genuinely last, and the next task to append will rewrite this line.
+    assert_eq!(
+        control::KEYS
+            .iter()
+            .position(|key| *key == "last_replacement"),
+        Some(control::KEYS.len() - 1)
+    );
+}
+
+/// The three counts mirror what was published, they do not accumulate, and they cannot tear.
+///
+/// The last property is the reason they share one atomic: they are compared **with each other**
+/// — `erase` against `units`, `units` against `distinct` — so a reading that mixed one press with
+/// another would be a wrong measurement rather than a stale one, which is not true of any other
+/// key on this channel.
+#[test]
+fn the_last_replacement_key_mirrors_what_was_published_into_it() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    for (erase, units, distinct) in [(6, 6, 6), (6, 6, 1), (0, 3, 2)] {
+        control::note_replacement(erase, units, distinct);
+
+        let state = control::snapshot();
+        assert_eq!(
+            (
+                state.replacement_erase,
+                state.replacement_units,
+                state.replacement_distinct
+            ),
+            (erase as u16, units as u16, distinct as u16),
+            "the snapshot reports the shape that was published into it"
+        );
+
+        assert!(
+            control::render(&state)
+                .contains(&format!("last_replacement={erase}/{units}/{distinct}")),
+            "and renders the three counts in that order"
+        );
+    }
+
+    // A register, not a counter: the second publication replaces the first.
+    control::note_replacement(2, 2, 2);
+    assert_eq!(control::snapshot().replacement_erase, 2);
+
+    // Each field saturates rather than wrapping into its neighbour — the ring of FR-07 holds 256
+    // strokes, so nothing this program builds comes near it, and a value that wrapped would
+    // corrupt the other two.
+    control::note_replacement(usize::MAX, 1, 1);
+    let state = control::snapshot();
+    assert_eq!(state.replacement_erase, u16::MAX);
+    assert_eq!(
+        (state.replacement_units, state.replacement_distinct),
+        (1, 1)
+    );
 }
 
 /// **Step 5 of FR-40 reaches the stamp — the repair of task T-10-5, end to end on one thread.**

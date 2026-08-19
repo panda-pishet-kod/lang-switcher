@@ -40,7 +40,7 @@ use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_A, VK_CONTROL, VK_DELETE, VK_HOME, VK_SHIFT, VK_TAB,
+    VK_A, VK_CONTROL, VK_DELETE, VK_HOME, VK_SHIFT, VK_SPACE, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, HWND_MESSAGE, PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
@@ -305,13 +305,18 @@ fn both_failed(position: u8, app: &str, reason: &str) -> Vec<Row> {
     ]
 }
 
-/// All three rows of position 16 when the scenario could not reach the second press.
+/// Every row of position 16 when the scenario could not reach the second press.
 ///
-/// Its own helper and not [`both_failed`] because position 16 asserts three things and expects
+/// Its own helper and not [`both_failed`] because position 16 asserts more things and expects
 /// different values for two of them: the *original* text, and the *source* layout. A row that
 /// failed while claiming to have expected `привет` would misreport what the position is for.
+///
+/// The rows of the series of task T-10-6 come with it, so that the position reports the **same
+/// number of assertions** whether it ran or fell over at the first step: a run whose row count
+/// depends on how far it got cannot be compared with the run before it, and comparing runs is
+/// what the bench is for.
 fn rollback_failed(position: u8, app: &str, reason: &str) -> Vec<Row> {
-    vec![
+    let mut rows = vec![
         Row::new(
             position,
             app,
@@ -336,7 +341,11 @@ fn rollback_failed(position: u8, app: &str, reason: &str) -> Vec<Row> {
             reason,
             "cycle_position=0",
         ),
-    ]
+    ];
+
+    rows.extend(series_failed(position, app, reason));
+
+    rows
 }
 
 /// What the third row of position 16 is about, in the report.
@@ -692,7 +701,7 @@ fn rolled_back(ctx: &Context, target: &input::Target, scene: RollbackScene<'_>) 
         })
         .unwrap_or_else(|| "канал не ответил".to_owned());
 
-    vec![
+    let mut rows = vec![
         Row::new(
             position,
             app_name,
@@ -746,11 +755,373 @@ fn rolled_back(ctx: &Context, target: &input::Target, scene: RollbackScene<'_>) 
             "FR-32, FR-33: цикл длины 2 вернулся в начало; ключ канала — задача T-05-2a; \
              прочие счётчики: {counters}"
         )),
-    ]
+    ];
+
+    // ⚠ **The blind spot of §11.5, closed by task T-10-6.** Everything above this line presses
+    // the hotkey **twice**, on **one** word, in a field that held nothing else. The user broke
+    // the product with the household version of the same gesture — several words in one window,
+    // spaces between them, four presses on the second word — and every position of the matrix
+    // gave `pass` while it did. The series below is that gesture, as assertions of this position.
+    rows.extend(series(
+        ctx,
+        target,
+        position,
+        app_name,
+        content,
+        shown_now.as_str(),
+    ));
+
+    rows
 }
 
 /// The key of the SEC-04a channel this position rests on — task T-05-2a.
 const CYCLE_KEY: &str = "cycle_position";
+
+/// The shape of the last replacement packet, `erase/units/distinct` — task T-10-6.
+///
+/// The key that separates "the product built a collapsed packet" from "the product built a
+/// correct one and what is on the screen is somebody else's doing". Read after every press of the
+/// series, because a reading taken only at the end would be the shape of the last press alone.
+const PACKET_KEY: &str = "last_replacement";
+
+// ---------------------------------------------------------------------------------------
+// Position 16, the series of task T-10-6 — several words, spaces, four presses
+// ---------------------------------------------------------------------------------------
+
+/// How many presses the series makes on the **second** word.
+///
+/// Four, because four is what the user made and four is where the defect showed its whole shape:
+/// press 2 collapsed, press 3 was right but a press late, press 4 collapsed again and took the
+/// word with it. Three would have shown the first two of those and hidden the rest.
+const SERIES_PRESSES: usize = 4;
+
+/// One report row per press of the series. Named rather than numbered in a loop, because
+/// [`Assertion::Other`] takes a `&'static str` and a row whose name is built at runtime cannot be
+/// compared between two runs of the bench.
+const SERIES_ROWS: [&str; SERIES_PRESSES] = [
+    "серия: второе слово, нажатие 1",
+    "серия: второе слово, нажатие 2",
+    "серия: второе слово, нажатие 3",
+    "серия: второе слово, нажатие 4",
+];
+
+/// The row that answers criterion 13 of the task over the whole series at once.
+const SERIES_SHAPE: &str = "серия: ни схлопывания, ни стирания без вставки";
+
+/// The row that says the series ran at all.
+const SERIES_SETUP: &str = "серия: второе слово набрано";
+
+/// Bound on the wait for one press of the series to reach the field.
+///
+/// **A bound on a condition, not a delay** — requirement 1 of §11.5. The condition is "the field
+/// no longer reads what it read before the press", which a replacement satisfies in tens of
+/// milliseconds whether the replacement is right or wrong, so the bound is spent only when the
+/// product did nothing at all. Shorter than [`wait::TEXT_TIMEOUT`] on purpose: four presses that
+/// each spent ten seconds would outlive `LANGSW_DEBUG_TIMEOUT_SEC` and the product would die
+/// mid-position, which reports as a defect of the product and is a defect of the bench.
+const SERIES_STEP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What the field is expected to read after press `press` of the series, given `first` — the word
+/// already in the field, which the series never touches.
+///
+/// Odd presses convert (`привет`), even ones roll back (`ghbdtn`) — FR-33 over a cycle of length
+/// two. The **whole** field is compared and not the last word of it: a press that erased the word
+/// without typing anything back would leave the first word alone in the field, and a comparison
+/// of last words would read that as a correct rollback. Criterion 13 of the task is precisely
+/// about not doing so.
+fn series_expected(first: &str, press: usize) -> String {
+    let word = if press % 2 == 1 { EXPECTED } else { TYPED };
+    format!("{first} {word}")
+}
+
+/// Whether `text` is a run of one character repeated — the shape of the defect, `nnnnnn`.
+///
+/// Two or more characters, all equal. One character is not a collapse of anything, and the empty
+/// string is the erasure the neighbouring check answers.
+fn is_collapsed(text: &str) -> bool {
+    let mut characters = text.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    text.chars().count() > 1 && characters.all(|character| character == first)
+}
+
+/// The keys of SEC-04a this task reads after **every** press.
+fn series_channel() -> String {
+    crate::channel::read()
+        .ok()
+        .map(|snapshot| {
+            format!(
+                "buffer_len={}, cycle_position={}, active_layout={}, hotkey_handoffs={}, \
+                 send_mismatches={}, events_lost={}, replacement_method={}, {PACKET_KEY}={}",
+                snapshot.get("buffer_len").unwrap_or("?"),
+                snapshot.get(CYCLE_KEY).unwrap_or("?"),
+                snapshot.get("active_layout").unwrap_or("?"),
+                snapshot.get("hotkey_handoffs").unwrap_or("?"),
+                snapshot.get("send_mismatches").unwrap_or("?"),
+                snapshot.get("events_lost").unwrap_or("?"),
+                snapshot.get("replacement_method").unwrap_or("?"),
+                snapshot.get(PACKET_KEY).unwrap_or("?"),
+            )
+        })
+        .unwrap_or_else(|| "канал не ответил".to_owned())
+}
+
+/// Reads the field, normalised, or `None` while the provider is not answering.
+fn read_field(content: &Element) -> Option<String> {
+    content.read().map(|(raw, _)| normalise(&raw))
+}
+
+/// Types `text` one character at a time, each character confirmed in the field before the next
+/// one is sent — **the tempo of a person**, expressed as a condition.
+///
+/// The bench's [`input::type_text`] hands the whole word to one `SendInput` call, which is the
+/// one thing the user's scenario did not do. Rather than sleep between keystrokes — a fixed delay,
+/// which requirement 1 of §11.5 forbids — each character is followed by a wait for the field to
+/// read it back. The pace that results is the round trip of UI Automation, tens of milliseconds,
+/// which is inside the range a person types in, and the wait is a condition throughout.
+fn type_paced(
+    text: &str,
+    target: &input::Target,
+    content: &Element,
+    prefix: &str,
+) -> Result<(), String> {
+    let mut expected = prefix.to_owned();
+
+    for character in text.chars() {
+        let mut one = [0u8; 4];
+        let one = character.encode_utf8(&mut one);
+        input::type_text(one, target).map_err(|error| format!("ввод {one:?}: {error}"))?;
+
+        expected.push(character);
+        let landed = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text == &expected)
+        });
+
+        if landed.is_none() {
+            return Err(format!(
+                "символ {one:?} не дошёл до приложения: прочитано {:?}, ожидалось {expected:?}",
+                read_field(content).unwrap_or_else(|| "<чтение не удалось>".to_owned())
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// A setup failure of the series, in the shape of the rows the series would have produced.
+fn series_failed(position: u8, app_name: &str, reason: &str) -> Vec<Row> {
+    let mut rows = vec![
+        Row::new(
+            position,
+            app_name,
+            Assertion::Other(SERIES_SETUP),
+            Verdict::Fail,
+            reason.to_owned(),
+            format!("второе слово {TYPED:?} в том же поле, через пробел"),
+        )
+        .with_note(format!(
+            "серия T-10-6 не начиналась; продукт: {}",
+            series_channel()
+        )),
+    ];
+
+    for (index, name) in SERIES_ROWS.iter().enumerate() {
+        rows.push(Row::new(
+            position,
+            app_name,
+            Assertion::Other(name),
+            Verdict::Fail,
+            "нажатие не отправлялось".to_owned(),
+            series_expected(TYPED, index + 1),
+        ));
+    }
+
+    rows.push(Row::new(
+        position,
+        app_name,
+        Assertion::Other(SERIES_SHAPE),
+        Verdict::Fail,
+        "серия не исполнялась".to_owned(),
+        "ни одного чтения из повторов одного символа и ни одного без вставки".to_owned(),
+    ));
+
+    rows
+}
+
+/// **The scenario the user broke the product with** — several words in one field, a space between
+/// them, four presses of the hotkey on the second word.
+///
+/// # Why it is here and not a row of its own in §11.3
+///
+/// Because §11.3 is `SPEC.md` and a new line of that matrix is the user's to write. The class of
+/// defect is nevertheless the one the matrix was blind to, so it enters the bench the only way it
+/// may: as further assertions of a position that already exists. Position 16 rather than 1
+/// because what the series measures is FR-32 and FR-33 — the alternation of conversion and
+/// rollback — over a run longer than the two presses this position used to make.
+///
+/// # What is asserted
+///
+/// | Row | Expected |
+/// |---|---|
+/// | setup | the second word reaches the field, through a real `Space` |
+/// | press 1…4 | the **whole** field, bit for bit: `ghbdtn привет` and `ghbdtn ghbdtn` in turn |
+/// | shape | no reading is one character repeated, and no press erased without typing back |
+///
+/// The space is sent as `VK_SPACE` and not through [`input::type_text`], which would fall back to
+/// a `KEYEVENTF_UNICODE` event for it: a unicode event carries `wVk = 0`, the product would record
+/// it as `VK_PACKET` rather than as the boundary key of FR-10, and the buffer would **not** be
+/// flushed between the two words. The whole point of the scenario is that it is.
+fn series(
+    ctx: &Context,
+    target: &input::Target,
+    position: u8,
+    app_name: &str,
+    content: &Element,
+    after_rollback: &str,
+) -> Vec<Row> {
+    let failed = |reason: &str| series_failed(position, app_name, reason);
+
+    // The word the rollback left in the field. The series never touches it, and every expected
+    // reading below is built from it, so a first word that is not what this position thinks it is
+    // ends the series here instead of producing rows about the wrong thing.
+    if after_rollback != TYPED {
+        return failed(&format!(
+            "перед серией поле читается {after_rollback:?}, а не {TYPED:?}"
+        ));
+    }
+
+    // The boundary key of FR-10, and the first half of "несколько слов, пробелы между ними".
+    if let Err(error) = input::tap(VK_SPACE.0, target) {
+        return failed(&format!("пробел между словами: {error}"));
+    }
+
+    // `normalise` trims, so the space alone is invisible in the reading; the second word is what
+    // makes it appear, and `type_paced` waits for each of its characters in turn.
+    if let Err(reason) = type_paced(TYPED, target, content, &format!("{after_rollback} ")) {
+        return failed(&reason);
+    }
+
+    let mut rows = vec![
+        Row::new(
+            position,
+            app_name,
+            Assertion::Other(SERIES_SETUP),
+            Verdict::Pass,
+            format!("{:?}", format!("{after_rollback} {TYPED}")),
+            format!("второе слово {TYPED:?} в том же поле, через пробел"),
+        )
+        .with_note(format!(
+            "набрано посимвольно, каждый символ подтверждён чтением поля; продукт: {}",
+            series_channel()
+        )),
+    ];
+
+    let mut collapsed: Vec<String> = Vec::new();
+    let mut erased: Vec<String> = Vec::new();
+
+    for (index, name) in SERIES_ROWS.iter().enumerate() {
+        let press = index + 1;
+        let expected = series_expected(after_rollback, press);
+
+        let before = read_field(content).unwrap_or_default();
+
+        if let Err(error) = input::tap(ctx.hotkey_vk, target) {
+            rows.push(
+                Row::new(
+                    position,
+                    app_name,
+                    Assertion::Other(name),
+                    Verdict::Fail,
+                    format!("нажатие {press}: {error}"),
+                    expected,
+                )
+                .with_note(format!("продукт: {}", series_channel())),
+            );
+            continue;
+        }
+
+        // ⚠ A condition, not a clock, and the condition is the **expected** reading rather than
+        // "the field changed".
+        //
+        // The first version of this loop waited for a change, and it caught the packet of FR-41
+        // in flight: `ghbdtn ghbdtn` had become `ghbdtn ghbdt` — one `Backspace` in — and the row
+        // reported that as the product's answer. A press that succeeds satisfies the condition
+        // below at once; a press that fails spends the bound, by which time the packet has long
+        // finished and the reading that follows is the settled one.
+        let landed = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text == &expected)
+        });
+
+        let shown = landed
+            .or_else(|| read_field(content))
+            .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+        let channel = series_channel();
+
+        // The two shapes criterion 13 names, judged on the word this series is pressing on — the
+        // last one in the field — and collected for the aggregate row below.
+        let word = shown.split_whitespace().last().unwrap_or("").to_owned();
+        if is_collapsed(&word) {
+            collapsed.push(format!("нажатие {press}: {word:?}"));
+        }
+        if shown.split_whitespace().count() < 2 {
+            erased.push(format!("нажатие {press}: {shown:?}"));
+        }
+
+        rows.push(
+            Row::new(
+                position,
+                app_name,
+                Assertion::Other(name),
+                if shown == expected {
+                    Verdict::Pass
+                } else {
+                    Verdict::Fail
+                },
+                format!("{shown:?}"),
+                format!("{expected:?} побитово"),
+            )
+            .with_note(format!(
+                "до нажатия {before:?}; чередование FR-33 по циклу длины 2; продукт после \
+                 нажатия: {channel}"
+            )),
+        );
+    }
+
+    let mut shape = Vec::new();
+    if collapsed.is_empty() {
+        shape.push("схлопываний нет".to_owned());
+    } else {
+        shape.push(format!("СХЛОПЫВАНИЕ — {}", collapsed.join("; ")));
+    }
+    if erased.is_empty() {
+        shape.push("стираний без вставки нет".to_owned());
+    } else {
+        shape.push(format!("СТИРАНИЕ БЕЗ ВСТАВКИ — {}", erased.join("; ")));
+    }
+
+    rows.push(
+        Row::new(
+            position,
+            app_name,
+            Assertion::Other(SERIES_SHAPE),
+            if collapsed.is_empty() && erased.is_empty() {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            shape.join("; "),
+            "ни одного чтения из повторов одного символа и ни одного без вставки".to_owned(),
+        )
+        .with_note(format!(
+            "FR-41, FR-45 и суть дефекта T-10-6: чётное нажатие давало шесть копий последнего \
+             символа целевого текста; продукт в конце серии: {}",
+            series_channel()
+        )),
+    );
+
+    rows
+}
 
 /// Runs a position end to end: launch, find, replace, restore.
 /// What a position needs beyond the command that starts it.
@@ -822,6 +1193,305 @@ fn run_position(
     }
 
     rows
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-6 — the delivery experiment, and what it separates
+// ---------------------------------------------------------------------------------------
+
+/// **The experiment that asks whether `KEYEVENTF_UNICODE` alone can produce the collapse** —
+/// task T-10-6, and the product takes no part in it.
+///
+/// The channel says the product builds a packet of six **distinct** code units
+/// (`last_replacement=6/6/6`) on the very presses whose result on the screen is six copies of one
+/// character. That leaves exactly one place for the collapse to be: between `SendInput` and the
+/// application. This experiment puts the bench in the product's place — the same shape of packet,
+/// the same window — and reads the field back, so that "the packet is delivered as six copies"
+/// stops being an inference and becomes a reading.
+///
+/// Three forms, ten runs each, in one Notepad:
+///
+/// 1. **one call** — all six characters in a single `SendInput`, which is the shape FR-41 requires
+///    of the product's own packet;
+/// 2. **six calls** — the same six characters, one `SendInput` each, which is what a person's
+///    keyboard produces and what FR-44 offers as an opt-in;
+/// 3. **one call, then the layout switch** — the same single call followed at once by
+///    `WM_INPUTLANGCHANGEREQUEST` to that same window, which is method 1 of FR-50 and therefore
+///    **the order FR-43 fixes**: the packet is sent, and then step 5 moves the layout.
+///
+/// Nothing here is a verdict of the matrix: it prints and returns an exit code, exactly as the
+/// other experiments of `e2e.rs` do.
+pub fn experiment_unicode(ctx: &Context) -> std::process::ExitCode {
+    const RUNS: usize = 10;
+
+    println!("--- ОПЫТ T-10-6: доставка KEYEVENTF_UNICODE без участия продукта ---\n");
+    println!(
+        "Стенд шлёт {EXPECTED:?} парами down+up с чужой сигнатурой в собственный Блокнот.\n\
+         Форма 3 добавляет ровно то, что делает шаг 5 FR-40 после пакета.\n"
+    );
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut app = match launch_notepad() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("Блокнот не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<([usize; 3], [usize; 3]), String> {
+        let window = adopt_window(ctx.automation, &mut app, &|element: &Element| {
+            element.class() == "Notepad"
+        })?;
+        let hwnd = app
+            .window
+            .ok_or_else(|| "у окна нет дескриптора".to_owned())?;
+        let content = ctx
+            .automation
+            .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+            .ok_or_else(|| "элемент ввода не найден".to_owned())?;
+
+        shell::activate_window(app.pid, Some(hwnd))?;
+        let target = input::Target { pid: app.pid, hwnd };
+
+        let forms: [&str; 3] = [
+            "один вызов          ",
+            "шесть вызовов       ",
+            "вызов + раскладка   ",
+        ];
+        let mut collapsed = [0usize; 3];
+        let mut wrong = [0usize; 3];
+
+        for run in 1..=RUNS {
+            for (form, name) in forms.iter().enumerate() {
+                input::chord(&[VK_CONTROL.0], VK_A.0, &target).map_err(|e| e.to_string())?;
+                input::tap(VK_DELETE.0, &target).map_err(|e| e.to_string())?;
+                wait::until(SERIES_STEP_TIMEOUT, || {
+                    read_field(&content).filter(|text| text.is_empty())
+                });
+
+                // The window is put back onto en-US before every run, so that form 3's switch is
+                // always a real change of layout and never the `AlreadyActive` short circuit.
+                layout::ensure(hwnd, layout::US, SERIES_STEP_TIMEOUT)?;
+
+                if form == 1 {
+                    for character in EXPECTED.chars() {
+                        let mut one = [0u8; 4];
+                        input::type_text(character.encode_utf8(&mut one), &target)
+                            .map_err(|e| e.to_string())?;
+                    }
+                } else {
+                    input::type_text(EXPECTED, &target).map_err(|e| e.to_string())?;
+                }
+
+                // ⚠ Form 3 and nothing else: `WM_INPUTLANGCHANGEREQUEST` to the window that has
+                // just been sent the packet, with nothing waited for in between — which is where
+                // FR-43 puts step 5 of FR-40.
+                if form == 2 {
+                    let _ = layout::ensure(hwnd, layout::RUSSIAN, SERIES_STEP_TIMEOUT);
+                }
+
+                let shown = wait::until(SERIES_STEP_TIMEOUT, || {
+                    read_field(&content).filter(|text| text == EXPECTED)
+                })
+                .or_else(|| read_field(&content))
+                .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+                let verdict = if shown == EXPECTED {
+                    "верно"
+                } else if is_collapsed(&shown) {
+                    collapsed[form] += 1;
+                    "СХЛОПЫВАНИЕ"
+                } else {
+                    wrong[form] += 1;
+                    "иное"
+                };
+                println!("  прогон {run:2}  {name}  {shown:?}  — {verdict}");
+            }
+        }
+
+        // ---- form 4: the product's packet, without the product ------------------------------
+        //
+        // Forms 1 to 3 send the insertion alone into an empty field. The product's press does
+        // something else: it takes `N` characters **off** a field that already holds text and puts
+        // the conversion in their place, all in one call, over and over on the same word. This
+        // walks that, four alternating bursts on a second word, with `U+0008` standing in for the
+        // `Backspace` of FR-41 — an `EDIT` and a `RichEdit` both delete a character on receiving
+        // it, and it is the only way to put an erasure and an insertion into a single `SendInput`
+        // through the bench's one and only send function.
+        println!("\n  --- форма 4: стирание и вставка одним вызовом, как в пакете FR-41 ---");
+
+        input::chord(&[VK_CONTROL.0], VK_A.0, &target).map_err(|e| e.to_string())?;
+        input::tap(VK_DELETE.0, &target).map_err(|e| e.to_string())?;
+        layout::ensure(hwnd, layout::US, SERIES_STEP_TIMEOUT)?;
+        input::type_text(&format!("{TYPED} {TYPED}"), &target).map_err(|e| e.to_string())?;
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(&content).filter(|text| text == &format!("{TYPED} {TYPED}"))
+        });
+
+        let erase: String = core::iter::repeat_n('\u{8}', TYPED.chars().count()).collect();
+        let mut collapsed_burst = 0;
+
+        for round in 1..=RUNS {
+            let word = if round % 2 == 1 { EXPECTED } else { TYPED };
+            let want = format!("{TYPED} {word}");
+
+            input::type_text(&format!("{erase}{word}"), &target).map_err(|e| e.to_string())?;
+
+            let shown = wait::until(SERIES_STEP_TIMEOUT, || {
+                read_field(&content).filter(|text| text == &want)
+            })
+            .or_else(|| read_field(&content))
+            .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+            let last = shown.split_whitespace().last().unwrap_or("").to_owned();
+            let verdict = if shown == want {
+                "верно"
+            } else if is_collapsed(&last) {
+                collapsed_burst += 1;
+                "СХЛОПЫВАНИЕ"
+            } else {
+                "иное"
+            };
+            println!("  бросок {round:2}  стирание+вставка   {shown:?}  — {verdict}");
+        }
+
+        println!("  схлопываний в форме 4: {collapsed_burst} из {RUNS}");
+
+        Ok((collapsed, wrong))
+    })();
+
+    let closed = app.close();
+
+    match outcome {
+        Ok((collapsed, wrong)) => {
+            println!("\nИТОГО из {RUNS} на форму:");
+            for (index, name) in ["один вызов", "шесть вызовов", "вызов + раскладка"]
+                .iter()
+                .enumerate()
+            {
+                println!(
+                    "  {name:<20} схлопываний {}, иных расхождений {}",
+                    collapsed[index], wrong[index]
+                );
+            }
+            println!("закрытие: {closed}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("\nопыт не доведён: {error}\nзакрытие: {closed}");
+            std::process::ExitCode::from(1)
+        }
+    }
+}
+
+/// **The experiment that asks which dial of §7 the collapse answers to** — task T-10-6.
+///
+/// Position 16 with its series, run three times against three configurations of the **same**
+/// product: as the user has it, with the pause of FR-44 at one millisecond, and in the
+/// compatibility mode of FR-42. The three differ in exactly one thing each, and between them they
+/// separate «пакет уходит одним броском» from «стирание идёт `Backspace`'ами» — the two shapes the
+/// packet of FR-41 can have.
+///
+/// The user's `config.toml` is borrowed through [`crate::config::Borrowed`], which is the one
+/// mechanism in this bench allowed to touch it, and given back byte for byte on every path out.
+pub fn experiment_modes(ctx: &Context) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-6: серия под тремя настройками §7 ---\n");
+
+    let Some(path) = lang_switcher::settings::default_config_path() else {
+        eprintln!("путь %APPDATA%\\Lang_Switcher\\config.toml не определён");
+        return std::process::ExitCode::from(1);
+    };
+
+    let variants: [(
+        &str,
+        Option<(u32, lang_switcher::settings::ReplacementMethod)>,
+    ); 3] = [
+        ("как есть (умолчания §7)", None),
+        (
+            "пауза FR-44 = 1 мс",
+            Some((1, lang_switcher::settings::ReplacementMethod::Backspace)),
+        ),
+        (
+            "режим FR-42 selection",
+            Some((0, lang_switcher::settings::ReplacementMethod::Selection)),
+        ),
+    ];
+
+    for (name, dial) in variants {
+        println!("\n=== {name} ===");
+
+        let mut borrowed = match dial {
+            None => None,
+            Some((delay, method)) => {
+                let (mut config, _) = lang_switcher::settings::read_or_default(&path);
+                config.replacement.inter_event_delay_ms = delay;
+                config.replacement.method = method;
+
+                let text = match config.to_toml_string() {
+                    Ok(text) => text,
+                    Err(error) => {
+                        eprintln!("  не удалось построить config.toml: {error}");
+                        continue;
+                    }
+                };
+
+                match crate::config::Borrowed::take(&path, &text) {
+                    Ok(borrowed) => Some(borrowed),
+                    Err(error) => {
+                        eprintln!("  подмена config.toml: {error}");
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let rows = match crate::sut::Sut::launch() {
+            Err(error) => {
+                eprintln!("  продукт не запустился: {error}");
+                Vec::new()
+            }
+            Ok(mut product) => {
+                let rows = if product.await_ready(Duration::from_secs(30)).is_none() {
+                    eprintln!("  продукт не сообщил о готовности за 30 с");
+                    Vec::new()
+                } else {
+                    position_16(ctx)
+                };
+                match product.stop() {
+                    Ok(code) => println!("  продукт остановлен, код {code}"),
+                    Err(error) => println!("  ⚠ {error}"),
+                }
+                rows
+            }
+        };
+
+        if let Some(borrowed) = borrowed.as_mut() {
+            println!("  {}", borrowed.give_back());
+        }
+
+        let collapses = rows
+            .iter()
+            .filter(|row| matches!(row.assertion, Assertion::Other(SERIES_SHAPE)))
+            .map(|row| row.actual.clone())
+            .collect::<Vec<_>>()
+            .join(" | ");
+
+        for row in &rows {
+            println!(
+                "  [{}] {} — {}",
+                row.assertion.as_str(),
+                row.verdict,
+                row.actual
+            );
+        }
+        println!("  сводка формы: {collapses}");
+
+        println!("  {}", restore_ambient(ctx));
+    }
+
+    std::process::ExitCode::SUCCESS
 }
 
 /// An `Edit` or a `Document` — what most of the matrix types into.
