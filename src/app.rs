@@ -1038,8 +1038,54 @@ fn publish_cache(cache: LayoutCache) {
 /// during the interval of FR-71, when the recorder is parked, and the layout it carries is
 /// exactly the value the parked recorder must wake up with — the stale one is what stamped
 /// strokes with a direction that converted «в себя». See there for the measurement.
+/// ⚠ **Task T-10-5 — the stamp is mirrored onto the channel of SEC-04a from here.** This is
+/// the one place in the program that writes `Recorder::active`, so it is the one place that
+/// can say what the stamp holds; FR-26 computes the direction of every conversion from that
+/// value, and until this key the channel could only show *counts* of the events that were
+/// supposed to refresh it. The mirror is written only when the write really landed in a
+/// recorder — `None` means this thread owns neither an installed nor a parked one, and
+/// publishing a layout no recorder took would be a reading of nothing. See
+/// [`crate::control::note_active_layout`].
 fn publish_active_layout(layout: LayoutId) {
-    with_recorder_wherever_it_is(|recorder| recorder.set_active_layout(layout));
+    let landed = with_recorder_wherever_it_is(|recorder| recorder.set_active_layout(layout));
+
+    #[cfg(feature = "testing")]
+    if landed.is_some() {
+        crate::control::note_active_layout(layout.raw());
+    }
+
+    let _ = landed;
+}
+
+/// **Step 5 of FR-40 has just moved the layout, and the stamp of FR-04 follows it** — task
+/// **T-10-5**.
+///
+/// Called from `inject::System::switch_layout`, on the input thread, once
+/// [`crate::switch::confirmed`] has said the foreground window is verifiably on `layout`. That
+/// function is where the *rule* lives and this is where the *effect* does: the whole of what
+/// happens here is [`publish_active_layout`], which is the same publication the four probe
+/// paths of FR-21 make and which touches nothing but the stamp.
+///
+/// # Why this exists rather than a re-read of the foreground layout
+///
+/// Because `switch::to` has already re-read it. Decision R-32 makes the verdict of every method
+/// a re-reading of FR-52 rather than a return value believed on trust, so by the time
+/// `confirmed` answers `true` the layout has been observed to *be* the target. Asking the system
+/// again here would cost a second round of Win32 calls on the path NFR-09 budgets, and would
+/// open a window in which a layout the user changed in between is mistaken for the one this
+/// switch produced.
+///
+/// # Why it is a function of this module
+///
+/// `publish_active_layout` reaches the recorder through [`with_recorder_wherever_it_is`], which
+/// is a pair of thread-locals of the input thread (FR-70, FR-71) and belongs here. Module
+/// `inject` asks for the publication and does not perform it, exactly as it asks module `switch`
+/// for the switch and does not perform that either.
+///
+/// ⚠ **FR-11: nothing here flushes the buffer**, and nothing that does may ever be added. See
+/// [`publish_active_layout`].
+pub fn note_layout_switched(layout: LayoutId) {
+    publish_active_layout(layout);
 }
 
 /// Re-reads the layout of the foreground window and rebuilds the cache if it really changed —
@@ -1981,11 +2027,34 @@ unsafe extern "system" fn window_proc(
             //
             // SEC-05: the message carries nothing — `wparam` and `lparam` are zero — and the
             // target travels in an atomic only this process writes, so a forged `WM_APP_SWITCH`
-            // finds nothing pending and does nothing. The result is dropped: it is a verdict
-            // module `switch` has already counted. SEC-01, SEC-07 — a layout handle, never a
+            // finds nothing pending and does nothing. SEC-01, SEC-07 — a layout handle, never a
             // stroke.
-            if message == crate::switch::WM_APP_SWITCH && is_watcher_window(hwnd) {
-                let _ = crate::switch::run_pending();
+            //
+            // ⚠ **The verdict is no longer dropped — task T-10-5.** Module `switch` still counts
+            // it, which is why it used to be thrown away; what that argument missed is the
+            // *stamp*. Methods 1 and 2 finish on the input thread and `inject::System::switch_layout`
+            // publishes the new layout there from `switch::confirmed`. Method 3 finishes **here**,
+            // on another thread, and the stamp is a thread-local of the input thread — so a
+            // layout this branch changed would leave `Recorder::active` behind exactly the way
+            // step 5 did before that task, and the first press of the next word would convert
+            // «в себя».
+            //
+            // It is closed with the mechanism FR-21's delivery already uses and with no other:
+            // one `PostMessageW` of `watchdog::WM_APP_LAYOUT` at the input thread, which answers
+            // it in `refresh_layout_and_cache` by re-reading FR-52 and refreshing the stamp. The
+            // watcher thread posts that very message from its own `WinEvent` callback, so this
+            // adds no mechanism, no timer and no polling — **NFR-10** — and nothing from §4.1 of
+            // `STATE.md` is retried. Method 3 is reached only after methods 1 and 2 have both
+            // failed, that is, rarely, so the rebuild the probe may cause is not on any hot path.
+            //
+            // `Some(false)` — method 3 ran and the layout still did not become the target — posts
+            // nothing: there is no change to tell anyone about, and `switch` has counted the
+            // failure. `None` is a forged message that found nothing pending.
+            if message == crate::switch::WM_APP_SWITCH
+                && is_watcher_window(hwnd)
+                && crate::switch::run_pending() == Some(true)
+            {
+                post_to_input_thread(crate::watchdog::WM_APP_LAYOUT);
             }
 
             // **FR-71, the heavy half — task T-06-1.** The third handoff in this program, and it

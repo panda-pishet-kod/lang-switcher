@@ -47,9 +47,11 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::sync::{Mutex, PoisonError};
 
+use lang_switcher::app;
 use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
 use lang_switcher::hook::{Edge, KeyEvent};
+use lang_switcher::layouts::LayoutId;
 use lang_switcher::settings::ReplacementMethod;
 use lang_switcher::watchdog;
 use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
@@ -105,6 +107,11 @@ fn the_payload_is_exactly_the_documented_keys_one_per_line() {
 /// the five words of `watchdog::Reason` — task **T-06-2**. There is no third shape for anything
 /// to hide in, and each of the two word-valued keys is checked against its own closed list
 /// rather than against "any word", which is what keeps the exception from becoming a hole.
+///
+/// Task **T-10-5** adds `active_layout`, and it is a third shape — a hexadecimal `HKL`. It is
+/// held to a shape as closed as the two lists above: literally `0x` and exactly eight hex
+/// digits, so nothing of variable length can ride in it, and an `HKL` carries nothing of a
+/// keystroke in any case (module `switch` states the same thing about its own arguments).
 #[test]
 fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
     let text = control::render(&control::snapshot());
@@ -140,6 +147,18 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
             assert!(
                 reasons.contains(&value),
                 "watchdog_last_reason is one of {reasons:?}, and {value:?} is not"
+            );
+            continue;
+        }
+
+        if key == "active_layout" {
+            let digits = value
+                .strip_prefix("0x")
+                .unwrap_or_else(|| panic!("active_layout is a hex HKL, and {value:?} is not"));
+
+            assert!(
+                digits.len() == 8 && digits.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "active_layout is 0x followed by exactly eight hex digits, {value:?} is not"
             );
             continue;
         }
@@ -1217,6 +1236,184 @@ fn the_layout_probe_key_mirrors_the_counter_of_the_watchdog() {
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-10-5 — the key that shows the stamp FR-26 takes its direction from
+// -------------------------------------------------------------------------------------
+
+/// `active_layout` is published, it is a hexadecimal `HKL`, and it closes the tail of `KEYS`.
+///
+/// # Why it exists at all
+///
+/// Every key added to this channel before it is a **count**: how many probes were answered,
+/// how many caches were built, how many handoffs were made. FR-26 takes the direction of
+/// every conversion from the *stamp* — `Recorder::active`, copied into every stroke at
+/// `buffer::Recorder::record` and read back at `inject::take_press` — and a count of the
+/// events that were supposed to refresh that stamp cannot say what value it ended up
+/// holding. The acceptance session's «первое нажатие моргает» is exactly a stale stamp, and
+/// task T-10-5 had to measure the moment it diverges from the layout the foreground window
+/// really runs. Without this key that moment can only be inferred; with it, it is read.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A layout handle, in the shape module `switch` already argues for in the open: "an `HKL` is
+/// an identifier of a layout, not a keystroke, and is fair game". Asserted below as `0x` plus
+/// exactly eight hex digits — a closed shape nothing of variable length can ride in.
+#[test]
+fn the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("active_layout="))
+        .expect("the channel does not publish active_layout");
+
+    println!("active_layout={published}");
+
+    let digits = published
+        .strip_prefix("0x")
+        .unwrap_or_else(|| panic!("active_layout must be a hex HKL, not {published:?}"));
+
+    assert!(
+        digits.len() == 8 && digits.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "active_layout must be 0x plus eight hex digits, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"active_layout"));
+    assert!(!control::RESERVED_KEYS.contains(&"active_layout"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one
+    // is genuinely last, and the next task to append will rewrite this line as its
+    // predecessors each rewrote theirs.
+    assert_eq!(
+        control::KEYS.iter().position(|key| *key == "active_layout"),
+        Some(control::KEYS.len() - 1)
+    );
+}
+
+/// The key mirrors what was published into it, and it is a register rather than a counter.
+///
+/// The two halves are what a mirror owes: a value written is the value read back, and a value
+/// nobody wrote does not appear. `note_active_layout` is the one writer — module `app` calls
+/// it from `publish_active_layout` and only when the stamp really landed in a recorder — so
+/// driving it directly here is driving the whole path this key has.
+#[test]
+fn the_active_layout_key_mirrors_what_was_published_into_it() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    // The two layouts of the acceptance configuration, US and RU. Values, not handles: this
+    // test opens no layout and asks the system nothing.
+    for layout in [0x0409_0409_usize, 0x0419_0419_usize] {
+        control::note_active_layout(layout);
+
+        assert_eq!(
+            control::snapshot().active_layout,
+            layout,
+            "the snapshot reports the stamp that was published into it"
+        );
+
+        assert!(
+            control::render(&control::snapshot())
+                .contains(&format!("active_layout={layout:#010x}")),
+            "and renders it as the hex HKL a reader compares against a layout handle"
+        );
+    }
+
+    // Unlike every other key of this channel it does not accumulate: a stamp is a register,
+    // and the second publication replaces the first rather than adding to it.
+    control::note_active_layout(0x0409_0409);
+    assert_eq!(control::snapshot().active_layout, 0x0409_0409);
+}
+
+/// **Step 5 of FR-40 reaches the stamp — the repair of task T-10-5, end to end on one thread.**
+///
+/// # What was broken
+///
+/// `inject::System::switch_layout` switched the foreground window and told nobody. None of the
+/// four refresh paths of `app::publish_active_layout` fires for a switch made there — the focus
+/// does not move, the user pressed no modifier, `WM_INPUTLANGCHANGE` cannot reach this process —
+/// so `Recorder::active` kept the previous layout while the window ran the new one. Measured on
+/// a live run as `active_layout=0x04090409` against a window on `0x04190419` with
+/// `layout_probes` frozen across the press; felt as «первое нажатие моргает», because every
+/// stroke of the next word was then stamped with the stale layout and FR-26 converted it into
+/// the layout it was already typed in.
+///
+/// `app::note_layout_switched` is the far end of that repair. This drives it against a real
+/// recorder installed on this thread and asserts both halves of what it owes: the stamp the
+/// buffer will apply to the next stroke, and the mirror a run reads on the channel.
+///
+/// # What it must NOT do — FR-11, FR-32
+///
+/// A layout change is not a reason to throw away what the user typed, and the strokes already in
+/// the ring must keep the layout each was recorded under — that is what makes the rollback of
+/// FR-33 answer the same thing after this change as before it. Both are asserted below over a
+/// buffer that is deliberately **not** empty when the switch is published.
+#[test]
+fn the_switch_of_fr40_step_five_reaches_the_stamp_without_touching_the_buffer() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    const US: LayoutId = LayoutId::from_raw(0x0409_0409);
+    const RU: LayoutId = LayoutId::from_raw(0x0419_0419);
+
+    buffer::install_recorder(Recorder::with_capacity(8));
+    app::note_layout_switched(US);
+
+    // Three strokes typed under US, exactly as a user would have them there when the hotkey
+    // arrives: the switch of step 5 happens with a full buffer, never with an empty one.
+    for _ in 0..3 {
+        press(VK_A.0, SCAN_A);
+    }
+
+    assert_eq!(buffer::len(), 3);
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(US),
+        "the stamp starts where the window was"
+    );
+
+    // Step 5 of FR-40, as `inject::System::switch_layout` now reports it.
+    app::note_layout_switched(RU);
+
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(RU),
+        "the stamp follows the switch the product itself made"
+    );
+    assert_eq!(
+        control::snapshot().active_layout,
+        RU.raw(),
+        "and the channel says so, which is what made the defect measurable at all"
+    );
+
+    // FR-11: not one stroke was thrown away.
+    assert_eq!(
+        buffer::len(),
+        3,
+        "FR-11: a layout change does not flush the buffer, and this path has no reset on it"
+    );
+
+    // FR-32: the strokes keep the layout they were typed under, which is where
+    // `inject::take_press` reads the direction of FR-26 from. If the publication reached them,
+    // the rollback of FR-33 would answer a different layout from the second press onwards —
+    // the very defect FR-32 warns about.
+    for index in 0..3 {
+        assert_eq!(
+            buffer::with(|recorder| recorder.stroke(index).map(|stroke| stroke.hkl())),
+            Some(Some(US)),
+            "stroke {index} keeps the layout it was recorded under"
+        );
+    }
+
+    // A new stroke, and only a new stroke, carries the new stamp.
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        buffer::with(|recorder| recorder.stroke(3).map(|stroke| stroke.hkl())),
+        Some(Some(RU)),
+        "the stroke made after the switch is the one that carries the new layout"
+    );
+
+    buffer::uninstall();
+}
+
+// -------------------------------------------------------------------------------------
 // Task T-10-1 — the four keys of the callback-latency instrument, criterion 2 §13
 // -------------------------------------------------------------------------------------
 
@@ -1265,9 +1462,12 @@ fn the_callback_latency_keys_of_t_10_1_are_published_as_numbers() {
     }
 
     // Appended, not inserted — the rule every key since task T-05-2a has followed. The four
-    // arrive together and close the list: one instrument, one block in the diff.
+    // arrive together: one instrument, one block in the diff. They closed the list until task
+    // T-10-5 appended `active_layout` after them, so "last" became a fixed position — the same
+    // rewrite `layout_probes`, `focus_repeats`, `background_skips` and `device_changes` each
+    // went through in turn.
     assert_eq!(
-        &control::KEYS[control::KEYS.len() - 4..],
+        &control::KEYS[24..28],
         &[
             "callback_samples",
             "callback_p50_ns",

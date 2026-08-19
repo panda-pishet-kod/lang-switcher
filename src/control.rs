@@ -930,6 +930,24 @@ static BUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
 /// flush of FR-10 leaves behind (FR-34).
 static CYCLE_POSITION: AtomicUsize = AtomicUsize::new(0);
 
+/// The layout strokes are being recorded under **right now** — the mirror of the stamp of
+/// FR-04, `Recorder::active`.
+///
+/// The same construction as [`CYCLE_POSITION`] and for the same reason: the stamp is a field
+/// of a thread-local of the input thread (section 6.3), so a reader outside that thread needs
+/// it published rather than fetched. Module `app` writes this from the one place the stamp is
+/// written — `publish_active_layout` — and only when the write really landed in a recorder,
+/// under the `testing` feature and nowhere else.
+///
+/// Zero means "nothing has been published yet", which is the state between process start and
+/// the first `publish_active_layout`.
+///
+/// **SEC-01, SEC-07.** An `HKL` — the identifier of a keyboard layout, exactly what module
+/// `switch` already reasons about in the open: "an `HKL` is an identifier of a layout, not a
+/// keystroke, and is fair game". It is not a scan code, not a character and not a stroke, and
+/// nothing about what the user typed can be recovered from it.
+static ACTIVE_LAYOUT: AtomicUsize = AtomicUsize::new(0);
+
 /// [`BUFFER_LEN`] as it stood when the input thread left its message loop.
 ///
 /// The file sink runs on the main thread after every thread has been joined, by which time
@@ -997,6 +1015,34 @@ pub fn note_buffer_len(len: usize) {
 #[inline]
 pub fn note_cycle_position(position: usize) {
     CYCLE_POSITION.store(position, Ordering::Relaxed);
+}
+
+/// Publishes the layout the typing buffer stamps strokes with — called by module `app` from
+/// the one place that stamp is written, and by nothing else.
+///
+/// # Why this key exists — task T-10-5
+///
+/// Twenty-eight keys said what the program *did* and none of them said what the stamp *held*.
+/// FR-26 takes the direction of every conversion from that value (through
+/// `Stroke::layout`), so a stamp that has gone stale is the difference between a conversion
+/// and the «моргание» of the acceptance session — and until this key there was no way to see
+/// it from outside the process, only to infer it from `cache_builds` and `layout_probes`.
+/// The whole of defect A of that task is a statement about this number, and a statement about
+/// a number nobody can read is a guess.
+///
+/// # NFR-01 to NFR-05
+///
+/// The caller sits on the input thread's message loop, never in the hook callback, so this is
+/// one relaxed atomic store and nothing else — no allocation (NFR-03), no lock (NFR-04), no
+/// I/O and nothing formatted (NFR-05), a constant handful of instructions (NFR-01, NFR-02).
+/// `Relaxed` for the reason [`note_buffer_len`] gives.
+///
+/// # SEC-01, SEC-07
+///
+/// A layout handle. See [`ACTIVE_LAYOUT`].
+#[inline]
+pub fn note_active_layout(layout: usize) {
+    ACTIVE_LAYOUT.store(layout, Ordering::Relaxed);
 }
 
 /// Latches the live length for the file sink — see [`BUFFER_LEN_AT_EXIT`].
@@ -1218,6 +1264,21 @@ pub struct Snapshot {
     /// bounds by 1 ms (1 000 000 here). Unclamped, unlike the percentiles, which read from
     /// fixed histogram cells. Task **T-10-1**, same terms as [`Snapshot::callback_p50_ns`].
     pub callback_max_ns: u64,
+    /// The layout the typing buffer is stamping strokes with — task **T-10-5**.
+    ///
+    /// [`ACTIVE_LAYOUT`], written by `app::publish_active_layout`. **FR-26 takes the
+    /// direction of every conversion from this value** and from nothing else, so the pair
+    /// «what the stamp holds» against «what the foreground window really runs» is the whole
+    /// question defect A of that task asks. Every other key on this channel answers "did
+    /// something happen"; this one answers "what is in the register the answer is computed
+    /// from", which no count can be substituted for.
+    ///
+    /// Rendered as the hexadecimal `HKL` — `0x04090409` for US, `0x04190419` for RU — because
+    /// the reader of this key is comparing it against a layout handle and a decimal `usize`
+    /// would have to be converted by hand at every comparison.
+    ///
+    /// SEC-01, SEC-07: a layout handle. Not a scan code, not a character, not a stroke.
+    pub active_layout: usize,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1262,6 +1323,7 @@ pub fn snapshot() -> Snapshot {
         callback_p50_ns: 0,
         callback_p99_ns: 0,
         callback_max_ns: 0,
+        active_layout: ACTIVE_LAYOUT.load(Ordering::Relaxed),
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1335,6 +1397,11 @@ pub fn snapshot() -> Snapshot {
 /// of §11.3 takes its three verdicts from these numbers. Samples first, then the median, the
 /// 99th percentile and the exact maximum, all in nanoseconds — see
 /// [`Snapshot::callback_samples`] through [`Snapshot::callback_max_ns`].
+///
+/// `active_layout` of task **T-10-5** is appended last, by the same rule, and it is the first
+/// key on this channel that is a *register* rather than a count: FR-26 computes the direction
+/// of every conversion from the stamp, and no count of probes, rebuilds or handoffs can say
+/// what value the stamp ended up holding. See [`Snapshot::active_layout`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1364,7 +1431,8 @@ pub fn render(state: &Snapshot) -> String {
          callback_samples={}\n\
          callback_p50_ns={}\n\
          callback_p99_ns={}\n\
-         callback_max_ns={}\n",
+         callback_max_ns={}\n\
+         active_layout={:#010x}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1393,6 +1461,7 @@ pub fn render(state: &Snapshot) -> String {
         state.callback_p50_ns,
         state.callback_p99_ns,
         state.callback_max_ns,
+        state.active_layout,
     )
 }
 
@@ -1412,7 +1481,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 28] = [
+pub const KEYS: [&str; 29] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1441,6 +1510,7 @@ pub const KEYS: [&str; 28] = [
     "callback_p50_ns",
     "callback_p99_ns",
     "callback_max_ns",
+    "active_layout",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

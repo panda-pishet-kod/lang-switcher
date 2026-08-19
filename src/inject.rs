@@ -935,16 +935,53 @@ impl Environment for System {
     /// — module `switch` documents why none of the three methods may be reached from inside the
     /// callback, and it is the same reason `SendInput` may not be.
     ///
-    /// The result is dropped because module `switch` counts every refusal and every failed
-    /// method itself, and there is nothing an injection can do about a layout that would not
-    /// change. SEC-01 and SEC-07: what is dropped is an outcome and a layout handle, never a
-    /// stroke.
+    /// # ⚠ The stamp of FR-04 follows the switch — task **T-10-5**
+    ///
+    /// The outcome used to be dropped, on the argument that module `switch` counts every refusal
+    /// itself and an injection can do nothing about a layout that would not change. The first
+    /// half is still true; the second half was wrong, and the acceptance session felt the
+    /// difference as «первое нажатие моргает».
+    ///
+    /// **What was measured** (report of task T-10-5, experiments `expA1`, `expA2b`, `expA3`):
+    /// this line switches the foreground window, and *nothing* then tells the typing buffer.
+    /// The four refresh paths of `app::publish_active_layout` are a probe on a focus change, a
+    /// probe on a modifier release (T-03-3c), a device change and start-up — and a switch made
+    /// **here** raises none of them: the focus does not move, the user pressed no modifier, and
+    /// `WM_INPUTLANGCHANGE` cannot reach this process (T-03-2a). So `Recorder::active` kept the
+    /// previous layout while the window ran the new one — measured as `active_layout=0x04090409`
+    /// against a window on `0x04190419`, with `layout_probes` and `cache_builds` frozen across
+    /// the press. Every stroke of the next word was then stamped with the stale layout
+    /// (`buffer::Recorder::record`), [`take_press`] took its `origin` from that stamp, and
+    /// `cycle.target(origin, 1)` answered the layout the text was *already* typed in: a full
+    /// replacement that put back the very same characters.
+    ///
+    /// So the publication belongs exactly here, at the one place in the program that changes the
+    /// layout without the user touching anything, and it is conditional on
+    /// [`crate::switch::confirmed`] — the target is published only for the two outcomes decision
+    /// R-32 has verified by re-reading FR-52. A refusal publishes nothing, because a window that
+    /// did not move must not be reported as having moved: that would be the same defect with the
+    /// sign flipped.
+    ///
+    /// ⚠ **FR-32 and FR-33 are untouched by this, and that is a property of the design rather
+    /// than a hope.** The stamp is what *future* strokes are recorded under; the strokes already
+    /// in the ring keep the layout each was typed under (FR-32 stores them unchanged), and
+    /// [`take_press`] reads `origin` from `strokes.first()`. So the second press of a double
+    /// press still counts its cycle from the layout the run was typed in, and the rollback of
+    /// FR-33 answers exactly what it answered before.
+    ///
+    /// ⚠ **FR-11 is untouched too:** `publish_active_layout` does not flush the buffer and there
+    /// is no `reset` anywhere on this path — which is what makes it safe to move the stamp in the
+    /// middle of a conversion session.
+    ///
+    /// SEC-01, SEC-07: what crosses this line is a layout handle and a boolean, never a stroke.
     fn switch_layout(&mut self) {
         let Some(target) = self.target else {
             return;
         };
 
-        let _ = crate::switch::to(target);
+        if crate::switch::confirmed(crate::switch::to(target)) {
+            crate::app::note_layout_switched(target);
+        }
     }
 }
 

@@ -573,6 +573,123 @@ fn no_foreground_window_is_refused_and_counted() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Task T-10-5 — which outcomes a caller may take the target as fact from
+// ---------------------------------------------------------------------------------------
+
+/// **`confirmed` is true for exactly the two outcomes decision R-32 has verified, and for
+/// nothing else.**
+///
+/// # What rests on it
+///
+/// Step 5 of FR-40 is the one place in the program that changes the keyboard layout without the
+/// user touching anything, and until task T-10-5 nothing told the typing buffer about it: the
+/// stamp of FR-04 kept the previous layout, every stroke of the next word was recorded under it,
+/// and FR-26 then converted into the layout the text was already typed in — the acceptance
+/// session's «первое нажатие моргает». `inject::System::switch_layout` now publishes the target
+/// as the new stamp, and this function is the gate it does that through.
+///
+/// So both halves of the assertion carry weight, and the `false` half carries more. Publishing
+/// after a refusal would tell the buffer the window moved when it did not, which is the same
+/// defect with the sign reversed and would be *harder* to see: it would strike only on machines
+/// where the chain of FR-50 fails.
+///
+/// The cases are enumerated over the whole of both enums rather than sampled, so that an outcome
+/// added later cannot quietly default to either answer.
+#[test]
+fn only_a_verified_switch_is_confirmed() {
+    // The two R-32 has re-read FR-52 for: "a method ran and the layout became the target", and
+    // "it was the target before anything was sent".
+    for outcome in [
+        Ok(Outcome::Switched(Method::PostMessage)),
+        Ok(Outcome::Switched(Method::AttachActivate)),
+        Ok(Outcome::Switched(Method::TextServices)),
+        Ok(Outcome::AlreadyActive),
+    ] {
+        assert!(
+            switch::confirmed(outcome),
+            "{outcome:?} is a verified switch and the stamp may follow it"
+        );
+    }
+
+    // Method 3 is running on the watcher thread and its verdict is not known here (R-31).
+    // "Not yet" is not "yes": the input thread must not stamp a layout nobody has verified.
+    assert!(
+        !switch::confirmed(Ok(Outcome::HandedOver)),
+        "a handover is an unfinished switch, not a finished one"
+    );
+
+    // Every refusal: nothing was sent, or nothing took, and the window kept its layout.
+    for error in [
+        SwitchError::ImeTarget,
+        SwitchError::NoTarget,
+        SwitchError::NoForeground,
+        SwitchError::Exhausted,
+    ] {
+        assert!(
+            !switch::confirmed(Err(error)),
+            "{error:?} moved no layout and the stamp must not move either"
+        );
+    }
+}
+
+/// The gate answers over the real chain, not only over hand-built values.
+///
+/// The four cases below are driven through `to_in` against the seam, so what is asserted is what
+/// step 5 of FR-40 will actually see: a machine that switches, a machine already on the target,
+/// a machine nothing works on, and a refusal. A test built only from literals would still pass
+/// if the chain stopped producing one of them.
+#[test]
+fn the_gate_answers_over_the_chain_itself() {
+    let _guard = counters();
+
+    // Method 1 works: the layout really became the target.
+    let mut fake = Fake::on(US).working(0);
+    assert!(switch::confirmed(switch::to_in(
+        &mut fake,
+        Scope::PerWindow,
+        RU
+    )));
+
+    // Already there — no method runs at all.
+    let mut fake = Fake::on(RU);
+    assert!(switch::confirmed(switch::to_in(
+        &mut fake,
+        Scope::PerWindow,
+        RU
+    )));
+
+    // Every method lies and the watcher thread takes the handover: the verdict is not known
+    // on this thread, so the stamp must not move here.
+    let mut fake = Fake::on(US);
+    assert_eq!(
+        switch::to_in(&mut fake, Scope::PerWindow, RU),
+        Ok(Outcome::HandedOver)
+    );
+    let mut fake = Fake::on(US);
+    assert!(!switch::confirmed(switch::to_in(
+        &mut fake,
+        Scope::PerWindow,
+        RU
+    )));
+
+    // Methods 1 and 2 lie and the handover finds no watcher: the chain is exhausted.
+    let mut fake = Fake::on(US).refusing(2);
+    assert!(!switch::confirmed(switch::to_in(
+        &mut fake,
+        Scope::PerWindow,
+        RU
+    )));
+
+    // A refusal before anything is attempted — FR-35.
+    let mut fake = Fake::on(US);
+    assert!(!switch::confirmed(switch::to_in(
+        &mut fake,
+        Scope::PerWindow,
+        PINYIN
+    )));
+}
+
+// ---------------------------------------------------------------------------------------
 // Point 24 — asking for the layout that is already active
 // ---------------------------------------------------------------------------------------
 

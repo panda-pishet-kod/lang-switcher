@@ -489,6 +489,35 @@ pub fn to_in(
     Err(SwitchError::Exhausted)
 }
 
+/// **Does this outcome mean the foreground window is now verifiably on the layout it was asked
+/// for?** — task **T-10-5**.
+///
+/// The two `true` arms are the two outcomes decision R-32 has already *verified* by re-reading
+/// FR-52: [`Outcome::Switched`] is "a method ran and the layout became the target",
+/// [`Outcome::AlreadyActive`] is "it was the target before anything was sent". Neither is a
+/// return value believed on trust — that is the whole of R-32 — so a caller may take the target
+/// as fact after either of them.
+///
+/// The three `false` cases are as much of the answer as the `true` ones:
+///
+/// * [`Outcome::HandedOver`] — method 3 is running on the watcher thread and its verdict is not
+///   known here (decision R-31). "Not yet known" is not "no", and it must not be reported as
+///   "yes" either; the caller in `app::window_proc` closes this case from the watcher side, by
+///   posting the layout probe of FR-21 when `run_pending` comes back true.
+/// * every [`SwitchError`] — nothing was sent, or nothing took, and the window kept whatever
+///   layout it had.
+///
+/// # Why the question is asked here and not at the call site
+///
+/// Because it is a statement about *this module's* vocabulary. Task T-10-5 measured that the
+/// stamp of FR-04 has to follow step 5 of FR-40 — the acceptance session's «первое нажатие
+/// моргает» is that stamp not following — and the only honest source for "the window is on
+/// layout X now" is the verification this module already performs. A call site that matched on
+/// the outcome itself would be a second copy of R-32's reasoning, free to drift from this one.
+pub const fn confirmed(outcome: Result<Outcome, SwitchError>) -> bool {
+    matches!(outcome, Ok(Outcome::Switched(_) | Outcome::AlreadyActive))
+}
+
 /// **Decision R-32 in one function:** did the layout of the foreground window actually become
 /// `target`?
 ///
