@@ -109,6 +109,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--classify") => scenarios::classify(&|| uia::Automation::new().ok()),
         Some("--experiment-unicode") => experiment_unicode(),
         Some("--experiment-modes") => experiment_modes(),
+        Some("--experiment-explorer") => experiment_explorer(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -376,6 +377,40 @@ fn experiment_modes() -> std::process::ExitCode {
     };
 
     scenarios::experiment_modes(&context)
+}
+
+/// **Task T-10-9** — `Win+E` and what conversion does after it.
+///
+/// The arm is here and the experiment is in `scenarios.rs`, the split every mode of this file
+/// follows. `--experiment-explorer [кругов]` — the optional argument is how many rounds are made
+/// after the shell window is opened; the task asks for ten, and a smaller number is what a first
+/// pass over a new instrument wants.
+fn experiment_explorer(arguments: &[String]) -> std::process::ExitCode {
+    let rounds = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10);
+    // ⚠ `--installed` runs the **signed Release copy in `%ProgramFiles%`** instead of the one
+    // built beside this bench. It is the only configuration the defect was ever seen in, it has
+    // no SEC-04a channel by construction, and it is ended by the synthetic FR-96 the task's
+    // environment section names.
+    let installed = arguments.iter().any(|value| value == "--installed");
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_explorer(&context, rounds, installed)
 }
 
 /// The measurement of position 11 — rule Р-39, and see [`scenarios::measure_layout`].

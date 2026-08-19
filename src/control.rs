@@ -1435,6 +1435,42 @@ pub struct Snapshot {
     /// is the *configured* value and may read `auto`, which is a rule and not a method; this is
     /// what the rule decided for the most recent press. See [`LAST_REPLACEMENT_METHOD`].
     pub last_replacement_method: &'static str,
+    /// Flush requests the two `WinEvent` subscriptions raised — **FR-10**, task **T-10-9**.
+    ///
+    /// [`crate::watchdog::Counters::window_flushes`], published through the file report of
+    /// `LANGSW_TESTING_REPORT` alone until now. The reason it moves onto the channel is the
+    /// reason `background_skips` and `focus_repeats` moved: **it is the number a hypothesis is
+    /// decided by, and the file sink cannot answer it in time.** The report is written by the
+    /// main thread *after the process has exited* (`app.rs`), so a scenario that requires the
+    /// process to survive the step under investigation — «открыть Проводник и продолжить
+    /// работать» — cannot read it at all. This number, `full_clears` and `strokes_removed`
+    /// beside it, is what separates «буфер стирается сбросами» from «в буфер ничего не
+    /// попадает»: the first moves all three, the second leaves all three standing while
+    /// `buffer_len` stays at zero.
+    ///
+    /// SEC-01, SEC-07: a count of events. Not a window, not a title, not a stroke.
+    pub window_flushes: u32,
+    /// Flushes that emptied the whole buffer — task **T-10-9**.
+    ///
+    /// [`crate::watchdog::Counters::full_clears`], on the channel for the reason
+    /// [`Snapshot::window_flushes`] gives. Beside it, it is the half of the pair that says a
+    /// flush *reached the typing the user had done* rather than arriving at an empty ring: a
+    /// storm against an empty buffer moves `window_flushes` and leaves this standing.
+    ///
+    /// SEC-01, SEC-07: a count of events.
+    pub full_clears: u32,
+    /// Strokes all flushes together removed — task **T-10-9**.
+    ///
+    /// [`crate::watchdog::Counters::strokes_removed`], on the channel for the reason
+    /// [`Snapshot::window_flushes`] gives, and the sharpest of the three: it is measured in
+    /// *the user's keystrokes*, so `strokes_removed` moving by exactly the length of what was
+    /// typed is the whole of hypothesis 1 — the acceptance session read `strokes_removed=18`
+    /// of 18 against nine presses on an empty buffer — while a буфер that never received the
+    /// strokes in the first place leaves it at rest.
+    ///
+    /// SEC-01, SEC-07: a count of strokes removed, never a stroke. No scan code, no character
+    /// and no layout of any of them enters this number.
+    pub strokes_removed: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1486,6 +1522,9 @@ pub fn snapshot() -> Snapshot {
         replacement_units: replacement.1,
         replacement_distinct: replacement.2,
         last_replacement_method: last_replacement_method(),
+        window_flushes: subscriptions.window_flushes,
+        full_clears: subscriptions.full_clears,
+        strokes_removed: subscriptions.strokes_removed,
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1571,6 +1610,16 @@ pub fn snapshot() -> Snapshot {
 /// FR-42а makes per press against the class of the foreground window, which no configured
 /// value can stand in for now that the configured value may be `auto`. See
 /// [`Snapshot::last_replacement_method`].
+///
+/// `window_flushes`, `full_clears` and `strokes_removed` of task **T-10-9** are appended after
+/// them, in that order and by the same rule, and they arrive here for the reason `focus_repeats`
+/// and `layout_probes` did — one step further. Those two were counters of `watchdog` whose
+/// *growth* was the observable of a repair; these three are counters of `watchdog` that were
+/// published through the file sink of `LANGSW_TESTING_REPORT` **only**, and that sink is written
+/// after the process exits. A scenario whose whole question is what happens to a **surviving**
+/// process therefore could not read them at all, and they are precisely the three numbers that
+/// tell «набранное стирается сбросами» from «набранное не попадает в буфер». See
+/// [`Snapshot::window_flushes`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1603,7 +1652,10 @@ pub fn render(state: &Snapshot) -> String {
          callback_max_ns={}\n\
          active_layout={:#010x}\n\
          last_replacement={}/{}/{}\n\
-         last_replacement_method={}\n",
+         last_replacement_method={}\n\
+         window_flushes={}\n\
+         full_clears={}\n\
+         strokes_removed={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1637,6 +1689,9 @@ pub fn render(state: &Snapshot) -> String {
         state.replacement_units,
         state.replacement_distinct,
         state.last_replacement_method,
+        state.window_flushes,
+        state.full_clears,
+        state.strokes_removed,
     )
 }
 
@@ -1657,7 +1712,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 31] = [
+pub const KEYS: [&str; 34] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1689,6 +1744,9 @@ pub const KEYS: [&str; 31] = [
     "active_layout",
     "last_replacement",
     "last_replacement_method",
+    "window_flushes",
+    "full_clears",
+    "strokes_removed",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

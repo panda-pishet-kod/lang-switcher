@@ -222,10 +222,25 @@ pub fn executable() -> Result<std::path::PathBuf, String> {
 impl Sut {
     /// Starts the product and joins it to the job before doing anything else with it.
     pub fn launch() -> Result<Self, String> {
+        Self::launch_with(DEBUG_TIMEOUT_SECS)
+    }
+
+    /// [`Sut::launch`] with a deadline of the caller's choosing — **task T-10-9**.
+    ///
+    /// Every position of the matrix wants [`DEBUG_TIMEOUT_SECS`] and gets it through
+    /// [`Sut::launch`]; nothing about the positions changes. What needs another number is the
+    /// experiment of that task: its scenario is «работает → `Win+E` → снова набрать», and a
+    /// human-tempo round of typing plus the shell opening a window plus ten repetitions does
+    /// not fit into forty-five seconds. The deadline is still FR-97's and is still handed over
+    /// in `LANGSW_DEBUG_TIMEOUT_SEC` — the same variable, no new one (Р-53).
+    ///
+    /// ⚠ It is a **net and not a stopping mechanism**: the caller ends its own product by pid,
+    /// and this only bounds how long a forgotten one can live.
+    pub fn launch_with(deadline_secs: u32) -> Result<Self, String> {
         let exe = executable()?;
 
         let child = Command::new(&exe)
-            .env("LANGSW_DEBUG_TIMEOUT_SEC", DEBUG_TIMEOUT_SECS.to_string())
+            .env("LANGSW_DEBUG_TIMEOUT_SEC", deadline_secs.to_string())
             .spawn()
             .map_err(|error| format!("не удалось запустить {}: {error}", exe.display()))?;
 
@@ -259,6 +274,61 @@ impl Sut {
         }
 
         Ok(Self { child, pid })
+    }
+
+    /// ⚠ **The installed, signed Release copy in `%ProgramFiles%`** — task **T-10-9**, and the
+    /// one configuration the defect under investigation was ever seen in.
+    ///
+    /// It is a different program from the one every other mode of this bench runs, in the two
+    /// ways that could matter to a defect nobody has reproduced on the debug build: it is built
+    /// **without** the `testing` feature, so SEC-04a is not merely quiet but absent, and it
+    /// carries `uiAccess="true"` (§8.2), so it runs with the foreground and injection rights that
+    /// manifest grants. Neither can be had from the build tree — a debug binary embeds
+    /// `app-dev.manifest` and the manifests are outside this task's boundaries.
+    ///
+    /// ⛔ It is registered in registry A like every other process the bench starts, it is joined
+    /// to the job object like every other one, and it is taken down by the synthetic FR-96 of
+    /// [`Sut::stop`] — which is what the task's environment section names as the way to end it.
+    /// `LANGSW_DEBUG_TIMEOUT_SEC` is set all the same and is expected to do nothing: FR-97 is a
+    /// debug-only deadline. The job object is the net here.
+    pub fn launch_installed() -> Result<Self, String> {
+        let exe = std::path::PathBuf::from(r"C:\Program Files\Lang_Switcher")
+            .join(lang_switcher::EXE_NAME);
+
+        if !exe.exists() {
+            return Err(format!("{} не найден", exe.display()));
+        }
+
+        let child = Command::new(&exe)
+            .env("LANGSW_DEBUG_TIMEOUT_SEC", DEBUG_TIMEOUT_SECS.to_string())
+            .spawn()
+            .map_err(|error| format!("не удалось запустить {}: {error}", exe.display()))?;
+
+        Ok(Self::adopt(child))
+    }
+
+    /// Registers a freshly spawned product and joins it to the job — shared by both launchers.
+    fn adopt(child: Child) -> Self {
+        let pid = child.id();
+
+        // ⛔ Requirement A: the product is a process the bench started, and it enters the
+        // registry here, at the moment of launch.
+        crate::own::register_spawned(pid);
+
+        let job = JOB.load(Ordering::SeqCst);
+        if job != 0 {
+            // SAFETY: identical to the call in `launch_with` — a live job handle and the process
+            // handle the `Child` owns. NFR-13: examined.
+            let ok = unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as isize) };
+            if ok == 0 {
+                eprintln!(
+                    "warning: AssignProcessToJobObject не сработала: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+
+        Self { child, pid }
     }
 
     /// Waits until the product reports its hook installed, through the SEC-04a channel.

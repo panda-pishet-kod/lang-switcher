@@ -1316,12 +1316,17 @@ fn the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle() {
     assert!(!control::RESERVED_KEYS.contains(&"active_layout"));
 
     // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
-    // **T-10-6** appended `last_replacement` after it and task **T-10-8** appended
-    // `last_replacement_method` after that, each rewriting this line, as its predecessors
-    // each rewrote theirs.
+    // **T-10-6** appended `last_replacement` after it, task **T-10-8** appended
+    // `last_replacement_method` after that, and task **T-10-9** appended three more, each
+    // rewriting this line, as its predecessors each rewrote theirs.
+    //
+    // ⚠ Written as a **fixed index** now, and not as `len() - n`: the tail-relative form made
+    // every appending task rewrite an assertion about a key it did not touch, which is the
+    // rake `device_changes` already walked into (task T-10-0). The position of this key is a
+    // constant of the channel; the length of the channel is not.
     assert_eq!(
         control::KEYS.iter().position(|key| *key == "active_layout"),
-        Some(control::KEYS.len() - 3)
+        Some(28)
     );
 }
 
@@ -1411,13 +1416,15 @@ fn the_last_replacement_key_of_t_10_6_is_published_as_three_counts() {
     assert!(!control::RESERVED_KEYS.contains(&"last_replacement"));
 
     // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
-    // T-10-8 appended `last_replacement_method` after this one, so "last" became a fixed
-    // position — the same rewrite every key of this tail has gone through in turn.
+    // T-10-8 appended `last_replacement_method` after this one and task T-10-9 appended three
+    // more, so "last" became a fixed position — the same rewrite every key of this tail has
+    // gone through in turn, and it is written as a fixed index for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`.
     assert_eq!(
         control::KEYS
             .iter()
             .position(|key| *key == "last_replacement"),
-        Some(control::KEYS.len() - 2)
+        Some(29)
     );
 }
 
@@ -1702,14 +1709,104 @@ fn the_last_replacement_method_key_of_t_10_8_is_published_as_a_closed_word() {
     assert!(control::KEYS.contains(&"last_replacement_method"));
     assert!(!control::RESERVED_KEYS.contains(&"last_replacement_method"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one
-    // is genuinely last, and the next task to append will rewrite this line.
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // T-10-9 appended three more after this one, so this is a fixed position now, for the
+    // reason given at `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`.
     assert_eq!(
         control::KEYS
             .iter()
             .position(|key| *key == "last_replacement_method"),
-        Some(control::KEYS.len() - 1)
+        Some(30)
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-9 — the three flush counters that only the file sink used to answer
+// -------------------------------------------------------------------------------------
+
+/// `window_flushes`, `full_clears` and `strokes_removed` are published, they are decimal
+/// counts, and they close the tail of `KEYS` in that order.
+///
+/// # Why they exist at all
+///
+/// All three live in `watchdog::Counters` and were published through the file report of
+/// `LANGSW_TESTING_REPORT` **only** — a sink the main thread writes *after the process has
+/// exited*. Defect D of the final acceptance session («как только я открыл проводник
+/// переключение перестало работать везде») is a question about a process that has to keep
+/// running across the step under investigation, so the file sink cannot answer it even in
+/// principle, and these three are exactly the numbers that separate the two candidate
+/// mechanisms: strokes that reach the buffer and are erased by flushes move all three, and
+/// strokes that never reach the buffer leave all three standing while `buffer_len` stays at
+/// zero. The same standing `background_skips`, `focus_repeats` and `layout_probes` were moved
+/// onto this channel for by tasks T-10-0, T-10-0e and T-10-0f.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// Three counts. `strokes_removed` counts *removals of* strokes and carries nothing of any
+/// stroke — no scan code, no character, no layout — which is asserted below by refusing every
+/// value that is not a bare decimal.
+#[test]
+fn the_three_flush_keys_of_t_10_9_are_published_as_decimal_counts_at_the_tail() {
+    let text = control::render(&control::snapshot());
+
+    for key in ["window_flushes", "full_clears", "strokes_removed"] {
+        let published = text
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .unwrap_or_else(|| panic!("the channel does not publish {key}"));
+
+        println!("{key}={published}");
+
+        assert!(
+            !published.is_empty() && published.bytes().all(|byte| byte.is_ascii_digit()),
+            "{key} must be a decimal count, not {published:?}"
+        );
+
+        assert!(control::KEYS.contains(&key));
+        assert!(!control::RESERVED_KEYS.contains(&key));
+    }
+
+    // Appended in that order, and at the end — the rule every key since task T-05-2a has
+    // followed. Written against fixed indices for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`.
+    assert_eq!(
+        &control::KEYS[31..34],
+        &["window_flushes", "full_clears", "strokes_removed"]
+    );
+    assert_eq!(control::KEYS.len(), 34);
+}
+
+/// The three keys mirror `watchdog::counters()` and are not invented here.
+///
+/// The channel is a mirror of the module that owns the numbers (decision Р-28: one source,
+/// two sinks), so the assertion that matters is not "some number appears" but "the number that
+/// appears is the one `watchdog` holds". Read twice around the snapshot, because the program
+/// keeps running: the published value has to lie between the two live reads, monotone counters
+/// being what they are.
+#[test]
+fn the_three_flush_keys_of_t_10_9_mirror_the_watchdog_counters() {
+    let before = watchdog::counters();
+    let state = control::snapshot();
+    let after = watchdog::counters();
+
+    for (published, low, high) in [
+        (
+            state.window_flushes,
+            before.window_flushes,
+            after.window_flushes,
+        ),
+        (state.full_clears, before.full_clears, after.full_clears),
+        (
+            state.strokes_removed,
+            before.strokes_removed,
+            after.strokes_removed,
+        ),
+    ] {
+        assert!(
+            (low..=high).contains(&published),
+            "the channel publishes what watchdog holds: {published} is outside {low}..={high}"
+        );
+    }
 }
 
 /// The key mirrors what `inject::on_hotkey` publishes into it, a register and not a counter —

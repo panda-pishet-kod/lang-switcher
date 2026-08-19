@@ -40,7 +40,7 @@ use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_A, VK_CONTROL, VK_DELETE, VK_HOME, VK_SHIFT, VK_SPACE, VK_TAB,
+    VK_A, VK_CONTROL, VK_DELETE, VK_E, VK_HOME, VK_LWIN, VK_SHIFT, VK_SPACE, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, HWND_MESSAGE, PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
@@ -4488,4 +4488,786 @@ pub fn pending_positions() -> Vec<Row> {
         // still called it `pending` on a task that has finished would be the same kind of
         // untruth this list exists to prevent.
     ]
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-9 — the Explorer experiment, and the instrument it is measured with
+// ---------------------------------------------------------------------------------------
+
+/// The keys of SEC-04a this experiment reads after **every** step of every round.
+///
+/// The list of the task, in the task's order, with the three keys T-10-9 put on the channel at
+/// the end — they are the ones the first hypothesis is decided by, and until this task they
+/// existed only in the file report the main thread writes *after the process exits*, which a
+/// scenario that requires the process to survive `Win+E` cannot read at all.
+const WATCHED_KEYS: [&str; 24] = [
+    "buffer_len",
+    "hotkey_handoffs",
+    "cycle_position",
+    "active_layout",
+    "replacement_method",
+    "last_replacement",
+    "last_replacement_method",
+    "send_mismatches",
+    "post_failures",
+    "events_lost",
+    "fail_safe",
+    "consecutive_panics",
+    "window_flushes",
+    "full_clears",
+    "strokes_removed",
+    "background_skips",
+    "focus_repeats",
+    // Beyond the list of the task, and each for a reason the first run made concrete:
+    // `buffer_len=0` has **two** causes and they have to be told apart — a flush of the
+    // watchdog, which moves `strokes_removed`, and the parking of FR-70/FR-71, which does not.
+    // These five are what say which of them, and whether the verdict that ends the parking
+    // ever came back.
+    "focus_changes",
+    "password_probes",
+    "password_field",
+    "layout_probes",
+    "cache_builds",
+    "layout_cache_failures",
+    "hook_installed",
+];
+
+/// One reading of [`WATCHED_KEYS`], in one line, for the step-by-step protocol.
+fn watched(label: &str) -> String {
+    match crate::channel::read() {
+        Err(error) => format!("  [{label}] канал не ответил: {error}"),
+        Ok(snapshot) => {
+            let pairs: Vec<String> = WATCHED_KEYS
+                .iter()
+                .map(|key| format!("{key}={}", snapshot.get(key).unwrap_or("<нет>")))
+                .collect();
+            format!("  [{label}] {}", pairs.join(" "))
+        }
+    }
+}
+
+/// The verdict of **one press**, decided by comparing the field before it with the field after
+/// it — the instrument, and the whole reason this experiment exists.
+///
+/// # ⚠ Why it is not a comparison with `привет`
+///
+/// The controller's first instrument compared the reading against the sample `привет` and
+/// reported «конвертация работает». The window's layout was Russian at the time, so `ghbdtn`
+/// **already read `привет` while it was being typed**: the check passed without executing the
+/// thing it was checking. Nothing here compares against a sample as its verdict. What decides
+/// is `after != before` — the field changed when the hotkey was pressed — and the expected
+/// text is carried alongside as a *description*, never as the test.
+#[derive(Debug, Clone)]
+struct PressOutcome {
+    before: String,
+    after: String,
+    /// What FR-33 says the field should read at this point in the cycle. Reported, not asserted.
+    wanted: String,
+}
+
+impl PressOutcome {
+    /// **The detector.** The press did something to the field.
+    fn changed(&self) -> bool {
+        self.after != self.before
+    }
+
+    /// The press did the *right* thing — reported beside [`Self::changed`], and never instead
+    /// of it.
+    fn correct(&self) -> bool {
+        self.after == self.wanted
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "до={:?} после={:?} ожидалось={:?} — изменилось: {}, верно: {}",
+            self.before,
+            self.after,
+            self.wanted,
+            if self.changed() { "ДА" } else { "НЕТ" },
+            if self.correct() { "да" } else { "нет" },
+        )
+    }
+}
+
+/// Clears the field, types `ghbdtn` at a human tempo, presses the hotkey once and reports what
+/// the field read **before** and **after** the press.
+///
+/// The tempo is [`type_paced`]'s — each character confirmed in the field before the next one is
+/// sent — because the household gesture the defect was found with is a person typing, and the
+/// window between the last stroke and the hotkey is where several of this project's defects have
+/// lived. The two waits are conditions and never clocks (requirement 1 of §11.5): the first waits
+/// for the typing to read back, the second for the field to stop reading what it read before the
+/// press, and the second's timeout is spent **only** when nothing happened at all — which is
+/// exactly the outcome under investigation.
+fn press_once(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    label: &str,
+    source: u32,
+) -> Result<PressOutcome, String> {
+    // ⚠ **The precondition of the scenario, restored at the start of every round and not once
+    // at the start of the run.** Step 5 of FR-40 leaves the window in RU after a successful
+    // replacement, and the very first trial run of this experiment showed what that costs: the
+    // second round typed the `G` key and the field read `п`. That is the controller's own trap
+    // seen from the typing side — the same Russian layout that made `ghbdtn` read `привет`
+    // without any conversion happening — and it is answered here rather than tolerated.
+    layout::ensure(target.hwnd, source, Duration::from_secs(5))
+        .map_err(|error| format!("исходная раскладка перед кругом: {error}"))?;
+
+    // The **same six keys** whichever layout the window runs, because a person's fingers do not
+    // change: what changes is what the field shows for them, and therefore which direction the
+    // conversion has to go. Under US the field reads `ghbdtn` and the press must produce
+    // `привет`; under RU the field already reads `привет` — the controller's trap — and the
+    // press must produce `ghbdtn`.
+    let (shown, wanted) = if source & 0xFFFF == layout::RUSSIAN & 0xFFFF {
+        (EXPECTED, TYPED)
+    } else {
+        (TYPED, EXPECTED)
+    };
+
+    input::chord(&[VK_CONTROL.0], VK_A.0, target).map_err(|error| format!("Ctrl+A: {error}"))?;
+    input::tap(VK_DELETE.0, target).map_err(|error| format!("Delete: {error}"))?;
+    wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(String::is_empty)
+    });
+
+    println!("{}", watched(&format!("{label}: поле очищено")));
+
+    type_paced_as(TYPED, shown, target, content)?;
+
+    let before = read_field(content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+    println!("{}", watched(&format!("{label}: набрано, до нажатия")));
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    // The condition is «поле больше не читается так, как читалось до нажатия» — not «поле
+    // читается как образец». A wrong replacement satisfies it as fast as a right one; only a
+    // press that did nothing spends the whole bound.
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    println!("{}", watched(&format!("{label}: после нажатия")));
+
+    Ok(PressOutcome {
+        before,
+        after,
+        wanted: wanted.to_owned(),
+    })
+}
+
+/// [`type_paced`] for a window whose layout is not the one the keys are named in.
+///
+/// `keys` is what is pressed — always `ghbdtn`, the six keys of the matrix — and `shown` is what
+/// the field is expected to read them back as, which under the Russian layout is `привет`. The
+/// two are separate arguments precisely because conflating them is the mistake this whole task
+/// is about: the same six keystrokes read as two different strings depending on a value the
+/// instrument must not assume.
+fn type_paced_as(
+    keys: &str,
+    shown: &str,
+    target: &input::Target,
+    content: &Element,
+) -> Result<(), String> {
+    let mut expected = String::new();
+
+    for (key, character) in keys.chars().zip(shown.chars()) {
+        let mut one = [0u8; 4];
+        let one = key.encode_utf8(&mut one);
+        input::type_text(one, target).map_err(|error| format!("ввод {one:?}: {error}"))?;
+
+        expected.push(character);
+        let landed = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text == &expected)
+        });
+
+        if landed.is_none() {
+            return Err(format!(
+                "клавиша {one:?} не дошла до приложения: прочитано {:?}, ожидалось {expected:?}",
+                read_field(content).unwrap_or_else(|| "<чтение не удалось>".to_owned())
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Samples the flush counters with the machine at rest and prints the deltas — **hypothesis 1
+/// of the task, asked of a running process**.
+///
+/// The four numbers are `window_flushes`, `full_clears`, `strokes_removed` and `focus_changes`.
+/// The first three are the keys this task put on the channel; the fourth is what says whether a
+/// flush came from a focus event at all. Nothing is typed and nothing is pressed while this
+/// runs, so any growth is the environment's doing and not the bench's.
+fn idle_watch(total: Duration, every: Duration) {
+    let read = || -> Option<(u64, u64, u64, u64)> {
+        let snapshot = crate::channel::read().ok()?;
+        // A key the running product does not publish reads as zero here, and that is the honest
+        // answer for a delta: it says «этот счётчик не двигался», which is what an absent key
+        // means to a reader that cannot see it.
+        let value = |key: &str| -> u64 {
+            snapshot
+                .get(key)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0)
+        };
+        Some((
+            value("window_flushes"),
+            value("full_clears"),
+            value("strokes_removed"),
+            value("focus_changes"),
+        ))
+    };
+
+    let Some(first) = read() else {
+        println!("  канал не ответил — покой не измерен");
+        return;
+    };
+    println!(
+        "  t=0с   window_flushes={} full_clears={} strokes_removed={} focus_changes={}",
+        first.0, first.1, first.2, first.3
+    );
+
+    let started = Instant::now();
+    while started.elapsed() < total {
+        let step = Instant::now() + every;
+        while Instant::now() < step {
+            std::thread::sleep(wait::POLL);
+        }
+
+        match read() {
+            None => println!("  канал не ответил"),
+            Some(now) => println!(
+                "  t={:<4} window_flushes={} (+{}) full_clears={} (+{}) strokes_removed={} (+{}) \
+                 focus_changes={} (+{})",
+                format!("{}с", started.elapsed().as_secs()),
+                now.0,
+                now.0 - first.0,
+                now.1,
+                now.1 - first.1,
+                now.2,
+                now.2 - first.2,
+                now.3,
+                now.3 - first.3,
+            ),
+        }
+    }
+}
+
+/// A round at a person's tempo: a pause between the keystrokes and a pause before the hotkey.
+///
+/// The same instrument as [`press_once`] — the verdict is still `after != before` — and the
+/// only difference is where the time goes. It exists because every measurement this bench has
+/// ever made types a word in tens of milliseconds, and the window a flush has to land in is the
+/// gap between the last stroke and the hotkey, which for a person is seconds.
+fn slow_press(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    label: &str,
+    source: u32,
+) -> Result<PressOutcome, String> {
+    /// The gap between two of a person's keystrokes, and before the hotkey. Two hundred
+    /// milliseconds is an unhurried typist; the pause before the press is five times that,
+    /// which is the hesitation the acceptance session described.
+    const GAP: Duration = Duration::from_millis(200);
+
+    layout::ensure(target.hwnd, source, Duration::from_secs(5))
+        .map_err(|error| format!("исходная раскладка: {error}"))?;
+
+    let (shown, wanted) = if source & 0xFFFF == layout::RUSSIAN & 0xFFFF {
+        (EXPECTED, TYPED)
+    } else {
+        (TYPED, EXPECTED)
+    };
+
+    input::chord(&[VK_CONTROL.0], VK_A.0, target).map_err(|error| format!("Ctrl+A: {error}"))?;
+    input::tap(VK_DELETE.0, target).map_err(|error| format!("Delete: {error}"))?;
+    wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(String::is_empty)
+    });
+    println!("{}", watched(&format!("{label}: поле очищено")));
+
+    let pause = |gap: Duration| {
+        let until = Instant::now() + gap;
+        while Instant::now() < until {
+            std::thread::sleep(wait::POLL);
+        }
+    };
+
+    for key in TYPED.chars() {
+        let mut one = [0u8; 4];
+        let one = key.encode_utf8(&mut one);
+        input::type_text(one, target).map_err(|error| format!("ввод {one:?}: {error}"))?;
+        pause(GAP);
+    }
+
+    let landed = read_field(content).unwrap_or_default();
+    println!(
+        "{}",
+        watched(&format!("{label}: набрано в темпе человека ({landed:?})"))
+    );
+
+    // The hesitation itself — five gaps, a second, the interval the acceptance session named.
+    pause(GAP * 5);
+    println!(
+        "{}",
+        watched(&format!("{label}: пауза выдержана, до нажатия"))
+    );
+
+    let before = read_field(content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+    if before != shown {
+        println!(
+            "  ⚠ поле читается {before:?}, а набиралось {shown:?} — часть штрихов не дошла до \
+             приложения; это факт о приложении, вердикт ниже всё равно про изменение поля"
+        );
+    }
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    println!("{}", watched(&format!("{label}: после нажатия")));
+
+    Ok(PressOutcome {
+        before,
+        after,
+        wanted: wanted.to_owned(),
+    })
+}
+
+/// The layout a round runs the window in — **both sides, alternating**.
+///
+/// Criterion 12 of the task asks for the scenario «при EN раскладке окна и при RU», and
+/// alternating is stronger than running one block of each: a defect that needs a *change* of
+/// layout between rounds — which is the whole of defect A of the previous session, closed by
+/// T-10-5 — is only reachable this way.
+fn round_layout(round: usize) -> u32 {
+    if round % 2 == 1 {
+        layout::US
+    } else {
+        layout::RUSSIAN
+    }
+}
+
+/// Finds the Notepad window of `app`, puts it through requirement B and returns what a round
+/// needs: the send target and the element it reads back.
+fn adopt_notepad(ctx: &Context, app: &mut App) -> Result<(input::Target, Element), String> {
+    let window = adopt_window(ctx.automation, app, &|element: &Element| {
+        element.class() == "Notepad"
+    })?;
+    let hwnd = app
+        .window
+        .ok_or_else(|| "у окна нет дескриптора".to_owned())?;
+    let content = ctx
+        .automation
+        .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+        .ok_or_else(|| "элемент ввода не найден".to_owned())?;
+
+    shell::activate_window(app.pid, Some(hwnd))?;
+    layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+
+    Ok((input::Target { pid: app.pid, hwnd }, content))
+}
+
+/// One press of the hotkey on an **empty** typing buffer — the selection path of FR-60/FR-61.
+///
+/// It is not a verdict and cannot be one: with nothing typed and nothing selected the correct
+/// behaviour is that nothing happens. What it is for is the *state* the path leaves behind — a
+/// real `Ctrl+C` goes out, the clipboard is opened, saved and put back — and no round of
+/// [`press_once`] can ever reach it, because `wants_selection_path` refuses a non-empty buffer
+/// (Р-62). The channel is read on both sides of it.
+fn empty_press(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    label: &str,
+) -> Result<(), String> {
+    input::chord(&[VK_CONTROL.0], VK_A.0, target).map_err(|error| format!("Ctrl+A: {error}"))?;
+    input::tap(VK_DELETE.0, target).map_err(|error| format!("Delete: {error}"))?;
+    wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(String::is_empty)
+    });
+
+    println!("{}", watched(&format!("{label}: буфер пуст, до нажатия")));
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    // A bound on the state settling, not on a result: there is no result to wait for.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        std::thread::sleep(wait::POLL);
+    }
+
+    println!("{}", watched(&format!("{label}: после нажатия")));
+    println!(
+        "  поле после нажатия на пустом буфере: {:?}",
+        read_field(content).unwrap_or_else(|| "<чтение не удалось>".to_owned())
+    );
+
+    Ok(())
+}
+
+/// **The experiment of task T-10-9** — «после открытия Проводника конвертация перестаёт
+/// работать ВЕЗДЕ», staged with the channel open at every step.
+///
+/// # The shape
+///
+/// | Step | What it establishes |
+/// |---|---|
+/// | 0 | the **negative control of the instrument**: one round with no product running at all |
+/// | 1 | conversion works — one round, before anything else is touched |
+/// | 2 | `Win+E`, sent as a chord into the bench's own foreground window, the way the user sent it |
+/// | 3 | back to the bench's own window, without touching the shell's |
+/// | 4…13 | ten more rounds, each with the channel read before and after every press |
+///
+/// ⚠ **Step 0 is not decoration.** Criterion 11 of the task and the controller's own recorded
+/// mistake are both about an instrument that reported success without executing what it was
+/// measuring. An instrument that has never been seen to go red is an instrument nobody knows the
+/// meaning of, so the run begins by showing it red on a case that is broken by construction —
+/// no product, therefore no conversion, therefore `after == before`.
+///
+/// ⚠ **What this experiment does NOT do.** It does not touch the Explorer window it opened: the
+/// shell is not in registry A, nothing is typed into it, nothing is posted to it and nothing is
+/// terminated. `Win+E` is sent while **the bench's own window** holds the foreground, through
+/// `input::chord`, which refuses to send at all unless that is true; going back afterwards is
+/// `shell::activate_window` on the bench's own process. The Explorer window is left standing,
+/// and the operator closes it — which is what requirement B costs here and it is cheaper than
+/// weakening it.
+pub fn experiment_explorer(
+    ctx: &Context,
+    rounds: usize,
+    installed: bool,
+) -> std::process::ExitCode {
+    /// The FR-97 deadline this experiment runs the product under, in seconds.
+    ///
+    /// Named in the report, as the task requires. Ten paced rounds plus the shell opening a
+    /// window do not fit into the forty-five seconds every position gets, and the band the task
+    /// gives is 120 to 600. Two hundred and forty is inside it, and the product is still ended
+    /// explicitly by pid at the end of the run — the deadline is a net, not a stopping mechanism.
+    const DEADLINE_SECS: u32 = 240;
+
+    println!("--- ОПЫТ T-10-9: Win+E и конвертация после него ---\n");
+    println!(
+        "Прибор: сравнение поля ДО и ПОСЛЕ нажатия. Совпадение с образцом {EXPECTED:?} \
+         сообщается рядом и НИКОГДА не является вердиктом.\n\
+         LANGSW_DEBUG_TIMEOUT_SEC = {DEADLINE_SECS}\n"
+    );
+
+    let _clipboard = clip::Guard::capture();
+
+    // ---- step 0: the instrument, shown red on a case that cannot work ----------------------
+    //
+    // In a Notepad of its own, which is then closed. The product is **not** running yet, so the
+    // round is broken by construction and the instrument has to say so.
+    println!("=== ШАГ 0: отрицательный контроль прибора — продукт НЕ запущен ===");
+    let control = (|| -> Result<PressOutcome, String> {
+        let mut app = launch_notepad()?;
+        let outcome = (|| -> Result<PressOutcome, String> {
+            let (target, content) = adopt_notepad(ctx, &mut app)?;
+            press_once(ctx, &target, &content, "контроль", layout::US)
+        })();
+        println!("  {}", app.close());
+        outcome
+    })();
+
+    match control {
+        Err(error) => {
+            eprintln!("отрицательный контроль не поставлен: {error}");
+            return std::process::ExitCode::from(1);
+        }
+        Ok(control) => {
+            println!("  {}", control.describe());
+            if control.changed() {
+                eprintln!(
+                    "⛔ ПРИБОР НЕИСПРАВЕН: без продукта поле изменилось после нажатия ({})",
+                    control.describe()
+                );
+                return std::process::ExitCode::from(1);
+            }
+            println!("  ✔ прибор краснеет на заведомо сломанном случае — ему можно верить\n");
+        }
+    }
+
+    // ---- the product, and only then the window it will work in ----------------------------
+    //
+    // ⚠ **The order is the point.** The first pass of this experiment launched the product
+    // *after* the window already existed and already held the foreground, and the channel then
+    // showed `focus_changes=0` for the whole of the pre-Explorer phase: the guard of FR-70/FR-71
+    // never parked the buffer once, so nothing of that path was under test at all. The user's
+    // product is started by autostart and every window they open is created under it. So the
+    // product goes up first here, and the Notepad is created while it is watching.
+    let launched = if installed {
+        println!(
+            "⚠ ПРОДУКТ — УСТАНОВЛЕННЫЙ ПОДПИСАННЫЙ RELEASE из %ProgramFiles% (uiAccess=1).\n\
+             Канала SEC-04a у него нет по построению — прибор «до/после» его и не требует.\n"
+        );
+        crate::sut::Sut::launch_installed()
+    } else {
+        crate::sut::Sut::launch_with(DEADLINE_SECS)
+    };
+
+    let mut product = match launched {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    if installed {
+        // No channel to wait on. The readiness condition available from outside a Release copy
+        // is that the process is still alive — FR-02's hook goes up in its first milliseconds —
+        // and the rounds below would fail loudly if it were not there.
+        let alive = wait::until_true(Duration::from_secs(10), || {
+            shell::process_is_alive(product.pid)
+        });
+        println!(
+            "Продукт (Release) PID {}, процесс жив: {alive}",
+            product.pid
+        );
+    } else {
+        let ready = match product.await_ready(Duration::from_secs(30)) {
+            Some(ready) => ready,
+            None => {
+                eprintln!("продукт не сообщил о готовности за 30 с");
+                return std::process::ExitCode::from(1);
+            }
+        };
+        println!(
+            "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+            product.pid,
+            ready.get("hook_installed").unwrap_or("?"),
+            ready.present_keys().len()
+        );
+        println!(
+            "Снимок канала целиком, сразу после готовности:\n{}",
+            ready.raw
+        );
+    }
+
+    let mut app = match launch_notepad() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("Блокнот не запустился: {error}");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<(), String> {
+        let (target, content) = adopt_notepad(ctx, &mut app)?;
+        let hwnd = target.hwnd;
+
+        let result = (|| -> Result<(), String> {
+            shell::activate_window(app.pid, Some(hwnd))?;
+            layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+            println!("{}", watched("окно создано под работающим продуктом"));
+
+            // ---- step 1: it works ------------------------------------------------------
+            println!("\n=== ШАГ 1: конвертация работает (до Проводника) ===");
+            let mut before_explorer = Vec::new();
+            for round in 1..=2 {
+                let source = round_layout(round);
+                let outcome = press_once(ctx, &target, &content, &format!("до-{round}"), source)?;
+                println!(
+                    "  круг {round} ({}): {}",
+                    layout::describe(source),
+                    outcome.describe()
+                );
+                before_explorer.push(outcome);
+            }
+
+            // ---- step 1b: a press on an **empty** buffer --------------------------------
+            //
+            // ⚠ The one gesture the rounds above can never make, and the user certainly made:
+            // `wants_selection_path` hands the press to the selection path **only** when the
+            // typing buffer is empty (Р-62), and that path sends a real `Ctrl+C` and opens the
+            // clipboard. Nothing above this line ever reaches it, so nothing above this line
+            // could leave whatever state it leaves.
+            println!("\n=== ШАГ 1б: нажатие на ПУСТОМ буфере — путь выделения FR-60/FR-61 ===");
+            empty_press(ctx, &target, &content, "пусто-до")?;
+
+            // ---- step 2: Win+E ---------------------------------------------------------
+            println!("\n=== ШАГ 2: Win+E — открываю Проводник ===");
+            println!("{}", watched("перед Win+E"));
+            for attempt in 1..=2 {
+                // The chord goes out only while **our own** window holds the foreground —
+                // `input::chord` refuses otherwise, and after the first Explorer window the
+                // foreground is the shell's. So the window is brought back first, which is also
+                // what the user does between two `Win+E` presses.
+                shell::activate_window(app.pid, Some(hwnd))?;
+                input::chord(&[VK_LWIN.0], VK_E.0, &target)
+                    .map_err(|error| format!("Win+E: {error}"))?;
+
+                let shell_up = wait::until(Duration::from_secs(20), || {
+                    input::foreground().filter(|(pid, _)| *pid != app.pid)
+                });
+                match shell_up {
+                    Some((pid, front)) => println!(
+                        "  окно {attempt}: передний план ушёл процессу {pid} ({}), класс {:?}",
+                        crate::own::process_table_name(pid)
+                            .unwrap_or_else(|| "<имя неизвестно>".into()),
+                        window_class_of(front)
+                    ),
+                    None => println!("  ⚠ окно {attempt}: передний план не сменился за 20 с"),
+                }
+
+                // ⚠ **A dwell and not a poll.** Everything else in this bench waits on a
+                // condition (requirement 1 of §11.5), and this is deliberately not one: what is
+                // being given time to happen is the shell's own settling — the churn of focus
+                // events an opening folder window makes — and there is no condition on our side
+                // that says it is over. It is an interval of the *scenario*, the way «отошёл на
+                // некоторое время» is, not a wait for a result.
+                let dwell = Duration::from_secs(4);
+                let deadline = Instant::now() + dwell;
+                while Instant::now() < deadline {
+                    std::thread::sleep(wait::POLL);
+                }
+                println!(
+                    "{}",
+                    watched(&format!("Проводник {attempt}, после выдержки"))
+                );
+            }
+
+            // ---- step 3: back to our own window ----------------------------------------
+            println!("\n=== ШАГ 3: возвращаюсь в своё окно ===");
+            shell::activate_window(app.pid, Some(hwnd))?;
+            println!("{}", watched("своё окно снова впереди"));
+            println!(
+                "  раскладка окна сейчас: {}",
+                layout::of_window(hwnd)
+                    .map(layout::id_of)
+                    .map_or("<не читается>".to_owned(), layout::describe)
+            );
+            layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+
+            // ---- step 3b: is the buffer being eaten while nobody touches anything? ------
+            //
+            // ⚠ **This is hypothesis 1 of the task, asked directly.** «Буфер пуст к моменту
+            // нажатия — что-то сбрасывает его непрерывно». The three counters T-10-9 put on the
+            // channel are the only way to ask it of a *running* process, and the question is
+            // asked with the machine at rest: nothing is typed, nothing is clicked, the bench's
+            // own window is in front and the Explorer windows are open behind it. A flush storm
+            // shows as `window_flushes` climbing with nobody at the keyboard.
+            println!(
+                "\n=== ШАГ 3б: покой 20 с — растут ли сбросы, когда никто ничего не делает ==="
+            );
+            idle_watch(Duration::from_secs(20), Duration::from_secs(2));
+
+            // ---- step 3в: a round at a person's tempo, not the bench's ------------------
+            //
+            // ⚠ Every round of this experiment so far has typed at the round-trip of UI
+            // Automation — tens of milliseconds a character — and the acceptance session's own
+            // diagnosis of the very first defect was that «окно уязвимости между набором и
+            // горячей клавишей у него ничтожно, а у человека оно секунды». So one round is made
+            // at a human tempo, with a real pause between the last stroke and the hotkey. It is
+            // an interval of the **scenario** — the thing being staged is a person hesitating —
+            // and not a wait for a result, which is what requirement 1 of §11.5 forbids.
+            println!("\n=== ШАГ 3в: круг в темпе человека — пауза между набором и нажатием ===");
+            let slow = slow_press(ctx, &target, &content, "медленно", layout::US)?;
+            println!("  {}", slow.describe());
+
+            // ---- step 4: does it still work? -------------------------------------------
+            println!("\n=== ШАГ 4: те же нажатия ПОСЛЕ Проводника, {rounds} кругов ===");
+            let mut after_explorer = Vec::new();
+            for round in 1..=rounds {
+                let source = round_layout(round);
+                let outcome =
+                    press_once(ctx, &target, &content, &format!("после-{round}"), source)?;
+                println!(
+                    "  круг {round} ({}): {}",
+                    layout::describe(source),
+                    outcome.describe()
+                );
+                after_explorer.push(outcome);
+            }
+
+            // ---- ⛔ the shell windows this experiment does NOT open ---------------------
+            //
+            // «Прочие окна оболочки: меню «Пуск», поиск панели задач» — measured and refused,
+            // and the measurement is recorded here rather than the refusal alone. Tapping `Win`
+            // from our own window **does** open the Start menu and the channel can be read while
+            // it is up; what cannot be done is getting the foreground back. Measured on this
+            // machine in the second pass of this experiment: `SearchHost.exe` (PID 4468,
+            // `Windows.UI.Core.CoreWindow`) took the foreground and `shell::activate_window`
+            // spent its full thirty seconds without recovering it — the same rake §11.3 position
+            // 12 already records («меню не открывается вовсе»). The only way past it is to send a
+            // key into the shell's own window, which this task's environment section forbids and
+            // requirement B of the bench forbids. So the Start menu stays where §11.6 put it: a
+            // person's position, and one the user closed `pass` in the very session this defect
+            // appeared in.
+            println!(
+                "\n⛔ меню «Пуск» и поиск панели задач стенд не открывает — см. позицию 12 §11.3: \
+                 окно принадлежит SearchHost/StartMenuExperienceHost, передний план обратно \
+                 не отдаётся, а отправлять клавиши в чужое окно запрещено"
+            );
+
+            println!("\n=== ИТОГ ===");
+            let changed_before = before_explorer.iter().filter(|o| o.changed()).count();
+            let correct_before = before_explorer.iter().filter(|o| o.correct()).count();
+            let changed_after = after_explorer.iter().filter(|o| o.changed()).count();
+            let correct_after = after_explorer.iter().filter(|o| o.correct()).count();
+            println!(
+                "  до Проводника:    изменилось {changed_before}/{}, верно {correct_before}/{}",
+                before_explorer.len(),
+                before_explorer.len()
+            );
+            println!(
+                "  после Проводника: изменилось {changed_after}/{}, верно {correct_after}/{}",
+                after_explorer.len(),
+                after_explorer.len()
+            );
+            println!("{}", watched("конец опыта"));
+
+            Ok(())
+        })();
+
+        match product.stop() {
+            Ok(code) => println!("\nпродукт остановлен по FR-96, код {code}"),
+            Err(error) => println!("\n⚠ остановка продукта: {error}"),
+        }
+
+        result
+    })();
+
+    let closed = app.close();
+    println!("{closed}");
+    println!("{}", restore_ambient(ctx));
+
+    match outcome {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("\nопыт не доведён: {error}");
+            std::process::ExitCode::from(1)
+        }
+    }
+}
+
+/// The class name of a window, for the protocol of [`experiment_explorer`].
+///
+/// ⚠ Reading a class name is not «трогать окно»: it copies a string out of the window class the
+/// system already published and changes nothing. It is here because the whole question of
+/// hypothesis 5 is which class the resolver of FR-42а sees when the shell is in front, and a
+/// protocol that only said «передний план сменился» could not answer it.
+fn window_class_of(hwnd: HWND) -> String {
+    use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+
+    let mut buffer = [0u16; 257];
+    // SAFETY: `buffer` is a live local array and the call is given the slice itself, so the
+    // binding derives the bound from the array and cannot write past it. NFR-13: a non-positive
+    // return is the documented failure and is examined.
+    let length = unsafe { GetClassNameW(hwnd, &mut buffer) };
+
+    if length <= 0 {
+        return "<класс не читается>".to_owned();
+    }
+
+    String::from_utf16_lossy(&buffer[..length as usize])
 }
