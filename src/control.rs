@@ -1499,6 +1499,41 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: one of four named constants.
     pub field_state: crate::guard::Field,
+    /// Clipboard accesses that exhausted `selection::OPEN_ATTEMPTS` — task **T-10-11**, FR-62.
+    ///
+    /// [`crate::selection::Counters::open_refusals`], and **this is the refusal of the selection
+    /// path itself**: FR-60/FR-61 replace a word by selecting it and going through the clipboard,
+    /// so an access that never opened is a replacement that cannot run. FR-42а resolves `auto` to
+    /// `selection` for every non-console window — Блокнот, Telegram, Word, Chrome, VS Code — which
+    /// is to say for almost everything the user types into, and until this key that whole path had
+    /// **not one number** on the channel. The fourth row of the break-down table of task T-10-9,
+    /// «замена отказывает», could be read only as `last_replacement=0/0/0`: that the replacement
+    /// did not happen, never why.
+    ///
+    /// SEC-01, SEC-07: a count of refused accesses. Not the text of the clipboard, not its
+    /// format, not its size — `selection::snapshot` and `selection::restore` publish nothing of
+    /// what they carry and cannot, and nothing of it reaches this number.
+    pub clipboard_refusals: u32,
+    /// `CloseClipboard` calls that failed — task **T-10-11**.
+    ///
+    /// [`crate::selection::Counters::close_failures`], and the one of the three that predicts a
+    /// **lasting** failure rather than a momentary one: a clipboard this process opened and could
+    /// not close stays open, and every later access — ours and everyone else's — is refused while
+    /// it does. «Переключение перестало работать **везде**» is the shape a stuck clipboard has,
+    /// and this is the number that would say so.
+    ///
+    /// SEC-01, SEC-07: a count of failed calls.
+    pub clipboard_close_failures: u32,
+    /// Clipboard opens that were refused once and retried — task **T-10-11**, FR-62.
+    ///
+    /// [`crate::selection::Counters::open_retries`]. Beside the two above it is the **gradient**:
+    /// contention that is growing but has not yet exhausted `OPEN_ATTEMPTS` moves this and leaves
+    /// [`Snapshot::clipboard_refusals`] standing — «становится тяжелее, но ещё работает». A run
+    /// looking for a rare event needs the reading that comes *before* the event as much as the
+    /// event itself.
+    ///
+    /// SEC-01, SEC-07: a count of retries.
+    pub clipboard_retries: u32,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1512,6 +1547,7 @@ pub fn snapshot() -> Snapshot {
     let watchdog = crate::watchdog::health();
     let subscriptions = crate::watchdog::counters();
     let guard = crate::guard::counters();
+    let clipboard = crate::selection::counters();
     // One load, three fields — see [`LAST_REPLACEMENT`] for why they may not be read apart.
     let replacement = last_replacement();
 
@@ -1554,6 +1590,9 @@ pub fn snapshot() -> Snapshot {
         full_clears: subscriptions.full_clears,
         strokes_removed: subscriptions.strokes_removed,
         field_state: crate::guard::field(),
+        clipboard_refusals: clipboard.open_refusals,
+        clipboard_close_failures: clipboard.close_failures,
+        clipboard_retries: clipboard.open_retries,
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1657,6 +1696,17 @@ pub fn snapshot() -> Snapshot {
 /// buffering off. This key names the gate's own state in one of four closed words, so a gate
 /// that never leaves `pending` is readable directly rather than by inference. See
 /// [`Snapshot::field_state`].
+///
+/// The three `clipboard_` keys of task **T-10-11** are appended after it, in that order and by
+/// the same rule, and they close the last unlit corner of the four-row break-down table. Every
+/// key before them describes the path *into* the buffer or the state of the gate above it; the
+/// fourth row — «замена отказывает» — had only `last_replacement=0/0/0`, which says a
+/// replacement did not run and never why. FR-42а resolves `auto` to `selection` for every
+/// non-console window, so that path carries almost everything the user types, and it went
+/// through `OpenClipboard`/`CloseClipboard` with **not one number** leaving the process. These
+/// three mirror `selection::counters()`: the refusal, the close that failed — the one failure
+/// that lasts, because a clipboard left open refuses everybody — and the retry beside them as
+/// the gradient. See [`Snapshot::clipboard_refusals`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1693,7 +1743,10 @@ pub fn render(state: &Snapshot) -> String {
          window_flushes={}\n\
          full_clears={}\n\
          strokes_removed={}\n\
-         field_state={}\n",
+         field_state={}\n\
+         clipboard_refusals={}\n\
+         clipboard_close_failures={}\n\
+         clipboard_retries={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1731,6 +1784,9 @@ pub fn render(state: &Snapshot) -> String {
         state.full_clears,
         state.strokes_removed,
         state.field_state.name(),
+        state.clipboard_refusals,
+        state.clipboard_close_failures,
+        state.clipboard_retries,
     )
 }
 
@@ -1751,7 +1807,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 35] = [
+pub const KEYS: [&str; 38] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1787,6 +1843,9 @@ pub const KEYS: [&str; 35] = [
     "full_clears",
     "strokes_removed",
     "field_state",
+    "clipboard_refusals",
+    "clipboard_close_failures",
+    "clipboard_retries",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

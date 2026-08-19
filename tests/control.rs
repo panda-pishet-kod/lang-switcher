@@ -1883,11 +1883,8 @@ fn the_field_state_key_of_t_10_10_is_one_of_four_closed_words_at_the_tail() {
 
     // Appended, not inserted — the rule every key since task T-05-2a has followed, written
     // against a fixed index for the reason given at
-    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
-    // assertion travels with the last-appended key: it is the check that no key reached the
-    // channel without a review, and it belongs beside the key that currently closes the list.
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`.
     assert_eq!(control::KEYS[34], "field_state");
-    assert_eq!(control::KEYS.len(), 35);
 }
 
 /// Every one of the four states of `guard::Field` renders as its own word, and `password_field`
@@ -1962,6 +1959,123 @@ fn the_field_state_key_mirrors_what_guard_holds() {
         ["pending", "ordinary", "password", "undetermined"].contains(&state.field_state.name()),
         "and it is a word of the closed list either way"
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-11 — the selection path, which had not one number on this channel
+// -------------------------------------------------------------------------------------
+
+/// The three `clipboard_` keys are published, they are decimal counts, and they close the tail
+/// of `KEYS`.
+///
+/// # Why they exist at all
+///
+/// FR-42а resolves the configured `auto` **to `selection` for every non-console window** — a
+/// Блокнот, a Telegram, a Word, a Chrome, a VS Code — so the selection path of FR-60/FR-61 is
+/// the path almost everything the user types goes through, and it replaces a word by selecting
+/// it and passing it through the clipboard. Until this task that path published **not one
+/// number**. The break-down table of task T-10-9 has four rows, and its fourth — «замена
+/// отказывает» — could be read only as `last_replacement=0/0/0`: the statement that a
+/// replacement did not run, never the reason. These three are the reason:
+/// `clipboard_refusals` is the selection path refusing outright, `clipboard_close_failures` is
+/// the one failure that **lasts** — a clipboard this process opened and could not close refuses
+/// everybody afterwards, which is the shape «переключение перестало работать везде» has — and
+/// `clipboard_retries` is the gradient between the two.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// Three counts of program events, asserted below by refusing every value that is not a bare
+/// decimal. Not the text of the clipboard, not its format, not its size: `selection::snapshot`
+/// and `selection::restore` publish nothing of what they carry, and none of these numbers is
+/// proportional to it or can be turned back into it.
+#[test]
+fn the_three_clipboard_keys_of_t_10_11_are_published_as_decimal_counts_at_the_tail() {
+    let text = control::render(&control::snapshot());
+
+    for key in [
+        "clipboard_refusals",
+        "clipboard_close_failures",
+        "clipboard_retries",
+    ] {
+        let published = text
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .unwrap_or_else(|| panic!("the channel does not publish {key}"));
+
+        println!("{key}={published}");
+
+        assert!(
+            !published.is_empty() && published.bytes().all(|byte| byte.is_ascii_digit()),
+            "{key} must be a decimal count, not {published:?}"
+        );
+
+        assert!(control::KEYS.contains(&key));
+        assert!(!control::RESERVED_KEYS.contains(&key));
+    }
+
+    // Appended in that order, and at the end — the rule every key since task T-05-2a has
+    // followed, written against fixed indices for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
+    // assertion travels with the last-appended key: it is the check that no key reached the
+    // channel without a review, and its place is beside the key that currently closes the
+    // list, so that a task which adds one is the task that edits it.
+    assert_eq!(
+        &control::KEYS[35..38],
+        &[
+            "clipboard_refusals",
+            "clipboard_close_failures",
+            "clipboard_retries"
+        ]
+    );
+    assert_eq!(control::KEYS.len(), 38);
+}
+
+/// The three keys mirror `selection::counters()` and are not invented here.
+///
+/// The same assertion the flush keys of T-10-9 are held to, for the same reason (decision Р-28:
+/// one source, two sinks): what matters is not that a number appears but that the number which
+/// appears is the one `selection` holds. Read twice around the snapshot, because the program
+/// keeps running and all three are monotone counters — the published value has to lie between
+/// the two live reads.
+///
+/// ⚠ **What this test does not prove, said plainly.** On a quiet process every one of the
+/// thirteen counters of `selection::Counters` reads zero, so a channel that mirrored the wrong
+/// field of the right struct would pass here. The bracket is a mirror check, not a pairing
+/// check. What pins the pairing is the run itself: the key that has to be right during the
+/// experiment is `clipboard_refusals`, and its meaning is read off a live product whose
+/// selection path is running — no unit test on an idle process can stand in for that, and this
+/// one does not pretend to.
+#[test]
+fn the_three_clipboard_keys_of_t_10_11_mirror_the_selection_counters() {
+    let before = lang_switcher::selection::counters();
+    let state = control::snapshot();
+    let after = lang_switcher::selection::counters();
+
+    for (name, published, low, high) in [
+        (
+            "clipboard_refusals",
+            state.clipboard_refusals,
+            before.open_refusals,
+            after.open_refusals,
+        ),
+        (
+            "clipboard_close_failures",
+            state.clipboard_close_failures,
+            before.close_failures,
+            after.close_failures,
+        ),
+        (
+            "clipboard_retries",
+            state.clipboard_retries,
+            before.open_retries,
+            after.open_retries,
+        ),
+    ] {
+        assert!(
+            (low..=high).contains(&published),
+            "the channel publishes what selection holds: {name} is {published}, outside {low}..={high}"
+        );
+    }
 }
 
 /// The key mirrors what `inject::on_hotkey` publishes into it, a register and not a counter —

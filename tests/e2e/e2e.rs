@@ -81,6 +81,14 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run(arguments: &[String]) -> std::process::ExitCode {
+    // ⚠ **Before the banner and before every net**, deliberately. This mode is not a run of the
+    // bench: it is the program the console item of `--experiment-sequence` hosts inside a
+    // `conhost.exe`, and everything below — the safety net, the config recovery, the layout
+    // recovery — belongs to a run that measures something. A parked console must touch nothing.
+    if arguments.first().map(String::as_str) == Some("--console-park") {
+        return console_park();
+    }
+
     banner();
 
     // Requirement 7, first half: the job object and the panic hook. Everything below this line
@@ -110,6 +118,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-unicode") => experiment_unicode(),
         Some("--experiment-modes") => experiment_modes(),
         Some("--experiment-explorer") => experiment_explorer(arguments),
+        Some("--experiment-sequence") => experiment_sequence(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -416,6 +425,100 @@ fn experiment_explorer(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_explorer(&context, rounds, installed)
+}
+
+/// **Task T-10-11** — the человек's whole sequence, and `Win+E` only after all of it.
+///
+/// The same split as every mode of this file: the arm builds the context, the experiment lives in
+/// `scenarios.rs`. `--experiment-sequence [кругов] [--installed]`; the task asks for at least ten
+/// verification rounds after the shell window, so ten is the default and a smaller number is what
+/// a first pass over a new instrument wants.
+fn experiment_sequence(arguments: &[String]) -> std::process::ExitCode {
+    let rounds = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10);
+    let installed = arguments.iter().any(|value| value == "--installed");
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_sequence(&context, rounds, installed)
+}
+
+/// ⭐ **The program the console item of the sequence hosts** — task T-10-11.
+///
+/// # Why the bench hosts itself rather than a shell
+///
+/// Measured before it was written. A `cmd.exe` or a `powershell.exe` started directly on this
+/// machine is handed to a **COM-activated `WindowsTerminal.exe` under `svchost.exe`** — not kin to
+/// the bench at all, so requirement A refuses it before requirement C ever gets a say; and
+/// `conhost.exe cmd.exe` gives the right window class but hands the window to a `cmd.exe`, a
+/// protected name that was not spawned **directly**, which `own::claim_window_process` refuses
+/// before it walks any ancestry. Relaxing requirement C for a proved descendant is the open
+/// question §11.3 position 6 leaves to the controller, and this task does not answer it for them.
+///
+/// So the console the sequence drives is a real `conhost.exe` — spawned directly, therefore inside
+/// requirement C — hosting **this binary**, whose name is not on the protected list and which
+/// descends from a process the bench started. The window is a genuine `ConsoleWindowClass`, which
+/// is what FR-42а resolves to the `Backspace` path.
+///
+/// # What it does, and the whole of it
+///
+/// Reads lines from standard input until the console goes away. That is not a placeholder: a
+/// program blocked in `read_line` is what puts a console into **cooked line-input mode with echo**,
+/// which is the mode the `Backspace` path of FR-42а exists for and the one positions 6–7 were
+/// confirmed in. Nothing is printed but the two lines below, nothing is parsed, and no line is ever
+/// acted on — the typing is there to be looked at by UI Automation, not to be obeyed.
+/// ⚠ **`CONIN$` and not `stdin`, and the first pass measured why.** `Command::spawn` hands the
+/// child the parent's standard handles, and the parent of this process is a bench whose own stdin
+/// is a pipe or the null device. Reading `stdin` therefore hit end-of-file at once, the program
+/// exited, `conhost.exe` closed with it and the console window the item needs never existed long
+/// enough to be found — the run reported «окно приложения не появилось» and nothing else.
+/// `CONIN$` is the console input buffer of **this** process's console whatever the inherited
+/// handles point at, which is the thing that has to be read for the console to be in cooked mode.
+fn console_park() -> std::process::ExitCode {
+    use std::io::{BufRead, BufReader};
+
+    println!("langsw-e2e --console-park: окно консоли для пунктов 4-5 опыта T-10-11.");
+    println!("Строки читаются и никак не исполняются. Закройте окно, чтобы завершить.");
+
+    // Read **and** write: a console input handle opened read-only cannot be used to put the
+    // console into the mode a line read needs. NFR-13: the failure is examined, and it parks
+    // rather than exiting, because a window that vanishes is worse to diagnose than one that sits.
+    let console = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("CONIN$");
+
+    let Ok(console) = console else {
+        println!("⚠ CONIN$ не открылся — окно остаётся, но набор читаться не будет");
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    };
+
+    let mut reader = BufReader::new(console);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            // End of input — the console has gone, and so does this.
+            Ok(0) | Err(_) => return std::process::ExitCode::SUCCESS,
+            Ok(_) => {}
+        }
+    }
 }
 
 /// The measurement of position 11 — rule Р-39, and see [`scenarios::measure_layout`].

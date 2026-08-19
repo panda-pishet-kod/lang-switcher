@@ -4693,7 +4693,7 @@ fn press_once(
 
     println!("{}", watched(&format!("{label}: поле очищено")));
 
-    type_paced_as(TYPED, shown, target, content)?;
+    type_paced_as(TYPED, shown, target, content, "")?;
 
     let before = read_field(content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
     println!("{}", watched(&format!("{label}: набрано, до нажатия")));
@@ -4725,13 +4725,18 @@ fn press_once(
 /// two are separate arguments precisely because conflating them is the mistake this whole task
 /// is about: the same six keystrokes read as two different strings depending on a value the
 /// instrument must not assume.
+///
+/// `prefix` is what the field already reads before the first key — empty for the rounds of
+/// [`press_once`], which clear the field first, and the text left by an earlier press for the
+/// sequence of task T-10-11, which deliberately does not.
 fn type_paced_as(
     keys: &str,
     shown: &str,
     target: &input::Target,
     content: &Element,
+    prefix: &str,
 ) -> Result<(), String> {
-    let mut expected = String::new();
+    let mut expected = prefix.to_owned();
 
     for (key, character) in keys.chars().zip(shown.chars()) {
         let mut one = [0u8; 4];
@@ -5434,6 +5439,271 @@ pub fn experiment_explorer(
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-10-11 — the человек's whole sequence, and the two paths of FR-42а alternating
+// ---------------------------------------------------------------------------------------
+
+/// The window class the console item of the sequence needs — FR-42а, `inject::resolve_auto`.
+///
+/// Not a class the bench invents: it is one of the two entries of
+/// `inject::CONSOLE_WINDOW_CLASSES`, and the whole reason this item exists is that it is the only
+/// way the bench can make the product resolve `auto` to `Backspace`.
+const CONSOLE_CLASS: &str = "ConsoleWindowClass";
+
+/// ⭐ **A real console window the bench may drive, without weakening a single requirement.**
+///
+/// # The measurement this is built on, and the three routes it rules out
+///
+/// Measured on this machine before anything was written, because the task's own claim — «позиции
+/// 1, 4, 5 и 8 стенд уже умеет водить» — turned out not to hold for the consoles:
+///
+/// | Launched directly | Window class | Window owned by | Owner's parent |
+/// |---|---|---|---|
+/// | `cmd.exe` | `CASCADIA_HOSTING_WINDOW_CLASS` | `WindowsTerminal.exe` | **`svchost.exe`** |
+/// | `powershell.exe` | `CASCADIA_HOSTING_WINDOW_CLASS` | `WindowsTerminal.exe` | **`svchost.exe`** |
+/// | `conhost.exe cmd.exe` | `ConsoleWindowClass` | `cmd.exe` | the spawned `conhost.exe` |
+///
+/// The first two are worse than §11.3 positions 6–7 record: that measurement found
+/// `WindowsTerminal.exe` **descending** from the bench's `wt.exe`, so only requirement C refused.
+/// Today the default-terminal handoff raises it by COM activation under `svchost.exe`, so it is
+/// not kin to the bench at all and requirement **A** refuses first. The third gives the right
+/// window class but hands the window to a `cmd.exe` — a name on the protected list of requirement
+/// C which was not spawned **directly**, and `own::claim_window_process` refuses a protected name
+/// before it walks any ancestry.
+///
+/// ⛔ **Requirement C is not relaxed here, and that is deliberate.** The documentation of position
+/// 6 says in as many words that whether C should be relaxed for a proved descendant «is a question
+/// for the controller … not a decision the bench takes for itself», and the verdict on T-10-10
+/// singled out that A–E were left unweakened. So the question stays open and this goes round it.
+///
+/// # What is launched instead
+///
+/// `conhost.exe` — spawned **directly**, so requirement C is satisfied for it by
+/// [`launched`]'s `register_spawned` — hosting **this bench's own binary** in the mode
+/// [`crate::console_park`] parks in. The console window that results is a real conhost window of
+/// class `ConsoleWindowClass`, and it is owned by `langsw-e2e.exe`: a name that is **not** on the
+/// protected list, descending from a process the bench spawned directly, which is exactly the
+/// case `claim_window_process` adopts.
+///
+/// The hosted program does nothing but read lines, which is what puts the console in **cooked
+/// line-input mode with echo** — the input mode FR-42а's `Backspace` path exists for, and the one
+/// the acceptance session confirmed positions 6–7 in.
+fn launch_console() -> Result<App, String> {
+    let bench = std::env::current_exe()
+        .map_err(|error| format!("собственный путь стенда не читается: {error}"))?;
+
+    // ⚠ **`ShellExecuteEx` and not `Command::spawn`** — three failing variants measured first; see
+    // `sut::shell_execute` for the table and the cause. In short: `std`'s `Command` always passes
+    // explicit standard handles, and a console **host** handed somebody else's standard streams
+    // does not go on to create the console it exists to create.
+    let conhost = std::path::PathBuf::from(r"C:\Windows\System32\conhost.exe");
+    let pid =
+        crate::sut::shell_execute(&conhost, &format!("\"{}\" --console-park", bench.display()))?;
+
+    // ⛔ Requirement A: the id came from the handle of the launch itself, and it enters the
+    // registry here, at that instant — before any window exists to be found by.
+    crate::own::register_spawned(pid);
+
+    // `Terminate` and not `WmClose`: the program the console hosts is the bench's own and holds
+    // nothing a kill could damage — the same reasoning `launch_notepad` gives. `child` is `None`
+    // because there is no `Child` to hold: `ShellExecuteEx` gives a handle, not a process object,
+    // and `App` tracks liveness by pid.
+    Ok(App {
+        name: "Консоль (conhost + langsw-e2e --console-park)".to_owned(),
+        pid,
+        child: None,
+        window: None,
+        close: CloseWith::Terminate,
+        scratch: None,
+    })
+}
+
+/// Finds the console window, puts it through requirement B and reports what the run needs.
+///
+/// ⚠ The predicate is the class alone, which other consoles on the machine also carry — the
+/// operator's own shells among them. That is safe and is why [`adopt_window`] scans candidates
+/// instead of taking the first: every window that is not ours is refused by
+/// `own::claim_window_process`, with the refusal recorded, and the loop moves on. The owner's name
+/// is asserted afterwards so that an adoption which somehow matched the wrong console is caught
+/// rather than measured.
+fn adopt_console(ctx: &Context, app: &mut App) -> Result<(input::Target, Element), String> {
+    let window = adopt_window(ctx.automation, app, &|element: &Element| {
+        element.class() == CONSOLE_CLASS
+    })?;
+
+    // ⭐ **Measured, and better than the design expected.** The window turns out to belong to the
+    // `conhost.exe` the bench spawned **directly**, not to the program it hosts — so requirement C
+    // is satisfied outright rather than by descent: `was_spawned` is true for this very pid, which
+    // is exactly the exemption C names. (A `conhost` hosting `cmd.exe` hands the window to the
+    // `cmd.exe` instead, which is the case C refuses and the reason that route was abandoned.)
+    // Either owner is ours; a third name means the predicate matched something else and the item
+    // does not run.
+    let owner = crate::own::process_table_name(app.pid).unwrap_or_else(|| "<неизвестно>".into());
+    let bare = owner.to_ascii_lowercase();
+    if !(bare.starts_with("conhost") || bare.starts_with("langsw-e2e")) {
+        return Err(format!(
+            "окном консоли владеет {owner:?} (pid {}) — ни conhost, запущенный стендом напрямую, \
+             ни его программа; опыт над чужой консолью не ставится",
+            app.pid
+        ));
+    }
+    println!(
+        "  консоль усыновлена: владелец окна {owner:?}, pid {}",
+        app.pid
+    );
+
+    let hwnd = app
+        .window
+        .ok_or_else(|| "у окна консоли нет дескриптора".to_owned())?;
+
+    // ⚠ **A console window has two process ids, and they are different.** UI Automation reports the
+    // window as `conhost.exe`'s; `GetWindowThreadProcessId` reports it as the **attached console
+    // application's** — the program conhost hosts. Everything below this line goes through Win32 —
+    // `SetForegroundWindow`, the foreground guard inside `input::type_text`, `input::Target` — so
+    // it is the Win32 answer that has to be used, and the first pass measured what happens
+    // otherwise: «окно процесса 1252 не удалось вывести вперёд за 30 с; передний план принадлежит
+    // процессу 5464 (langsw-e2e.exe)» — the window was already in front, under the other id.
+    //
+    // ⛔ Requirement B is satisfied for that id **explicitly** and not by inheritance: it is put
+    // through `claim_window_process` in its own right, which admits it because `langsw-e2e` is not
+    // a protected name and it descends from the `conhost.exe` this bench spawned directly.
+    if let Some(win32_pid) = window_process_of(hwnd)
+        && win32_pid != app.pid
+    {
+        crate::own::claim_window_process(win32_pid)?;
+        println!(
+            "  окно консоли по Win32 принадлежит процессу {win32_pid} ({}) — усыновлён отдельно",
+            crate::own::process_table_name(win32_pid).unwrap_or_else(|| "<неизвестно>".into())
+        );
+        app.pid = win32_pid;
+    }
+
+    // ⚠ **`TextPattern` on the screen, and not whatever answers first.** The first pass took the
+    // window element because `read()` on it returned `Some` — and what it returned was the window
+    // *title*, `C:\Windows\System32\conhost.exe`, which never changes however much is typed. An
+    // instrument whose reading cannot move is worse than one that fails: it reports «не
+    // изменилось» for everything. So the screen is looked for by the pattern that actually holds
+    // it, and the window itself is the last resort rather than the first.
+    let screen = ctx
+        .automation
+        .find(&window, &|e: &Element| e.text().is_some())
+        .or_else(|| window.text().map(|_| window.clone()));
+
+    let Some(content) = screen else {
+        // What the tree did offer, so the refusal is diagnosable from the protocol.
+        println!("  ⚠ ни один узел консоли не отдал TextPattern. Что видно под окном:");
+        for element in ctx.automation.find_all(&window, &|_: &Element| true) {
+            println!("    {}", element.describe());
+        }
+        return Err("экран консоли не читается через TextPattern".to_owned());
+    };
+
+    shell::activate_window(app.pid, Some(hwnd))?;
+    println!(
+        "  раскладка окна консоли: {}",
+        layout::of_window(hwnd)
+            .map(layout::id_of)
+            .map_or("<не читается>".to_owned(), layout::describe)
+    );
+
+    Ok((input::Target { pid: app.pid, hwnd }, content))
+}
+
+/// One round in the console — **the same instrument, a different way of clearing the line**.
+///
+/// The verdict is [`PressOutcome::changed`] exactly as everywhere else. What differs is the
+/// housekeeping either side of it:
+///
+/// * the line is cleared with `Escape`, which is what the console's own line editor does with it —
+///   `Ctrl+A`/`Delete` mean nothing here and [`press_once`]'s clearing would be a no-op that then
+///   compared two identical screens;
+/// * the reading is the whole visible screen, so «набранное дошло» is asked as *contains* rather
+///   than as equality, and the reported text is the last non-empty line of the screen.
+fn console_press(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    label: &str,
+    source: u32,
+) -> Result<PressOutcome, String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+
+    // ⚠ **Asked, then read — never assumed.** A console window does not take the layout the way an
+    // ordinary window does: the first pass spent the whole five seconds of `layout::ensure` and the
+    // window stayed in RU. That refusal is a fact about consoles, not a failure of the round, so it
+    // is reported and the round goes on **in whatever layout the window is really in** — which is
+    // the only thing that decides what the six keys read back as. Assuming the requested layout
+    // here would be the controller's trap all over again, one level down.
+    let asked = layout::ensure(target.hwnd, source, Duration::from_secs(5));
+    let actual = layout::of_window(target.hwnd).map(layout::id_of);
+    if let Err(error) = &asked {
+        println!(
+            "  ⚠ {label}: консоль не приняла раскладку — {error}. Круг идёт в той, что есть: {}",
+            actual.map_or("<не читается>".to_owned(), layout::describe)
+        );
+    }
+
+    let russian = actual.map(|id| id & 0xFFFF) == Some(layout::RUSSIAN & 0xFFFF);
+    let (shown, wanted) = if russian {
+        (EXPECTED, TYPED)
+    } else {
+        (TYPED, EXPECTED)
+    };
+
+    input::tap(VK_ESCAPE.0, target).map_err(|error| format!("Escape: {error}"))?;
+    let cleared = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|screen| !screen.contains(shown) && !screen.contains(wanted))
+    });
+    if cleared.is_none() {
+        println!("  ⚠ {label}: строка консоли не очистилась Escape — круг всё равно ставится");
+    }
+    println!("{}", watched(&format!("{label}: строка очищена")));
+
+    input::type_text(TYPED, target).map_err(|error| format!("ввод {TYPED:?}: {error}"))?;
+    let landed = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|screen| screen.contains(shown))
+    });
+    if landed.is_none() {
+        return Err(format!(
+            "набранное не дошло до консоли: экран {:?}",
+            console_line(&read_field(content).unwrap_or_default())
+        ));
+    }
+
+    let before =
+        read_field(content).ok_or_else(|| "экран не читается перед нажатием".to_owned())?;
+    println!("{}", watched(&format!("{label}: набрано, до нажатия")));
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|screen| screen != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    println!("{}", watched(&format!("{label}: после нажатия")));
+
+    Ok(PressOutcome {
+        before: console_line(&before),
+        after: console_line(&after),
+        wanted: wanted.to_owned(),
+    })
+}
+
+/// The last non-empty run of characters on a console screen — what a person sees on the line
+/// they are typing.
+///
+/// The whole screen is what `TextPattern` gives and what the verdict is decided on; this is for
+/// the protocol, so that a report line is a line rather than eighty spaces and a word.
+fn console_line(screen: &str) -> String {
+    screen
+        .split_whitespace()
+        .next_back()
+        .unwrap_or("")
+        .to_owned()
+}
+
 /// The class name of a window, for the protocol of [`experiment_explorer`].
 ///
 /// ⚠ Reading a class name is not «трогать окно»: it copies a string out of the window class the
@@ -5454,4 +5724,691 @@ fn window_class_of(hwnd: HWND) -> String {
     }
 
     String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// The process id Win32 reports for a window — **not always the one UI Automation reports**.
+///
+/// They differ for exactly the case the console item of task T-10-11 needs: UI Automation names
+/// `conhost.exe`, Win32 names the console application attached to it. Everything that sends input
+/// or moves the foreground is Win32, so it is this answer those need.
+fn window_process_of(hwnd: HWND) -> Option<u32> {
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    let mut pid = 0u32;
+    // SAFETY: `hwnd` came from UI Automation and may since have died, in which case the call
+    // returns zero — which is examined (NFR-13). `pid` is a live local and the only thing written.
+    let thread = unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
+
+    if thread == 0 || pid == 0 {
+        None
+    } else {
+        Some(pid)
+    }
+}
+
+/// One number of SEC-04a, or `None` when the channel did not answer or the key is absent.
+fn channel_number(key: &str) -> Option<u64> {
+    crate::channel::read()
+        .ok()?
+        .get(key)
+        .and_then(|value| value.parse().ok())
+}
+
+/// What the sequence counts as it goes — **criterion 10 asks for the run to be shown in numbers**.
+///
+/// Not a verdict and not a判断: a tally. `selection` and `backspace` are read off
+/// `last_replacement_method` after every press, which is the register FR-42а writes per press, so
+/// the two counts together are «сколько замен каким путём» measured rather than assumed.
+#[derive(Default)]
+struct Tally {
+    presses: usize,
+    selection: usize,
+    backspace: usize,
+    none: usize,
+}
+
+impl Tally {
+    /// Reads the method of the press that has just happened and adds it in.
+    fn note_press(&mut self) {
+        self.presses += 1;
+        match crate::channel::read()
+            .ok()
+            .and_then(|snapshot| snapshot.get("last_replacement_method").map(str::to_owned))
+            .as_deref()
+        {
+            Some("selection") => self.selection += 1,
+            Some("backspace") => self.backspace += 1,
+            _ => self.none += 1,
+        }
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "нажатий {}, из них последняя замена читалась как selection {}, backspace {}, \
+             none/не прочитано {}",
+            self.presses, self.selection, self.backspace, self.none
+        )
+    }
+}
+
+/// Item 2 of the sequence — **нажатие → `Enter` → набор → нажатие**, in Notepad.
+///
+/// The gesture the acceptance session closed defect T-10-5 with, and the one thing no round of
+/// [`press_once`] can reach: `Enter` is the boundary key of FR-10, so it flushes the typing buffer
+/// between the two presses, and the second press therefore starts from an empty buffer in a field
+/// that is **not** empty — which is what hands it to the selection path of FR-60/FR-61 (Р-62) with
+/// a real `Ctrl+C` and a real clipboard round trip.
+fn item_enter(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    tally: &mut Tally,
+) -> Result<Vec<PressOutcome>, String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
+
+    layout::ensure(target.hwnd, layout::US, Duration::from_secs(5))
+        .map_err(|error| format!("исходная раскладка: {error}"))?;
+
+    input::chord(&[VK_CONTROL.0], VK_A.0, target).map_err(|error| format!("Ctrl+A: {error}"))?;
+    input::tap(VK_DELETE.0, target).map_err(|error| format!("Delete: {error}"))?;
+    wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(String::is_empty)
+    });
+    println!("{}", watched("пункт 2: поле очищено"));
+
+    let mut outcomes = Vec::new();
+
+    // ---- press one, on what was just typed ------------------------------------------------
+    type_paced(TYPED, target, content, "")?;
+    let before = read_field(content).unwrap_or_default();
+    println!("{}", watched("пункт 2: набрано, до нажатия 1"));
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("нажатие 1: {error}"))?;
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_default();
+    tally.note_press();
+    println!("{}", watched("пункт 2: после нажатия 1"));
+    outcomes.push(PressOutcome {
+        before,
+        after: after.clone(),
+        wanted: EXPECTED.to_owned(),
+    });
+
+    // ---- `Enter`, the boundary key of FR-10 -------------------------------------------------
+    //
+    // ⛔ In **Notepad**, and only ever in Notepad. The prohibition on `Enter` in this task is about
+    // Telegram, where it sends a message; a newline in the bench's own throwaway Notepad document
+    // is the gesture the acceptance session actually made.
+    input::tap(VK_RETURN.0, target).map_err(|error| format!("Enter: {error}"))?;
+    println!("{}", watched("пункт 2: Enter отправлен (в СВОЙ Блокнот)"));
+
+    // ---- type again, and press again --------------------------------------------------------
+    //
+    // ⚠ **The layout is read, never assumed — the controller's trap from the typing side.** Step 5
+    // of FR-40 leaves the window in RU after a successful replacement, so the six keys `ghbdtn`
+    // now read back as `привет` **while they are being typed**, with no conversion involved. The
+    // first pass of this item asserted `"привет g"` against a field reading `"привет п"` and
+    // reported the item as not executed. What a person does here is keep typing whatever the
+    // window is in, so that is what is staged, and what the field is expected to show is derived
+    // from the layout as it actually stands.
+    let window_layout = layout::of_window(target.hwnd).map(layout::id_of);
+    println!(
+        "  раскладка окна после нажатия 1: {}",
+        window_layout.map_or("<не читается>".to_owned(), layout::describe)
+    );
+
+    // ⚠ And put it back to US before typing again — the same restoration `press_once` makes at the
+    // start of **every** round, and for a reason stronger than tidiness. Under RU the six keys read
+    // back as `привет` already, so a *correct* second press would write `привет` over `привет` and
+    // the field would not change: the instrument would report «не изменилось» for a product that
+    // did exactly the right thing. The verdict of this bench is `after != before`, and a state in
+    // which a success is indistinguishable from a failure is a state the instrument must not be
+    // measured in.
+    layout::ensure(target.hwnd, layout::US, Duration::from_secs(5))
+        .map_err(|error| format!("возврат раскладки перед вторым набором: {error}"))?;
+
+    // `normalise` turns the newline into a space, so the field now reads «<первое> <второе>».
+    let prefix = format!("{} ", read_field(content).unwrap_or_default());
+    type_paced_as(TYPED, TYPED, target, content, &prefix)?;
+
+    let before = read_field(content).unwrap_or_default();
+    println!("{}", watched("пункт 2: набрано после Enter, до нажатия 2"));
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("нажатие 2: {error}"))?;
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_default();
+    tally.note_press();
+    println!("{}", watched("пункт 2: после нажатия 2"));
+    outcomes.push(PressOutcome {
+        before,
+        after,
+        // The first word as press 1 left it, and the second converted by press 2. Reported beside
+        // the verdict and never as it — `PressOutcome::changed` is the verdict here as everywhere.
+        wanted: format!("{EXPECTED} {EXPECTED}"),
+    });
+
+    Ok(outcomes)
+}
+
+/// **The experiment of task T-10-11** — the человек's whole sequence on one instance of the
+/// product, and `Win+E` only after all of it.
+///
+/// # What is new here, and it is one thing
+///
+/// T-10-9 and T-10-10 both staged the user's *trigger* — `Win+E` — and neither staged the user's
+/// *sequence*. The acceptance session went through five items in four applications before it
+/// pressed `Win+E`, and the two paths of FR-42а alternated across them: `Selection` for Блокнот
+/// and Telegram, `Backspace` for the two consoles. Nothing until now has made **one instance of
+/// the product run both packet builders and a clipboard round trip in each of the first items**
+/// and only then opened the shell.
+///
+/// | Item | What | The path FR-42а resolves |
+/// |---|---|---|
+/// | 1 | Блокнот: слово, пробел, второе слово, **четыре нажатия подряд** | `Selection` |
+/// | 2 | Блокнот: нажатие → `Enter` → набор → нажатие | `Selection` |
+/// | 3 | Telegram, «Избранное» | `Selection` — see the refusal recorded at run time |
+/// | 4–5 | консоль (`cmd`/PowerShell) | `Backspace` |
+/// | 6 | `Win+E`, Проводник, обратно в своё окно | — |
+/// | 7–8 | проверка ≥10 раз, обе раскладки через один | `Selection` |
+///
+/// ⚠ **Item 1 is `series` — the position-16 detector, reused and not rewritten.** The numbering of
+/// §11.3 is untouched and no row of the matrix is added; what the item does is call the assertions
+/// that already exist and print them.
+///
+/// ⛔ **`Enter` is sent in Notepad and nowhere else**, and Telegram is never driven by this mode.
+pub fn experiment_sequence(
+    ctx: &Context,
+    rounds: usize,
+    installed: bool,
+) -> std::process::ExitCode {
+    /// The FR-97 deadline the **debug** build runs under here. The installed diagnostic build has
+    /// no such deadline at all, which is why the sequence can be as long as the user's was.
+    const DEADLINE_SECS: u32 = 600;
+
+    println!("--- ОПЫТ T-10-11: ПОСЛЕДОВАТЕЛЬНОСТЬ человека, и Win+E только после неё ---\n");
+    println!(
+        "Прибор: сравнение поля ДО и ПОСЛЕ нажатия. Совпадение с образцом {EXPECTED:?} \
+         сообщается рядом и НИКОГДА не является вердиктом."
+    );
+
+    protocol(&format!(
+        "\n\n=========== ПОСЛЕДОВАТЕЛЬНОСТЬ T-10-11 {} ===========\n\
+         установленная сборка: {installed}, кругов проверки после Проводника: {rounds}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    println!(
+        "Полный протокол каждого снимка канала (все ключи, каждый шаг каждого пункта): {}",
+        protocol_path().display()
+    );
+
+    let already = crate::sut::any_running();
+    if already.is_empty() {
+        println!("экземпляров продукта до запуска: ни одного\n");
+    } else {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Синтетическая FR-96 сняла бы чужой экземпляр, \
+             а показания канала были бы неизвестно чьими. Опыт не ставится."
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    // ---- step 0: the instrument, shown red ------------------------------------------------
+    println!("=== ШАГ 0: отрицательный контроль прибора — продукт НЕ запущен ===");
+    let control = (|| -> Result<PressOutcome, String> {
+        let mut app = launch_notepad()?;
+        let outcome = (|| -> Result<PressOutcome, String> {
+            let (target, content) = adopt_notepad(ctx, &mut app)?;
+            press_once(ctx, &target, &content, "контроль", layout::US)
+        })();
+        println!("  {}", app.close());
+        outcome
+    })();
+
+    match control {
+        Err(error) => {
+            eprintln!("отрицательный контроль не поставлен: {error}");
+            return std::process::ExitCode::from(1);
+        }
+        Ok(control) => {
+            println!("  {}", control.describe());
+            protocol(&format!(
+                "ВЕРДИКТ отрицательный контроль (продукт не запущен): {}",
+                control.describe()
+            ));
+            if control.changed() {
+                eprintln!(
+                    "⛔ ПРИБОР НЕИСПРАВЕН: без продукта поле изменилось после нажатия ({})",
+                    control.describe()
+                );
+                return std::process::ExitCode::from(1);
+            }
+            println!("  ✔ прибор краснеет на заведомо сломанном случае — ему можно верить\n");
+        }
+    }
+
+    // ---- the product, first, so every window below is created under it ---------------------
+    let launched_product = if installed {
+        println!(
+            "⚠ ПРОДУКТ — УСТАНОВЛЕННЫЙ ПОДПИСАННЫЙ RELEASE из %ProgramFiles% (uiAccess=1),\n\
+             собранный --release --features testing: манифест uiAccess И канал SEC-04a сразу.\n\
+             Поднят ShellExecuteEx, стендом НЕ порождён. Таймаута FR-97 в нём нет.\n"
+        );
+        crate::sut::Installed::launch().map(Product::Installed)
+    } else {
+        println!("LANGSW_DEBUG_TIMEOUT_SEC = {DEADLINE_SECS}\n");
+        crate::sut::Sut::launch_with(DEADLINE_SECS).map(Product::Debug)
+    };
+
+    let mut product = match launched_product {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let ready = match product.await_ready(Duration::from_secs(30)) {
+        Some(ready) => ready,
+        None => {
+            eprintln!("продукт не сообщил о готовности за 30 с");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+    println!(
+        "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+        product.pid(),
+        ready.get("hook_installed").unwrap_or("?"),
+        ready.present_keys().len()
+    );
+    println!(
+        "Снимок канала целиком, сразу после готовности:\n{}",
+        ready.raw
+    );
+    protocol(&format!(
+        "[готовность] PID {}\n{}",
+        product.pid(),
+        ready.raw.trim_end()
+    ));
+
+    let running = crate::sut::any_running();
+    if running.len() == 1 && running[0] == product.pid() {
+        println!("экземпляр продукта ровно один, и это наш: {running:?}\n");
+    } else {
+        println!(
+            "⚠ экземпляров продукта {running:?}, наш {} — FR-96 в конце снимет любой из них\n",
+            product.pid()
+        );
+    }
+
+    let mut tally = Tally::default();
+    let mut skipped: Vec<String> = Vec::new();
+    let outcome = run_sequence(ctx, rounds, &mut tally, &mut skipped);
+
+    // ⛔ «Продукт прожил весь опыт без перезапуска» — shown, not asserted.
+    let alive = product.is_alive();
+    println!(
+        "\nпродукт PID {} к концу опыта: {}",
+        product.pid(),
+        if alive {
+            "ЖИВ, ни разу не перезапускался"
+        } else {
+            "⚠ УЖЕ НЕ ЖИВ — он ушёл посреди опыта, и это само по себе находка"
+        }
+    );
+    protocol(&format!("[конец опыта] PID {} жив: {alive}", product.pid()));
+
+    println!("\n=== ЧТО ИСПОЛНЕНО, В ЧИСЛАХ (критерий 10) ===");
+    println!("  {}", tally.describe());
+    for key in [
+        "focus_changes",
+        "password_probes",
+        "hotkey_handoffs",
+        "clipboard_refusals",
+        "clipboard_close_failures",
+        "clipboard_retries",
+        "window_flushes",
+        "full_clears",
+        "strokes_removed",
+        "send_mismatches",
+        "post_failures",
+        "events_lost",
+    ] {
+        println!(
+            "  {key} = {}",
+            channel_number(key).map_or("<нет>".to_owned(), |value| value.to_string())
+        );
+    }
+
+    if skipped.is_empty() {
+        println!("\n⚠ пунктов, которые не удалось исполнить: НЕТ");
+    } else {
+        println!("\n⛔ ПУНКТЫ, КОТОРЫЕ НЕ УДАЛОСЬ ИСПОЛНИТЬ — названы, а не пропущены:");
+        for line in &skipped {
+            println!("  • {line}");
+            protocol(&format!("НЕ ИСПОЛНЕНО: {line}"));
+        }
+    }
+
+    match product.stop() {
+        Ok(how) => println!("\nпродукт остановлен по FR-96, {how}"),
+        Err(error) => println!("\n⚠ остановка продукта: {error}"),
+    }
+    let left = crate::sut::any_running();
+    if left.is_empty() {
+        println!("экземпляров продукта после опыта: ни одного");
+    } else {
+        println!("⚠ после опыта остались экземпляры продукта: {left:?}");
+    }
+
+    println!("{}", restore_ambient(ctx));
+
+    match outcome {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("\nопыт не доведён: {error}");
+            std::process::ExitCode::from(1)
+        }
+    }
+}
+
+/// The six items, in the order the acceptance session made them — split out so that the product
+/// is stopped and the numbers printed on **every** path out, including a refusal in the middle.
+fn run_sequence(
+    ctx: &Context,
+    rounds: usize,
+    tally: &mut Tally,
+    skipped: &mut Vec<String>,
+) -> Result<(), String> {
+    let mut notepad = launch_notepad()?;
+
+    let result = (|| -> Result<(), String> {
+        let (target, content) = adopt_notepad(ctx, &mut notepad)?;
+        let hwnd = target.hwnd;
+        println!("{}", watched("Блокнот создан под работающим продуктом"));
+
+        // ---- item 1: слово, пробел, второе слово, четыре нажатия подряд ------------------
+        println!("\n=== ПУНКТ 1: Блокнот — слово, пробел, второе слово, ЧЕТЫРЕ нажатия ===");
+        input::chord(&[VK_CONTROL.0], VK_A.0, &target)
+            .map_err(|error| format!("Ctrl+A: {error}"))?;
+        input::tap(VK_DELETE.0, &target).map_err(|error| format!("Delete: {error}"))?;
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(&content).filter(String::is_empty)
+        });
+        type_paced(TYPED, &target, &content, "")?;
+        println!("{}", watched("пункт 1: первое слово набрано"));
+
+        // ⭐ The detector of T-10-6 itself, called and not copied — position 16's assertions.
+        let rows = series(
+            ctx,
+            &target,
+            16,
+            "Блокнот (пункт 1 последовательности)",
+            &content,
+            TYPED,
+        );
+        for row in &rows {
+            let line = format!(
+                "{:?} [{:?}] получено {} — ожидалось {}",
+                row.assertion, row.verdict, row.actual, row.expected
+            );
+            println!("  {line}");
+            protocol(&format!("ПУНКТ 1 {line}"));
+        }
+        // Four presses of the series, plus nothing else: the tally reads the register once per
+        // press, and the series does not expose its presses, so they are counted here as four.
+        for _ in 0..4 {
+            tally.note_press();
+        }
+        println!("{}", watched("пункт 1: серия окончена"));
+
+        // ---- item 2: нажатие → Enter → набор → нажатие -----------------------------------
+        println!("\n=== ПУНКТ 2: Блокнот — нажатие → Enter → набор → нажатие ===");
+        match item_enter(ctx, &target, &content, tally) {
+            Ok(outcomes) => {
+                for (index, outcome) in outcomes.iter().enumerate() {
+                    let line = format!("пункт 2, нажатие {}: {}", index + 1, outcome.describe());
+                    println!("  {line}");
+                    protocol(&format!("ВЕРДИКТ {line}"));
+                }
+            }
+            Err(error) => {
+                println!("  ⚠ пункт 2 не доведён: {error}");
+                skipped.push(format!("пункт 2 (Блокнот, Enter): {error}"));
+            }
+        }
+
+        // ---- item 3: Telegram ------------------------------------------------------------
+        println!("\n=== ПУНКТ 3: Telegram, «Избранное» ===");
+        let reason = telegram_refusal();
+        println!("  ⛔ НЕ ИСПОЛНЕН: {reason}");
+        skipped.push(format!("пункт 3 (Telegram, «Избранное»): {reason}"));
+
+        // ---- items 4 and 5: the console --------------------------------------------------
+        println!("\n=== ПУНКТЫ 4 и 5: консоль — путь Backspace по FR-42а ===");
+        let mut console = match launch_console() {
+            Ok(app) => Some(app),
+            Err(error) => {
+                println!("  ⚠ консоль не запустилась: {error}");
+                skipped.push(format!("пункты 4–5 (консоль): запуск не удался: {error}"));
+                None
+            }
+        };
+        // Remembered **before** adoption, because adoption moves `App::pid` to the process Win32
+        // names for the window — the program conhost hosts. `App::close` then puts that one away,
+        // and this is the launcher it leaves standing. Requirement C admits it by name: this very
+        // pid was spawned directly.
+        let conhost_pid = console.as_ref().map(|app| app.pid);
+
+        if let Some(app) = console.as_mut() {
+            match adopt_console(ctx, app) {
+                Err(error) => {
+                    println!("  ⛔ консоль не усыновлена: {error}");
+                    // What the bench actually saw, so that a refusal is diagnosable from the
+                    // protocol instead of from a second run: every top-level window of the class
+                    // the item needs, with the process behind it.
+                    let seen = ctx
+                        .automation
+                        .top_level_of_any(&|e: &Element| e.class() == CONSOLE_CLASS);
+                    println!(
+                        "  окон класса {CONSOLE_CLASS} видно всего: {}; процесс консоли {} жив: {}",
+                        seen.len(),
+                        app.pid,
+                        shell::process_is_alive(app.pid)
+                    );
+                    for window in &seen {
+                        println!("    {}", window.describe());
+                    }
+                    skipped.push(format!("пункты 4–5 (консоль): {error}"));
+                }
+                Ok((console_target, console_content)) => {
+                    println!(
+                        "  консоль: pid {}, класс окна {:?} — FR-42а обязан выбрать backspace",
+                        app.pid,
+                        window_class_of(console_target.hwnd)
+                    );
+                    println!("{}", watched("пункты 4–5: консоль впереди"));
+
+                    for round in 1..=4usize {
+                        let source = round_layout(round);
+                        match console_press(
+                            ctx,
+                            &console_target,
+                            &console_content,
+                            &format!("консоль-{round}"),
+                            source,
+                        ) {
+                            Ok(outcome) => {
+                                tally.note_press();
+                                let line = format!(
+                                    "консоль, круг {round} ({}): {}",
+                                    layout::describe(source),
+                                    outcome.describe()
+                                );
+                                println!("  {line}");
+                                protocol(&format!("ВЕРДИКТ {line}"));
+                            }
+                            Err(error) => {
+                                println!("  ⚠ консоль, круг {round}: {error}");
+                                skipped.push(format!("пункты 4–5, круг {round} консоли: {error}"));
+                                break;
+                            }
+                        }
+                    }
+
+                    println!(
+                        "  ⚠ cmd и PowerShell продукт РАЗЛИЧИТЬ НЕ МОЖЕТ: обе оболочки живут за \
+                         одним классом окна, и FR-42а выбирает по классу (inject.rs, \
+                         CONSOLE_WINDOW_CLASSES). Один консольный экземпляр закрывает ровно то, \
+                         что продукт различает."
+                    );
+                }
+            }
+        }
+
+        if let Some(mut app) = console {
+            println!("  {}", app.close());
+        }
+        // The `conhost.exe` itself, when the program it hosted was a different process and it has
+        // not gone with it. Reported either way, so the run says what it left behind.
+        if let Some(pid) = conhost_pid {
+            if shell::process_is_alive(pid) {
+                match shell::terminate(pid) {
+                    Ok(()) => println!("  conhost {pid}: снят"),
+                    Err(error) => println!("  ⚠ conhost {pid} снять не удалось: {error}"),
+                }
+            } else {
+                println!("  conhost {pid}: ушёл вместе со своей программой");
+            }
+        }
+
+        // Back to the Notepad, the way the user came back to their own window.
+        shell::activate_window(notepad.pid, Some(hwnd))?;
+        println!("{}", watched("возврат в Блокнот после консоли"));
+
+        // ---- item 6: Win+E ---------------------------------------------------------------
+        println!("\n=== ПУНКТ 6: Win+E — Проводник, ПОСЛЕ всей последовательности ===");
+        println!("{}", watched("перед Win+E"));
+        for attempt in 1..=2 {
+            shell::activate_window(notepad.pid, Some(hwnd))?;
+            input::chord(&[VK_LWIN.0], VK_E.0, &target)
+                .map_err(|error| format!("Win+E: {error}"))?;
+
+            let shell_up = wait::until(Duration::from_secs(20), || {
+                input::foreground().filter(|(pid, _)| *pid != notepad.pid)
+            });
+            match shell_up {
+                Some((pid, front)) => println!(
+                    "  окно {attempt}: передний план ушёл процессу {pid} ({}), класс {:?}",
+                    crate::own::process_table_name(pid)
+                        .unwrap_or_else(|| "<имя неизвестно>".into()),
+                    window_class_of(front)
+                ),
+                None => println!("  ⚠ окно {attempt}: передний план не сменился за 20 с"),
+            }
+
+            // A dwell of the scenario, not a wait for a result — see `experiment_explorer`.
+            let deadline = Instant::now() + Duration::from_secs(4);
+            while Instant::now() < deadline {
+                std::thread::sleep(wait::POLL);
+            }
+            println!(
+                "{}",
+                watched(&format!("Проводник {attempt}, после выдержки"))
+            );
+        }
+
+        println!("\n=== ПУНКТ 6б: возвращаюсь в своё окно ===");
+        shell::activate_window(notepad.pid, Some(hwnd))?;
+        println!("{}", watched("своё окно снова впереди"));
+        println!(
+            "  раскладка окна сейчас: {}",
+            layout::of_window(hwnd)
+                .map(layout::id_of)
+                .map_or("<не читается>".to_owned(), layout::describe)
+        );
+        layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+
+        // ---- items 7 and 8: is conversion alive? ------------------------------------------
+        println!("\n=== ПУНКТЫ 7 и 8: проверка после Проводника, {rounds} кругов ===");
+        let mut after = Vec::new();
+        for round in 1..=rounds {
+            let source = round_layout(round);
+            let outcome = press_once(ctx, &target, &content, &format!("после-{round}"), source)?;
+            tally.note_press();
+            let line = format!(
+                "круг после-{round} ({}): {}",
+                layout::describe(source),
+                outcome.describe()
+            );
+            println!("  {line}");
+            protocol(&format!("ВЕРДИКТ {line}"));
+            after.push(outcome);
+        }
+
+        println!("\n=== ИТОГ ===");
+        let changed = after.iter().filter(|o| o.changed()).count();
+        let correct = after.iter().filter(|o| o.correct()).count();
+        println!(
+            "  после Проводника: изменилось {changed}/{}, верно {correct}/{}",
+            after.len(),
+            after.len()
+        );
+        println!("{}", watched("конец опыта"));
+
+        Ok(())
+    })();
+
+    println!("{}", notepad.close());
+    result
+}
+
+/// Why item 3 of the sequence is not executed — **named, not skipped** (criterion 11).
+///
+/// Two independent reasons, and both are measurements rather than opinions:
+///
+/// 1. **§11.3 position 8 already measured that the bench cannot drive Telegram.** The window is
+///    found, «Избранное» is opened and confirmed by title, the message box is found and told apart
+///    from the search box — and then `ghbdtn` typed through `SendInput` reads back as `""` from
+///    `ValuePattern`, **including after a `SetFocus` that reports success**. That is the case
+///    footnote 7 of §11.3 names in advance («у Qt-приложений поддержка неполная … позиция
+///    переводится в П»), and it is why position 8 is `pending` and was closed by a **person**.
+/// 2. **Telegram was not running when this task took its baseline**, so driving it would mean
+///    starting the operator's messenger as well.
+///
+/// ⛔ The one route past the first reason — clicking into the field with a synthetic mouse — is
+/// refused for the reason position 8 gives: the item would then be measuring the bench's aim. And
+/// `Enter` is never sent to Telegram under any circumstance.
+fn telegram_refusal() -> String {
+    let installed = std::env::var("APPDATA")
+        .map(|appdata| {
+            std::path::Path::new(&appdata)
+                .join("Telegram Desktop")
+                .join("Telegram.exe")
+                .exists()
+        })
+        .unwrap_or(false);
+
+    format!(
+        "стенд Telegram водить не может — измерено позицией 8 §11.3: окно и «Избранное» \
+         находятся, но набранное через SendInput до Qt-поля не доходит, ValuePattern возвращает \
+         пустую строку и после успешного SetFocus (сноска 7 §11.3). Telegram.exe на машине \
+         {}; на момент снятия базы он НЕ был запущен. Обход мышью отвергнут — он мерил бы \
+         прицел стенда. ⛔ Enter в Telegram не отправлялся и отправлен быть не мог",
+        if installed {
+            "установлен"
+        } else {
+            "не найден"
+        }
+    )
 }

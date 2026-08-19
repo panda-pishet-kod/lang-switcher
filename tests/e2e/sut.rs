@@ -410,6 +410,102 @@ unsafe extern "system" {
     fn WaitForSingleObject(handle: isize, milliseconds: u32) -> u32;
 }
 
+/// Starts `file` with `parameters` through `ShellExecuteEx` and returns its process id —
+/// task **T-10-11**.
+///
+/// # ⚠ Why this exists beside [`Installed::launch`] rather than inside it
+///
+/// The two want different things of the handle. [`Installed`] **keeps** it, because that handle is
+/// how it answers `is_alive` without going near the process table — the point of T-10-10 being that
+/// «продукт прожил весь опыт» has to be shown rather than asserted. This one wants only the id, and
+/// closes the handle before returning, because its caller tracks liveness by pid through `App`.
+/// Merging them would mean giving a working, reviewed launch path a second lifetime rule.
+///
+/// # ⚠ Why `ShellExecuteEx` and not `Command::spawn`
+///
+/// Measured, in three passes, while building the console item of `--experiment-sequence`:
+///
+/// | How `conhost.exe <program>` was started | What happened |
+/// |---|---|
+/// | `Command::spawn` | conhost took over the **bench's own** console — its initialisation escape sequences came out of the bench's stdout — and then exited. No window |
+/// | `Command::spawn` + `CREATE_NEW_CONSOLE` | the same. No window |
+/// | `Command::spawn` + `DETACHED_PROCESS` + three null handles | conhost exited at once. No window |
+/// | `ShellExecuteEx` | a real `ConsoleWindowClass` window, hosting the program, alive |
+///
+/// The cause is that `std`'s `Command` always passes explicit standard handles
+/// (`STARTF_USESTDHANDLES`), and a console **host** handed somebody else's standard streams does
+/// not go on to create the console it exists to create. `ShellExecuteEx` sets no such flag.
+///
+/// ⛔ Requirement A holds exactly as it does for [`Installed::launch`]: the id comes from the
+/// handle of the launch itself and from nothing else, and it is the caller — `launched` — that
+/// enters it in the registry, at that instant.
+pub fn shell_execute(file: &std::path::Path, parameters: &str) -> Result<u32, String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let path: Vec<u16> = file
+        .as_os_str()
+        .encode_wide()
+        .chain(core::iter::once(0))
+        .collect();
+    let verb: Vec<u16> = "open".encode_utf16().chain(core::iter::once(0)).collect();
+    let args: Vec<u16> = parameters
+        .encode_utf16()
+        .chain(core::iter::once(0))
+        .collect();
+
+    let mut info = ShellExecuteInfoW {
+        cb_size: core::mem::size_of::<ShellExecuteInfoW>() as u32,
+        mask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
+        hwnd: 0,
+        verb: verb.as_ptr(),
+        file: path.as_ptr(),
+        parameters: args.as_ptr(),
+        directory: core::ptr::null(),
+        show: SW_SHOWNORMAL,
+        inst_app: 0,
+        id_list: core::ptr::null_mut(),
+        class: core::ptr::null(),
+        key_class: 0,
+        hot_key: 0,
+        icon_or_monitor: 0,
+        process: 0,
+    };
+
+    // SAFETY: `info` is a live local whose `cb_size` is its own size; `verb`, `path` and `args`
+    // are alive across the call and NUL-terminated by construction, and every other pointer field
+    // is null, which the documentation permits. NFR-13: a zero return is the documented failure
+    // and is examined rather than discarded.
+    let ok = unsafe { ShellExecuteExW(&raw mut info) };
+
+    if ok == 0 {
+        return Err(format!(
+            "ShellExecuteEx не запустила {}: {}",
+            file.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    if info.process == 0 {
+        return Err("ShellExecuteEx не вернула описатель процесса".to_owned());
+    }
+
+    // SAFETY: `info.process` is the handle `ShellExecuteEx` has just returned, and
+    // `SEE_MASK_NOCLOSEPROCESS` makes this side its owner. NFR-13: a zero return is examined.
+    let pid = unsafe { GetProcessId(info.process) };
+    let failure = std::io::Error::last_os_error();
+
+    // SAFETY: closing the handle this call owns, exactly once, on every path out.
+    unsafe { CloseHandle(HANDLE(info.process as *mut core::ffi::c_void)) }.ok();
+
+    if pid == 0 {
+        return Err(format!(
+            "не удалось прочитать pid запущенного процесса: {failure}"
+        ));
+    }
+
+    Ok(pid)
+}
+
 /// The installed, signed copy in `%ProgramFiles%` carrying `uiAccess="true"` — task
 /// **T-10-10**, and the one configuration the defect under investigation was ever seen in.
 ///
