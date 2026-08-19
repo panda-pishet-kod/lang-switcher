@@ -1621,20 +1621,24 @@ fn a_character_outside_the_bmp_leaves_the_compatibility_mode_as_two_adjacent_inp
 /// that publishes a pause and puts it back, and a second writer here would be asserting on that
 /// test's timing. Nothing in this file writes either atomic outside the `#[ignore]`d checks.
 #[test]
-fn the_default_mode_is_backspace_and_choosing_it_changes_nothing() {
+fn the_default_of_section_7_is_auto_and_replace_in_still_runs_the_backspace_packet() {
+    // FR-42а moved the default of section 7 from `backspace` to `auto` — in the schema, in
+    // the derived default and in the starting value of the published atomic, all three.
+    // `backspace` remains as the manual override, and `replace_in` — the seam task T-04-1
+    // left — still runs exactly the FR-41 packet, which the rest of this test pins down.
     assert_eq!(
         settings::Replacement::default().method,
-        ReplacementMethod::Backspace
+        ReplacementMethod::Auto
     );
     assert_eq!(
         settings::Config::default().replacement.method,
-        ReplacementMethod::Backspace
+        ReplacementMethod::Auto
     );
     assert_eq!(
         settings::Config::default().replacement.inter_event_delay_ms,
         0
     );
-    assert_eq!(inject::replacement_method(), ReplacementMethod::Backspace);
+    assert_eq!(inject::replacement_method(), ReplacementMethod::Auto);
 
     // **Point 18.** The mode of task T-04-1 is untouched: the same strokes through `replace_in`,
     // which knows no mode, and through `replace_in_with` in the default one, produce the same
@@ -1665,6 +1669,228 @@ fn the_default_mode_is_backspace_and_choosing_it_changes_nothing() {
     let mut selection = Bench::machine(Modifiers::RIGHT_CTRL);
     selection_run(&mut selection);
     assert_ne!(plain.log, selection.log);
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-42а — the resolver of `auto`. Task T-10-8.
+//
+// The rule is a pure function of a window class name (`inject::resolve_auto`), so it is
+// driven here with names of this file's choosing — the fake source the task asks for — and
+// the Win32 half is exercised once, live, against a real window of this file's own
+// registered class (`resolver_live` below). No foreground is needed for either: the pure
+// half asks no window anything, and the live half asks a message-only window by handle.
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn both_console_classes_resolve_auto_to_backspace() {
+    // The closed list itself, exactly as the module publishes it — both entries, and the
+    // measurement of T-10-7 behind them: consoles are where `selection` was measured to
+    // break (COOKED input does not select on Shift+Left) and `backspace` to hold.
+    assert_eq!(
+        inject::CONSOLE_WINDOW_CLASSES,
+        ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"]
+    );
+
+    for class in inject::CONSOLE_WINDOW_CLASSES {
+        assert_eq!(
+            inject::resolve_auto(Some(class)),
+            ReplacementMethod::Backspace,
+            "{class} is a console host and gets the Backspace path"
+        );
+    }
+
+    // Case-insensitively, because Windows compares class names case-insensitively — the
+    // spelling belongs to whoever registered the class, not to this program.
+    assert_eq!(
+        inject::resolve_auto(Some("consolewindowclass")),
+        ReplacementMethod::Backspace
+    );
+    assert_eq!(
+        inject::resolve_auto(Some("cascadia_hosting_window_class")),
+        ReplacementMethod::Backspace
+    );
+}
+
+#[test]
+fn every_other_class_and_every_refusal_resolves_auto_to_selection() {
+    // Ordinary windows of the measured matrix: every one of them held under `selection`
+    // (T-10-7), and every one of them gets it.
+    for class in [
+        "Notepad",
+        "Edit",
+        "Chrome_WidgetWin_1",
+        "Qt51511QWindowIcon",
+        "OpusApp",
+    ] {
+        assert_eq!(
+            inject::resolve_auto(Some(class)),
+            ReplacementMethod::Selection,
+            "{class} is not a console host"
+        );
+    }
+
+    // Membership, not substring: the list is closed, and a class that merely contains a
+    // listed name is a different class nobody measured.
+    assert_eq!(
+        inject::resolve_auto(Some("ConsoleWindowClass2")),
+        ReplacementMethod::Selection
+    );
+    assert_eq!(
+        inject::resolve_auto(Some("XCASCADIA_HOSTING_WINDOW_CLASS")),
+        ReplacementMethod::Selection
+    );
+
+    // The empty class — no registered window has one, so it can only be a damaged answer.
+    assert_eq!(inject::resolve_auto(Some("")), ReplacementMethod::Selection);
+
+    // And the refusal itself: no foreground window at all, or `GetClassNameW` failed. The
+    // direction is the decision FR-42а writes out — `selection` held everything measured
+    // except the enumerable consoles, so the unknown gets the method with the evidence.
+    assert_eq!(inject::resolve_auto(None), ReplacementMethod::Selection);
+}
+
+#[test]
+fn explicit_methods_pass_through_the_effective_choice_untouched() {
+    // Section 7 keeps `backspace` and `selection` as manual overrides without automatics:
+    // the effective method of an explicit choice is that choice, whatever window is in
+    // front — no class is even asked for, and these two must hold with any foreground.
+    assert_eq!(
+        inject::effective_method(ReplacementMethod::Backspace),
+        ReplacementMethod::Backspace
+    );
+    assert_eq!(
+        inject::effective_method(ReplacementMethod::Selection),
+        ReplacementMethod::Selection
+    );
+}
+
+#[test]
+fn the_packet_functions_stay_total_over_auto_and_answer_the_refusal_direction() {
+    // `Auto` never reaches the packet builders through `on_hotkey`, which resolves it first;
+    // the builders are total anyway, and their answer is the same refusal direction the
+    // resolver takes — the `Selection` packet, structure for structure.
+    let text = utf16("привет");
+
+    assert_eq!(
+        inject::packet_events(ReplacementMethod::Auto, 6, text.len()),
+        inject::selection_events(6, text.len())
+    );
+
+    let mut from_auto = vec![INPUT::default(); inject::selection_events(6, text.len())];
+    let mut from_selection = from_auto.clone();
+
+    let auto_len = inject::build_packet(ReplacementMethod::Auto, 6, &text, &mut from_auto)
+        .expect("sized above");
+    let selection_len = inject::build_selection(6, &text, &mut from_selection).expect("sized");
+
+    assert_eq!(auto_len, selection_len);
+    assert_eq!(
+        reduce(&from_auto[..auto_len]),
+        reduce(&from_selection[..selection_len])
+    );
+}
+
+/// The live half of the resolver check: a real window of this file's own registered class.
+///
+/// A module of its own so that its imports — window creation, nothing else — are not in scope
+/// for any other test, the same fence `behavioural` keeps around `SendInput`.
+mod resolver_live {
+    use lang_switcher::inject;
+    use lang_switcher::settings::ReplacementMethod;
+
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, HWND_MESSAGE, RegisterClassW,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
+    };
+    use windows::core::{PCWSTR, w};
+
+    /// The class this test registers — a name no console host will ever carry.
+    const PROBE_CLASS: PCWSTR = w!("LangSwT108ResolverProbe");
+
+    /// The plainest possible window procedure.
+    ///
+    /// # Safety
+    ///
+    /// Called by the system with the arguments of a live window's message, which are exactly
+    /// what `DefWindowProcW` takes.
+    unsafe extern "system" fn probe_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+    }
+
+    /// **The one live test of the resolver** — a real window, of this file's own class, read
+    /// back through the very `GetClassNameW` path the product resolves `auto` with.
+    ///
+    /// Message-only (`HWND_MESSAGE`): it has a class like any window, and it can never become
+    /// the foreground window or appear on anybody's screen, so the test needs no foreground
+    /// gate and disturbs nothing.
+    #[test]
+    fn a_real_window_of_our_own_class_reads_back_and_resolves_to_selection() {
+        // SAFETY: `None` asks for the handle of the running executable — the documented use.
+        let instance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW");
+
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(probe_proc),
+            hInstance: instance.into(),
+            lpszClassName: PROBE_CLASS,
+            ..Default::default()
+        };
+
+        // SAFETY: `class` is a live, fully initialised `WNDCLASSW` whose two pointers — the
+        // window procedure and the static class name — outlive the call and the class.
+        // NFR-13: a zero atom is the documented failure and is examined.
+        let atom = unsafe { RegisterClassW(&class) };
+        assert_ne!(
+            atom,
+            0,
+            "RegisterClassW: {}",
+            std::io::Error::last_os_error()
+        );
+
+        // SAFETY: the class name is the one registered a line above; `HWND_MESSAGE` as the
+        // parent asks for a message-only window; every other argument is a plain value or a
+        // null option. NFR-13: the `Result` is examined.
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PROBE_CLASS,
+                PCWSTR::null(),
+                WINDOW_STYLE(0),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(instance.into()),
+                None,
+            )
+        }
+        .expect("a message-only window of our own class");
+
+        // The Win32 half answers the very name this test registered...
+        let class = inject::window_class(window);
+        assert_eq!(class.as_deref(), Some("LangSwT108ResolverProbe"));
+
+        // ...and the rule sends a window that is not a console host down the FR-42 path.
+        assert_eq!(
+            inject::resolve_auto(class.as_deref()),
+            ReplacementMethod::Selection
+        );
+
+        // Zero outcome of `GetClassNameW`, live: a null handle names no window and no class,
+        // and the answer is the refusal — `None`, never an empty string mistaken for a name.
+        assert_eq!(inject::window_class(HWND::default()), None);
+
+        // SAFETY: `window` is the live window created above, owned by this thread.
+        unsafe { DestroyWindow(window) }.expect("DestroyWindow");
+    }
 }
 
 // ---------------------------------------------------------------------------------------

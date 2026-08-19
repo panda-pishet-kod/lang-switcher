@@ -110,8 +110,10 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 
 /// The schema version this build writes and fully understands.
 ///
-/// Section 7 of SPEC pins it at 1.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+/// Version 2 arrived with FR-42а: the default of `[replacement] method` moved from
+/// `backspace` to `auto`, and [`step_1_to_2`] carries the files of the old default over to
+/// the new one.
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -195,15 +197,26 @@ pub enum LayoutMode {
     Cycle,
 }
 
-/// Text replacement method, `replacement.method` of section 7. Values `backspace` and
-/// `selection`.
+/// Text replacement method, `replacement.method` of section 7. Values `auto`, `backspace`
+/// and `selection`.
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReplacementMethod {
-    /// Erase the typed run with backspaces and retype it. The default of section 7.
+    /// Choose between the two real methods by the class of the foreground window at the
+    /// moment of the replacement — **FR-42а**, and the default of section 7.
+    ///
+    /// The choice itself lives in `inject::effective_method`, next to the one
+    /// `GetClassNameW` call it is made from; this module only names the value. Schema 2 made
+    /// it the default: the measurement of task T-10-7 showed that neither pure method holds
+    /// everywhere — `selection` breaks the COOKED input of consoles, `backspace` races the
+    /// erasure in ordinary edit controls on repeated presses — so the default became the
+    /// choice by window class, and the two words below remain as manual overrides.
     #[default]
+    Auto,
+    /// Erase the typed run with backspaces and retype it. The default of section 7 up to
+    /// schema 1; an explicit manual override since schema 2.
     Backspace,
     /// Select the run just typed with `Shift+Left` and let the insertion replace it — the
     /// compatibility mode of **FR-42**.
@@ -292,11 +305,11 @@ impl Default for Layouts {
 
 /// Section `[replacement]` of section 7.
 ///
-/// Both defaults of section 7 — `backspace` and `0` — coincide with the defaults of the
+/// Both defaults of section 7 — `auto` and `0` — coincide with the defaults of the
 /// field types, so the derive is the whole implementation.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Replacement {
-    /// How the typed run is replaced. Default `backspace`.
+    /// How the typed run is replaced. Default `auto` — FR-42а.
     #[serde(default)]
     pub method: ReplacementMethod,
     /// Pause inserted between synthesised input events, milliseconds. Default `0`.
@@ -622,6 +635,9 @@ impl Config {
         if self.schema_version < 1 {
             step_0_to_1(self);
         }
+        if self.schema_version < 2 {
+            step_1_to_2(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -635,6 +651,27 @@ impl Config {
 /// are where field surgery goes; the shape of the ladder is what this one establishes.
 fn step_0_to_1(config: &mut Config) {
     config.schema_version = 1;
+}
+
+/// Raises a file from schema 1 to schema 2 — **FR-42а**, the new default of section 7.
+///
+/// Up to schema 1 the default of `[replacement] method` was `backspace`, and the file always
+/// carried the field, because [`write_to`] writes the whole structure. So `backspace` in a
+/// schema ≤ 1 file is what the absence of a choice looks like — the value the program put
+/// there itself — and it is raised to the new default, `auto`.
+///
+/// `selection` is left exactly as it is: it was never a default of any schema, so a file
+/// holding it holds a decision a person made (the compatibility mode of FR-42), and a
+/// migration that overrode a decision would be damage, not maintenance.
+///
+/// A **current** file with `backspace` in it never reaches this rung — [`Config::migrate`]
+/// runs it for versions below 2 only — which is what keeps `backspace` usable as an explicit
+/// manual override from schema 2 onwards.
+fn step_1_to_2(config: &mut Config) {
+    if config.replacement.method == ReplacementMethod::Backspace {
+        config.replacement.method = ReplacementMethod::Auto;
+    }
+    config.schema_version = 2;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -1066,6 +1103,11 @@ pub const IDS_LAYOUT_WORD_SOURCE: u16 = 3053;
 pub const IDS_LAYOUT_WORD_TARGET: u16 = 3054;
 /// What the journal folder line says when `%APPDATA%` is not set.
 pub const IDS_LOG_DIR_MISSING: u16 = 3055;
+/// The automatic method of FR-42а — the third radio button of the «Замена» group, and the
+/// recommended one. Appended to the block rather than renumbering the two methods above:
+/// every identifier here is mirrored by hand in `app.rc`, and a renumbering would be a
+/// silent mismatch waiting to happen.
+pub const IDS_METHOD_AUTO: u16 = 3056;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -1085,7 +1127,7 @@ pub const IDS_MENU_EXIT: u16 = 3077;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 62] = [
+pub const INTERFACE_STRINGS: [u16; 63] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1142,6 +1184,7 @@ pub const INTERFACE_STRINGS: [u16; 62] = [
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,
     IDS_LOG_DIR_MISSING,
+    IDS_METHOD_AUTO,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
     IDS_MENU_SETTINGS,
@@ -1637,6 +1680,11 @@ const IDC_CYCLE_LIST: i32 = 1024;
 const IDC_CYCLE_UP: i32 = 1025;
 const IDC_CYCLE_DOWN: i32 = 1026;
 const IDC_LAYOUT_NOTE: i32 = 1027;
+// 1029 and not 1033: `CheckRadioButton` walks the identifier range it is given, so the three
+// method radios have to be contiguous — and 1032 is already the delay field. `auto` sits in
+// front of `backspace` because it is the default of section 7 and the first thing the group
+// shows, and the free number in front happened to be there. Mirrored in `app.rc` by hand.
+const IDC_METHOD_AUTO: i32 = 1029;
 const IDC_METHOD_BACKSPACE: i32 = 1030;
 const IDC_METHOD_SELECTION: i32 = 1031;
 const IDC_DELAY: i32 = 1032;
@@ -1705,6 +1753,7 @@ const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_CYCLE_UP, IDS_CYCLE_UP),
     (IDC_CYCLE_DOWN, IDS_CYCLE_DOWN),
     (IDC_GROUP_REPLACEMENT, IDS_GROUP_REPLACEMENT),
+    (IDC_METHOD_AUTO, IDS_METHOD_AUTO),
     (IDC_METHOD_BACKSPACE, IDS_METHOD_BACKSPACE),
     (IDC_METHOD_SELECTION, IDS_METHOD_SELECTION),
     (IDC_DELAY_LABEL, IDS_DELAY_LABEL),
@@ -2123,12 +2172,13 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // Section «Раскладки» of FR-92 — FR-30, FR-31, FR-35.
     fill_layouts(hwnd, state);
 
-    // Section «Замена» of FR-92 — FR-41, FR-42, FR-44.
+    // Section «Замена» of FR-92 — FR-41, FR-42, FR-42а, FR-44.
     let method = match state.working.replacement.method {
+        ReplacementMethod::Auto => IDC_METHOD_AUTO,
         ReplacementMethod::Backspace => IDC_METHOD_BACKSPACE,
         ReplacementMethod::Selection => IDC_METHOD_SELECTION,
     };
-    check_radio(hwnd, IDC_METHOD_BACKSPACE, IDC_METHOD_SELECTION, method);
+    check_radio(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION, method);
     limit_text(hwnd, IDC_DELAY, MS_FIELD_DIGITS);
     set_text(
         hwnd,
@@ -2307,10 +2357,15 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     read_cycle_checks(hwnd, &mut state.rows);
     state.working.layouts.cycle = cycle_from_rows(&state.rows, &state.session);
 
+    // Three radios, one value. The fallback of the last arm is `Auto` and not `Backspace`,
+    // because `auto` is the default of section 7: a dialog where somehow none of the three is
+    // ticked reads back as the default rather than as a manual override nobody chose.
     state.working.replacement.method = if is_checked(hwnd, IDC_METHOD_SELECTION) {
         ReplacementMethod::Selection
-    } else {
+    } else if is_checked(hwnd, IDC_METHOD_BACKSPACE) {
         ReplacementMethod::Backspace
+    } else {
+        ReplacementMethod::Auto
     };
     state.working.replacement.inter_event_delay_ms = parse_ms(
         &get_text(hwnd, IDC_DELAY),

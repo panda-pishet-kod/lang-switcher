@@ -99,8 +99,9 @@ fn a_thoroughly_customised_config() -> Config {
 fn defaults_match_section_7_field_by_field() {
     let config = Config::default();
 
-    assert_eq!(config.schema_version, 1);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 1);
+    // Schema 2 — FR-42а moved the default of `[replacement] method` to `auto`.
+    assert_eq!(config.schema_version, 2);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 2);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -113,7 +114,7 @@ fn defaults_match_section_7_field_by_field() {
     assert_eq!(config.layouts.pair_target, "0x00000419");
     assert_eq!(config.layouts.cycle, ["0x00000409", "0x00000419"]);
 
-    assert_eq!(config.replacement.method, ReplacementMethod::Backspace);
+    assert_eq!(config.replacement.method, ReplacementMethod::Auto);
     assert_eq!(config.replacement.inter_event_delay_ms, 0);
 
     assert!(config.selection.enabled);
@@ -154,7 +155,7 @@ fn unknown_fields_are_ignored_and_the_rest_is_read() {
     let dir = TestDir::new("unknown_fields");
     let path = write_file(
         &dir,
-        "schema_version = 1\n\
+        "schema_version = 2\n\
          unknown_top_level = 42\n\
          \n\
          [general]\n\
@@ -185,7 +186,7 @@ fn missing_field_falls_back_to_its_default() {
     let dir = TestDir::new("missing_field");
     let path = write_file(
         &dir,
-        "schema_version = 1\n\
+        "schema_version = 2\n\
          \n\
          [selection]\n\
          clipboard_timeout_ms = 500\n",
@@ -204,7 +205,7 @@ fn missing_section_falls_back_to_its_defaults() {
     let dir = TestDir::new("missing_section");
     let path = write_file(
         &dir,
-        "schema_version = 1\n\
+        "schema_version = 2\n\
          \n\
          [general]\n\
          enabled = false\n",
@@ -383,6 +384,164 @@ fn file_from_a_newer_schema_is_recognised_and_left_intact() {
     assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
 }
 
+// -----------------------------------------------------------------------------------------
+// FR-42а — the migration to schema 2. Task T-10-8.
+//
+// Up to schema 1 the default of `[replacement] method` was `backspace`, and `write_to` always
+// wrote the field out, so `backspace` in an old file is what the absence of a choice looks
+// like. `selection` was never a default of any schema, so it is a choice a person made.
+// The rung must raise the former and must not touch the latter.
+// -----------------------------------------------------------------------------------------
+
+/// A schema 1 file exactly as the previous build wrote it for a user who never chose a
+/// method — plus enough customised fields to see that migration is surgery on one field and
+/// not a rewrite.
+const SCHEMA_1_BACKSPACE_FILE: &str = "schema_version = 1\n\
+                                       \n\
+                                       [general]\n\
+                                       enabled = true\n\
+                                       autostart = false\n\
+                                       language = \"en\"\n\
+                                       \n\
+                                       [hotkey]\n\
+                                       key = \"ScrollLock\"\n\
+                                       \n\
+                                       [layouts]\n\
+                                       mode = \"cycle\"\n\
+                                       cycle = [\"0x00000419\", \"0x00000409\"]\n\
+                                       \n\
+                                       [replacement]\n\
+                                       method = \"backspace\"\n\
+                                       inter_event_delay_ms = 7\n\
+                                       \n\
+                                       [selection]\n\
+                                       clipboard_timeout_ms = 450\n\
+                                       \n\
+                                       [buffer]\n\
+                                       capacity = 64\n\
+                                       \n\
+                                       [exclusions]\n\
+                                       processes = [\"mstsc.exe\"]\n\
+                                       \n\
+                                       [diagnostics]\n\
+                                       log_enabled = true\n";
+
+#[test]
+fn migration_raises_the_old_default_backspace_to_auto_and_touches_nothing_else() {
+    let dir = TestDir::new("migrate_backspace");
+    let path = write_file(&dir, SCHEMA_1_BACKSPACE_FILE);
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 1 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 1 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+
+    // The one field the rung is about: the old default became the new default.
+    assert_eq!(config.replacement.method, ReplacementMethod::Auto);
+
+    // Everything else survived, field by field — migration is not a reset.
+    assert!(config.general.enabled);
+    assert!(!config.general.autostart);
+    assert_eq!(config.general.language, Language::En);
+    assert_eq!(config.hotkey.key, "ScrollLock");
+    assert_eq!(config.layouts.mode, LayoutMode::Cycle);
+    assert_eq!(config.layouts.cycle, ["0x00000419", "0x00000409"]);
+    assert_eq!(config.replacement.inter_event_delay_ms, 7);
+    assert_eq!(config.selection.clipboard_timeout_ms, 450);
+    assert_eq!(config.buffer.capacity, 64);
+    assert_eq!(config.exclusions.processes, ["mstsc.exe"]);
+    assert!(config.diagnostics.log_enabled);
+
+    // Written back — the caller's decision, as always — the file is current and stays put.
+    settings::write_to(&path, &config).expect("writing the migrated configuration");
+    let (again, outcome) = settings::read_from(&path).expect("rereading");
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(again, config);
+}
+
+#[test]
+fn migration_leaves_an_explicit_selection_exactly_as_the_person_chose_it() {
+    let dir = TestDir::new("migrate_selection");
+    let path = write_file(
+        &dir,
+        "schema_version = 1\n\
+         \n\
+         [replacement]\n\
+         method = \"selection\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 1 file must be read");
+
+    // The version is raised — the file does travel through the rung — and the choice is not.
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 1 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.replacement.method, ReplacementMethod::Selection);
+}
+
+#[test]
+fn an_unversioned_file_with_backspace_climbs_both_rungs_to_auto() {
+    let dir = TestDir::new("migrate_unversioned");
+    let path = write_file(
+        &dir,
+        "[replacement]\n\
+         method = \"backspace\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("an unversioned file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 0 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.replacement.method, ReplacementMethod::Auto);
+}
+
+#[test]
+fn backspace_in_a_current_file_is_an_explicit_override_and_stays() {
+    // From schema 2 onwards `backspace` is a manual override, exactly as `selection` always
+    // was: only files below the current version travel through the rung, so an override
+    // written today is still there tomorrow. Without this property the word would be
+    // unusable — every restart would erase it.
+    let dir = TestDir::new("current_backspace");
+    let path = write_file(
+        &dir,
+        "schema_version = 2\n\
+         \n\
+         [replacement]\n\
+         method = \"backspace\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a current file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(config.replacement.method, ReplacementMethod::Backspace);
+
+    // And the round trip keeps it: written back whole, read back the same.
+    settings::write_to(&path, &config).expect("writing");
+    let (again, outcome) = settings::read_from(&path).expect("rereading");
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(again.replacement.method, ReplacementMethod::Backspace);
+}
+
+#[test]
+fn auto_is_the_word_section_7_spells_it() {
+    // The value reads and writes as the word of the file format, `auto`, alongside the two
+    // that were already there — FR-42а adds a word to the closed set, not a synonym.
+    let dir = TestDir::new("auto_word");
+    let path = write_file(
+        &dir,
+        "schema_version = 2\n\
+         \n\
+         [replacement]\n\
+         method = \"auto\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("the word auto must be admitted");
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(config.replacement.method, ReplacementMethod::Auto);
+
+    let text = config.to_toml_string().expect("serialises");
+    assert!(text.contains("method = \"auto\""));
+}
+
 // Criterion 20. The write is atomic, and no temporary file is left behind by it.
 #[test]
 fn successful_write_leaves_no_temporary_file() {
@@ -508,7 +667,8 @@ fn written_file_carries_every_section_of_section_7() {
         .to_toml_string()
         .expect("the defaults must serialise");
 
-    assert!(text.contains("schema_version = 1"));
+    assert!(text.contains("schema_version = 2"));
+    assert!(text.contains("method = \"auto\""));
     for section in [
         "[general]",
         "[hotkey]",
@@ -585,7 +745,7 @@ const FR_92_SECTIONS: [&str; 8] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 35] = [
+const TEMPLATE_TEXT: [&str; 36] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -604,6 +764,8 @@ const TEMPLATE_TEXT: [&str; 35] = [
     "Выше",
     "Ниже",
     "Замена",
+    // The third method of FR-42а stands first in its group: it is the default of section 7.
+    "Автоматически (рекомендуется)",
     "Backspace",
     "Выделение (совместимость)",
     "Задержка между событиями, мс:",
@@ -627,7 +789,7 @@ const TEMPLATE_TEXT: [&str; 35] = [
 
 /// Identifiers `app.rc` gives the controls, and what each of them is for. One row per element
 /// FR-92 names, so that a section losing a control is a failing test and not a smaller window.
-const TEMPLATE_CONTROLS: [(u32, &str); 45] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 46] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1010, "Горячая клавиша: поле клавиши"),
@@ -641,6 +803,7 @@ const TEMPLATE_CONTROLS: [(u32, &str); 45] = [
     (1025, "Раскладки: порядок вверх"),
     (1026, "Раскладки: порядок вниз"),
     (1027, "Раскладки: замечание о ненайденной раскладке"),
+    (1029, "Замена: метод «Автоматически» — FR-42а"),
     (1030, "Замена: метод Backspace"),
     (1031, "Замена: метод выделения"),
     (1032, "Замена: задержка между событиями"),
@@ -944,7 +1107,7 @@ fn what_the_dialog_applies_reaches_the_modules_that_act_on_it() {
     // there already: publishing the defaults puts every one of them back.
     app::publish_configuration(&Config::default());
 
-    assert_eq!(inject::replacement_method(), ReplacementMethod::Backspace);
+    assert_eq!(inject::replacement_method(), ReplacementMethod::Auto);
     assert_eq!(inject::inter_event_delay_ms(), 0);
     assert!(selection::path_enabled());
     assert_eq!(layouts::published().mode(), LayoutMode::Pair);
@@ -1340,7 +1503,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 62] = [
+const FR_94_STRINGS: [(u16, &str, &str); 63] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -1508,6 +1671,11 @@ const FR_94_STRINGS: [(u16, &str, &str); 62] = [
         settings::IDS_LOG_DIR_MISSING,
         "%APPDATA% не задан — журнал писать некуда",
         "%APPDATA% is not set — there is nowhere to write the journal",
+    ),
+    (
+        settings::IDS_METHOD_AUTO,
+        "Автоматически (рекомендуется)",
+        "Automatic (recommended)",
     ),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),

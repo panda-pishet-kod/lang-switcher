@@ -82,7 +82,7 @@ use std::io::Write;
 use std::mem::ManuallyDrop;
 use std::os::windows::io::FromRawHandle;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -984,6 +984,34 @@ static LAST_REPLACEMENT: AtomicU64 = AtomicU64::new(0);
 /// Width of one field of [`LAST_REPLACEMENT`].
 const REPLACEMENT_FIELD_BITS: u32 = 16;
 
+/// The method the last replacement really ran — task **T-10-8**, FR-42а.
+///
+/// `replacement_method` reports the *configured* value, and since FR-42а that value may be
+/// `auto` — a rule, not a method. Which of the two real packets a given press actually built
+/// is decided per replacement, against the class of the foreground window at that moment, and
+/// without this mirror the decision is invisible from outside the process: the live evidence
+/// the task asks for («в Блокноте пошёл путь выделения, в cmd — путь Backspace») would be
+/// unprovable.
+///
+/// Holds [`METHOD_NONE`] until the first replacement, then the code of the resolved method —
+/// never [`crate::settings::ReplacementMethod::Auto`], which cannot be the outcome of a
+/// resolution.
+///
+/// **SEC-01, SEC-07.** One of three words about the program's own behaviour. Not a window
+/// class, not a window, and certainly not a stroke: the class the decision was made from is
+/// deliberately *not* published — it is somebody else's window title material, and the method
+/// is the whole of what the bench needs.
+static LAST_REPLACEMENT_METHOD: AtomicU8 = AtomicU8::new(METHOD_NONE);
+
+/// [`LAST_REPLACEMENT_METHOD`] before the first replacement: nothing has run yet.
+const METHOD_NONE: u8 = 0;
+
+/// The last replacement ran the `Backspace` packet of FR-41.
+const METHOD_BACKSPACE: u8 = 1;
+
+/// The last replacement ran the `Selection` packet of FR-42.
+const METHOD_SELECTION: u8 = 2;
+
 /// [`BUFFER_LEN`] as it stood when the input thread left its message loop.
 ///
 /// The file sink runs on the main thread after every thread has been joined, by which time
@@ -1107,6 +1135,46 @@ pub fn note_replacement(erase: usize, units: usize, distinct: usize) {
         | field(distinct);
 
     LAST_REPLACEMENT.store(packed, Ordering::Relaxed);
+}
+
+/// Publishes the method the replacement being built really runs — called by
+/// `inject::on_hotkey` from the one place FR-42а resolves `auto`, and by nothing else.
+/// Task **T-10-8**.
+///
+/// `method` is the *resolved* method: one of the two packets, never
+/// [`ReplacementMethod::Auto`]. `Auto` cannot be the outcome of a resolution, and if a defect
+/// ever delivered it here anyway it is recorded as [`METHOD_NONE`] — "nothing decidable ran" —
+/// rather than silently renamed to either real method, so the defect stays visible on the
+/// channel instead of masquerading as a decision.
+///
+/// # NFR-01 to NFR-05
+///
+/// The caller sits on the input thread's message loop, never in the hook callback, and this is
+/// one relaxed atomic store: no allocation (NFR-03), no lock (NFR-04), no I/O and nothing
+/// formatted (NFR-05). `Relaxed` for the reason [`note_buffer_len`] gives.
+///
+/// # SEC-01, SEC-07
+///
+/// A word about the program's own choice. See [`LAST_REPLACEMENT_METHOD`].
+#[inline]
+pub fn note_replacement_method(method: ReplacementMethod) {
+    let code = match method {
+        ReplacementMethod::Backspace => METHOD_BACKSPACE,
+        ReplacementMethod::Selection => METHOD_SELECTION,
+        ReplacementMethod::Auto => METHOD_NONE,
+    };
+
+    LAST_REPLACEMENT_METHOD.store(code, Ordering::Relaxed);
+}
+
+/// Unpacks [`LAST_REPLACEMENT_METHOD`] into the word [`render`] prints.
+fn last_replacement_method() -> &'static str {
+    match LAST_REPLACEMENT_METHOD.load(Ordering::Relaxed) {
+        METHOD_BACKSPACE => "backspace",
+        METHOD_SELECTION => "selection",
+        // `METHOD_NONE`, and — total match over a `u8` — every code nothing ever stores.
+        _ => "none",
+    }
 }
 
 /// Unpacks [`LAST_REPLACEMENT`] into the three numbers it carries — erase, units, distinct.
@@ -1362,6 +1430,11 @@ pub struct Snapshot {
     /// How many of those units were **distinct** — the number that tells a correct packet from a
     /// collapsed one. Task **T-10-6**; see [`LAST_REPLACEMENT`].
     pub replacement_distinct: u16,
+    /// The method the last replacement really ran — `"none"` before the first one, then
+    /// `"backspace"` or `"selection"`. Task **T-10-8**, FR-42а: [`Snapshot::replacement_method`]
+    /// is the *configured* value and may read `auto`, which is a rule and not a method; this is
+    /// what the rule decided for the most recent press. See [`LAST_REPLACEMENT_METHOD`].
+    pub last_replacement_method: &'static str,
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1412,6 +1485,7 @@ pub fn snapshot() -> Snapshot {
         replacement_erase: replacement.0,
         replacement_units: replacement.1,
         replacement_distinct: replacement.2,
+        last_replacement_method: last_replacement_method(),
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1490,6 +1564,13 @@ pub fn snapshot() -> Snapshot {
 /// key on this channel that is a *register* rather than a count: FR-26 computes the direction
 /// of every conversion from the stamp, and no count of probes, rebuilds or handoffs can say
 /// what value the stamp ended up holding. See [`Snapshot::active_layout`].
+///
+/// `last_replacement` of task **T-10-6** and `last_replacement_method` of task **T-10-8** are
+/// appended after it, in that order and each by the same rule. The first is the shape of the
+/// packet the last press built; the second is which of the two packets it was — the decision
+/// FR-42а makes per press against the class of the foreground window, which no configured
+/// value can stand in for now that the configured value may be `auto`. See
+/// [`Snapshot::last_replacement_method`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1521,7 +1602,8 @@ pub fn render(state: &Snapshot) -> String {
          callback_p99_ns={}\n\
          callback_max_ns={}\n\
          active_layout={:#010x}\n\
-         last_replacement={}/{}/{}\n",
+         last_replacement={}/{}/{}\n\
+         last_replacement_method={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1554,15 +1636,17 @@ pub fn render(state: &Snapshot) -> String {
         state.replacement_erase,
         state.replacement_units,
         state.replacement_distinct,
+        state.last_replacement_method,
     )
 }
 
-/// `[replacement] method` as section 7 spells it — FR-42.
+/// `[replacement] method` as section 7 spells it — FR-42, FR-42а.
 ///
-/// The two words of the configuration file and not the Rust spelling of the enum: the bench
+/// The three words of the configuration file and not the Rust spelling of the enum: the bench
 /// compares this against what it wrote into `config.toml`.
 pub const fn method_name(method: ReplacementMethod) -> &'static str {
     match method {
+        ReplacementMethod::Auto => "auto",
         ReplacementMethod::Backspace => "backspace",
         ReplacementMethod::Selection => "selection",
     }
@@ -1573,7 +1657,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 30] = [
+pub const KEYS: [&str; 31] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1604,6 +1688,7 @@ pub const KEYS: [&str; 30] = [
     "callback_max_ns",
     "active_layout",
     "last_replacement",
+    "last_replacement_method",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

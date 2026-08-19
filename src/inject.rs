@@ -100,11 +100,13 @@ use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_BACK,
     VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
 
 use crate::convert::{self, ConvertError, Keystroke};
 use crate::hook::INJECTED_SIGNATURE;
@@ -640,18 +642,22 @@ pub fn build_selection(
 // The two modes as one choice — FR-42, section 7
 // ---------------------------------------------------------------------------------------
 
-/// `[replacement] method` of section 7 — FR-42, published by the UI thread.
+/// `[replacement] method` of section 7 — FR-42 and FR-42а, published by the UI thread.
 ///
 /// Held as a code rather than as the enum because an atomic is the only way the input thread may
 /// learn it (section 6.3), and there is no atomic of an enum. [`method_from_code`] is total, so
 /// no value this can hold is a value the replacement path has to reason about.
-static REPLACEMENT_METHOD: AtomicU8 = AtomicU8::new(BACKSPACE_CODE);
+static REPLACEMENT_METHOD: AtomicU8 = AtomicU8::new(AUTO_CODE);
 
-/// [`ReplacementMethod::Backspace`] — the default of section 7, and the value this starts at.
+/// [`ReplacementMethod::Backspace`] — the default of section 7 up to schema 1.
 const BACKSPACE_CODE: u8 = 0;
 
 /// [`ReplacementMethod::Selection`].
 const SELECTION_CODE: u8 = 1;
+
+/// [`ReplacementMethod::Auto`] — the default of section 7 (FR-42а), and the value the atomic
+/// starts at.
+const AUTO_CODE: u8 = 2;
 
 /// Publishes `[replacement] method` — FR-42.
 ///
@@ -667,8 +673,10 @@ pub fn set_replacement_method(method: ReplacementMethod) {
     REPLACEMENT_METHOD.store(method_code(method), Ordering::Relaxed);
 }
 
-/// The replacement mode as it stands. [`ReplacementMethod::Backspace`] — the default of section 7
-/// and of `settings` — until the UI thread publishes something else.
+/// The replacement mode as it stands — the **configured** value, [`ReplacementMethod::Auto`]
+/// included. [`ReplacementMethod::Auto`] — the default of section 7 and of `settings` — until
+/// the UI thread publishes something else. What a press actually runs is
+/// [`effective_method`] of this value, decided per replacement.
 pub fn replacement_method() -> ReplacementMethod {
     method_from_code(REPLACEMENT_METHOD.load(Ordering::Relaxed))
 }
@@ -678,27 +686,31 @@ const fn method_code(method: ReplacementMethod) -> u8 {
     match method {
         ReplacementMethod::Backspace => BACKSPACE_CODE,
         ReplacementMethod::Selection => SELECTION_CODE,
+        ReplacementMethod::Auto => AUTO_CODE,
     }
 }
 
 /// The mode a stored code means.
 ///
 /// Total on purpose: only [`set_replacement_method`] ever writes the atomic and it writes only
-/// the two codes above, but a mode that could not be decided is not something the replacement
+/// the three codes above, but a mode that could not be decided is not something the replacement
 /// path may have to handle, so anything else reads as the documented default of section 7.
 const fn method_from_code(code: u8) -> ReplacementMethod {
     match code {
         SELECTION_CODE => ReplacementMethod::Selection,
-        _ => ReplacementMethod::Backspace,
+        BACKSPACE_CODE => ReplacementMethod::Backspace,
+        _ => ReplacementMethod::Auto,
     }
 }
 
 /// How many `INPUT` structures the packet of `method` takes — [`replacement_events`] or
 /// [`selection_events`].
+///
+/// `Auto` counts as `Selection` for the same reason [`build_packet`] builds it so — see there.
 pub const fn packet_events(method: ReplacementMethod, erase: usize, units: usize) -> usize {
     match method {
         ReplacementMethod::Backspace => replacement_events(erase, units),
-        ReplacementMethod::Selection => selection_events(erase, units),
+        ReplacementMethod::Selection | ReplacementMethod::Auto => selection_events(erase, units),
     }
 }
 
@@ -708,6 +720,12 @@ pub const fn packet_events(method: ReplacementMethod, erase: usize, units: usize
 /// of FR-03, the single call of FR-41, the portions of FR-44, the modifier hygiene of FR-40 and
 /// the position of the layout switch of FR-43 — is shared by both modes and knows nothing about
 /// which one it is carrying, which is the whole reason the choice is made here and not there.
+///
+/// `Auto` never arrives here through [`on_hotkey`], which resolves it against the foreground
+/// window first ([`effective_method`]) — a packet builder is a pure function of its arguments
+/// and must stay one, so it cannot ask a window anything. The arm exists because the function
+/// has to be total, and it answers with the `Selection` packet: the refusal direction of
+/// FR-42а, exactly as [`resolve_auto`] answers when the window class cannot be read.
 pub fn build_packet(
     method: ReplacementMethod,
     erase: usize,
@@ -716,7 +734,139 @@ pub fn build_packet(
 ) -> Result<usize, InjectError> {
     match method {
         ReplacementMethod::Backspace => build_replacement(erase, text, out),
-        ReplacementMethod::Selection => build_selection(erase, text, out),
+        ReplacementMethod::Selection | ReplacementMethod::Auto => build_selection(erase, text, out),
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-42а — `auto`: the method resolved by the class of the foreground window
+// ---------------------------------------------------------------------------------------
+
+/// The window classes whose windows get the `Backspace` path under `method = "auto"` — FR-42а.
+///
+/// The two are the console hosts of Windows: `ConsoleWindowClass` is conhost — the classic
+/// console window `cmd.exe` and every console program get by default — and
+/// `CASCADIA_HOSTING_WINDOW_CLASS` is Windows Terminal, which hosts the same console sessions
+/// behind its own window.
+///
+/// # ⚠ Why the list is closed, and where it comes from
+///
+/// It is the measurement of task T-10-7, not a taxonomy. That task ran both methods over the
+/// whole matrix and every reachable live application, and the *only* place `selection` broke
+/// was the console COOKED input: `Shift+Left` is not a selection there, so the insertion lands
+/// in front of the unerased original (`приветghbdtn`, and worse in a series). `Backspace`, in
+/// turn, was measured to hold in exactly those windows (positions 6–7 of the acceptance
+/// matrix). So the rule is not "consoles are special", it is "these named window classes were
+/// measured to need the other path". A class nobody measured has no business in this list —
+/// adding one is a new measurement and a controller decision, not an edit.
+///
+/// The shells *inside* a console window do not matter and cannot be told apart from outside:
+/// PowerShell (PSReadLine) and cmd live behind the same `CASCADIA_HOSTING_WINDOW_CLASS` in
+/// Windows Terminal, and PowerShell was measured to work under **both** methods — which is what
+/// makes the class, rather than the shell, the right thing to dispatch on (review of T-10-7).
+pub const CONSOLE_WINDOW_CLASSES: [&str; 2] =
+    ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"];
+
+/// **FR-42а: the pure half of the choice.** The method a window of class `class` gets under
+/// `method = "auto"`.
+///
+/// `None` means the class could not be read at all — no foreground window, or a
+/// `GetClassNameW` refusal ([`foreground_window_class`] documents both) — and an empty string
+/// is a class no registered window can have. Both fall through to the `_` arm below.
+///
+/// # ⚠ The direction of the refusal is a decision, not an accident
+///
+/// Every unknown, empty or unreadable class answers **`Selection`**, and deliberately so:
+/// the measurement of T-10-7 showed `selection` holding everything reachable *except* the
+/// consoles — EDIT, Блокнот, Word, Chrome, VS Code, Telegram, PowerShell — while the consoles
+/// are a short, enumerable list of window classes. So the closed list names the consoles and
+/// everything else gets the method that held everywhere else. Falling back to `Backspace`
+/// instead would hand every unknown application the one method that is *known* to race the
+/// erasure on repeated presses (the collapsed series of T-10-6) in ordinary edit controls —
+/// trading a measured-good default for a measured-bad one exactly where nothing is known.
+///
+/// Case-insensitively, because window class names are case-insensitive to Windows itself —
+/// the same rule `guard::class_is_edit` states for its own comparison.
+pub fn resolve_auto(class: Option<&str>) -> ReplacementMethod {
+    match class {
+        Some(class)
+            if CONSOLE_WINDOW_CLASSES
+                .iter()
+                .any(|console| class.eq_ignore_ascii_case(console)) =>
+        {
+            ReplacementMethod::Backspace
+        }
+        _ => ReplacementMethod::Selection,
+    }
+}
+
+/// The class name of `window`, or `None` when it cannot be read.
+///
+/// The Win32 half of FR-42а, split from [`resolve_auto`] so that the resolution rule is a pure
+/// function a test can drive with any class name it likes, while the one place that really
+/// asks a window is this. Public for the same reason `guard::class_name` is: `tests\inject.rs`
+/// puts a real window of its own class under it.
+///
+/// `None` and not an empty string for the failure, because the caller has to tell "the call
+/// refused" apart from nothing at all — FR-42а sends both down the `Selection` path, and the
+/// comment in [`resolve_auto`] says why, but the two must arrive as what they are rather than
+/// be conflated here (NFR-13: the return value is examined, not smoothed over).
+pub fn window_class(window: HWND) -> Option<String> {
+    // 256 characters is the documented maximum length of a registered class name, plus room
+    // for the terminator the call writes. The same sizing as `guard::class_name`.
+    let mut buffer = [0u16; 257];
+
+    // SAFETY: `buffer` is a live local array and the call is given the slice itself, so the
+    // binding derives the bound from the array and cannot write past it. The call writes the
+    // class name of `window` into it and touches nothing else of ours. NFR-13: a zero (or
+    // negative) return is the documented failure — a window that died between the two calls of
+    // `effective_method`, or an invalid handle — and is examined below.
+    let length = unsafe { GetClassNameW(window, &mut buffer) };
+
+    if length <= 0 {
+        // Zero outcome 2 of FR-42а: the window exists as a handle but its class cannot be
+        // read. Answered with `None`, which `resolve_auto` turns into `Selection`.
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..length as usize]))
+}
+
+/// **FR-42а, whole.** The method this press really runs: an explicit `backspace` or
+/// `selection` passes through untouched — section 7 keeps them as manual overrides without
+/// automatics — and `auto` is resolved by the class of the foreground window, right now.
+///
+/// # Where and when this runs
+///
+/// Called once per replacement, from [`on_hotkey`] — the input thread's message loop, the same
+/// place the configuration is read (FR-42а: «одним вызовом `GetClassNameW` на потоке
+/// интерфейса в момент замены»). It is **never** reached from the hook callback: the callback
+/// ends at `PostMessageW`, and everything here runs after the handoff, where NFR-09's thirty
+/// milliseconds apply rather than NFR-01's hundred microseconds. Two cheap `user32` reads fit
+/// that budget; nothing here opens a file, takes a lock or allocates.
+///
+/// The window asked is the foreground window *at the moment of the replacement* — the same
+/// window the packet is about to land in, which is the whole point of resolving late rather
+/// than at configuration time.
+pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
+    match configured {
+        ReplacementMethod::Auto => {
+            // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and
+            // touches no memory of ours; callable from any thread.
+            let foreground = unsafe { GetForegroundWindow() };
+
+            let class = if foreground.is_invalid() {
+                // Zero outcome 1 of FR-42а: there is no foreground window at all — the
+                // documented NULL return, seen around desktop switches and lock screens.
+                // `None` reaches the `_` arm of `resolve_auto`: the `Selection` path.
+                None
+            } else {
+                window_class(foreground)
+            };
+
+            resolve_auto(class.as_deref())
+        }
+        explicit => explicit,
     }
 }
 
@@ -1246,8 +1396,9 @@ pub fn replace(
 
 /// **FR-40, steps 3 to 6**, against any [`Environment`] — see [`replace`] for the requirement.
 ///
-/// The `backspace` mode of FR-41, which is the default of section 7. [`replace_in_with`] is the
-/// same steps for a mode chosen by the caller.
+/// The `backspace` mode of FR-41, unconditionally — the seam task T-04-1 left, kept as it was
+/// when `backspace` was the default of section 7 (the default is `auto` since FR-42а).
+/// [`replace_in_with`] is the same steps for a mode chosen by the caller.
 pub fn replace_in(
     env: &mut impl Environment,
     strokes: &[Keystroke],
@@ -1437,13 +1588,20 @@ pub fn on_hotkey() -> Option<Replaced> {
         cycle_len,
     } = take_press()?;
 
-    let outcome = replace_with(
-        &strokes,
-        &target,
-        inter_event_delay_ms(),
-        replacement_method(),
-    )
-    .ok();
+    // **FR-42а.** The configured method is read once per press, and `auto` is resolved against
+    // the foreground window here — the input thread's message loop, after the handoff, never
+    // the hook callback — so that everything below this line is a pure function of its
+    // arguments, exactly as `delay_ms` already is. `method` is one of the two real packets by
+    // construction; `Auto` does not travel further.
+    let method = effective_method(replacement_method());
+
+    // The method this very replacement runs, published for the bench of §11.5: without it the
+    // choice FR-42а makes is invisible from outside the process, and a rule nobody can observe
+    // is a rule nobody can check. A count-free word, same discipline as `note_replacement`.
+    #[cfg(feature = "testing")]
+    crate::control::note_replacement_method(method);
+
+    let outcome = replace_with(&strokes, &target, inter_event_delay_ms(), method).ok();
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02.
     strokes.fill(Keystroke::default());
@@ -1618,6 +1776,7 @@ mod tests {
     fn a_code_that_names_no_mode_reads_as_the_default_of_section_seven() {
         assert_eq!(method_code(ReplacementMethod::Backspace), BACKSPACE_CODE);
         assert_eq!(method_code(ReplacementMethod::Selection), SELECTION_CODE);
+        assert_eq!(method_code(ReplacementMethod::Auto), AUTO_CODE);
         assert_eq!(
             method_from_code(BACKSPACE_CODE),
             ReplacementMethod::Backspace
@@ -1626,12 +1785,14 @@ mod tests {
             method_from_code(SELECTION_CODE),
             ReplacementMethod::Selection
         );
+        assert_eq!(method_from_code(AUTO_CODE), ReplacementMethod::Auto);
 
-        // Nothing but `set_replacement_method` writes the atomic and it writes only those two,
-        // so this is unreachable — and the replacement path must have a mode rather than a
-        // question even so, which is what makes the fallback the *documented* default.
-        assert_eq!(method_from_code(200), ReplacementMethod::Backspace);
-        assert_eq!(method_from_code(u8::MAX), ReplacementMethod::Backspace);
+        // Nothing but `set_replacement_method` writes the atomic and it writes only those
+        // three, so this is unreachable — and the replacement path must have a mode rather
+        // than a question even so, which is what makes the fallback the *documented* default
+        // of section 7: `auto` since FR-42а.
+        assert_eq!(method_from_code(200), ReplacementMethod::Auto);
+        assert_eq!(method_from_code(u8::MAX), ReplacementMethod::Auto);
     }
 
     /// **Section 7 reaches this module.** `[replacement] method` and
@@ -1650,13 +1811,13 @@ mod tests {
     /// alone. It still puts back what it found, for the same reason.
     #[test]
     fn the_replacement_section_of_the_configuration_reaches_this_module() {
-        // The default of section 7 is one word in three places: the schema says `backspace`,
-        // `settings` derives it, and this module starts at it without being told.
+        // The default of section 7 is one word in three places: the schema says `auto`
+        // (FR-42а), `settings` derives it, and this module starts at it without being told.
         assert_eq!(
             crate::settings::Replacement::default().method,
-            ReplacementMethod::Backspace
+            ReplacementMethod::Auto
         );
-        assert_eq!(replacement_method(), ReplacementMethod::Backspace);
+        assert_eq!(replacement_method(), ReplacementMethod::Auto);
         assert_eq!(inter_event_delay_ms(), 0);
 
         let directory =
@@ -1688,7 +1849,7 @@ mod tests {
         assert_eq!(replacement_method(), ReplacementMethod::Selection);
         assert_eq!(inter_event_delay_ms(), 37);
 
-        set_replacement_method(ReplacementMethod::Backspace);
+        set_replacement_method(ReplacementMethod::Auto);
         set_inter_event_delay_ms(0);
 
         let _ = std::fs::remove_dir_all(&directory);

@@ -137,8 +137,20 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
 
         if key == "replacement_method" {
             assert!(
-                value == "backspace" || value == "selection",
-                "replacement_method is one of the two words of section 7"
+                value == "auto" || value == "backspace" || value == "selection",
+                "replacement_method is one of the three words of section 7"
+            );
+            continue;
+        }
+
+        // **Task T-10-8.** The method the last replacement really ran — FR-42а resolves
+        // `auto` per press, so the configured word above stopped answering which packet a
+        // given press built. `none` is the state before the first replacement; `auto` is
+        // deliberately NOT in this list, because a resolution cannot answer it.
+        if key == "last_replacement_method" {
+            assert!(
+                value == "none" || value == "backspace" || value == "selection",
+                "last_replacement_method is a resolved method or none, and {value:?} is neither"
             );
             continue;
         }
@@ -303,6 +315,9 @@ fn the_focus_and_probe_counts_are_the_ones_module_guard_holds() {
 /// here is that the channel reports the published value rather than a constant.
 #[test]
 fn the_replacement_settings_on_the_channel_are_the_published_ones() {
+    // The three words of section 7, `auto` of FR-42а included: the bench compares this key
+    // against what it wrote into `config.toml`, and since task T-10-8 that may be `auto`.
+    assert_eq!(control::method_name(ReplacementMethod::Auto), "auto");
     assert_eq!(
         control::method_name(ReplacementMethod::Backspace),
         "backspace"
@@ -1301,11 +1316,12 @@ fn the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle() {
     assert!(!control::RESERVED_KEYS.contains(&"active_layout"));
 
     // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
-    // **T-10-6** appended `last_replacement` after it and rewrote this line, as its
-    // predecessors each rewrote theirs.
+    // **T-10-6** appended `last_replacement` after it and task **T-10-8** appended
+    // `last_replacement_method` after that, each rewriting this line, as its predecessors
+    // each rewrote theirs.
     assert_eq!(
         control::KEYS.iter().position(|key| *key == "active_layout"),
-        Some(control::KEYS.len() - 2)
+        Some(control::KEYS.len() - 3)
     );
 }
 
@@ -1394,13 +1410,14 @@ fn the_last_replacement_key_of_t_10_6_is_published_as_three_counts() {
     assert!(control::KEYS.contains(&"last_replacement"));
     assert!(!control::RESERVED_KEYS.contains(&"last_replacement"));
 
-    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one is
-    // genuinely last, and the next task to append will rewrite this line.
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. Task
+    // T-10-8 appended `last_replacement_method` after this one, so "last" became a fixed
+    // position — the same rewrite every key of this tail has gone through in turn.
     assert_eq!(
         control::KEYS
             .iter()
             .position(|key| *key == "last_replacement"),
-        Some(control::KEYS.len() - 1)
+        Some(control::KEYS.len() - 2)
     );
 }
 
@@ -1643,4 +1660,84 @@ fn the_callback_latency_keys_mirror_the_instrument_of_the_hook() {
             "an empty instrument must publish zeros, not remnants"
         );
     }
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-8 — the key that shows which packet FR-42а chose for a given press
+// -------------------------------------------------------------------------------------
+
+/// `last_replacement_method` is published, it is one of a closed set of words, and it closes
+/// the tail of `KEYS`.
+///
+/// # Why it exists at all
+///
+/// FR-42а made the configured method a *rule*: `replacement_method=auto` says how the choice
+/// is made and nothing about what any given press chose. The live evidence of task T-10-8 —
+/// «в Блокноте пошёл путь выделения, в cmd — путь Backspace» — is a statement about that
+/// per-press choice, and without this key it is a statement nothing outside the process can
+/// verify: both packets erase and retype the same characters, and `last_replacement`'s three
+/// counts are deliberately packet-shape only.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// One word of a closed set about the program's own decision. The window class the decision
+/// was made from is exactly what is NOT here — asserted below by refusing every value outside
+/// the three words.
+#[test]
+fn the_last_replacement_method_key_of_t_10_8_is_published_as_a_closed_word() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("last_replacement_method="))
+        .expect("the channel does not publish last_replacement_method");
+
+    println!("last_replacement_method={published}");
+
+    assert!(
+        published == "none" || published == "backspace" || published == "selection",
+        "last_replacement_method is a resolved method or none, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"last_replacement_method"));
+    assert!(!control::RESERVED_KEYS.contains(&"last_replacement_method"));
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed. This one
+    // is genuinely last, and the next task to append will rewrite this line.
+    assert_eq!(
+        control::KEYS
+            .iter()
+            .position(|key| *key == "last_replacement_method"),
+        Some(control::KEYS.len() - 1)
+    );
+}
+
+/// The key mirrors what `inject::on_hotkey` publishes into it, a register and not a counter —
+/// and a value no resolution can produce is recorded as `none` rather than invented.
+#[test]
+fn the_last_replacement_method_key_mirrors_what_was_published_into_it() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    for (method, word) in [
+        (ReplacementMethod::Backspace, "backspace"),
+        (ReplacementMethod::Selection, "selection"),
+    ] {
+        control::note_replacement_method(method);
+
+        let state = control::snapshot();
+        assert_eq!(
+            state.last_replacement_method, word,
+            "the snapshot reports the resolved method that was published into it"
+        );
+        assert!(
+            control::render(&state).contains(&format!("last_replacement_method={word}\n")),
+            "and renders it as that word"
+        );
+    }
+
+    // `Auto` cannot be the outcome of a resolution — `inject::effective_method` never returns
+    // it — and if a defect ever delivered it here anyway, the honest answer is "nothing
+    // decidable ran", not a decision the program did not make.
+    control::note_replacement_method(ReplacementMethod::Auto);
+    assert_eq!(control::snapshot().last_replacement_method, "none");
 }
