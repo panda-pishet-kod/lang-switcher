@@ -53,6 +53,39 @@
 //! stroke the *user* makes during the dispatch is not, and a borrow held across `SendInput`
 //! would turn that into a panic.
 //!
+//! # Why a character is a down **and an up**
+//!
+//! A `KEYEVENTF_UNICODE` event carries a code unit in `wScan`, and it would be tempting to send
+//! one structure per unit and call the character delivered. That is what this module did until
+//! task T-10-4, and it is wrong in a way no ordinary control reveals.
+//!
+//! Qt renders a `KEYEVENTF_UNICODE` **keydown that is never released** not as the character of
+//! that event but as the character currently latched, and it is the **keyup** that advances the
+//! latch. Measured in Telegram Desktop 7.0.9 (task T-10-4, and the mechanism in T-10-0b before
+//! it): `привет` as six down-only events puts `пппппп` on the screen — the first unit latches
+//! and the next five are rendered as it — while the same six characters as down+up pairs put
+//! `привет`. Nothing about the packet's *packaging* changes this: one call, one call per event
+//! and pauses of 7, 10 and 35 ms between them were all measured and all give `пппппп`. The form
+//! of the event is the whole of it.
+//!
+//! Three consequences are built into this module rather than left to the reader:
+//!
+//! * every code unit is [`EVENTS_PER_UNIT`] structures, in [`build_replacement`] and in
+//!   [`build_selection`] alike — the compatibility mode of FR-42 inserts through the same run of
+//!   character events and had the same defect;
+//! * a packet therefore **ends on a keyup** and leaves the latch clean for whatever is typed
+//!   next, which the down-only form did not: it left the last unit latched, and the first unit
+//!   of the *next* packet was swallowed by it. That swallowed unit is the whole of the
+//!   "first character is lost" that made the pairs look unusable when they were first measured;
+//! * a character outside the BMP is four structures, and [`portion_end`] keeps all four in one
+//!   `SendInput` call for the reason FR-41 gives — half a character delivered on its own is not
+//!   a character delivered slowly.
+//!
+//! Ordinary controls are indifferent to all of it: a standard Win32 `EDIT` was measured under
+//! both forms — plain text and a surrogate pair, with and without the erasure — and put the
+//! same characters on the screen either way. That is why this is a change of form and not of
+//! behaviour, and it is what the bench of §11.5 re-checks in Notepad, Word and Chrome.
+//!
 //! # SEC-01, SEC-02, SEC-07
 //!
 //! This module holds the user's text in plain form — that is what it is for — and it is the
@@ -318,13 +351,21 @@ const HIGH_SURROGATE_FIRST: u16 = 0xD800;
 /// Last UTF-16 code unit that starts a surrogate pair.
 const HIGH_SURROGATE_LAST: u16 = 0xDBFF;
 
+/// How many `INPUT` structures one UTF-16 code unit takes: a keydown **and a keyup**.
+///
+/// Two, and the second is not decoration — see "Why a character is a down and an up" in the
+/// module header. Every count in this module is expressed through this constant so that the
+/// form of a character event is stated in exactly one place.
+pub const EVENTS_PER_UNIT: usize = 2;
+
 /// How many `INPUT` structures a replacement of `erase` characters by `units` code units takes.
 ///
-/// `erase * 2` because FR-41 asks for `Backspace` **down and up**, `units` because a character
-/// is one `KEYEVENTF_UNICODE` event per UTF-16 code unit — which is what makes a character
-/// outside the BMP two structures without anything here having to know about it.
+/// `erase * 2` because FR-41 asks for `Backspace` **down and up**, and
+/// `units * EVENTS_PER_UNIT` because a code unit travels as a down and an up as well — which is
+/// what makes a character outside the BMP four structures without anything here having to know
+/// about it.
 pub const fn replacement_events(erase: usize, units: usize) -> usize {
-    erase * 2 + units
+    erase * 2 + units * EVENTS_PER_UNIT
 }
 
 /// **`N` of FR-41: how many characters the recorded strokes put on the screen.**
@@ -364,7 +405,8 @@ const fn is_high_surrogate(unit: u16) -> bool {
 }
 
 /// **FR-41.** Builds the whole replacement packet into `out`, in the order the requirement
-/// fixes: `erase` × (`Backspace` down + up), then `text` as `KEYEVENTF_UNICODE` events.
+/// fixes: `erase` × (`Backspace` down + up), then `text` as `KEYEVENTF_UNICODE` events, each
+/// code unit a down and an up.
 ///
 /// Returns how many events were written, which is always [`replacement_events`] of the two
 /// lengths. `out` shorter than that is [`InjectError::OutputTooSmall`] and **nothing is
@@ -372,10 +414,10 @@ const fn is_high_surrogate(unit: u16) -> bool {
 /// worse than none.
 ///
 /// `text` is UTF-16 as [`crate::convert::convert_strokes`] produced it, so a character outside
-/// the BMP is already the two code units of its surrogate pair and becomes two adjacent `INPUT`
-/// structures here without a special case. That adjacency is a requirement — a pair split
-/// between two `SendInput` calls is two undefined characters — and it is what
-/// [`dispatch_with`] keeps whole when FR-44 asks for portions.
+/// the BMP is already the two code units of its surrogate pair and becomes four adjacent
+/// `INPUT` structures here without a special case. That adjacency is a requirement — a pair
+/// split between two `SendInput` calls is two undefined characters — and it is what
+/// [`portion_end`] keeps whole when FR-44 asks for portions.
 ///
 /// Every structure written carries [`crate::hook::INJECTED_SIGNATURE`] in `dwExtraInfo`
 /// (FR-03). Every structure. The signature is what stops the program's own output from
@@ -406,9 +448,14 @@ pub fn build_replacement(
     // unit to the application as text, bypassing the keyboard layout entirely, which is what
     // FR-43 rests on: there is no race with the layout switch of step 5 because the switch
     // cannot change what these events mean.
+    //
+    // Down **and up**, per unit — see "Why a character is a down and an up" in the module
+    // header. The up is what advances Qt's latch, and without it every unit after the first is
+    // rendered as the first.
     for &unit in text {
-        out[written] = unicode_event(unit);
-        written += 1;
+        out[written] = unicode_event(unit, false);
+        out[written + 1] = unicode_event(unit, true);
+        written += EVENTS_PER_UNIT;
     }
 
     Ok(written)
@@ -439,7 +486,8 @@ const SELECTION_SHIFT_EVENTS: usize = 2;
 /// How many `INPUT` structures the compatibility packet of FR-42 takes.
 ///
 /// `erase * 2` for the `Left` presses (down and up, as with `Backspace` in FR-41), plus the two
-/// events of the bracketing `Shift`, plus one event per UTF-16 code unit of the insertion.
+/// events of the bracketing `Shift`, plus [`EVENTS_PER_UNIT`] per UTF-16 code unit of the
+/// insertion — the insertion is the same down+up run as FR-41's and is counted the same way.
 ///
 /// Nothing typed is nothing to select: with `erase` at zero there is no selection to make and
 /// therefore no `Shift` to press, and the packet is the insertion alone. A `Shift+Left` sent
@@ -447,9 +495,9 @@ const SELECTION_SHIFT_EVENTS: usize = 2;
 /// would replace it.
 pub const fn selection_events(erase: usize, units: usize) -> usize {
     if erase == 0 {
-        units
+        units * EVENTS_PER_UNIT
     } else {
-        SELECTION_SHIFT_EVENTS + erase * 2 + units
+        SELECTION_SHIFT_EVENTS + erase * 2 + units * EVENTS_PER_UNIT
     }
 }
 
@@ -475,7 +523,7 @@ pub const fn selection_events(erase: usize, units: usize) -> usize {
 /// Shift down                       one event, ours
 /// Left down, Left up               × N, extended keys
 /// Shift up                         one event, ours — before a single character is inserted
-/// the recoded text                 one KEYEVENTF_UNICODE event per UTF-16 code unit
+/// the recoded text                 one KEYEVENTF_UNICODE down + up per UTF-16 code unit
 /// ```
 ///
 /// `N` × `Shift+Left` is `N` repetitions of the *keystroke*, which is what a person does when
@@ -541,9 +589,12 @@ pub fn build_selection(
         written += 1;
     }
 
+    // The same down+up run as [`build_replacement`], and for the same reason: the mode differs
+    // in how the old text is taken off the screen, never in how the new text is put on it.
     for &unit in text {
-        out[written] = unicode_event(unit);
-        written += 1;
+        out[written] = unicode_event(unit, false);
+        out[written + 1] = unicode_event(unit, true);
+        written += EVENTS_PER_UNIT;
     }
 
     Ok(written)
@@ -681,15 +732,29 @@ fn key_event(vk: VIRTUAL_KEY, extended: bool, up: bool) -> INPUT {
 
 /// One keyboard `INPUT` carrying a UTF-16 code unit — FR-41, `wVk = 0`, `wScan = символ`.
 ///
-/// See [`key_event`] for `dwExtraInfo`, `time` and why these are the only two builders.
-fn unicode_event(unit: u16) -> INPUT {
+/// `up` is the edge, and a unit is always sent as both of them: `KEYEVENTF_UNICODE` names the
+/// character and `KEYEVENTF_KEYUP` names the release of it, exactly as they do for a virtual
+/// key. Why the release is mandatory rather than tidy is in the module header — Qt renders an
+/// unreleased unicode keydown as the latched character, so a run of downs alone comes out as
+/// the first character repeated.
+///
+/// See [`key_event`] for `dwExtraInfo`, `time` and why these are the only two builders. In
+/// particular the signature of FR-03 is on **both** edges: an up without it would come back
+/// through the hook as the user's own keystroke.
+fn unicode_event(unit: u16, up: bool) -> INPUT {
+    let mut flags = KEYEVENTF_UNICODE;
+
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(0),
                 wScan: unit,
-                dwFlags: KEYEVENTF_UNICODE,
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: INJECTED_SIGNATURE,
             },
@@ -909,12 +974,13 @@ pub fn dispatch(events: &[INPUT], delay_ms: u32) -> Dispatched {
 ///
 /// # What a portion is
 ///
-/// One event, except that a surrogate pair is never split: FR-41 says a character outside the
-/// BMP goes as two `INPUT` structures, and two halves of a character delivered in separate
-/// calls are two undefined characters, not one character delivered slowly. The pair is
-/// recognised from the events themselves — a `KEYEVENTF_UNICODE` event whose `wScan` is a
-/// leading surrogate takes its neighbour with it — so no side table has to be carried from the
-/// builder to here and the two cannot disagree.
+/// One event, except that a character outside the BMP is never split: it is two code units and
+/// therefore four `INPUT` structures, and two halves of a character delivered in separate calls
+/// are two undefined characters, not one character delivered slowly. The character is
+/// recognised from the events themselves — a `KEYEVENTF_UNICODE` **keydown** whose `wScan` is a
+/// leading surrogate takes the rest of the character with it — so no side table has to be
+/// carried from the builder to here and the two cannot disagree. See [`portion_end`] for why
+/// the edge has to be part of that test.
 ///
 /// # FR-45
 ///
@@ -963,14 +1029,33 @@ pub fn dispatch_in(env: &mut impl Environment, events: &[INPUT], delay_ms: u32) 
     done
 }
 
-/// Where the portion starting at `start` ends — one event, or two for a surrogate pair.
+/// Where the portion starting at `start` ends — one event, or the whole of a character outside
+/// the BMP.
+///
+/// A character outside the BMP is two code units and therefore
+/// `2 * EVENTS_PER_UNIT` structures: the leading half down and up, then the trailing half down
+/// and up. All four travel in one call, because FR-41's rule is about the *character* — half of
+/// one delivered on its own is not a character delivered slowly, it is two undefined ones.
+///
+/// The test is on the **keydown** of the leading half and not merely on `wScan`, which matters
+/// now that a unit has two edges: the event after the leading half's keydown is that same
+/// half's keyup, carrying the same `wScan`, and a rule that looked only at the code unit would
+/// group those two and leave the trailing half to go out on its own — precisely the split this
+/// function exists to prevent.
 fn portion_end(events: &[INPUT], start: usize) -> usize {
-    let pair = start + 1 < events.len()
-        && keyboard(&events[start]).is_some_and(|key| {
-            key.dwFlags.0 & KEYEVENTF_UNICODE.0 != 0 && is_high_surrogate(key.wScan)
-        });
+    let character = keyboard(&events[start]).is_some_and(|key| {
+        key.dwFlags.0 & KEYEVENTF_UNICODE.0 != 0
+            && key.dwFlags.0 & KEYEVENTF_KEYUP.0 == 0
+            && is_high_surrogate(key.wScan)
+    });
 
-    if pair { start + 2 } else { start + 1 }
+    if character {
+        // Bounded by the slice: a packet that ended mid-character would be a bug elsewhere, and
+        // the answer to it is a short last portion rather than a panic on this path.
+        (start + 2 * EVENTS_PER_UNIT).min(events.len())
+    } else {
+        start + 1
+    }
 }
 
 /// **FR-45.** Records a `SendInput` that did not take everything it was given.

@@ -99,8 +99,23 @@ impl Event {
     }
 
     /// Whether this is a character event — `KEYEVENTF_UNICODE`, `wVk = 0`, FR-41.
+    ///
+    /// Says nothing about the edge, deliberately: the assertions that only care that a slot
+    /// holds a character read this one, and the assertions that care *which* edge it is read
+    /// [`Event::is_unicode_edge`].
     fn is_unicode(self) -> bool {
         self.flags & KEYEVENTF_UNICODE.0 != 0 && self.vk == 0
+    }
+
+    /// Whether this is a character event going down or up — the form task T-10-4 established.
+    ///
+    /// The edge is part of the requirement now, exactly as it always was for `Backspace`,
+    /// `Left` and `Shift`: a code unit travels as a down **and** an up, because Qt renders an
+    /// unreleased unicode keydown as the character already latched and the up is what advances
+    /// the latch. A test that checked only `is_unicode` would accept the old down-only form and
+    /// the new one indifferently, which is the one thing these tests must not do.
+    fn is_unicode_edge(self, up: bool) -> bool {
+        self.is_unicode() && (self.flags & KEYEVENTF_KEYUP.0 != 0) == up
     }
 
     /// Whether this is the `Left` arrow of the **navigation block** going down or up — FR-42.
@@ -353,8 +368,8 @@ fn every_input_sent_carries_the_injected_signature_of_fr03() {
 
     let stream = bench.stream();
 
-    // 6 backspaces down + 6 up + 6 characters + 2 released + 1 restored.
-    assert_eq!(stream.len(), 6 * 2 + 6 + 2 + 1);
+    // 6 backspaces down + 6 up + 6 characters down + 6 up + 2 released + 1 restored.
+    assert_eq!(stream.len(), 6 * 2 + 6 * 2 + 2 + 1);
 
     for event in stream {
         assert_eq!(
@@ -390,7 +405,7 @@ fn the_signature_is_on_every_modifier_event_of_both_directions() {
 // ---------------------------------------------------------------------------------------
 
 /// **FR-41.** `N` × (`Backspace` down + up), and only then the characters as
-/// `KEYEVENTF_UNICODE` with `wVk = 0` and `wScan` = the code unit.
+/// `KEYEVENTF_UNICODE` with `wVk = 0` and `wScan` = the code unit — each unit down **and** up.
 #[test]
 fn the_packet_is_backspaces_down_and_up_first_then_unicode_events() {
     let text = utf16("привет");
@@ -398,7 +413,7 @@ fn the_packet_is_backspaces_down_and_up_first_then_unicode_events() {
 
     let len = inject::build_replacement(6, &text, &mut out).expect("the array is exactly sized");
 
-    assert_eq!(len, 18);
+    assert_eq!(len, 24);
 
     let events = reduce(&out[..len]);
 
@@ -412,12 +427,114 @@ fn the_packet_is_backspaces_down_and_up_first_then_unicode_events() {
         assert_eq!(event.scan, 0);
     }
 
-    // Then the characters, in the order they are to appear, one event per code unit.
-    for (event, &unit) in events[12..].iter().zip(text.iter()) {
-        assert!(event.is_unicode(), "FR-41: wVk = 0 and KEYEVENTF_UNICODE");
-        assert_eq!(event.scan, unit, "FR-41: wScan is the character");
-        assert_eq!(event.flags & KEYEVENTF_KEYUP.0, 0);
+    // Then the characters, in the order they are to appear, as a down and an up per code unit.
+    // Task T-10-4: the up is not optional — without it Qt renders every unit after the first as
+    // the first, so the pairing is checked here rather than merely the presence of characters.
+    let characters = &events[12..];
+
+    assert_eq!(characters.len(), text.len() * 2);
+
+    for (index, &unit) in text.iter().enumerate() {
+        let down = characters[index * 2];
+        let up = characters[index * 2 + 1];
+
+        assert!(
+            down.is_unicode_edge(false),
+            "FR-41: character {index} goes down first"
+        );
+        assert!(
+            up.is_unicode_edge(true),
+            "T-10-4: character {index} is released before the next one is pressed"
+        );
+        assert_eq!(down.scan, unit, "FR-41: wScan is the character");
+        assert_eq!(up.scan, unit, "the release names the same code unit");
     }
+}
+
+/// **Task T-10-4.** A code unit costs two structures in both modes, and the two sizing functions
+/// say so — they are what every caller sizes an array with, so an arithmetic that disagreed with
+/// the builders would be refused packets rather than wrong ones.
+#[test]
+fn a_code_unit_is_two_structures_and_both_sizing_functions_agree() {
+    assert_eq!(inject::EVENTS_PER_UNIT, 2);
+
+    // Nothing to erase and nothing to say is nothing at all; then one unit, then the six of
+    // `привет` with six characters to take off the screen first.
+    assert_eq!(inject::replacement_events(0, 0), 0);
+    assert_eq!(inject::replacement_events(0, 1), 2);
+    assert_eq!(inject::replacement_events(6, 6), 24);
+
+    // The compatibility mode adds the two `Shift` events and the arrows, and counts the
+    // insertion identically. With nothing selected there is no `Shift` at all.
+    assert_eq!(inject::selection_events(0, 1), 2);
+    assert_eq!(inject::selection_events(6, 6), 26);
+
+    // A character outside the BMP is two code units and therefore four structures.
+    assert_eq!(inject::replacement_events(1, 2), 6);
+    assert_eq!(inject::selection_events(1, 2), 8);
+
+    // And the builders write exactly what the arithmetic promised.
+    let text = utf16("привет");
+    let mut out = [INPUT::default(); inject::replacement_events(6, 6)];
+    assert_eq!(
+        inject::build_replacement(6, &text, &mut out),
+        Ok(inject::replacement_events(6, 6))
+    );
+
+    let mut out = [INPUT::default(); inject::selection_events(6, 6)];
+    assert_eq!(
+        inject::build_selection(6, &text, &mut out),
+        Ok(inject::selection_events(6, 6))
+    );
+}
+
+/// **Task T-10-4.** A packet ends on a **release**, in both modes, so that it leaves the latch
+/// of the receiving application clean.
+///
+/// This is the half of the defect that made the down+up form look unusable when it was first
+/// measured. Qt advances its character latch on the keyup, so a packet that ended on a keydown
+/// left the last code unit latched — and the first code unit of the *next* packet was rendered
+/// as that stale one and lost. Measured in Telegram Desktop 7.0.9: a packet of pairs followed
+/// by a single down-only unit prints that unit correctly, while a packet whose tail was
+/// down-only swallows the first character of whatever comes next.
+#[test]
+fn a_packet_ends_on_a_release_so_the_next_one_is_not_swallowed() {
+    let text = utf16("привет");
+
+    let mut out = [INPUT::default(); inject::replacement_events(6, 6)];
+    let len = inject::build_replacement(6, &text, &mut out).expect("sized");
+    let events = reduce(&out[..len]);
+
+    assert!(
+        events[len - 1].is_unicode_edge(true),
+        "FR-41: the last event of a replacement is the release of the last code unit"
+    );
+    assert_eq!(events[len - 1].scan, *text.last().expect("six units"));
+
+    let mut out = [INPUT::default(); inject::selection_events(6, 6)];
+    let len = inject::build_selection(6, &text, &mut out).expect("sized");
+    let events = reduce(&out[..len]);
+
+    assert!(
+        events[len - 1].is_unicode_edge(true),
+        "FR-42: and the compatibility packet ends the same way"
+    );
+
+    // The two modes differ in how the old text leaves the screen and in nothing else: the
+    // character run at the end of both is the same array of events.
+    let mut backspace = [INPUT::default(); inject::replacement_events(6, 6)];
+    let taken = inject::build_replacement(6, &text, &mut backspace).expect("sized");
+    let backspace = reduce(&backspace[..taken]);
+
+    let mut selection = [INPUT::default(); inject::selection_events(6, 6)];
+    let taken = inject::build_selection(6, &text, &mut selection).expect("sized");
+    let selection = reduce(&selection[..taken]);
+
+    assert_eq!(
+        backspace[12..],
+        selection[14..],
+        "both modes insert through the very same character events"
+    );
 }
 
 /// A packet that does not fit is refused whole — FR-41 is about an array that is complete and
@@ -426,9 +543,11 @@ fn the_packet_is_backspaces_down_and_up_first_then_unicode_events() {
 fn a_packet_that_does_not_fit_is_refused_and_nothing_is_written() {
     let mut out = [INPUT::default(); 3];
 
+    // 2 backspaces (4 events) and two characters (4 events): the packet is eight and the array
+    // is three, so nothing is written and the exact length is reported back.
     assert_eq!(
         inject::build_replacement(2, &utf16("ab"), &mut out),
-        Err(InjectError::OutputTooSmall { needed: 6 })
+        Err(InjectError::OutputTooSmall { needed: 8 })
     );
 
     // Untouched: every slot is still the zeroed structure the array was built with, and a
@@ -516,8 +635,12 @@ fn a_stroke_that_produced_no_character_erases_nothing() {
 // Point 12 — FR-41: surrogate pairs
 // ---------------------------------------------------------------------------------------
 
-/// **FR-41.** A character outside the BMP leaves as **two** `INPUT` structures, adjacent and
-/// in order — a pair split apart is two undefined characters, not one character.
+/// **FR-41.** A character outside the BMP leaves as its two code units, adjacent and in order —
+/// a pair split apart is two undefined characters, not one character.
+///
+/// Since task T-10-4 a code unit is a down and an up, so the character is four structures: the
+/// leading half pressed and released, then the trailing half. The order of the *units* is what
+/// FR-41 fixes and it is unchanged.
 #[test]
 fn a_character_outside_the_bmp_leaves_as_two_adjacent_inputs() {
     let target = layout_with(
@@ -540,11 +663,16 @@ fn a_character_outside_the_bmp_leaves_as_two_adjacent_inputs() {
 
     let replacement = &bench.sent()[0];
 
-    assert_eq!(replacement.len(), 2 + 2);
-    assert!(replacement[2].is_unicode());
-    assert!(replacement[3].is_unicode());
+    // One backspace (2 events) and one character (2 code units × 2 edges).
+    assert_eq!(replacement.len(), 2 + 4);
+    assert!(replacement[2].is_unicode_edge(false));
+    assert!(replacement[3].is_unicode_edge(true));
+    assert!(replacement[4].is_unicode_edge(false));
+    assert!(replacement[5].is_unicode_edge(true));
     assert_eq!(replacement[2].scan, HIGH_SURROGATE);
-    assert_eq!(replacement[3].scan, LOW_SURROGATE, "the pair is not split");
+    assert_eq!(replacement[3].scan, HIGH_SURROGATE);
+    assert_eq!(replacement[4].scan, LOW_SURROGATE, "the pair is not split");
+    assert_eq!(replacement[5].scan, LOW_SURROGATE);
 
     // And the pair is one character for the erasure, not two: two backspaces would have eaten
     // the character before it.
@@ -681,13 +809,13 @@ fn a_zero_delay_sends_the_whole_array_in_exactly_one_call() {
     let done = inject::dispatch_in(&mut bench, &packet[..len], 0);
 
     assert_eq!(done.calls, 1, "FR-41: one call, not one per event");
-    assert_eq!(done.requested, 18);
-    assert_eq!(done.accepted, 18);
+    assert_eq!(done.requested, 24);
+    assert_eq!(done.accepted, 24);
     assert!(done.is_complete());
 
     // One call, carrying everything, in order, and no pause anywhere.
     assert_eq!(bench.log.len(), 1);
-    assert_eq!(bench.sent()[0].len(), 18);
+    assert_eq!(bench.sent()[0].len(), 24);
     assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
 
     // And through the whole of FR-40: three packets, one call each.
@@ -719,17 +847,18 @@ fn a_delay_above_zero_sends_portions_with_a_pause_and_keeps_the_order() {
     let mut bench = Bench::new();
     let done = inject::dispatch_in(&mut bench, &packet[..len], 7);
 
-    // Six events, six calls, and the same six events in the same order.
-    assert_eq!(done.calls, 6);
-    assert_eq!(done.requested, 6);
-    assert_eq!(done.accepted, 6);
+    // Eight events (2 backspaces down+up, 2 characters down+up), eight calls, and the same
+    // eight events in the same order.
+    assert_eq!(done.calls, 8);
+    assert_eq!(done.requested, 8);
+    assert_eq!(done.accepted, 8);
     assert_eq!(
         bench.stream(),
         whole,
         "FR-44 changes the timing, not the order"
     );
 
-    // The pause goes *between*: five of them for six portions, never before the first and
+    // The pause goes *between*: seven of them for eight portions, never before the first and
     // never after the last.
     let expected: Vec<Step> = whole
         .iter()
@@ -745,9 +874,15 @@ fn a_delay_above_zero_sends_portions_with_a_pause_and_keeps_the_order() {
 
 /// **FR-44 against FR-41.** A surrogate pair is never split across portions: two halves in two
 /// calls are two undefined characters, not one character delivered slowly.
+///
+/// Since task T-10-4 the character is four structures rather than two — both halves pressed and
+/// released — and all four have to stay in the one call. The trap this guards against is a
+/// portioning rule that keys on the code unit alone: the event after the leading half's keydown
+/// is that same half's keyup, so such a rule would group *those* two and let the trailing half
+/// travel on its own, which is the very split FR-41 forbids.
 #[test]
 fn a_surrogate_pair_stays_in_one_portion_however_long_the_pause() {
-    let mut packet = [INPUT::default(); 3];
+    let mut packet = [INPUT::default(); inject::replacement_events(0, 3)];
     let len = inject::build_replacement(
         0,
         &[HIGH_SURROGATE, LOW_SURROGATE, u16::from(b'!')],
@@ -758,15 +893,48 @@ fn a_surrogate_pair_stays_in_one_portion_however_long_the_pause() {
     let mut bench = Bench::new();
     let done = inject::dispatch_in(&mut bench, &packet[..len], 3);
 
-    // Two portions, not three: the pair travels together and the `!` follows on its own.
-    assert_eq!(done.calls, 2);
+    // Three portions: the whole character, then the two edges of the `!`.
+    assert_eq!(done.calls, 3);
 
     let packets = bench.sent();
-    assert_eq!(packets[0].len(), 2);
+
+    assert_eq!(packets[0].len(), 4, "the character travels whole");
     assert_eq!(packets[0][0].scan, HIGH_SURROGATE);
-    assert_eq!(packets[0][1].scan, LOW_SURROGATE);
+    assert_eq!(packets[0][1].scan, HIGH_SURROGATE);
+    assert_eq!(packets[0][2].scan, LOW_SURROGATE, "the pair is not split");
+    assert_eq!(packets[0][3].scan, LOW_SURROGATE);
+    assert!(packets[0][0].is_unicode_edge(false));
+    assert!(packets[0][1].is_unicode_edge(true));
+    assert!(packets[0][2].is_unicode_edge(false));
+    assert!(packets[0][3].is_unicode_edge(true));
+
     assert_eq!(packets[1].len(), 1);
     assert_eq!(packets[1][0].scan, u16::from(b'!'));
+    assert!(packets[1][0].is_unicode_edge(false));
+    assert_eq!(packets[2].len(), 1);
+    assert_eq!(packets[2][0].scan, u16::from(b'!'));
+    assert!(packets[2][0].is_unicode_edge(true));
+}
+
+/// A slice that stops in the middle of a character is portioned to its end and no further.
+///
+/// Nothing in this module can produce such a slice — the builders always write whole characters
+/// — and that is exactly why the guard is worth a test: the portioning walks the events it is
+/// given, and an answer past the end would be a panic on the replacement path of a resident
+/// program rather than a wrong character.
+#[test]
+fn a_slice_that_stops_inside_a_character_is_portioned_to_its_end_and_no_further() {
+    let mut packet = [INPUT::default(); inject::replacement_events(0, 2)];
+    let len =
+        inject::build_replacement(0, &[HIGH_SURROGATE, LOW_SURROGATE], &mut packet).expect("sized");
+
+    let mut bench = Bench::new();
+    let done = inject::dispatch_in(&mut bench, &packet[..len - 1], 2);
+
+    // Three events of the four: they go out in one portion, short but never overrunning.
+    assert_eq!(done.calls, 1);
+    assert_eq!(done.requested, 3);
+    assert_eq!(bench.sent()[0].len(), 3);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -798,8 +966,9 @@ fn a_short_return_from_sendinput_reaches_the_counter_of_fr45() {
     let mut bench = Bench::refusing(2);
     let done = inject::dispatch_in(&mut bench, &packet[..len], 0);
 
-    assert_eq!(done.requested, 9);
-    assert_eq!(done.accepted, 7);
+    // 3 backspaces down+up and 3 characters down+up — twelve events, of which ten were taken.
+    assert_eq!(done.requested, 12);
+    assert_eq!(done.accepted, 10);
     assert!(!done.is_complete(), "FR-45: the return value is examined");
 
     let after = inject::send_mismatches();
@@ -838,7 +1007,7 @@ fn the_replacement_is_formed_and_sent_before_the_layout_switch_point() {
 
     // Everything the replacement consists of went out before the switch was reached, and the
     // whole of it: `accepted` is the system's own count.
-    assert_eq!(outcome.replacement.accepted, 18);
+    assert_eq!(outcome.replacement.accepted, 24);
     assert!(outcome.replacement.is_complete());
 
     let sent_before_switch: usize = bench.log[..switch]
@@ -849,7 +1018,8 @@ fn the_replacement_is_formed_and_sent_before_the_layout_switch_point() {
         })
         .sum();
 
-    assert_eq!(sent_before_switch, 1 + 18);
+    // The one released `Shift` of step 3, then the whole replacement.
+    assert_eq!(sent_before_switch, 1 + 24);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -925,8 +1095,8 @@ fn the_compatibility_packet_is_n_shift_left_then_the_insertion() {
 
     let len = inject::build_selection(6, &text, &mut out).expect("the array is exactly sized");
 
-    // One `Shift` down, twelve arrow events, one `Shift` up, six characters.
-    assert_eq!(len, 1 + 12 + 1 + 6);
+    // One `Shift` down, twelve arrow events, one `Shift` up, six characters down and up.
+    assert_eq!(len, 1 + 12 + 1 + 12);
 
     let events = reduce(&out[..len]);
 
@@ -949,11 +1119,27 @@ fn the_compatibility_packet_is_n_shift_left_then_the_insertion() {
         "FR-42: our own Shift comes up, and before the insertion"
     );
 
-    // Then the insertion, one event per code unit — the same run FR-41 ends with.
-    for (event, &unit) in events[14..].iter().zip(text.iter()) {
-        assert!(event.is_unicode(), "FR-42: wVk = 0 and KEYEVENTF_UNICODE");
-        assert_eq!(event.scan, unit, "FR-42: wScan is the character");
-        assert_eq!(event.flags & KEYEVENTF_KEYUP.0, 0);
+    // Then the insertion, a down and an up per code unit — the same run FR-41 ends with, and
+    // for the same reason (task T-10-4): this mode inserts through the very same character
+    // events, so it had the very same defect in Qt and is fixed by the very same form.
+    let characters = &events[14..];
+
+    assert_eq!(characters.len(), text.len() * 2);
+
+    for (index, &unit) in text.iter().enumerate() {
+        let down = characters[index * 2];
+        let up = characters[index * 2 + 1];
+
+        assert!(
+            down.is_unicode_edge(false),
+            "FR-42: character {index} goes down first"
+        );
+        assert!(
+            up.is_unicode_edge(true),
+            "T-10-4: character {index} is released before the next one is pressed"
+        );
+        assert_eq!(down.scan, unit, "FR-42: wScan is the character");
+        assert_eq!(up.scan, unit, "the release names the same code unit");
     }
 
     // Nothing is erased anywhere in this mode.
@@ -978,11 +1164,17 @@ fn an_empty_run_selects_nothing_and_presses_no_shift_at_all() {
 
     let len = inject::build_selection(0, &text, &mut out).expect("the array is exactly sized");
 
-    assert_eq!(len, 2);
-    assert_eq!(inject::selection_events(0, 2), 2);
+    // Two code units, a down and an up each, and not one arrow or `Shift` among them.
+    assert_eq!(len, 4);
+    assert_eq!(inject::selection_events(0, 2), 4);
 
-    for event in reduce(&out[..len]) {
-        assert!(event.is_unicode());
+    let events = reduce(&out[..len]);
+
+    for (index, &unit) in text.iter().enumerate() {
+        assert!(events[index * 2].is_unicode_edge(false));
+        assert!(events[index * 2 + 1].is_unicode_edge(true));
+        assert_eq!(events[index * 2].scan, unit);
+        assert_eq!(events[index * 2 + 1].scan, unit);
     }
 }
 
@@ -991,9 +1183,10 @@ fn an_empty_run_selects_nothing_and_presses_no_shift_at_all() {
 fn a_compatibility_packet_that_does_not_fit_is_refused_and_nothing_is_written() {
     let mut out = [INPUT::default(); 5];
 
+    // Two `Shift` events, two arrows down and up, two characters down and up.
     assert_eq!(
         inject::build_selection(2, &utf16("ab"), &mut out),
-        Err(InjectError::OutputTooSmall { needed: 8 })
+        Err(InjectError::OutputTooSmall { needed: 10 })
     );
 
     for slot in &out {
@@ -1245,8 +1438,8 @@ fn every_input_of_the_compatibility_mode_carries_the_injected_signature_of_fr03(
 
     let stream = bench.stream();
 
-    // 2 released + (Shift + 12 arrows + Shift + 6 characters) + 1 restored.
-    assert_eq!(stream.len(), 2 + (1 + 12 + 1 + 6) + 1);
+    // 2 released + (Shift + 12 arrows + Shift + 6 characters down and up) + 1 restored.
+    assert_eq!(stream.len(), 2 + (1 + 12 + 1 + 12) + 1);
 
     for event in stream {
         assert_eq!(
@@ -1272,12 +1465,12 @@ fn a_zero_delay_sends_the_compatibility_packet_in_exactly_one_call() {
     let done = inject::dispatch_in(&mut bench, &packet[..len], 0);
 
     assert_eq!(done.calls, 1, "FR-41: one call, not one per event");
-    assert_eq!(done.requested, 20);
-    assert_eq!(done.accepted, 20);
+    assert_eq!(done.requested, 26);
+    assert_eq!(done.accepted, 26);
     assert!(done.is_complete());
 
     assert_eq!(bench.log.len(), 1);
-    assert_eq!(bench.sent()[0].len(), 20);
+    assert_eq!(bench.sent()[0].len(), 26);
     assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
 
     // And through the whole of FR-40 in this mode: three packets, one call each.
@@ -1308,21 +1501,22 @@ fn a_delay_above_zero_portions_the_compatibility_packet_without_tearing_the_sele
     let len = inject::build_selection(2, &text, &mut packet).expect("sized");
 
     let whole = reduce(&packet[..len]);
-    assert_eq!(whole.len(), 1 + 4 + 1 + 2);
+    assert_eq!(whole.len(), 1 + 4 + 1 + 4);
 
     let mut bench = Bench::new();
     let done = inject::dispatch_in(&mut bench, &packet[..len], 5);
 
-    assert_eq!(done.calls, 8);
-    assert_eq!(done.requested, 8);
-    assert_eq!(done.accepted, 8);
+    assert_eq!(done.calls, 10);
+    assert_eq!(done.requested, 10);
+    assert_eq!(done.accepted, 10);
     assert_eq!(
         bench.stream(),
         whole,
         "FR-44 changes the timing, not the order"
     );
 
-    // The pause goes *between*: seven of them for eight portions.
+    // The pause goes *between*: nine of them for ten portions. One event per portion, because
+    // there is no character outside the BMP in "да" to hold four events together.
     let expected: Vec<Step> = whole
         .iter()
         .enumerate()
@@ -1340,7 +1534,10 @@ fn a_delay_above_zero_portions_the_compatibility_packet_without_tearing_the_sele
     assert!(stream[0].is_shift(false));
     assert!(stream[4].is_left(true), "the last arrow of the selection");
     assert!(stream[5].is_shift(true));
-    assert!(stream[6].is_unicode());
+    assert!(
+        stream[6].is_unicode_edge(false),
+        "the insertion begins with the first character going down"
+    );
     assert_eq!(stream.iter().filter(|e| e.is_shift(false)).count(), 1);
     assert_eq!(stream.iter().filter(|e| e.is_shift(true)).count(), 1);
 }
@@ -1349,9 +1546,10 @@ fn a_delay_above_zero_portions_the_compatibility_packet_without_tearing_the_sele
 // Point 16 — FR-41: surrogate pairs in the compatibility mode
 // ---------------------------------------------------------------------------------------
 
-/// **FR-41 in the compatibility mode.** A character outside the BMP is inserted as **two**
-/// adjacent `INPUT` structures, and selected by **one** `Shift+Left` — it is one character on
-/// the screen however many code units it takes to say.
+/// **FR-41 in the compatibility mode.** A character outside the BMP is inserted as its two code
+/// units, adjacent and in order — four `INPUT` structures since task T-10-4 — and selected by
+/// **one** `Shift+Left`: it is one character on the screen however many code units it takes to
+/// say.
 #[test]
 fn a_character_outside_the_bmp_leaves_the_compatibility_mode_as_two_adjacent_inputs() {
     let target = layout_with(
@@ -1378,15 +1576,20 @@ fn a_character_outside_the_bmp_leaves_the_compatibility_mode_as_two_adjacent_inp
 
     let packet = &bench.sent()[0];
 
-    // Shift, one arrow down and up, Shift, and the two halves of the character.
-    assert_eq!(packet.len(), 1 + 2 + 1 + 2);
+    // Shift, one arrow down and up, Shift, and both halves of the character pressed and
+    // released.
+    assert_eq!(packet.len(), 1 + 2 + 1 + 4);
     assert_eq!(packet.iter().filter(|e| e.is_left(false)).count(), 1);
-    assert!(packet[4].is_unicode());
-    assert!(packet[5].is_unicode());
+    assert!(packet[4].is_unicode_edge(false));
+    assert!(packet[5].is_unicode_edge(true));
+    assert!(packet[6].is_unicode_edge(false));
+    assert!(packet[7].is_unicode_edge(true));
     assert_eq!(packet[4].scan, HIGH_SURROGATE);
-    assert_eq!(packet[5].scan, LOW_SURROGATE, "the pair is not split");
+    assert_eq!(packet[5].scan, HIGH_SURROGATE);
+    assert_eq!(packet[6].scan, LOW_SURROGATE, "the pair is not split");
+    assert_eq!(packet[7].scan, LOW_SURROGATE);
 
-    // And it stays unsplit under FR-44 as well: `dispatch_in` recognises the pair from the
+    // And it stays unsplit under FR-44 as well: `dispatch_in` recognises the character from the
     // events themselves, so the rule is the same packet by packet and mode by mode.
     let mut bench = Bench::new();
     let mut whole = [INPUT::default(); inject::selection_events(1, 2)];
@@ -1398,9 +1601,11 @@ fn a_character_outside_the_bmp_leaves_the_compatibility_mode_as_two_adjacent_inp
         .sent()
         .pop()
         .expect("the insertion is the last portion");
-    assert_eq!(last.len(), 2);
+    assert_eq!(last.len(), 4, "all four events of the character, one call");
     assert_eq!(last[0].scan, HIGH_SURROGATE);
-    assert_eq!(last[1].scan, LOW_SURROGATE);
+    assert_eq!(last[1].scan, HIGH_SURROGATE);
+    assert_eq!(last[2].scan, LOW_SURROGATE);
+    assert_eq!(last[3].scan, LOW_SURROGATE);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1753,7 +1958,10 @@ mod behavioural {
     /// the strokes in the buffer to agree — which is exactly what this function establishes.
     fn type_ghbdtn(text: &str) {
         let units: Vec<u16> = text.encode_utf16().collect();
-        let mut events = vec![INPUT::default(); units.len()];
+        // Sized from the module's own arithmetic and not from the number of code units: a unit
+        // is a down and an up (task T-10-4), and a hand-written length here would refuse the
+        // packet rather than fail an assertion.
+        let mut events = vec![INPUT::default(); inject::replacement_events(0, units.len())];
 
         let len = inject::build_replacement(0, &units, &mut events).expect("sized");
         inject::dispatch(&events[..len], 0);
@@ -2013,10 +2221,13 @@ mod behavioural {
         let outcome = inject::on_hotkey().expect("the buffer holds six strokes under US");
         pump();
 
-        // Twenty events, twenty calls: the packet really was portioned, which is what makes the
-        // result below a statement about FR-44 and not about FR-41 again.
+        // Twenty-six events, twenty-six calls: the packet really was portioned, which is what
+        // makes the result below a statement about FR-44 and not about FR-41 again. Fourteen of
+        // them are the selection (Shift, six arrows down and up, Shift) and twelve are the six
+        // characters, each a down and an up.
         assert_eq!(
-            outcome.replacement.calls, 20,
+            outcome.replacement.calls,
+            inject::selection_events(6, 6),
             "FR-44: portions, not one call"
         );
         assert!(outcome.replacement.is_complete());
