@@ -29,8 +29,8 @@ use core::cell::Cell;
 use std::alloc::System;
 
 use lang_switcher::buffer::{
-    self, DEFAULT_CAPACITY, MAX_CAPACITY, ReadError, Recorded, Recorder, ResetOutcome, Stroke,
-    StrokeMods,
+    self, DEFAULT_CAPACITY, MAX_CAPACITY, Physical, ReadError, Recorded, Recorder, ResetOutcome,
+    Stroke, StrokeMods,
 };
 use lang_switcher::convert::{Keystroke, convert_stroke, max_units};
 use lang_switcher::hook::{self, Decision, Edge, HotkeyState, INJECTED_SIGNATURE, KeyEvent, Mode};
@@ -220,6 +220,9 @@ fn cache() -> LayoutCache {
 /// Virtual keys used below. The letters are their own codes.
 const VK_A: u16 = 0x41;
 const VK_B: u16 = 0x42;
+/// `R`, the other half of `Win+R` — the command of FR-10 that criterion 12 of task T-10-12
+/// names beside the `Win+Space` of FR-11.
+const VK_R: u16 = 0x52;
 const VK_2: u16 = 0x32;
 const VK_Z: u16 = 0x5A;
 const VK_BACK: u16 = 0x08;
@@ -849,6 +852,220 @@ fn everything_but_win_plus_space_flushes_exactly_as_it_did() {
         "the right Win switches the layout too"
     );
     assert_eq!(recorder.len(), 3);
+}
+
+// ---------------------------------------------------------------------------------------
+// Defect D — the latch in `held`, task T-10-12
+// ---------------------------------------------------------------------------------------
+
+/// The system answering "nobody is holding anything" — the state of a keyboard while these
+/// tests feed their synthetic strokes, stated instead of assumed.
+fn nothing_is_physically_held() -> Physical {
+    Physical {
+        ctrl: false,
+        alt_left: false,
+        alt_right: false,
+        win: false,
+    }
+}
+
+/// The system answering "`Win` really is down" — a user holding it for `Win+Space` or `Win+R`.
+fn win_is_physically_held() -> Physical {
+    Physical {
+        win: true,
+        ..nothing_is_physically_held()
+    }
+}
+
+/// The system agreeing with everything the stream said — every command modifier really down.
+fn everything_is_physically_held() -> Physical {
+    Physical {
+        ctrl: true,
+        alt_left: true,
+        alt_right: true,
+        win: true,
+    }
+}
+
+/// **The detector of defect D** — criterion 11 of task T-10-12.
+///
+/// # What broke, and how it was found
+///
+/// `Win+E`, a click in the search box of the Explorer window it opened, and six letters typed
+/// there: from that moment the product recorded nothing at all, in **every** application, until
+/// the process was restarted. The channel showed the callback alive and counting, `buffer_len`
+/// stuck at zero, and every flush counter frozen — nobody was clearing the ring, so nothing was
+/// ever entering it. A human pressed and released `Win` once, six and a half minutes later, and
+/// the product started working again in the same second.
+///
+/// The mechanism is the whole of it: `Held::win` is raised by a press the hook saw and lowered
+/// only by a release the hook sees. Task T-10-12 measured that the release of that `Win+E` never
+/// reached the callback — and that it was **not** lost in the hook-reinstallation gap, which is
+/// two microseconds wide once every thirty seconds. One release missed, and the command row of
+/// FR-10 then throws away every keystroke for the life of the process.
+///
+/// # Why the test is written on the release and not on the trigger
+///
+/// The trigger is a shell window, and the bench may not touch one — position 10 of §11.3 is
+/// marked **П**. It does not need to: what the shell did was *withhold one release*, and that is
+/// exactly what this test feeds. No timing, no live Explorer, no race.
+///
+/// # Both sides
+///
+/// On the code before the repair this test **fails**: the letter comes back `Flushed` and the
+/// buffer stays empty, for ever. After it, the letter is stored. Both runs are in the report.
+#[test]
+fn a_win_release_that_never_arrived_does_not_silence_the_buffer_for_ever() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(nothing_is_physically_held);
+
+    // The user types a word. Ordinary, and it works.
+    fill(&mut recorder, 3);
+
+    // `Win` goes down and the hook sees it...
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+
+    // ...and the release never arrives. Nothing else happens: no reinstallation, no suspension,
+    // no panic. The hook is up and the callback is being called, which is what the channel of
+    // the broken run showed.
+
+    // Before the repair this is `Flushed` and the buffer is empty. The keystroke is the user's
+    // own text and it must be recorded.
+    assert_eq!(
+        press(&mut recorder, VK_A, SCAN_A),
+        Recorded::Stored,
+        "defect D: a `Win` release that never arrived must not turn text into a command"
+    );
+
+    // And it must not be a single lucky stroke, either: the latch was permanent, so the check
+    // is that the buffer keeps working for the rest of the session.
+    for _ in 0..8 {
+        assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    }
+
+    assert_eq!(
+        recorder.len(),
+        3 + 1 + 8,
+        "the word that was already there survives, and everything typed after it is recorded"
+    );
+
+    // The belief itself has been put right, not merely stepped around once per keystroke: with
+    // `held.win` genuinely down, `Space` is the boundary key of the first row of FR-10 again,
+    // and not the layout switch of FR-11 that a raised `Win` would have made of it.
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed,
+        "the latch is down, not merely bypassed"
+    );
+}
+
+/// The same latch on `Ctrl` and on `Alt` — the other two bits of the command row of FR-10.
+///
+/// `Win` is the one defect D was caught on, because `Win+E` is the combination the shell owns.
+/// The row reads `Ctrl`, `Alt` and `Win` alike, so a lost release of any of them latches the
+/// same way, and the repair is checked on all three rather than on the one that was reported.
+#[test]
+fn a_lost_release_of_any_command_modifier_is_recovered_from() {
+    for modifier in [VK_LCONTROL, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN] {
+        let mut recorder = fresh();
+        recorder.verify_held_with(nothing_is_physically_held);
+
+        assert_eq!(hold(&mut recorder, modifier), Recorded::Modifier);
+
+        assert_eq!(
+            press(&mut recorder, VK_A, SCAN_A),
+            Recorded::Stored,
+            "a lost release of {modifier:#04x} must not latch the command row"
+        );
+        assert_eq!(recorder.len(), 1, "modifier {modifier:#04x}");
+    }
+}
+
+/// **Criterion 12 of task T-10-12: FR-10 and FR-11 are exactly what they were.**
+///
+/// The repair asks the system only on the row that is about to throw the stroke away, and it
+/// only ever *lowers* a belief the system contradicts. When the user really is holding the key
+/// — which is what these probes state — every row of the FR-10 table and the exception of FR-11
+/// answer precisely as they did before the repair existed.
+///
+/// This is the behaviour the user decided on question 43 (commit `e6ba407`) and decision Р-44
+/// gave to task T-10-6. Breaking it while repairing the latch would have been the worst
+/// available outcome of task T-10-12, so it is asserted here against the repair itself and not
+/// only in the tests that predate it.
+#[test]
+fn the_physical_check_leaves_fr10_and_fr11_alone_when_the_key_really_is_held() {
+    // FR-11: `Win+Space` switches the layout and **does not** flush the buffer.
+    let mut recorder = fresh();
+    recorder.verify_held_with(win_is_physically_held);
+    fill(&mut recorder, 3);
+    hold(&mut recorder, VK_LWIN);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Ignored,
+        "FR-11: Win+Space must still not flush the buffer"
+    );
+    assert_eq!(recorder.len(), 3, "FR-11: the strokes are still there");
+
+    // FR-10: `Win+R` is a command and **does** flush.
+    let mut recorder = fresh();
+    recorder.verify_held_with(win_is_physically_held);
+    fill(&mut recorder, 3);
+    hold(&mut recorder, VK_LWIN);
+    assert_eq!(
+        press(&mut recorder, VK_R, SCAN_A),
+        Recorded::Flushed,
+        "FR-10: Win+R is a command and must still flush"
+    );
+    assert_eq!(recorder.len(), 0);
+
+    // FR-10: `Ctrl` and `Alt` combinations are still commands when the keys really are down.
+    for modifier in [VK_LCONTROL, VK_LMENU] {
+        let mut recorder = fresh();
+        recorder.verify_held_with(everything_is_physically_held);
+        fill(&mut recorder, 3);
+        hold(&mut recorder, modifier);
+        assert_eq!(
+            press(&mut recorder, VK_A, SCAN_A),
+            Recorded::Flushed,
+            "FR-10: {modifier:#04x}+A is still a command"
+        );
+        assert_eq!(recorder.len(), 0, "modifier {modifier:#04x}");
+    }
+
+    // `AltGr` is still text and not a command, which is the exception the mask itself carries.
+    let mut recorder = fresh();
+    recorder.verify_held_with(everything_is_physically_held);
+    hold(&mut recorder, VK_LCONTROL);
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(
+        press(&mut recorder, VK_A, SCAN_A),
+        Recorded::Stored,
+        "AltGr must still produce text"
+    );
+    assert!(recorder.stroke(0).expect("stored").mods().altgr());
+}
+
+/// A bare `Space` after a latched `Win` flushes, which is the row of FR-10 it belongs to.
+///
+/// The interesting half of the repair: the exception of FR-11 is read off `held.win` as well, so
+/// a latched `Win` did not merely swallow letters — it also turned every `Space` into a silent
+/// no-op instead of the boundary key of the first row of FR-10. Putting the belief right fixes
+/// both, and this pins the second one so that a later change cannot quietly re-introduce it.
+#[test]
+fn a_bare_space_after_a_lost_win_release_is_the_boundary_key_it_should_be() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(nothing_is_physically_held);
+
+    fill(&mut recorder, 3);
+    hold(&mut recorder, VK_LWIN);
+    // The release is lost here.
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed,
+        "with no `Win` actually held, `Space` is the boundary key of FR-10 and not the switch of FR-11"
+    );
+    assert_eq!(recorder.len(), 0);
 }
 
 #[test]

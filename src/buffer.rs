@@ -756,6 +756,10 @@ const fn modifier_role(vk: u16) -> Option<Role> {
 /// never reached), is not seen. Its release is seen, and clears it, so the state cannot stay
 /// wrong indefinitely; and `CapsLock` can be seeded from a caller that has a trustworthy source
 /// through [`Recorder::set_caps_lock`].
+///
+/// ⚠ **Task T-10-12 corrected the sentence above: "its release is seen" was an assumption, and
+/// it is false.** A release that never arrives leaves the belief raised for ever, and defect D
+/// is what that costs — see [`Held::reconcile`] and the comment inside [`Recorder::record`].
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Held {
     shift: bool,
@@ -802,7 +806,74 @@ impl Held {
     const fn altgr(self) -> bool {
         self.ctrl && self.alt_right
     }
+
+    /// Drops every command modifier the system says is **not** physically down, and answers
+    /// whether anything changed — **the repair of defect D**, task T-10-12.
+    ///
+    /// # Why this exists
+    ///
+    /// The belief above is built from the hook stream alone, so it is right only while the
+    /// stream is complete. One missing release — and task T-10-12 measured that a release can
+    /// go missing without the program losing the hook, without a counter moving and without a
+    /// single one of its own error paths being taken — raises a flag that nothing in the
+    /// program could ever lower again. Every subsequent keystroke then takes the command row
+    /// of FR-10, the ring is cleared and nothing is ever recorded, in every application, until
+    /// the process is restarted. The buffer stops working and the product still reports itself
+    /// healthy, which is the part that cost this project three tasks of searching.
+    ///
+    /// # Clearing only, never raising
+    ///
+    /// A bit the system reports **down** is left exactly as the stream left it. Raising bits
+    /// from the system would widen the command row of FR-10 — it would turn text into a
+    /// command for a modifier pressed before the hook went up, which is a documented and
+    /// accepted limitation of this design and **not** the defect this task was given. Clearing
+    /// can only ever turn a keystroke that was being thrown away back into text, which is the
+    /// defect and nothing besides it.
+    ///
+    /// `Shift` and `CapsLock` are not touched: neither appears in the command row, so neither
+    /// can latch the defect, and `CapsLock` is a toggle whose "physical state" means something
+    /// else entirely.
+    fn reconcile(&mut self, physical: Physical) -> bool {
+        let before = *self;
+
+        self.ctrl &= physical.ctrl;
+        self.alt_left &= physical.alt_left;
+        self.alt_right &= physical.alt_right;
+        self.win &= physical.win;
+
+        *self != before
+    }
 }
+
+/// The command modifiers as the **system** reports them, against the belief of [`Held`].
+///
+/// Produced by [`crate::hook::physical_modifiers`], which is where the Win32 call belongs: the
+/// argument for `GetAsyncKeyState` over `GetKeyState` is already written out there for FR-96,
+/// and module `inject` makes the same choice for the same reason (`src\inject.rs:253`) — the
+/// asynchronous state is the desktop's, and this program's input thread never holds the
+/// keyboard focus that `GetKeyState` would answer from.
+///
+/// Carried as a plain `Copy` value so that [`Recorder::record`] stays a function of its
+/// arguments and can be tested without a keyboard: NFR-03 (nothing allocated), NFR-04 (no lock,
+/// no atomic) and NFR-05 (no I/O) all survive it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Physical {
+    /// Either `Ctrl`.
+    pub ctrl: bool,
+    /// The left `Alt`.
+    pub alt_left: bool,
+    /// The right `Alt` — `AltGr` on the layouts that have one.
+    pub alt_right: bool,
+    /// Either `Win`.
+    pub win: bool,
+}
+
+/// How [`Recorder`] asks the system what is really held.
+///
+/// A bare function pointer and not a closure or a trait object: it is read on the command row
+/// of FR-10 and nowhere else, it allocates nothing, and it leaves [`Recorder`] `Send`-neutral
+/// and free of any interior mutability the callback would have to synchronise on.
+pub type PhysicalProbe = fn() -> Physical;
 
 // ---------------------------------------------------------------------------------------
 // The flush rules of FR-10 — the LL-hook rows only
@@ -1004,6 +1075,24 @@ pub struct Recorder {
     /// left behind by a flush: every rule of FR-10 that empties the ring empties it through that
     /// one function.
     cycle: usize,
+    /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
+    /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
+    /// before that task.
+    ///
+    /// # Why it is a field and not a direct call
+    ///
+    /// `record` has to stay a function of its arguments. A `GetAsyncKeyState` wired straight
+    /// into it would make every test of the FR-10 table depend on what the keyboard of the
+    /// machine running the tests happens to be doing — a synthetic `Win`↓ fed by a test is not
+    /// a key anybody is holding, so the system would answer "up" and the FR-11 exception would
+    /// evaporate under every existing test that exercises it. The seam lets a test state its
+    /// premise instead of hiding it, and it is what makes the detector of criterion 11
+    /// two-sided without a live keyboard.
+    ///
+    /// **The product always sets it**: [`install`] is the one path by which the input thread
+    /// gets a buffer, and `app::restore_buffer` puts back the very same value it parked, so the
+    /// probe travels with the recorder across the FR-70 gate.
+    verify: Option<PhysicalProbe>,
 }
 
 impl Recorder {
@@ -1025,7 +1114,17 @@ impl Recorder {
             held: Held::default(),
             converted: false,
             cycle: 0,
+            verify: None,
         }
+    }
+
+    /// Gives this recorder a way to check its belief about the modifiers against the system —
+    /// task T-10-12, and see [`Held::reconcile`] for what it is for.
+    ///
+    /// Set by [`install`] on the product's path. A test sets it to state, explicitly, what the
+    /// keyboard is doing while the test feeds its synthetic strokes.
+    pub fn verify_held_with(&mut self, probe: PhysicalProbe) {
+        self.verify = Some(probe);
     }
 
     /// A buffer sized by the `[buffer]` section of the configuration — FR-07.
@@ -1250,7 +1349,61 @@ impl Recorder {
             return Recorded::Ignored;
         }
 
-        let mods = self.mods_now(key.flags);
+        let mut mods = self.mods_now(key.flags);
+
+        // ⚠ **The command row of FR-10, computed here and applied further down** — hoisted out
+        // of its `if` by task T-10-12 so that the check below can be gated on it without
+        // evaluating it twice. Moving it changes nothing: the only statement between here and
+        // the row is the conversion-session flush, which touches neither `held` nor `mods`.
+        let mut command = (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr();
+
+        // ---------------------------------------------------------------------------------
+        // ⭐ **Defect D — the repair.** Task T-10-12.
+        //
+        // `self.held` is the program's *belief*, built from the hook stream and from nothing
+        // else. It is right only while the stream is complete, and task T-10-12 measured that
+        // it is not always complete: pressing `Win+E`, clicking in the search box of the
+        // Explorer window that opens and typing there killed the buffer of a live installation
+        // outright — every keystroke thrown away, in every application, for six and a half
+        // minutes, until a human pressed and released `Win` and it recovered in the same
+        // second. The release of that `Win+E` never reached the callback at all. One missed
+        // release, and `held.win` stays raised for the life of the process.
+        //
+        // What makes it the worst kind of defect is that nothing shows: the callback is alive
+        // and counting, no flush counter moves — the ring is cleared *here*, on a path that
+        // never touches them — and every health indicator the product publishes says it is
+        // well. Three tasks searched for it in the wrong place.
+        //
+        // **The check runs only on the row that is about to throw the stroke away.** Ordinary
+        // typing believes no command modifier is down, `command` is false, and the branch is
+        // not taken: a letter costs the boolean it was going to cost anyway (NFR-01, NFR-02).
+        // It is the shape module `hook` already uses for FR-96 — the cheap test first, the
+        // system call only once the answer is "yes".
+        //
+        // **The exception of FR-11 is covered by the same gate**, and deliberately so. A
+        // believed `Win+Space` implies `command`: `held.win` alone puts the row true, and
+        // `altgr` cannot be set without `Ctrl`, which `Win+Space` does not have. So the
+        // reconciliation below happens *before* the FR-11 test reads `held.win`, and both rows
+        // decide on the same corrected belief rather than on two different ones.
+        //
+        // ⚠ **This does not touch FR-10 or FR-11 themselves** (decision Р-44, the user's
+        // decision on question 43). When the user really is holding the key, the system says so,
+        // nothing is lowered and both rows answer exactly as they always did — which is what
+        // `the_physical_check_leaves_fr10_and_fr11_alone_when_the_key_really_is_held` pins.
+        // [`Held::reconcile`] can only ever *lower* a belief, so no stroke that used to be text
+        // can become a command; only the reverse, which is the defect.
+        //
+        // ⛔ **The reinstallation of the hook is not involved and is not touched.** Task T-10-12
+        // measured the gap at two microseconds once every thirty seconds and showed the lost
+        // release did not fall in one. `watchdog` is deliberately unchanged by this repair.
+        // ---------------------------------------------------------------------------------
+        if command
+            && let Some(probe) = self.verify
+            && self.held.reconcile(probe())
+        {
+            mods = self.mods_now(key.flags);
+            command = (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr();
+        }
 
         // ⚠ **FR-11, and it stands in front of every flush row below — decision Р-44.**
         //
@@ -1300,7 +1453,7 @@ impl Recorder {
         // itself carries: it is `Ctrl` plus the right `Alt` by construction and it produces
         // characters, so a layout that puts text on it keeps working. The other exception, the
         // `Win+Space` of FR-11, has been answered above.
-        if (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr() {
+        if command {
             self.clear_ring();
             return Recorded::Flushed;
         }
@@ -1595,8 +1748,16 @@ thread_local! {
 ///
 /// Called by the input thread before the hook goes up. Any buffer already installed is
 /// dropped, which zeroes it (SEC-02).
+///
+/// **This is where the repair of defect D is armed** (task T-10-12): the recorder the product
+/// runs on is the one that can check its belief about the modifiers against the system. It is
+/// the single path by which the input thread ever gets a buffer, and `app::restore_buffer`
+/// re-installs the very value `app::park_buffer` took away, so the probe survives the FR-70
+/// gate without anybody having to remember it.
 pub fn install(config: &settings::Buffer) {
-    install_recorder(Recorder::from_config(config));
+    let mut recorder = Recorder::from_config(config);
+    recorder.verify_held_with(crate::hook::physical_modifiers);
+    install_recorder(recorder);
 }
 
 /// Installs `recorder` on the calling thread, replacing and zeroing whatever was there.

@@ -930,6 +930,51 @@ fn is_held(state: i16) -> bool {
     (state as u16) & 0x8000 != 0
 }
 
+/// The command modifiers as the system reports them — **the repair of defect D**, task T-10-12.
+///
+/// Handed to module `buffer` through [`crate::buffer::Recorder::verify_held_with`] and called
+/// by [`crate::buffer::Recorder::record`] **only on the row of FR-10 that is about to throw the
+/// stroke away as a command**. Ordinary typing — no `Ctrl`, no `Alt`, no `Win` believed down —
+/// never reaches it and pays nothing at all, which is the same shape FR-96 uses above: the
+/// cheap test first, the system call only once the answer is already "yes".
+///
+/// # NFR-01, NFR-02
+///
+/// Five leaf reads of a table the kernel keeps per desktop. They are exactly the calls
+/// [`emergency_modifiers_held`] documents — nothing blocks, nothing allocates, nothing is
+/// journalled — and they are on a path the user takes when pressing a keyboard shortcut, not
+/// when typing a word. The measured effect on `callback_p50_ns` and `callback_p99_ns` is in
+/// the report of task T-10-12.
+///
+/// The sided codes are asked for where the side matters and only there: `AltGr` is the right
+/// `Alt` with `Ctrl`, and reading both `Alt` keys through the combined `VK_MENU` would lose
+/// exactly the distinction between `€` and a menu accelerator that [`crate::buffer`] needs.
+/// `Win` has no such distinction in the FR-10 table, but `WH_KEYBOARD_LL` reports it sided and
+/// there is no combined virtual key for it, so both halves are asked.
+pub fn physical_modifiers() -> crate::buffer::Physical {
+    // SAFETY: the invariants are the ones `emergency_modifiers_held` states above, and they
+    // hold identically here — each call takes a virtual-key code by value, returns a `SHORT`,
+    // touches no memory of ours, cannot block and is callable from inside a hook callback,
+    // which is where this runs. The five are one block so that NFR-14 is satisfied by
+    // construction rather than by one comment doing duty for its neighbours.
+    let (ctrl, alt_left, alt_right, win_left, win_right) = unsafe {
+        (
+            GetAsyncKeyState(i32::from(VK_CONTROL.0)),
+            GetAsyncKeyState(i32::from(VK_LMENU.0)),
+            GetAsyncKeyState(i32::from(VK_RMENU.0)),
+            GetAsyncKeyState(i32::from(VK_LWIN.0)),
+            GetAsyncKeyState(i32::from(VK_RWIN.0)),
+        )
+    };
+
+    crate::buffer::Physical {
+        ctrl: is_held(ctrl),
+        alt_left: is_held(alt_left),
+        alt_right: is_held(alt_right),
+        win: is_held(win_left) || is_held(win_right),
+    }
+}
+
 /// FR-96: release the keyboard and end the process, in that order.
 ///
 /// The order is the requirement. Unhooking first means that whatever happens to the
