@@ -1555,8 +1555,22 @@ impl Recorder {
         // flushes as a command. Nothing here empties the ring — it cannot, the branch runs only
         // when the ring is already empty.
         // ---------------------------------------------------------------------------------
+        // ⭐ **Task T-10-15 gives this branch a voice, and changes nothing about it.** The five
+        // outcomes of [`Recorder::restamp`] — this `else`, and the four exits of the function
+        // itself — were indistinguishable from outside the process: four of the five leave the
+        // stamp exactly as it was, so `active_layout` reads the same for all of them. See
+        // [`crate::control::RESTAMP_OUTCOMES`].
+        //
+        // ⚠ **The `else` is a count and not a decision.** The condition, the call and everything
+        // either of them does are the lines task T-10-14 left here; the arm below adds one relaxed
+        // `fetch_add` on the path a keystroke that is *not* the first of a word takes, compiled
+        // out of every build that is not a `testing` one — the same terms `note_buffer_len` has
+        // been called under from this file since task T-03-4.
         if self.ring.len() == 0 {
             self.restamp();
+        } else {
+            #[cfg(feature = "testing")]
+            crate::control::note_restamp(crate::control::Restamp::Skipped);
         }
 
         // FR-06 through the cache of FR-20, and FR-04: what the key gave, at the moment it was
@@ -1843,12 +1857,20 @@ impl Recorder {
     /// percentiles NFR-01 is written in.
     fn restamp(&mut self) {
         let Some(probe) = self.stamp else {
+            // ⭐ **Outcome 2 of task T-10-15.** See the note at the call site in
+            // [`Recorder::record`] for why every exit of this function counts itself.
+            #[cfg(feature = "testing")]
+            crate::control::note_restamp(crate::control::Restamp::NoProbe);
             return;
         };
 
         let observed = probe();
 
         if observed == LayoutId::default() || observed == self.active {
+            // ⭐ **Outcome 3 of task T-10-15.** This is what a *healthy* first stroke looks like:
+            // the stamp already names the layout the probe reads, so there is nothing to correct.
+            #[cfg(feature = "testing")]
+            crate::control::note_restamp(crate::control::Restamp::Unchanged);
             return;
         }
 
@@ -1857,6 +1879,16 @@ impl Recorder {
             .as_ref()
             .is_none_or(|cache| cache.contains(observed))
         {
+            // ⭐ **Outcome 4 of task T-10-15 — the silent refusal, and the one that task was
+            // written around.** The probe read a real layout, different from the one stamped, and
+            // the cache of FR-20 has no map for it. Accepting would be worse than the defect: the
+            // stamp would name a layout `lookup` cannot decode through and `resolve_active` would
+            // leave `active_index` at `None`. A callback cannot rebuild the cache, so refusing is
+            // the only correct thing left — and *saying so* is what was missing. A stale cache
+            // makes the repair of defect E do nothing at all, and before this counter the channel
+            // showed that state and a probe that was never consulted as the same reading.
+            #[cfg(feature = "testing")]
+            crate::control::note_restamp(crate::control::Restamp::Uncached);
             return;
         }
 
@@ -1873,6 +1905,13 @@ impl Recorder {
         // `testing` one.
         #[cfg(feature = "testing")]
         crate::control::note_active_layout(observed.raw());
+
+        // ⭐ **Outcome 5 of task T-10-15** — the repair of defect E doing its work. It is counted
+        // beside the mirror above rather than instead of it: `active_layout` says what the stamp
+        // *holds*, and it holds the same value whether it was corrected here once or a hundred
+        // times. The count is what turns «штамп совпал» into «штамп исправили».
+        #[cfg(feature = "testing")]
+        crate::control::note_restamp(crate::control::Restamp::Accepted);
     }
 
     /// Re-resolves the position of the active layout in the cache.

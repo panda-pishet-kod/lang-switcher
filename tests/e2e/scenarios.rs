@@ -4501,7 +4501,7 @@ pub fn pending_positions() -> Vec<Row> {
 /// the end — they are the ones the first hypothesis is decided by, and until this task they
 /// existed only in the file report the main thread writes *after the process exits*, which a
 /// scenario that requires the process to survive `Win+E` cannot read at all.
-const WATCHED_KEYS: [&str; 25] = [
+const WATCHED_KEYS: [&str; 30] = [
     "buffer_len",
     // **Task T-10-10, and first in importance after `buffer_len` itself.** The hypothesis this
     // run exists to test is that the gate of FR-70/FR-71 stays shut for ever, and that is the
@@ -4539,6 +4539,15 @@ const WATCHED_KEYS: [&str; 25] = [
     "cache_builds",
     "layout_cache_failures",
     "hook_installed",
+    // ⭐ **Task T-10-15.** The five outcomes of `buffer::Recorder::restamp`, which until that task
+    // were one reading: four of them leave the stamp exactly where it was, so `active_layout`
+    // above says the same thing for all four. `restamp_uncached` is the silent refusal — the
+    // repair of defect E declining because the cache of FR-20 has no map for what the probe read.
+    "restamp_skips",
+    "restamp_no_probe",
+    "restamp_unchanged",
+    "restamp_uncached",
+    "restamp_accepted",
 ];
 
 /// Where the full protocol of the experiment is written — **debt 4 of the verdict on T-10-9**.
@@ -7154,4 +7163,494 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
             std::process::ExitCode::from(2)
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Опыт T-10-15 — какой из пяти исходов перештамповки происходит на самом деле
+// ---------------------------------------------------------------------------------------
+
+/// The five outcome keys of task **T-10-15**, in the order `control::KEYS` lists them.
+const RESTAMP_KEYS: [&str; 5] = [
+    "restamp_skips",
+    "restamp_no_probe",
+    "restamp_unchanged",
+    "restamp_uncached",
+    "restamp_accepted",
+];
+
+/// One reading of the five outcome counters of `buffer::Recorder::restamp`.
+///
+/// ⚠ **A reading is only worth something as a difference.** Every one of the five is a monotone
+/// count over the whole life of the process, so the number that answers "what did *this* press
+/// do" is `after - before` around that press and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RestampCounts([u64; RESTAMP_KEYS.len()]);
+
+impl RestampCounts {
+    /// Reads all five, or `None` when the channel could not answer or a key is missing — which is
+    /// what a product built before this task would look like, and is a finding rather than a zero.
+    fn take() -> Option<Self> {
+        let snapshot = crate::channel::read().ok()?;
+        let mut values = [0u64; RESTAMP_KEYS.len()];
+
+        for (slot, key) in values.iter_mut().zip(RESTAMP_KEYS) {
+            *slot = snapshot.get(key)?.parse::<u64>().ok()?;
+        }
+
+        Some(Self(values))
+    }
+
+    /// The difference from an earlier reading.
+    fn since(self, before: Self) -> [i64; RESTAMP_KEYS.len()] {
+        core::array::from_fn(|index| self.0[index] as i64 - before.0[index] as i64)
+    }
+}
+
+/// One line naming what the five counters did between `before` and `after`.
+fn describe_restamp(before: Option<RestampCounts>, after: Option<RestampCounts>) -> String {
+    let (Some(before), Some(after)) = (before, after) else {
+        return "  исходы restamp: <канал не ответил или ключей нет — сборка без T-10-15?>"
+            .to_owned();
+    };
+
+    let delta = after.since(before);
+    let pairs: Vec<String> = RESTAMP_KEYS
+        .iter()
+        .zip(delta)
+        .map(|(key, value)| format!("{key}{value:+}"))
+        .collect();
+
+    format!("  исходы restamp за шаг: {}", pairs.join(" "))
+}
+
+/// Which single outcome a step took, when exactly one of the four *calls* moved.
+///
+/// `restamp_skips` is excluded on purpose: it moves on every stroke after the first of a word, so
+/// it is never the answer to "what did the first stroke do" and would mask the one that is.
+fn sole_outcome(before: RestampCounts, after: RestampCounts) -> Option<&'static str> {
+    let delta = after.since(before);
+    let moved: Vec<&'static str> = RESTAMP_KEYS
+        .iter()
+        .zip(delta)
+        .skip(1)
+        .filter_map(|(key, value)| (value > 0).then_some(*key))
+        .collect();
+
+    (moved.len() == 1).then(|| moved[0])
+}
+
+/// ⭐ **The experiment of task T-10-15** — which of the five outcomes of `Recorder::restamp`
+/// really happens, measured on the **installed** copy.
+///
+/// # What this is, and what it deliberately is not
+///
+/// It is not a fourth repair and not a fourth guess. Task T-10-14 reproduced the divergence of the
+/// stamp and cured it six times out of six — **on a build the bench itself started**, with a
+/// synthetic `Alt+Shift`, and with no departure of the system anywhere in it. The person's defect
+/// survives on the **installed** copy after **real** sleep and a real lock. This mode removes the
+/// first of those two differences entirely and says plainly what it could not do about the second.
+///
+/// # The arms
+///
+/// | Arm | What it establishes |
+/// |---|---|
+/// | 0 | ⛔ **negative control of the instrument**: the hotkey on an empty field must change nothing. An instrument that cannot report "не изменилось" cannot report anything |
+/// | A | positive control: a fresh stamp converts, and the five counters say `restamp_unchanged` or `restamp_accepted` |
+/// | B | the household case of T-10-14 — `Alt+Shift` into the window that already has the focus — now on the installed copy and with the outcome named by number |
+/// | C | ⭐ **positive control of `restamp_uncached`**: a third layout attached for the length of the arm, the window moved into it with no focus change, so the cache of FR-20 provably has no map for what the probe reads |
+///
+/// Arm C is what makes a zero in arm B mean anything. Without it, `restamp_uncached=0` would be
+/// indistinguishable from a counter that never fires — the exact class of mistake that has cost
+/// this project three repairs, and the reason the instrument is checked before its readings.
+///
+/// # ⛔ What no arm here does
+///
+/// The machine is not suspended, not locked, and no desktop is switched: `LockWorkStation` would
+/// take the controller's session down with it and `Ctrl+Alt+Del` cannot be sent at all. The one
+/// remaining route to a **real** `EVENT_SYSTEM_DESKTOPSWITCH` without a person is the secure
+/// desktop of a UAC prompt, and whether this machine has one is a question of measurement, not of
+/// argument — it is measured in the report of this task and not here, because raising an elevated
+/// process would put a window this bench does not own in front of every arm that follows it.
+pub fn experiment_away(ctx: &Context, rounds: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-15: какой из пяти исходов перештамповки происходит ---\n");
+    println!(
+        "Прибор: сравнение поля ДО и ПОСЛЕ нажатия. Совпадение с образцом {EXPECTED:?} \
+         сообщается рядом и НИКОГДА не является вердиктом — под русской раскладкой ghbdtn \
+         даёт привет уже при наборе.\n\
+         Продукт: УСТАНОВЛЕННАЯ подписанная сборка из %ProgramFiles% (uiAccess=1), поднятая \
+         ShellExecuteEx, стендом НЕ порождённая.\n\
+         ⛔ Машина не усыпляется, не блокируется и рабочий стол не переключается.\n"
+    );
+
+    protocol(&format!(
+        "\n\n=========== ОПЫТ T-10-15 {} ===========\nкругов бытового случая: {rounds}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    println!(
+        "Полный протокол каждого снимка: {}",
+        protocol_path().display()
+    );
+
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Синтетическая FR-96 сняла бы чужой экземпляр, \
+             а показания канала были бы неизвестно чьими. Опыт не ставится."
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut product = match crate::sut::Installed::launch() {
+        Ok(installed) => installed,
+        Err(error) => {
+            eprintln!("установленный продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+        eprintln!("установленный продукт не сообщил о готовности через канал SEC-04a за 30 с");
+        let _ = product.stop();
+        return std::process::ExitCode::from(1);
+    };
+
+    println!(
+        "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+        product.pid,
+        ready.get("hook_installed").unwrap_or("?"),
+        ready.present_keys().len()
+    );
+    println!(
+        "Снимок канала целиком, сразу после готовности:\n{}",
+        ready.raw
+    );
+    protocol(&format!(
+        "[готовность] PID {}\n{}",
+        product.pid,
+        ready.raw.trim_end()
+    ));
+
+    // ⛔ The five keys have to be there, or every reading below is a fabricated zero.
+    for key in RESTAMP_KEYS {
+        if ready.get(key).is_none() {
+            eprintln!(
+                "⛔ установленная сборка не публикует {key}: это сборка без счётчиков T-10-15, \
+                 и все показания ниже были бы выдуманными нулями. Опыт не ставится."
+            );
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    }
+
+    let mut field = match launch_stamp_window() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("окно стенда не открылось: {error}");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<(usize, bool), String> {
+        let (target, content) = adopt_stamp_window(ctx, &mut field)?;
+
+        // ---- arm 0: the negative control of the instrument itself --------------------------
+        //
+        // The hotkey on an **empty** field. The product is running, the hook is up, the press
+        // really reaches it — and there is nothing in the buffer to convert, so the field must
+        // read the same afterwards. An instrument that reports «изменилось» here is measuring
+        // something other than what it claims, and everything below it would be worthless.
+        println!("=== ПЛЕЧО 0: отрицательный контроль прибора — нажатие на пустом поле ===");
+        clear_field(&target, &content)?;
+        let empty_before =
+            read_field(&content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+        println!("{}", watched("плечо 0: поле пусто, до нажатия"));
+        input::tap(ctx.hotkey_vk, &target).map_err(|error| format!("горячая клавиша: {error}"))?;
+        let empty_after = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(&content).filter(|text| text != &empty_before)
+        })
+        .or_else(|| read_field(&content))
+        .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+        println!("{}", watched("плечо 0: после нажатия"));
+
+        let idle = PressOutcome {
+            before: empty_before,
+            after: empty_after,
+            wanted: String::new(),
+        };
+        println!("  {}", idle.describe());
+        if idle.changed() {
+            return Err(format!(
+                "⛔ ПРИБОР НЕИСПРАВЕН: нажатие на пустом поле изменило текст ({})",
+                idle.describe()
+            ));
+        }
+        println!("  ✔ прибор умеет сказать «не изменилось» — ему можно верить\n");
+
+        // ---- arm A: the positive control ---------------------------------------------------
+        println!("=== ПЛЕЧО A: штамп свеж — положительный контроль ===");
+        let (agreed, sample) = await_agreement(target.hwnd);
+        println!("  {}", sample.describe());
+        if !agreed {
+            return Err(format!(
+                "штамп не сошёлся с настоящей раскладкой за {} с ещё до всякого стимула — \
+                 плечо A недостоверно",
+                STAMP_CONVERGENCE_BOUND.as_secs()
+            ));
+        }
+
+        let before = RestampCounts::take();
+        let fresh = press_once(ctx, &target, &content, "A", layout::US)?;
+        let after = RestampCounts::take();
+        println!("  {}", fresh.describe());
+        println!("{}", describe_restamp(before, after));
+        if !fresh.changed() {
+            return Err(
+                "плечо A не изменило текст — прибор не годится, всё ниже недостоверно".to_owned(),
+            );
+        }
+        println!();
+
+        // ---- arm B: the household case, on the installed copy -------------------------------
+        let mut unchanged_rounds = 0usize;
+
+        for round in 1..=rounds {
+            println!("=== ПЛЕЧО B, круг {round}: Alt+Shift в окно, которое уже переднее ===");
+
+            // Cleared with `Backspace` alone: `Ctrl+A` ends in a modifier release, and a modifier
+            // release **is** the probe of T-03-3c — the round would refresh the very stamp it is
+            // trying to leave stale. Measured in task T-10-14 and inherited here.
+            clear_field(&target, &content)?;
+
+            // The healthy precondition, built and verified rather than assumed — and the
+            // direction is fixed for the reason T-10-14 measured: the probe wins the race against
+            // an activation of `en-US` every time and loses it against `ru-RU` every time, so a
+            // round that took whatever the previous press left behind would measure the direction
+            // and not the defect.
+            let from = layout::ensure(target.hwnd, layout::US, Duration::from_secs(5))?;
+            input::tap(VK_SHIFT.0, &target)
+                .map_err(|error| format!("Shift подготовки: {error}"))?;
+            let (started, start) = await_agreement(target.hwnd);
+            println!(
+                "  до переключения (сошлись: {started}): {}",
+                start.describe()
+            );
+            if !started {
+                println!("  ⚠ штамп не сошёлся ещё до стимула — круг пропущен");
+                continue;
+            }
+
+            let to = other_layout(from);
+            println!("  стимул: Alt+Shift в переднее окно, фокус не трогали");
+            input::chord(&[VK_MENU.0], VK_SHIFT.0, &target)
+                .map_err(|error| format!("Alt+Shift: {error}"))?;
+
+            let settled = wait::until(Duration::from_secs(5), || {
+                layout::of_window(target.hwnd)
+                    .map(layout::id_of)
+                    .filter(|id| id & 0xFFFF == to & 0xFFFF)
+            });
+            let Some(settled) = settled else {
+                println!(
+                    "  ⚠ окно не перешло в {} за 5 с — круг пропущен",
+                    layout::describe(to)
+                );
+                continue;
+            };
+            println!(
+                "  окно перешло {} → {}",
+                layout::describe(from),
+                layout::describe(settled)
+            );
+
+            let (converged, after_switch) = await_agreement(target.hwnd);
+            println!("  после переключения: {}", after_switch.describe());
+            println!(
+                "  штамп догнал настоящую раскладку сам: {}",
+                if converged { "да" } else { "⛔ НЕТ" }
+            );
+
+            let shown = shown_under(settled);
+            let at_typing = StampSample::take(target.hwnd);
+            println!("  в момент набора: {}", at_typing.describe());
+
+            // ⭐ The reading that this whole task exists for: the counters **around the first
+            // stroke of the word** and nothing wider. `type_paced_as` types six keys, of which
+            // exactly one — the first — reaches `restamp` at all.
+            let before = RestampCounts::take();
+            type_paced_as(TYPED, shown, &target, &content, "")?;
+            let after = RestampCounts::take();
+
+            let typed_before =
+                read_field(&content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+            println!("{}", watched(&format!("круг {round}: набрано, до нажатия")));
+            println!("{}", describe_restamp(before, after));
+            if let (Some(before), Some(after)) = (before, after)
+                && let Some(outcome) = sole_outcome(before, after)
+            {
+                println!("  ⭐ исход первого штриха слова: {outcome}");
+            }
+
+            input::tap(ctx.hotkey_vk, &target)
+                .map_err(|error| format!("горячая клавиша: {error}"))?;
+
+            let text_after = wait::until(SERIES_STEP_TIMEOUT, || {
+                read_field(&content).filter(|text| text != &typed_before)
+            })
+            .or_else(|| read_field(&content))
+            .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+            let press = PressOutcome {
+                before: typed_before,
+                after: text_after,
+                wanted: shown_under(other_layout(settled)).to_owned(),
+            };
+            println!("{}", watched(&format!("круг {round}: после нажатия")));
+            println!(
+                "  ⭐ круг {round}: набирали под {}, штамп говорил {} — {}",
+                layout::describe(settled),
+                at_typing
+                    .stamp
+                    .map_or_else(|| "<нет>".to_owned(), layout::describe),
+                press.describe()
+            );
+
+            if !press.changed() {
+                unchanged_rounds += 1;
+            }
+            println!();
+        }
+
+        // ---- arm C: the positive control of `restamp_uncached` ------------------------------
+        let uncached_fires = arm_uncached(&target, &content)?;
+
+        println!("\n=== ИТОГ ===");
+        println!("  кругов бытового случая: {rounds}");
+        println!("  ⛔ нажатие НЕ изменило текст: {unchanged_rounds}/{rounds}");
+        println!(
+            "  счётчик restamp_uncached срабатывает, когда карты нет в кэше: {}",
+            if uncached_fires { "ДА" } else { "⛔ НЕТ" }
+        );
+
+        Ok((unchanged_rounds, uncached_fires))
+    })();
+
+    println!("{}", field.close());
+    match product.stop() {
+        Ok(()) => println!("продукт остановлен через FR-96"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    match outcome {
+        // The exit code is the detector of arm B, exactly as it is in the mode of T-10-14: green
+        // when every press changed the field, red when any press did nothing at all.
+        Ok((0, _)) => {
+            println!("\nВЕРДИКТ: все нажатия изменили текст — ЗЕЛЁНЫЙ");
+            std::process::ExitCode::SUCCESS
+        }
+        Ok((unchanged, _)) => {
+            println!("\nВЕРДИКТ: нажатий, ничего не изменивших: {unchanged} — ⛔ КРАСНЫЙ");
+            std::process::ExitCode::from(1)
+        }
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
+/// ⭐ **Arm C — the positive control of `restamp_uncached`**, and the only arm that can produce
+/// the silent refusal on purpose.
+///
+/// # Why a third layout
+///
+/// The refusal happens when the probe reads a real layout the cache of FR-20 has **no map for**.
+/// With the two layouts of this session that state is unreachable: both were in
+/// `GetKeyboardLayoutList` when the product built its cache. A layout attached *after* the build,
+/// and made current with no focus change and no foreground change, is that state by construction —
+/// `app::refresh_layout_and_cache` is the only thing that rebuilds the cache and it runs on
+/// exactly the two events this arm avoids.
+///
+/// This is not the person's configuration and is not claimed to be. It is what makes a zero
+/// reading of `restamp_uncached` in arm B *mean* something: a counter that has been seen to fire.
+///
+/// # ⛔ The layout is given back on every path out
+///
+/// `layout::Temporary` detaches on success, on failure and on an unwind, and leaves a note on
+/// disk that the next run acts on if this process is killed between the two. Footnote 3 of §11.3
+/// and the rule it is built on: never take away, or leave behind, something on somebody's machine.
+fn arm_uncached(target: &input::Target, content: &Element) -> Result<bool, String> {
+    println!("=== ПЛЕЧО C: положительный контроль счётчика restamp_uncached ===");
+    println!(
+        "  Третья раскладка подключается на время плеча и снимается на любом пути выхода \
+         (сноска 3 §11.3)."
+    );
+
+    let mut stash = match layout::Temporary::attach() {
+        Ok(stash) => stash,
+        Err(error) => {
+            println!("  ⚠ третья раскладка не подключилась: {error}");
+            println!("  плечо C не поставлено — контроля счётчика нет");
+            return Ok(false);
+        }
+    };
+
+    let measured = (|| -> Result<bool, String> {
+        println!(
+            "  третья раскладка подключена: {}",
+            layout::describe(stash.handle())
+        );
+        println!("{}", watched("плечо C: третья раскладка подключена"));
+
+        clear_field(target, content)?;
+
+        // The window moves into the third layout by the same message the household `Alt+Shift`
+        // ends in — a request to the window that already has the focus. Nothing is activated,
+        // no focus moves, so nothing asks the product to rebuild its cache.
+        layout::ensure(target.hwnd, layout::THIRD, Duration::from_secs(5))?;
+        println!(
+            "  окно переведено в {} без смены фокуса",
+            layout::describe(layout::THIRD)
+        );
+
+        let before = RestampCounts::take();
+        // One key, and it is the first stroke of a new word — the only stroke that reaches
+        // `restamp` at all. What it puts in the field is of no interest here; the counter is.
+        input::type_text("g", target)
+            .map_err(|error| format!("ввод под третьей раскладкой: {error}"))?;
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| !text.is_empty())
+        });
+        let after = RestampCounts::take();
+
+        println!("{}", watched("плечо C: штрих под третьей раскладкой"));
+        println!("{}", describe_restamp(before, after));
+
+        let fired = match (before, after) {
+            (Some(before), Some(after)) => after.since(before)[3] > 0,
+            _ => false,
+        };
+
+        println!(
+            "  ⭐ молчаливый отказ виден числом: {}",
+            if fired {
+                "ДА — restamp_uncached вырос"
+            } else {
+                "⛔ НЕТ — счётчик не двинулся; см. cache_builds выше"
+            }
+        );
+
+        clear_field(target, content)?;
+        Ok(fired)
+    })();
+
+    println!("  {}", stash.detach());
+    // Back to the layout every other arm assumes, before anything else runs.
+    let _ = layout::ensure(target.hwnd, layout::US, Duration::from_secs(5));
+
+    measured
 }

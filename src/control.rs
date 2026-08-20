@@ -1012,6 +1012,97 @@ const METHOD_BACKSPACE: u8 = 1;
 /// The last replacement ran the `Selection` packet of FR-42.
 const METHOD_SELECTION: u8 = 2;
 
+/// The five outcomes of [`crate::buffer::Recorder::restamp`], counted — task **T-10-15**.
+///
+/// # Why counters and not one more flag
+///
+/// The repair of defect E (task T-10-14) reads the real layout on the first stroke of a new word
+/// and re-stamps the recorder with it. That path has **five** ways to end and, until this task,
+/// **not one of them was visible from outside the process**: `active_layout` shows the stamp
+/// after the fact, so a stamp that stayed stale reads identically whether the probe was never
+/// consulted, answered with the value already held, or answered with a layout the cache of FR-20
+/// has no map for. Three different defects, one reading. The task that measures why the repair
+/// does not help a person coming back from a real absence cannot start from a reading like that.
+///
+/// The refusal on the cache is the one this task was written around: it is **silent** by
+/// construction — a callback cannot rebuild the cache, so refusing is the only correct thing it
+/// can do — and it is exactly the outcome a stale cache would produce.
+///
+/// # One index per outcome
+///
+/// Indexed by [`Restamp`] so that the publisher is a single relaxed `fetch_add` on an entry
+/// chosen by a `match`, in the shape [`note_replacement_method`] already uses. The five are
+/// separate atomics rather than fields of one word because they are counts that stand alone:
+/// nothing compares two of them for a torn reading, unlike [`LAST_REPLACEMENT`].
+///
+/// **SEC-01, SEC-07.** Five counts of the program's own decisions. Not a character, not a scan
+/// code, not a stroke — and deliberately **not the layout** that was refused: which layout the
+/// cache lacked is `active_layout`'s business and not a fact this key needs in order to say
+/// "the refusal happened".
+static RESTAMP_OUTCOMES: [AtomicU32; Restamp::COUNT] =
+    [const { AtomicU32::new(0) }; Restamp::COUNT];
+
+/// How a call of [`crate::buffer::Recorder::restamp`] ended — task **T-10-15**.
+///
+/// The five rows of the table in that task, in the order the code reaches them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Restamp {
+    /// **Not called at all**: the ring was not empty, so this stroke is not the first of a word.
+    /// The ordinary case for every letter of a word after its first, and the one that says the
+    /// branch of the repair was never reached for this keystroke.
+    Skipped = 0,
+    /// Called, and `Recorder::stamp` holds no probe — the recorder was built without one, or
+    /// crossed the FR-70 gate without it. Nothing can be read, so nothing is.
+    NoProbe = 1,
+    /// The probe answered with an empty layout, or with the layout already stamped. Nothing to
+    /// correct; this is what a *healthy* first stroke looks like.
+    Unchanged = 2,
+    /// ⭐ **The silent refusal.** The probe answered with a real layout, different from the one
+    /// stamped, and the cache of FR-20 has no map for it. The stamp stays stale and the callback
+    /// says nothing, because a callback cannot rebuild the cache.
+    Uncached = 3,
+    /// The stamp was corrected — the repair of defect E, doing its work.
+    Accepted = 4,
+}
+
+impl Restamp {
+    /// How many outcomes there are. The length of [`RESTAMP_OUTCOMES`] and of nothing else.
+    const COUNT: usize = 5;
+
+    /// Every outcome, in the order [`render`] emits them and [`KEYS`] lists them.
+    const ALL: [Self; Self::COUNT] = [
+        Self::Skipped,
+        Self::NoProbe,
+        Self::Unchanged,
+        Self::Uncached,
+        Self::Accepted,
+    ];
+}
+
+/// Records the outcome of one call — or one deliberate non-call — of
+/// [`crate::buffer::Recorder::restamp`]. Task **T-10-15**.
+///
+/// # NFR-01 to NFR-05
+///
+/// One relaxed `fetch_add` and nothing else: no allocation (NFR-03), no lock (NFR-04), no I/O
+/// and nothing formatted (NFR-05), a constant handful of instructions (NFR-01, NFR-02).
+/// `Relaxed` for the reason [`note_buffer_len`] gives — these are counts read for their value,
+/// never for ordering against anything else.
+///
+/// ⚠ **The caller is the hook callback**, and [`Restamp::Skipped`] is published on *every*
+/// stroke that is not the first of a word. That is the same term `note_buffer_len` has always
+/// been called under from the same path, and the whole of this module — statics included — is
+/// compiled out of every build that is not a `testing` one.
+///
+/// Plain `fetch_add` and not a saturating one, which is how every other counter this channel
+/// publishes is written (`watchdog::DESKTOP_SWITCHES`, `guard::PROBES`): saturating costs a
+/// compare-and-swap loop on a path taken once per keystroke, and what it would protect against
+/// is `u32::MAX` strokes inside one session.
+#[inline]
+pub fn note_restamp(outcome: Restamp) {
+    RESTAMP_OUTCOMES[outcome as usize].fetch_add(1, Ordering::Relaxed);
+}
+
 /// [`BUFFER_LEN`] as it stood when the input thread left its message loop.
 ///
 /// The file sink runs on the main thread after every thread has been joined, by which time
@@ -1543,6 +1634,27 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: a count of retries.
     pub clipboard_retries: u32,
+    /// ⭐ The five outcomes of `buffer::Recorder::restamp` — task **T-10-15**, indexed by
+    /// [`Restamp`].
+    ///
+    /// [`RESTAMP_OUTCOMES`] says why they exist: the repair of defect E has five ways to end and
+    /// four of them leave the stamp exactly as it was, so `active_layout` alone cannot tell them
+    /// apart. `restamp_uncached` is the one the task was written around — the refusal that is
+    /// silent by construction.
+    ///
+    /// The five are read in one pass and rendered as five keys, so a single snapshot of the
+    /// channel separates every row of that task's table.
+    ///
+    /// SEC-01, SEC-07: five counts of the program's own decisions. See [`RESTAMP_OUTCOMES`].
+    pub restamp: [u32; Restamp::COUNT],
+}
+
+/// Reads [`RESTAMP_OUTCOMES`] in one pass, in the order of [`Restamp::ALL`].
+///
+/// Not a consistent cut, for the reason [`snapshot`] gives about every other number it takes:
+/// five separate relaxed loads of five monotone counts, none of which has to agree with another.
+fn restamp_outcomes() -> [u32; Restamp::COUNT] {
+    Restamp::ALL.map(|outcome| RESTAMP_OUTCOMES[outcome as usize].load(Ordering::Relaxed))
 }
 
 /// Takes the numbers in one pass — **the single source both sinks read** (decision Р-28).
@@ -1602,6 +1714,7 @@ pub fn snapshot() -> Snapshot {
         clipboard_refusals: clipboard.open_refusals,
         clipboard_close_failures: clipboard.close_failures,
         clipboard_retries: clipboard.open_retries,
+        restamp: restamp_outcomes(),
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1716,6 +1829,14 @@ pub fn snapshot() -> Snapshot {
 /// three mirror `selection::counters()`: the refusal, the close that failed — the one failure
 /// that lasts, because a clipboard left open refuses everybody — and the retry beside them as
 /// the gradient. See [`Snapshot::clipboard_refusals`].
+///
+/// ⭐ The five `restamp_` keys of task **T-10-15** are appended after them, in the order of
+/// [`Restamp::ALL`] and by the same rule every key above them followed: they are the outcome of a
+/// decision the program makes on the hook path, and until they existed the only reading of that
+/// decision was `active_layout` **after** it — which is the same value for four of the five
+/// outcomes. Their whole point is that one snapshot separates «перештамповка не звалась» from
+/// «звалась и отказала, потому что карты нет в кэше FR-20», and those are different defects in
+/// different modules. See [`RESTAMP_OUTCOMES`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1755,7 +1876,12 @@ pub fn render(state: &Snapshot) -> String {
          field_state={}\n\
          clipboard_refusals={}\n\
          clipboard_close_failures={}\n\
-         clipboard_retries={}\n",
+         clipboard_retries={}\n\
+         restamp_skips={}\n\
+         restamp_no_probe={}\n\
+         restamp_unchanged={}\n\
+         restamp_uncached={}\n\
+         restamp_accepted={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1796,6 +1922,11 @@ pub fn render(state: &Snapshot) -> String {
         state.clipboard_refusals,
         state.clipboard_close_failures,
         state.clipboard_retries,
+        state.restamp[Restamp::Skipped as usize],
+        state.restamp[Restamp::NoProbe as usize],
+        state.restamp[Restamp::Unchanged as usize],
+        state.restamp[Restamp::Uncached as usize],
+        state.restamp[Restamp::Accepted as usize],
     )
 }
 
@@ -1816,7 +1947,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 38] = [
+pub const KEYS: [&str; 43] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1855,6 +1986,11 @@ pub const KEYS: [&str; 38] = [
     "clipboard_refusals",
     "clipboard_close_failures",
     "clipboard_retries",
+    "restamp_skips",
+    "restamp_no_probe",
+    "restamp_unchanged",
+    "restamp_uncached",
+    "restamp_accepted",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

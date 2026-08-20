@@ -52,7 +52,7 @@ use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
 use lang_switcher::guard::Field;
 use lang_switcher::hook::{Edge, KeyEvent};
-use lang_switcher::layouts::LayoutId;
+use lang_switcher::layouts::{KeyMapping, LayoutCache, LayoutId, LayoutMapBuilder, Mods};
 use lang_switcher::settings::ReplacementMethod;
 use lang_switcher::watchdog;
 use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
@@ -2013,12 +2013,14 @@ fn the_three_clipboard_keys_of_t_10_11_are_published_as_decimal_counts_at_the_ta
         assert!(!control::RESERVED_KEYS.contains(&key));
     }
 
-    // Appended in that order, and at the end — the rule every key since task T-05-2a has
-    // followed, written against fixed indices for the reason given at
-    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
-    // assertion travels with the last-appended key: it is the check that no key reached the
-    // channel without a review, and its place is beside the key that currently closes the
-    // list, so that a task which adds one is the task that edits it.
+    // Appended in that order — the rule every key since task T-05-2a has followed, written
+    // against fixed indices for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`.
+    //
+    // ⚠ The length assertion that used to stand here has moved to
+    // `the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot`: it travels with
+    // the key that currently **closes** the list, so that a task which appends one is the task
+    // that edits it. Task T-10-15 appended five, so these three no longer close anything.
     assert_eq!(
         &control::KEYS[35..38],
         &[
@@ -2027,7 +2029,6 @@ fn the_three_clipboard_keys_of_t_10_11_are_published_as_decimal_counts_at_the_ta
             "clipboard_retries"
         ]
     );
-    assert_eq!(control::KEYS.len(), 38);
 }
 
 /// The three keys mirror `selection::counters()` and are not invented here.
@@ -2106,4 +2107,249 @@ fn the_last_replacement_method_key_mirrors_what_was_published_into_it() {
     // decidable ran", not a decision the program did not make.
     control::note_replacement_method(ReplacementMethod::Auto);
     assert_eq!(control::snapshot().last_replacement_method, "none");
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-10-15 — the five outcomes of the repair of defect E, which were one reading
+// -------------------------------------------------------------------------------------
+
+/// The layouts of the synthetic cache below. The same values `tests\buffer.rs` uses, and for the
+/// same reason: a test states its premise instead of depending on what the keyboard of the
+/// machine running it happens to be doing.
+const EN: LayoutId = LayoutId::from_raw(0x0409_0409);
+/// The other half of the cache.
+const RU: LayoutId = LayoutId::from_raw(0x0419_0419);
+/// A layout the cache of FR-20 does **not** hold — the premise of the silent refusal.
+const NOT_IN_CACHE: LayoutId = LayoutId::from_raw(0x0407_0407);
+
+/// A cache of FR-20 holding exactly [`EN`] and [`RU`], with one key on each.
+///
+/// One key is enough: nothing here decodes anything, and what the refusal turns on is
+/// `LayoutCache::contains`, which is a question about the *set of layouts* and not about the
+/// contents of a map.
+fn two_layout_cache() -> LayoutCache {
+    let map_of = |layout: LayoutId, character: char| {
+        let mut builder = LayoutMapBuilder::new(layout);
+        builder.set(SCAN_A, false, Mods::NONE, KeyMapping::from_char(character));
+        builder.finish()
+    };
+
+    LayoutCache::from_maps(vec![map_of(EN, 'a'), map_of(RU, 'ф')]).expect("two non-empty maps")
+}
+
+/// The probe of a machine really running [`RU`] — the layout the cache **does** hold.
+fn probe_russian() -> LayoutId {
+    RU
+}
+
+/// The probe of a machine really running [`EN`] — the layout already stamped.
+fn probe_english() -> LayoutId {
+    EN
+}
+
+/// No foreground window at all: the desktop is switching, or this is the secure desktop.
+fn probe_nothing() -> LayoutId {
+    LayoutId::default()
+}
+
+/// ⭐ The probe of a machine whose real layout the cache has no map for.
+fn probe_uncached() -> LayoutId {
+    NOT_IN_CACHE
+}
+
+/// The change in the five counts, as a difference — the reading this channel is diffed for.
+fn restamp_delta(before: [u32; 5], after: [u32; 5]) -> [i64; 5] {
+    core::array::from_fn(|index| i64::from(after[index]) - i64::from(before[index]))
+}
+
+/// Installs a recorder with the cache of FR-20, [`EN`] stamped, and the given probe.
+fn recorder_with(probe: buffer::LayoutProbe) {
+    let mut recorder = Recorder::with_capacity(8);
+    recorder.set_cache(two_layout_cache());
+    recorder.set_active_layout(EN);
+    recorder.stamp_layout_with(probe);
+    buffer::install_recorder(recorder);
+}
+
+/// ⭐ **Every outcome of `Recorder::restamp` is a different reading of one snapshot** — the whole
+/// of criterion 9 of task T-10-15, driven through the real recorder rather than through
+/// `note_restamp`.
+///
+/// # Why this is the test and five calls of `note_restamp` are not
+///
+/// The publisher is trivial and could not be wrong in an interesting way. What could — and what
+/// three repairs in a row were misled by — is the **pairing**: which branch of the repair
+/// publishes which count. A test that called the publisher five times would assert that five
+/// atomics can be incremented, and would go on passing if the branches were wired to each other's
+/// counters. So every arm below builds the *premise of the branch* — a recorder with or without a
+/// probe; a probe answering a layout the cache holds, does not hold, or already stamps — presses
+/// a key through `buffer::record`, and reads the channel.
+///
+/// # ⚠ The negative half of each arm
+///
+/// Each arm asserts the whole vector of five and not only its own entry, so a branch that
+/// published *two* counts, or published somebody else's, fails here. That is the same demand the
+/// instrument of this task's experiment is held to: a reading is worth something only when the
+/// values it must **not** take are pinned as well.
+#[test]
+fn the_five_restamp_keys_of_t_10_15_are_paired_with_the_branches_that_publish_them() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    // ---- outcome 1: not called at all, because the ring is not empty ---------------------
+    // The recorder has both a probe and a cache, so the *only* thing keeping the branch shut is
+    // the ring — which is what this outcome means.
+    recorder_with(probe_russian);
+
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        buffer::with(|recorder| recorder.len()),
+        Some(1),
+        "the first stroke of the word is in the ring, so the next one is not a first stroke"
+    );
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [1, 0, 0, 0, 0],
+        "a stroke that is not the first of a word moves restamp_skips and nothing else"
+    );
+
+    // ---- outcome 2: called, and there is no probe ----------------------------------------
+    buffer::install_recorder(Recorder::with_capacity(8));
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [0, 1, 0, 0, 0],
+        "a recorder without a probe moves restamp_no_probe and nothing else"
+    );
+
+    // ---- outcome 3: the probe answers with the layout already stamped ---------------------
+    recorder_with(probe_english);
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [0, 0, 1, 0, 0],
+        "a stamp that already agrees moves restamp_unchanged and nothing else"
+    );
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(EN),
+        "and leaves the stamp exactly where it was"
+    );
+
+    // ---- outcome 3 again: no foreground window at all -------------------------------------
+    // The secure desktop and the interval of a desktop switch both answer this way, and the
+    // experiment of this task walks straight through them — so the arm is measured, not assumed.
+    recorder_with(probe_nothing);
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [0, 0, 1, 0, 0],
+        "an empty answer is the same outcome and is counted as one"
+    );
+
+    // ---- outcome 4: ⭐ the silent refusal — the cache has no map for what the probe read ---
+    recorder_with(probe_uncached);
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [0, 0, 0, 1, 0],
+        "a layout the cache of FR-20 does not hold moves restamp_uncached and nothing else"
+    );
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(EN),
+        "and the stamp stays stale — which is the defect this key was added to make visible"
+    );
+
+    // ---- outcome 5: the repair doing its work ---------------------------------------------
+    recorder_with(probe_russian);
+
+    let before = control::snapshot().restamp;
+    press(VK_A.0, SCAN_A);
+    assert_eq!(
+        restamp_delta(before, control::snapshot().restamp),
+        [0, 0, 0, 0, 1],
+        "a layout the cache holds moves restamp_accepted and nothing else"
+    );
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(RU),
+        "and the stamp really was corrected"
+    );
+
+    // Leave a plain recorder behind — the shape every other test of this binary installs for
+    // itself anyway, and one that holds neither a probe nor a cache of ours.
+    buffer::install_recorder(Recorder::with_capacity(8));
+}
+
+/// The five keys are published, they are decimal counts, and they close the tail of `KEYS`.
+///
+/// # Why five and not one
+///
+/// The repair of defect E has five ways to end and **four of them leave the stamp exactly as it
+/// was**, so `active_layout` — the only key that said anything about the stamp — reads the same
+/// for all four. Task T-10-15 was given a defect three repairs in a row had missed, and the
+/// instrument it started from could not tell «перештамповка не звалась» from «звалась и отказала,
+/// потому что карты раскладки нет в кэше FR-20». Those are different defects in different modules
+/// and they now differ by one line of one snapshot.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// Five counts of the program's own decisions, asserted below by refusing every value that is not
+/// a bare decimal. Not a character, not a scan code, not a stroke — and deliberately not the
+/// layout that was refused either.
+#[test]
+fn the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot() {
+    let text = control::render(&control::snapshot());
+
+    for key in [
+        "restamp_skips",
+        "restamp_no_probe",
+        "restamp_unchanged",
+        "restamp_uncached",
+        "restamp_accepted",
+    ] {
+        let published = text
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .unwrap_or_else(|| panic!("the channel does not publish {key}"));
+
+        println!("{key}={published}");
+
+        assert!(
+            !published.is_empty() && published.bytes().all(|byte| byte.is_ascii_digit()),
+            "{key} must be a decimal count, not {published:?}"
+        );
+
+        assert!(control::KEYS.contains(&key));
+        assert!(!control::RESERVED_KEYS.contains(&key));
+    }
+
+    // Appended in that order, and at the end — the rule every key since task T-05-2a has
+    // followed, written against fixed indices for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
+    // assertion travels with the last-appended key: it is the check that no key reached the
+    // channel without a review, and its place is beside the key that currently closes the
+    // list, so that a task which adds one is the task that edits it.
+    assert_eq!(
+        &control::KEYS[38..43],
+        &[
+            "restamp_skips",
+            "restamp_no_probe",
+            "restamp_unchanged",
+            "restamp_uncached",
+            "restamp_accepted"
+        ]
+    );
+    assert_eq!(control::KEYS.len(), 43);
 }

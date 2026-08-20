@@ -121,6 +121,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-sequence") => experiment_sequence(arguments),
         Some("--experiment-stamp") => experiment_stamp(arguments),
         Some("--experiment-latency") => experiment_latency(arguments),
+        Some("--experiment-away") => experiment_away(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -486,6 +487,37 @@ fn experiment_stamp(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_stamp(&context, rounds)
+}
+
+/// ⭐ **Task T-10-15** — which of the five outcomes of `Recorder::restamp` really happens, on the
+/// **installed** copy.
+///
+/// The same split as every mode of this file: the arm builds the context, the experiment lives in
+/// `scenarios.rs`. `--experiment-away [кругов]`. There is no `--installed` switch, and that is
+/// deliberate — the whole subject of the task is the configuration the person's defect lives in,
+/// so the installed copy is the only product this mode will run. See
+/// [`scenarios::experiment_away`].
+fn experiment_away(arguments: &[String]) -> std::process::ExitCode {
+    let rounds = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_away(&context, rounds)
 }
 
 /// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.
