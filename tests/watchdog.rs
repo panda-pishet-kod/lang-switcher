@@ -43,18 +43,18 @@ use lang_switcher::buffer::{self, Recorder, ResetOutcome};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{self, Counters, FLUSH_EVENTS, Rebuild, WM_APP_FLUSH, WM_APP_LAYOUT};
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::{GetRegisteredRawInputDevices, RAWINPUTDEVICE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, EVENT_OBJECT_FOCUS,
     EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetMessageTime,
-    GetWindowThreadProcessId, HWND_MESSAGE, MSG, PBT_APMRESUMEAUTOMATIC, PM_REMOVE, PeekMessageW,
-    RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP,
-    RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP,
-    RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, WINDOW_STYLE,
-    WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE, WM_POWERBROADCAST,
-    WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
+    GetWindowThreadProcessId, HWND_MESSAGE, MSG, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PM_REMOVE,
+    PeekMessageW, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
+    RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN,
+    RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL,
+    RI_MOUSE_WHEEL, WINDOW_STYLE, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
+    WM_INPUTLANGCHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
 
@@ -530,6 +530,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         device_notice_failures: after.device_notice_failures - before.device_notice_failures,
         background_skips: after.background_skips - before.background_skips,
         focus_repeats: after.focus_repeats - before.focus_repeats,
+        recovery_probes: after.recovery_probes - before.recovery_probes,
     }
 }
 
@@ -662,10 +663,29 @@ fn all_three_subscriptions_install_and_come_off() {
     drop(again);
 }
 
+/// The turn-taking lock for every test that makes this process's **one** notice window, or that
+/// asserts on the counters the two system messages of FR-80 move — task **T-10-13**.
+///
+/// ⚠ `NOTICE_WINDOW` is a process-wide cell and `register_session_notice` is what fills it, so
+/// two tests holding registrations at once would each be answering `is_ui_window` for the
+/// other's window; and `POWER_RESUMES`, `SESSION_CHANGES` and `RECOVERY_PROBES` are process-wide
+/// counters, so a test asserting "nothing moved" beside a test that moves them is asserting on
+/// its neighbour's timing. `cargo test` runs the tests of a binary in parallel, which is exactly
+/// how the Raw Input pair above first failed; the same cure, for the same reason.
+static NOTICE_TURN: Mutex<()> = Mutex::new(());
+
+/// Takes the turn, ignoring poisoning — see [`raw_input_turn`] for why.
+fn notice_turn() -> std::sync::MutexGuard<'static, ()> {
+    NOTICE_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Criterion 10: the registration of FR-80 is made and — the half the task specification calls
 /// obligatory — withdrawn.
 #[test]
 fn the_session_registration_of_fr80_is_accepted_and_withdrawn() {
+    let _turn = notice_turn();
     let window = TestWindow::new();
 
     let registration = watchdog::register_session_notice(window.handle)
@@ -733,6 +753,8 @@ fn the_private_messages_of_this_process_are_all_distinct() {
 /// process does not have, so none of them does anything here — least of all install a hook.
 #[test]
 fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
+    let _turn = notice_turn();
+
     // The preconditions this test rests on, asserted rather than assumed: this thread owns no
     // typing buffer, so it is not the input thread, and this process has no hook.
     assert!(
@@ -772,6 +794,151 @@ fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
     // The one that matters: no keyboard hook exists in this process, and the keyboard of
     // whoever is running `cargo test` is untouched.
     assert!(!lang_switcher::hook::is_installed());
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-13 — the stamp after an absence
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **Defect E, the detector.** Coming back from sleep or from a locked session asks the input
+/// thread to re-read the layout, and it does so **before** the user can type.
+///
+/// # What this is about
+///
+/// The direction of FR-26 is taken from the layout stamp, and `Stroke::new` copies that stamp
+/// into **every stroke as it is recorded** (`src\buffer.rs`). A stamp that is stale while the
+/// user types therefore converts the word «в себя» — the «моргает» of the acceptance run — and
+/// no refresh made afterwards can undo it: the strokes already carry the wrong layout. So the
+/// requirement is not "refresh eventually" but "refresh before the first keystroke", and the
+/// three mechanisms of FR-80 that observe an external event are the only moments at which this
+/// program learns that it was away at all.
+///
+/// Before this task the two arms below did `request_rehook` and nothing else. Measured on the
+/// **running product** (task report, §2): the same six keys typed under a layout the stamp did
+/// not name blinked on the first press and converted on the second, and a delivered
+/// `PBT_APMRESUMEAUTOMATIC` — `posted=True` from a relay at high integrity, because UIPI refuses
+/// a plain post — changed nothing; one `WM_APP_LAYOUT` posted into the same product repaired the
+/// very first press.
+///
+/// # Why the counter and not `layout_probes`
+///
+/// `layout_probes` counts probes the **input thread answered**, and this process has no input
+/// thread; it is flat here whatever the product does, so a test reading it would be green for
+/// the wrong reason. `recovery_probes` counts the probe where it is **sent**, which is the half
+/// of the mechanism that lives in this module and the half this test can see.
+///
+/// # The positive controls
+///
+/// `power_resumes` and `session_changes` growing is the proof the message really reached the arm
+/// — a run with every counter flat would otherwise be indistinguishable from a message nobody
+/// delivered, which is precisely the trap the live measurement fell into and was caught by
+/// examining the Win32 return. `recoveries` staying flat is the proof that no hook was installed
+/// on the way, and `window_flushes` staying flat is FR-11: a layout question is never a flush.
+#[test]
+fn coming_back_from_an_absence_asks_for_a_fresh_layout_stamp() {
+    let _turn = notice_turn();
+
+    let window = TestWindow::new();
+
+    // The registration is what publishes `NOTICE_WINDOW`, and `is_ui_window` reading that cell
+    // is what binds the two system arms to this window. Without it the messages below fall
+    // through to `DefWindowProcW` and this test would assert on nothing (SEC-05).
+    let notice = watchdog::register_session_notice(window.handle)
+        .expect("WTSRegisterSessionNotification must be accepted");
+
+    let before = watchdog::counters();
+    let before_health = watchdog::health();
+
+    // **The machine woke.** `PBT_APMRESUMEAUTOMATIC` is delivered on every resume, including the
+    // ones nobody was present for — FR-80's third mechanism.
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_POWERBROADCAST,
+            WPARAM(PBT_APMRESUMEAUTOMATIC as usize)
+        ),
+        Some(LRESULT(1)),
+        "a power notification at the UI window is answered TRUE"
+    );
+
+    let after_resume = watchdog::counters();
+    let health_after_resume = watchdog::health();
+
+    assert_eq!(
+        health_after_resume.power_resumes,
+        before_health.power_resumes + 1,
+        "positive control: the broadcast reached the arm"
+    );
+    assert_eq!(
+        delta(before, after_resume).recovery_probes,
+        1,
+        "T-10-13: waking up must ask the input thread to re-read the layout (FR-21, FR-26)"
+    );
+
+    // **The session came back.** Lock and unlock deliver `WM_WTSSESSION_CHANGE`, and the
+    // acceptance run passed position 19 only because the password typed at the lock screen
+    // released a modifier and that released modifier posted a probe — the product's own
+    // `LAYOUT_PROBE_MODIFIERS` path, measured arm F of the report. Nothing about a session
+    // change guarantees a modifier, so the same probe has to be posted here.
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_WTSSESSION_CHANGE,
+            WPARAM(WTS_SESSION_UNLOCK as usize)
+        ),
+        Some(LRESULT(0))
+    );
+
+    let after_unlock = watchdog::counters();
+    let health_after_unlock = watchdog::health();
+
+    assert_eq!(
+        health_after_unlock.session_changes,
+        before_health.session_changes + 1,
+        "positive control: the session change reached the arm"
+    );
+    assert_eq!(
+        delta(before, after_unlock).recovery_probes,
+        2,
+        "T-10-13: an unlocked session must ask for the layout too"
+    );
+
+    // **The negative control.** Suspending is not coming back, and the other `PBT_*` subtypes
+    // must leave both counters alone: a probe on every power notification would be a mechanism
+    // that fires when nothing has happened.
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_POWERBROADCAST,
+            WPARAM(PBT_APMSUSPEND as usize)
+        ),
+        Some(LRESULT(1))
+    );
+
+    let after_suspend = watchdog::counters();
+
+    assert_eq!(
+        watchdog::health().power_resumes,
+        health_after_unlock.power_resumes,
+        "a suspend is not a resume and is counted by nobody"
+    );
+    assert_eq!(
+        delta(before, after_suspend).recovery_probes,
+        2,
+        "going to sleep is not coming back from it"
+    );
+
+    // Nothing else moved. No hook was installed — `reinstall_hook` belongs to the input window
+    // and none of the arms above is it — and FR-11 holds: a layout question is not a flush.
+    let whole = delta(before, after_suspend);
+
+    assert_eq!(watchdog::health().recoveries, before_health.recoveries);
+    assert_eq!(whole.window_flushes, 0, "FR-11: a probe never flushes");
+    assert_eq!(whole.window_flushes_taken, 0);
+    assert_eq!(whole.strokes_removed, 0);
+    assert!(!lang_switcher::hook::is_installed());
+
+    drop(notice);
 }
 
 /// FR-90, criterion 18: the state the tray of task T-08-1 will show is readable from outside

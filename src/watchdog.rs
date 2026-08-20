@@ -140,6 +140,23 @@
 //!   [`Health::silent_removals`]. That count is a diagnostic, not a decision — the reinstall
 //!   happens either way.
 //!
+//! # Coming back is more than the hook — defect E, task T-10-13
+//!
+//! The three mechanisms that observe an **event** all mean the same thing about the world: this
+//! program was away, and something may have moved while it was. FR-80 was written about the one
+//! thing that can move and cannot be seen — the hook — but it is not the only one. The layout
+//! stamp is refreshed by [`WM_APP_LAYOUT`] and by nothing else, and a machine coming back from
+//! sleep owes this program neither a focus change nor a released modifier, which are two of the
+//! three occasions that post it. So the user types into the window that was already in front,
+//! under a layout the stamp does not name, and the direction of FR-26 is decided from a stale
+//! value: the word converts «в себя» and «моргает».
+//!
+//! Each of the three therefore posts one layout probe beside its reinstallation request — see
+//! [`probe_layout_after_absence`], which is also where the measurement and the reason the fourth
+//! mechanism is **not** among them are written down. The reinstallation conditions themselves are
+//! untouched: what FR-80 does about the hook is FR-80's, and this is a second, independent
+//! question that happens to be answered on the same three events.
+//!
 //! ⚠ **Synthetic input is not used as a pulse.** Sending a keystroke with `SendInput` to see
 //! whether it comes back through the callback would put keystrokes into whatever window the
 //! user has in front of them, on a timer, and would entangle the watchdog with the injected-
@@ -302,7 +319,14 @@ pub const WM_APP_FLUSH: u32 = WM_APP + 6;
 /// of FR-21.
 ///
 /// `WM_APP + 7`, the next free number after [`WM_APP_FLUSH`]. Posted by [`win_event_proc`] when
-/// the foreground window changes and by [`crate::app`] when the shell reports a language change.
+/// the foreground window changes; by [`crate::hook`] when a modifier key is released (task
+/// T-03-3c); by [`crate::app`] after the third switching method of FR-50 finishes on another
+/// thread (task T-10-5); and by [`probe_layout_after_absence`] on each of the three event-driven
+/// mechanisms of FR-80 — a desktop switch, a session change and a resume (task **T-10-13**).
+///
+/// The list is worth keeping accurate, because the defect that added the last entry *was* the
+/// list: the stamp is refreshed by this message and by nothing else, so an occasion missing from
+/// it is an occasion on which the direction of FR-26 is decided by a stale value.
 ///
 /// SEC-05: it carries nothing either. The handler asks the *system* what the foreground window's
 /// layout is; the sender cannot put a layout into it.
@@ -603,6 +627,21 @@ static LAYOUT_PROBES: AtomicU32 = AtomicU32::new(0);
 /// length. Zero on every healthy run, and nothing in the program reads it as a decision.
 static DEVICE_NOTICE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
+/// [`WM_APP_LAYOUT`] probes this module posted because the program had been **away** — task
+/// **T-10-13**, and the observable half of that repair.
+///
+/// Counted where the probe is *sent*, not where it is answered, which is what makes it the
+/// number a test can read: [`LAYOUT_PROBES`] belongs to the input thread and stays at zero in a
+/// process that has no input thread, so a run with both flat would prove nothing at all. Growth
+/// here says the recovery path did ask; the difference against [`LAYOUT_PROBES`] on a live run
+/// says how many of the questions were answered.
+///
+/// Deliberately **not** incremented by the focus-change probe of [`win_event_proc`]: that probe
+/// is the ordinary traffic of FR-21 and would drown the quantity this counter exists to show,
+/// which is "the stamp was refreshed after an absence". SEC-07: a count of events, and there is
+/// nothing else it could ever hold.
+static RECOVERY_PROBES: AtomicU32 = AtomicU32::new(0);
+
 /// Counts of what the subscriptions of this module have done — SEC-07 allows counts and nothing
 /// else, and these are counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -641,6 +680,9 @@ pub struct Counters {
     /// task T-10-0e. See [`FOCUS_REPEATS`]: growth here under a staged same-hwnd churn is
     /// the positive control that the churn was delivered and turned away.
     pub focus_repeats: u32,
+    /// Layout probes posted after an absence — task T-10-13. See [`RECOVERY_PROBES`]: this is
+    /// the send side of the probe, where `layout_probes` is the answer side.
+    pub recovery_probes: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -659,6 +701,7 @@ pub fn counters() -> Counters {
         device_notice_failures: DEVICE_NOTICE_FAILURES.load(Ordering::Relaxed),
         background_skips: BACKGROUND_SKIPS.load(Ordering::Relaxed),
         focus_repeats: FOCUS_REPEATS.load(Ordering::Relaxed),
+        recovery_probes: RECOVERY_PROBES.load(Ordering::Relaxed),
     }
 }
 
@@ -1344,6 +1387,25 @@ unsafe extern "system" fn win_event_proc(
         // exactly what makes the mechanism correct without knowing which direction is which.
         DESKTOP_SWITCHES.fetch_add(1, Ordering::Relaxed);
         request_rehook(Reason::DesktopSwitch);
+
+        // **Defect E, task T-10-13.** The third of the three event-driven mechanisms, and it is
+        // in for the same measured reason as the other two rather than by analogy: locking the
+        // session raises this event in both directions — the lock screen is another desktop —
+        // and position 19 of the acceptance matrix, which is exactly that, still needed the
+        // password's modifier release to convert on the first press (arms D and F of the task
+        // report). So a desktop switch does not refresh the stamp either, and the secure desktop
+        // is the one place where the user can change the input language while this program's
+        // hook cannot see a single stroke of it.
+        //
+        // The `return` below is why this cannot be left to the code further down: a desktop
+        // switch never reaches the flush-and-probe path of a focus change. Two events arrive for
+        // one prompt, one per direction; the first finds `GetForegroundWindow` empty on the
+        // secure desktop and `refresh_layout_and_cache` treats that as "not a change", so it is
+        // the second — the one that lands back on the user's desktop — that does the work. That
+        // is the same "twice is what makes it correct without knowing which direction is which"
+        // the reinstallation above relies on.
+        probe_layout_after_absence();
+
         return;
     }
 
@@ -1604,6 +1666,50 @@ pub fn request_rehook(reason: Reason) {
     crate::app::post_to_input_thread(WM_APP_REHOOK);
 }
 
+/// Asks the input thread to re-read the keyboard layout, because this program has just learnt
+/// that it was **away** — defect E, task **T-10-13**.
+///
+/// # What goes wrong without it
+///
+/// The direction of FR-26 is taken from the layout stamp, and the stamp is refreshed by
+/// [`WM_APP_LAYOUT`] and by nothing else. Only three occasions post that message: a focus change
+/// ([`win_event_proc`] below), the release of a modifier key ([`crate::hook`]'s
+/// `LAYOUT_PROBE_MODIFIERS`, task T-03-3c), and the third switching method of FR-50 finishing on
+/// another thread (task T-10-5). **A machine that wakes up owes this program none of the three.**
+/// The user comes back to the window that was already in front, types, presses the hotkey — and
+/// the word is converted «в себя», which is what the acceptance run of 2026-08-20 saw as
+/// «первое нажатие моргает, со второго всё работает».
+///
+/// # Why the refresh has to happen *here* and not at the hotkey
+///
+/// Because `Stroke::new` copies the stamp into **every stroke as it is recorded**
+/// (`crate::buffer`). By the time the hotkey arrives the word already carries the layout it was
+/// recorded under, and no refresh can go back and change it. Measured, on the running product:
+/// the same probe delivered *after* the six keys repaired nothing, and delivered *before* them
+/// repaired the very first press. That is the whole content of "the stamp must be fresh before
+/// the user can type a word".
+///
+/// # NFR-10
+///
+/// One `PostMessageW` of a message that already exists, on an event that already arrives. No
+/// timer, no polling, no new mechanism — the same shape task T-10-5 used for method 3 of FR-50.
+/// The input thread answers in `app::refresh_layout_and_cache`, which re-reads FR-52 and rebuilds
+/// the cache **only if the layout really moved**; after a wake-up that has not changed anything
+/// the probe costs one `GetKeyboardLayout` and one comparison.
+///
+/// ⚠ **Deliberately not on the liveness timer.** That is FR-80's fourth mechanism and the only
+/// one that fires when nothing has happened; a probe there would be a poll of the keyboard layout
+/// every thirty seconds, which is exactly what NFR-10 forbids. The three callers below are the
+/// three that observe an event in the world.
+///
+/// ⚠ **It is not a flush** (FR-11). The buffer is left exactly as it is — a layout question never
+/// throws away what the user has typed, and the two arms this is called from do not appear in the
+/// FR-10 table.
+fn probe_layout_after_absence() {
+    RECOVERY_PROBES.fetch_add(1, Ordering::Relaxed);
+    crate::app::post_to_input_thread(WM_APP_LAYOUT);
+}
+
 /// Takes the hook off and puts it back — the single recovery path of FR-80, and the only place
 /// in this module that touches [`crate::hook`].
 ///
@@ -1720,6 +1826,13 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
             if wparam.0 as u32 == PBT_APMRESUMEAUTOMATIC {
                 POWER_RESUMES.fetch_add(1, Ordering::Relaxed);
                 request_rehook(Reason::PowerResume);
+
+                // **Defect E, task T-10-13.** The hook coming back is not the whole of coming
+                // back: the layout stamp has to be fresh before the user's first keystroke, and
+                // a resume owes this program no focus change and no modifier release. See
+                // [`probe_layout_after_absence`]. The line above is untouched — which hook is
+                // reinstalled and when is FR-80 and is not this task's.
+                probe_layout_after_absence();
             }
 
             // TRUE, which is what a window that has finished with a power notification answers.
@@ -1736,6 +1849,15 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
         WM_WTSSESSION_CHANGE if is_ui_window(window) => {
             SESSION_CHANGES.fetch_add(1, Ordering::Relaxed);
             request_rehook(Reason::SessionChange);
+
+            // **Defect E, task T-10-13.** Position 19 of the acceptance matrix — lock, unlock,
+            // type — passed **by luck**: the password typed at the lock screen released a
+            // modifier, and a released modifier is one of the three occasions that post the
+            // probe. Measured: this message, delivered to the running product, refreshed nothing
+            // by itself. A session that unlocks without a password, or with one typed on the
+            // secure desktop where no hook of ours sees it, has no such luck.
+            probe_layout_after_absence();
+
             Some(LRESULT(0))
         }
 
