@@ -31,6 +31,7 @@
 //! third verdict of decision Р-30 stays where it belongs: the positions the bench may not drive
 //! at all, which §11.6 hands to a person, and the requirements no task has written yet.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -7653,4 +7654,863 @@ fn arm_uncached(target: &input::Target, content: &Element) -> Result<bool, Strin
     let _ = layout::ensure(target.hwnd, layout::US, Duration::from_secs(5));
 
     measured
+}
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Опыт T-10-16 — окно гонки: серия с меняющимся таймингом
+// ---------------------------------------------------------------------------------------
+
+/// The grid of pauses `D`, in milliseconds, between the switch and the first keystroke — §2 of
+/// task T-10-16.
+const RACE_GRID: [u64; 11] = [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+
+/// The three points of the grid the negative control of §3 is run at.
+const RACE_CONTROL_GRID: [u64; 3] = [0, 10, 100];
+
+/// How long §1's tight poll is willing to wait for the system's own report to move.
+///
+/// Not a delay anything is decided by: the poll ends at the first reading that differs, so this
+/// bound is only reached by «отчёт не изменился вовсе» — which is itself one of the numbers §1
+/// asks for, and is reported as such rather than as a timeout.
+const RACE_REPORT_BOUND: Duration = Duration::from_millis(400);
+
+/// Where the raw numbers of the series are written — one line per circle, appended as it happens.
+///
+/// Beside the report, because the task says the next task will need them. Under `%TEMP%` when
+/// that directory does not exist, because losing a quarter-hour series to a missing folder would
+/// be the wrong trade. No new environment variable (Р-53).
+fn race_raw_path() -> std::path::PathBuf {
+    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    if beside.is_dir() {
+        beside.join("T-10-16-серия.csv")
+    } else {
+        std::env::temp_dir().join("T-10-16-серия.csv")
+    }
+}
+
+/// Appends one raw line, opening the file per call so that a run cut short leaves everything up
+/// to that point already on disk. Failures are reported and never fatal — as in [`protocol`].
+fn race_raw(line: &str) {
+    use std::io::Write;
+
+    let path = race_raw_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Err(error) => eprintln!("⚠ сырой протокол {} не открылся: {error}", path.display()),
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{line}") {
+                eprintln!("⚠ сырой протокол не записался: {error}");
+            }
+        }
+    }
+}
+
+/// Minimum, median, 95th percentile and maximum — **the distribution §1 asks for instead of a
+/// mean**.
+///
+/// Percentiles by nearest rank on the sorted sample, in integer arithmetic: a mean would hide
+/// exactly the tail the question is about.
+fn race_distribution(samples: &[u64]) -> String {
+    if samples.is_empty() {
+        return "нет ни одной выборки".to_owned();
+    }
+
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let last = sorted.len() - 1;
+    let at = |numerator: usize, denominator: usize| sorted[last * numerator / denominator];
+
+    format!(
+        "n={} min={} медиана={} p95={} max={} (мкс)",
+        sorted.len(),
+        sorted[0],
+        at(1, 2),
+        at(19, 20),
+        sorted[last]
+    )
+}
+
+/// The pause `D` of §2 — **the independent variable of the experiment and nothing else**.
+///
+/// ⚠ This is a **fixed** wait, and it is fixed on purpose. Requirement 1 of §11.5 forbids
+/// deciding that something is ready by waiting a fixed time; nothing is decided here. `D` is the
+/// quantity under study — the answer of §2 is a curve of the failure rate **against** it — so a
+/// wait on a condition would destroy the measurement rather than improve it.
+///
+/// Spun at the small end rather than slept: `std::thread::sleep` on Windows rounds up to the
+/// scheduler's tick, so a requested millisecond can cost fifteen and the four smallest points of
+/// [`RACE_GRID`] would collapse into one. Above thirty milliseconds most of the wait is slept and
+/// only the last stretch is spun, so a second of grid costs a second and not a core.
+fn race_pause(millis: u64) {
+    if millis == 0 {
+        return;
+    }
+
+    let deadline = Instant::now() + Duration::from_millis(millis);
+    if millis > 30 {
+        std::thread::sleep(Duration::from_millis(millis - 10));
+    }
+    while Instant::now() < deadline {
+        std::hint::spin_loop();
+    }
+}
+
+/// One channel read that yields **both** the five counters and the stamp.
+///
+/// Two reads would cost two round trips and could straddle a change; the circle needs the pair,
+/// so the pair comes out of one snapshot.
+fn race_channel() -> (Option<RestampCounts>, Option<u32>) {
+    let Ok(snapshot) = crate::channel::read() else {
+        return (None, None);
+    };
+
+    let mut values = [0u64; RESTAMP_KEYS.len()];
+    let mut complete = true;
+    for (slot, key) in values.iter_mut().zip(RESTAMP_KEYS) {
+        match snapshot
+            .get(key)
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            Some(value) => *slot = value,
+            None => complete = false,
+        }
+    }
+
+    let stamp = snapshot.get("active_layout").and_then(parse_hkl);
+    (complete.then_some(RestampCounts(values)), stamp)
+}
+
+/// ⭐ **The ground truth of this task, and the only one available.**
+///
+/// What the field reads back after **one** keystroke on the `G` key is what the layout really
+/// was at the instant that key was processed — because [`input::type_text`] sends the virtual key
+/// and its scan code, exactly as a keyboard does, and lets the system decode it. `g` means the
+/// key was decoded under en-US, `п` means ru-RU. This is what the person at the machine sees, and
+/// §1 of the task says in as many words that it is what to measure when there is nothing to
+/// compare `GetKeyboardLayout` against.
+fn race_truth_of(first: &str) -> Option<u32> {
+    match first {
+        "g" => Some(layout::US),
+        "п" => Some(layout::RUSSIAN),
+        _ => None,
+    }
+}
+
+/// A layout id for the raw file, or `?`.
+fn race_hex(id: Option<u32>) -> String {
+    id.map_or_else(|| "?".to_owned(), |id| format!("0x{id:08X}"))
+}
+
+/// A share in per cent, where an empty denominator answers zero instead of dividing by it.
+fn race_percent(part: usize, whole: usize) -> usize {
+    part * 100 / whole.max(1)
+}
+
+/// ⚠ [`layout::ensure`], retried — **a precondition that is built, and known to sometimes need
+/// building twice.**
+///
+/// Measured while the first pass of this series was running, and worth writing down because it
+/// is the same asymmetry from the other side: a `WM_INPUTLANGCHANGEREQUEST` posted a millisecond
+/// or two after the system's own `Alt+Shift` is sometimes not acted on at all, and the window
+/// stays where it was. It happened into `ru-RU` and never into `en-US`, roughly once in a
+/// hundred repetitions.
+///
+/// So the precondition is attempted three times, and a circle that still cannot build it is
+/// **skipped and counted as skipped** — never silently allowed to become a reading, and never
+/// allowed to end the stage either, because one dropped message is not a reason to lose a
+/// quarter-hour series.
+fn race_ensure(hwnd: HWND, language: u32) -> Result<u32, String> {
+    let mut last = "не пробовали".to_owned();
+
+    for _ in 0..3 {
+        match layout::ensure(hwnd, language, Duration::from_secs(2)) {
+            Ok(id) => return Ok(id),
+            Err(error) => last = error,
+        }
+    }
+
+    Err(last)
+}
+
+/// What one circle of §2 or §3 produced.
+#[derive(Debug, Clone)]
+struct RaceOutcome {
+    /// Whether the circle managed to build its own precondition. A circle that did not is
+    /// **not** counted as a failure — it is counted as a circle that did not happen.
+    built: bool,
+    /// The detector: the field read differently after the hotkey than before it.
+    changed: bool,
+    /// The layout the first stroke of the word was really decoded under — the ground truth.
+    truth: Option<u32>,
+    /// What `GetKeyboardLayout` said about the window's thread at that same instant.
+    reported: Option<u32>,
+    /// The product's stamp before the stimulus and after the word was typed.
+    stamp_before: Option<u32>,
+    stamp_after: Option<u32>,
+    /// Which single outcome of `restamp` the first stroke took, when exactly one moved.
+    outcome: Option<&'static str>,
+}
+
+/// ⭐ **One circle of the series** — §2 of task T-10-16, and §3's negative control when
+/// `stimulus` is false.
+///
+/// The five steps, and what each of them is answering:
+///
+/// | Step | What it does | Why it is written this way |
+/// |---|---|---|
+/// | 1 | empties the field with `Backspace` alone | ⚠ `Ctrl+A` ends in a **modifier release**, and a modifier release *is* the layout probe of T-03-3c: the instrument would refresh the very stamp the circle exists to leave stale. Measured in T-10-14, inherited here |
+/// | 2 | ⭐ **builds its own precondition**: en-US, confirmed, stamp confirmed fresh | T-10-14 measured that the directions are not symmetric — the probe beats an activation of en-US every time and loses to ru-RU every time. A circle taking whatever the previous one left would measure the direction, not the defect |
+/// | 3 | synthetic `Alt+Shift` into the window that already has the focus | the household gesture, and the one the person's protocol is full of |
+/// | 4 | pauses `D` milliseconds — [`race_pause`] | the independent variable |
+/// | 5 | one keystroke, then five more, then the hotkey | the first stroke is the only one that reaches `restamp`, and what the field reads after it is the ground truth |
+///
+/// ⚠ **The channel is deliberately not read between the stimulus and the first keystroke.** One
+/// snapshot costs a millisecond or two — more than the four smallest points of the grid — so
+/// reading the stamp there would move the very quantity being swept. What is read there is
+/// `GetKeyboardLayout`, two Win32 calls and a fraction of a microsecond. The stamp is taken
+/// **before** the stimulus and **after** the word, which brackets the one stroke that can change
+/// it, and the five counters say which branch that stroke took.
+fn race_circle(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    stage: &str,
+    d_ms: u64,
+    rep: usize,
+    stimulus: bool,
+) -> Result<RaceOutcome, String> {
+    // Step 1 — the field, emptied without touching a single modifier.
+    clear_field(target, content)?;
+
+    // Step 2 — the precondition, built and **verified**, never inherited.
+    let Ok(from) = race_ensure(target.hwnd, layout::US) else {
+        race_raw(&format!(
+            "{stage},{d_ms},{rep},{},,,,,,,,,,,,,,предусловие-не-построено-раскладка",
+            if stimulus {
+                "US->RU"
+            } else {
+                "нет-стимула"
+            }
+        ));
+        return Ok(RaceOutcome {
+            built: false,
+            changed: false,
+            truth: None,
+            reported: None,
+            stamp_before: None,
+            stamp_after: None,
+            outcome: None,
+        });
+    };
+    input::tap(VK_SHIFT.0, target).map_err(|error| format!("Shift предусловия: {error}"))?;
+    let (built, start) = await_agreement(target.hwnd);
+    let stamp_before = start.stamp;
+    if !built {
+        race_raw(&format!(
+            "{stage},{d_ms},{rep},{},,,,{},,,,,,,,,,предусловие-не-построено",
+            if stimulus {
+                "US->RU"
+            } else {
+                "нет-стимула"
+            },
+            race_hex(stamp_before)
+        ));
+        return Ok(RaceOutcome {
+            built: false,
+            changed: false,
+            truth: None,
+            reported: None,
+            stamp_before,
+            stamp_after: None,
+            outcome: None,
+        });
+    }
+
+    let (before_counts, _) = race_channel();
+
+    // Step 3 — the stimulus, or, in the negative control of §3, deliberately nothing at all.
+    let to = other_layout(from);
+    if stimulus {
+        input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+            .map_err(|error| format!("Alt+Shift: {error}"))?;
+    }
+
+    // Step 4 — the independent variable.
+    race_pause(d_ms);
+
+    // Step 5 — what the system reports at the instant of the first keystroke, and then the
+    // keystroke itself. Two Win32 calls, no channel: see the warning on this function.
+    let reported = layout::of_window(target.hwnd).map(layout::id_of);
+
+    input::type_text("g", target).map_err(|error| format!("первый штрих: {error}"))?;
+    let first = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| !text.is_empty())
+    })
+    .ok_or_else(|| "первый штрих не дошёл до поля".to_owned())?;
+    let truth = race_truth_of(&first);
+
+    input::type_text("hbdtn", target).map_err(|error| format!("остальные штрихи: {error}"))?;
+    let typed = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text.chars().count() >= TYPED.chars().count())
+    });
+
+    let (after_counts, stamp_after) = race_channel();
+    let outcome = match (before_counts, after_counts) {
+        (Some(before), Some(after)) => sole_outcome(before, after),
+        _ => None,
+    };
+    let deltas = match (before_counts, after_counts) {
+        (Some(before), Some(after)) => after.since(before),
+        _ => [0; RESTAMP_KEYS.len()],
+    };
+
+    let text_before = typed
+        .or_else(|| read_field(content))
+        .ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    let text_after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &text_before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    let press = PressOutcome {
+        before: text_before,
+        after: text_after,
+        wanted: shown_under(other_layout(truth.unwrap_or(from))).to_owned(),
+    };
+
+    race_raw(&format!(
+        "{stage},{d_ms},{rep},{},{},{},{},{},{},{},{},{},{},{},{:?},{:?},{},{}",
+        if stimulus {
+            "US->RU"
+        } else {
+            "нет-стимула"
+        },
+        race_hex(Some(from)),
+        race_hex(reported),
+        race_hex(truth),
+        race_hex(stamp_before),
+        race_hex(stamp_after),
+        deltas[0],
+        deltas[1],
+        deltas[2],
+        deltas[3],
+        deltas[4],
+        press.before,
+        press.after,
+        u8::from(press.changed()),
+        outcome.unwrap_or("-")
+    ));
+
+    let _ = to;
+
+    Ok(RaceOutcome {
+        built: true,
+        changed: press.changed(),
+        truth,
+        reported,
+        stamp_before,
+        stamp_after,
+        outcome,
+    })
+}
+
+/// ⭐ **§1 of task T-10-16** — how long the system's own report takes to move after a synthetic
+/// `Alt+Shift`, with a resolution far below a millisecond.
+///
+/// # ⚠ The ground truth, named explicitly, as the task demands
+///
+/// `GetKeyboardLayout(GetWindowThreadProcessId(hwnd))` is **the only** thing Windows offers about
+/// the layout of a *foreign* thread. `GetKeyboardLayoutNameW` answers about the calling thread and
+/// `ToUnicodeEx` is a pure function of the `HKL` it is handed, so neither is a second opinion.
+/// There is therefore **nothing to compare the report against inside this function**, and it does
+/// not pretend otherwise: what it measures is *when the report moves*, on a clock that starts at
+/// `SendInput`.
+///
+/// The second opinion — what the keyboard **actually types** — is [`race_truth_of`], and it is
+/// what [`race_report_against_truth`] and every circle of §2 are built on. That is where the word
+/// «отставание» acquires a meaning.
+///
+/// # Both directions, and each circle builds its own precondition
+///
+/// T-10-14 measured that the two directions are not symmetric. A loop that fired `Alt+Shift`
+/// repeatedly would alternate directions inside one sample and average the two together, which is
+/// exactly the mistake rule 3 of the task warns about. Each repetition therefore puts the window
+/// into the layout it is about to leave, waits for that to be true, and only then fires.
+fn race_report_lag(target: &input::Target, repeats: usize) -> Result<(), String> {
+    println!("=== §1: ОТСТАВАНИЕ СИСТЕМНОГО ОТЧЁТА, {repeats} повторов на сторону ===");
+    println!(
+        "  Прибор: GetKeyboardLayout(GetWindowThreadProcessId(hwnd)) — FR-52 дословно, то же \
+         чтение, что делает продукт.\n  Опрос — плотный цикл без сна, шаг заведомо меньше \
+         микросекунды. Граница ожидания {} мс.",
+        RACE_REPORT_BOUND.as_millis()
+    );
+    println!(
+        "  ⚠ Ground truth: у чужого потока GetKeyboardLayout — единственный источник, сравнивать \
+         тут не с чем. Второе мнение даёт §1b: что фактически напечаталось."
+    );
+
+    for (from, to, name) in [
+        (layout::US, layout::RUSSIAN, "en-US → ru-RU"),
+        (layout::RUSSIAN, layout::US, "ru-RU → en-US"),
+    ] {
+        let mut moved: Vec<u64> = Vec::new();
+        let mut chords: Vec<u64> = Vec::new();
+        let mut never = 0usize;
+        let mut skipped = 0usize;
+
+        for rep in 1..=repeats {
+            // ⭐ The circle's own precondition. Not "whatever the last one left behind".
+            if race_ensure(target.hwnd, from).is_err() {
+                skipped += 1;
+                race_raw(&format!(
+                    "lag,,{rep},{name},,,,,,,,,,,,,,предусловие-не-построено"
+                ));
+                continue;
+            }
+
+            let started = Instant::now();
+            input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+                .map_err(|error| format!("Alt+Shift, повтор {rep}: {error}"))?;
+            let sent = started.elapsed();
+
+            let mut answer = None;
+            while started.elapsed() < RACE_REPORT_BOUND {
+                if let Some(id) = layout::of_window(target.hwnd).map(layout::id_of)
+                    && id & 0xFFFF == to & 0xFFFF
+                {
+                    answer = Some(started.elapsed());
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+
+            match answer {
+                Some(elapsed) => {
+                    let micros = elapsed.as_micros() as u64;
+                    moved.push(micros);
+                    chords.push(sent.as_micros() as u64);
+                    race_raw(&format!("lag,,{rep},{name},,,,,,,,,,,,,,{micros}"));
+                }
+                None => {
+                    never += 1;
+                    race_raw(&format!("lag,,{rep},{name},,,,,,,,,,,,,,НЕ-ИЗМЕНИЛСЯ"));
+                }
+            }
+        }
+
+        println!("\n  ── {name} ──");
+        println!("  время до изменения отчёта: {}", race_distribution(&moved));
+        println!(
+            "  из них сам вызов SendInput занял: {}",
+            race_distribution(&chords)
+        );
+        println!(
+            "  ⭐ отчёт НЕ изменился за {} мс: {never}/{repeats} ({}%)",
+            RACE_REPORT_BOUND.as_millis(),
+            race_percent(never, repeats)
+        );
+        println!("  предусловие не построилось (круг не состоялся): {skipped}/{repeats}");
+    }
+
+    Ok(())
+}
+
+/// ⭐ **§1b** — the system's report against **what actually gets typed**, at each point of the
+/// grid and in both directions.
+///
+/// This is the measurement that can say the word «отставание» honestly. At `D` milliseconds after
+/// the switch it asks two independent questions at the same instant: what does
+/// `GetKeyboardLayout` say, and what does the `G` key actually produce in the field. Three
+/// outcomes are possible and all three are counted:
+///
+/// * they agree — the report is telling the truth at that delay;
+/// * the report still names the old layout while the key already types in the new one — the
+///   report **lags behind the keyboard**, which is the controller's hypothesis;
+/// * the report already names the new layout while the key still types in the old one — the
+///   report **runs ahead of the keyboard**, which is the opposite hypothesis and had to be
+///   counted separately rather than folded into "disagreement".
+fn race_report_against_truth(
+    target: &input::Target,
+    content: &Element,
+    per_point: usize,
+) -> Result<(), String> {
+    println!("\n=== §1b: СИСТЕМНЫЙ ОТЧЁТ ПРОТИВ ТОГО, ЧТО ФАКТИЧЕСКИ ПЕЧАТАЕТСЯ ===");
+    println!(
+        "  Ground truth — поле: клавиша G под en-US даёт \"g\", под ru-RU даёт \"п\". \
+         Это то, что видит человек."
+    );
+
+    for (from, to, name) in [
+        (layout::US, layout::RUSSIAN, "en-US → ru-RU"),
+        (layout::RUSSIAN, layout::US, "ru-RU → en-US"),
+    ] {
+        println!("\n  ── {name} ──");
+        println!(
+            "  {:>6}  {:>6} {:>8} {:>8} {:>8}",
+            "D, мс", "кругов", "согласны", "отчёт-отстаёт", "отчёт-впереди"
+        );
+
+        for d_ms in RACE_GRID {
+            let mut agree = 0usize;
+            let mut behind = 0usize;
+            let mut ahead = 0usize;
+            let mut unreadable = 0usize;
+            let mut skipped = 0usize;
+
+            for rep in 1..=per_point {
+                clear_field(target, content)?;
+                if race_ensure(target.hwnd, from).is_err() {
+                    skipped += 1;
+                    race_raw(&format!(
+                        "truth,{d_ms},{rep},{name},,,,,,,,,,,,,,предусловие-не-построено"
+                    ));
+                    continue;
+                }
+
+                input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+                    .map_err(|error| format!("Alt+Shift: {error}"))?;
+                race_pause(d_ms);
+
+                let reported = layout::of_window(target.hwnd).map(layout::id_of);
+                input::type_text("g", target)
+                    .map_err(|error| format!("штрих ground truth: {error}"))?;
+                let first = wait::until(SERIES_STEP_TIMEOUT, || {
+                    read_field(content).filter(|text| !text.is_empty())
+                });
+                let truth = first.as_deref().and_then(race_truth_of);
+
+                let verdict = match (reported, truth) {
+                    (Some(reported), Some(truth)) => {
+                        if reported & 0xFFFF == truth & 0xFFFF {
+                            agree += 1;
+                            "согласны"
+                        } else if truth & 0xFFFF == to & 0xFFFF {
+                            behind += 1;
+                            "ОТЧЁТ-ОТСТАЁТ"
+                        } else {
+                            ahead += 1;
+                            "отчёт-впереди"
+                        }
+                    }
+                    _ => {
+                        unreadable += 1;
+                        "нечитаемо"
+                    }
+                };
+
+                race_raw(&format!(
+                    "truth,{d_ms},{rep},{name},{},{},{},,,,,,,,{:?},,,{verdict}",
+                    race_hex(Some(from)),
+                    race_hex(reported),
+                    race_hex(truth),
+                    first.unwrap_or_default()
+                ));
+            }
+
+            println!(
+                "  {d_ms:>6}  {:>6} {agree:>8} {behind:>13} {ahead:>13}{}",
+                per_point - skipped,
+                if unreadable > 0 || skipped > 0 {
+                    format!("  (нечитаемо: {unreadable}, пропущено: {skipped})")
+                } else {
+                    String::new()
+                }
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// ⭐ **§2 and §3 of task T-10-16** — the grid of `D`, and the negative control beside it.
+///
+/// The answer this produces is the one the task names: **the share of failures against `D`**. A
+/// failure is one circle whose hotkey left the field reading exactly what it read before —
+/// [`PressOutcome::changed`] false — and nothing else is a failure, in particular not "the text
+/// did not match `привет`", because under ru-RU `ghbdtn` already reads `привет` while it is being
+/// typed.
+fn race_grid(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    reps: usize,
+    stimulus: bool,
+) -> Result<Vec<(u64, usize, usize, usize)>, String> {
+    let grid: &[u64] = if stimulus {
+        &RACE_GRID
+    } else {
+        &RACE_CONTROL_GRID
+    };
+    let stage = if stimulus { "grid" } else { "control" };
+
+    let mut table = Vec::new();
+
+    for &d_ms in grid {
+        let mut failures = 0usize;
+        let mut done = 0usize;
+        let mut skipped = 0usize;
+        let mut truth_ru = 0usize;
+        let mut report_behind = 0usize;
+        let mut outcomes: BTreeMap<&'static str, usize> = BTreeMap::new();
+
+        for rep in 1..=reps {
+            let circle = race_circle(ctx, target, content, stage, d_ms, rep, stimulus)?;
+            if !circle.built {
+                skipped += 1;
+                continue;
+            }
+
+            done += 1;
+            if !circle.changed {
+                failures += 1;
+            }
+            if circle
+                .truth
+                .is_some_and(|id| id & 0xFFFF == layout::RUSSIAN & 0xFFFF)
+            {
+                truth_ru += 1;
+            }
+            if let (Some(reported), Some(truth)) = (circle.reported, circle.truth)
+                && reported & 0xFFFF != truth & 0xFFFF
+                && truth & 0xFFFF == layout::RUSSIAN & 0xFFFF
+            {
+                report_behind += 1;
+            }
+            *outcomes.entry(circle.outcome.unwrap_or("-")).or_insert(0) += 1;
+
+            let _ = (circle.stamp_before, circle.stamp_after);
+        }
+
+        let named: Vec<String> = outcomes
+            .iter()
+            .map(|(name, count)| format!("{name}×{count}"))
+            .collect();
+        println!(
+            "  D={d_ms:>4} мс: кругов {done:>3}, отказов {failures:>3} ({:>3}%), пропущено {skipped}, \
+             набор реально под ru-RU {truth_ru}, отчёт отстал от клавиатуры {report_behind}; исходы: {}",
+            race_percent(failures, done),
+            named.join(" ")
+        );
+
+        table.push((d_ms, done, failures, report_behind));
+    }
+
+    Ok(table)
+}
+
+/// ⚠ Takes down a copy of the product that was already running, with the synthetic FR-96 the
+/// task names as the ordinary step before every run of the bench — and **proves** it went.
+///
+/// Without this the experiment refuses to start, and rightly: two copies would answer the same
+/// channel and every counter below would be of unknown provenance.
+fn race_clear_the_stage() -> Result<(), String> {
+    let already = crate::sut::any_running();
+    if already.is_empty() {
+        return Ok(());
+    }
+
+    println!(
+        "Уже работают копии продукта {already:?} — синтетическая FR-96, как перед всяким \
+         прогоном стенда."
+    );
+    input::emergency_combination().map_err(|error| format!("FR-96: {error}"))?;
+
+    if wait::until_true(Duration::from_secs(20), || {
+        crate::sut::any_running().is_empty()
+    }) {
+        println!("  ✔ работающих копий не осталось\n");
+        Ok(())
+    } else {
+        Err(format!(
+            "FR-96 не сняла работавшие копии {:?} за 20 с",
+            crate::sut::any_running()
+        ))
+    }
+}
+
+/// ⭐ **The experiment of task T-10-16** — a series with the timing varied, not one trial
+/// repeated.
+///
+/// # ⛔ What this mode does not do
+///
+/// It does not repair anything. `src\` is not touched by this task at all. The machine is not
+/// suspended, not locked and no desktop is switched — `LockWorkStation` would end the
+/// controller's session along with the run, and synthetic input does not reach a lock screen.
+///
+/// # The stages, and why they are separate invocations
+///
+/// | Stage | What it answers |
+/// |---|---|
+/// | `lag` | §1 — when does `GetKeyboardLayout` move, distribution, both directions |
+/// | `truth` | §1b — the report against what actually gets typed, at every `D`, both directions |
+/// | `grid` | §2 — 11 points × `reps` circles; the share of failures against `D` |
+/// | `control` | §3 — the same circle with **no `Alt+Shift` at all**; failures must be zero |
+///
+/// Each stage brings the product up and takes it down itself, so a stage that goes wrong costs a
+/// stage and not the series, and the raw file already holds everything up to that point.
+pub fn experiment_race(ctx: &Context, stage: &str, reps: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-16: окно гонки, серия с меняющимся таймингом ---\n");
+    println!(
+        "Прибор: вердикт круга — «текст поля ПОСЛЕ нажатия отличается от текста ДО». \
+         Совпадение с {EXPECTED:?} сообщается рядом и НИКОГДА не является вердиктом: под русской \
+         раскладкой ghbdtn читается как привет уже при наборе.\n\
+         Очистка поля — только Backspace: Ctrl+A отпускает Ctrl, а отпускание модификатора и есть \
+         зонд раскладки T-03-3c.\n\
+         Каждый круг строит своё предусловие (en-US, подтверждено; штамп сведён) — направления \
+         несимметричны, T-10-14.\n\
+         Продукт: УСТАНОВЛЕННАЯ подписанная сборка из %ProgramFiles% (uiAccess=1), поднятая \
+         ShellExecuteEx.\n\
+         ⛔ Машина не усыпляется, не блокируется, рабочий стол не переключается.\n"
+    );
+    println!("Сырые числа серии: {}\n", race_raw_path().display());
+
+    if let Err(error) = race_clear_the_stage() {
+        eprintln!("⛔ {error}");
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut product = match crate::sut::Installed::launch() {
+        Ok(installed) => installed,
+        Err(error) => {
+            eprintln!("установленный продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+        eprintln!("установленный продукт не сообщил о готовности через канал SEC-04a за 30 с");
+        let _ = product.stop();
+        return std::process::ExitCode::from(1);
+    };
+    println!(
+        "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+        product.pid,
+        ready.get("hook_installed").unwrap_or("?"),
+        ready.present_keys().len()
+    );
+
+    // ⛔ Without the five keys every counter below would be a fabricated zero.
+    for key in RESTAMP_KEYS {
+        if ready.get(key).is_none() {
+            eprintln!("⛔ установленная сборка не публикует {key} — опыт не ставится");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    }
+
+    let mut field = match launch_stamp_window() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("окно стенда не открылось: {error}");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<usize, String> {
+        let (target, content) = adopt_stamp_window(ctx, &mut field)?;
+
+        // ---- the instrument, before any reading of it -------------------------------------
+        //
+        // The hotkey on an **empty** field. The product is up, the hook is in the chain, the
+        // press really reaches it — and there is nothing to convert, so the field must read the
+        // same afterwards. An instrument that reports «изменилось» here measures something other
+        // than what it claims and everything below it would be worthless.
+        println!("\n=== ПРИБОР, ПРОВЕРКА 1: нажатие на пустом поле ничего не меняет ===");
+        clear_field(&target, &content)?;
+        let empty_before =
+            read_field(&content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+        input::tap(ctx.hotkey_vk, &target).map_err(|error| format!("горячая клавиша: {error}"))?;
+        let empty_after = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(&content).filter(|text| text != &empty_before)
+        })
+        .or_else(|| read_field(&content))
+        .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+        let idle = PressOutcome {
+            before: empty_before,
+            after: empty_after,
+            wanted: String::new(),
+        };
+        println!("  {}", idle.describe());
+        if idle.changed() {
+            return Err(format!(
+                "⛔ ПРИБОР НЕИСПРАВЕН: нажатие на пустом поле изменило текст ({})",
+                idle.describe()
+            ));
+        }
+        println!("  ✔ прибор умеет сказать «не изменилось»");
+
+        println!("\n=== ПРИБОР, ПРОВЕРКА 2: свежий штамп — нажатие обязано изменить текст ===");
+        let fresh = press_once(ctx, &target, &content, "прибор", layout::US)?;
+        println!("  {}", fresh.describe());
+        if !fresh.changed() {
+            return Err("положительный контроль не изменил текст — прибор не годится".to_owned());
+        }
+        println!("  ✔ прибор умеет сказать «изменилось»\n");
+
+        let mut failures = 0usize;
+
+        match stage {
+            "lag" => race_report_lag(&target, reps)?,
+            "truth" => race_report_against_truth(&target, &content, reps)?,
+            "grid" => {
+                println!("=== §2: СЕТКА D, {reps} кругов на значение ===");
+                let table = race_grid(ctx, &target, &content, reps, true)?;
+                println!("\n  ── доля отказов против D ──");
+                println!(
+                    "  {:>7} {:>7} {:>8} {:>7} {:>16}",
+                    "D, мс", "кругов", "отказов", "доля", "отчёт-отстал"
+                );
+                for (d_ms, done, fails, behind) in &table {
+                    println!(
+                        "  {d_ms:>7} {done:>7} {fails:>8} {:>6}% {behind:>16}",
+                        race_percent(*fails, *done)
+                    );
+                    failures += fails;
+                }
+            }
+            "control" => {
+                println!("=== §3: ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ — круг БЕЗ Alt+Shift вовсе ===");
+                println!("  Отказов быть не должно ни на одном D.");
+                let table = race_grid(ctx, &target, &content, reps, false)?;
+                for (_, _, fails, _) in &table {
+                    failures += fails;
+                }
+            }
+            other => return Err(format!("неизвестная ступень {other:?}")),
+        }
+
+        Ok(failures)
+    })();
+
+    println!("{}", field.close());
+    match product.stop() {
+        Ok(()) => println!("продукт остановлен через FR-96"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    match outcome {
+        Ok(0) => {
+            println!("\nступень {stage}: отказов не зафиксировано");
+            std::process::ExitCode::SUCCESS
+        }
+        Ok(failures) => {
+            println!("\nступень {stage}: кругов без изменения текста — {failures}");
+            std::process::ExitCode::from(1)
+        }
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
 }
