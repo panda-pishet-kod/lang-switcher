@@ -40,7 +40,8 @@ use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_A, VK_CONTROL, VK_DELETE, VK_E, VK_HOME, VK_LWIN, VK_SHIFT, VK_SPACE, VK_TAB,
+    VK_A, VK_BACK, VK_CONTROL, VK_DELETE, VK_E, VK_HOME, VK_LWIN, VK_MENU, VK_SHIFT, VK_SPACE,
+    VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, HWND_MESSAGE, PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
@@ -6411,4 +6412,746 @@ fn telegram_refusal() -> String {
             "не найден"
         }
     )
+}
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Опыт T-10-14 — штамп раскладки против настоящей раскладки, БЕЗ сна
+// ---------------------------------------------------------------------------------------
+
+/// How long the two values are given to converge on their own after a switch.
+///
+/// Not a delay the measurement depends on: [`wait::until`] ends at the first poll that finds
+/// them equal, so this is only the bound on «they never did». Three seconds is two orders of
+/// magnitude longer than any message the product answers on.
+const STAMP_CONVERGENCE_BOUND: Duration = Duration::from_secs(3);
+
+/// One `(настоящая раскладка, штамп продукта)` pair, taken at one instant.
+///
+/// ⚠ **Two real readings, around the channel read.** The product reads the layout of the
+/// foreground window's thread and so does this; the channel read between them costs a
+/// millisecond or two, and a pair taken as «real, stamp» alone could not tell a stale stamp
+/// from a layout that moved while the channel was being read. The second real reading closes
+/// that: a sample whose two real readings differ is unusable and is never counted as a
+/// divergence.
+#[derive(Debug, Clone, Copy)]
+struct StampSample {
+    real_before: Option<u32>,
+    stamp: Option<u32>,
+    real_after: Option<u32>,
+    probes: Option<u64>,
+    focus: Option<u64>,
+}
+
+impl StampSample {
+    /// Reads one pair. The order is real, stamp, real.
+    fn take(hwnd: HWND) -> Self {
+        let real_before = layout::of_window(hwnd).map(layout::id_of);
+        let snapshot = crate::channel::read().ok();
+        let real_after = layout::of_window(hwnd).map(layout::id_of);
+
+        let count = |key: &str| -> Option<u64> {
+            snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.get(key))
+                .and_then(|value| value.parse::<u64>().ok())
+        };
+
+        Self {
+            stamp: snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.get("active_layout"))
+                .and_then(parse_hkl),
+            probes: count("layout_probes"),
+            focus: count("focus_changes"),
+            real_before,
+            real_after,
+        }
+    }
+
+    /// The real layout, when both readings around the channel agree — otherwise `None`.
+    fn real(&self) -> Option<u32> {
+        match (self.real_before, self.real_after) {
+            (Some(first), Some(second)) if first == second => Some(first),
+            _ => None,
+        }
+    }
+
+    /// `Some(true)` — the pair diverges; `Some(false)` — it agrees; `None` — unusable.
+    fn diverged(&self) -> Option<bool> {
+        Some(self.real()? & 0xFFFF != self.stamp? & 0xFFFF)
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "настоящая={} штамп={} layout_probes={} focus_changes={} — {}",
+            self.real()
+                .map_or_else(|| "<менялась при чтении>".to_owned(), layout::describe),
+            self.stamp
+                .map_or_else(|| "<нет>".to_owned(), layout::describe),
+            self.probes
+                .map_or_else(|| "?".to_owned(), |v| v.to_string()),
+            self.focus.map_or_else(|| "?".to_owned(), |v| v.to_string()),
+            match self.diverged() {
+                Some(true) => "⛔ РАСХОДЯТСЯ",
+                Some(false) => "совпадают",
+                None => "нечитаемо",
+            }
+        )
+    }
+}
+
+/// `0x04190419`, as the channel writes it.
+fn parse_hkl(value: &str) -> Option<u32> {
+    u32::from_str_radix(value.trim().trim_start_matches("0x"), 16).ok()
+}
+
+/// The other of the two layouts of this session.
+fn other_layout(id: u32) -> u32 {
+    if id & 0xFFFF == layout::RUSSIAN & 0xFFFF {
+        layout::US
+    } else {
+        layout::RUSSIAN
+    }
+}
+
+/// What the field reads back for the six keys of [`TYPED`] under `id`.
+fn shown_under(id: u32) -> &'static str {
+    if id & 0xFFFF == layout::RUSSIAN & 0xFFFF {
+        EXPECTED
+    } else {
+        TYPED
+    }
+}
+
+/// Title of the bench's **own** window for this experiment.
+const STAMP_WINDOW_TITLE: &str = "LangSw-Stamp-14";
+
+/// ⛔ **The window of this experiment is the bench's own** — the shape position 15 already uses,
+/// and for the reason written down there: on this machine a `Notepad.exe` the bench did not
+/// start is running, the System32 `notepad.exe` is a stub whose process exits as soon as the
+/// packaged application takes over, and a window opened by that stub is created **inside the
+/// stranger's process**. Requirement B refuses it, correctly, and the experiment would be
+/// measuring the machine's window ownership instead of the product.
+///
+/// Measured, not assumed: the first run of this experiment refused the window of process 15788,
+/// «*привет — Блокнот», which is the controller's own live session and is not this task's to
+/// close.
+///
+/// One plain multiline text box, nothing masked, nothing saved anywhere. `TopMost` so that the
+/// foreground guard of [`input::send_verified`] has a stable answer.
+fn launch_stamp_window() -> Result<App, String> {
+    let scratch = scratch_dir("stamp");
+    let script = scratch.join("stamp-window.ps1");
+
+    let body = format!(
+        "Add-Type -AssemblyName System.Windows.Forms\n\
+         $form = New-Object System.Windows.Forms.Form\n\
+         $form.Text = '{STAMP_WINDOW_TITLE}'\n\
+         $form.Width = 640\n\
+         $form.Height = 260\n\
+         $form.StartPosition = 'CenterScreen'\n\
+         $form.TopMost = $true\n\
+         $box = New-Object System.Windows.Forms.TextBox\n\
+         $box.Multiline = $true\n\
+         $box.Left = 20\n\
+         $box.Top = 30\n\
+         $box.Width = 580\n\
+         $box.Height = 150\n\
+         $box.TabIndex = 0\n\
+         $form.Controls.Add($box)\n\
+         $form.Add_Shown({{ $form.Activate(); [void]$box.Focus() }})\n\
+         [void]$form.ShowDialog()\n"
+    );
+
+    std::fs::write(&script, body)
+        .map_err(|error| format!("не удалось записать {}: {error}", script.display()))?;
+
+    let child = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-STA",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script)
+        .spawn()
+        .map_err(|error| format!("запуск окна опыта T-10-14: {error}"))?;
+
+    Ok(launched(
+        "Штамп раскладки (окно стенда)",
+        child,
+        CloseWith::WmClose,
+        Some(scratch),
+    ))
+}
+
+/// Adopts the window of [`launch_stamp_window`], brings it forward and puts it into US.
+fn adopt_stamp_window(ctx: &Context, app: &mut App) -> Result<(input::Target, Element), String> {
+    let window = adopt_window(ctx.automation, app, &|element: &Element| {
+        element.name().starts_with(STAMP_WINDOW_TITLE)
+    })?;
+    let hwnd = app
+        .window
+        .ok_or_else(|| "у окна нет дескриптора".to_owned())?;
+    let content = ctx
+        .automation
+        .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+        .ok_or_else(|| "элемент ввода не найден".to_owned())?;
+
+    shell::activate_window(app.pid, Some(hwnd))?;
+    layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+
+    Ok((input::Target { pid: app.pid, hwnd }, content))
+}
+
+/// Empties the field **without pressing a single modifier** — `Backspace` and nothing else.
+///
+/// ⭐ Not tidiness, and not a stylistic preference. `Ctrl+A` ends in a `Ctrl` release, and
+/// `hook::is_layout_probe` fires the layout probe of T-03-3c on **every modifier release**; a
+/// field cleared that way refreshes the stamp and destroys the state the round is creating.
+/// The first run of this experiment cleared with `Ctrl+A`, `Delete` and watched `layout_probes`
+/// climb by one and the stamp catch up on every round. `Backspace` is in no combination at all
+/// and is the one key of the FR-10 table that neither flushes nor probes — it pops one stroke,
+/// which is exactly the bookkeeping the deletion deserves.
+///
+/// ⚠ **`VK_BACK` as a key, never `'\u{8}'` through [`input::type_text`].** That function has no
+/// virtual key for `\u{8}` and falls back to `KEYEVENTF_UNICODE`, which puts the value in
+/// `wScan` with `wVk = 0` — and scan code `0x08` is the **`7` key**. The product's hook decodes
+/// exactly that: the second run of this experiment filled the field with `77777777` on every
+/// press, eight sevens for eight "backspaces", because the buffer had faithfully recorded eight
+/// presses of the `7` key. The bench's own instrument, poisoning its own measurement.
+fn clear_field(target: &input::Target, content: &Element) -> Result<(), String> {
+    for _ in 0..2 {
+        let Some(text) = read_field(content) else {
+            return Err("поле не читается при очистке".to_owned());
+        };
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        // One `Backspace` per character, plus two of margin: the count is what the field says it
+        // holds, and extra presses on an empty field do nothing.
+        for _ in 0..text.chars().count() + 2 {
+            input::tap(VK_BACK.0, target).map_err(|error| format!("очистка поля: {error}"))?;
+        }
+
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(String::is_empty)
+        });
+    }
+
+    match read_field(content) {
+        Some(text) if text.is_empty() => Ok(()),
+        Some(text) => Err(format!("поле не очистилось, в нём {text:?}")),
+        None => Err("поле не читается при очистке".to_owned()),
+    }
+}
+
+/// How a round switches the layout of the window that already has the focus.
+///
+/// Two forms, alternated, because they answer two different questions and the task asks for
+/// both: whether the household gesture reproduces the defect, and whether the *mechanism* named
+/// in the diagnosis — an event that outruns the switch — is really what does it.
+#[derive(Debug, Clone, Copy)]
+enum Stimulus {
+    /// **The household gesture**: a synthetic `Alt+Shift`, the switcher of this session, sent
+    /// into the window the bench is typing in. Windows performs the switch after the callback
+    /// that saw the release has returned; the product's probe rides that same release.
+    AltShift,
+    /// **The mechanism, made deterministic**: `WM_INPUTLANGCHANGEREQUEST` is *posted* and not
+    /// waited for, and a bare `Shift` tap is sent immediately behind it. The target thread has
+    /// not pumped the request yet, so the probe the `Shift` release fires reads the layout that
+    /// is on its way out — the event has outrun the switch, by construction and not by luck.
+    RequestThenRelease,
+}
+
+/// The rotation of [`Stimulus`] the rounds walk through.
+const STIMULI: [Stimulus; 2] = [Stimulus::AltShift, Stimulus::RequestThenRelease];
+
+impl Stimulus {
+    fn name(self) -> &'static str {
+        match self {
+            Self::AltShift => "синтетический Alt+Shift",
+            Self::RequestThenRelease => "WM_INPUTLANGCHANGEREQUEST без ожидания + отпускание Shift",
+        }
+    }
+
+    /// Asks the window to move to `to`. Returns as soon as the request is on its way — the
+    /// caller waits on the condition, never on this.
+    fn fire(self, target: &input::Target, to: u32) -> Result<(), String> {
+        match self {
+            Self::AltShift => {
+                println!("  стимул: Alt+Shift в переднее окно, фокус не трогали");
+                input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+                    .map_err(|error| format!("Alt+Shift: {error}"))
+            }
+            Self::RequestThenRelease => {
+                let Some(wanted) = layout::handle_for(to) else {
+                    return Err(format!(
+                        "раскладка {} не подключена в этом сеансе",
+                        layout::describe(to)
+                    ));
+                };
+
+                // SAFETY: `target.hwnd` is the window of a process in registry A, adopted by
+                // `adopt_stamp_window`. `PostMessageW` copies the message into that thread's
+                // queue and dereferences nothing of ours; `wanted` is a layout handle taken from
+                // the system's own list. NFR-13: the result is examined below.
+                let posted = unsafe {
+                    PostMessageW(
+                        Some(target.hwnd),
+                        WM_INPUTLANGCHANGEREQUEST,
+                        WPARAM(0),
+                        LPARAM(wanted.0 as isize),
+                    )
+                };
+                posted
+                    .map_err(|error| format!("PostMessage(WM_INPUTLANGCHANGEREQUEST): {error}"))?;
+
+                println!(
+                    "  стимул: WM_INPUTLANGCHANGEREQUEST → {} ПОСЛАНО и не дождано; \
+                     сразу за ним отпускание Shift",
+                    layout::describe(to)
+                );
+
+                // ⚠ Nothing is waited for between the post and this tap. The request is sitting
+                // in the target thread's queue; the `Shift` release goes through the hook first
+                // because `SendInput` reaches the low-level hook chain before the target thread
+                // is next scheduled to pump.
+                input::tap(VK_SHIFT.0, target).map_err(|error| format!("Shift: {error}"))
+            }
+        }
+    }
+}
+
+/// `WM_INPUTLANGCHANGEREQUEST` — the same constant `layout::ensure` uses.
+const WM_INPUTLANGCHANGEREQUEST: u32 = 0x0050;
+
+/// Waits until the product's stamp agrees with the real layout of `hwnd`, and says what it saw.
+fn await_agreement(hwnd: HWND) -> (bool, StampSample) {
+    let agreed = wait::until(STAMP_CONVERGENCE_BOUND, || {
+        let sample = StampSample::take(hwnd);
+        (sample.diverged() == Some(false)).then_some(sample)
+    });
+
+    match agreed {
+        Some(sample) => (true, sample),
+        None => (false, StampSample::take(hwnd)),
+    }
+}
+
+/// ⭐ **Task T-10-14** — the divergence between the layout stamp and the real layout, produced
+/// **without putting the machine to sleep**, and the press that follows it.
+///
+/// # What is being reproduced
+///
+/// The defect is not in sleeping. The stamp of FR-04 is read on an *event* —
+/// `watchdog::WM_APP_LAYOUT`, posted from a focus or foreground change — and used much later,
+/// at the moment strokes are recorded. A switch the event does not cover, or covers too early,
+/// leaves the stamp naming a layout the user is no longer typing in; from then on FR-26 takes
+/// its direction from that value **and** `Recorder::lookup` decodes the strokes through that
+/// layout's map, so the product converts what it believes was typed into what is already on the
+/// screen. The user sees nothing happen.
+///
+/// # The stimulus, and why it needs no sleep
+///
+/// `WM_INPUTLANGCHANGEREQUEST` to the window that already has the focus — `layout::ensure`, the
+/// bench's existing precondition tool. Nothing is activated, no window is created, no focus
+/// moves, the machine is not suspended. It is the case `app::refresh_layout_and_cache` writes
+/// down as its own known limit in as many words: «a user who switches layout with `Alt+Shift`
+/// **without leaving the window they are typing in** changes no foreground and moves no focus».
+///
+/// # ⚠ The instrument
+///
+/// The verdict of every press is `after != before` — [`PressOutcome::changed`] — and never a
+/// comparison with `привет`, because under the Russian layout the six keys of `ghbdtn` already
+/// read `привет` while they are being typed. The sample is printed alongside as a description
+/// and never as the test. That trap is what the controller reported «работает» on.
+pub fn experiment_stamp(ctx: &Context, rounds: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-14: штамп раскладки против настоящей, БЕЗ сна ---\n");
+    println!(
+        "Прибор: сравнение поля ДО и ПОСЛЕ нажатия. Совпадение с образцом {EXPECTED:?} \
+         сообщается рядом и НИКОГДА не является вердиктом.\n\
+         Стимул: WM_INPUTLANGCHANGEREQUEST в окно, которое УЖЕ переднее — ни фокус, ни переднее \
+         окно не меняются. ⛔ Машина не усыпляется и усыплена быть не может: sleep во всём стенде \
+         один, это интервал опроса wait::POLL.\n"
+    );
+
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Показания канала были бы неизвестно чьими. \
+             Опыт не ставится."
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut product = match crate::sut::Sut::launch_with(600) {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+        eprintln!("продукт не сообщил о готовности через канал SEC-04a за 30 с");
+        let _ = product.stop();
+        return std::process::ExitCode::from(1);
+    };
+    println!(
+        "Продукт PID {}, hook_installed={}\n",
+        product.pid,
+        ready.get("hook_installed").unwrap_or("?")
+    );
+
+    let mut field = match launch_stamp_window() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("окно стенда не открылось: {error}");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<(usize, usize), String> {
+        let (target, content) = adopt_stamp_window(ctx, &mut field)?;
+
+        // ---- the instrument, shown working on a case that must succeed --------------------
+        println!("=== ПЛЕЧО A: штамп свеж — положительный контроль прибора ===");
+        let (agreed, sample) = await_agreement(target.hwnd);
+        println!("  {}", sample.describe());
+        if !agreed {
+            return Err(format!(
+                "штамп не сошёлся с настоящей раскладкой за {} с ещё до всякого стимула — \
+                 плечо A недостоверно",
+                STAMP_CONVERGENCE_BOUND.as_secs()
+            ));
+        }
+
+        let fresh = press_once(ctx, &target, &content, "A", layout::US)?;
+        println!("  {}", fresh.describe());
+        if !fresh.changed() {
+            return Err(
+                "плечо A не изменило текст — прибор не годится, всё ниже недостоверно".to_owned(),
+            );
+        }
+
+        let mut stale_rounds = 0usize;
+        let mut unchanged_rounds = 0usize;
+
+        for round in 1..=rounds {
+            let stimulus = STIMULI[(round - 1) % STIMULI.len()];
+            println!(
+                "\n=== ПЛЕЧО B, круг {round}: стимул «{}» ===",
+                stimulus.name()
+            );
+
+            // Step 1 — empty the field, **without a single modifier**. ⭐ This is not tidiness.
+            // `Ctrl+A` ends in a `Ctrl` release, and a modifier release is exactly what
+            // `hook::is_layout_probe` fires the probe of T-03-3c on; clearing the field that way
+            // would refresh the stamp and destroy the very state the round is trying to create.
+            // Measured: the first run of this experiment cleared with `Ctrl+A`, `Delete` and
+            // watched `layout_probes` climb and the stamp catch up every single time.
+            clear_field(&target, &content)?;
+
+            // Step 2 — **the healthy precondition, built and verified, not assumed.** The round
+            // always starts from en-US and always switches into ru-RU, because the direction is
+            // not symmetric: measured over two runs, the probe of T-03-3c wins the race against
+            // an activation of en-US every time and loses it against ru-RU every time. A round
+            // that took whatever layout the previous press left behind measured the direction,
+            // not the defect.
+            //
+            // The `Shift` tap is the setup and is deliberate: it is the probe of T-03-3c itself,
+            // fired **after** the switch has already settled, which is exactly the case in which
+            // it is supposed to work. It is what makes «до» a healthy state rather than a hope.
+            let from = layout::ensure(target.hwnd, layout::US, Duration::from_secs(5))?;
+            input::tap(VK_SHIFT.0, &target)
+                .map_err(|error| format!("Shift подготовки: {error}"))?;
+            let (started_agreed, start) = await_agreement(target.hwnd);
+            println!(
+                "  до переключения (сошлись: {started_agreed}): {}",
+                start.describe()
+            );
+            if !started_agreed {
+                println!("  ⚠ штамп не сошёлся ещё до стимула — круг пропущен");
+                continue;
+            }
+
+            // Step 3 — the stimulus. Both forms switch the layout of the window that already has
+            // the focus: no foreground change, no focus move, nothing suspended.
+            let to = other_layout(from);
+            stimulus.fire(&target, to)?;
+
+            let settled = wait::until(Duration::from_secs(5), || {
+                layout::of_window(target.hwnd)
+                    .map(layout::id_of)
+                    .filter(|id| id & 0xFFFF == to & 0xFFFF)
+            });
+            let Some(settled) = settled else {
+                println!(
+                    "  ⚠ окно не перешло в {} за 5 с — круг пропущен",
+                    layout::describe(to)
+                );
+                continue;
+            };
+            println!(
+                "  окно перешло {} → {}",
+                layout::describe(from),
+                layout::describe(settled)
+            );
+
+            // Step 4 — do the two converge on their own? The wait is on the condition, and
+            // «не сошлись за три секунды» is the finding.
+            let (converged, after_switch) = await_agreement(target.hwnd);
+            println!("  после переключения: {}", after_switch.describe());
+            println!(
+                "  штамп догнал настоящую раскладку сам: {}",
+                if converged { "да" } else { "⛔ НЕТ" }
+            );
+            if !converged {
+                stale_rounds += 1;
+            }
+
+            // Step 5 — type under the layout the window really has, and press. The six keys are
+            // the same whichever layout it is; what changes is what the field shows for them.
+            // ⚠ Not one of them is a modifier, so nothing between here and the hotkey can fire
+            // the probe — which is precisely the household case: a person switches the layout
+            // and types a word.
+            let shown = shown_under(settled);
+
+            // ⚠ Read once more **immediately before the first key**: the defect is about what
+            // the stamp said when the strokes were recorded, not a second earlier.
+            let at_typing = StampSample::take(target.hwnd);
+            println!("  в момент набора: {}", at_typing.describe());
+
+            type_paced_as(TYPED, shown, &target, &content, "")?;
+
+            let before =
+                read_field(&content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+            println!("{}", watched(&format!("круг {round}: набрано, до нажатия")));
+
+            input::tap(ctx.hotkey_vk, &target)
+                .map_err(|error| format!("горячая клавиша: {error}"))?;
+
+            let after = wait::until(SERIES_STEP_TIMEOUT, || {
+                read_field(&content).filter(|text| text != &before)
+            })
+            .or_else(|| read_field(&content))
+            .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+            let press = PressOutcome {
+                before,
+                after,
+                wanted: shown_under(other_layout(settled)).to_owned(),
+            };
+            println!("{}", watched(&format!("круг {round}: после нажатия")));
+            println!(
+                "  ⭐ круг {round}: набирали под {}, штамп говорил {} — {}",
+                layout::describe(settled),
+                at_typing
+                    .stamp
+                    .map_or_else(|| "<нет>".to_owned(), layout::describe),
+                press.describe()
+            );
+
+            if !press.changed() {
+                unchanged_rounds += 1;
+            }
+        }
+
+        println!("\n=== ИТОГ ===");
+        println!("  кругов: {rounds}, стимулы чередуются: {:?}", STIMULI);
+        println!("  штамп сам не догнал раскладку: {stale_rounds}/{rounds}");
+        println!("  ⛔ нажатие НЕ изменило текст: {unchanged_rounds}/{rounds}");
+
+        Ok((stale_rounds, unchanged_rounds))
+    })();
+
+    println!("{}", field.close());
+    match product.stop() {
+        Ok(code) => println!("продукт остановлен, код {code}"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    match outcome {
+        // The exit code **is** the detector: green when every press changed the field, red when
+        // any press did nothing at all.
+        Ok((_, 0)) => {
+            println!("\nВЕРДИКТ: все нажатия изменили текст — ЗЕЛЁНЫЙ");
+            std::process::ExitCode::SUCCESS
+        }
+        Ok((_, unchanged)) => {
+            println!("\nВЕРДИКТ: нажатий, ничего не изменивших: {unchanged} — ⛔ КРАСНЫЙ");
+            std::process::ExitCode::from(1)
+        }
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Опыт T-10-14 — задержка callback, критерий 12
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **Task T-10-14** — `callback_p50_ns` and `callback_p99_ns` under a volley of the shape
+/// that actually exercises the repair.
+///
+/// # Why this is not position 23
+///
+/// It is position 23's measurement, in position 23's terms, on a window of the bench's own —
+/// and it has to be, twice over.
+///
+/// 1. Position 23 drives Notepad, and on this machine a `Notepad.exe` the bench did not start
+///    is running (§2.1 of the report of this task), so requirement B refuses the window.
+/// 2. ⭐ **Position 23 types `ghbdtn` with no boundary key at all**, so the ring never empties
+///    after the first stroke and the repair's branch — the first stroke of a **new word** —
+///    runs exactly once in ten thousand presses. Its percentiles therefore cannot say what
+///    that branch costs; they can only say it is not on the common path, which is worth
+///    knowing and is not what criterion 12 asks.
+///
+/// `--words` types `ghbdtn ` instead: the space is a boundary key of FR-10, the ring is
+/// emptied, and the next letter is a first stroke of a new word. One press in seven, that is
+/// **one callback sample in fourteen** — comfortably inside the p99 the criterion is about.
+///
+/// The histogram of `hook::profile` is global and is never reset, so one run measures one
+/// shape. The mode is meant to be run twice, once each way, against a fresh product.
+pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::process::ExitCode {
+    /// Presses spent before the first reading, so one-time costs are paid outside it.
+    const WARMUP: usize = 300;
+    /// Presses per `SendInput` call — position 23's number, and for its reason.
+    const BATCH: usize = 300;
+
+    let chunk_text = if words {
+        format!("{TYPED} ")
+    } else {
+        TYPED.to_owned()
+    };
+
+    println!("--- ОПЫТ T-10-14: задержка callback (критерий 12) ---\n");
+    println!(
+        "Форма залпа: {chunk_text:?} — {}\n",
+        if words {
+            "с границей слова, ветка починки работает на каждом седьмом нажатии"
+        } else {
+            "без границ слова, как в позиции 23: ветка починки срабатывает один раз за залп"
+        }
+    );
+
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!("⛔ продукт уже запущен: {already:?}. Опыт не ставится.");
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut product = match crate::sut::Sut::launch_with(600) {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    if product.await_ready(Duration::from_secs(30)).is_none() {
+        eprintln!("продукт не сообщил о готовности за 30 с");
+        let _ = product.stop();
+        return std::process::ExitCode::from(1);
+    }
+    println!("Продукт PID {}\n", product.pid);
+
+    let mut field = match launch_stamp_window() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("окно стенда не открылось: {error}");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<(), String> {
+        let (target, _content) = adopt_stamp_window(ctx, &mut field)?;
+
+        let warm = chunk_text.repeat(WARMUP / chunk_text.chars().count());
+        let (before_warmup, ..) = callback_reading()?;
+        input::type_text(&warm, &target).map_err(|error| format!("разминка: {error}"))?;
+        let warm_target = before_warmup + 2 * warm.chars().count() as u64;
+        if wait::until(Duration::from_secs(20), || {
+            callback_reading()
+                .ok()
+                .filter(|(samples, ..)| *samples >= warm_target)
+        })
+        .is_none()
+        {
+            return Err("разминка не дошла до callback за 20 с".to_owned());
+        }
+
+        let (samples_before, p50_before, p99_before, max_before) = callback_reading()?;
+        println!(
+            "  до залпа:  выборка {samples_before}, p50 {p50_before} нс, p99 {p99_before} нс, \
+             максимум {max_before} нс"
+        );
+
+        let batch = chunk_text.repeat(BATCH / chunk_text.chars().count());
+        let batch_len = batch.chars().count();
+        let batches = presses.div_ceil(batch_len);
+        let started = Instant::now();
+        for _ in 0..batches {
+            input::type_text(&batch, &target).map_err(|error| format!("залп: {error}"))?;
+        }
+        let injection = started.elapsed();
+
+        // Requirement 1 of §11.5: the wait is on «выборка накрыла залп», never on a clock.
+        let volley_target = samples_before + 2 * (batches * batch_len) as u64;
+        let Some((samples, p50, p99, max)) = wait::until(Duration::from_secs(40), || {
+            callback_reading()
+                .ok()
+                .filter(|(samples, ..)| *samples >= volley_target)
+        }) else {
+            return Err(format!(
+                "выборка не набралась: нужно ≥ {volley_target}, канал показывает {:?}",
+                callback_reading().map(|(samples, ..)| samples)
+            ));
+        };
+
+        println!("  после:     выборка {samples}, p50 {p50} нс, p99 {p99} нс, максимум {max} нс");
+        println!(
+            "\n  залп {} нажатий пакетами по {batch_len}, инжекция {} мс; \
+             вызовов за залп {}",
+            batches * batch_len,
+            injection.as_millis(),
+            samples - samples_before
+        );
+        println!(
+            "  NFR-01 (p99 < 100 000 нс): {}   NFR-02 (максимум < 1 000 000 нс): {}",
+            if p99 < 100_000 { "да" } else { "⛔ НЕТ" },
+            if max < 1_000_000 {
+                "да"
+            } else {
+                "⛔ НЕТ"
+            }
+        );
+
+        Ok(())
+    })();
+
+    println!("{}", field.close());
+    match product.stop() {
+        Ok(code) => println!("продукт остановлен, код {code}"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    match outcome {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
 }

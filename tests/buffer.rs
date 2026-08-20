@@ -2234,3 +2234,231 @@ fn the_thread_local_flush_reaches_the_buffer_of_the_calling_thread() {
     buffer::uninstall();
     assert_eq!(buffer::reset_up_to(300), None);
 }
+
+// -------------------------------------------------------------------------------------
+// ⭐ Defect E — the layout is read where it is used. Task T-10-14
+// -------------------------------------------------------------------------------------
+
+/// A machine whose foreground window is really running Russian, whatever the stamp believes.
+///
+/// The product's probe is `switch::current` — FR-52; a test states the premise instead of
+/// depending on what the keyboard of the machine running it happens to be doing. Exactly the
+/// arrangement `Physical`/`PhysicalProbe` already gives the repair of defect D, and the reason
+/// the detector below is two-sided without a live keyboard.
+fn really_russian() -> LayoutId {
+    RU
+}
+
+/// No foreground window at all — the desktop is switching, or this is the secure desktop.
+fn no_foreground() -> LayoutId {
+    LayoutId::default()
+}
+
+/// A layout the cache of FR-20 does not hold.
+fn really_unknown() -> LayoutId {
+    UNKNOWN
+}
+
+/// How many times [`counting_russian`] was asked. Read by one test and by no other.
+static PROBE_CALLS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// [`really_russian`], counting the calls.
+fn counting_russian() -> LayoutId {
+    PROBE_CALLS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    RU
+}
+
+/// ⭐ **The detector of defect E** — a word typed while the stamp and the real layout disagree.
+///
+/// # The premise, stated rather than hoped for
+///
+/// The stamp says English; the machine is really on Russian. That is not a contrived state: task
+/// T-10-14 produced it on the running product six times out of six with a synthetic `Alt+Shift`
+/// into the window that already had the focus. The probe of T-03-3c fired on the modifier
+/// release — `layout_probes` rose every time — and read `en-US`, the layout on its way out,
+/// because the system applies the switch after the callback has returned. Nothing corrected it
+/// afterwards: `focus_changes` never moved, and no other occasion arrives while somebody is
+/// typing a word.
+///
+/// # ⚠ Why both assertions, and why the first one is the one that mattered
+///
+/// The stale stamp costs **two** things and only the second is obvious. FR-26 takes the
+/// direction of the conversion from `Stroke::hkl`, which is the famous half. The other half is
+/// that [`Recorder::lookup`] decodes the scan code through *the map of the stamped layout*, so a
+/// stale stamp also makes the buffer believe the user typed something they did not — and that is
+/// what makes the defect invisible on screen: the six keys of `ghbdtn` under `ru-RU` put `привет`
+/// in the field, the buffer stamped `en-US` believes it holds `ghbdtn`, converts `en-US → ru-RU`
+/// and produces `привет` — the text that is already there. The user presses the hotkey and
+/// nothing happens.
+///
+/// Before the repair this test read `"a"` and `EN`; after it, `"ф"` and `RU`. Both runs are in
+/// the report of task T-10-14.
+#[test]
+fn a_word_is_recorded_under_the_layout_really_active_and_not_under_a_stale_stamp() {
+    let mut recorder = fresh();
+    recorder.stamp_layout_with(really_russian);
+
+    // The premise: the stamp is the value an event left behind, and it is wrong.
+    assert_eq!(
+        recorder.active_layout(),
+        EN,
+        "the premise of this test is a stamp that says English"
+    );
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+
+    // FR-06: decoded through the map of the layout the user is really typing in.
+    assert_eq!(
+        typed(&recorder),
+        "ф",
+        "FR-06: the stroke is decoded through the layout that was really active"
+    );
+    // FR-26: the direction of the conversion is taken from this value.
+    assert_eq!(
+        recorder.stroke(0).expect("stored").hkl(),
+        RU,
+        "FR-26: the stroke carries the layout that was really active"
+    );
+    // And the stamp itself has caught up, so the rest of the word agrees with the first letter.
+    assert_eq!(recorder.active_layout(), RU);
+}
+
+/// The read happens **on the first stroke of a word and on no other stroke** — NFR-01.
+///
+/// The whole argument that three Win32 calls are affordable inside the hook callback rests on
+/// this: a word costs them once, not once per letter. Asserted by counting rather than described,
+/// so that a later edit which moves the call out of its branch fails here instead of quietly
+/// putting a system call on every keystroke in the machine.
+///
+/// The second half is the boundary key: `Space` empties the ring (FR-10), so the next letter is
+/// a first stroke again and asks again. That is the property that makes the repair cover the
+/// household case at all — a person switches the layout between words.
+#[test]
+fn the_layout_is_read_once_per_word_and_not_once_per_stroke() {
+    use core::sync::atomic::Ordering;
+
+    PROBE_CALLS.store(0, Ordering::Relaxed);
+
+    let mut recorder = fresh();
+    recorder.stamp_layout_with(counting_russian);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        PROBE_CALLS.load(Ordering::Relaxed),
+        1,
+        "the first stroke of the word asks"
+    );
+
+    for _ in 0..5 {
+        assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    }
+    assert_eq!(
+        PROBE_CALLS.load(Ordering::Relaxed),
+        1,
+        "NFR-01: the rest of the word does not ask again"
+    );
+
+    // FR-10, the boundary-key row: the ring is emptied, so the next letter starts a word.
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed
+    );
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        PROBE_CALLS.load(Ordering::Relaxed),
+        2,
+        "the first stroke of the next word asks again"
+    );
+}
+
+/// The three answers the repair deliberately ignores — and it ignores them by leaving the stamp
+/// exactly where it was.
+///
+/// * **No probe at all.** Every other test in this file is that case, and it is why none of them
+///   had to be touched: a recorder that was not told what the keyboard is doing behaves exactly
+///   as this module behaved before task T-10-14.
+/// * **A zero answer.** No foreground window — the desktop is switching, or this is the secure
+///   desktop. `app::layout_refresh_needed` already refuses to treat that as a change, and so does
+///   this: publishing it would tell the buffer to record under a layout no cache contains.
+/// * **⚠ A layout the cache of FR-20 does not hold.** Adopting it would resolve `active_index` to
+///   `None` and turn a working decode into an empty one for the whole word, in the callback,
+///   where the rebuild that would fix it is fifty times the budget of NFR-01. The stamp is left
+///   alone, the decode keeps working, and a layout genuinely new to the session stays the
+///   business of FR-21's rebuild on the message path.
+#[test]
+fn a_probe_that_answers_nothing_useful_leaves_the_stamp_exactly_where_it_was() {
+    // No probe: the behaviour of this module before task T-10-14.
+    let mut recorder = fresh();
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(recorder.active_layout(), EN);
+    assert_eq!(typed(&recorder), "a");
+
+    // No foreground window.
+    let mut recorder = fresh();
+    recorder.stamp_layout_with(no_foreground);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(recorder.active_layout(), EN);
+    assert_eq!(typed(&recorder), "a");
+
+    // A layout the cache does not hold: the decode keeps working rather than going empty.
+    let mut recorder = fresh();
+    recorder.stamp_layout_with(really_unknown);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(recorder.active_layout(), EN);
+    assert_eq!(
+        typed(&recorder),
+        "a",
+        "the stroke still decodes: the repair never turns a working lookup into an empty one"
+    );
+}
+
+/// ⛔ **FR-10 and FR-11 are not what this repair touches** — decision Р-44, the user's decision
+/// on question 43, asserted against a recorder that *does* have the probe.
+///
+/// Every existing test of those two rules runs without a probe and therefore could not have
+/// noticed if the repair had damaged them. This one gives the recorder a probe that would change
+/// the stamp on any stroke that reached the read, and then walks the three rows the decisions are
+/// about:
+///
+/// * `Alt+Shift` — modifiers alone; the first statement of `record` answers `Modifier` for all
+///   four events and the buffer survives, exactly as task T-03-3b measured;
+/// * `Win+Space` — reaches `record` proper and is `Ignored` by the FR-11 exception, the buffer
+///   survives, nothing is stored and no layout is read, because the ring is not empty;
+/// * `Win+R` — a command, and it still flushes.
+///
+/// The strokes typed before the switches keep the layout they were typed under, which is the
+/// per-stroke `hkl` FR-11 rests on and which this repair does not go near.
+#[test]
+fn the_layout_read_leaves_fr10_and_fr11_exactly_as_they_were() {
+    let mut recorder = fresh();
+    recorder.stamp_layout_with(really_russian);
+
+    // Two strokes. The first reads the layout, so both are Russian — that is the repair working,
+    // and it is the state the rules below have to survive.
+    fill(&mut recorder, 2);
+    assert_eq!(recorder.active_layout(), RU);
+    assert_eq!(typed(&recorder), "фф");
+
+    // FR-11, first combination: `Alt+Shift` is modifiers alone and never reaches the rows below.
+    assert_eq!(hold(&mut recorder, VK_LMENU), Recorded::Modifier);
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LMENU), Recorded::Modifier);
+    assert_eq!(recorder.len(), 2, "FR-11: Alt+Shift does not flush");
+
+    // FR-11, second combination: `Win+Space` reaches `record` and is the exception Р-44 protects.
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Ignored,
+        "FR-11: Win+Space is a layout switch, not a command"
+    );
+    assert_eq!(recorder.len(), 2, "FR-11: Win+Space does not flush");
+    assert_eq!(release(&mut recorder, VK_LWIN), Recorded::Modifier);
+
+    // FR-10: `Win+R` is a command and flushes, repair or no repair.
+    assert_eq!(hold(&mut recorder, VK_LWIN), Recorded::Modifier);
+    assert_eq!(press(&mut recorder, VK_R, 0x13), Recorded::Flushed);
+    assert_eq!(recorder.len(), 0, "FR-10: Win+R is a command and flushes");
+    assert_eq!(release(&mut recorder, VK_LWIN), Recorded::Modifier);
+}

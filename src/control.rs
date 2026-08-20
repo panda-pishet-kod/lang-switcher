@@ -1081,8 +1081,16 @@ pub fn note_cycle_position(position: usize) {
     CYCLE_POSITION.store(position, Ordering::Relaxed);
 }
 
-/// Publishes the layout the typing buffer stamps strokes with — called by module `app` from
-/// the one place that stamp is written, and by nothing else.
+/// Publishes the layout the typing buffer stamps strokes with — called from the two places the
+/// stamp is written, and from nowhere else.
+///
+/// ⚠ **There are two since task T-10-14.** `app::publish_active_layout` is the write that
+/// answers an *event*, and `buffer::Recorder::restamp` is the read the buffer makes for itself
+/// on the first stroke of a new word — the repair of defect E, which exists precisely because
+/// the first of those two can carry a value the system had not applied yet. Both mirror here,
+/// because a stamp corrected in one of them and mirrored from only the other would make this key
+/// a value the program has already stopped using — and this key is what a detector of that very
+/// defect reads.
 ///
 /// # Why this key exists — task T-10-5
 ///
@@ -1096,10 +1104,11 @@ pub fn note_cycle_position(position: usize) {
 ///
 /// # NFR-01 to NFR-05
 ///
-/// The caller sits on the input thread's message loop, never in the hook callback, so this is
-/// one relaxed atomic store and nothing else — no allocation (NFR-03), no lock (NFR-04), no
+/// One relaxed atomic store and nothing else — no allocation (NFR-03), no lock (NFR-04), no
 /// I/O and nothing formatted (NFR-05), a constant handful of instructions (NFR-01, NFR-02).
-/// `Relaxed` for the reason [`note_buffer_len`] gives.
+/// `Relaxed` for the reason [`note_buffer_len`] gives. ⚠ One of the two callers *is* in the hook
+/// callback since task T-10-14, so that list is now a requirement rather than a description —
+/// the same terms `note_cycle_position` has always been called under.
 ///
 /// # SEC-01, SEC-07
 ///

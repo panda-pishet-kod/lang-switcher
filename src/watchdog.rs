@@ -144,18 +144,33 @@
 //!
 //! The three mechanisms that observe an **event** all mean the same thing about the world: this
 //! program was away, and something may have moved while it was. FR-80 was written about the one
-//! thing that can move and cannot be seen — the hook — but it is not the only one. The layout
-//! stamp is refreshed by [`WM_APP_LAYOUT`] and by nothing else, and a machine coming back from
-//! sleep owes this program neither a focus change nor a released modifier, which are two of the
-//! three occasions that post it. So the user types into the window that was already in front,
-//! under a layout the stamp does not name, and the direction of FR-26 is decided from a stale
-//! value: the word converts «в себя» and «моргает».
+//! thing that can move and cannot be seen — the hook — but it is not the only one. When this was
+//! written the layout stamp was refreshed by [`WM_APP_LAYOUT`] and by nothing else, and a machine
+//! coming back from sleep owes this program neither a focus change nor a released modifier, which
+//! are two of the three occasions that posted it. So the user typed into the window that was
+//! already in front, under a layout the stamp did not name, and the direction of FR-26 was
+//! decided from a stale value: the word converted «в себя» and «моргало».
 //!
 //! Each of the three therefore posts one layout probe beside its reinstallation request — see
 //! [`probe_layout_after_absence`], which is also where the measurement and the reason the fourth
 //! mechanism is **not** among them are written down. The reinstallation conditions themselves are
 //! untouched: what FR-80 does about the hook is FR-80's, and this is a second, independent
 //! question that happens to be answered on the same three events.
+//!
+//! ⭐ **What task T-10-14 changed about all of this, and what it did not.** That task found the
+//! cause behind the three tasks that had chased occasions: the stamp was *read* on an event and
+//! *used* much later, and an event can outrun the switch it reports — measured, six rounds out of
+//! six, with a synthetic `Alt+Shift` that raised `layout_probes` every time and left the stamp
+//! naming the layout on its way out. `buffer::Recorder::restamp` now reads FR-52 on the first
+//! stroke of a new word, so **the correctness of what the user types no longer depends on any
+//! occasion at all**, this module's three included.
+//!
+//! The three probes are **kept**, and their job is now the narrower one they always also did:
+//! the read in the buffer refuses a layout the cache of FR-20 does not hold — it cannot rebuild
+//! a cache inside the hook callback, and FR-20 is five milliseconds — so this message remains the
+//! only thing that brings the *cache* back in step after an absence in which the session's layout
+//! list itself may have changed. It also keeps `active_layout` on the channel of SEC-04a honest
+//! between words. See [`probe_layout_after_absence`].
 //!
 //! ⚠ **Synthetic input is not used as a pulse.** Sending a keystroke with `SendInput` to see
 //! whether it comes back through the callback would put keystrokes into whatever window the
@@ -324,9 +339,15 @@ pub const WM_APP_FLUSH: u32 = WM_APP + 6;
 /// thread (task T-10-5); and by [`probe_layout_after_absence`] on each of the three event-driven
 /// mechanisms of FR-80 — a desktop switch, a session change and a resume (task **T-10-13**).
 ///
-/// The list is worth keeping accurate, because the defect that added the last entry *was* the
-/// list: the stamp is refreshed by this message and by nothing else, so an occasion missing from
-/// it is an occasion on which the direction of FR-26 is decided by a stale value.
+/// The list was worth keeping accurate because the defect that added the last entry *was* the
+/// list: the stamp used to be refreshed by this message and by nothing else, so an occasion
+/// missing from it was an occasion on which the direction of FR-26 was decided by a stale value.
+///
+/// ⭐ **Since task T-10-14 it is no longer the only writer of the stamp**, and that is the whole
+/// point of that task: `buffer::Recorder::restamp` reads FR-52 on the first stroke of a new word,
+/// where the value is used, so no list of occasions can be incomplete in a way the user feels
+/// while typing. What this message still owns alone is the **rebuild** of the FR-20 cache, which
+/// cannot happen in the hook callback.
 ///
 /// SEC-05: it carries nothing either. The handler asks the *system* what the foreground window's
 /// layout is; the sender cannot put a layout into it.
@@ -1688,6 +1709,34 @@ pub fn request_rehook(reason: Reason) {
 /// the same probe delivered *after* the six keys repaired nothing, and delivered *before* them
 /// repaired the very first press. That is the whole content of "the stamp must be fresh before
 /// the user can type a word".
+///
+/// # ⭐ Kept, and what for — task T-10-14, point 3 of its задание
+///
+/// That task removed the reason this probe was written, and the decision was to keep it anyway.
+/// Both halves are stated here rather than left for a reader to work out.
+///
+/// **What it no longer is.** It is no longer what makes the first press after an absence correct.
+/// `buffer::Recorder::restamp` reads FR-52 on the first stroke of a new word — at the point of
+/// use, where nothing can be stale — so a machine that wakes up and owes this program no event at
+/// all is now covered by construction. T-10-14 measured the case this probe could never have
+/// covered: a synthetic `Alt+Shift` into the window that already has the focus, where the probe
+/// of T-03-3c *does* fire, `layout_probes` *does* rise, and the value read is the layout on its
+/// way out. No number of occasions answers that; only reading later does.
+///
+/// **What it still is, alone.** The read in the buffer is inside the hook callback, so it cannot
+/// rebuild the cache of FR-20 — that is a sweep of every virtual key against eight modifier
+/// combinations for every layout in the session, five milliseconds, fifty times the whole budget
+/// of NFR-01 — and it therefore **refuses a layout the cache does not already hold**. An absence
+/// is exactly the interval in which the session's layout list can have changed: a layout added,
+/// or another user's session. This message is the only thing that brings the cache back in step
+/// afterwards, and `app::refresh_layout_and_cache` is where that rebuild happens. It also keeps
+/// `active_layout` on the channel of SEC-04a truthful between words, which is what a person
+/// diagnosing this family of defects reads.
+///
+/// **What it costs to keep.** One `PostMessageW` on three events that happen a handful of times a
+/// day. Removing it would save nothing measurable and would give up the cache half; keeping it
+/// buys the cache half for that price. Task T-10-13 was therefore neither wrong nor sufficient,
+/// which is exactly what the задание of T-10-14 said in advance.
 ///
 /// # NFR-10
 ///

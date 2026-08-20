@@ -119,6 +119,8 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-modes") => experiment_modes(),
         Some("--experiment-explorer") => experiment_explorer(arguments),
         Some("--experiment-sequence") => experiment_sequence(arguments),
+        Some("--experiment-stamp") => experiment_stamp(arguments),
+        Some("--experiment-latency") => experiment_latency(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -455,6 +457,63 @@ fn experiment_sequence(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_sequence(&context, rounds, installed)
+}
+
+/// ⭐ **Task T-10-14** — the layout stamp against the real layout, produced without sleep.
+///
+/// The same split as every mode of this file: the arm builds the context, the experiment lives
+/// in `scenarios.rs`. `--experiment-stamp [кругов]` — each round switches the window's layout
+/// with no focus change, asks whether the stamp catches up on its own, and then types and
+/// presses. See [`scenarios::experiment_stamp`].
+fn experiment_stamp(arguments: &[String]) -> std::process::ExitCode {
+    let rounds = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(4);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_stamp(&context, rounds)
+}
+
+/// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.
+///
+/// `--experiment-latency [нажатий] [--words]`. See [`scenarios::experiment_latency`] for why
+/// this is position 23's measurement on a window of the bench's own and what `--words` changes.
+fn experiment_latency(arguments: &[String]) -> std::process::ExitCode {
+    let presses = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(10_200);
+    let words = arguments.iter().any(|value| value == "--words");
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_latency(&context, presses, words)
 }
 
 /// ⭐ **The program the console item of the sequence hosts** — task T-10-11.

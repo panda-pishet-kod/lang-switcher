@@ -875,6 +875,26 @@ pub struct Physical {
 /// and free of any interior mutability the callback would have to synchronise on.
 pub type PhysicalProbe = fn() -> Physical;
 
+/// How [`Recorder`] asks the system which layout the user is **really** typing in —
+/// **the repair of defect E**, task T-10-14.
+///
+/// A bare function pointer for the same three reasons [`PhysicalProbe`] is one: it is read on
+/// one rare row of [`Recorder::record`] and nowhere else, it allocates nothing, and it leaves
+/// [`Recorder`] free of interior mutability the callback would have to synchronise on.
+///
+/// ⭐ **The product's implementation is [`crate::switch::current`], and it is not a new one.**
+/// That function *is* FR-52 — `GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(),
+/// null))`, the expression the requirement gives word for word, with each of the three returns
+/// examined as NFR-13 demands — and it was already public and already the reading the selection
+/// path of FR-60/FR-61 makes at the moment of the press. Task T-10-14 wrote no reader of its own
+/// and deliberately did not: a second copy of those three calls is a second thing to keep right,
+/// and this module's problem was never *how* to read the layout but **when**.
+///
+/// A test supplies its own and thereby **states**, explicitly, what the layout of the foreground
+/// window is while it feeds its synthetic strokes — which is what makes the detector of criterion
+/// 11 two-sided without a live keyboard, exactly as `PhysicalProbe` did for defect D.
+pub type LayoutProbe = fn() -> LayoutId;
+
 // ---------------------------------------------------------------------------------------
 // The flush rules of FR-10 — the LL-hook rows only
 // ---------------------------------------------------------------------------------------
@@ -1093,6 +1113,26 @@ pub struct Recorder {
     /// gets a buffer, and `app::restore_buffer` puts back the very same value it parked, so the
     /// probe travels with the recorder across the FR-70 gate.
     verify: Option<PhysicalProbe>,
+    /// How to read the layout the user is **really** typing in — **the repair of defect E**,
+    /// task T-10-14. `None` means "believe [`Recorder::active`]", which is what this module did
+    /// unconditionally before that task.
+    ///
+    /// # Why the stamp was not enough on its own
+    ///
+    /// [`Recorder::active`] is written from outside, by `app::publish_active_layout`, when an
+    /// *event* says the layout may have moved. Task T-10-14 measured that the event can arrive
+    /// **before the system has applied the switch**: a synthetic `Alt+Shift` into the window
+    /// that already has the focus moved the layout to `ru-RU`, the probe of T-03-3c fired on the
+    /// modifier release and read `en-US` — the layout on its way out — and nothing corrected it
+    /// afterwards, six rounds out of six. Three earlier tasks (T-10-5, T-10-0f, T-10-13) each
+    /// added an *occasion* to re-read; none of them changed the fact that the value is read
+    /// ahead of the moment it is used.
+    ///
+    /// **The product always sets it**: [`install`] is the one path by which the input thread
+    /// gets a buffer, and `app::restore_buffer` puts back the very same value it parked, so the
+    /// probe travels with the recorder across the FR-70 gate — the same arrangement `verify`
+    /// already relies on.
+    stamp: Option<LayoutProbe>,
 }
 
 impl Recorder {
@@ -1115,6 +1155,7 @@ impl Recorder {
             converted: false,
             cycle: 0,
             verify: None,
+            stamp: None,
         }
     }
 
@@ -1125,6 +1166,15 @@ impl Recorder {
     /// keyboard is doing while the test feeds its synthetic strokes.
     pub fn verify_held_with(&mut self, probe: PhysicalProbe) {
         self.verify = Some(probe);
+    }
+
+    /// Gives this recorder a way to read the layout the user is really typing in — **the repair
+    /// of defect E**, task T-10-14, and see [`Recorder::restamp`] for what it is for.
+    ///
+    /// Set by [`install`] on the product's path. A test sets it to state, explicitly, what the
+    /// layout of the foreground window is while the test feeds its synthetic strokes.
+    pub fn stamp_layout_with(&mut self, probe: LayoutProbe) {
+        self.stamp = Some(probe);
     }
 
     /// A buffer sized by the `[buffer]` section of the configuration — FR-07.
@@ -1473,6 +1523,42 @@ impl Recorder {
             return Recorded::Flushed;
         }
 
+        // ---------------------------------------------------------------------------------
+        // ⭐ **Defect E — the repair.** Task T-10-14.
+        //
+        // The layout is read **here**, where it is used, instead of being believed from a value
+        // somebody read earlier on an event. Everything below this line — the decoding of FR-06
+        // and the stamp of FR-04 that FR-26 takes its direction from — then rests on what the
+        // foreground window is running **now**, at the moment these strokes are being typed.
+        //
+        // ⚠ **Why the earlier value could not be trusted.** `Recorder::active` is written from
+        // `app::publish_active_layout` when an event says the layout may have moved. Task
+        // T-10-14 measured that the event outruns the switch: a synthetic `Alt+Shift` into the
+        // window that already had the focus moved it to `ru-RU`, the probe of T-03-3c fired on
+        // the modifier release, read `en-US`, and nothing corrected it — six rounds out of six,
+        // `layout_probes` rising every time and `focus_changes` never moving. The next word was
+        // then decoded through the `en-US` map and converted `en-US → ru-RU`, producing the text
+        // that was already on the screen. That is the «моргание» three earlier tasks each
+        // answered by adding one more *occasion* to re-read.
+        //
+        // **On the first stroke of a new word and on nothing else.** The ring is empty exactly
+        // when a word is starting — every flush row of FR-10 above has already run — and the
+        // stamp only has to be right for strokes that are about to be recorded. Typing `ghbdtn`
+        // costs the three Win32 reads once, on the `g`; the other five keys take the branch not
+        // taken and pay a comparison. It is the shape module `hook` already uses for FR-96 and
+        // the repair of defect D: the cheap test first, the system call only once the answer is
+        // "yes".
+        //
+        // ⚠ **FR-11 is untouched, and this is not a flush** (Р-44, the user's decision on
+        // question 43). A layout change still throws nothing away; `Alt+Shift` still never
+        // reaches this line at all, `Win+Space` still returns `Ignored` above, and `Win+R` still
+        // flushes as a command. Nothing here empties the ring — it cannot, the branch runs only
+        // when the ring is already empty.
+        // ---------------------------------------------------------------------------------
+        if self.ring.len() == 0 {
+            self.restamp();
+        }
+
         // FR-06 through the cache of FR-20, and FR-04: what the key gave, at the moment it was
         // pressed, in the layout that was active then.
         let produced = self.lookup(key.scan, mods);
@@ -1714,6 +1800,81 @@ impl Recorder {
         self.cache.as_ref()?.map_at(self.active_index?)
     }
 
+    /// Reads the layout the user is really typing in and adopts it — **the repair of defect E**,
+    /// task T-10-14.
+    ///
+    /// Called from [`Recorder::record`] on the first stroke of a new word and from nowhere else.
+    /// See the comment at the call site for the measurement.
+    ///
+    /// # The three cases it deliberately does nothing in
+    ///
+    /// * **No probe.** A recorder built by a test that did not state what the keyboard is doing
+    ///   behaves exactly as this module behaved before this task. That is what keeps every
+    ///   existing test of the FR-10 table a statement about FR-10 and not about the layout of
+    ///   the machine running it.
+    /// * **A zero answer.** No foreground window at all — the desktop is switching, or this is
+    ///   the secure desktop. Not a change and not treated as one, the same rule
+    ///   `app::layout_refresh_needed` already applies: publishing it would tell the buffer to
+    ///   record under a layout no cache contains.
+    /// * **⚠ A layout the cache of FR-20 does not have.** The stamp is left alone on purpose.
+    ///   The honest repair would be to rebuild the cache, and FR-20 is a sweep of every virtual
+    ///   key against eight modifier combinations for every layout in the session — five
+    ///   milliseconds, measured, which is fifty times the whole budget NFR-01 gives this
+    ///   callback. So this narrows itself to what it can do without lying: adopting a layout the
+    ///   cache already holds can only ever make [`Recorder::lookup`] more correct, and never
+    ///   turns a working lookup into an empty one. A layout genuinely new to the session is the
+    ///   business of FR-21's rebuild on the message path, which is unchanged and still runs.
+    ///   The case is narrow — `GetKeyboardLayoutList` gives the cache every layout of the
+    ///   session, so a switch the user can make is in it unless the list itself has just grown.
+    ///
+    /// # NFR-01 to NFR-05
+    ///
+    /// Three leaf Win32 reads ([`crate::switch::current`]): `GetForegroundWindow` reads a value
+    /// the window manager keeps for the desktop, `GetWindowThreadProcessId` the window's own
+    /// record and `GetKeyboardLayout` the thread's. None allocates (NFR-03), none can block
+    /// (NFR-04), none journals anything (NFR-05) and none is re-entrant into this callback. Then
+    /// one comparison against the layouts the cache holds — a scan of the session's layout list,
+    /// two entries on this machine — and two stores.
+    ///
+    /// **Measured, not argued** (report of T-10-14, `--experiment-latency --words`, a volley of
+    /// 10 290 presses in which every seventh key starts a word, so one callback sample in
+    /// fourteen takes this branch): `callback_p50_ns` 2000 before and 2000 after,
+    /// `callback_p99_ns` 2900–3000 before and 2900–3000 after. The branch does not show at the
+    /// percentiles NFR-01 is written in.
+    fn restamp(&mut self) {
+        let Some(probe) = self.stamp else {
+            return;
+        };
+
+        let observed = probe();
+
+        if observed == LayoutId::default() || observed == self.active {
+            return;
+        }
+
+        if !self
+            .cache
+            .as_ref()
+            .is_none_or(|cache| cache.contains(observed))
+        {
+            return;
+        }
+
+        self.active = observed;
+        self.resolve_active();
+
+        // ⚠ **The mirror of SEC-04a has to see this.** Until this task
+        // `app::publish_active_layout` was the one place in the program that wrote
+        // `Recorder::active`, and therefore the one place that could say what the stamp holds.
+        // It is now the second; a stamp corrected here and not mirrored would make
+        // `active_layout` on the channel a value the program has already stopped using, and the
+        // detector of this very defect reads that key. One relaxed atomic store — the same cost
+        // `advance_cycle` pays a few lines up, and compiled out of every build that is not a
+        // `testing` one.
+        #[cfg(feature = "testing")]
+        crate::control::note_active_layout(observed.raw());
+    }
+
     /// Re-resolves the position of the active layout in the cache.
     ///
     /// Done when either the cache or the active layout is published, and never in the
@@ -1754,9 +1915,18 @@ thread_local! {
 /// the single path by which the input thread ever gets a buffer, and `app::restore_buffer`
 /// re-installs the very value `app::park_buffer` took away, so the probe survives the FR-70
 /// gate without anybody having to remember it.
+/// **The repair of defect E is armed on the same line** (task T-10-14): the recorder the product
+/// runs on is the one that can read the layout the user is really typing in, at the moment it
+/// records a stroke. Both probes travel with the recorder across the FR-70 gate for the same
+/// reason and by the same route.
+///
+/// ⭐ The layout probe is [`crate::switch::current`] — FR-52 itself, already public, already the
+/// reading the selection path of FR-60/FR-61 makes at the moment of the press. No new reader was
+/// written: see [`LayoutProbe`].
 pub fn install(config: &settings::Buffer) {
     let mut recorder = Recorder::from_config(config);
     recorder.verify_held_with(crate::hook::physical_modifiers);
+    recorder.stamp_layout_with(crate::switch::current);
     install_recorder(recorder);
 }
 
