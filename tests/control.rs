@@ -50,13 +50,17 @@ use std::sync::{Mutex, PoisonError};
 use lang_switcher::app;
 use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::control;
+use lang_switcher::convert::{self, Keystroke};
 use lang_switcher::guard::Field;
 use lang_switcher::hook::{Edge, KeyEvent};
-use lang_switcher::layouts::{KeyMapping, LayoutCache, LayoutId, LayoutMapBuilder, Mods};
+use lang_switcher::inject::{self, Environment, Modifiers};
+use lang_switcher::layouts::{
+    KeyMapping, LayoutCache, LayoutId, LayoutMap, LayoutMapBuilder, Mods,
+};
 use lang_switcher::settings::ReplacementMethod;
 use lang_switcher::watchdog;
 use windows::Win32::System::Pipes::PIPE_REJECT_REMOTE_CLIENTS;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_A, VK_BACK, VK_RETURN};
+use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, VK_A, VK_BACK, VK_RETURN};
 
 /// Serialises the tests that assert on the process-wide mirrors.
 ///
@@ -217,6 +221,33 @@ fn every_value_is_a_number_or_one_of_the_two_words_of_fr42() {
                 assert!(
                     !field.is_empty() && field.bytes().all(|byte| byte.is_ascii_digit()),
                     "every field of last_replacement is a decimal count, {field:?} is not"
+                );
+            }
+            continue;
+        }
+
+        // ⭐ **Task T-10-17.** The second compound value, and the same discipline as the first:
+        // two hexadecimal `HKL`s separated by `/` — the layout the strokes were recorded under
+        // and the one they were rendered into. Each half is held to literally `0x` and exactly
+        // eight hex digits, the shape `active_layout` is held to above, so nothing of variable
+        // length can ride in either of them. The flag beside it,
+        // `last_replacement_changed`, needs no arm at all: it renders as `0` or `1` and falls
+        // through to the decimal rule below, which is the tightest statement available about
+        // a bit.
+        if key == "last_replacement_direction" {
+            let halves: Vec<&str> = value.split('/').collect();
+            assert_eq!(
+                halves.len(),
+                2,
+                "last_replacement_direction is from/to, and {value:?} is not"
+            );
+            for half in halves {
+                let digits = half.strip_prefix("0x").unwrap_or_else(|| {
+                    panic!("every half of last_replacement_direction is a hex HKL, {half:?} is not")
+                });
+                assert!(
+                    digits.len() == 8 && digits.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "every half is 0x and exactly eight hex digits, {half:?} is not"
                 );
             }
             continue;
@@ -2340,7 +2371,9 @@ fn the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot() {
     // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
     // assertion travels with the last-appended key: it is the check that no key reached the
     // channel without a review, and its place is beside the key that currently closes the
-    // list, so that a task which adds one is the task that edits it.
+    // list, so that a task which adds one is the task that edits it. Task **T-10-17** appended
+    // two more after these five, so the length now travels with
+    // `the_two_replacement_outcome_keys_of_t_10_17_close_the_channel`.
     assert_eq!(
         &control::KEYS[38..43],
         &[
@@ -2351,5 +2384,268 @@ fn the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot() {
             "restamp_accepted"
         ]
     );
-    assert_eq!(control::KEYS.len(), 43);
+}
+
+// -------------------------------------------------------------------------------------
+// ⭐ Task T-10-17 — the two keys that say whether the replacement returned what it took,
+// and in which direction it went
+// -------------------------------------------------------------------------------------
+
+/// An [`Environment`] that swallows everything — the replacement is driven for what it
+/// **publishes**, not for what it sends.
+///
+/// Deliberately the smallest possible: `tests\inject.rs` owns the bench that inspects packets, and
+/// a second copy of it here would be a second thing to keep in step. What these tests need is a
+/// real call of `inject::replace_in_with` — the one place the packet is formed and therefore the
+/// one place the two new keys are published — with nothing reaching the machine.
+struct Silent;
+
+impl Environment for Silent {
+    fn held(&mut self) -> Modifiers {
+        Modifiers::NONE
+    }
+
+    fn send(&mut self, events: &[INPUT]) -> u32 {
+        // FR-45: the honest answer of a system that accepted everything, so `send_mismatches`
+        // stays where it was and no other key of this channel moves under these tests.
+        u32::try_from(events.len()).unwrap_or(u32::MAX)
+    }
+
+    fn pause(&mut self, _delay_ms: u32) {}
+}
+
+/// The hardwired US half of the FR-25 table — the layout the strokes below are recorded under.
+fn fallback_us() -> LayoutMap {
+    convert::fallback_map(convert::FALLBACK_US).expect("the FR-25 table carries US")
+}
+
+/// The hardwired Russian half of the FR-25 table.
+fn fallback_russian() -> LayoutMap {
+    convert::fallback_map(convert::FALLBACK_RUSSIAN).expect("the FR-25 table carries Russian")
+}
+
+/// The six strokes of `ghbdtn` as the buffer records them under US — `привет` in Russian, the
+/// example section 1 of SPEC opens with and the six characters the live protocol of defect E is
+/// made of.
+fn six_strokes_under_us() -> Vec<Keystroke> {
+    let source = fallback_us();
+
+    [0x22, 0x23, 0x30, 0x20, 0x14, 0x31]
+        .iter()
+        .map(|&scan| Keystroke::recorded_in(&source, scan, false, Mods::NONE))
+        .collect()
+}
+
+/// What the channel says about the last replacement, as one tuple.
+fn replacement_reading() -> (u16, u16, u16, bool, u32, u32) {
+    let state = control::snapshot();
+
+    (
+        state.replacement_erase,
+        state.replacement_units,
+        state.replacement_distinct,
+        state.last_replacement_changed,
+        state.last_replacement_from,
+        state.last_replacement_to,
+    )
+}
+
+/// ⭐ **The instrument, shown in both of its states — task T-10-17, requirement 2.**
+///
+/// # What was missing and why this is the test
+///
+/// The live protocol of defect E reads `last_replacement=6/6/6` on **all thirty-four** presses of
+/// a text the person watched not change, with the stamp demonstrably correct (`restamp_unchanged`
+/// twenty-three times, `restamp_accepted` never). `6/6/6` is the same reading for a press that
+/// rewrote six characters and for a press that handed back the six it took: the shape of a packet
+/// says how much moved, never whether anything did. Four repairs in a row were guesses because
+/// this reading did not exist.
+///
+/// A flag shown in one state is not a flag that has been checked — it is a constant nobody has
+/// caught yet. So both circles are driven here through the real `inject::replace_in_with`, the one
+/// place a packet is formed, and the whole tuple is asserted each time so that a publication
+/// landing in the wrong key colours the test:
+///
+/// | Circle | Target | What the packet does | `changed` | direction |
+/// |---|---|---|---|---|
+/// | conversion | Russian | `ghbdtn` becomes `привет` | **`true`** | `0x04090409` to `0x04190419` |
+/// | identity | US, the layout the strokes were typed in | `ghbdtn` stays `ghbdtn` | **`false`** | `0x04090409` to `0x04090409` |
+///
+/// The second circle is not a contrivance: it is exactly what `Cycle::target` answers whenever
+/// `step % len == 0` — the rollback of FR-32 and FR-33, which the docblock of that function
+/// describes as reproducing the original text code unit for code unit. Twelve of the person's
+/// thirty-four presses were that press, and until these two keys nothing on the channel could say
+/// so.
+#[test]
+fn the_two_replacement_outcome_keys_of_t_10_17_read_both_ways() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let strokes = six_strokes_under_us();
+    let us = LayoutId::from_raw(0x0409_0409);
+    let russian = LayoutId::from_raw(0x0419_0419);
+    let hkl = |id: LayoutId| u32::try_from(id.raw()).expect("an HKL is a thirty-two bit word");
+
+    // ---- circle 1: the replacement really rewrites the word -------------------------------
+    inject::replace_in_with(
+        &mut Silent,
+        &strokes,
+        &fallback_russian(),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("the packet is sized from the lengths it is built with");
+
+    assert_eq!(
+        replacement_reading(),
+        (6, 6, 6, true, hkl(us), hkl(russian)),
+        "six off, six back, six of them different, the insertion differs, and the direction is \
+         the one FR-26 read out of the strokes"
+    );
+
+    // ---- circle 2: the replacement returns what it took ------------------------------------
+    //
+    // The same six strokes rendered into the layout they were typed under — the identity
+    // `Cycle::target` produces on the rollback press.
+    inject::replace_in_with(
+        &mut Silent,
+        &strokes,
+        &fallback_us(),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("the packet is sized from the lengths it is built with");
+
+    assert_eq!(
+        replacement_reading(),
+        (6, 6, 6, false, hkl(us), hkl(us)),
+        "the shape is the same 6/6/6 the protocol of the person shows, and the two new keys are \
+         what separate this press from the one above it"
+    );
+
+    // ⚠ The two circles differ **only** in the target, and the three counts that existed before
+    // this task are identical across them. That equality is the whole argument for the keys:
+    // without it a reader could claim `distinct` already answered the question.
+    let state = control::snapshot();
+    assert_eq!(
+        (
+            state.replacement_erase,
+            state.replacement_units,
+            state.replacement_distinct
+        ),
+        (6, 6, 6)
+    );
+}
+
+/// The pair is a register and not a counter, the halves cannot tear, and each of them saturates
+/// rather than truncating into the other.
+///
+/// Driven through the publisher directly, as
+/// `the_last_replacement_key_mirrors_what_was_published_into_it` is: the test above proves the
+/// product publishes the right values, this one proves the storage carries whatever it is given.
+#[test]
+fn the_replacement_direction_of_t_10_17_mirrors_what_was_published_into_it() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    for (changed, from, to) in [
+        (true, 0x0409_0409_usize, 0x0419_0419_usize),
+        (false, 0x0419_0419, 0x0419_0419),
+        (true, 0, 0x0413_0413),
+    ] {
+        control::note_replacement_outcome(changed, from, to);
+
+        let state = control::snapshot();
+        assert_eq!(
+            (
+                state.last_replacement_changed,
+                state.last_replacement_from,
+                state.last_replacement_to
+            ),
+            (changed, from as u32, to as u32),
+            "the snapshot reports the outcome that was published into it"
+        );
+
+        let text = control::render(&state);
+        assert!(
+            text.contains(&format!(
+                "last_replacement_direction={:#010x}/{:#010x}",
+                from as u32, to as u32
+            )),
+            "and renders the two halves in the order from, then to"
+        );
+        assert!(
+            text.contains(&format!("last_replacement_changed={}", u8::from(changed))),
+            "and the flag as one bit"
+        );
+    }
+
+    // A register: the second publication replaces the first, it does not accumulate.
+    control::note_replacement_outcome(false, 0x0409_0409, 0x0409_0409);
+    let state = control::snapshot();
+    assert!(!state.last_replacement_changed);
+    assert_eq!(
+        (state.last_replacement_from, state.last_replacement_to),
+        (0x0409_0409, 0x0409_0409)
+    );
+
+    // Each half saturates rather than wrapping into its neighbour. No keyboard layout handle is
+    // wider than thirty-two bits, so this is unreachable in the product; a half that wrapped
+    // would quietly report a **different layout**, which is the one failure this pair must never
+    // have.
+    control::note_replacement_outcome(true, usize::MAX, 0x0419_0419);
+    let state = control::snapshot();
+    assert_eq!(state.last_replacement_from, u32::MAX);
+    assert_eq!(state.last_replacement_to, 0x0419_0419);
+}
+
+/// The two keys are published, they close the tail of `KEYS`, and the length assertion lives here
+/// now.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// One bit and two layout handles. The bit is the *comparison* of two texts and neither text nor
+/// any part of one is published; the handles are of exactly the kind `active_layout` has published
+/// since task T-10-5 — "an `HKL` is an identifier of a layout, not a keystroke". Both shapes are
+/// held closed by `every_value_is_a_number_or_one_of_the_two_words_of_fr42`: a bit falls under the
+/// decimal rule, and each half of the direction must be `0x` and exactly eight hex digits, so
+/// nothing of variable length can ride in either.
+#[test]
+fn the_two_replacement_outcome_keys_of_t_10_17_close_the_channel() {
+    let text = control::render(&control::snapshot());
+
+    let changed = text
+        .lines()
+        .find_map(|line| line.strip_prefix("last_replacement_changed="))
+        .expect("the channel does not publish last_replacement_changed");
+    assert!(
+        changed == "0" || changed == "1",
+        "last_replacement_changed is one bit, not {changed:?}"
+    );
+
+    let direction = text
+        .lines()
+        .find_map(|line| line.strip_prefix("last_replacement_direction="))
+        .expect("the channel does not publish last_replacement_direction");
+    let halves: Vec<&str> = direction.split('/').collect();
+    assert_eq!(
+        halves.len(),
+        2,
+        "last_replacement_direction is from/to, not {direction:?}"
+    );
+
+    for key in ["last_replacement_changed", "last_replacement_direction"] {
+        assert!(control::KEYS.contains(&key));
+        assert!(!control::RESERVED_KEYS.contains(&key));
+    }
+
+    // Appended, not inserted — the rule every key since task T-05-2a has followed, written
+    // against fixed indices for the reason given at
+    // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
+    // assertion travels with the last-appended key, so a task that adds one is the task that
+    // edits it; it moved here from
+    // `the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot`.
+    assert_eq!(
+        &control::KEYS[43..45],
+        &["last_replacement_changed", "last_replacement_direction"]
+    );
+    assert_eq!(control::KEYS.len(), 45);
 }

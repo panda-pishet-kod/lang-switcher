@@ -1012,6 +1012,79 @@ const METHOD_BACKSPACE: u8 = 1;
 /// The last replacement ran the `Selection` packet of FR-42.
 const METHOD_SELECTION: u8 = 2;
 
+/// ⭐ Whether the last replacement packet **inserted something other than what it took off the
+/// screen** — task **T-10-17**.
+///
+/// # Why this bit exists
+///
+/// The live protocol of defect E has all thirty-four presses reading `last_replacement=6/6/6`
+/// while the person reports the text «моргает» and stays as it was. `6/6/6` is the same reading
+/// for a press that rewrote six characters into six different ones and for a press that took six
+/// characters off and typed the very same six back: the shape of the packet says how much moved,
+/// never **whether anything did**. Four repairs of that defect were guesses because this bit did
+/// not exist to be read.
+///
+/// # What the two sides are, exactly — and what they are not
+///
+/// The product knows two texts at the moment [`crate::inject::replace_in_with`] forms the packet:
+/// what it **believes** it is erasing — the characters the recorded strokes produced when they
+/// were pressed, `Keystroke::produced` — and what it is inserting, the conversion of those same
+/// strokes into the target layout. This bit is the comparison of exactly those two.
+///
+/// ⚠ **It is not "the screen changed".** The product never reads the screen (SEC-01 forbids it
+/// and nothing here could), so what it can honestly publish is its own two sides. The difference
+/// is load-bearing, not pedantic: at `D = 0` of task T-10-16 the stamp is stale, the product
+/// believes it is erasing `ghbdtn`, inserts `привет`, and the field — which really held `привет`
+/// all along — does not change. That press is `1` here and «не изменилось» on the screen, and the
+/// two readings together are what separates it from a press that genuinely returned what it took.
+///
+/// `false` before the first replacement, which is the state [`LAST_REPLACEMENT`] reports as
+/// `0/0/0`: a reader that sees no replacement has no flag to interpret.
+///
+/// **SEC-01, SEC-07.** One bit. Neither text is published, neither can be recovered from it, and
+/// «равны ли они» is not a character, a code unit or a scan code.
+static LAST_REPLACEMENT_CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// ⭐ **The direction the last replacement actually applied**: the layout the strokes were
+/// recorded under, and the layout they were rendered into. Task **T-10-17**.
+///
+/// # Why the direction, and why it is not derivable from what was already here
+///
+/// [`ACTIVE_LAYOUT`] is the stamp **now**, and step 5 of FR-40 switches the foreground window
+/// straight after the packet goes out, so by the time any reader gets there the stamp is the
+/// *target* of the press it is trying to describe. `cycle_position` is a step, not a layout.
+/// Neither of them can answer «куда именно эта замена переводила», and that question has a
+/// specific wrong answer worth being able to see: `Cycle::target` returns `origin` itself
+/// whenever `step % len == 0` — the rollback of FR-32 and FR-33 — so a press whose direction is
+/// `X→X` converts the strokes into the layout they were typed in and reproduces the original text
+/// code unit for code unit. That press is a **legitimate** identity, and it is indistinguishable
+/// on today's channel from an identity produced by a defect.
+///
+/// # One word and not two
+///
+/// The two halves are compared **with each other** — the whole question is whether they are
+/// equal — so a reading that mixed the origin of one press with the target of another would be a
+/// wrong measurement rather than a stale one. That is the argument [`LAST_REPLACEMENT`] makes for
+/// packing three counts into one atomic, and it applies here for the same reason: `from` in the
+/// upper thirty-two bits, `to` in the lower, published by a single store and read by a single
+/// load.
+///
+/// Each half saturates at [`u32::MAX`] rather than truncating. An `HKL` of a keyboard layout is a
+/// language identifier and a device handle in one thirty-two bit word — `0x0409_0409`,
+/// `0x0419_0419` — so nothing this program can hold comes near the bound; a value that did would
+/// render as `0xffffffff`, which names no layout, instead of silently becoming a different one.
+///
+/// Zero on both halves — rendered `0x00000000/0x00000000` — is "no replacement yet", the same
+/// convention `active_layout` and `last_replacement` already use.
+///
+/// **SEC-01, SEC-07.** Two layout handles, of exactly the kind [`ACTIVE_LAYOUT`] already
+/// publishes: "an `HKL` is an identifier of a layout, not a keystroke, and is fair game". Not a
+/// scan code, not a character, not a stroke.
+static LAST_REPLACEMENT_DIRECTION: AtomicU64 = AtomicU64::new(0);
+
+/// Width of one half of [`LAST_REPLACEMENT_DIRECTION`].
+const DIRECTION_FIELD_BITS: u32 = 32;
+
 /// The five outcomes of [`crate::buffer::Recorder::restamp`], counted — task **T-10-15**.
 ///
 /// # Why counters and not one more flag
@@ -1265,6 +1338,52 @@ pub fn note_replacement_method(method: ReplacementMethod) {
     };
 
     LAST_REPLACEMENT_METHOD.store(code, Ordering::Relaxed);
+}
+
+/// ⭐ Publishes the two facts task **T-10-17** adds about the replacement being built: whether
+/// what it inserts differs from what it takes off the screen, and the direction it really
+/// applied. Called by module `inject` from the one place a packet is formed — beside
+/// [`note_replacement`] — and by nothing else.
+///
+/// `changed` is the comparison of the product's own two sides, argued at
+/// [`LAST_REPLACEMENT_CHANGED`]; `from` is the numeric `HKL` the strokes were recorded under
+/// (FR-26) and `to` the one they were rendered into. `from == to` is the rollback of FR-32, and
+/// being able to read it is the point of the pair — see [`LAST_REPLACEMENT_DIRECTION`].
+///
+/// # NFR-01 to NFR-05
+///
+/// The caller sits on the input thread's message loop, never in the hook callback, and this is
+/// two relaxed atomic stores over two shifts: no allocation (NFR-03), no lock (NFR-04), no I/O
+/// and nothing formatted (NFR-05). `Relaxed` for the reason [`note_buffer_len`] gives.
+///
+/// Two stores and not one, and the split is where the comparisons are: the two halves of the
+/// direction are compared with each other and therefore share a word, while the flag is read
+/// *beside* the direction rather than against it — the same terms
+/// [`note_replacement_method`] has published a word beside [`note_replacement`]'s counts since
+/// task T-10-8.
+///
+/// # SEC-01, SEC-07
+///
+/// One bit and two layout handles. See the two statics.
+#[inline]
+pub fn note_replacement_outcome(changed: bool, from: usize, to: usize) {
+    let half = |value: usize| u64::from(u32::try_from(value).unwrap_or(u32::MAX));
+
+    LAST_REPLACEMENT_CHANGED.store(changed, Ordering::Relaxed);
+    LAST_REPLACEMENT_DIRECTION.store(
+        (half(from) << DIRECTION_FIELD_BITS) | half(to),
+        Ordering::Relaxed,
+    );
+}
+
+/// Unpacks [`LAST_REPLACEMENT_DIRECTION`] into the two halves it carries — from, then to.
+fn last_replacement_direction() -> (u32, u32) {
+    let packed = LAST_REPLACEMENT_DIRECTION.load(Ordering::Relaxed);
+
+    (
+        (packed >> DIRECTION_FIELD_BITS) as u32,
+        (packed & u64::from(u32::MAX)) as u32,
+    )
 }
 
 /// Unpacks [`LAST_REPLACEMENT_METHOD`] into the word [`render`] prints.
@@ -1647,6 +1766,26 @@ pub struct Snapshot {
     ///
     /// SEC-01, SEC-07: five counts of the program's own decisions. See [`RESTAMP_OUTCOMES`].
     pub restamp: [u32; Restamp::COUNT],
+    /// ⭐ Whether the last replacement inserted something other than what it took off the screen
+    /// — task **T-10-17**.
+    ///
+    /// [`LAST_REPLACEMENT_CHANGED`] says why one bit was the missing quantity and what its two
+    /// sides are. `false` before the first replacement, which is the state
+    /// [`Snapshot::replacement_erase`] and its two neighbours report as `0/0/0`.
+    ///
+    /// SEC-01, SEC-07: one bit about the program's own packet. Neither text is here.
+    pub last_replacement_changed: bool,
+    /// ⭐ The layout the strokes of the last replacement were **recorded under** — task
+    /// **T-10-17**, the `from` half of [`LAST_REPLACEMENT_DIRECTION`].
+    ///
+    /// SEC-01, SEC-07: a layout handle, the kind [`Snapshot::active_layout`] already publishes.
+    pub last_replacement_from: u32,
+    /// ⭐ The layout they were **rendered into** — the `to` half of the same word.
+    ///
+    /// Equal to [`Snapshot::last_replacement_from`] exactly when the press was the rollback of
+    /// FR-32 and FR-33, which is a legitimate identity and the one this channel could not name
+    /// until now.
+    pub last_replacement_to: u32,
 }
 
 /// Reads [`RESTAMP_OUTCOMES`] in one pass, in the order of [`Restamp::ALL`].
@@ -1671,6 +1810,9 @@ pub fn snapshot() -> Snapshot {
     let clipboard = crate::selection::counters();
     // One load, three fields — see [`LAST_REPLACEMENT`] for why they may not be read apart.
     let replacement = last_replacement();
+    // One load, two halves — the same argument, for the same reason: the reading this pair is
+    // taken for is whether they are equal.
+    let direction = last_replacement_direction();
 
     let mut state = Snapshot {
         buffer_len: BUFFER_LEN.load(Ordering::Relaxed),
@@ -1715,6 +1857,9 @@ pub fn snapshot() -> Snapshot {
         clipboard_close_failures: clipboard.close_failures,
         clipboard_retries: clipboard.open_retries,
         restamp: restamp_outcomes(),
+        last_replacement_changed: LAST_REPLACEMENT_CHANGED.load(Ordering::Relaxed),
+        last_replacement_from: direction.0,
+        last_replacement_to: direction.1,
     };
 
     // ⚠ Read **after** every mirror above, deliberately. Summarising the latency histogram
@@ -1837,6 +1982,16 @@ pub fn snapshot() -> Snapshot {
 /// outcomes. Their whole point is that one snapshot separates «перештамповка не звалась» from
 /// «звалась и отказала, потому что карты нет в кэше FR-20», and those are different defects in
 /// different modules. See [`RESTAMP_OUTCOMES`].
+///
+/// ⭐ `last_replacement_changed` and `last_replacement_direction` of task **T-10-17** are appended
+/// after them, in that order and by the same rule, and they are the pair the live protocol of
+/// defect E was missing. Every key of the `last_replacement` family before them describes the
+/// *size* of a press — six off, six back, six of them different, through which packet — and all
+/// of them read identically whether the press rewrote the word or handed back the one that was
+/// already there. The first of the two is that missing bit; the second says which direction the
+/// press applied, so that a `X→X` press — the rollback `Cycle::target` produces whenever
+/// `step % len == 0`, a **legitimate** identity — can be told apart from an identity nobody asked
+/// for. See [`LAST_REPLACEMENT_CHANGED`] and [`LAST_REPLACEMENT_DIRECTION`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -1881,7 +2036,9 @@ pub fn render(state: &Snapshot) -> String {
          restamp_no_probe={}\n\
          restamp_unchanged={}\n\
          restamp_uncached={}\n\
-         restamp_accepted={}\n",
+         restamp_accepted={}\n\
+         last_replacement_changed={}\n\
+         last_replacement_direction={:#010x}/{:#010x}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -1927,6 +2084,9 @@ pub fn render(state: &Snapshot) -> String {
         state.restamp[Restamp::Unchanged as usize],
         state.restamp[Restamp::Uncached as usize],
         state.restamp[Restamp::Accepted as usize],
+        u8::from(state.last_replacement_changed),
+        state.last_replacement_from,
+        state.last_replacement_to,
     )
 }
 
@@ -1947,7 +2107,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 43] = [
+pub const KEYS: [&str; 45] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -1991,6 +2151,8 @@ pub const KEYS: [&str; 43] = [
     "restamp_unchanged",
     "restamp_uncached",
     "restamp_accepted",
+    "last_replacement_changed",
+    "last_replacement_direction",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

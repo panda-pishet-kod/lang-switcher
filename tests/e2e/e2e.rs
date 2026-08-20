@@ -123,6 +123,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-latency") => experiment_latency(arguments),
         Some("--experiment-away") => experiment_away(arguments),
         Some("--experiment-race") => experiment_race(arguments),
+        Some("--experiment-voice") => experiment_voice(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -549,6 +550,37 @@ fn experiment_race(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_race(&context, stage, reps)
+}
+
+/// ⭐ **Task T-10-17** — the replacement that returns what it took, given a voice.
+///
+/// `--experiment-voice <ступень> [повторов]`, where the stage is one of `check`, `blink`, `pair`.
+/// The same split as every mode of this file: the arm builds the context, the experiment lives in
+/// `scenarios.rs`. See [`scenarios::experiment_voice`] for what each stage answers, why the
+/// product here is the one this build produced rather than the installed copy, and what the `pair`
+/// stage borrows and gives back.
+fn experiment_voice(arguments: &[String]) -> std::process::ExitCode {
+    let stage = arguments.get(1).map_or("check", String::as_str);
+    let reps = arguments
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(5);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_voice(&context, stage, reps)
 }
 
 /// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.

@@ -8514,3 +8514,748 @@ pub fn experiment_race(ctx: &Context, stage: &str, reps: usize) -> std::process:
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Опыт T-10-17 — замена, которая возвращает то же самое: дать этому голос
+// ---------------------------------------------------------------------------------------
+
+/// The two keys task **T-10-17** adds, in the order `control::KEYS` lists them.
+///
+/// ⛔ A build without them cannot host this experiment, and the mode refuses to start rather than
+/// reporting fabricated zeros — the same gate [`experiment_race`] puts in front of `RESTAMP_KEYS`.
+const VOICE_KEYS: [&str; 2] = ["last_replacement_changed", "last_replacement_direction"];
+
+/// Where the raw numbers of this experiment are written — one line per press, appended as it
+/// happens, so a run cut short leaves everything up to that point on disk.
+///
+/// Beside the report when that directory exists, under `%TEMP%` otherwise. No new environment
+/// variable (Р-53).
+fn voice_raw_path() -> std::path::PathBuf {
+    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    if beside.is_dir() {
+        beside.join("T-10-17-серия.csv")
+    } else {
+        std::env::temp_dir().join("T-10-17-серия.csv")
+    }
+}
+
+/// Appends one raw line, opening the file per call — [`race_raw`]'s terms exactly.
+fn voice_raw(line: &str) {
+    use std::io::Write;
+
+    let path = voice_raw_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Err(error) => eprintln!("⚠ сырой протокол {} не открылся: {error}", path.display()),
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{line}") {
+                eprintln!("⚠ сырой протокол не записался: {error}");
+            }
+        }
+    }
+}
+
+/// ⭐ What the channel says about the **last replacement**, taken in one snapshot.
+///
+/// One read and not five: the shape, the flag and the direction describe one press and are read
+/// together, so two round trips could straddle a press and describe two of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VoiceReading {
+    /// `last_replacement` — `erase/units/distinct`, task T-10-6.
+    shape: String,
+    /// ⭐ `last_replacement_changed` — task T-10-17, key 1.
+    changed: Option<bool>,
+    /// ⭐ The two halves of `last_replacement_direction` — task T-10-17, key 2.
+    from: Option<u32>,
+    to: Option<u32>,
+    /// `hotkey_handoffs`, so that «замена вообще была» is a fact and not an assumption.
+    handoffs: Option<u64>,
+    /// `cycle_position` — the step FR-32 counts, and the thing that decides whether
+    /// `Cycle::target` answers the origin itself.
+    cycle: Option<u64>,
+    /// `active_layout` — the stamp, for the protocol beside the direction.
+    stamp: Option<u32>,
+}
+
+impl VoiceReading {
+    /// Reads one snapshot, or `None` when the channel could not answer.
+    fn take() -> Option<Self> {
+        let snapshot = crate::channel::read().ok()?;
+
+        let direction = snapshot.get("last_replacement_direction");
+        let (from, to) = match direction.and_then(|value| value.split_once('/')) {
+            Some((left, right)) => (parse_hkl(left), parse_hkl(right)),
+            None => (None, None),
+        };
+
+        Some(Self {
+            shape: snapshot
+                .get("last_replacement")
+                .unwrap_or("<нет>")
+                .to_owned(),
+            changed: snapshot
+                .get("last_replacement_changed")
+                .and_then(|value| match value {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    _ => None,
+                }),
+            from,
+            to,
+            handoffs: snapshot
+                .get("hotkey_handoffs")
+                .and_then(|value| value.parse().ok()),
+            cycle: snapshot
+                .get("cycle_position")
+                .and_then(|value| value.parse().ok()),
+            stamp: snapshot.get("active_layout").and_then(parse_hkl),
+        })
+    }
+
+    /// Whether the direction the replacement applied was the identity — `from == to`.
+    ///
+    /// `None` when either half is unreadable, which is a finding and never a `false`.
+    fn identity(&self) -> Option<bool> {
+        match (self.from, self.to) {
+            (Some(from), Some(to)) => Some(from == to),
+            _ => None,
+        }
+    }
+
+    /// One line for the console.
+    fn describe(&self) -> String {
+        format!(
+            "пакет={} вставленное-отличается={} направление={}→{} ({}) нажатий={} шаг={} штамп={}",
+            self.shape,
+            match self.changed {
+                Some(true) => "ДА",
+                Some(false) => "НЕТ",
+                None => "<нет ключа>",
+            },
+            race_hex(self.from),
+            race_hex(self.to),
+            match self.identity() {
+                Some(true) => "⭐ ТОЖДЕСТВО",
+                Some(false) => "настоящее",
+                None => "нечитаемо",
+            },
+            self.handoffs
+                .map_or_else(|| "?".to_owned(), |value| value.to_string()),
+            self.cycle
+                .map_or_else(|| "?".to_owned(), |value| value.to_string()),
+            race_hex(self.stamp),
+        )
+    }
+
+    /// The columns of the raw file, in the order the header names them.
+    fn columns(&self) -> String {
+        format!(
+            "{},{},{},{},{},{}",
+            self.shape,
+            match self.changed {
+                Some(true) => "1",
+                Some(false) => "0",
+                None => "?",
+            },
+            race_hex(self.from),
+            race_hex(self.to),
+            self.handoffs
+                .map_or_else(|| "?".to_owned(), |value| value.to_string()),
+            self.cycle
+                .map_or_else(|| "?".to_owned(), |value| value.to_string()),
+        )
+    }
+}
+
+/// A reading that says nothing, for the rows where the channel did not answer.
+fn voice_absent() -> VoiceReading {
+    VoiceReading {
+        shape: "<нет>".to_owned(),
+        changed: None,
+        from: None,
+        to: None,
+        handoffs: None,
+        cycle: None,
+        stamp: None,
+    }
+}
+
+/// What one press produced: the field on both sides of it, and the channel after it.
+struct VoicePress {
+    press: PressOutcome,
+    reading: VoiceReading,
+}
+
+/// Presses the hotkey once against whatever is already in the field, and reads the channel.
+///
+/// ⚠ **The field is not cleared and nothing is typed.** That is the whole point of the second
+/// press of a pair: FR-32 leaves the buffer standing after a conversion, so the next press walks
+/// the *same* strokes one step further along the cycle — and with a cycle of two, one step further
+/// is back where they started.
+fn voice_press(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    wanted: &str,
+) -> Result<VoicePress, String> {
+    let before = read_field(content).ok_or_else(|| "поле не читается перед нажатием".to_owned())?;
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    // The condition is «поле читается не так, как читалось» — never «поле читается как образец».
+    // A press that did nothing at all is the outcome under investigation, and it is the only one
+    // that spends the whole bound.
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .or_else(|| read_field(content))
+    .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+
+    Ok(VoicePress {
+        press: PressOutcome {
+            before,
+            after,
+            wanted: wanted.to_owned(),
+        },
+        reading: VoiceReading::take().unwrap_or_else(voice_absent),
+    })
+}
+
+/// ⭐ **Ступень «прибор» — обе стороны нового ключа на живом продукте.**
+///
+/// A flag that has only ever been seen in one state is not a flag that has been checked. Each
+/// round drives the product through **both** states in a row, and they differ by nothing but the
+/// press count:
+///
+/// | Press | What the cycle does | What the field does | `changed` | direction |
+/// |---|---|---|---|---|
+/// | first | `cycle_position` 0 → 1, `step = 1` | `ghbdtn` becomes `привет` | expected **1** | expected `0x04090409/0x04190419` |
+/// | second | `cycle_position` 1 → 0, `step = 2`, `2 % 2 = 0` | back to `ghbdtn` | expected **0** | expected `0x04090409/0x04090409` |
+///
+/// The second press is not staged and not contrived: `Cycle::target` answers `origin` itself
+/// whenever `step % len == 0`, which its own docblock describes as reproducing the original text
+/// code unit for code unit. It is the rollback of FR-32 and FR-33 — and **twelve of the person's
+/// thirty-four presses were exactly this press**.
+fn voice_check(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    reps: usize,
+) -> Result<(usize, usize), String> {
+    println!("=== СТУПЕНЬ «прибор»: обе стороны ключа, {reps} кругов ===");
+    println!(
+        "  Круг = два нажатия по одному набору. Первое — конверсия (шаг 1), второе — откат \
+         FR-32 (шаг 2, 2 % 2 = 0 → цель = origin).\n  Ожидание: первое даёт \
+         вставленное-отличается=ДА и настоящее направление, второе — НЕТ и тождество."
+    );
+
+    let mut differs_seen = 0usize;
+    let mut same_seen = 0usize;
+
+    for rep in 1..=reps {
+        // Every round builds its own precondition rather than inheriting the previous one: step 5
+        // of FR-40 leaves the window in the target layout, and a round that started there would
+        // measure the direction instead of the flag (T-10-14 measured that the two directions are
+        // not symmetric).
+        clear_field(target, content)?;
+        race_ensure(target.hwnd, layout::US)?;
+        input::tap(VK_SHIFT.0, target).map_err(|error| format!("Shift предусловия: {error}"))?;
+        let (built, _) = await_agreement(target.hwnd);
+        if !built {
+            println!("  круг {rep}: предусловие не построено — круг пропущен");
+            voice_raw(&format!(
+                "прибор,{rep},предусловие,,,,,,,,,предусловие-не-построено"
+            ));
+            continue;
+        }
+
+        type_paced_as(TYPED, TYPED, target, content, "")?;
+
+        // ---- press 1: the conversion ------------------------------------------------------
+        let first = voice_press(ctx, target, content, EXPECTED)?;
+        println!("  круг {rep}, нажатие 1: {}", first.press.describe());
+        println!("    {}", first.reading.describe());
+        voice_raw(&format!(
+            "прибор,{rep},1-конверсия,{},{:?},{:?},{}",
+            first.reading.columns(),
+            first.press.before,
+            first.press.after,
+            u8::from(first.press.changed())
+        ));
+        if first.reading.changed == Some(true) {
+            differs_seen += 1;
+        }
+
+        // ---- press 2: the rollback, on the very same strokes -------------------------------
+        let second = voice_press(ctx, target, content, TYPED)?;
+        println!("  круг {rep}, нажатие 2: {}", second.press.describe());
+        println!("    {}", second.reading.describe());
+        voice_raw(&format!(
+            "прибор,{rep},2-откат,{},{:?},{:?},{}",
+            second.reading.columns(),
+            second.press.before,
+            second.press.after,
+            u8::from(second.press.changed())
+        ));
+        if second.reading.changed == Some(false) {
+            same_seen += 1;
+        }
+    }
+
+    println!(
+        "\n  ⭐ ключ показан в состоянии «отличается»: {differs_seen} из {reps}; в состоянии \
+         «совпало»: {same_seen} из {reps}"
+    );
+
+    clear_field(target, content)?;
+    Ok((differs_seen, same_seen))
+}
+
+/// ⭐ **Ступень «моргание» — воспроизведение `D = 0` из T-10-16, прочитанное новыми ключами.**
+///
+/// The circle is T-10-16's, step for step, because that is the one stimulus known to produce the
+/// person's signature twenty times out of twenty: en-US confirmed, a synthetic `Alt+Shift` into
+/// the window that already has the focus, **no pause at all**, then the word and the hotkey. What
+/// is new is only what is read afterwards.
+///
+/// The prediction this stage exists to test is written down before it runs, in §3 of the report:
+/// the field will not change and the flag will nevertheless say **«отличается»**, because the
+/// product's belief about what it is erasing is wrong while its direction is right. If that is
+/// what comes out, then the person's «моргание» and this one are **two different mechanisms**, and
+/// the two keys are what separates them.
+fn voice_blink(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    reps: usize,
+) -> Result<(usize, usize, usize), String> {
+    println!("=== СТУПЕНЬ «моргание»: D = 0 из T-10-16, {reps} кругов ===");
+    println!(
+        "  Круг T-10-16 без единого изменения: en-US подтверждена, Alt+Shift в окно, которое уже \
+         в фокусе, пауза 0, затем слово и горячая клавиша.\n  Очистка поля — только Backspace \
+         (Ctrl+A отпускает Ctrl, а отпускание модификатора и есть зонд раскладки)."
+    );
+
+    let mut done = 0usize;
+    let mut unchanged_field = 0usize;
+    let mut flag_differs = 0usize;
+
+    for rep in 1..=reps {
+        clear_field(target, content)?;
+
+        let Ok(_from) = race_ensure(target.hwnd, layout::US) else {
+            println!("  круг {rep}: предусловие не построено — круг пропущен");
+            continue;
+        };
+        input::tap(VK_SHIFT.0, target).map_err(|error| format!("Shift предусловия: {error}"))?;
+        let (built, _) = await_agreement(target.hwnd);
+        if !built {
+            println!("  круг {rep}: штамп не сведён — круг пропущен");
+            continue;
+        }
+
+        // The stimulus, and then nothing at all: `D = 0`.
+        input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+            .map_err(|error| format!("Alt+Shift: {error}"))?;
+
+        let reported = layout::of_window(target.hwnd).map(layout::id_of);
+
+        input::type_text("g", target).map_err(|error| format!("первый штрих: {error}"))?;
+        let first = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| !text.is_empty())
+        })
+        .ok_or_else(|| "первый штрих не дошёл до поля".to_owned())?;
+        let truth = race_truth_of(&first);
+
+        input::type_text("hbdtn", target).map_err(|error| format!("остальные штрихи: {error}"))?;
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text.chars().count() >= TYPED.chars().count())
+        });
+
+        let pressed = voice_press(
+            ctx,
+            target,
+            content,
+            shown_under(other_layout(truth.unwrap_or(layout::US))),
+        )?;
+
+        done += 1;
+        if !pressed.press.changed() {
+            unchanged_field += 1;
+        }
+        if pressed.reading.changed == Some(true) {
+            flag_differs += 1;
+        }
+
+        println!("  круг {rep}: {}", pressed.press.describe());
+        println!(
+            "    набрано реально под {}, система отчитывалась {}",
+            race_hex(truth),
+            race_hex(reported)
+        );
+        println!("    {}", pressed.reading.describe());
+
+        voice_raw(&format!(
+            "моргание,{rep},D=0,{},{:?},{:?},{},{},{}",
+            pressed.reading.columns(),
+            pressed.press.before,
+            pressed.press.after,
+            u8::from(pressed.press.changed()),
+            race_hex(truth),
+            race_hex(reported)
+        ));
+    }
+
+    println!(
+        "\n  кругов {done}: поле не изменилось в {unchanged_field}, ключ сказал «отличается» \
+         в {flag_differs}"
+    );
+
+    clear_field(target, content)?;
+    Ok((done, unchanged_field, flag_differs))
+}
+
+/// ⭐ **Ступень «пара» — гипотеза контролера, проверенная измерением, а не исполненная.**
+///
+/// # The hypothesis, verbatim
+///
+/// «При `mode = "pair"` направление разрешается сопоставлением текущей раскладки с парой. Если
+/// сопоставление не опознаёт текущую раскладку, направление может выродиться в тождество — замена
+/// состоится и вернёт то же самое, а `last_replacement` покажет `6/6/6`.»
+///
+/// # How this stage produces the state the hypothesis is about
+///
+/// The state is «раскладка, под которой набрано, не входит в пару». On a two-layout machine it is
+/// unreachable: `layouts::cycle_for` does not consult the configuration at all when the session
+/// has exactly two layouts, and both of them are then in the pair by construction. So this stage
+/// builds the three-layout session FR-30's second bullet describes:
+///
+/// 1. a third layout is attached **before the product starts**, so the cache of FR-20 has a map
+///    for it and the stamp can legitimately become it — unlike arm C of T-10-15, which attached it
+///    afterwards on purpose to get the silent refusal;
+/// 2. `config.toml` is borrowed and replaced with the **person's own** `[layouts]`:
+///    `mode = "pair"`, `pair_source = 0x00000409`, `pair_target = 0x00000419`;
+/// 3. the window is moved into the third layout, a word is typed, and the hotkey is pressed.
+///
+/// # What each outcome means, decided **before** the run
+///
+/// | What the channel shows | Verdict |
+/// |---|---|
+/// | `last_replacement` moves and `from == to` | hypothesis **confirmed**: the direction degenerated |
+/// | `last_replacement` does not move at all | hypothesis **refuted**: an origin outside the pair is a refusal, not an identity |
+/// | `last_replacement` moves with `from != to` | hypothesis refuted differently: the pair was resolved without the third layout |
+///
+/// ⛔ The third layout is detached on every path out, and `config.toml` goes back byte for byte —
+/// footnote 3 of §11.3, and `config::Borrowed`'s own rule.
+fn voice_pair(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+    reps: usize,
+) -> Result<(usize, usize, usize), String> {
+    println!("=== СТУПЕНЬ «пара»: гипотеза о вырождении направления, {reps} кругов ===");
+    println!(
+        "  Сессия из трёх раскладок, config.toml — как у человека: mode = pair, \
+         pair_source = 0x00000409, pair_target = 0x00000419.\n  Набор идёт под ТРЕТЬЕЙ \
+         раскладкой, то есть под той, которой в паре нет."
+    );
+
+    let mut replaced = 0usize;
+    let mut identity = 0usize;
+    let mut silent = 0usize;
+
+    for rep in 1..=reps {
+        clear_field(target, content)?;
+
+        layout::ensure(target.hwnd, layout::THIRD, Duration::from_secs(5))
+            .map_err(|error| format!("перевод окна в третью раскладку: {error}"))?;
+
+        // The stamp has to become the third layout for the origin to be outside the pair at all,
+        // and that is what the modifier probe of T-03-3c is for: a `Shift` tap is the household
+        // event the product reads the layout on.
+        input::tap(VK_SHIFT.0, target).map_err(|error| format!("зонд раскладки: {error}"))?;
+        let (_agreed, sample) = await_agreement(target.hwnd);
+        println!("  круг {rep}: {}", sample.describe());
+
+        let before = VoiceReading::take().unwrap_or_else(voice_absent);
+
+        input::type_text(TYPED, target).map_err(|error| format!("набор: {error}"))?;
+        wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text.chars().count() >= TYPED.chars().count())
+        });
+
+        let pressed = voice_press(ctx, target, content, "")?;
+
+        // ⭐ The decisive comparison: did a replacement happen at all? `hotkey_handoffs` says the
+        // press reached the product; the *shape* moving is what says a packet was built.
+        let moved = pressed.reading.handoffs != before.handoffs
+            && (pressed.reading.shape != before.shape
+                || pressed.reading.from != before.from
+                || pressed.reading.to != before.to
+                || pressed.press.changed());
+        let same_direction = pressed.reading.identity() == Some(true);
+
+        if pressed.reading.shape == before.shape
+            && pressed.reading.from == before.from
+            && pressed.reading.to == before.to
+            && !pressed.press.changed()
+        {
+            silent += 1;
+        } else {
+            replaced += 1;
+            if same_direction {
+                identity += 1;
+            }
+        }
+
+        println!("    {}", pressed.press.describe());
+        println!("    до нажатия:    {}", before.describe());
+        println!("    после нажатия: {}", pressed.reading.describe());
+        println!(
+            "    ⭐ замена {}",
+            if moved {
+                "состоялась"
+            } else {
+                "НЕ состоялась — ключи замены не двинулись"
+            }
+        );
+
+        voice_raw(&format!(
+            "пара,{rep},третья-раскладка,{},{:?},{:?},{},до:{}",
+            pressed.reading.columns(),
+            pressed.press.before,
+            pressed.press.after,
+            u8::from(pressed.press.changed()),
+            before.columns()
+        ));
+    }
+
+    clear_field(target, content)?;
+    let _ = layout::ensure(target.hwnd, layout::US, Duration::from_secs(5));
+
+    println!(
+        "\n  замен состоялось {replaced}, из них с тождественным направлением {identity}; \
+         молчаливых отказов (замены не было вовсе) {silent}"
+    );
+
+    Ok((replaced, identity, silent))
+}
+
+/// The `[layouts]` of the **person's** configuration — `mode = "pair"` over `0x00000409` and
+/// `0x00000419`, serialised by the product's own writer.
+///
+/// Everything outside `[layouts]` is carried over unchanged, for the reason
+/// `config::cycle_of_three` gives: the hotkey this run presses is read from that file, and a
+/// configuration rebuilt from the defaults of §7 would silently change it.
+fn voice_pair_config(path: &std::path::Path) -> Result<String, String> {
+    let (mut config, _) = lang_switcher::settings::read_or_default(path);
+
+    config.layouts.mode = lang_switcher::settings::LayoutMode::Pair;
+    config.layouts.pair_source = format!("0x{:08X}", layout::US);
+    config.layouts.pair_target = format!("0x{:08X}", layout::RUSSIAN);
+
+    config
+        .to_toml_string()
+        .map_err(|error| format!("не удалось построить config.toml режима «Пара»: {error}"))
+}
+
+/// ⭐ **The experiment of task T-10-17** — the two keys, shown in both states, and the identity
+/// named by number.
+///
+/// # ⛔ What this mode does not do
+///
+/// It repairs nothing. The replacement logic is not touched by this task at all; the two keys are
+/// a *reading* taken beside the packet that was already being built. The machine is not suspended,
+/// not locked and no desktop is switched.
+///
+/// # ⚠ Why the product here is the one this build produced, and not the installed copy
+///
+/// The two keys are new. The signed diagnostic build in `%ProgramFiles%` was made before them and
+/// therefore cannot publish them — which the gate below establishes by reading, not by assuming.
+/// T-10-15 and T-10-16 used the installed copy because their question was about *that* copy;
+/// this task's question is about a value that exists only in this tree, and a mode that started
+/// the installed copy would have nothing to read.
+///
+/// # The stages
+///
+/// | Stage | What it answers |
+/// |---|---|
+/// | `check` | требование 2 — прибор показан в **обоих** состояниях: круг конверсии и круг отката |
+/// | `blink` | воспроизведение `D = 0` из T-10-16, прочитанное новыми ключами |
+/// | `pair` | требование 12 — гипотеза контролера о вырождении направления, проверенная прямо |
+pub fn experiment_voice(ctx: &Context, stage: &str, reps: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-17: замена, которая возвращает то же самое ---\n");
+    println!(
+        "Прибор круга — «текст поля ПОСЛЕ нажатия отличается от текста ДО». Совпадение с {EXPECTED:?} \
+         сообщается рядом и НИКОГДА не является вердиктом.\n\
+         ⚠ Новый ключ last_replacement_changed — это сравнение ДВУХ СТОРОН ПРОДУКТА (что он \
+         считает снимаемым и что вставляет), а НЕ «экран изменился»: экрана продукт не читает.\n\
+         ⛔ Машина не усыпляется, не блокируется, рабочий стол не переключается.\n"
+    );
+    println!("Сырые числа: {}\n", voice_raw_path().display());
+
+    if let Err(error) = race_clear_the_stage() {
+        eprintln!("⛔ {error}");
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    // ---- stage-specific setup, before the product starts ------------------------------------
+    //
+    // Both of these have to be in place *before* the launch: the cache of FR-20 is built at
+    // start-up from the layouts attached then, and `[layouts]` is read at start-up too.
+    let mut stash = None;
+    let mut borrowed = None;
+    if stage == "pair" {
+        match layout::Temporary::attach() {
+            Ok(attached) => {
+                println!(
+                    "третья раскладка подключена на время ступени: {}",
+                    layout::describe(attached.handle())
+                );
+                stash = Some(attached);
+            }
+            Err(error) => {
+                eprintln!("⛔ третья раскладка не подключилась: {error} — ступень не ставится");
+                return std::process::ExitCode::from(1);
+            }
+        }
+
+        let Some(path) = lang_switcher::settings::default_config_path() else {
+            eprintln!("путь %APPDATA%\\Lang_Switcher\\config.toml не определён");
+            return std::process::ExitCode::from(1);
+        };
+        match voice_pair_config(&path).and_then(|text| crate::config::Borrowed::take(&path, &text))
+        {
+            Ok(taken) => {
+                println!("{}", taken.describe_original());
+                borrowed = Some(taken);
+            }
+            Err(error) => {
+                eprintln!("⛔ подмена config.toml: {error}");
+                return std::process::ExitCode::from(1);
+            }
+        }
+    }
+
+    // ⚠ The FR-97 net, widened for the reason task T-10-9 widened it and by the same mechanism —
+    // the same environment variable, no new one (Р-53). A round of this experiment is a word typed
+    // at a human tempo plus two presses, and a stage is several of them; the forty-five seconds
+    // `Sut::launch` hands out would end the product in the middle of the series it is hosting.
+    // It is a net and not a stopping mechanism: this function ends its own product by FR-96 below.
+    const VOICE_DEADLINE_SECS: u32 = 600;
+
+    let mut product = match crate::sut::Sut::launch_with(VOICE_DEADLINE_SECS) {
+        Ok(started) => started,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<String, String> {
+        let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+            return Err("продукт не сообщил о готовности через канал SEC-04a за 30 с".to_owned());
+        };
+        println!(
+            "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+            product.pid,
+            ready.get("hook_installed").unwrap_or("?"),
+            ready.present_keys().len()
+        );
+
+        // ⛔ Without the two keys every reading below would be a fabricated zero.
+        for key in VOICE_KEYS {
+            if ready.get(key).is_none() {
+                return Err(format!("сборка не публикует {key} — опыт не ставится"));
+            }
+        }
+        println!("  ✔ оба ключа T-10-17 на канале\n");
+
+        let mut field = launch_stamp_window()?;
+
+        let measured = (|| -> Result<String, String> {
+            let (target, content) = adopt_stamp_window(ctx, &mut field)?;
+
+            // ---- the instrument, before any reading of it ---------------------------------
+            //
+            // The hotkey on an **empty** field: the product is up, the hook is in the chain, the
+            // press really reaches it, and there is nothing to convert. An instrument that says
+            // «изменилось» here measures something other than what it claims.
+            println!("=== ПРИБОР, ПРОВЕРКА 0: нажатие на пустом поле ничего не меняет ===");
+            clear_field(&target, &content)?;
+            let idle = voice_press(ctx, &target, &content, "")?;
+            println!("  {}", idle.press.describe());
+            if idle.press.changed() {
+                return Err(format!(
+                    "⛔ ПРИБОР НЕИСПРАВЕН: нажатие на пустом поле изменило текст ({})",
+                    idle.press.describe()
+                ));
+            }
+            println!("  ✔ прибор умеет сказать «не изменилось»\n");
+
+            match stage {
+                "check" => {
+                    let (differs, same) = voice_check(ctx, &target, &content, reps)?;
+                    if differs == 0 || same == 0 {
+                        return Err(format!(
+                            "ключ показан не в обоих состояниях: «отличается» {differs}, \
+                             «совпало» {same} из {reps}"
+                        ));
+                    }
+                    Ok(format!(
+                        "прибор проверен двусторонне: «отличается» {differs}/{reps}, «совпало» \
+                         {same}/{reps}"
+                    ))
+                }
+                "blink" => {
+                    let (done, unchanged, differs) = voice_blink(ctx, &target, &content, reps)?;
+                    Ok(format!(
+                        "кругов {done}, поле не изменилось {unchanged}, ключ сказал «отличается» \
+                         {differs}"
+                    ))
+                }
+                "pair" => {
+                    let (replaced, identity, silent) = voice_pair(ctx, &target, &content, reps)?;
+                    Ok(format!(
+                        "замен {replaced}, из них тождественных {identity}, отказов без замены \
+                         {silent}"
+                    ))
+                }
+                other => Err(format!("неизвестная ступень {other:?}")),
+            }
+        })();
+
+        println!("{}", field.close());
+        measured
+    })();
+
+    match product.stop() {
+        Ok(code) => println!("продукт остановлен через FR-96, код выхода {code}"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    // ⛔ Given back on every path out, whatever the outcome above was.
+    if let Some(mut taken) = borrowed {
+        println!("{}", taken.give_back());
+    }
+    if let Some(mut attached) = stash {
+        println!("{}", attached.detach());
+    }
+
+    match outcome {
+        Ok(said) => {
+            println!("\nступень {stage}: {said}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}

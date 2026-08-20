@@ -437,6 +437,58 @@ fn distinct_units(packet: &[INPUT]) -> usize {
         .count()
 }
 
+/// ⭐ Whether the packet's insertion is **something other than what the strokes already put on
+/// the screen** — task **T-10-17**.
+///
+/// # What it compares, and why those are the two sides
+///
+/// The product knows two texts here and only two. One is what it believes it is taking off the
+/// screen: the characters each recorded stroke produced when it was pressed,
+/// `Keystroke::produced` — the same quantity [`typed_chars`] counts to get the `N` of FR-41. The
+/// other is `inserted`, the conversion of those same strokes into the target layout, as
+/// [`crate::convert::convert_strokes`] wrote it. Their concatenations are compared, and the
+/// answer is one bit.
+///
+/// Walked stroke by stroke against a shrinking tail rather than assembled into a second buffer:
+/// this is a comparison, so it needs no copy of the user's text, and building one would be a
+/// second place holding it in the clear (SEC-01, SEC-02). The per-stroke chunks are the
+/// *produced* lengths, which need not match the converted ones — a stroke may give one character
+/// in one layout and a ligature in another — so the walk consumes the tail by produced length and
+/// requires it to be exhausted at the end, which is concatenation equality and nothing weaker.
+///
+/// ⚠ **This is not "the screen changed", and it must not be read as one.** Nothing in this
+/// program reads the screen. When the stamp is stale the product's belief about what it is
+/// erasing is wrong, and then this bit says `true` — the two sides it can see really do differ —
+/// while the field does not move. That pair of readings is the measurement, not a defect of it:
+/// see [`crate::control::LAST_REPLACEMENT_CHANGED`].
+///
+/// Compiled under the `testing` feature alone (condition 1 of SEC-04a), as [`distinct_units`] is,
+/// and it costs one linear walk over a word.
+#[cfg(feature = "testing")]
+fn insertion_differs(strokes: &[Keystroke], inserted: &[u16]) -> bool {
+    let mut rest = inserted;
+
+    for stroke in strokes {
+        let produced = stroke.produced();
+        let units = produced.units();
+
+        let Some((head, tail)) = rest.split_at_checked(units.len()) else {
+            // The insertion ran out before the strokes did, so the two texts are of different
+            // lengths and cannot be equal.
+            return true;
+        };
+
+        if head != units {
+            return true;
+        }
+
+        rest = tail;
+    }
+
+    // Anything left over is insertion the strokes do not account for.
+    !rest.is_empty()
+}
+
 /// Whether `unit` is the leading half of a surrogate pair.
 const fn is_high_surrogate(unit: u16) -> bool {
     unit >= HIGH_SURROGATE_FIRST && unit <= HIGH_SURROGATE_LAST
@@ -1470,6 +1522,26 @@ pub fn replace_in_with(
     #[cfg(feature = "testing")]
     if let Ok(len) = built {
         crate::control::note_replacement(erased, typed, distinct_units(&events[..len]));
+
+        // ⭐ **Whether this packet returns what it took, and the direction it applied — task
+        // T-10-17, SEC-04a.**
+        //
+        // The three counts above say how *much* moved and never *whether* anything did: the
+        // live protocol of defect E reads `6/6/6` on all thirty-four presses of a text the
+        // person watched not change. These two are the missing half. The first is the
+        // comparison of the product's own two sides — see [`insertion_differs`]. The second is
+        // the direction FR-26 decided, `origin` being the layout the strokes carry (the very
+        // value `take_press` chose the target from) and `target.layout()` the layout they were
+        // rendered into: equal halves are the rollback of FR-32, a legitimate identity, and
+        // until now it was unreadable from outside.
+        //
+        // Two layout handles and one bit, of exactly the kind `active_layout` already
+        // publishes — SEC-01 and SEC-07 are argued at `control::note_replacement_outcome`.
+        crate::control::note_replacement_outcome(
+            insertion_differs(strokes, &text[..typed]),
+            strokes.first().map_or(0, |stroke| stroke.layout().raw()),
+            target.layout().raw(),
+        );
     }
 
     // The working buffers hold the user's text in plain form and are the only place outside
