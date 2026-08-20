@@ -10194,3 +10194,1034 @@ pub fn experiment_phase(ctx: &Context, stage_name: &str, reps: usize) -> std::pr
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Опыт T-10-19 — два потока, две раскладки: у ТОГО ли потока продукт спрашивает раскладку
+// ---------------------------------------------------------------------------------------
+
+/// The settle between the stimulus and the first keystroke, in milliseconds.
+///
+/// ⚠ Not a free parameter and not a pause in the sense requirement 1 of §11.5 forbids: T-10-16
+/// measured the race window of the layout report and found it **shorter than one millisecond**,
+/// so anything at or above a millisecond is past it. 150 ms is inside the range a person takes
+/// between `Alt+Shift` and the first letter, and the question of this task is expressly about
+/// what survives past the race — a *stable* divergence, not the race itself.
+const THREADS_SETTLE_MS: u64 = 150;
+
+/// How many transitions of the polled tuple are kept per circle.
+///
+/// The poll runs tight — a snapshot costs about a microsecond — so a circle sees tens of
+/// thousands of samples. Keeping every sample would drown the raw file in identical rows; what
+/// is worth keeping is the instants at which something **changed**, and there are never many.
+const THREADS_MAX_STEPS: usize = 24;
+
+/// Where the raw numbers of this series go — one line per circle, appended as it happens.
+///
+/// Beside the report, as T-10-16 and T-10-18 wrote theirs; `%TEMP%` if that directory is gone.
+/// No new environment variable (Р-53).
+fn threads_raw_path() -> std::path::PathBuf {
+    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    if beside.is_dir() {
+        beside.join("T-10-19-серия.csv")
+    } else {
+        std::env::temp_dir().join("T-10-19-серия.csv")
+    }
+}
+
+/// Appends one raw line. Opened per call so that a run cut short still leaves everything up to
+/// that point on disk; a write failure is reported and is never fatal.
+fn threads_raw(line: &str) {
+    use std::io::Write;
+
+    let path = threads_raw_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{line}") {
+                eprintln!("⚠ строка серии не записана в {}: {error}", path.display());
+            }
+        }
+        Err(error) => eprintln!("⚠ {} не открыт: {error}", path.display()),
+    }
+}
+
+/// The header of the raw file, written once per stage. **Thirty-three columns**; the eleven in
+/// the middle (`переднее_окно` … `раскладки_совпали`) are [`layout::Pair::raw`], in its own order.
+const THREADS_HEADER: &str = "приложение,род,ступень,направление,круг,построено,\
+     до_раскладка_переднего,до_раскладка_фокуса,\
+     переднее_окно,поток_переднего,процесс_переднего,раскладка_переднего,\
+     проба_фокуса,окно_фокуса,поток_фокуса,процесс_фокуса,раскладка_фокуса,\
+     потоки_совпали,раскладки_совпали,\
+     напечаталось,правда,переднее=правда,фокус=правда,\
+     фронт_сдвинулся_нс,фокус_сдвинулся_нс,расхождение_первое_нс,расхождение_всего_нс,\
+     расхождение_самое_долгое_нс,потоки_расходились,процессы_совпали,опросов,опрос_длился_нс,\
+     примечание";
+
+/// The commas a skipped circle has to carry so that its row lines up with [`THREADS_HEADER`].
+/// Six fields are written before it; the rest are empty.
+const THREADS_SKIPPED_PAD: &str = ",,,,,,,,,,,,,,,,,,,,,,,,,,";
+
+/// One transition of the polled tuple, and the instant it happened at.
+#[derive(Debug, Clone, Copy)]
+struct ThreadsStep {
+    /// Nanoseconds since the stimulus returned.
+    at_ns: u128,
+    front: Option<u32>,
+    focus: Option<u32>,
+    threads_same: Option<bool>,
+}
+
+/// ⭐ **What the tight poll between the stimulus and the first keystroke saw** — §2 of the task.
+///
+/// The question §2 asks is not «is there a race» — T-10-16 answered that with a number — but
+/// «does the front-window thread's layout stay different from the one being typed under, for
+/// longer than a millisecond». A divergence caused by *reading the wrong thread* would not
+/// decay: it would sit there for as long as the two threads disagree. So what is recorded is
+/// every instant the tuple changed, and from it the durations that matter.
+#[derive(Debug, Clone, Default)]
+struct ThreadsHold {
+    steps: Vec<ThreadsStep>,
+    polls: u64,
+    /// How long the poll ran, in nanoseconds.
+    ///
+    /// ⚠ **Not decoration — the first pass of this experiment was wrong without it.** A
+    /// divergence that begins at `+1,3 мс` and is still there when the poll ends has no closing
+    /// transition, so «последний переход минус первый» reported it as **0 нс** while it had in
+    /// fact lasted the whole two seconds. A duration is measured against the end of the
+    /// observation, not against the last time something moved.
+    bound_ns: u128,
+}
+
+impl ThreadsHold {
+    /// Polls for `bound`, keeping only the instants at which the tuple changed.
+    ///
+    /// ⚠ **No channel and no UI Automation inside this loop.** One channel snapshot costs a
+    /// millisecond or two — more than the whole quantity being measured — so the loop is Win32
+    /// only, exactly as T-10-16's was, and for the same reason.
+    fn poll(bound: Duration) -> Self {
+        let started = Instant::now();
+        let mut held = Self::default();
+        let mut last: Option<(Option<u32>, Option<u32>, Option<bool>)> = None;
+
+        loop {
+            let elapsed = started.elapsed();
+            if elapsed >= bound {
+                held.bound_ns = elapsed.as_nanos();
+                break;
+            }
+
+            let pair = layout::Pair::take();
+            held.polls += 1;
+
+            let now = (pair.front_layout, pair.focus_layout, pair.threads_agree());
+            if last != Some(now) && held.steps.len() < THREADS_MAX_STEPS {
+                held.steps.push(ThreadsStep {
+                    at_ns: elapsed.as_nanos(),
+                    front: now.0,
+                    focus: now.1,
+                    threads_same: now.2,
+                });
+                last = Some(now);
+            }
+
+            // Not a sleep and not a yield to the scheduler's discretion: a hint that this is a
+            // spin, which is what keeps the resolution far below the millisecond the question
+            // is about.
+            std::hint::spin_loop();
+        }
+
+        held
+    }
+
+    /// The first instant the front-window thread's layout read something other than `from`.
+    ///
+    /// ⚠ [`same_language`], not `==`: `from` is a language id and the reading is a whole `HKL`.
+    fn front_moved_ns(&self, from: u32) -> Option<u128> {
+        self.steps
+            .iter()
+            .find(|step| step.front.is_some_and(|id| !same_language(id, from)))
+            .map(|step| step.at_ns)
+    }
+
+    /// The same for the focus thread's layout.
+    fn focus_moved_ns(&self, from: u32) -> Option<u128> {
+        self.steps
+            .iter()
+            .find(|step| step.focus.is_some_and(|id| !same_language(id, from)))
+            .map(|step| step.at_ns)
+    }
+
+    /// ⭐ **How long the two layouts disagreed with each other** — the number the hypothesis
+    /// lives or dies by, computed as **intervals** and not as a distance between transitions.
+    ///
+    /// Returns `(первое расхождение, суммарная длительность, самая долгая непрерывная)`. Every
+    /// stretch runs from the transition that opened it to the transition that closed it, and a
+    /// stretch still open when the poll ended runs to [`ThreadsHold::bound_ns`] — which is the
+    /// case that matters, because a divergence caused by reading the wrong thread never closes.
+    fn split(&self) -> (Option<u128>, u128, u128) {
+        let split_at = |step: &ThreadsStep| match (step.front, step.focus) {
+            // Both sides are whole `HKL`s here, so `==` would do; [`same_language`] is used all
+            // the same, because the one place this file compared layouts by a different rule is
+            // the place it got wrong.
+            (Some(front), Some(focus)) => !same_language(front, focus),
+            _ => false,
+        };
+
+        let mut first: Option<u128> = None;
+        let mut total = 0u128;
+        let mut longest = 0u128;
+
+        for (index, step) in self.steps.iter().enumerate() {
+            if !split_at(step) {
+                continue;
+            }
+            first.get_or_insert(step.at_ns);
+
+            // The stretch ends where the next transition begins, or — if this is the last one —
+            // at the end of the observation.
+            let ends = self
+                .steps
+                .get(index + 1)
+                .map_or(self.bound_ns, |next| next.at_ns);
+            let span = ends.saturating_sub(step.at_ns);
+            total += span;
+            longest = longest.max(span);
+        }
+
+        (first, total, longest)
+    }
+
+    /// Whether the two **threads** were ever seen to be different ones.
+    fn threads_ever_split(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|step| step.threads_same == Some(false))
+    }
+}
+
+/// The three applications of §1, and the kinds the task insists on having both of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Subject {
+    /// ⭐ **The packaged Notepad of Windows 11** — the application the person was working in,
+    /// and the one the hypothesis is about.
+    Notepad,
+    /// A classic Win32 window, and the bench's **own** — requirement B, and the shape T-10-14,
+    /// T-10-16 and T-10-18 all used.
+    Own,
+    /// The third: a Chrome window on a local `data:` page with a textarea. A modern
+    /// multi-process application, which is where a divergence between the top-level window's
+    /// thread and the input thread would be most likely if it existed anywhere.
+    Chrome,
+}
+
+/// The rotation §1 walks through — «не менее трёх, и обязательно оба рода».
+const SUBJECTS: [Subject; 3] = [Subject::Notepad, Subject::Own, Subject::Chrome];
+
+impl Subject {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Notepad => "Блокнот",
+            Self::Own => "своё-окно",
+            Self::Chrome => "Chrome",
+        }
+    }
+
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Notepad => "упакованное",
+            Self::Own => "классическое",
+            Self::Chrome => "многопроцессное",
+        }
+    }
+
+    /// Opens the application, puts it through requirement B and returns what a circle needs.
+    ///
+    /// ⛔ **Every window here is one the bench opened itself.** The Notepad the person left open
+    /// is a stranger's process, and `own::claim_window_process` refuses it — which is the
+    /// correct outcome and not an obstacle to work around.
+    fn open(self, ctx: &Context) -> Result<(App, input::Target, Element), String> {
+        /// The local page of the Chrome subject — no network (SEC-03, NFR-11).
+        const PAGE: &str = "data:text/html,<textarea id=t rows=8 cols=40 autofocus></textarea>";
+
+        match self {
+            Self::Notepad => {
+                let mut app = launch_notepad()?;
+                match adopt_notepad(ctx, &mut app) {
+                    Ok((target, content)) => Ok((app, target, content)),
+                    Err(reason) => {
+                        println!("{}", app.close());
+                        Err(reason)
+                    }
+                }
+            }
+            Self::Own => {
+                let mut app = launch_stamp_window()?;
+                match adopt_stamp_window(ctx, &mut app) {
+                    Ok((target, content)) => Ok((app, target, content)),
+                    Err(reason) => {
+                        println!("{}", app.close());
+                        Err(reason)
+                    }
+                }
+            }
+            Self::Chrome => {
+                let mut app = launch_chrome("threads19", &[PAGE])?;
+                let opened = (|| -> Result<(input::Target, Element), String> {
+                    let window = adopt_window(ctx.automation, &mut app, &is_chrome_window)?;
+                    let hwnd = app
+                        .window
+                        .ok_or_else(|| "у окна Chrome нет дескриптора".to_owned())?;
+                    let content = ctx
+                        .automation
+                        .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| {
+                            e.control_type() == Some(UIA_EditControlTypeId)
+                                && e.class() != "Chrome_OmniboxView"
+                                && !e.name().contains("Адресная строка")
+                                && !e.name().to_lowercase().contains("address")
+                        })
+                        .ok_or_else(|| "поле ввода Chrome не найдено".to_owned())?;
+                    shell::activate_window(app.pid, Some(hwnd))?;
+                    layout::ensure(hwnd, layout::US, Duration::from_secs(5))?;
+                    Ok((input::Target { pid: app.pid, hwnd }, content))
+                })();
+
+                match opened {
+                    Ok((target, content)) => Ok((app, target, content)),
+                    Err(reason) => {
+                        println!("{}", app.close());
+                        Err(reason)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// ⚠ **Two layout values are compared by their language id and never by the whole number** —
+/// and the first pass of this experiment got that wrong, which is why the rule is a function
+/// with its own name.
+///
+/// `GetKeyboardLayout` answers a whole `HKL`, `0x04190419`; the constants of this bench and the
+/// ground truth of [`threads_truth`] are language ids, `0x0419`. Compared as integers they never
+/// agree, and the first run of the series duly reported «переднее \u{2260} правда» on **12 circles
+/// out of 12** — including the bench's own window, where the two threads are provably the same
+/// one. A hundred per cent agreement between a hypothesis and a measurement is a reason to
+/// suspect the measurement, and it was the instrument that was wrong.
+fn same_language(left: u32, right: u32) -> bool {
+    left & 0xFFFF == right & 0xFFFF
+}
+
+/// ⭐ **The ground truth** — what the key really printed, and nothing else.
+///
+/// ⚠ Requirement 2 of the task, verbatim: the verdict is **what actually appears**, never a
+/// match against a sample. `g` under en-US, `п` under ru-RU. The character is taken as the
+/// *difference* between the field before and after, so that a field which was not perfectly
+/// empty cannot be read as a layout.
+fn threads_truth(before: &str, after: &str) -> Option<u32> {
+    let added = after.strip_prefix(before).unwrap_or(after);
+    match added
+        .chars()
+        .next_back()
+        .or_else(|| after.chars().next_back())
+    {
+        Some('g') => Some(layout::US),
+        Some('\u{43F}') => Some(layout::RUSSIAN),
+        _ => None,
+    }
+}
+
+/// What one circle of the series produced.
+#[derive(Debug, Clone)]
+struct ThreadsOutcome {
+    /// Whether the circle built its own precondition. A circle that did not is counted as a
+    /// circle that did not happen — never as a reading and never as a failure.
+    built: bool,
+    /// The decisive snapshot: both threads and both layouts, at the instant of the first stroke.
+    pair: Option<layout::Pair>,
+    /// The layout the stroke was really decoded under.
+    truth: Option<u32>,
+    /// How long the two layouts disagreed with each other, in nanoseconds.
+    split_ns: Option<u128>,
+    /// Whether the two threads were ever seen to be different ones during the poll.
+    threads_split: bool,
+}
+
+impl ThreadsOutcome {
+    /// ⭐ Did the value the **product** reads agree with what was really typed?
+    fn front_true(&self) -> Option<bool> {
+        match (self.pair.as_ref().and_then(|p| p.front_layout), self.truth) {
+            (Some(front), Some(truth)) => Some(same_language(front, truth)),
+            _ => None,
+        }
+    }
+
+    /// ⭐ And did the value the hypothesis proposes to read instead?
+    fn focus_true(&self) -> Option<bool> {
+        match (self.pair.as_ref().and_then(|p| p.focus_layout), self.truth) {
+            (Some(focus), Some(truth)) => Some(same_language(focus, truth)),
+            _ => None,
+        }
+    }
+}
+
+/// ⭐ **One circle** — §1 for `stimulus = true`, §3's negative control for `stimulus = false`.
+///
+/// | Step | What it does | Why it is written this way |
+/// |---|---|---|
+/// | 1 | empties the field with `Backspace` alone | ⚠ `Ctrl+A` ends in a **modifier release**, and a modifier release *is* the layout probe of T-03-3c. Inherited from T-10-14 and T-10-16 |
+/// | 2 | ⭐ **builds its own precondition**: `from`, confirmed | T-10-14 measured that the two directions are not symmetric; a circle taking whatever the last one left would measure the direction |
+/// | 3 | synthetic `Alt+Shift`, or — in §3 — deliberately nothing at all | the household gesture, and the control that says the instrument is not inventing divergences |
+/// | 4 | polls both threads and both layouts tight, for [`THREADS_SETTLE_MS`] | §2: does anything disagree, and for how long |
+/// | 5 | ⭐ takes **both threads and both layouts in one instant**, then types one key | §1: the two readings and the ground truth, of the same moment |
+fn threads_circle(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+    stage: &str,
+    from: u32,
+    rep: usize,
+    stimulus: bool,
+) -> Result<ThreadsOutcome, String> {
+    let direction = match (stimulus, from == layout::US) {
+        (true, true) => "US->RU",
+        (true, false) => "RU->US",
+        (false, true) => "US-без-стимула",
+        (false, false) => "RU-без-стимула",
+    };
+    let prefix = format!(
+        "{},{},{stage},{direction},{rep}",
+        subject.name(),
+        subject.kind()
+    );
+
+    // Step 1 — the field, emptied without touching a single modifier.
+    clear_field(target, content)?;
+
+    // Step 2 — the precondition, built and verified, never inherited.
+    if let Err(reason) = race_ensure(target.hwnd, from) {
+        threads_raw(&format!(
+            "{prefix},0{THREADS_SKIPPED_PAD}предусловие-не-построено: {reason}"
+        ));
+        return Ok(ThreadsOutcome {
+            built: false,
+            pair: None,
+            truth: None,
+            split_ns: None,
+            threads_split: false,
+        });
+    }
+
+    // ⚠ **The precondition, as both threads see it.** `layout::ensure` posts
+    // `WM_INPUTLANGCHANGEREQUEST` to the **foreground window's** thread and confirms it by
+    // reading that same thread back — which is the product's own question, and therefore
+    // confirms nothing about the thread that receives the input. Taken and written down so that
+    // «предусловие построено» can be read as the narrow claim it really is.
+    let pre = layout::Pair::take();
+
+    // Step 3 — the stimulus, or, in §3, nothing at all.
+    if stimulus {
+        input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+            .map_err(|error| format!("Alt+Shift: {error}"))?;
+    }
+
+    // Step 4 — the tight poll, Win32 only.
+    let held = ThreadsHold::poll(Duration::from_millis(THREADS_SETTLE_MS));
+    let (split_first, split_total, split_longest) = held.split();
+    let split_ns = (split_total > 0).then_some(split_longest);
+
+    // Step 5 — the two readings and the ground truth, of the same moment.
+    let pair = layout::Pair::take();
+
+    let before = read_field(content).ok_or_else(|| "поле не читается перед штрихом".to_owned())?;
+    input::type_text("g", target).map_err(|error| format!("штрих: {error}"))?;
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .ok_or_else(|| "штрих не дошёл до поля".to_owned())?;
+    let truth = threads_truth(&before, &after);
+
+    let outcome = ThreadsOutcome {
+        built: true,
+        pair: Some(pair.clone()),
+        truth,
+        split_ns,
+        threads_split: held.threads_ever_split(),
+    };
+
+    let ns = |value: Option<u128>| value.map_or_else(|| "?".to_owned(), |v| v.to_string());
+    let flag =
+        |value: Option<bool>| value.map_or_else(|| "?".to_owned(), |v| u8::from(v).to_string());
+
+    threads_raw(&format!(
+        "{prefix},1,{},{},{},{after:?},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        race_hex(pre.front_layout),
+        race_hex(pre.focus_layout),
+        pair.raw(),
+        race_hex(truth),
+        flag(outcome.front_true()),
+        flag(outcome.focus_true()),
+        ns(held.front_moved_ns(from)),
+        ns(held.focus_moved_ns(from)),
+        ns(split_first),
+        split_total,
+        split_longest,
+        u8::from(held.threads_ever_split()),
+        flag(pair.processes_agree()),
+        held.polls,
+        held.bound_ns,
+        match &pair.focus {
+            layout::Focus::Refused(reason) => format!("GetGUIThreadInfo-отказ: {reason}"),
+            layout::Focus::None => "GetGUIThreadInfo-ответил-нет-фокуса".to_owned(),
+            layout::Focus::Window(_) => String::new(),
+        }
+    ));
+
+    Ok(outcome)
+}
+
+/// What one application's series added up to.
+#[derive(Debug, Clone, Default)]
+struct ThreadsTally {
+    circles: usize,
+    skipped: usize,
+    /// Circles in which the two threads were different ones at the moment of the stroke.
+    threads_differ: usize,
+    /// Circles in which the two layouts were different at that moment.
+    layouts_differ: usize,
+    /// ⭐ Circles in which the value **the product reads** disagreed with what was typed.
+    front_wrong: usize,
+    /// ⭐ Circles in which the value **the hypothesis proposes** disagreed with what was typed.
+    focus_wrong: usize,
+    /// Circles in which the ground truth could not be read at all.
+    truth_unreadable: usize,
+    /// Circles in which `GetGUIThreadInfo` refused.
+    probe_refused: usize,
+    /// Circles in which `GetGUIThreadInfo` answered «this thread has no focus window».
+    probe_no_focus: usize,
+    /// The longest stretch, in nanoseconds, over which the two layouts disagreed.
+    longest_split_ns: u128,
+    /// Circles in which the two threads were ever seen to differ during the poll.
+    threads_split_seen: usize,
+}
+
+impl ThreadsTally {
+    fn absorb(&mut self, outcome: &ThreadsOutcome) {
+        if !outcome.built {
+            self.skipped += 1;
+            return;
+        }
+        self.circles += 1;
+
+        if let Some(pair) = &outcome.pair {
+            if pair.threads_agree() == Some(false) {
+                self.threads_differ += 1;
+            }
+            if pair.layouts_agree() == Some(false) {
+                self.layouts_differ += 1;
+            }
+            match &pair.focus {
+                layout::Focus::Refused(_) => self.probe_refused += 1,
+                layout::Focus::None => self.probe_no_focus += 1,
+                layout::Focus::Window(_) => {}
+            }
+        }
+
+        if outcome.truth.is_none() {
+            self.truth_unreadable += 1;
+        } else {
+            if outcome.front_true() == Some(false) {
+                self.front_wrong += 1;
+            }
+            if outcome.focus_true() == Some(false) {
+                self.focus_wrong += 1;
+            }
+        }
+
+        if let Some(split) = outcome.split_ns {
+            self.longest_split_ns = self.longest_split_ns.max(split);
+        }
+        if outcome.threads_split {
+            self.threads_split_seen += 1;
+        }
+    }
+
+    /// The row of the table §1 asks for.
+    fn row(&self, label: &str) -> String {
+        format!(
+            "  {label:<24} {:>7} {:>10} {:>9} {:>11} {:>15} {:>13} {:>12}",
+            self.circles,
+            self.skipped,
+            self.threads_differ,
+            self.layouts_differ,
+            self.front_wrong,
+            self.focus_wrong,
+            self.probe_refused + self.probe_no_focus,
+        )
+    }
+}
+
+/// The header of that table.
+const THREADS_TABLE_HEADER: &str = "  приложение / род           кругов пропущено  потоки-\u{2260} раскладки-\u{2260} переднее-\u{2260}правда фокус-\u{2260}правда проба-пусто";
+
+/// ⭐ **The instrument, checked before a single reading is taken** — §3 of the task.
+///
+/// Two checks, and both of them are about *this* instrument rather than about the product:
+///
+/// 1. **The ground truth answers, in both layouts.** Under a *verified* en-US the key must print
+///    `g`; under a *verified* ru-RU the same key must print `п`. An instrument that cannot tell
+///    the two apart would report «совпадает» for everything, and every number below it would be
+///    worthless. ⭐ This is stronger than T-10-16's check, which only ever confirmed one side.
+/// 2. **`GetGUIThreadInfo` is asked, and its answer is named** — window, no-focus, or refusal.
+///    ⚠ Requirement 3, verbatim: if the probe does not answer for the packaged Notepad, *that is
+///    a result*, and it is said out loud rather than worked around.
+fn threads_instrument(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+) -> Result<(), String> {
+    println!("\n  ── ПРИБОР ПРЕЖДЕ ПОКАЗАНИЙ: {} ──", subject.name());
+
+    for (language, wanted) in [(layout::US, 'g'), (layout::RUSSIAN, '\u{43F}')] {
+        clear_field(target, content)?;
+        race_ensure(target.hwnd, language).map_err(|reason| {
+            format!(
+                "предусловие прибора {}: {reason}",
+                layout::describe(language)
+            )
+        })?;
+
+        let before =
+            read_field(content).ok_or_else(|| "поле не читается перед штрихом".to_owned())?;
+        input::type_text("g", target).map_err(|error| format!("штрих прибора: {error}"))?;
+        let after = wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text != &before)
+        })
+        .ok_or_else(|| "штрих прибора не дошёл до поля".to_owned())?;
+
+        let got = after.chars().next_back();
+        println!(
+            "    под {}: клавиша G напечатала {:?} (ждали {wanted:?}) — {}",
+            layout::describe(language),
+            got.unwrap_or(' '),
+            if got == Some(wanted) {
+                "\u{2714}"
+            } else {
+                "\u{26D4} ПРИБОР НЕИСПРАВЕН"
+            }
+        );
+        if got != Some(wanted) {
+            return Err(format!(
+                "основание опыта не держит: под {} клавиша G напечатала {got:?}, а не {wanted:?}",
+                layout::describe(language)
+            ));
+        }
+    }
+
+    clear_field(target, content)?;
+    race_ensure(target.hwnd, layout::US).map_err(|reason| format!("возврат в en-US: {reason}"))?;
+
+    // ⚠ The probe, asked and reported — never assumed to have answered.
+    let pair = layout::Pair::named();
+    println!("    проба потоков: {}", pair.describe());
+    println!(
+        "    классы окон: переднее {:?}, фокуса {:?}{}",
+        pair.front_class.as_deref().unwrap_or("<не читается>"),
+        pair.focus_class.as_deref().unwrap_or("<нет окна фокуса>"),
+        match pair.threads_agree() {
+            // ⭐ The mechanism in one line, named rather than counted: which two window classes
+            // the two threads belong to. A reader can check this against any Windows 11 machine.
+            Some(false) => " — \u{26D4} ЭТО РАЗНЫЕ ПОТОКИ",
+            Some(true) => " — один поток",
+            None => "",
+        }
+    );
+    match &pair.focus {
+        layout::Focus::Window(_) => println!(
+            "    \u{2714} GetGUIThreadInfo ОТВЕЧАЕТ для {} и называет окно фокуса",
+            subject.name()
+        ),
+        layout::Focus::None => println!(
+            "    \u{26A0} GetGUIThreadInfo ОТВЕТИЛ для {}, но у потока НЕТ окна фокуса — \
+             это ответ, а не отказ",
+            subject.name()
+        ),
+        layout::Focus::Refused(reason) => println!(
+            "    \u{26D4} GetGUIThreadInfo ОТКАЗАЛ для {}: {reason}. Это результат, а не помеха: \
+             пустой ответ пробы не есть доказательство отсутствия",
+            subject.name()
+        ),
+    }
+
+    Ok(())
+}
+
+/// ⭐ **§2, asked at a timescale a thousand times longer than the race** — «дольше миллисекунды?»
+///
+/// Ten rounds of `Alt+Shift`, each followed by a **two-second** tight poll of both threads and
+/// both layouts. T-10-16 measured the race at under a millisecond; a divergence that came from
+/// reading the *wrong thread* would not decay at all, so two seconds is where the two
+/// explanations part company beyond argument. The full transition timeline of every round is
+/// printed, not a summary of it.
+fn threads_long_hold(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+    rounds: usize,
+) -> Result<u128, String> {
+    /// Two seconds — three orders of magnitude past the window T-10-16 measured.
+    const LONG_BOUND: Duration = Duration::from_secs(2);
+
+    println!(
+        "\n  ── §2: ДЕРЖИТСЯ ЛИ РАСХОЖДЕНИЕ: {} кругов по 2 с тугого опроса, {} ──",
+        rounds,
+        subject.name()
+    );
+
+    let mut worst = 0u128;
+
+    for round in 1..=rounds {
+        clear_field(target, content)?;
+        let from = if round % 2 == 1 {
+            layout::US
+        } else {
+            layout::RUSSIAN
+        };
+        if race_ensure(target.hwnd, from).is_err() {
+            println!("    круг {round}: предусловие не построено, круг пропущен");
+            continue;
+        }
+
+        input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+            .map_err(|error| format!("Alt+Shift: {error}"))?;
+
+        let held = ThreadsHold::poll(LONG_BOUND);
+        let (first, total, longest) = held.split();
+        worst = worst.max(longest);
+
+        println!(
+            "    круг {round:>2} из {}: опрос {:.3} мс, опросов {}, переходов {}, \
+             потоки расходились: {}",
+            layout::describe(from),
+            held.bound_ns as f64 / 1e6,
+            held.polls,
+            held.steps.len(),
+            if held.threads_ever_split() {
+                "\u{26D4} ДА"
+            } else {
+                "нет"
+            }
+        );
+        for step in &held.steps {
+            println!(
+                "        +{:>10} нс: переднее {} | фокус {} | потоки {}",
+                step.at_ns,
+                step.front.map_or_else(|| "?".to_owned(), layout::describe),
+                step.focus.map_or_else(|| "?".to_owned(), layout::describe),
+                match step.threads_same {
+                    Some(true) => "совпали",
+                    Some(false) => "\u{26D4} РАЗНЫЕ",
+                    None => "неизвестно",
+                }
+            );
+        }
+        println!(
+            "        расхождение раскладок между собой: {}",
+            match first {
+                Some(first) => format!(
+                    "началось на +{first} нс ({:.3} мс), всего {total} нс ({:.3} мс), \
+                     самое долгое непрерывное {longest} нс (\u{2B50} {:.3} мс)",
+                    first as f64 / 1e6,
+                    total as f64 / 1e6,
+                    longest as f64 / 1e6
+                ),
+                None => "не наблюдалось ни разу".to_owned(),
+            }
+        );
+    }
+
+    Ok(worst)
+}
+
+/// One application's whole series — both directions, `reps` circles each.
+fn threads_series(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+    stage: &str,
+    reps: usize,
+    stimulus: bool,
+) -> Result<ThreadsTally, String> {
+    let mut tally = ThreadsTally::default();
+
+    for rep in 1..=reps {
+        // ⭐ Both directions, alternated inside the series rather than run as two blocks: an
+        // asymmetry that only appears after a run of one direction would otherwise be read as a
+        // property of the application. T-10-14 measured that the directions are not symmetric.
+        for from in [layout::US, layout::RUSSIAN] {
+            let outcome = threads_circle(subject, target, content, stage, from, rep, stimulus)?;
+            tally.absorb(&outcome);
+
+            // The first two circles are printed in full, so that the protocol shows what a row
+            // of the raw file is made of rather than only its total.
+            if rep <= 1 {
+                println!(
+                    "    круг {rep} из {}: {} | напечаталось {} | переднее=правда {} | фокус=правда {}",
+                    layout::describe(from),
+                    outcome
+                        .pair
+                        .as_ref()
+                        .map_or_else(|| "<не снято>".to_owned(), layout::Pair::describe),
+                    outcome
+                        .truth
+                        .map_or_else(|| "?".to_owned(), layout::describe),
+                    outcome
+                        .front_true()
+                        .map_or_else(|| "?".to_owned(), |v| v.to_string()),
+                    outcome
+                        .focus_true()
+                        .map_or_else(|| "?".to_owned(), |v| v.to_string()),
+                );
+            }
+        }
+
+        if rep % 10 == 0 {
+            println!(
+                "    …{rep} кругов на сторону: потоки\u{2260} {}, раскладки\u{2260} {}, \
+                 переднее\u{2260}правда {}, фокус\u{2260}правда {}",
+                tally.threads_differ, tally.layouts_differ, tally.front_wrong, tally.focus_wrong
+            );
+        }
+    }
+
+    Ok(tally)
+}
+
+/// ⭐ **The experiment of task T-10-19** — the seventh hypothesis, **tested rather than executed**.
+///
+/// # ⛔ What this mode does not do
+///
+/// It repairs nothing. `src\` is not touched by this task at all — the product's two call sites
+/// are read and quoted, never edited. The machine is not suspended, not locked, and no desktop is
+/// switched: a lock screen lives on a separate desktop, synthetic input does not reach it, and
+/// there would be nothing left to come back with.
+///
+/// # ⚠ The product is not launched, and that is deliberate
+///
+/// The question is about **the system**: does `GetKeyboardLayout` of the foreground window's
+/// thread answer for the thread that actually receives the input. Nothing about that needs the
+/// product running, nothing about it is read off the channel, and the copy in `%ProgramFiles%`
+/// is a build without a channel anyway. Launching the product would add a keyboard hook to the
+/// chain and a mutex to the run, and would answer no part of the question.
+///
+/// # The stages
+///
+/// | Stage | What it answers |
+/// |---|---|
+/// | `probe` | §3 — does the instrument hold, and does `GetGUIThreadInfo` answer at all, per application |
+/// | `pairs` | §1 and §2 — both threads and both layouts against the ground truth, ≥50 circles × both directions × three applications |
+/// | `control` | §3 — the same circle with **no `Alt+Shift` at all**; divergences must be zero |
+/// | `clear` | takes any running copy of the product down with a synthetic FR-96 and does nothing else |
+pub fn experiment_threads(ctx: &Context, stage: &str, reps: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-19: два потока, две раскладки — у ТОГО ли потока читается ---\n");
+    println!(
+        "Вопрос: раскладка в Windows хранится ПО ПОТОКУ. Продукт спрашивает её у потока \
+         ВЕРХНЕГО окна переднего плана. Ввод получает поток окна с фокусом клавиатуры. \
+         Это один и тот же поток?\n\
+         Прибор: ground truth — ЧТО ФАКТИЧЕСКИ ПЕЧАТАЕТСЯ (клавиша G даёт g под en-US и \u{43F} под \
+         ru-RU), а не совпадение с образцом. Прибор проверяется В ОБЕ стороны прежде показаний.\n\
+         Очистка поля — только Backspace: Ctrl+A отпускает Ctrl, а отпускание модификатора и \
+         есть зонд раскладки T-03-3c.\n\
+         Каждый круг строит СВОЁ предусловие — направления несимметричны, T-10-14.\n\
+         \u{26D4} Окна открывает стенд сам (требование B). Продукт НЕ запускается: опыт меряет \
+         систему, а не продукт.\n\
+         \u{26D4} Машина не усыпляется, не блокируется, рабочий стол не переключается.\n"
+    );
+    println!("Сырые числа серии: {}\n", threads_raw_path().display());
+    threads_raw(THREADS_HEADER);
+
+    // ⚠ **Whether a copy of the product is up is reported, not assumed.** The first pass of this
+    // series ran with the person's own copy in the chain — which is the condition the defect was
+    // reported under, and therefore the right one to measure first. `--experiment-threads clear`
+    // takes it down with a synthetic FR-96 so that the same series can be run **without** the
+    // product and the two compared: that is what separates «два потока расходятся» from «наш
+    // собственный хук их разводит».
+    let running = crate::sut::any_running();
+    println!(
+        "Работающие копии продукта: {}",
+        if running.is_empty() {
+            "нет — опыт идёт на голой системе".to_owned()
+        } else {
+            format!("{running:?} — опыт идёт при поднятом продукте, как у человека")
+        }
+    );
+
+    if stage == "clear" {
+        return match race_clear_the_stage() {
+            Ok(()) => {
+                println!("\nсцена чиста: работающих копий продукта не осталось");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(reason) => {
+                eprintln!("\n{reason}");
+                std::process::ExitCode::from(1)
+            }
+        };
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut tallies: Vec<(Subject, ThreadsTally)> = Vec::new();
+    let mut refusals: Vec<String> = Vec::new();
+    let mut worst_long_ns = 0u128;
+
+    for subject in SUBJECTS {
+        println!(
+            "\n==================== {} ({}) ====================",
+            subject.name(),
+            subject.kind()
+        );
+
+        let (mut app, target, content) = match subject.open(ctx) {
+            Ok(opened) => opened,
+            Err(reason) => {
+                let said = format!(
+                    "{} ({}): не открылось — {reason}",
+                    subject.name(),
+                    subject.kind()
+                );
+                eprintln!("  \u{26A0} {said}");
+                refusals.push(said);
+                continue;
+            }
+        };
+        println!("  окно открыто стендом: {} PID {}", app.name, app.pid);
+
+        let measured = (|| -> Result<(), String> {
+            threads_instrument(subject, &target, &content)?;
+
+            match stage {
+                "probe" => {
+                    worst_long_ns =
+                        worst_long_ns.max(threads_long_hold(subject, &target, &content, reps)?);
+                }
+                "pairs" => {
+                    println!(
+                        "\n  ── §1: {reps} кругов на сторону, обе стороны, {} ──",
+                        subject.name()
+                    );
+                    let tally = threads_series(subject, &target, &content, "pairs", reps, true)?;
+                    tallies.push((subject, tally));
+                }
+                "control" => {
+                    println!(
+                        "\n  ── §3: ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ — {reps} кругов БЕЗ Alt+Shift, {} ──",
+                        subject.name()
+                    );
+                    let tally = threads_series(subject, &target, &content, "control", reps, false)?;
+                    tallies.push((subject, tally));
+                }
+                other => return Err(format!("неизвестная ступень {other:?}")),
+            }
+            Ok(())
+        })();
+
+        // Requirement 5 of §11.5: the window is put back where it came from, whatever happened.
+        let _ = layout::ensure(target.hwnd, layout::US, Duration::from_secs(3));
+        println!("  {}", app.close());
+
+        if let Err(reason) = measured {
+            let said = format!("{} ({}): {reason}", subject.name(), subject.kind());
+            eprintln!("  \u{26D4} {said}");
+            refusals.push(said);
+        }
+    }
+
+    threads_summary(stage, &tallies, &refusals, worst_long_ns)
+}
+
+/// The table §1 asks for, the sentence §2 asks for, and the verdict Р-39 asks for.
+fn threads_summary(
+    stage: &str,
+    tallies: &[(Subject, ThreadsTally)],
+    refusals: &[String],
+    worst_long_ns: u128,
+) -> std::process::ExitCode {
+    println!("\n\n==================== ИТОГ СТУПЕНИ {stage} ====================\n");
+
+    if !tallies.is_empty() {
+        println!("{THREADS_TABLE_HEADER}");
+        for (subject, tally) in tallies {
+            println!(
+                "{}",
+                tally.row(&format!("{} / {}", subject.name(), subject.kind()))
+            );
+        }
+
+        let total: usize = tallies.iter().map(|(_, t)| t.circles).sum();
+        let threads: usize = tallies.iter().map(|(_, t)| t.threads_differ).sum();
+        let layouts: usize = tallies.iter().map(|(_, t)| t.layouts_differ).sum();
+        let front: usize = tallies.iter().map(|(_, t)| t.front_wrong).sum();
+        let focus: usize = tallies.iter().map(|(_, t)| t.focus_wrong).sum();
+        let unread: usize = tallies.iter().map(|(_, t)| t.truth_unreadable).sum();
+        let refused: usize = tallies.iter().map(|(_, t)| t.probe_refused).sum();
+        let nofocus: usize = tallies.iter().map(|(_, t)| t.probe_no_focus).sum();
+        let longest: u128 = tallies
+            .iter()
+            .map(|(_, t)| t.longest_split_ns)
+            .max()
+            .unwrap_or(0);
+
+        println!("\n  ── всего по трём приложениям ──");
+        println!("  кругов: {total}");
+        println!(
+            "  два потока оказались РАЗНЫМИ:            {threads} ({}%)",
+            race_percent(threads, total)
+        );
+        println!(
+            "  две раскладки оказались РАЗНЫМИ:         {layouts} ({}%)",
+            race_percent(layouts, total)
+        );
+        println!(
+            "  \u{2B50} раскладка ПЕРЕДНЕГО окна \u{2260} напечатанному: {front} ({}%)",
+            race_percent(front, total)
+        );
+        println!(
+            "  \u{2B50} раскладка окна ФОКУСА \u{2260} напечатанному:   {focus} ({}%)",
+            race_percent(focus, total)
+        );
+        println!("  правда не прочиталась:                   {unread}");
+        println!("  GetGUIThreadInfo отказал:                {refused}");
+        println!("  GetGUIThreadInfo ответил «нет фокуса»:   {nofocus}");
+        println!(
+            "  самое долгое расхождение двух раскладок: {longest} нс ({:.6} мс)",
+            longest as f64 / 1e6
+        );
+    }
+
+    if worst_long_ns > 0 || stage == "probe" {
+        println!(
+            "\n  §2, самое долгое расхождение при двухсекундном опросе: {worst_long_ns} нс \
+             ({:.6} мс)",
+            worst_long_ns as f64 / 1e6
+        );
+    }
+
+    if !refusals.is_empty() {
+        println!("\n  ── что не измерялось и почему ──");
+        for refusal in refusals {
+            println!("  \u{26A0} {refusal}");
+        }
+    }
+
+    println!("\nСырые числа: {}", threads_raw_path().display());
+
+    if refusals.is_empty() {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::from(1)
+    }
+}

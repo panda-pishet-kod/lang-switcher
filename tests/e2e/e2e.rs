@@ -125,6 +125,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-race") => experiment_race(arguments),
         Some("--experiment-voice") => experiment_voice(arguments),
         Some("--experiment-phase") => experiment_phase(arguments),
+        Some("--experiment-threads") => experiment_threads(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -614,6 +615,39 @@ fn experiment_phase(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_phase(&context, stage, reps)
+}
+
+/// ⭐ **Task T-10-19** — two threads, two layouts: is the layout read from the *right* thread?
+///
+/// `--experiment-threads <ступень> [кругов]`, where the stage is one of `probe`, `pairs`,
+/// `control`. The same split as every mode of this file: the arm builds the context, the
+/// experiment lives in `scenarios.rs`. See [`scenarios::experiment_threads`] for what each stage
+/// answers and why the product is deliberately not launched.
+///
+/// ⛔ A task of **measurement**: `src\` is not touched. The machine is not suspended, not locked,
+/// and no desktop is switched.
+fn experiment_threads(arguments: &[String]) -> std::process::ExitCode {
+    let stage = arguments.get(1).map_or("pairs", String::as_str);
+    let reps = arguments
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(50);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_threads(&context, stage, reps)
 }
 
 /// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.

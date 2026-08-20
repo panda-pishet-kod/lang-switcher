@@ -34,9 +34,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetForegroundWindow, GetWindowThreadProcessId, MSG, PM_REMOVE, PeekMessageW, RegisterClassW,
-    SW_SHOWNORMAL, SetForegroundWindow, ShowWindow, TranslateMessage, WINDOW_EX_STYLE, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW,
+    GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+    MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+    TranslateMessage, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -95,6 +95,289 @@ pub fn of_this_thread() -> HKL {
     // SAFETY: a zero thread id is the documented way to ask about the calling thread, which is
     // the question here. Nothing is written anywhere.
     unsafe { GetKeyboardLayout(0) }
+}
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Task T-10-19 — two threads, two layouts, one instant
+// ---------------------------------------------------------------------------------------
+
+/// What `GetGUIThreadInfo` answered — **three outcomes, not two**.
+///
+/// ⚠ Requirement 3 of task T-10-19, written into the type so that it cannot be lost in a
+/// `None`: **an empty answer is not evidence of absence.** A thread that has no focus window
+/// and a call that was refused are different facts, and a probe that collapses them into
+/// `Option<HWND>` would let «упакованный Блокнот не отдаёт фокус» be reported as «фокус
+/// совпадает с передним окном» — the exact shape of mistake this task exists to avoid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    /// The call answered and named a focus window.
+    Window(HWND),
+    /// The call answered, and the thread has **no** window with the keyboard focus.
+    /// `hwndFocus` came back null. This is an answer, and a meaningful one.
+    None,
+    /// The call **refused**. The system's own words are carried so that the report can name
+    /// what happened instead of guessing.
+    Refused(String),
+}
+
+impl Focus {
+    /// The handle, when there is one. Used only where a missing answer and a refusal really are
+    /// treated alike; everywhere else the variants are matched.
+    pub fn hwnd(&self) -> Option<HWND> {
+        match self {
+            Self::Window(hwnd) => Some(*hwnd),
+            Self::None | Self::Refused(_) => None,
+        }
+    }
+
+    /// A short word for a table cell.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::Window(_) => "окно",
+            Self::None => "нет-фокуса",
+            Self::Refused(_) => "ОТКАЗ",
+        }
+    }
+}
+
+/// The window with the keyboard focus **inside `thread`**, asked the only way another thread's
+/// focus can be asked.
+///
+/// `GetFocus` answers for the *calling* thread's queue and would report nothing here for ever;
+/// `GetGUIThreadInfo` is the one call that answers for somebody else's thread. It is the same
+/// call `src\guard.rs` makes for its own purpose — this is a second, independent site so that
+/// the measurement does not depend on a function the task is forbidden to touch.
+pub fn focus_of_thread(thread: u32) -> Focus {
+    if thread == 0 {
+        return Focus::Refused("нулевой идентификатор потока".to_owned());
+    }
+
+    let mut info = GUITHREADINFO {
+        cbSize: u32::try_from(size_of::<GUITHREADINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: `info` is a live, properly aligned `GUITHREADINFO` owned by this frame and its
+    // `cbSize` describes it, which is the contract the call demands before it writes. `thread`
+    // is a non-zero id the caller obtained from the system. NFR-13: the `Result` is examined,
+    // and a refusal is carried out of here rather than flattened.
+    if let Err(error) = unsafe { GetGUIThreadInfo(thread, &raw mut info) } {
+        return Focus::Refused(error.message());
+    }
+
+    if info.hwndFocus.is_invalid() {
+        return Focus::None;
+    }
+
+    Focus::Window(info.hwndFocus)
+}
+
+/// The class name of `window`, or `None` when it cannot be read.
+///
+/// A `GetClassNameW` into a fixed buffer: class names are bounded at 256 characters by the
+/// window class registration itself, so a buffer of 256 cannot truncate a real one.
+fn class_of(window: HWND) -> Option<String> {
+    let mut buffer = [0u16; 256];
+
+    // SAFETY: `buffer` is a live array owned by this frame and its length bounds the write,
+    // which is the contract the call takes. NFR-13: a zero return is a failure — an invalid
+    // window, most often one that died between two calls — and is examined rather than turned
+    // into an empty name.
+    let written = unsafe { GetClassNameW(window, &mut buffer) };
+    if written <= 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..written as usize]))
+}
+
+/// ⭐ **Both threads and both layouts, taken in one instant** — §1 of task T-10-19.
+///
+/// | Field | The call behind it | Who asks it in the product |
+/// |---|---|---|
+/// | [`Pair::front_thread`] / [`Pair::front_layout`] | `GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow()))` | `switch::current`, `app::refresh_layout_and_cache` — **verbatim** |
+/// | [`Pair::focus`] / [`Pair::focus_thread`] / [`Pair::focus_layout`] | `GetGUIThreadInfo(front_thread).hwndFocus`, then the same two calls on it | nobody — this is the quantity under test |
+///
+/// [`Pair::span_ns`] is how long the whole snapshot took. It is not decoration: the question of
+/// §2 is about durations near a millisecond, and a probe whose own cost is unknown cannot answer
+/// it. Measured on this machine the span is tens of nanoseconds to a few microseconds.
+#[derive(Debug, Clone)]
+pub struct Pair {
+    /// `GetForegroundWindow()`, as a number for the raw file.
+    pub front_hwnd: isize,
+    /// The thread that owns the foreground window — what the product asks about.
+    pub front_thread: u32,
+    /// The process that owns the foreground window. ⭐ Named so that a divergence can be
+    /// *explained* rather than only counted — and it turned out to say the **opposite** of what
+    /// the hypothesis expected: for the packaged Notepad both windows belong to the *same*
+    /// process, so «упакованное приложение живёт в чужом хосте» is not what is happening here.
+    pub front_pid: u32,
+    /// `GetKeyboardLayout(front_thread)` — **the value the product uses**.
+    pub front_layout: Option<u32>,
+    /// What `GetGUIThreadInfo` said, including a refusal.
+    pub focus: Focus,
+    /// The window with the keyboard focus, as a number.
+    pub focus_hwnd: Option<isize>,
+    /// The thread that owns the focus window — the thread that actually receives the input.
+    pub focus_thread: Option<u32>,
+    /// The process that owns the focus window.
+    pub focus_pid: Option<u32>,
+    /// `GetKeyboardLayout(focus_thread)`.
+    pub focus_layout: Option<u32>,
+    /// How long this whole snapshot took to take, in nanoseconds.
+    pub span_ns: u128,
+    /// Class name of the foreground window.
+    ///
+    /// ⭐ Read **only for the protocol**, and deliberately kept out of [`Pair::raw`]: a class
+    /// name turns «два потока» into a mechanism a reader can go and check, but reading two
+    /// strings costs a `GetClassNameW` each, and the tight poll of §2 must stay at the cost of
+    /// the numbers it is measuring. Filled by [`Pair::named`], never by [`Pair::take`].
+    pub front_class: Option<String>,
+    /// Class name of the focus window, on the same terms.
+    pub focus_class: Option<String>,
+}
+
+impl Pair {
+    /// Takes the snapshot. Five to seven Win32 calls, no allocation on the happy path, no
+    /// channel and no UI Automation — see the note on [`Pair::span_ns`].
+    pub fn take() -> Self {
+        let started = std::time::Instant::now();
+
+        // SAFETY: takes no arguments, returns a handle by value, touches no memory of ours.
+        let front = unsafe { GetForegroundWindow() };
+
+        // SAFETY: `front` is the handle just returned; the process id is written into a local
+        // this frame owns. NFR-13: a zero thread means there is no foreground window and is
+        // examined below.
+        let mut front_pid = 0u32;
+        let front_thread = unsafe { GetWindowThreadProcessId(front, Some(&raw mut front_pid)) };
+
+        let front_layout = (front_thread != 0).then(|| {
+            // SAFETY: a non-zero live thread id; the call only reads.
+            id_of(unsafe { GetKeyboardLayout(front_thread) })
+        });
+
+        let focus = focus_of_thread(front_thread);
+
+        let focus_hwnd = focus.hwnd();
+        let mut focus_pid = 0u32;
+        let focus_thread = focus_hwnd.and_then(|hwnd| {
+            // SAFETY: `hwnd` came from `GUITHREADINFO` moments ago; the process id is written
+            // into a local this frame owns. NFR-13: a zero thread is rejected rather than passed
+            // on, because zero means "the calling thread" to `GetKeyboardLayout`.
+            let thread = unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut focus_pid)) };
+            (thread != 0).then_some(thread)
+        });
+
+        let focus_layout = focus_thread.map(|thread| {
+            // SAFETY: a non-zero live thread id; the call only reads.
+            id_of(unsafe { GetKeyboardLayout(thread) })
+        });
+
+        Self {
+            front_hwnd: front.0 as isize,
+            front_thread,
+            front_pid,
+            front_layout,
+            focus,
+            focus_hwnd: focus_hwnd.map(|hwnd| hwnd.0 as isize),
+            focus_thread,
+            focus_pid: focus_thread.map(|_| focus_pid),
+            focus_layout,
+            span_ns: started.elapsed().as_nanos(),
+            front_class: None,
+            focus_class: None,
+        }
+    }
+
+    /// The same snapshot, plus the two class names — for the protocol, not for the poll.
+    ///
+    /// ⚠ The timing in [`Pair::span_ns`] is the timing of [`Pair::take`] and stays that way:
+    /// the two extra reads happen **after** the clock is stopped, so a snapshot that carries
+    /// names never claims to have been as cheap as one that does not.
+    pub fn named() -> Self {
+        let mut pair = Self::take();
+        pair.front_class = class_of(HWND(pair.front_hwnd as *mut core::ffi::c_void));
+        pair.focus_class = pair
+            .focus
+            .hwnd()
+            .and_then(|hwnd| class_of(hwnd).or_else(|| Some("<не читается>".to_owned())));
+        pair
+    }
+
+    /// Whether the two threads are the same one. `None` while the focus thread is unknown —
+    /// which is itself a reading and is never silently turned into "same".
+    pub fn threads_agree(&self) -> Option<bool> {
+        self.focus_thread.map(|focus| focus == self.front_thread)
+    }
+
+    /// Whether the two layouts are the same. `None` while either is unknown.
+    pub fn layouts_agree(&self) -> Option<bool> {
+        match (self.front_layout, self.focus_layout) {
+            (Some(front), Some(focus)) => Some(front == focus),
+            _ => None,
+        }
+    }
+
+    /// Whether the two windows belong to two **processes**. `None` while the focus process is
+    /// unknown.
+    pub fn processes_agree(&self) -> Option<bool> {
+        self.focus_pid.map(|focus| focus == self.front_pid)
+    }
+
+    /// A row for the raw file: eleven fields, in the order the header names them.
+    pub fn raw(&self) -> String {
+        format!(
+            "0x{:X},{},{},{},{},0x{:X},{},{},{},{},{}",
+            self.front_hwnd,
+            self.front_thread,
+            self.front_pid,
+            self.front_layout
+                .map_or_else(|| "?".to_owned(), |id| format!("0x{id:08X}")),
+            self.focus.tag(),
+            self.focus_hwnd.unwrap_or(0),
+            self.focus_thread
+                .map_or_else(|| "?".to_owned(), |id| id.to_string()),
+            self.focus_pid
+                .map_or_else(|| "?".to_owned(), |id| id.to_string()),
+            self.focus_layout
+                .map_or_else(|| "?".to_owned(), |id| format!("0x{id:08X}")),
+            self.threads_agree()
+                .map_or_else(|| "?".to_owned(), |same| u8::from(same).to_string()),
+            self.layouts_agree()
+                .map_or_else(|| "?".to_owned(), |same| u8::from(same).to_string()),
+        )
+    }
+
+    /// A line for the protocol.
+    pub fn describe(&self) -> String {
+        format!(
+            "переднее 0x{:X} поток {} процесс {} раскладка {} | фокус {} 0x{:X} поток {} \
+             процесс {} раскладка {} | потоки {} раскладки {} | проба {} нс",
+            self.front_hwnd,
+            self.front_thread,
+            self.front_pid,
+            self.front_layout.map_or_else(|| "?".to_owned(), describe),
+            self.focus.tag(),
+            self.focus_hwnd.unwrap_or(0),
+            self.focus_thread
+                .map_or_else(|| "?".to_owned(), |id| id.to_string()),
+            self.focus_pid
+                .map_or_else(|| "?".to_owned(), |id| id.to_string()),
+            self.focus_layout.map_or_else(|| "?".to_owned(), describe),
+            match self.threads_agree() {
+                Some(true) => "совпали",
+                Some(false) => "⛔ РАЗНЫЕ",
+                None => "неизвестно",
+            },
+            match self.layouts_agree() {
+                Some(true) => "совпали",
+                Some(false) => "⛔ РАЗНЫЕ",
+                None => "неизвестно",
+            },
+            self.span_ns
+        )
+    }
 }
 
 /// Every layout currently attached to this session.
