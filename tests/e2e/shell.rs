@@ -294,3 +294,131 @@ pub fn terminate(pid: u32) -> Result<(), String> {
 // asked in exactly one place — `input::send_verified` — immediately before every send, and a
 // second way of asking it would be a second thing to keep in step. `activate` above waits on
 // the same fact through `input::foreground` for the same reason.
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-18 — reaching the product's window procedure with a message
+// ---------------------------------------------------------------------------------------
+
+use std::cell::RefCell;
+
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetClassNameW, GetWindowThreadProcessId, PostMessageW,
+};
+
+/// The class name of every window the product creates — `src\app.rs`, `WINDOW_CLASS_NAME`.
+///
+/// Two of the product's three windows are `HWND_MESSAGE` and therefore take no part in
+/// top-level enumeration at all (its own module documentation says so). The **UI** window
+/// cannot be one of them — decision Р-20 point 2 needs the broadcast of `TaskbarCreated` —
+/// so it is a top-level window that is never shown, and it is the one this finds.
+pub const PRODUCT_WINDOW_CLASS: &str = "LangSwitcher.Hidden";
+
+thread_local! {
+    /// Where [`enum_windows_proc`] accumulates; a thread-local rather than a `static mut`, and
+    /// borrowed only inside the callback, which `EnumWindows` runs on this same thread before
+    /// it returns.
+    static FOUND: RefCell<Vec<(isize, u32)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// `EnumWindows` callback — records every top-level window with its owning process id.
+///
+/// # Safety
+///
+/// Called by Windows with a live window handle. It reads nothing through a pointer of ours:
+/// `lparam` is ignored deliberately, so a stray callback cannot dereference anything.
+unsafe extern "system" fn enum_windows_proc(window: HWND, _lparam: LPARAM) -> windows::core::BOOL {
+    let mut pid = 0u32;
+    // SAFETY: `window` is the live handle Windows just handed this callback, and `pid` is a
+    // live local of this frame. NFR-13: a zero return means the window died between the
+    // enumeration and this call, and the entry is then dropped rather than recorded.
+    let thread = unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
+
+    if thread != 0 && pid != 0 {
+        FOUND.with(|found| found.borrow_mut().push((window.0 as isize, pid)));
+    }
+
+    // TRUE: keep enumerating. There is no early exit — the whole list is wanted.
+    windows::core::BOOL(1)
+}
+
+/// The class name of a window, or `<класс не читается>`.
+fn class_of(window: HWND) -> String {
+    let mut buffer = [0u16; 257];
+    // SAFETY: `buffer` is a live local array handed over as a slice, so the binding derives the
+    // bound from the array itself and cannot write past it. NFR-13: a non-positive return is the
+    // documented failure and is examined.
+    let length = unsafe { GetClassNameW(window, &mut buffer) };
+
+    if length <= 0 {
+        return "<класс не читается>".to_owned();
+    }
+
+    String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// ⭐ **Task T-10-18** — the product's **top-level** window, found by enumeration.
+///
+/// Both halves of the filter matter and neither is enough on its own: the process id says the
+/// window belongs to the copy this run started, and the class says it is the product's rather
+/// than something else the same process might own. `watchdog::is_ui_window` compares the
+/// handle against the one `register_session_notice` published, so a message aimed anywhere
+/// else falls through to `DefWindowProcW` — which is why the answer has to be exact and why a
+/// run that finds none or finds several says so instead of guessing.
+pub fn product_ui_window(pid: u32) -> Result<HWND, String> {
+    FOUND.with(|found| found.borrow_mut().clear());
+
+    // SAFETY: `enum_windows_proc` is a real `extern "system"` function of this binary and the
+    // `lparam` it is handed is zero and never dereferenced. `EnumWindows` runs the callback on
+    // this thread and returns after the last one, so the thread-local below is complete and
+    // is not being borrowed anywhere else. NFR-13: the result is examined — the documented
+    // failure is that the callback stopped the enumeration, which this one never does.
+    let walked = unsafe { EnumWindows(Some(enum_windows_proc), LPARAM(0)) };
+
+    let mut mine: Vec<HWND> = FOUND.with(|found| {
+        found
+            .borrow()
+            .iter()
+            .filter(|(_, owner)| *owner == pid)
+            .map(|(raw, _)| HWND(*raw as *mut core::ffi::c_void))
+            .collect()
+    });
+
+    if let Err(error) = walked {
+        return Err(format!("EnumWindows: {error}"));
+    }
+
+    mine.retain(|window| class_of(*window) == PRODUCT_WINDOW_CLASS);
+
+    match mine.len() {
+        0 => Err(format!(
+            "у процесса {pid} нет верхнеуровневого окна класса {PRODUCT_WINDOW_CLASS}"
+        )),
+        1 => Ok(mine[0]),
+        several => Err(format!(
+            "у процесса {pid} {several} верхнеуровневых окон класса {PRODUCT_WINDOW_CLASS} — \
+             какое из них UI-окно, перечисление не говорит"
+        )),
+    }
+}
+
+/// Posts one message into a window of the product and **examines the Win32 return** — NFR-13.
+///
+/// ⚠ The examination is the whole point of the helper. Task T-10-13 measured what happens
+/// without it: `PostMessageW` from a medium-integrity process into the **installed** copy, which
+/// runs elevated, is refused by UIPI with `ERROR_ACCESS_DENIED`, and an experiment that did not
+/// look would have recorded «пробуждение ничего не обновляет» on a message that never arrived.
+/// The copy this task drives is a plain child of the bench and at the same integrity level, so
+/// the post is expected to succeed — expected, and therefore checked.
+///
+/// Every message this is used for is one the product's own SEC-05 threat model already
+/// enumerates: a forged `WM_POWERBROADCAST` or `WM_WTSSESSION_CHANGE` buys the sender a hook
+/// reinstallation and nothing else.
+pub fn post_to_window(window: HWND, message: u32, wparam: usize) -> Result<(), String> {
+    // SAFETY: `window` came from `product_ui_window` on this same thread moments ago;
+    // `PostMessageW` only queues a copy of the message and dereferences neither `wparam` nor
+    // `lparam`, both of which are plain integers here. NFR-13: the result is examined and the
+    // failure is returned rather than swallowed.
+    unsafe { PostMessageW(Some(window), message, WPARAM(wparam), LPARAM(0)) }
+        .map_err(|error| format!("PostMessage({message:#x}, wparam={wparam:#x}): {error}"))
+}

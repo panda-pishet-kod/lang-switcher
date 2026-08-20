@@ -45,8 +45,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, HWND_MESSAGE, PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
-    WM_CLOSE,
+    CreateWindowExW, DestroyWindow, HWND_MESSAGE, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND,
+    PostMessageW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE,
+    WTS_SESSION_UNLOCK,
 };
 use windows::core::w;
 
@@ -9251,6 +9252,940 @@ pub fn experiment_voice(ctx: &Context, stage: &str, reps: usize) -> std::process
     match outcome {
         Ok(said) => {
             println!("\nступень {stage}: {said}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(reason) => {
+            eprintln!("\nопыт не доведён: {reason}");
+            std::process::ExitCode::from(2)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-10-18 — does the phase of the cycle survive an absence?
+// ---------------------------------------------------------------------------------------
+
+/// The keys task **T-10-18** cannot proceed without.
+///
+/// `cycle_position` is the quantity under investigation; the two of T-10-17 are what separates
+/// «замена вернула то же самое» from «продукт ошибся в снимаемом», and without them the verdict
+/// of the decisive circle would be the same ambiguous «текст не изменился» four repairs already
+/// broke on. ⛔ A build lacking any of them refuses to host the experiment rather than reporting
+/// fabricated zeros.
+const PHASE_KEYS: [&str; 3] = [
+    "cycle_position",
+    "last_replacement_changed",
+    "last_replacement_direction",
+];
+
+/// The **fresh** word of the decisive circle — deliberately not [`TYPED`].
+///
+/// The circle is about a word typed *after* the conversion, and a person who retypes the same six
+/// letters leaves the bench unable to tell «поле не изменилось» from «поле снова показывает то,
+/// что и показывало». Four keys that spell `тест` under ru-RU make the two distinguishable at a
+/// glance and, more to the point, in the raw file.
+const PHASE_FRESH: &str = "ntcn";
+
+/// Where the raw numbers of this experiment go — one line per circle, appended as it happens.
+fn phase_raw_path() -> std::path::PathBuf {
+    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    if beside.is_dir() {
+        beside.join("T-10-18-серия.csv")
+    } else {
+        std::env::temp_dir().join("T-10-18-серия.csv")
+    }
+}
+
+/// Appends one raw line, opening the file per call — [`voice_raw`]'s terms exactly.
+fn phase_raw(line: &str) {
+    use std::io::Write;
+
+    let path = phase_raw_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Err(error) => eprintln!("⚠ сырой протокол {} не открылся: {error}", path.display()),
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{line}") {
+                eprintln!("⚠ сырой протокол не записался: {error}");
+            }
+        }
+    }
+}
+
+/// ⭐ **The state of the buffer and of the cycle, in one snapshot.**
+///
+/// One read and not nine, for [`VoiceReading::take`]'s reason: these numbers describe one moment
+/// and two round trips could straddle a keystroke and describe two of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PhaseState {
+    /// ⭐ `cycle_position` — the quantity the hypothesis is about.
+    cycle: Option<u64>,
+    /// `buffer_len` — how many strokes are live. The observable proxy for «сессия конвертации
+    /// ещё открыта»: FR-32 keeps the strokes standing after a conversion, and every flush of
+    /// FR-10 takes them.
+    buffer_len: Option<u64>,
+    /// `full_clears`, `window_flushes`, `strokes_removed` — which mechanism did the taking.
+    full_clears: Option<u64>,
+    window_flushes: Option<u64>,
+    strokes_removed: Option<u64>,
+    /// `password_field` and `field_state` — the gate of FR-70/FR-71, so that «буфер припаркован»
+    /// is a reading and not an assumption.
+    password_field: Option<u64>,
+    field_state: String,
+    /// `layout_probes` — the probe of FR-21 answered by the input thread.
+    layout_probes: Option<u64>,
+    /// `watchdog_recoveries` and `watchdog_last_reason` — ⭐ the **positive control of delivery**
+    /// for the two return probes. A message nobody received leaves both flat, which is exactly
+    /// the trap task T-10-13 fell into and caught by examining the Win32 return.
+    recoveries: Option<u64>,
+    reason: String,
+    /// `hotkey_handoffs` — the press reached the product.
+    handoffs: Option<u64>,
+}
+
+impl PhaseState {
+    /// Reads one snapshot, or `None` when the channel could not answer.
+    fn take() -> Option<Self> {
+        let snapshot = crate::channel::read().ok()?;
+        let number = |key: &str| {
+            snapshot
+                .get(key)
+                .and_then(|value| value.parse::<u64>().ok())
+        };
+
+        Some(Self {
+            cycle: number("cycle_position"),
+            buffer_len: number("buffer_len"),
+            full_clears: number("full_clears"),
+            window_flushes: number("window_flushes"),
+            strokes_removed: number("strokes_removed"),
+            password_field: number("password_field"),
+            field_state: snapshot.get("field_state").unwrap_or("<нет>").to_owned(),
+            layout_probes: number("layout_probes"),
+            recoveries: number("watchdog_recoveries"),
+            reason: snapshot
+                .get("watchdog_last_reason")
+                .unwrap_or("<нет>")
+                .to_owned(),
+            handoffs: number("hotkey_handoffs"),
+        })
+    }
+
+    /// A reading that says nothing, for the rows where the channel did not answer.
+    fn absent() -> Self {
+        Self {
+            cycle: None,
+            buffer_len: None,
+            full_clears: None,
+            window_flushes: None,
+            strokes_removed: None,
+            password_field: None,
+            field_state: "<нет>".to_owned(),
+            layout_probes: None,
+            recoveries: None,
+            reason: "<нет>".to_owned(),
+            handoffs: None,
+        }
+    }
+
+    /// One line for the console.
+    fn describe(&self) -> String {
+        format!(
+            "шаг={} буфер={} очисток={} сбросов-окна={} штрихов-снято={} пароль={}/{} зондов={} \
+             восстановлений={}/{} нажатий={}",
+            phase_number(self.cycle),
+            phase_number(self.buffer_len),
+            phase_number(self.full_clears),
+            phase_number(self.window_flushes),
+            phase_number(self.strokes_removed),
+            phase_number(self.password_field),
+            self.field_state,
+            phase_number(self.layout_probes),
+            phase_number(self.recoveries),
+            self.reason,
+            phase_number(self.handoffs),
+        )
+    }
+
+    /// The columns of the raw file, in the order the header names them.
+    fn columns(&self) -> String {
+        format!(
+            "{},{},{},{},{},{},{},{},{},{},{}",
+            phase_number(self.cycle),
+            phase_number(self.buffer_len),
+            phase_number(self.full_clears),
+            phase_number(self.window_flushes),
+            phase_number(self.strokes_removed),
+            phase_number(self.password_field),
+            self.field_state,
+            phase_number(self.layout_probes),
+            phase_number(self.recoveries),
+            self.reason,
+            phase_number(self.handoffs),
+        )
+    }
+}
+
+/// A channel number, or `?` — never a fabricated zero.
+fn phase_number(value: Option<u64>) -> String {
+    value.map_or_else(|| "?".to_owned(), |value| value.to_string())
+}
+
+/// What is done to the product between the conversion and the fresh word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Impact {
+    /// ⭐ **The negative control.** Nothing at all — requirement 3 of the task.
+    None,
+    /// ⭐ **The control of the parking arm** — the same two focus changes, and no parking.
+    ///
+    /// The gate of FR-70/FR-71 is reachable *only* through a focus change, and a focus change is
+    /// itself two rows of the FR-10 table («смена активного окна», «смена фокуса внутри окна» —
+    /// decision Р-60). So an arm that only parked could never say which of the two did the
+    /// resetting. This arm goes to the very same window and comes back **without** pressing
+    /// `Tab`, so the focus never enters the masked box: `password_field` stays `0`, the buffer is
+    /// never parked, and whatever still happens is the focus change alone.
+    Focus,
+    /// The buffer parked and unparked by the gate of FR-70/FR-71.
+    Park,
+    /// `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC` — «машина проснулась», FR-80.
+    PowerResume,
+    /// `WM_WTSSESSION_CHANGE` / `WTS_SESSION_UNLOCK` — «сессия вернулась», FR-80.
+    SessionChange,
+}
+
+impl Impact {
+    /// The word this impact is called by in the console and in the raw file.
+    fn name(self) -> &'static str {
+        match self {
+            Self::None => "без-воздействия",
+            Self::Focus => "смена-фокуса-без-парковки",
+            Self::Park => "парковка-буфера",
+            Self::PowerResume => "зонд-power_resume",
+            Self::SessionChange => "зонд-session_change",
+        }
+    }
+
+    /// The stage word that selects it on the command line.
+    fn from_stage(stage: &str) -> Option<Self> {
+        match stage {
+            "control" => Some(Self::None),
+            "focus" => Some(Self::Focus),
+            "park" => Some(Self::Park),
+            "power" => Some(Self::PowerResume),
+            "session" => Some(Self::SessionChange),
+            _ => None,
+        }
+    }
+
+    /// Whether this impact needs the password window open.
+    fn needs_password_window(self) -> bool {
+        matches!(self, Self::Focus | Self::Park)
+    }
+
+    /// What `watchdog_last_reason` must read afterwards for the message to have been received —
+    /// `None` for the impacts that are not a watchdog message at all.
+    fn expected_reason(self) -> Option<&'static str> {
+        match self {
+            Self::None | Self::Focus | Self::Park => None,
+            Self::PowerResume => Some("power_resume"),
+            Self::SessionChange => Some("session_change"),
+        }
+    }
+}
+
+/// Everything the circle needs in order to apply an impact.
+struct PhaseStage<'a> {
+    ctx: &'a Context<'a>,
+    /// The window typed in and pressed in.
+    target: input::Target,
+    content: Element,
+    /// The product's top-level window — where the two forged messages go.
+    ui_window: HWND,
+    /// The password window of the parking impact, and its own handle.
+    password: Option<(u32, HWND)>,
+}
+
+/// Applies one impact and answers what it did, in words, for the protocol.
+///
+/// ⚠ **Every impact confirms itself by a reading of the channel, never by having been attempted.**
+/// A forged message that UIPI ate, or a focus change the product's watcher thread has not yet
+/// classified, would otherwise be indistinguishable from an impact that changed nothing — and
+/// «ничего не изменилось» is precisely the conclusion this task is testing.
+fn phase_apply(stage: &PhaseStage, impact: Impact) -> Result<String, String> {
+    match impact {
+        Impact::None => Ok("ничего не делалось (отрицательный контроль)".to_owned()),
+
+        Impact::Focus | Impact::Park => {
+            let Some((pid, hwnd)) = stage.password else {
+                return Err("окно поля пароля не открыто — плечо не ставится".to_owned());
+            };
+
+            // Into the other window. It opens with the focus in its **ordinary** field, which is
+            // not the gate of FR-70 — so this alone is a focus change and nothing more.
+            shell::activate_window(pid, Some(hwnd))?;
+            let into = input::Target { pid, hwnd };
+
+            // ⭐ Which box the focus lands in is **driven to** the wanted one and then confirmed
+            // on the channel — never assumed. The form keeps the focus it had when it lost the
+            // foreground, so a round that simply tapped `Tab` would park on the odd rounds and
+            // unpark on the even ones, and the two arms would swap places without saying so.
+            phase_focus_box(&into, impact == Impact::Park)?;
+
+            // And back. ⚠ The wait is on `field_state` reading `ordinary` and not merely on
+            // `password_field` reading `0`: the `pending` state of FR-71 also reports `0`, and
+            // the buffer is still parked while it does — a letter typed then is not recorded at
+            // all, which the first pass of this stage measured (`buffer_len` stayed `0`).
+            shell::activate_window(stage.target.pid, Some(stage.target.hwnd))?;
+            let restored = wait::until_true(Duration::from_secs(10), || {
+                PhaseState::take().is_some_and(|state| {
+                    state.field_state == "ordinary" && state.password_field == Some(0)
+                })
+            });
+            if !restored {
+                let seen = PhaseState::take().unwrap_or_else(PhaseState::absent);
+                return Err(format!(
+                    "ворота FR-70 не открылись за 10 с: {}",
+                    seen.describe()
+                ));
+            }
+
+            Ok(if impact == Impact::Park {
+                "буфер припаркован (password_field 0→1) и возвращён (1→0, ворота открыты)"
+                    .to_owned()
+            } else {
+                "фокус ушёл в другое окно и вернулся; парковки НЕ было (password_field 0 всё время)"
+                    .to_owned()
+            })
+        }
+
+        Impact::PowerResume | Impact::SessionChange => {
+            let before = PhaseState::take().unwrap_or_else(PhaseState::absent);
+
+            let (message, wparam) = match impact {
+                Impact::PowerResume => (WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC as usize),
+                _ => (WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK as usize),
+            };
+            shell::post_to_window(stage.ui_window, message, wparam)?;
+
+            // ⭐ The positive control of delivery. `watchdog_recoveries` moving **and**
+            // `watchdog_last_reason` reading the word this arm sets is the proof the message
+            // reached the window procedure — not the fact that `PostMessage` returned Ok.
+            let wanted = impact.expected_reason().unwrap_or("");
+            let landed = wait::until_true(Duration::from_secs(10), || {
+                PhaseState::take().is_some_and(|state| {
+                    state.reason == wanted
+                        && match (state.recoveries, before.recoveries) {
+                            (Some(now), Some(was)) => now > was,
+                            _ => false,
+                        }
+                })
+            });
+
+            if !landed {
+                let seen = PhaseState::take().unwrap_or_else(PhaseState::absent);
+                return Err(format!(
+                    "сообщение {message:#x} до оконной процедуры не дошло: было \
+                     восстановлений={}/{}, стало {}",
+                    phase_number(before.recoveries),
+                    before.reason,
+                    seen.describe()
+                ));
+            }
+
+            Ok(format!(
+                "{message:#x} доставлено: watchdog_last_reason={wanted}, восстановлений {} → {}",
+                phase_number(before.recoveries),
+                phase_number(PhaseState::take().and_then(|state| state.recoveries)),
+            ))
+        }
+    }
+}
+
+/// The four keys of [`PHASE_FRESH`] as the *other* layout of this pair renders them.
+///
+/// Reported beside the verdict of the decisive circle and never used as one — the same rule every
+/// mode of this file has followed since T-10-13 measured that `ghbdtn` reads `привет` before the
+/// hotkey is touched at all if the window is Russian. It answers `<неизвестно>` for anything the
+/// two renderings do not cover, rather than guessing.
+fn phase_other_rendering(landed: &str) -> &'static str {
+    match landed {
+        // `n t c n` on the Russian ЙЦУКЕН layout is `т е с т`.
+        "ntcn" => "тест",
+        "тест" => "ntcn",
+        _ => "<неизвестно>",
+    }
+}
+
+/// ⭐ Types `keys` at a human tempo and answers **what actually landed in the field** — a
+/// deliberately sample-free instrument.
+///
+/// # Why [`type_paced_as`] will not do here
+///
+/// That function waits for each character to read back **as the caller said it would**, and the
+/// caller cannot say: step 5 of FR-40 leaves the window in the layout the conversion targeted, so
+/// the fresh word of the decisive circle is typed under ru-RU and `ntcn` arrives as `тесн`. The
+/// first pass of the circle ended on exactly that — «клавиша "n" не дошла до приложения:
+/// прочитано "т"» — and the keystroke had arrived perfectly.
+///
+/// ⚠ **And re-establishing en-US first would be the wrong experiment**, not merely a longer one.
+/// The household case is a person who converted a word and goes on typing: the product itself put
+/// the window into the other layout and he did not ask it to come back. A circle that switched the
+/// layout would also fire the modifier probe of T-03-3c and refresh the very stamp it is standing
+/// on. So the layout is left where the product put it, and the instrument stops needing to know.
+///
+/// The pace is [`type_paced`]'s and the wait is a condition throughout: each character is followed
+/// by a wait for the field to grow by one, never by a clock.
+fn phase_type(keys: &str, target: &input::Target, content: &Element) -> Result<String, String> {
+    for key in keys.chars() {
+        let before = read_field(content).ok_or_else(|| "поле не читается при наборе".to_owned())?;
+        let was = before.chars().count();
+
+        let mut one = [0u8; 4];
+        let one = key.encode_utf8(&mut one);
+        input::type_text(one, target).map_err(|error| format!("ввод {one:?}: {error}"))?;
+
+        if wait::until(SERIES_STEP_TIMEOUT, || {
+            read_field(content).filter(|text| text.chars().count() > was)
+        })
+        .is_none()
+        {
+            return Err(format!(
+                "штрих {one:?} не дошёл до поля: в нём осталось {:?}",
+                read_field(content).unwrap_or_default()
+            ));
+        }
+    }
+
+    read_field(content).ok_or_else(|| "поле не читается после набора".to_owned())
+}
+
+/// Drives the focus of the password window into the masked box (`password = true`) or into the
+/// ordinary one, and **confirms the result on the channel** before returning.
+///
+/// The form of [`launch_password_window`] holds exactly two text boxes, so `Tab` alternates
+/// between them and four taps are two full turns — enough for either starting point, and bounded
+/// so that a form that stopped answering ends the arm instead of tapping forever.
+///
+/// ⚠ The confirmation is `password_field`, the product's own verdict of FR-72, and not the
+/// bench's belief about where it sent a `Tab`. The parking of FR-70 is what the arm is *for*; an
+/// arm that only believed it had parked would be the fifth guess this project cannot afford.
+fn phase_focus_box(into: &input::Target, password: bool) -> Result<(), String> {
+    let wanted = u64::from(password);
+
+    for tap in 0..=4 {
+        let settled = wait::until_true(Duration::from_secs(3), || {
+            PhaseState::take().is_some_and(|state| {
+                state.password_field == Some(wanted)
+                    && (password || state.field_state == "ordinary")
+            })
+        });
+        if settled {
+            return Ok(());
+        }
+        if tap < 4 {
+            input::tap(VK_TAB.0, into).map_err(|error| format!("Tab в окне пароля: {error}"))?;
+        }
+    }
+
+    let seen = PhaseState::take().unwrap_or_else(PhaseState::absent);
+    Err(format!(
+        "фокус не удалось поставить в {} поле за четыре Tab: {}",
+        if password {
+            "парольное"
+        } else {
+            "обычное"
+        },
+        seen.describe()
+    ))
+}
+
+/// Builds the precondition of one circle — **its own**, never inherited from the previous one.
+///
+/// T-10-14 measured that the two directions are not symmetric, so a circle that started wherever
+/// step 5 of FR-40 left the window would be measuring the direction instead of the phase.
+fn phase_precondition(stage: &PhaseStage) -> Result<bool, String> {
+    clear_field(&stage.target, &stage.content)?;
+    if race_ensure(stage.target.hwnd, layout::US).is_err() {
+        return Ok(false);
+    }
+
+    // The `Shift` tap is the household layout probe of T-03-3c and is what brings the product's
+    // stamp level with the real layout before anything is typed.
+    input::tap(VK_SHIFT.0, &stage.target).map_err(|error| format!("Shift предусловия: {error}"))?;
+    let (built, _) = await_agreement(stage.target.hwnd);
+
+    Ok(built)
+}
+
+/// ⭐ **Requirement 9 — what survives, name by name, before any circle is built on it.**
+///
+/// One repetition of this stage, for one impact, is:
+///
+/// | Step | Read | Why |
+/// |---|---|---|
+/// | after the conversion | `cycle_position`, `buffer_len` | the phase is *somewhere*, and FR-32 keeps the strokes |
+/// | after the impact, **before a single keystroke** | the same | ⭐ the pure answer: does the impact reset anything |
+/// | after **one letter** of a fresh word | the same | FR-10's last row, «любая клавиша после конвертации — полный сброс» |
+///
+/// ⚠ **The field is not cleared between the second and third readings**, and that is the whole
+/// design of the stage. Clearing costs a `Backspace`, `Backspace` is a keystroke, and a keystroke
+/// is itself a row of the FR-10 table — so a stage that cleared first could never tell the reset
+/// of the impact from the reset of its own instrument. Un-cleared, the third reading separates
+/// them by a number nothing else could give: `buffer_len` reads **1** if the session was ended and
+/// the letter started a new buffer, and **7** if the letter was merely appended to the old one.
+fn phase_survival(stage: &PhaseStage, impacts: &[Impact], reps: usize) -> Result<usize, String> {
+    println!("=== СТУПЕНЬ «что переживает»: {reps} повторов на каждое воздействие ===");
+    println!(
+        "  Читается на трёх шагах: после конверсии, после воздействия (ДО первой клавиши) и \
+         после ОДНОЙ буквы свежего слова.\n  ⭐ Ключевое число третьего шага — buffer_len: 1 = \
+         сброс FR-10 состоялся, 7 = буква дописалась к прежнему буферу."
+    );
+
+    let mut done = 0usize;
+
+    for impact in impacts {
+        println!("\n--- воздействие: {} ---", impact.name());
+
+        for rep in 1..=reps {
+            if !phase_precondition(stage)? {
+                println!("  повтор {rep}: предусловие не построено — пропущен");
+                continue;
+            }
+
+            type_paced_as(TYPED, TYPED, &stage.target, &stage.content, "")?;
+
+            let converted = voice_press(stage.ctx, &stage.target, &stage.content, EXPECTED)?;
+            let after_conversion = PhaseState::take().unwrap_or_else(PhaseState::absent);
+            println!(
+                "  повтор {rep}, конверсия: {} | {}",
+                converted.press.describe(),
+                converted.reading.describe()
+            );
+            println!("    после конверсии:  {}", after_conversion.describe());
+
+            let said = phase_apply(stage, *impact)?;
+            let after_impact = PhaseState::take().unwrap_or_else(PhaseState::absent);
+            println!("    воздействие: {said}");
+            println!("    после воздействия: {}", after_impact.describe());
+
+            // ⭐ One letter, and nothing cleared. The `n` of `ntcn`.
+            //
+            // The wait is on the **field**, not on the channel: `buffer_len` is exactly the
+            // number under investigation, and waiting for it to move would be waiting for the
+            // answer. The field growing is the fact that the keystroke arrived.
+            let before_letter = read_field(&stage.content)
+                .ok_or_else(|| "поле не читается перед буквой".to_owned())?;
+            input::type_text("n", &stage.target)
+                .map_err(|error| format!("первая буква свежего слова: {error}"))?;
+            wait::until(SERIES_STEP_TIMEOUT, || {
+                read_field(&stage.content).filter(|text| text != &before_letter)
+            });
+            let after_letter = PhaseState::take().unwrap_or_else(PhaseState::absent);
+            println!("    после ОДНОЙ буквы: {}", after_letter.describe());
+
+            phase_raw(&format!(
+                "переживает,{},{rep},после-конверсии,{},{:?},{:?},{}",
+                impact.name(),
+                after_conversion.columns(),
+                converted.press.before,
+                converted.press.after,
+                u8::from(converted.press.changed())
+            ));
+            phase_raw(&format!(
+                "переживает,{},{rep},после-воздействия,{},\"\",\"\",",
+                impact.name(),
+                after_impact.columns()
+            ));
+            phase_raw(&format!(
+                "переживает,{},{rep},после-одной-буквы,{},\"\",\"\",",
+                impact.name(),
+                after_letter.columns()
+            ));
+
+            done += 1;
+        }
+    }
+
+    clear_field(&stage.target, &stage.content)?;
+    Ok(done)
+}
+
+/// What one decisive circle produced.
+#[derive(Debug, Clone)]
+struct PhaseCircle {
+    /// Whether the circle built its own precondition and got its conversion.
+    built: bool,
+    /// ⭐ The verdict: the field read differently after the single press than before it.
+    changed: bool,
+    /// `cycle_position` right after the impact, before a single keystroke.
+    cycle_after_impact: Option<u64>,
+    /// `cycle_position` as the deciding press found it — the number the hypothesis is about.
+    cycle_before_press: Option<u64>,
+    /// The channel's reading of the press itself.
+    reading: VoiceReading,
+}
+
+/// ⭐ **Requirements 10 and 11 — the decisive circle.**
+///
+/// Конверсия → воздействие → набор **нового** слова → **одно** нажатие → вердикт.
+///
+/// # What the verdict is, and what it is not
+///
+/// «текст поля ПОСЛЕ нажатия отличается от текста ДО» — the instrument of T-10-15, T-10-16 and
+/// T-10-17, and the one this family of defects has taught the project to insist on. A comparison
+/// against a sample is reported beside it and is never the verdict: `ntcn` типed under a Russian
+/// layout reads `тест` before the hotkey is touched at all.
+///
+/// # Why the field is cleared with `Backspace` and what that costs
+///
+/// `Ctrl+A` ends in a `Ctrl` release, and a modifier release **is** the layout probe of T-03-3c;
+/// clearing that way would refresh the very stamp the circle is examining. So `Backspace` alone.
+///
+/// ⚠ **And the first `Backspace` is itself a keystroke after a conversion** — the last row of the
+/// FR-10 table. That is not a flaw of the circle, it is the shape of the case: a person cannot
+/// type a fresh word without pressing *something* first, and every «something» is a row of that
+/// table. What the circle can do, and does, is read `cycle_position` **before** that keystroke as
+/// well as after it, so the protocol can say which of the two zeroed the counter.
+fn phase_circle(stage: &PhaseStage, impact: Impact, rep: usize) -> Result<PhaseCircle, String> {
+    let absent = PhaseCircle {
+        built: false,
+        changed: false,
+        cycle_after_impact: None,
+        cycle_before_press: None,
+        reading: voice_absent(),
+    };
+
+    if !phase_precondition(stage)? {
+        println!("  круг {rep}: предусловие не построено — круг пропущен");
+        phase_raw(&format!(
+            "круг,{},{rep},предусловие-не-построено,,,,,,,,,,,,,,",
+            impact.name()
+        ));
+        return Ok(absent);
+    }
+
+    // ---- the conversion the impact is applied after ---------------------------------------
+    type_paced_as(TYPED, TYPED, &stage.target, &stage.content, "")?;
+    let converted = voice_press(stage.ctx, &stage.target, &stage.content, EXPECTED)?;
+    if !converted.press.changed() {
+        println!(
+            "  круг {rep}: конверсия не состоялась ({}) — круг не строится на ней",
+            converted.press.describe()
+        );
+        phase_raw(&format!(
+            "круг,{},{rep},конверсия-не-состоялась,,,,,,,,,,,,,,",
+            impact.name()
+        ));
+        return Ok(absent);
+    }
+    let after_conversion = PhaseState::take().unwrap_or_else(PhaseState::absent);
+
+    // ---- the impact ------------------------------------------------------------------------
+    let said = phase_apply(stage, impact)?;
+    let after_impact = PhaseState::take().unwrap_or_else(PhaseState::absent);
+
+    // ---- the fresh word --------------------------------------------------------------------
+    clear_field(&stage.target, &stage.content)?;
+    let after_clearing = PhaseState::take().unwrap_or_else(PhaseState::absent);
+    let landed = phase_type(PHASE_FRESH, &stage.target, &stage.content)?;
+    let before_press = PhaseState::take().unwrap_or_else(PhaseState::absent);
+
+    // ---- ONE press, and the verdict --------------------------------------------------------
+    //
+    // ⚠ The `wanted` handed over is what the **other** layout renders these four keys as, and it
+    // is printed beside the verdict and never instead of it: the verdict is «текст изменился».
+    let pressed = voice_press(
+        stage.ctx,
+        &stage.target,
+        &stage.content,
+        phase_other_rendering(&landed),
+    )?;
+
+    println!("  круг {rep} [{}]: {said}", impact.name());
+    println!("    свежее слово легло как {landed:?}");
+    println!("    после конверсии:   {}", after_conversion.describe());
+    println!("    после воздействия: {}", after_impact.describe());
+    println!("    после очистки:     {}", after_clearing.describe());
+    println!("    перед нажатием:    {}", before_press.describe());
+    println!("    ⭐ нажатие: {}", pressed.press.describe());
+    println!("       {}", pressed.reading.describe());
+
+    phase_raw(&format!(
+        "круг,{},{rep},{},{},{},{},{},{:?},{:?},{}",
+        impact.name(),
+        phase_number(after_conversion.cycle),
+        phase_number(after_impact.cycle),
+        phase_number(after_clearing.cycle),
+        phase_number(before_press.cycle),
+        pressed.reading.columns(),
+        pressed.press.before,
+        pressed.press.after,
+        u8::from(pressed.press.changed())
+    ));
+    phase_raw(&format!(
+        "круг-состояние,{},{rep},после-воздействия,{}",
+        impact.name(),
+        after_impact.columns()
+    ));
+
+    Ok(PhaseCircle {
+        built: true,
+        changed: pressed.press.changed(),
+        cycle_after_impact: after_impact.cycle,
+        cycle_before_press: before_press.cycle,
+        reading: pressed.reading,
+    })
+}
+
+/// ⭐ **The experiment of task T-10-18** — the sixth hypothesis, tested rather than executed.
+///
+/// # The hypothesis, verbatim
+///
+/// «По FR-10 „любая клавиша после конвертации — полный сброс“, то есть набор нового слова обязан
+/// сбросить состояние конвертации и фазу цикла. Если после ухода системы этот сброс не
+/// происходит, первое нажатие на свежем слове исполняет не конверсию, а следующий шаг цикла —
+/// откат, — и текст остаётся прежним.»
+///
+/// # ⛔ What this mode does not do
+///
+/// It repairs nothing: `src\` is not touched by this task at all, and the logic of the cycle and
+/// of the reset is not changed by a single line. The machine is **not** suspended, **not** locked
+/// and no desktop is switched — the lock screen lives on a separate desktop that synthetic input
+/// cannot reach, and a run that went there could not come back.
+///
+/// # The stages
+///
+/// | Stage | What it answers |
+/// |---|---|
+/// | `state` | требование 9 — что переживает парковку и зонды, а что сбрасывается, поимённо |
+/// | `park` | требование 10 — решающий круг с парковкой буфера |
+/// | `power` | требование 10 — решающий круг с зондом `PBT_APMRESUMEAUTOMATIC` |
+/// | `session` | требование 10 — решающий круг с зондом `WTS_SESSION_UNLOCK` |
+/// | `control` | ⭐ требование 11 — **отрицательный контроль**: тот же круг без воздействия |
+pub fn experiment_phase(ctx: &Context, stage_name: &str, reps: usize) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-10-18: переживает ли фаза цикла уход и парковку ---\n");
+    println!(
+        "Прибор круга — «текст поля ПОСЛЕ нажатия отличается от текста ДО». Совпадение с \
+         образцом сообщается рядом и НИКОГДА не является вердиктом.\n\
+         ⛔ Машина не усыпляется, не блокируется, рабочий стол не переключается.\n\
+         ⛔ Логика цикла и сброса не менялась ни строкой: это задача измерения."
+    );
+    println!("Сырые числа: {}\n", phase_raw_path().display());
+
+    if let Err(error) = race_clear_the_stage() {
+        eprintln!("⛔ {error}");
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    // The same widened FR-97 net, through the same environment variable, for the same reason:
+    // a stage is twenty circles of a word typed at a human tempo plus two presses.
+    const PHASE_DEADLINE_SECS: u32 = 1800;
+
+    let mut product = match crate::sut::Sut::launch_with(PHASE_DEADLINE_SECS) {
+        Ok(started) => started,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let outcome = (|| -> Result<String, String> {
+        let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+            return Err("продукт не сообщил о готовности через канал SEC-04a за 30 с".to_owned());
+        };
+        println!(
+            "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+            product.pid,
+            ready.get("hook_installed").unwrap_or("?"),
+            ready.present_keys().len()
+        );
+
+        // ⛔ Without these three every reading below would be a fabricated zero.
+        for key in PHASE_KEYS {
+            if ready.get(key).is_none() {
+                return Err(format!("сборка не публикует {key} — опыт не ставится"));
+            }
+        }
+        println!("  ✔ все три ключа T-10-18 на канале");
+
+        // ⭐ The window the two forged messages go to, found by enumeration and named out loud.
+        let ui_window = shell::product_ui_window(product.pid)?;
+        println!(
+            "  ✔ верхнеуровневое окно продукта: hwnd={:#x} класс={}\n",
+            ui_window.0 as usize,
+            shell::PRODUCT_WINDOW_CLASS
+        );
+
+        let needs_password = Impact::from_stage(stage_name)
+            .is_some_and(Impact::needs_password_window)
+            || stage_name == "state";
+
+        let mut field = launch_stamp_window()?;
+        let mut password_window = if needs_password {
+            Some(launch_password_window()?)
+        } else {
+            None
+        };
+
+        let measured = (|| -> Result<String, String> {
+            let (target, content) = adopt_stamp_window(ctx, &mut field)?;
+
+            let password = match password_window.as_mut() {
+                None => None,
+                Some(app) => {
+                    adopt_window(ctx.automation, app, &|element: &Element| {
+                        element.name().starts_with(PASSWORD_WINDOW_TITLE)
+                    })?;
+                    let hwnd = app
+                        .window
+                        .ok_or_else(|| "у окна поля пароля нет дескриптора".to_owned())?;
+                    println!("Окно поля пароля открыто, PID {}\n", app.pid);
+                    Some((app.pid, hwnd))
+                }
+            };
+
+            // The stamp window has to be the one in front again after the password window came
+            // up, or the first press of the first circle would go to the wrong place.
+            shell::activate_window(target.pid, Some(target.hwnd))?;
+
+            let stage = PhaseStage {
+                ctx,
+                target,
+                content,
+                ui_window,
+                password,
+            };
+
+            // ---- the instrument, before any reading of it ----------------------------------
+            println!("=== ПРИБОР, ПРОВЕРКА 0: нажатие на пустом поле ничего не меняет ===");
+            clear_field(&stage.target, &stage.content)?;
+            let idle = voice_press(ctx, &stage.target, &stage.content, "")?;
+            println!("  {}", idle.press.describe());
+            if idle.press.changed() {
+                return Err(format!(
+                    "⛔ ПРИБОР НЕИСПРАВЕН: нажатие на пустом поле изменило текст ({})",
+                    idle.press.describe()
+                ));
+            }
+            println!("  ✔ прибор умеет сказать «не изменилось»");
+
+            // ---- the instrument of the probe arm, checked the other way round --------------
+            //
+            // ⭐ **The negative control of message delivery.** `PBT_APMSUSPEND` is «уснуть», not
+            // «вернуться»; the arm of `handle_watchdog_message` must not answer it. If this moved
+            // the counters, then the positive control below would prove nothing — it would be
+            // answering any message at all.
+            println!("\n=== ПРИБОР, ПРОВЕРКА 1: PBT_APMSUSPEND — не «возвращение» ===");
+            let before_suspend = PhaseState::take().unwrap_or_else(PhaseState::absent);
+            shell::post_to_window(stage.ui_window, WM_POWERBROADCAST, PBT_APMSUSPEND as usize)?;
+            let moved = wait::until_true(Duration::from_secs(3), || {
+                PhaseState::take().is_some_and(|now| now.recoveries != before_suspend.recoveries)
+            });
+            let after_suspend = PhaseState::take().unwrap_or_else(PhaseState::absent);
+            println!("  до:    {}", before_suspend.describe());
+            println!("  после: {}", after_suspend.describe());
+            if moved {
+                return Err(
+                    "⛔ ПРИБОР НЕИСПРАВЕН: PBT_APMSUSPEND сдвинул watchdog_recoveries — рука \
+                     отвечает на любое сообщение, и положительный контроль ниже ничего не значил \
+                     бы"
+                    .to_owned(),
+                );
+            }
+            println!("  ✔ «уснуть» счётчиков не двигает — рука различает подтипы\n");
+
+            match stage_name {
+                "state" => {
+                    let impacts = [
+                        Impact::None,
+                        Impact::Focus,
+                        Impact::Park,
+                        Impact::PowerResume,
+                        Impact::SessionChange,
+                    ];
+                    let done = phase_survival(&stage, &impacts, reps)?;
+                    Ok(format!("повторов доведено {done}"))
+                }
+                other => {
+                    let Some(impact) = Impact::from_stage(other) else {
+                        return Err(format!("неизвестная ступень {other:?}"));
+                    };
+
+                    println!(
+                        "=== СТУПЕНЬ «{}»: решающий круг, {reps} повторов ===",
+                        impact.name()
+                    );
+                    println!(
+                        "  Круг: конверсия → воздействие → очистка → набор СВЕЖЕГО слова \
+                         {PHASE_FRESH:?} → ОДНО нажатие → вердикт «текст изменился».\n"
+                    );
+
+                    let mut built = 0usize;
+                    let mut changed = 0usize;
+                    let mut phase_zero_after_impact = 0usize;
+                    let mut phase_zero_before_press = 0usize;
+                    let mut identity = 0usize;
+
+                    for rep in 1..=reps {
+                        let circle = phase_circle(&stage, impact, rep)?;
+                        if !circle.built {
+                            continue;
+                        }
+                        built += 1;
+                        if circle.changed {
+                            changed += 1;
+                        }
+                        if circle.cycle_after_impact == Some(0) {
+                            phase_zero_after_impact += 1;
+                        }
+                        if circle.cycle_before_press == Some(0) {
+                            phase_zero_before_press += 1;
+                        }
+                        if circle.reading.identity() == Some(true) {
+                            identity += 1;
+                        }
+                    }
+
+                    println!(
+                        "\n  ⭐ кругов состоялось {built} из {reps}: текст изменился в {changed}, \
+                         фаза = 0 сразу после воздействия в {phase_zero_after_impact}, фаза = 0 \
+                         перед нажатием в {phase_zero_before_press}, направление тождественно в \
+                         {identity}"
+                    );
+
+                    clear_field(&stage.target, &stage.content)?;
+
+                    Ok(format!(
+                        "кругов {built}/{reps}, текст изменился {changed}, фаза=0 после \
+                         воздействия {phase_zero_after_impact}, фаза=0 перед нажатием \
+                         {phase_zero_before_press}, тождеств {identity}"
+                    ))
+                }
+            }
+        })();
+
+        println!("{}", field.close());
+        if let Some(mut app) = password_window {
+            println!("{}", app.close());
+        }
+
+        measured
+    })();
+
+    match product.stop() {
+        Ok(code) => println!("продукт остановлен через FR-96, код выхода {code}"),
+        Err(error) => println!("⚠ {error}"),
+    }
+
+    match outcome {
+        Ok(said) => {
+            println!("\nступень {stage_name}: {said}");
             std::process::ExitCode::SUCCESS
         }
         Err(reason) => {

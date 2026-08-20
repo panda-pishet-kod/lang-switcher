@@ -124,6 +124,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-away") => experiment_away(arguments),
         Some("--experiment-race") => experiment_race(arguments),
         Some("--experiment-voice") => experiment_voice(arguments),
+        Some("--experiment-phase") => experiment_phase(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -581,6 +582,38 @@ fn experiment_voice(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_voice(&context, stage, reps)
+}
+
+/// ⭐ **Task T-10-18** — does the phase of the cycle survive an absence?
+///
+/// `--experiment-phase <ступень> [кругов]`, where the stage is one of `state`, `park`, `power`,
+/// `session`, `control`. The same split as every mode of this file: the arm builds the context,
+/// the experiment lives in `scenarios.rs`. See [`scenarios::experiment_phase`] for what each stage
+/// answers, why `control` is not optional and what the forged messages are.
+///
+/// ⛔ The machine is not suspended and not locked by any of them.
+fn experiment_phase(arguments: &[String]) -> std::process::ExitCode {
+    let stage = arguments.get(1).map_or("state", String::as_str);
+    let reps = arguments
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_phase(&context, stage, reps)
 }
 
 /// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.
