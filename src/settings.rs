@@ -90,10 +90,10 @@ use windows::Win32::UI::Controls::{
     LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
-    LVM_SETTEXTCOLOR, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, LVSIL_STATE,
-    MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLVCUSTOMDRAW,
-    ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
-    ODT_COMBOBOX,
+    LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
+    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
+    NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
+    ODT_BUTTON, ODT_COMBOBOX,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
@@ -3533,40 +3533,83 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     1
 }
 
-/// Answers `NM_CUSTOMDRAW` for the layout list — FR-92а, task T-11-7: the selected row in
-/// the selection pair of the palette instead of the system highlight.
+/// Whether one item change of the layout list is refused — FR-31, task T-11-7-2: the pure
+/// half of the gate of [`on_notify`].
+///
+/// Since task T-11-7-2 the list is never `EnableWindow`-disabled — a disabled
+/// `SysListView32` ignores its own colours and paints the system wash, the defect the final
+/// sweep found — so the «выключенность» of the pair mode is this decision instead: in the
+/// pair mode every change the control asks about — a tick toggled by `LVS_EX_CHECKBOXES`
+/// with mouse or space bar, a selection or focus moved by mouse or arrow key — is refused
+/// before it happens, and a click on the list changes nothing at all. In the cycle mode
+/// every change passes, which is the path of FR-31 exactly as it was.
+///
+/// `None` is the mode of a moment with no readable state: before `WM_INITDIALOG` stores
+/// the pointer, or — the case that matters — while a programmatic fill holds the state
+/// borrowed ([`fill_layouts`] and [`move_cycle_row`] write the list from inside
+/// [`with_state`], so the re-entrant `LVN_ITEMCHANGING` they raise finds the `RefCell`
+/// busy). Those writes are the program's own and are allowed in either mode, which is what
+/// keeps [`fill_cycle_list`] filling a pair-mode dialog.
+pub fn cycle_list_change_is_refused(mode: Option<LayoutMode>) -> bool {
+    mode == Some(LayoutMode::Pair)
+}
+
+/// Answers the two notifications of the layout list — FR-92а: `NM_CUSTOMDRAW` (task T-11-7,
+/// the row paints of the palette; task T-11-7-2, the muted rows of the pair mode) and
+/// `LVN_ITEMCHANGING` (task T-11-7-2, the gate of FR-31 — in the pair mode a click changes
+/// nothing).
 ///
 /// # SEC-05 — the checks come before any work
 ///
 /// The first dereference of the message takes the three fields of `NMHDR` and nothing else:
 /// `hwndFrom`, `idFrom`, `code`. All three are then compared — `code` against
-/// `NM_CUSTOMDRAW`, `idFrom` against `IDC_CYCLE_LIST`, and `hwndFrom` against the dialog's
-/// own `GetDlgItem` answer for that identifier — and only a message that passes every one
-/// is read any further, as the `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
+/// `NM_CUSTOMDRAW` and `LVN_ITEMCHANGING`, `idFrom` against `IDC_CYCLE_LIST`, and `hwndFrom`
+/// against the dialog's own `GetDlgItem` answer for that identifier — and only a message
+/// that passes every one goes any further. `LVN_ITEMCHANGING` is then decided on the header
+/// alone: not a byte of its payload is read. Only `NM_CUSTOMDRAW` reads on, as the
+/// `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
 /// Out of that structure exactly three fields are read — `dwDrawStage`, `dwItemSpec`,
 /// `uItemState` — and three written — `clrText`, `clrTextBk`, `uItemState` — the documented
 /// answer protocol of item prepaint; the `hdc` and the rectangle of the message are not
 /// touched, and no pointer of the message is followed. Whether the row is selected is not
 /// taken from the message either: it is the list's own `LVM_GETITEMSTATE` answer, asked by
 /// identifier through [`send_to`] — the reading [`read_cycle_checks`] already does for the
-/// ticks. A forged message can therefore recolour one repaint of its own list and nothing
-/// else — no privileged action starts here, and the window of time is the same gate as for
-/// `WM_DRAWITEM`: outside the modal call there is no procedure to arrive at.
+/// ticks. A forged message can therefore recolour one repaint of its own list, or refuse
+/// one change of it, and nothing else — no privileged action starts here, and the window of
+/// time is the same gate as for `WM_DRAWITEM`: outside the modal call there is no procedure
+/// to arrive at.
 ///
-/// # The manoeuvre for the selected row, and the two answers
+/// # The gate of the pair mode — task T-11-7-2
+///
+/// Since task T-11-7-2 the list is never `EnableWindow`-disabled (see [`enable_by_mode`]),
+/// so the control answers clicks and keys in every mode — and `LVN_ITEMCHANGING` is the one
+/// point where it *asks before it moves*: a TRUE answer refuses the change before it
+/// happens. That is the gate: with the mode read through [`with_state`] — the same road the
+/// palette takes — [`cycle_list_change_is_refused`] refuses every change in the pair mode,
+/// which closes ticks (mouse and space bar) and selection (mouse and arrow keys) in one
+/// move, before any action. An unreachable state — `None` — allows: that is a programmatic
+/// fill running under the held borrow ([`fill_layouts`], [`move_cycle_row`] write the list
+/// from inside `with_state`), and the program's own writes pass in either mode. The cycle
+/// mode is untouched: the answer there is «not handled», as it always was.
+///
+/// # The manoeuvre for the row paints, and the two answers
 ///
 /// `CDDS_PREPAINT` is answered with `CDRF_NOTIFYITEMDRAW` — «ask me again for each item» —
-/// the documented door to item prepaint. There, for a selected row, `clrTextBk`/`clrText`
-/// take `sel_bg`/`sel_fg` — and the `CDIS_SELECTED` bit is *removed* from `uItemState`:
-/// while that bit stands the control paints the selection ground itself (the system
-/// highlight, or the theme's), and the two colour fields lose to it. Clearing the bit in
-/// the item-prepaint answer is the documented custom-draw lever for exactly this — the
-/// control then draws the row as an ordinary one, with the colours just set; the row still
-/// *is* selected (`LVIS_SELECTED` is untouched, `LVS_SHOWSELALWAYS` stays a style of the
-/// template). The answer is `CDRF_DODEFAULT` — «draw it yourself, with the fields I set»;
-/// `CDRF_NEWFONT` is the answer of a handler that swapped a font into the `hdc`, which
-/// this one never does. Chosen by the documentation — the product is not launched by the
-/// executor; the eye check is the controller's, at the final acceptance.
+/// the documented door to item prepaint. There the row's paints are the answer of the pure
+/// [`cycle_row_paint`] table: in the cycle mode a selected row takes `sel_bg`/`sel_fg` and
+/// an ordinary one is left to the control's own colours (task T-11-7 as it was); in the
+/// pair mode every row takes `field_bg`/`text_muted` — the logical «выключенность» of task
+/// T-11-7-2, a selected row wearing the same muted paints as the rest. Wherever the table
+/// says so, the `CDIS_SELECTED` bit is *removed* from `uItemState`: while that bit stands
+/// the control paints the selection ground itself (the system highlight, or the theme's),
+/// and the two colour fields lose to it. Clearing the bit in the item-prepaint answer is
+/// the documented custom-draw lever for exactly this — the control then draws the row as an
+/// ordinary one, with the colours just set; the row still *is* selected (`LVIS_SELECTED` is
+/// untouched, `LVS_SHOWSELALWAYS` stays a style of the template). The answer is
+/// `CDRF_DODEFAULT` — «draw it yourself, with the fields I set»; `CDRF_NEWFONT` is the
+/// answer of a handler that swapped a font into the `hdc`, which this one never does.
+/// Chosen by the documentation — the product is not launched by the executor; the eye check
+/// is the controller's, at the final acceptance.
 ///
 /// Answers through [`answer_notify`] — a dialog procedure hands a `WM_NOTIFY` result back
 /// in two moves, not by return value. 0 — «not handled» — for every stage this handler has
@@ -3588,13 +3631,31 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
     let (from_window, from_id, code) = (header.hwndFrom, header.idFrom, header.code);
 
     // SEC-05: the three comparisons, before any work.
-    if code != NM_CUSTOMDRAW || from_id != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX) {
+    if (code != NM_CUSTOMDRAW && code != LVN_ITEMCHANGING)
+        || from_id != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX)
+    {
         return 0;
     }
 
     // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
     // ours, and answers a handle or an error.
     if unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() != Some(from_window) {
+        return 0;
+    }
+
+    // Task T-11-7-2, the gate of FR-31 — decided on the header alone, before any action
+    // and without reading a byte of the payload (see the doc comment).
+    if code == LVN_ITEMCHANGING {
+        // SAFETY: see the caller.
+        let mode = unsafe { with_state(hwnd, |state| state.working.layouts.mode) };
+
+        if cycle_list_change_is_refused(mode) {
+            // TRUE — the change is refused; the list stays exactly as drawn.
+            return answer_notify(hwnd, 1);
+        }
+
+        // «Not handled» — the change proceeds: the cycle mode as it always was, and the
+        // program's own writes under the held borrow.
         return 0;
     }
 
@@ -3625,22 +3686,27 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
         & LVIS_SELECTED.0
         != 0;
 
-    if selected {
-        // The colour choice, split from the write-back as everywhere in this file: the
-        // borrow of the state ends before the message structure is touched.
-        //
-        // SAFETY: see the caller.
-        let pair =
-            unsafe { with_state(hwnd, |state| (state.palette.sel_bg, state.palette.sel_fg)) };
+    // The choice, split from the write-back as everywhere in this file: the borrow of the
+    // state ends before the message structure is touched. The palette is a `&'static`, so
+    // copying the reference out of the borrow is sound.
+    //
+    // SAFETY: see the caller.
+    let read = unsafe { with_state(hwnd, |state| (state.working.layouts.mode, state.palette)) };
 
-        let Some((sel_bg, sel_fg)) = pair else {
-            // No state to choose from — «not handled», the system selection stays (NFR-13).
-            return 0;
-        };
+    let Some((mode, palette)) = read else {
+        // No state to choose from — «not handled», the control draws with its own colours
+        // (NFR-13).
+        return 0;
+    };
 
-        draw.clrTextBk = sel_bg;
-        draw.clrText = sel_fg;
+    let paint = cycle_row_paint(mode, selected, palette);
 
+    if let Some((ground, ink)) = paint.colours {
+        draw.clrTextBk = ground;
+        draw.clrText = ink;
+    }
+
+    if paint.strip_selected {
         // The lever of the doc comment: without `CDIS_SELECTED` the control paints the row
         // as ordinary — with the pair just set instead of the system highlight.
         draw.nmcd.uItemState =
@@ -4945,7 +5011,21 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
                 LayoutMode::Pair
             };
 
+            // FR-92а, task T-11-7-2: the mode the gate and the row paints of the layout
+            // list read through `with_state` — kept current on the very click, the same
+            // road the palette takes. Nothing is decided early: `read_dialog` still reads
+            // the radio buttons afresh on «Применить», and «Отмена» still drops the whole
+            // working copy.
+            //
+            // SAFETY: see the caller.
+            unsafe { with_state(hwnd, |state| state.working.layouts.mode = mode) };
+
             enable_by_mode(hwnd, mode);
+
+            // The muted or full row paints are custom-draw state, not window state: with
+            // `EnableWindow` gone from the list (task T-11-7-2) nothing else would repaint
+            // it on a mode flip.
+            repaint_control(hwnd, IDC_CYCLE_LIST);
         }
 
         // FR-94. The one button of the dialog that is a mode and not an action: pressing it
@@ -5526,6 +5606,59 @@ pub fn check_frame_colors(checked: bool, palette: &theme::Palette) -> CheckFrame
     }
 }
 
+/// Ground, ink and selection treatment of one row of the layout list — what
+/// [`cycle_row_paint`] answers and the whole of what the item prepaint of [`on_notify`]
+/// writes back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CycleRowPaint {
+    /// The `(clrTextBk, clrText)` pair to write — `None` writes nothing, and the row keeps
+    /// the colours [`paint_cycle_list`] gave the whole control.
+    pub colours: Option<(COLORREF, COLORREF)>,
+    /// Whether `CDIS_SELECTED` is removed from the draw state, so the control does not
+    /// paint the system selection ground over the pair above.
+    pub strip_selected: bool,
+}
+
+/// The paints of one row of the layout list, by mode and role — FR-92а, task T-11-7-2: the
+/// pure half of the item prepaint, closed by a table test over both modes, both roles and
+/// both palettes.
+///
+/// The table:
+/// - **cycle, ordinary row** — nothing: the control draws with the `text` on `field_bg`
+///   the three messages of [`paint_cycle_list`] already set;
+/// - **cycle, selected row** — `sel_bg`/`sel_fg`, `CDIS_SELECTED` stripped: the selection
+///   pair of the palette instead of the system highlight (task T-11-7 as it was);
+/// - **pair, any row** — `field_bg`/`text_muted`, `CDIS_SELECTED` stripped: the logical
+///   «выключенность» of task T-11-7-2. The window stays enabled — a disabled
+///   `SysListView32` ignores its colours and paints the system wash, the defect this task
+///   heals — so the disabled look is painted here: every row muted, and a row that still
+///   carries `LVIS_SELECTED` wears the same muted paints as the rest rather than an active
+///   selection.
+///
+/// Colours of the given palette rather than roles, as [`check_frame_colors`] above and for
+/// the same reason; every answer is a field of `palette` and nothing else, so not a single
+/// colour number enters this module (§6.2).
+pub fn cycle_row_paint(
+    mode: LayoutMode,
+    selected: bool,
+    palette: &theme::Palette,
+) -> CycleRowPaint {
+    match (mode, selected) {
+        (LayoutMode::Pair, _) => CycleRowPaint {
+            colours: Some((palette.field_bg, palette.text_muted)),
+            strip_selected: true,
+        },
+        (LayoutMode::Cycle, true) => CycleRowPaint {
+            colours: Some((palette.sel_bg, palette.sel_fg)),
+            strip_selected: true,
+        },
+        (LayoutMode::Cycle, false) => CycleRowPaint {
+            colours: None,
+            strip_selected: false,
+        },
+    }
+}
+
 /// Hands the layout list the three colours of the resolved palette — FR-92а, task T-11-7.
 ///
 /// `LVM_SETBKCOLOR` is the ground of the control below and around the rows, `LVM_SETTEXTCOLOR`
@@ -5895,6 +6028,16 @@ fn read_cycle_checks(hwnd: HWND, rows: &mut [LayoutRow]) {
 ///
 /// FR-92 says the list is «активен в режиме „Несколько"», and the pair is the other way round:
 /// a control that cannot affect anything is disabled rather than left to be clicked.
+///
+/// **Except the list itself — task T-11-7-2.** A `SysListView32` under `EnableWindow(FALSE)`
+/// ignores its own `LVM_SET*COLOR` colours and paints the system wash — the defect the final
+/// sweep found: a light body in both palettes, an unreadable second row in the dark one. So
+/// the list stays enabled at the window level always, and its pair-mode «выключенность» is
+/// logical instead: every change the control would make is refused before any action by the
+/// gate of [`on_notify`] ([`cycle_list_change_is_refused`]), and the rows wear the muted
+/// paints of [`cycle_row_paint`]. The two arrow buttons keep the honest disable — owner
+/// drawing paints a disabled button grey with the palette's own colours, so the defect never
+/// touched them.
 fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
     let cycle = matches!(mode, LayoutMode::Cycle);
 
@@ -5902,7 +6045,7 @@ fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
         enable(hwnd, control, !cycle);
     }
 
-    for control in [IDC_CYCLE_LIST, IDC_CYCLE_UP, IDC_CYCLE_DOWN] {
+    for control in [IDC_CYCLE_UP, IDC_CYCLE_DOWN] {
         enable(hwnd, control, cycle);
     }
 }

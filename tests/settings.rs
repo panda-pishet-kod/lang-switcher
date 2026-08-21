@@ -1498,7 +1498,7 @@ fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
 // bits their pictures, are held to the values they had before this task.
 
 use lang_switcher::settings::{
-    CHECK_FRAME_ORDER, CHECKED_IMAGE, CheckFrameColors, UNCHECKED_IMAGE,
+    CHECK_FRAME_ORDER, CHECKED_IMAGE, CheckFrameColors, CycleRowPaint, UNCHECKED_IMAGE,
 };
 
 #[test]
@@ -1563,6 +1563,83 @@ fn the_state_image_bits_and_the_frame_order_of_fr_31_are_unchanged() {
             "frame {position} carries the picture of the bits that name it"
         );
     }
+}
+
+// -----------------------------------------------------------------------------------------
+// FR-92а and FR-31 — task T-11-7-2: the list is never window-disabled (a disabled
+// SysListView32 ignores its own colours and paints the system wash — the defect of the
+// final sweep), so the pair mode's «выключенность» is logical: muted row paints by the
+// pure table below, and a gate that refuses every item change before any action.
+// -----------------------------------------------------------------------------------------
+
+#[test]
+fn the_row_paints_follow_the_mode_table_of_fr_92a() {
+    // Both palettes by name, so a swapped pair could not pass: the loop asserts against
+    // the fields of the very palette it hands in — full table, two modes × two roles.
+    for palette in [&GRAPHITE, &FOG] {
+        // Cycle, ordinary row: nothing is written — the control draws with the colours
+        // LVM_SETTEXTCOLOR/LVM_SETTEXTBKCOLOR already gave the whole control.
+        assert_eq!(
+            settings::cycle_row_paint(LayoutMode::Cycle, false, palette),
+            CycleRowPaint {
+                colours: None,
+                strip_selected: false,
+            },
+            "cycle mode, ordinary row, palette {:?}",
+            palette.field_bg
+        );
+
+        // Cycle, selected row: the selection pair of the palette, the system highlight
+        // stripped — task T-11-7 exactly as it was.
+        assert_eq!(
+            settings::cycle_row_paint(LayoutMode::Cycle, true, palette),
+            CycleRowPaint {
+                colours: Some((palette.sel_bg, palette.sel_fg)),
+                strip_selected: true,
+            },
+            "cycle mode, selected row, palette {:?}",
+            palette.sel_bg
+        );
+
+        // Pair, both roles: the muted ink on the list's own ground, and the row that still
+        // carries LVIS_SELECTED wears the same paints as the rest — selection is not drawn
+        // as active in a mode the list has no say in.
+        for selected in [false, true] {
+            assert_eq!(
+                settings::cycle_row_paint(LayoutMode::Pair, selected, palette),
+                CycleRowPaint {
+                    colours: Some((palette.field_bg, palette.text_muted)),
+                    strip_selected: true,
+                },
+                "pair mode, selected {selected}, palette {:?}",
+                palette.text_muted
+            );
+        }
+    }
+}
+
+#[test]
+fn a_click_in_pair_mode_is_refused_before_any_action_of_fr_31() {
+    // Pair: every change the control asks about — tick, selection, focus — is refused at
+    // LVN_ITEMCHANGING, before it happens: a click on the list changes nothing.
+    assert!(
+        settings::cycle_list_change_is_refused(Some(LayoutMode::Pair)),
+        "the pair mode refuses every item change"
+    );
+
+    // Cycle: the path of FR-31 as it was — changes proceed.
+    assert!(
+        !settings::cycle_list_change_is_refused(Some(LayoutMode::Cycle)),
+        "the cycle mode lets every item change through"
+    );
+
+    // No readable state: a programmatic fill holds the borrow, or the dialog is not up
+    // yet — the program's own writes pass in either mode, so the list can be filled while
+    // the pair mode is on.
+    assert!(
+        !settings::cycle_list_change_is_refused(None),
+        "an unreachable state means a programmatic write, which passes"
+    );
 }
 
 // =========================================================================================
