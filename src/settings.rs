@@ -83,10 +83,9 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::Win32::UI::Controls::{
-    BST_CHECKED, BST_UNCHECKED, CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT,
-    CDRF_NOTIFYITEMDRAW, CheckDlgButton, CheckRadioButton, DRAWITEMSTRUCT, EM_LIMITTEXT,
-    HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32, INITCOMMONCONTROLSEX, ImageList_Add,
-    ImageList_Create, ImageList_Destroy, InitCommonControlsEx, IsDlgButtonChecked,
+    CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW,
+    DRAWITEMSTRUCT, EM_LIMITTEXT, HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32,
+    INITCOMMONCONTROLSEX, ImageList_Add, ImageList_Create, ImageList_Destroy, InitCommonControlsEx,
     LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT, LVIS_FOCUSED,
     LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
@@ -1796,7 +1795,7 @@ const IDC_CYCLE_LIST: i32 = 1024;
 const IDC_CYCLE_UP: i32 = 1025;
 const IDC_CYCLE_DOWN: i32 = 1026;
 const IDC_LAYOUT_NOTE: i32 = 1027;
-// 1029 and not 1033: `CheckRadioButton` walks the identifier range it is given, so the three
+// 1029 and not 1033: `check_radio` walks the identifier range it is given, so the three
 // method radios have to be contiguous — and 1032 is already the delay field. `auto` sits in
 // front of `backspace` because it is the default of section 7 and the first thing the group
 // shows, and the free number in front happened to be there. Mirrored in `app.rc` by hand.
@@ -2160,30 +2159,37 @@ pub fn show_dialog(
     // task T-11-9 (`WM_SETTINGCHANGE`), not here.
     let palette = theme::resolve(config.general.theme, theme::system_is_light());
 
-    let state = RefCell::new(DialogState {
-        working: config.clone(),
-        rows: layout_rows(&config.layouts, &session),
-        session,
-        apply,
-        capture: None,
-        palette,
-        // `None` — some `CreateSolidBrush` refused — is survived, not escalated: the dialog
-        // opens and works with the system colours, because not painting is better than not
-        // opening (NFR-13). Nothing is journaled on that path: `Brushes::new` documents
-        // why, and the vocabulary of `diag` is closed (reviews\T-11-1.md).
-        brushes: theme::Brushes::new(palette),
-        // Empty until `WM_INITDIALOG`: the map is geometry of live windows, and there are
-        // no windows yet. Filled exactly once — see the field's own documentation.
-        panel_children: Vec::new(),
-    });
+    let state = DialogCell {
+        // Task T-11-5b-2: every glyph element starts «снят» here; `fill_dialog` writes the
+        // configuration in on `WM_INITDIALOG`, before the dialog is first painted.
+        checks: GlyphChecks::new(),
+        state: RefCell::new(DialogState {
+            working: config.clone(),
+            rows: layout_rows(&config.layouts, &session),
+            session,
+            apply,
+            capture: None,
+            palette,
+            // `None` — some `CreateSolidBrush` refused — is survived, not escalated: the dialog
+            // opens and works with the system colours, because not painting is better than not
+            // opening (NFR-13). Nothing is journaled on that path: `Brushes::new` documents
+            // why, and the vocabulary of `diag` is closed (reviews\T-11-1.md).
+            brushes: theme::Brushes::new(palette),
+            // Empty until `WM_INITDIALOG`: the map is geometry of live windows, and there are
+            // no windows yet. Filled exactly once — see the field's own documentation.
+            panel_children: Vec::new(),
+        }),
+    };
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`, and the
     // "name" is an integer identifier in the `MAKEINTRESOURCE` form — a value below 65536
     // carried inside the pointer, never dereferenced as a string. `owner` is a live window of
     // this thread. The parameter is a pointer to `state`, which lives on this frame: the call
     // is modal and does not return until `EndDialog`, so the pointer cannot outlive the value
-    // it names. `dialog_proc` is the only reader of it and reads it through a `RefCell`, so no
-    // two borrows can overlap however the dialog manager re-enters.
+    // it names. `dialog_proc` is the only reader of it; the guarded half is read through the
+    // `RefCell` of the `state` field, so no two borrows can overlap however the dialog manager
+    // re-enters, and the check store beside it is `Cell`-based — mutation through a shared
+    // reference, no borrow to collide with (task T-11-5b-2).
     let result = unsafe {
         DialogBoxParamW(
             Some(instance),
@@ -2317,13 +2323,118 @@ pub fn on_system_theme_message(setting_string: Option<&str>) {
     }
 }
 
+/// The eight owner-drawn check boxes and radio buttons whose check state the dialog keeps
+/// itself — FR-92а, task T-11-5b-2. The storage-side list, beside the drawing-side list of
+/// [`glyph_kind`]: both name the same eight controls of the template.
+///
+/// Public for the same reason the colour tables are: `tests\settings.rs` exercises the
+/// store over these very identifiers, without a live window.
+pub const GLYPH_CHECK_CONTROLS: [i32; 8] = [
+    IDC_AUTOSTART,
+    IDC_MODE_PAIR,
+    IDC_MODE_CYCLE,
+    IDC_METHOD_AUTO,
+    IDC_METHOD_BACKSPACE,
+    IDC_METHOD_SELECTION,
+    IDC_SELECTION_ENABLED,
+    IDC_LOG_ENABLED,
+];
+
+/// The check state of the eight owner-drawn check boxes and radio buttons — FR-92а,
+/// task T-11-5b-2.
+///
+/// A button of type `BS_OWNERDRAW` keeps no check state of its own: the button-message
+/// pair that stores and answers it for the automatic types ignores the write and answers
+/// «снят» for an owner-drawn one — which the final sweep of the live acceptance saw as
+/// all eight glyphs drawn unchecked whatever the configuration said. This store is that
+/// state, kept by the dialog itself: a fixed array of «идентификатор → взведён» pairs —
+/// the elements are eight and known, so no map — and it is the *only* truth about the
+/// eight: nothing asks the controls, so nothing can quietly disagree with it.
+///
+/// The flag sits in a [`Cell`] so that a shared reference reads and writes it, and that
+/// interior mutability is load-bearing, not convenience: `fill_dialog` writes the store
+/// from inside the `WM_INITDIALOG` borrow of [`DialogState`] and `read_dialog` reads it
+/// from inside the «Применить» borrow, where a nested `RefCell` borrow would be refused —
+/// the store must answer at every depth, which is what [`DialogCell`] and
+/// [`with_glyph_checks`] arrange.
+///
+/// A write to an identifier the store does not carry is dropped and a read answers «снят»
+/// (NFR-13: a wrong identifier misdraws one glyph, it does not fall). The answer for a
+/// store that does not exist *yet* is the caller's business: [`with_glyph_checks`] says
+/// `None`, and [`is_checked`] turns that into «снят».
+pub struct GlyphChecks {
+    /// The pairs, in template order. The identifier column never changes after [`Self::new`].
+    entries: [(i32, Cell<bool>); 8],
+}
+
+impl GlyphChecks {
+    /// The eight known identifiers, every one «снят» — the state of the dialog before
+    /// `fill_dialog` writes the configuration in.
+    pub fn new() -> Self {
+        Self {
+            entries: GLYPH_CHECK_CONTROLS.map(|control| (control, Cell::new(false))),
+        }
+    }
+
+    /// Writes one element's state. An identifier outside the eight is dropped — see the
+    /// type's own documentation.
+    pub fn set(&self, control: i32, on: bool) {
+        if let Some((_, cell)) = self.entries.iter().find(|(id, _)| *id == control) {
+            cell.set(on);
+        }
+    }
+
+    /// Reads one element's state; «снят» for an identifier outside the eight.
+    pub fn get(&self, control: i32) -> bool {
+        self.entries
+            .iter()
+            .find(|(id, _)| *id == control)
+            .is_some_and(|(_, cell)| cell.get())
+    }
+
+    /// Arms `chosen` and quenches every other identifier of `first..=last` — the store
+    /// half of what the automatic radio types did for themselves: the walk is the same
+    /// contiguous identifier range, the template's `WS_GROUP` runs.
+    pub fn check_radio(&self, first: i32, last: i32, chosen: i32) {
+        for (id, cell) in &self.entries {
+            if (first..=last).contains(id) {
+                cell.set(*id == chosen);
+            }
+        }
+    }
+}
+
+impl Default for GlyphChecks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// What `GWLP_USERDATA` of the settings dialog points at: the check store beside the
+/// guarded state, both on the frame of [`show_dialog`] — task T-11-5b-2.
+///
+/// The store sits *beside* the `RefCell`, not inside it, deliberately. The writers and
+/// readers of check state run at every depth — `fill_dialog` inside the `WM_INITDIALOG`
+/// borrow, `read_dialog` inside the «Применить» borrow, `restore_self_switching` and
+/// `draw_glyph_element` outside any — and a store behind the `RefCell` would answer the
+/// nested callers with a refusal: «Применить» would then read every element «снят» and
+/// erase the very configuration it was asked to keep. `Cell`-based state behind a shared
+/// reference has no borrow to refuse.
+struct DialogCell<'a> {
+    /// The check state of the eight glyph elements — [`with_glyph_checks`] is the road in.
+    checks: GlyphChecks,
+    /// Everything else the dialog procedure needs — [`with_state`] is the road in, and
+    /// its `RefCell` is what refuses re-entrant mutation.
+    state: RefCell<DialogState<'a>>,
+}
+
 /// Everything the dialog procedure needs, for as long as the dialog is up.
 ///
-/// Lives on the frame of [`show_dialog`] and is reached through a `RefCell` behind a raw
-/// pointer, which is the standard shape of a Win32 dialog: the manager gives the procedure one
-/// `LPARAM` and nothing else. The `RefCell` is not decoration — a message dispatched while
-/// another message is being handled would otherwise alias a `&mut`, and here it is refused at
-/// run time instead.
+/// Lives on the frame of [`show_dialog`], inside a [`DialogCell`], and is reached through
+/// that cell's `RefCell` behind a raw pointer, which is the standard shape of a Win32
+/// dialog: the manager gives the procedure one `LPARAM` and nothing else. The `RefCell` is
+/// not decoration — a message dispatched while another message is being handled would
+/// otherwise alias a `&mut`, and here it is refused at run time instead.
 struct DialogState<'a> {
     /// The configuration being edited. Starts as a copy of the caller's and is never anything
     /// but a copy: nothing outside this dialog sees it until `apply` is called.
@@ -2384,7 +2495,8 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: `hwnd` is the live dialog and `GWLP_USERDATA` is a field every window
             // has, which the dialog manager does not use for itself — its own storage is the
             // `DWLP_*` range. The value stored is the pointer the manager forwarded from
-            // `DialogBoxParamW`; it is only ever read back by `with_state`, below.
+            // `DialogBoxParamW`; it is only ever read back by `with_state` and
+            // `with_glyph_checks`, below.
             unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
 
             // FR-92а, task T-11-9: the record `on_system_theme_message` finds the dialog
@@ -2392,8 +2504,8 @@ unsafe extern "system" fn dialog_proc(
             // it never outlives the window it names.
             DIALOG_WINDOW.with(|window| window.set(hwnd.0 as isize));
 
-            // SAFETY: the pointer has just been stored and names the `RefCell` on the frame of
-            // `show_dialog`, which outlives this modal call.
+            // SAFETY: the pointer has just been stored and names the `DialogCell` on the frame
+            // of `show_dialog`, which outlives this modal call.
             unsafe {
                 with_state(hwnd, |state| {
                     fill_dialog(hwnd, state);
@@ -2528,10 +2640,60 @@ unsafe extern "system" fn dialog_proc(
 /// T-11-9) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that function
 /// stored.
 unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -> Option<R> {
-    // SAFETY: by this function's own contract, `GWLP_USERDATA` of `hwnd` holds either zero
-    // or the pointer `show_dialog` stored, which names a `RefCell<DialogState>` alive for
-    // the whole of that modal call.
-    unsafe { with_window_state(hwnd, f) }
+    // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
+    let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+
+    if raw == 0 {
+        return None;
+    }
+
+    // SAFETY: by this function's own contract, `raw` is the pointer `show_dialog` stored,
+    // which names the `DialogCell` on that function's frame — the call is modal, so the
+    // frame is alive for as long as any message of this dialog can be handled. A shared
+    // reference is all that is taken, and the `RefCell` of the `state` field is what
+    // governs the mutable access below.
+    let cell = unsafe { &*(raw as *const DialogCell<'_>) };
+
+    let mut state = cell.state.try_borrow_mut().ok()?;
+
+    Some(f(&mut state))
+}
+
+/// Runs `f` against the check store of the eight glyph elements — FR-92а, task T-11-5b-2.
+///
+/// The same road [`with_state`] takes — the `GWLP_USERDATA` pointer `WM_INITDIALOG`
+/// stored — but without the `RefCell` borrow at the end of it: the store is `Cell`-based,
+/// so a shared reference reads and writes it even while [`DialogState`] is mutably
+/// borrowed. That is the whole point — `fill_dialog` and `read_dialog` run inside such a
+/// borrow, and the check state must answer there too (see [`DialogCell`]).
+///
+/// `None` exactly when there is no state yet — messages, `WM_DRAWITEM` among them, do
+/// arrive before `WM_INITDIALOG` stores the pointer. The callers then degrade per
+/// NFR-13: [`is_checked`] answers «снят», [`set_check`] and [`check_radio`] drop the
+/// write, and the glyph is drawn unchecked rather than not drawn at all.
+///
+/// # Safety
+///
+/// Same contract as [`with_state`]: may only be called with the window of a dialog
+/// created by [`show_dialog`], whose `GWLP_USERDATA` therefore holds either zero or the
+/// pointer that function stored.
+unsafe fn with_glyph_checks<R>(hwnd: HWND, f: impl FnOnce(&GlyphChecks) -> R) -> Option<R> {
+    // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
+    let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+
+    if raw == 0 {
+        return None;
+    }
+
+    // SAFETY: by the contract above, `raw` is the pointer `show_dialog` stored, which
+    // names the `DialogCell` on that function's frame — alive for as long as any message
+    // of this dialog can be handled, because the call is modal. A shared reference is all
+    // that is taken, and every mutation behind it goes through the `Cell`s of the store —
+    // no borrow that could collide with `with_state`'s, however deep inside one of its
+    // closures this runs.
+    let cell = unsafe { &*(raw as *const DialogCell<'_>) };
+
+    Some(f(&cell.checks))
 }
 
 /// Runs `f` against the [`AboutState`] of the about dialog — FR-92а, task T-11-11.
@@ -2550,15 +2712,17 @@ unsafe fn with_about_state<R>(hwnd: HWND, f: impl FnOnce(&mut AboutState) -> R) 
     unsafe { with_window_state(hwnd, f) }
 }
 
-/// The window-message plumbing behind [`with_state`] and [`with_about_state`] — one body,
-/// made generic by task T-11-11 instead of copied (§6.2).
+/// The window-message plumbing behind [`with_about_state`] — one body, made generic by
+/// task T-11-11 instead of copied (§6.2). [`with_state`] walked the same road until task
+/// T-11-5b-2 put the check store beside the settings dialog's `RefCell`: its pointer now
+/// names a [`DialogCell`], not a bare cell, so it reads the field itself.
 ///
 /// # Safety
 ///
 /// May only be called with a window whose `GWLP_USERDATA` holds either zero or a pointer to
-/// a `RefCell<S>` that outlives the modal call — which is what the two wrappers above
-/// guarantee through their own contracts: each names the one show function whose state type
-/// is `S`, and neither window can carry the other's pointer, because each show function
+/// a `RefCell<S>` that outlives the modal call — which is what the wrapper above
+/// guarantees through its own contract: it names the one show function whose state type
+/// is `S`, and no other window can carry that pointer, because each show function
 /// stores its own frame's cell into the window it alone creates.
 unsafe fn with_window_state<S, R>(hwnd: HWND, f: impl FnOnce(&mut S) -> R) -> Option<R> {
     // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
@@ -3605,7 +3769,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // FR-92а, task T-11-5b: the check boxes and radio buttons, by identifier, ahead of the
     // push-button path. Everything they take out of the message is already on this frame —
     // the same seven fields, nothing else; the check state is deliberately *not* a field of
-    // the message at all, it is read from the dialog's own control (see the function).
+    // the message at all, it is read from the dialog's own store (see the function).
     if let Some(kind) = glyph_kind(control) {
         // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
         // only to paint into for the length of this send.
@@ -3944,8 +4108,9 @@ enum GlyphMarkPaint {
 /// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
 /// `rect` to paint within. The check state is deliberately *not* taken from the message
 /// either — `itemState` carries no check bit worth trusting and `itemData` is never read —
-/// it is the dialog's own `BM_GETCHECK` answer, read from its own control by identifier
-/// ([`is_checked`] → `IsDlgButtonChecked`), and the caption is the control's own text
+/// it is the dialog's own answer, read from its own store by the identifier
+/// ([`is_checked`] → [`GlyphChecks`], task T-11-5b-2: an owner-drawn control keeps no
+/// check state, so the control cannot be asked), and the caption is the control's own text
 /// ([`get_text`] → `GetDlgItemTextW`). A forged message can therefore misdraw nothing but
 /// the rectangle it names.
 ///
@@ -3981,8 +4146,11 @@ unsafe fn draw_glyph_element(
     disabled: bool,
     focused: bool,
 ) -> isize {
-    // The dialog's own answer, not the message's: BM_GETCHECK of the very control the
-    // identifier names — the reading of one's own element the task words the rule around.
+    // The dialog's own answer, not the message's: the store of task T-11-5b-2, read by
+    // the identifier the message names — an owner-drawn control keeps no check state of
+    // its own, so the control cannot be asked. Before the state exists — `WM_DRAWITEM`
+    // does arrive ahead of full initialisation — the answer is «снят» and the element is
+    // drawn unchecked rather than not at all (NFR-13).
     let checked = is_checked(hwnd, control);
 
     // The colour choice, split from the painting as everywhere in this file: the borrow of
@@ -4678,30 +4846,33 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 /// `BS_AUTORADIOBUTTON` in the template, and the flip on a click and on the arrow keys
 /// died with them. This function is that behaviour, spelled out again:
 ///
-/// - **a check box flips on a click**: `BM_SETCHECK` of the opposite of its own state,
-///   then a repaint — `BM_SETCHECK` repaints no owner-drawn button. `BN_DBLCLK` counts as
+/// - **a check box flips on a click**: [`set_check`] of the opposite of its own stored
+///   state — the write lands in the dialog's [`GlyphChecks`] store and the repaint rides
+///   in `set_check` itself (task T-11-5b-2). `BN_DBLCLK` counts as
 ///   the click it is: an owner-drawn button folds the second press of a double click into
 ///   `BN_DBLCLK` instead of a second `BN_CLICKED`, and the automatic type answered both
 ///   presses with a toggle — dropping one would make a fast double click flip the box and
 ///   leave it flipped;
-/// - **a radio button checks itself and unchecks its group**: `CheckRadioButton` over the
+/// - **a radio button checks itself and unchecks its group**: [`check_radio`] over the
 ///   very ranges the rest of the dialog already uses — `IDC_MODE_PAIR..IDC_MODE_CYCLE`
-///   and `IDC_METHOD_AUTO..IDC_METHOD_SELECTION`, the template's `WS_GROUP` runs — then a
-///   repaint of the whole range: the neighbour that just lost the dot must lose it on the
-///   same message;
+///   and `IDC_METHOD_AUTO..IDC_METHOD_SELECTION`, the template's `WS_GROUP` runs — which
+///   quenches the run in the store, arms the chosen one and repaints the whole range: the
+///   neighbour that just lost the dot must lose it on the same message;
 /// - **`BN_SETFOCUS` is the arrow keys**: the dialog manager answers an arrow key inside
 ///   a `WS_GROUP` run by moving the focus, and an automatic radio button then checked
 ///   itself on arrival — `BS_NOTIFY` in the template is what makes the arrival audible
 ///   here. Answered **only while an arrow key is actually down**: focus also arrives by
 ///   Tab, and Tab enters the group at its first tab stop, not at the checked element —
-///   nothing juggles `WS_TABSTOP` for a non-automatic type the way `BM_SETCHECK` does for
-///   an automatic one — so checking on every arrival would silently move the user's
+///   nothing juggles `WS_TABSTOP` for a non-automatic type the way the automatic types
+///   did for themselves — so checking on every arrival would silently move the user's
 ///   choice to the first radio of the group on a mere walk through the dialog.
 ///
-/// The check state lives in the controls themselves: `BM_GETCHECK`/`BM_SETCHECK` and
-/// `CheckRadioButton` store and answer it for owner-drawn buttons exactly as they did for
-/// the automatic types, so [`set_check`], [`is_checked`] and [`check_radio`] are untouched
-/// and everything that reads the dialog keeps reading the truth.
+/// The check state lives in the dialog's own [`GlyphChecks`] store — task T-11-5b-2. An
+/// owner-drawn button keeps none of its own: the button-message pair that serves the
+/// automatic types ignores the write and answers «снят» for a `BS_OWNERDRAW` one, which
+/// the final sweep of the live acceptance saw as eight glyphs drawn unchecked. So
+/// [`set_check`], [`is_checked`] and [`check_radio`] — their signatures untouched — write
+/// and read the store, and everything that reads the dialog keeps reading the one truth.
 fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
     let notification = u32::from(notification);
     let clicked = notification == BN_CLICKED || notification == BN_DBLCLK;
@@ -4714,17 +4885,14 @@ fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
     match control {
         IDC_AUTOSTART | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED if clicked => {
             set_check(hwnd, control, !is_checked(hwnd, control));
-            repaint_control(hwnd, control);
         }
 
         IDC_MODE_PAIR | IDC_MODE_CYCLE if radio_checks => {
             check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, control);
-            repaint_control_range(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE);
         }
 
         IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE | IDC_METHOD_SELECTION if radio_checks => {
             check_radio(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION, control);
-            repaint_control_range(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION);
         }
 
         _ => {}
@@ -5893,32 +6061,48 @@ fn get_text(hwnd: HWND, control: i32) -> String {
     String::from_utf16_lossy(&buffer[..copied.min(buffer.len())])
 }
 
-/// Ticks or unticks one check box.
+/// Ticks or unticks one check box — in the dialog's own store, task T-11-5b-2.
+///
+/// An owner-drawn button keeps no check state of its own — the button-message pair that
+/// stores it for the automatic types ignores the write for a `BS_OWNERDRAW` one — so the
+/// state goes into [`GlyphChecks`], and the element is repainted here, by the writer,
+/// because writing a store changes no pixels by itself. A dialog with no state yet has no
+/// store to write and nothing on screen to go stale: the write is dropped and the repaint
+/// skipped (NFR-13; in practice every caller runs after `WM_INITDIALOG` stored the
+/// pointer).
 fn set_check(hwnd: HWND, control: i32, checked: bool) {
-    // SAFETY: `hwnd` is the live dialog and `control` names a button of its template.
-    if let Err(error) = unsafe {
-        CheckDlgButton(
-            hwnd,
-            control,
-            if checked { BST_CHECKED } else { BST_UNCHECKED },
-        )
-    } {
-        crate::app::report_non_critical("CheckDlgButton", &error);
+    // SAFETY: `hwnd` is the live dialog of `show_dialog` — every caller of this helper
+    // holds exactly that window.
+    let stored = unsafe { with_glyph_checks(hwnd, |checks| checks.set(control, checked)) };
+
+    if stored.is_some() {
+        repaint_control(hwnd, control);
     }
 }
 
-/// Whether one check box or radio button is ticked.
+/// Whether one check box or radio button is ticked — the dialog's own store answers,
+/// task T-11-5b-2.
+///
+/// «Снят» when the state is unreachable — before `WM_INITDIALOG` stores the pointer, or
+/// for an identifier the store does not carry: the degraded answer NFR-13 asks for, and
+/// the one [`draw_glyph_element`] draws when a `WM_DRAWITEM` outruns initialisation.
 fn is_checked(hwnd: HWND, control: i32) -> bool {
-    // SAFETY: as above. The call answers the state of the button and touches no memory of ours.
-    unsafe { IsDlgButtonChecked(hwnd, control) == BST_CHECKED.0 }
+    // SAFETY: as in `set_check` — `hwnd` is the live dialog of `show_dialog`.
+    unsafe { with_glyph_checks(hwnd, |checks| checks.get(control)) }.unwrap_or(false)
 }
 
-/// Ticks exactly one of a group of radio buttons.
+/// Ticks exactly one of a group of radio buttons — in the dialog's own store,
+/// task T-11-5b-2: every identifier of `first..=last` is quenched, `chosen` alone is
+/// armed, and the whole range is repainted — the neighbour that just lost the dot must
+/// lose it on the same occasion its winner gains it. The no-state path is `set_check`'s:
+/// write dropped, repaint skipped (NFR-13).
 fn check_radio(hwnd: HWND, first: i32, last: i32, chosen: i32) {
-    // SAFETY: `hwnd` is the live dialog; the three identifiers name buttons of its template and
-    // the range is the one the template declares as a group.
-    if let Err(error) = unsafe { CheckRadioButton(hwnd, first, last, chosen) } {
-        crate::app::report_non_critical("CheckRadioButton", &error);
+    // SAFETY: as in `set_check` — `hwnd` is the live dialog of `show_dialog`.
+    let stored =
+        unsafe { with_glyph_checks(hwnd, |checks| checks.check_radio(first, last, chosen)) };
+
+    if stored.is_some() {
+        repaint_control_range(hwnd, first, last);
     }
 }
 
@@ -5936,9 +6120,9 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
     let _ = unsafe { EnableWindow(window, enabled) };
 }
 
-/// Repaints one control now — task T-11-5b: `BM_SETCHECK` changes no pixels of an
-/// owner-drawn button, so the flip of [`restore_self_switching`] asks for the repaint
-/// itself.
+/// Repaints one control now — task T-11-5b: writing check state changes no pixels of an
+/// owner-drawn button, so [`set_check`] asks for the repaint the moment it writes the
+/// store (task T-11-5b-2).
 fn repaint_control(hwnd: HWND, control: i32) {
     // SAFETY: `hwnd` is the live dialog and `control` names a control of its template;
     // the crate turns a missing control into an error, which is the `Ok` guard below.
@@ -5957,7 +6141,7 @@ fn repaint_control(hwnd: HWND, control: i32) {
 }
 
 /// Repaints every control of one contiguous identifier range — the radio ranges of task
-/// T-11-5b, the same runs `CheckRadioButton` walks.
+/// T-11-5b, the same runs [`check_radio`] walks in the store.
 fn repaint_control_range(hwnd: HWND, first: i32, last: i32) {
     for control in first..=last {
         repaint_control(hwnd, control);

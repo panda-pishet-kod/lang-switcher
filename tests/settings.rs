@@ -1173,6 +1173,223 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 }
 
 // =========================================================================================
+// FR-92а — the check-state store of the eight glyph elements. Task T-11-5b-2.
+// =========================================================================================
+//
+// Criterion 9 — the substance of the defect: a `BS_OWNERDRAW` button keeps no check state
+// of its own, so the dialog now keeps its own store, and this section closes that store
+// without a live window. The configuration goes in the way `fill_dialog` writes it and
+// comes back out the way `read_dialog` reads it; a click's flip inverts exactly the
+// element clicked; a radio walk quenches the neighbours of its own range and no one else.
+// The identifiers are the template's own — the same eight the style test below reads out
+// of the built binary.
+
+use lang_switcher::settings::{GLYPH_CHECK_CONTROLS, GlyphChecks};
+
+/// The eight identifiers by name, mirrored from `app.rc` exactly as the style test's list.
+const GLYPH_AUTOSTART: i32 = 1001;
+const GLYPH_MODE_PAIR: i32 = 1020;
+const GLYPH_MODE_CYCLE: i32 = 1021;
+const GLYPH_METHOD_AUTO: i32 = 1029;
+const GLYPH_METHOD_BACKSPACE: i32 = 1030;
+const GLYPH_METHOD_SELECTION: i32 = 1031;
+const GLYPH_SELECTION_ENABLED: i32 = 1040;
+const GLYPH_LOG_ENABLED: i32 = 1060;
+
+#[test]
+fn the_store_lists_the_eight_template_identifiers_and_starts_all_unchecked() {
+    assert_eq!(
+        GLYPH_CHECK_CONTROLS,
+        [
+            GLYPH_AUTOSTART,
+            GLYPH_MODE_PAIR,
+            GLYPH_MODE_CYCLE,
+            GLYPH_METHOD_AUTO,
+            GLYPH_METHOD_BACKSPACE,
+            GLYPH_METHOD_SELECTION,
+            GLYPH_SELECTION_ENABLED,
+            GLYPH_LOG_ENABLED,
+        ],
+        "the storage side must list the same eight controls the template carries"
+    );
+
+    let checks = GlyphChecks::new();
+
+    for control in GLYPH_CHECK_CONTROLS {
+        assert!(
+            !checks.get(control),
+            "before the configuration is written in, {control} must read «снят» — the \
+             very answer a WM_DRAWITEM that outruns initialisation must draw (NFR-13)"
+        );
+    }
+}
+
+#[test]
+fn what_the_configuration_wrote_into_the_store_is_what_reads_back_out() {
+    // Every combination of the five configuration facts the eight elements carry: the
+    // three check boxes and the two radio groups. 2 × 2 × 2 × 2 × 3 = 48 round trips.
+    for autostart in [false, true] {
+        for selection in [false, true] {
+            for log in [false, true] {
+                for mode in [LayoutMode::Pair, LayoutMode::Cycle] {
+                    for method in [
+                        ReplacementMethod::Auto,
+                        ReplacementMethod::Backspace,
+                        ReplacementMethod::Selection,
+                    ] {
+                        let checks = GlyphChecks::new();
+
+                        // The write half, exactly the calls `fill_dialog` makes: three
+                        // set calls and two radio walks.
+                        checks.set(GLYPH_AUTOSTART, autostart);
+                        checks.check_radio(
+                            GLYPH_MODE_PAIR,
+                            GLYPH_MODE_CYCLE,
+                            match mode {
+                                LayoutMode::Pair => GLYPH_MODE_PAIR,
+                                LayoutMode::Cycle => GLYPH_MODE_CYCLE,
+                            },
+                        );
+                        checks.check_radio(
+                            GLYPH_METHOD_AUTO,
+                            GLYPH_METHOD_SELECTION,
+                            match method {
+                                ReplacementMethod::Auto => GLYPH_METHOD_AUTO,
+                                ReplacementMethod::Backspace => GLYPH_METHOD_BACKSPACE,
+                                ReplacementMethod::Selection => GLYPH_METHOD_SELECTION,
+                            },
+                        );
+                        checks.set(GLYPH_SELECTION_ENABLED, selection);
+                        checks.set(GLYPH_LOG_ENABLED, log);
+
+                        // The read half, exactly the reads `read_dialog` performs.
+                        assert_eq!(checks.get(GLYPH_AUTOSTART), autostart);
+                        assert_eq!(checks.get(GLYPH_SELECTION_ENABLED), selection);
+                        assert_eq!(checks.get(GLYPH_LOG_ENABLED), log);
+
+                        let mode_back = if checks.get(GLYPH_MODE_CYCLE) {
+                            LayoutMode::Cycle
+                        } else {
+                            LayoutMode::Pair
+                        };
+                        assert_eq!(mode_back, mode, "the mode must survive the round trip");
+
+                        let method_back = if checks.get(GLYPH_METHOD_SELECTION) {
+                            ReplacementMethod::Selection
+                        } else if checks.get(GLYPH_METHOD_BACKSPACE) {
+                            ReplacementMethod::Backspace
+                        } else {
+                            ReplacementMethod::Auto
+                        };
+                        assert_eq!(
+                            method_back, method,
+                            "the replacement method must survive the round trip"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_clicks_flip_inverts_exactly_the_element_clicked() {
+    let checks = GlyphChecks::new();
+    checks.set(GLYPH_AUTOSTART, true);
+
+    // The flip `restore_self_switching` performs on a click: the opposite of the
+    // element's own stored state, written back.
+    checks.set(GLYPH_LOG_ENABLED, !checks.get(GLYPH_LOG_ENABLED));
+
+    assert!(
+        checks.get(GLYPH_LOG_ENABLED),
+        "the first click arms an unchecked box"
+    );
+    assert!(
+        checks.get(GLYPH_AUTOSTART),
+        "a flip of one box must not move another"
+    );
+
+    checks.set(GLYPH_LOG_ENABLED, !checks.get(GLYPH_LOG_ENABLED));
+
+    assert!(
+        !checks.get(GLYPH_LOG_ENABLED),
+        "the second click quenches it again — a double click must not stick"
+    );
+}
+
+#[test]
+fn a_radio_walk_arms_the_chosen_and_quenches_the_neighbours_of_its_range_alone() {
+    let checks = GlyphChecks::new();
+
+    checks.set(GLYPH_AUTOSTART, true);
+    checks.check_radio(GLYPH_MODE_PAIR, GLYPH_MODE_CYCLE, GLYPH_MODE_PAIR);
+    checks.check_radio(GLYPH_METHOD_AUTO, GLYPH_METHOD_SELECTION, GLYPH_METHOD_AUTO);
+
+    // Choosing Backspace quenches Auto — and leaves the mode run and the check boxes
+    // alone: the walk is bounded by its own identifier range.
+    checks.check_radio(
+        GLYPH_METHOD_AUTO,
+        GLYPH_METHOD_SELECTION,
+        GLYPH_METHOD_BACKSPACE,
+    );
+
+    assert!(
+        checks.get(GLYPH_METHOD_BACKSPACE),
+        "the chosen radio is armed"
+    );
+    assert!(
+        !checks.get(GLYPH_METHOD_AUTO),
+        "its former neighbour is quenched"
+    );
+    assert!(
+        !checks.get(GLYPH_METHOD_SELECTION),
+        "the third of the run stays quenched"
+    );
+    assert!(
+        checks.get(GLYPH_MODE_PAIR),
+        "the other radio run must not move"
+    );
+    assert!(
+        checks.get(GLYPH_AUTOSTART),
+        "a check box is not part of any radio run"
+    );
+
+    // And the other way round: switching the mode leaves the method run alone.
+    checks.check_radio(GLYPH_MODE_PAIR, GLYPH_MODE_CYCLE, GLYPH_MODE_CYCLE);
+
+    assert!(checks.get(GLYPH_MODE_CYCLE), "the new mode is armed");
+    assert!(
+        !checks.get(GLYPH_MODE_PAIR),
+        "the old mode is quenched on the same walk"
+    );
+    assert!(
+        checks.get(GLYPH_METHOD_BACKSPACE),
+        "the method run must not move when the mode run walks"
+    );
+}
+
+#[test]
+fn an_identifier_outside_the_eight_reads_unchecked_and_stores_nothing() {
+    let checks = GlyphChecks::new();
+
+    // 1032 is the delay field — a control of the dialog, but not a glyph element.
+    checks.set(1032, true);
+
+    assert!(
+        !checks.get(1032),
+        "an identifier outside the eight must read «снят» (NFR-13)"
+    );
+
+    for control in GLYPH_CHECK_CONTROLS {
+        assert!(
+            !checks.get(control),
+            "a dropped write must not land on {control}"
+        );
+    }
+}
+
+// =========================================================================================
 // FR-92а — the panel map: containment of rectangles. Task T-11-5c.
 // =========================================================================================
 //
