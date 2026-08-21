@@ -870,7 +870,9 @@ fn the_theme_combo_order_is_the_order_of_the_theme_setting_values() {
 // The `WM_CTLCOLOR*` handlers themselves need a live dialog and are checked by the
 // controller's instrument on the real window at acceptance.
 
-use lang_switcher::settings::StaticColorRole;
+use lang_switcher::settings::{
+    ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, StaticColorRole,
+};
 use lang_switcher::theme::{FOG, GRAPHITE, resolve};
 
 // Criterion 10 of T-11-4. The mapping is closed by a table: every explanatory note of the
@@ -957,6 +959,82 @@ fn the_title_bar_is_dark_exactly_for_the_graphite_palette() {
             settings::title_bar_is_dark(resolve(setting, system_light)),
             dark_expected,
             "{setting:?} with system_light = {system_light} chose the wrong flag"
+        );
+    }
+}
+
+// =========================================================================================
+// FR-92а — the owner-drawn buttons: the closed colour-role table. Task T-11-5a.
+// =========================================================================================
+//
+// Criterion 9: the mapping «(identifier, state) → colour roles (face, text, frame)» is a
+// pure function, closed here by the full table — two kinds (ordinary, default «ОК») ×
+// three states (normal, pressed, disabled). The `WM_DRAWITEM` handler itself needs a live
+// dialog and is checked by the controller on the real window at acceptance, along with
+// Enter/Esc/Space. The identifiers are literals, not imports — the rule of the template
+// tests below: a test that imported the numbers would agree with any renumbering.
+
+#[test]
+fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
+    use ButtonFaceRole as Face;
+    use ButtonTextRole as Ink;
+
+    // Every ordinary button of the dialog by its actual identifier — including «Отмена»
+    // (2, the manager's own IDCANCEL): the accent belongs to «ОК» alone, so each of these
+    // is driven through all three states and must never show it.
+    let ordinary = [
+        (1012, "Задать"),
+        (1025, "Выше"),
+        (1026, "Ниже"),
+        (1053, "Удалить"),
+        (1052, "Добавить"),
+        (1061, "Открыть папку журнала"),
+        (2, "Отмена"),
+        (1080, "Применить"),
+    ];
+
+    // (pressed, disabled) → the expected face and ink of an ordinary button. The frame is
+    // `button_border` in every row of the table — asserted below with the whole struct.
+    let ordinary_states = [
+        (false, false, Face::ButtonBg, Ink::Text),
+        (true, false, Face::SelBg, Ink::SelFg),
+        (false, true, Face::ButtonBg, Ink::TextMuted),
+    ];
+
+    for (control, name) in ordinary {
+        for (pressed, disabled, face, text) in ordinary_states {
+            assert_eq!(
+                settings::button_color_roles(control, pressed, disabled),
+                ButtonColors {
+                    face,
+                    text,
+                    border: ButtonBorderRole::ButtonBorder,
+                },
+                "«{name}» ({control}), pressed = {pressed}, disabled = {disabled}"
+            );
+        }
+    }
+
+    // The default button «ОК» — identifier 1, the dialog manager's own IDOK, the number
+    // `DM_SETDEFID` is sent with: the accent pair in its normal state; the selection pair
+    // while pressed (the accent yields for the length of the press); muted ink on the
+    // ordinary face when disabled — a disabled button takes no Enter and must not
+    // advertise itself as the default.
+    let default_states = [
+        (false, false, Face::AccentBg, Ink::AccentFg),
+        (true, false, Face::SelBg, Ink::SelFg),
+        (false, true, Face::ButtonBg, Ink::TextMuted),
+    ];
+
+    for (pressed, disabled, face, text) in default_states {
+        assert_eq!(
+            settings::button_color_roles(1, pressed, disabled),
+            ButtonColors {
+                face,
+                text,
+                border: ButtonBorderRole::ButtonBorder,
+            },
+            "«ОК» (1), pressed = {pressed}, disabled = {disabled}"
         );
     }
 }
@@ -1198,6 +1276,57 @@ fn every_element_of_fr_92_has_its_control_in_the_template() {
         assert!(
             template.controls.contains(&id),
             "the dialog has no control {id}"
+        );
+    }
+}
+
+// Criterion 10 of T-11-5a — read out of the **built** `LangSwitcher.exe`, like everything
+// else about the template. ⚠ `BS_OWNERDRAW` (0x0B) is a button *type*, not a flag: types
+// live in the low nibble of the style and replace one another, so the check is equality of
+// the nibble and not a bit test — `style & 0x0B != 0` would also pass for a plain
+// `BS_DEFPUSHBUTTON` (0x01) or a `BS_CHECKBOX` (0x02), which are not owner drawing at all.
+#[test]
+fn the_nine_buttons_of_the_dialog_are_owner_drawn() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The nine push buttons of FR-92, by their actual identifiers — «ОК» (1, the former
+    // DEFPUSHBUTTON) and «Отмена» (2) carry the dialog manager's own numbers.
+    const OWNER_DRAWN_BUTTONS: [(u32, &str); 9] = [
+        (1012, "Задать"),
+        (1025, "Выше"),
+        (1026, "Ниже"),
+        (1053, "Удалить"),
+        (1052, "Добавить"),
+        (1061, "Открыть папку журнала"),
+        (1, "ОК"),
+        (2, "Отмена"),
+        (1080, "Применить"),
+    ];
+
+    for (id, what) in OWNER_DRAWN_BUTTONS {
+        let style = template
+            .styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("the dialog has no control {id} — «{what}»"));
+
+        println!("«{what}» ({id}): style {style:#010x}");
+
+        assert_eq!(
+            style & 0x0F,
+            0x0B,
+            "«{what}» ({id}) must carry BS_OWNERDRAW as its button type — task T-11-5a; \
+             the style is {style:#010x}"
+        );
+
+        // The task changes the button type and nothing else about the template: the tab
+        // stop of every button survives, or the keyboard loses the button entirely.
+        assert_ne!(
+            style & 0x0001_0000,
+            0,
+            "«{what}» ({id}) must keep WS_TABSTOP; the style is {style:#010x}"
         );
     }
 }
@@ -1637,6 +1766,9 @@ struct DialogTemplate {
     text: Vec<String>,
     /// The identifier of every control.
     controls: Vec<u32>,
+    /// The style of every control, paired with its identifier, in template order — task
+    /// T-11-5a reads the button types of the nine owner-drawn buttons out of this.
+    styles: Vec<(u32, u32)>,
 }
 
 impl DialogTemplate {
@@ -1676,13 +1808,14 @@ impl DialogTemplate {
 
         let mut text = Vec::new();
         let mut controls = Vec::new();
+        let mut styles = Vec::new();
 
         for _ in 0..items {
             at = (at + 3) & !3;
 
             let _help_id = read_u32(bytes, &mut at);
             let _ex_style = read_u32(bytes, &mut at);
-            let _style = read_u32(bytes, &mut at);
+            let style = read_u32(bytes, &mut at);
 
             for _ in 0..4 {
                 let _ = read_u16(bytes, &mut at);
@@ -1697,6 +1830,7 @@ impl DialogTemplate {
             at += extra;
 
             controls.push(id);
+            styles.push((id, style));
 
             if let Some(title) = title
                 && !title.is_empty()
@@ -1709,6 +1843,7 @@ impl DialogTemplate {
             caption,
             text,
             controls,
+            styles,
         }
     }
 }

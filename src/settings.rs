@@ -65,11 +65,12 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
+    ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    HDC, InvalidateRect, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SetBkColor,
+    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DrawFocusRect, DrawTextW, FillRect, FrameRect, HDC,
+    InvalidateRect, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SetBkColor,
     SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::{
@@ -80,12 +81,13 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::Win32::UI::Controls::{
-    BST_CHECKED, BST_UNCHECKED, CheckDlgButton, CheckRadioButton, EM_LIMITTEXT,
+    BST_CHECKED, BST_UNCHECKED, CheckDlgButton, CheckRadioButton, DRAWITEMSTRUCT, EM_LIMITTEXT,
     ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, IsDlgButtonChecked,
     LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT, LVIS_FOCUSED,
     LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE,
-    LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
+    LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, ODS_DISABLED,
+    ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
@@ -96,13 +98,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS,
-    DefWindowProcW, DialogBoxParamW, EndDialog, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW, IDCANCEL, IDOK,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW,
-    SetWindowTextW, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
-    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    DM_SETDEFID, DefWindowProcW, DialogBoxParamW, EndDialog, GWLP_USERDATA, GWLP_WNDPROC,
+    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW,
+    IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
+    LB_GETTEXTLEN, LB_RESETCONTENT, PostMessageW, SW_SHOWNORMAL, SendDlgItemMessageW,
+    SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM,
+    WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2225,6 +2228,36 @@ unsafe extern "system" fn dialog_proc(
                 })
             };
 
+            // FR-92а, task T-11-5a: «ОК» lost `BS_DEFPUSHBUTTON` to owner drawing — a
+            // button *type* occupies the low nibble the default style lived in — so the
+            // default identifier is handed to the dialog manager by the documented
+            // replacement, `DM_SETDEFID`. On Enter the manager asks `DM_GETDEFID` and
+            // clicks the button this message named, which is what keeps Enter landing on
+            // «ОК».
+            //
+            // *Posted*, not sent: everything this program tells its own windows goes
+            // through `PostMessageW` — a bare `SendMessage` is banned program-wide by the
+            // implication of FR-72, and a test sweeps `src\` for it. Nothing is lost by
+            // the queue: posted messages are retrieved ahead of input, this one is queued
+            // before the dialog is even shown, so the default is in force before the
+            // first keystroke that could ask for it.
+            //
+            // SAFETY: `hwnd` is the live dialog; the message carries two plain integers
+            // and no pointer — `PostMessageW` queues them by value and returns.
+            if let Err(error) = unsafe {
+                PostMessageW(
+                    Some(hwnd),
+                    DM_SETDEFID,
+                    WPARAM(usize::try_from(OK_COMMAND).unwrap_or(0)),
+                    LPARAM(0),
+                )
+            } {
+                // NFR-13. Not fatal: the one consequence would be Enter answered by the
+                // fallback of the dialog manager rather than by the named default, and
+                // the journal is told.
+                crate::app::report_non_critical("PostMessageW", &error);
+            }
+
             // TRUE: let the dialog manager choose the focus.
             1
         }
@@ -2237,6 +2270,15 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
             // and the value it names is alive for the whole of this modal call.
             unsafe { on_ctl_color(hwnd, message, wparam, lparam) }
+        }
+
+        // FR-92а, task T-11-5a: the nine owner-drawn buttons. Handled here and nowhere
+        // else — the dialog window exists exactly while the program itself holds the
+        // dialog on the screen, which is the gate the last sentence of SEC-05 names.
+        WM_DRAWITEM => {
+            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
+            // and the value it names is alive for the whole of this modal call.
+            unsafe { on_draw_item(hwnd, lparam) }
         }
 
         WM_COMMAND => {
@@ -2321,6 +2363,114 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
         IDC_HOTKEY_NOTE | IDC_LANGUAGE_RESTART | IDC_CYCLE_HINT | IDC_EXCLUSION_HINT
         | IDC_LAYOUT_NOTE | IDC_LOG_DIR => StaticColorRole::Muted,
         _ => StaticColorRole::Label,
+    }
+}
+
+/// The face of one owner-drawn button, named as the palette field it is filled with —
+/// FR-92а, task T-11-5a.
+///
+/// Roles and not colours, exactly as [`StaticColorRole`] before it: the mapping stays a
+/// pure function a table test can close, and the `WM_DRAWITEM` handler turns a role into
+/// a brush of the resolved palette in one place. Not a single colour number enters this
+/// module — §6.2 gives every palette value to `theme` alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonFaceRole {
+    /// [`theme::Palette::button_bg`] — the ordinary face.
+    ButtonBg,
+    /// [`theme::Palette::accent_bg`] — the accented face of the default button «ОК».
+    AccentBg,
+    /// [`theme::Palette::sel_bg`] — the face while the button is held pressed: a step
+    /// darker in the light palette and lighter in the dark one, with no new colour in the
+    /// palette.
+    SelBg,
+}
+
+/// The ink the button's caption is drawn with, named as the palette field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonTextRole {
+    /// [`theme::Palette::text`] — the ordinary caption.
+    Text,
+    /// [`theme::Palette::accent_fg`] — the caption over the accent face.
+    AccentFg,
+    /// [`theme::Palette::sel_fg`] — the caption over the pressed face, the pair the
+    /// palette designed for exactly this ground.
+    SelFg,
+    /// [`theme::Palette::text_muted`] — the caption of a disabled button.
+    TextMuted,
+}
+
+/// The frame of the button. One variant on purpose: the closed table of
+/// [`button_color_roles`] frames every kind in every state with the same single-pixel
+/// [`theme::Palette::button_border`], and a one-variant type is that fact written down —
+/// a second border colour cannot appear without widening this enum first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonBorderRole {
+    /// [`theme::Palette::button_border`].
+    ButtonBorder,
+}
+
+/// Face, caption ink and frame of one owner-drawn button — what [`button_color_roles`]
+/// answers and the whole of what the `WM_DRAWITEM` handler needs to choose colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ButtonColors {
+    /// What the button face is filled with.
+    pub face: ButtonFaceRole,
+    /// What the caption is drawn with.
+    pub text: ButtonTextRole,
+    /// What the single-pixel frame is drawn with.
+    pub border: ButtonBorderRole,
+}
+
+/// The colour roles of one button in one state — FR-92а, task T-11-5a, the pure half of
+/// `WM_DRAWITEM`, closed by a table test: обычная/умолчательная × нормальная/нажатая/
+/// запрещённая.
+///
+/// The default button is recognised by its identifier — `IDOK`, the one control
+/// `DM_SETDEFID` names on `WM_INITDIALOG` — not by `ODS_DEFAULT`, which the manager juggles
+/// as the focus moves and which would make the accent wander off «ОК».
+///
+/// The order of the arms is the precedence:
+/// - **запрещённость первой**: a disabled button takes no Enter and no click, so it must
+///   not advertise itself — the accent face yields to the ordinary one and the ink goes
+///   muted, whichever button it is («Выше»/«Ниже» are the ones actually seen grey);
+/// - **нажатие второй**: a held button shows the selection pair `sel_bg`/`sel_fg` of the
+///   palette, default and ordinary alike — the accent yields for the length of the press;
+/// - the accent itself is the *normal* state of «ОК» and nothing else.
+///
+/// Focus is deliberately absent here: `ODS_FOCUS` changes no colour — it adds the dotted
+/// `DrawFocusRect` frame on top of whatever face this table chose, and that is the drawing
+/// half's business.
+pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> ButtonColors {
+    let border = ButtonBorderRole::ButtonBorder;
+
+    if disabled {
+        return ButtonColors {
+            face: ButtonFaceRole::ButtonBg,
+            text: ButtonTextRole::TextMuted,
+            border,
+        };
+    }
+
+    if pressed {
+        return ButtonColors {
+            face: ButtonFaceRole::SelBg,
+            text: ButtonTextRole::SelFg,
+            border,
+        };
+    }
+
+    if control == OK_COMMAND {
+        return ButtonColors {
+            face: ButtonFaceRole::AccentBg,
+            text: ButtonTextRole::AccentFg,
+            border,
+        };
+    }
+
+    ButtonColors {
+        face: ButtonFaceRole::ButtonBg,
+        text: ButtonTextRole::Text,
+        border,
     }
 }
 
@@ -2499,6 +2649,178 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
     }
 
     brush.0 as isize
+}
+
+/// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a.
+///
+/// # SEC-05, last sentence, held to the letter
+///
+/// `lparam` points at the `DRAWITEMSTRUCT` of the message. Exactly five fields are read
+/// out of it, all in one place at the top of this function: `CtlType` (the check that
+/// this is a button), `CtlID` (the identifier), `itemState` (pressed, disabled, focused),
+/// `hDC` (the DC to paint into) and `rcItem` (the rectangle to paint) — the identifier
+/// and the drawing rectangle SEC-05 words the allowance around, plus the two plain values
+/// that say what state to paint. **The pointer-sized `itemData` is never read**: no
+/// pointer of the incoming message is dereferenced beyond that one struct read, and
+/// nothing in it is followed further. The caption is *not* taken from the message either —
+/// it is read from the dialog's own control by identifier (`get_text` →
+/// `GetDlgItemTextW`). The window of time is the gate: this message is handled by the
+/// dialog procedure alone, and the dialog window exists exactly while the program itself
+/// holds the dialog on the screen — a forged message outside that window has no procedure
+/// to arrive at.
+///
+/// # What is drawn
+///
+/// Face by `FillRect`, single-pixel frame by `FrameRect`, caption by `DrawTextW` centred
+/// both ways in the dialog's own font (already selected into the DC the manager hands
+/// over); the colour choice is the closed table of [`button_color_roles`]. `ODS_FOCUS`
+/// adds the dotted `DrawFocusRect` frame inside the border, over any face — unless the
+/// manager says the focus cue is hidden (`ODS_NOFOCUSRECT`, the keyboard-cues setting),
+/// which is how a native button behaves.
+///
+/// Answers 1 — «drawn» — for a button, and 0 for anything else. 0 is also the answer when
+/// the state is unreachable or [`theme::Brushes::new`] was refused at initialisation: an
+/// owner-drawn control has no system drawing to fall back to, but painting would need
+/// colour numbers this module is not allowed to hold (§6.2 — the palette lives in `theme`
+/// alone), and the refused-brushes dialog is already living degraded by the decision of
+/// T-11-4.
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the `lparam` of the message: the dialog manager
+/// sends `WM_DRAWITEM` with a pointer to a `DRAWITEMSTRUCT` that lives for the length of
+/// the send.
+unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
+    if lparam.0 == 0 {
+        return 0;
+    }
+
+    // The one dereference of the message, and the whole of what is taken out of it: five
+    // fields, copied out as plain values before anything else runs. `itemData` — never.
+    //
+    // SAFETY: see above — the dialog manager owns the struct for the length of the send,
+    // and this procedure is inside that send.
+    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+    let (ctl_type, ctl_id, item_state, dc, rect) = (
+        item.CtlType,
+        item.CtlID,
+        item.itemState,
+        item.hDC,
+        item.rcItem,
+    );
+
+    if ctl_type != ODT_BUTTON {
+        return 0;
+    }
+
+    let control = i32::try_from(ctl_id).unwrap_or(-1);
+
+    let pressed = item_state.0 & ODS_SELECTED.0 != 0;
+    let disabled = item_state.0 & ODS_DISABLED.0 != 0;
+    let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
+
+    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
+    // borrow of the state ends before the DC is touched, and what leaves the closure is
+    // plain values — two brush handles the state keeps alive until the dialog ends, and
+    // an ink.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            let colors = button_color_roles(control, pressed, disabled);
+
+            // The single place a role becomes a brush or a colour of the resolved
+            // palette — the drawing below never sees a role.
+            let face = match colors.face {
+                ButtonFaceRole::ButtonBg => brushes.button_bg(),
+                ButtonFaceRole::AccentBg => brushes.accent_bg(),
+                ButtonFaceRole::SelBg => brushes.sel_bg(),
+            };
+
+            let ink = match colors.text {
+                ButtonTextRole::Text => palette.text,
+                ButtonTextRole::AccentFg => palette.accent_fg,
+                ButtonTextRole::SelFg => palette.sel_fg,
+                ButtonTextRole::TextMuted => palette.text_muted,
+            };
+
+            let border = match colors.border {
+                ButtonBorderRole::ButtonBorder => brushes.button_border(),
+            };
+
+            Some((face, ink, border))
+        })
+    };
+
+    let Some(Some((face, ink, border))) = choice else {
+        return 0;
+    };
+
+    // The caption, from the dialog's own control by identifier — never from the message.
+    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
+    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
+
+    // NFR-13, for the paint calls below: each answers a success flag or a previous value,
+    // and every answer is deliberately dropped for the same reason `on_ctl_color` drops
+    // its own — the manager never hands a dead DC, only a forged message could (SEC-05),
+    // and the right reaction to a forgery is indifference: no read-back, no
+    // `debug_assert` handing the forger a crash of a debug build, and no journal row for
+    // GDI refusals (reviews\T-11-1.md).
+
+    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for
+    // the length of this send; `face` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &rect, face) };
+
+    // SAFETY: as above; `border` is a live brush of the dialog's state. `FrameRect`
+    // draws the single-pixel frame the task asks for.
+    unsafe { FrameRect(dc, &rect, border) };
+
+    // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC
+    // and touch no memory of this process.
+    unsafe { SetBkMode(dc, TRANSPARENT) };
+    // SAFETY: as above.
+    unsafe { SetTextColor(dc, ink) };
+
+    if !caption.is_empty() {
+        let mut text_rect = rect;
+
+        // SAFETY: `caption` and `text_rect` are live locals of this frame; the format
+        // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption
+        // and writes only pixels of the DC. The dialog's font is already selected into
+        // the DC the manager hands over — no font work here.
+        unsafe {
+            DrawTextW(
+                dc,
+                &mut caption,
+                &mut text_rect,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            )
+        };
+    }
+
+    if focused {
+        // Inside the single-pixel border, over whatever face was chosen above.
+        let focus_rect = RECT {
+            left: rect.left + 2,
+            top: rect.top + 2,
+            right: rect.right - 2,
+            bottom: rect.bottom - 2,
+        };
+
+        // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
+        // comment above the paint calls.
+        //
+        // SAFETY: `dc` is the DC of the message and `focus_rect` is a live local of
+        // this frame; the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+    }
+
+    // TRUE — the button is drawn.
+    1
 }
 
 /// Puts the interface strings of the locale in force into the window — FR-94.

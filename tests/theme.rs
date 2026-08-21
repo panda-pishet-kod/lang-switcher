@@ -235,12 +235,20 @@ fn a_brush_set_is_created_with_live_handles_that_carry_the_palette_and_drops_onc
         let brushes = Brushes::new(palette)
             .unwrap_or_else(|| panic!("the brush set of {palette_name} must be creatable"));
 
-        let named: [(&str, HBRUSH, u32); 5] = [
+        // Seven since task T-11-5a: `button_border` and `accent_bg` joined the original
+        // five for the owner-drawn buttons — same owner, same creation, same release.
+        let named: [(&str, HBRUSH, u32); 7] = [
             ("window_bg", brushes.window_bg(), palette.window_bg.0),
             ("panel_bg", brushes.panel_bg(), palette.panel_bg.0),
             ("field_bg", brushes.field_bg(), palette.field_bg.0),
             ("button_bg", brushes.button_bg(), palette.button_bg.0),
             ("sel_bg", brushes.sel_bg(), palette.sel_bg.0),
+            (
+                "button_border",
+                brushes.button_border(),
+                palette.button_border.0,
+            ),
+            ("accent_bg", brushes.accent_bg(), palette.accent_bg.0),
         ];
 
         for (field, handle, expected_color) in named {
@@ -274,7 +282,7 @@ fn a_brush_set_is_created_with_live_handles_that_carry_the_palette_and_drops_onc
             );
         }
 
-        // The release under test: `Drop` frees all five handles here, exactly once. No
+        // The release under test: `Drop` frees all seven handles here, exactly once. No
         // double release is reachable from safe code — `Brushes` is neither `Copy` nor
         // `Clone`, its fields are private and never reassigned, the getters hand out
         // borrowed copies without ownership, and `drop` runs once per value.

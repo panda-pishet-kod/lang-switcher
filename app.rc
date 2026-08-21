@@ -129,6 +129,12 @@
 #define WS_BORDER              0x00800000L
 #define WS_CAPTION             0x00C00000L
 #define WS_POPUP               0x80000000L
+// ⚠ BS_OWNERDRAW is the button TYPE, not a flag: button types live in the low nibble of the
+// style and replace one another rather than combine. The nine push buttons below carry it so
+// that the dialog paints them itself (FR-92а, task T-11-5a) — the low nibble of each style
+// becomes 0x0B, and the statements' own default type (BS_PUSHBUTTON 0x00, and 0x01 for the
+// former DEFPUSHBUTTON) is absorbed by it: 0x00|0x0B and 0x01|0x0B are both 0x0B.
+#define BS_OWNERDRAW           0x0B
 #define ES_AUTOHSCROLL         0x0080
 #define ES_READONLY            0x0800
 #define ES_NUMBER              0x2000
@@ -252,7 +258,7 @@ BEGIN
     GROUPBOX        "Горячая клавиша", IDC_GROUP_HOTKEY, 7, 77, 200, 48
     LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9
     EDITTEXT        IDC_HOTKEY, 48, 90, 64, 12, ES_AUTOHSCROLL | ES_READONLY
-    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14, BS_OWNERDRAW
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
@@ -265,8 +271,8 @@ BEGIN
     COMBOBOX        IDC_PAIR_TARGET, 54, 171, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 188, 186, 9
     CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 199, 142, 44
-    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 199, 40, 14
-    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 216, 40, 14
+    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 199, 40, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 216, 40, 14, BS_OWNERDRAW
     LTEXT           "", IDC_LAYOUT_NOTE, 14, 246, 186, 10
 
     // -- Замена: FR-41, FR-42, FR-42а, FR-44 ---------------------------------------------
@@ -292,15 +298,15 @@ BEGIN
     // -- Исключения: FR-84 ---------------------------------------------------------------
     GROUPBOX        "Исключения", IDC_GROUP_EXCLUSIONS, 213, 148, 200, 84
     LISTBOX         IDC_EXCLUSIONS, 220, 160, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_BORDER | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14
+    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
     EDITTEXT        IDC_EXCLUSION_NAME, 220, 207, 120, 12, ES_AUTOHSCROLL
-    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14
+    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14, BS_OWNERDRAW
     LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
     GROUPBOX        "Диагностика", IDC_GROUP_DIAGNOSTICS, 213, 236, 200, 58
     AUTOCHECKBOX    "Вести журнал", IDC_LOG_ENABLED, 220, 248, 90, 10
-    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14
+    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14, BS_OWNERDRAW
     LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9
     LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16
 
@@ -310,9 +316,14 @@ BEGIN
     LTEXT           "", IDC_STATE_LAYOUTS, 14, 321, 392, 9
     LTEXT           "", IDC_STATE_AUTOSTART, 14, 332, 392, 9
 
-    DEFPUSHBUTTON   "ОК", IDOK, 253, 348, 50, 14
-    PUSHBUTTON      "Отмена", IDCANCEL, 307, 348, 50, 14
-    PUSHBUTTON      "Применить", IDC_APPLY, 361, 348, 52, 14
+    // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
+    // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
+    // survive owner drawing. The behaviour survives by the documented replacement: the dialog
+    // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
+    // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
+    PUSHBUTTON      "ОК", IDOK, 253, 348, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 307, 348, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 361, 348, 52, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
