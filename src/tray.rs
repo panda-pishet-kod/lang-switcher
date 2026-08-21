@@ -13,7 +13,8 @@
 //! Implemented by backlog tasks: T-01-4 (done); T-08-1 (done) filled the two marked stubs —
 //! the menu now opens the settings dialog of FR-92, which lives in [`crate::settings`], and
 //! the check mark of FR-93 now writes and removes the value under
-//! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+//! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; T-11-10 (done) put the menu items
+//! on `MF_OWNERDRAW` and paints them in the palette of FR-92а.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -35,6 +36,12 @@
 //! and [`handle_ui_message`] shows the menu once the borrow has been dropped. The same rule
 //! covers `MessageBoxW` in the about box, which is modal for the same reason.
 //!
+//! The owner-draw state of task T-11-10 obeys the same rule from the other side: while
+//! `TrackPopupMenuEx` runs its loop, `WM_MEASUREITEM` and `WM_DRAWITEM` re-enter this
+//! module, so what they need lives in [`MENU_PAINT`] — a thread-local of its own, borrowed
+//! only for the length of one message and never across the modal call, exactly like
+//! [`UI_TRAY`] itself.
+//!
 //! # SEC-05
 //!
 //! Only the messages named in [`Tray::handle_message`] are handled; everything else is
@@ -48,6 +55,15 @@
 //! `TrackPopupMenuEx` instead of arriving as a message. A forged `WM_COMMAND` therefore
 //! cannot pause the program or shut it down — no privileged action is reachable by message.
 //!
+//! Task T-11-10 (FR-92а) draws the menu items itself, which brings `WM_MEASUREITEM` and
+//! `WM_DRAWITEM` to this window. Both are behind a gate: the thread-local [`MENU_PAINT`]
+//! holds `Some` exactly while our menu is on the screen — set immediately before
+//! `TrackPopupMenuEx`, cleared immediately after it returns — and outside that window both
+//! messages are [`Reaction::Ignored`] like everything else foreign. The `itemData` of every
+//! entry is the command number and never a pointer, so nothing a forged message carries is
+//! dereferenced beyond the identifier check and the drawing rectangle — the SEC-05 wording
+//! verbatim.
+//!
 //! # SEC-01, SEC-07
 //!
 //! Nothing here ever sees a keystroke, a key code or the contents of the buffer, and nothing
@@ -59,10 +75,17 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateFontIndirectW, CreatePen, CreateSolidBrush, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER,
+    DeleteObject, DrawTextW, FillRect, GetDC, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ,
+    HPEN, LineTo, MoveToEx, PS_SOLID, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
+    TRANSPARENT,
+};
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
 };
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, ODT_MENU};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
@@ -70,15 +93,17 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyIcon, DestroyMenu, GetSystemMetrics, HICON, HMENU,
     IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND,
-    MENU_ITEM_FLAGS, MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MessageBoxW, PostMessageW,
-    RT_VERSION, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow,
-    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_CONTEXTMENU,
-    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_NULL, WM_QUERYENDSESSION, WM_USER,
+    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED, MessageBoxW, NONCLIENTMETRICSW,
+    PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU,
+    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
+    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP,
+    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL,
+    WM_QUERYENDSESSION, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
 use crate::settings::{self, Config};
-use crate::{APP_NAME, app};
+use crate::{APP_NAME, app, theme};
 
 // ---------------------------------------------------------------------------------------
 // The menu of FR-91 — labels and commands
@@ -148,6 +173,16 @@ const NIN_KEYSELECT: u32 = WM_USER + 1;
 
 /// Name of the broadcast message FR-81 is about.
 const TASKBAR_CREATED: PCWSTR = w!("TaskbarCreated");
+
+/// Horizontal padding of an owner-drawn menu item: before the check column and after the
+/// text — FR-92а, task T-11-10.
+const MENU_H_PAD: i32 = 6;
+
+/// Gap between the check column and the text of an owner-drawn menu item.
+const MENU_CHECK_GAP: i32 = 4;
+
+/// Vertical padding above and below the text of an owner-drawn menu item.
+const MENU_V_PAD: i32 = 5;
 
 /// Offset of `VS_FIXEDFILEINFO` inside a `VS_VERSIONINFO` resource.
 ///
@@ -350,7 +385,9 @@ impl Tray {
     /// SEC-05: the list below is exhaustive and everything outside it is
     /// [`Reaction::Ignored`]. Nothing in it is privileged — the two entries that change
     /// anything, the state of FR-90 and the exit, are reachable only through the menu, and
-    /// the menu is not a message.
+    /// the menu is not a message. The measure/draw pair of the owner-drawn menu (FR-92а)
+    /// is answered only while this program itself holds the menu on the screen — the gate
+    /// of [`MENU_PAINT`]; at any other moment both are as foreign as anything else.
     pub fn handle_message(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Reaction {
         // FR-81. Tested before the `match` because the value is not a compile-time constant:
         // it is whatever `RegisterWindowMessageW` returned. Zero is excluded, or a failed
@@ -385,6 +422,13 @@ impl Tray {
 
                 Reaction::Handled(LRESULT(0))
             }
+
+            // FR-92а, task T-11-10: the measuring and the drawing of our own menu's
+            // entries. Both are behind the SEC-05 gate — answered only while
+            // [`MENU_PAINT`] says a menu of ours is on the screen, and `Ignored` at any
+            // other moment, before anything of the message is dereferenced.
+            WM_MEASUREITEM => measure_menu_item(lparam),
+            WM_DRAWITEM => draw_menu_item(lparam),
 
             _ => Reaction::Ignored,
         }
@@ -774,6 +818,23 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
 // The menu — FR-91
 // ---------------------------------------------------------------------------------------
 
+/// One command entry of FR-91 as the builder recorded it — task T-11-10.
+///
+/// With `MF_OWNERDRAW` the label no longer lives inside Windows' menu: this record is where
+/// it lives instead, found by command number both by the drawing of [`MenuPaint`] and by
+/// the tests that check FR-91 entry for entry. SEC-05 is why the lookup is by number: the
+/// entry's `itemData` carries the command and nothing else, so no message can hand the
+/// drawing a pointer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuItem {
+    /// The command identifier — the same number the entry carries as its `itemData`.
+    pub command: u32,
+    /// The label, out of the string table of the locale in force (FR-94).
+    pub label: String,
+    /// Whether the entry shows the check mark of FR-93.
+    pub checked: bool,
+}
+
 /// The context menu of FR-91, destroyed when this value is dropped.
 ///
 /// Built afresh for every click rather than kept and patched: the first label and the check
@@ -781,6 +842,9 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
 /// it is about cannot show a stale one.
 pub struct Menu {
     handle: HMENU,
+    /// The command entries in menu order — the builder's own record of what it appended,
+    /// and since task T-11-10 the only place the labels exist at all.
+    items: Vec<MenuItem>,
 }
 
 impl Menu {
@@ -795,7 +859,10 @@ impl Menu {
         // crate turns a null handle into an error, so NFR-13 is satisfied by the `?`.
         let handle = unsafe { CreatePopupMenu()? };
 
-        let menu = Self { handle };
+        let mut menu = Self {
+            handle,
+            items: Vec::with_capacity(5),
+        };
 
         // FR-94: every label out of the string table of the locale in force. The menu is built
         // afresh on every click, so it carries the locale published at start-up without any
@@ -805,59 +872,78 @@ impl Menu {
         } else {
             settings::IDS_MENU_RESUME
         });
-        let autostart_mark = if autostart { MF_CHECKED } else { MF_UNCHECKED };
 
-        menu.append_command(MF_STRING, CMD_TOGGLE, &first)?;
+        menu.append_command(CMD_TOGGLE, &first, false)?;
         menu.append_separator()?;
         menu.append_command(
-            MF_STRING,
             CMD_SETTINGS,
             &settings::text(settings::IDS_MENU_SETTINGS),
+            false,
         )?;
         menu.append_command(
-            MF_STRING | autostart_mark,
             CMD_AUTOSTART,
             &settings::text(settings::IDS_MENU_AUTOSTART),
+            autostart,
         )?;
         menu.append_separator()?;
-        menu.append_command(
-            MF_STRING,
-            CMD_ABOUT,
-            &settings::text(settings::IDS_MENU_ABOUT),
-        )?;
-        menu.append_command(
-            MF_STRING,
-            CMD_EXIT,
-            &settings::text(settings::IDS_MENU_EXIT),
-        )?;
+        menu.append_command(CMD_ABOUT, &settings::text(settings::IDS_MENU_ABOUT), false)?;
+        menu.append_command(CMD_EXIT, &settings::text(settings::IDS_MENU_EXIT), false)?;
 
         Ok(menu)
     }
 
     /// The raw handle, for `TrackPopupMenuEx` and for the tests that read the menu back with
-    /// `GetMenuItemCount` and `GetMenuStringW`.
+    /// `GetMenuItemCount`, `GetMenuState` and `GetMenuItemInfoW`.
     pub fn handle(&self) -> HMENU {
         self.handle
     }
 
-    /// Appends one command item.
-    fn append_command(&self, flags: MENU_ITEM_FLAGS, command: u32, label: &str) -> WinResult<()> {
-        let label = wide(label);
+    /// The command entries in menu order, labels and check marks included — the record the
+    /// drawing of [`MenuPaint`] and the tests of FR-91 both read.
+    pub fn items(&self) -> &[MenuItem] {
+        &self.items
+    }
 
-        // SAFETY: `self.handle` is a live menu created by `CreatePopupMenu` and owned by this
-        // value. `label` is a NUL-terminated UTF-16 buffer owned by this frame, neither moved
-        // nor dropped until the call returns; `AppendMenuW` copies the string rather than
-        // keeping the pointer. `command` is one of our own non-zero identifiers, which is
-        // what `MF_STRING` requires of the third argument. The crate turns the `BOOL` into a
-        // `Result`, so NFR-13 is satisfied by returning it.
+    /// Appends one command entry as `MF_OWNERDRAW` — FR-92а, task T-11-10.
+    ///
+    /// The label no longer travels through `AppendMenuW`: it is recorded in [`Menu::items`],
+    /// where [`MenuPaint`] finds it by command number at drawing time. What `AppendMenuW`
+    /// gets as its last argument is the entry's `itemData`, and that is **the command
+    /// number and nothing else** — SEC-05: a `WM_DRAWITEM` can be forged by any process of
+    /// our integrity level, dereferencing a pointer taken out of one would be a hole, and a
+    /// number a handler merely looks up is not.
+    ///
+    /// The check mark of FR-93 is still declared to Windows as `MF_CHECKED` — that is what
+    /// keeps the entry's state readable from outside, `GetMenuState` and screen readers
+    /// alike — and recorded in the entry, which is what the drawing paints by.
+    fn append_command(&mut self, command: u32, label: &str, checked: bool) -> WinResult<()> {
+        let mark = if checked { MF_CHECKED } else { MF_UNCHECKED };
+
+        // SAFETY: `self.handle` is a live menu created by `CreatePopupMenu` and owned by
+        // this value. `command` is one of our own non-zero identifiers. Under
+        // `MF_OWNERDRAW` the last argument is not read as a string: it is carried verbatim
+        // as the entry's `itemData`, and what is placed there is the command number — an
+        // address-shaped value with no allocation behind it, which `without_provenance`
+        // says in so many words, and which nothing ever dereferences (SEC-05). The crate
+        // turns the `BOOL` into a `Result`, so NFR-13 is satisfied by the `?`.
         unsafe {
             AppendMenuW(
                 self.handle,
-                flags,
+                MF_OWNERDRAW | mark,
                 usize::try_from(command).unwrap_or(0),
-                PCWSTR(label.as_ptr()),
+                PCWSTR(std::ptr::without_provenance(
+                    usize::try_from(command).unwrap_or(0),
+                )),
             )
-        }
+        }?;
+
+        self.items.push(MenuItem {
+            command,
+            label: label.to_owned(),
+            checked,
+        });
+
+        Ok(())
     }
 
     /// Appends one of the two rules of FR-91.
@@ -880,14 +966,458 @@ impl Drop for Menu {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// The drawing of the menu — FR-92а, task T-11-10
+// ---------------------------------------------------------------------------------------
+
+/// Everything `WM_MEASUREITEM` and `WM_DRAWITEM` need while the menu of FR-91 is on the
+/// screen — and, by being the `Some` of [`MENU_PAINT`], the SEC-05 gate itself.
+///
+/// # Life of one showing — FR-92а
+///
+/// Built by [`show_menu`] immediately before `TrackPopupMenuEx` and dropped immediately
+/// after it returns. The palette is resolved exactly once per showing — the setting out of
+/// the configuration, the system switch read once — and the two brushes, the pen and the
+/// font live exactly that long. `theme::Brushes` is deliberately not used: that set belongs
+/// to the long-lived dialog of FR-92, while these die with the menu.
+///
+/// # Why a thread-local of its own — the rule of the module header
+///
+/// While `TrackPopupMenuEx` runs its modal loop, every message re-enters this module, so
+/// the state the measure/draw handlers read must not sit behind the borrow of [`UI_TRAY`]
+/// and must not require [`show_menu`] to hold any borrow across the modal call.
+/// [`MENU_PAINT`] is borrowed for the length of one message and released, exactly like
+/// [`UI_TRAY`] in [`handle_ui_message`], and nothing running under its borrow pumps
+/// messages.
+struct MenuPaint {
+    /// The entries of the menu being shown — labels found by the command number that
+    /// arrives as `itemData`.
+    items: Vec<MenuItem>,
+    /// The palette of this showing, resolved once — FR-92а.
+    palette: &'static theme::Palette,
+    /// The menu font of `SPI_GETNONCLIENTMETRICS`, created for this showing.
+    font: HFONT,
+    /// Brush of [`theme::Palette::window_bg`] — the background of an entry at rest.
+    window_bg: HBRUSH,
+    /// Brush of [`theme::Palette::hover_bg`] — the background of the entry under the
+    /// cursor (`ODS_SELECTED`).
+    hover_bg: HBRUSH,
+    /// Pen of [`theme::Palette::text`], for the two strokes of the check mark.
+    text_pen: HPEN,
+}
+
+thread_local! {
+    /// The state of the menu now on the screen — `Some` exactly from just before
+    /// `TrackPopupMenuEx` until just after it returns. This *is* the gate SEC-05 asks
+    /// for: [`measure_menu_item`] and [`draw_menu_item`] answer [`Reaction::Ignored`]
+    /// while it holds `None`, before anything of the message is dereferenced.
+    static MENU_PAINT: RefCell<Option<MenuPaint>> = const { RefCell::new(None) };
+}
+
+impl MenuPaint {
+    /// Creates the paint state of one showing, every handle checked.
+    ///
+    /// `None` when the non-client metrics cannot be read or any GDI object is refused —
+    /// the same contract as `theme::Brushes::new`, for the same reasons: NFR-13 does not
+    /// allow painting with a handle nobody looked at, and nothing goes to the journal
+    /// because these calls do not promise a last-error code. The caller shows the menu
+    /// anyway — unpainted rows over no menu at all.
+    fn new(items: Vec<MenuItem>, palette: &'static theme::Palette) -> Option<Self> {
+        let mut metrics = NONCLIENTMETRICSW {
+            cbSize: u32::try_from(size_of::<NONCLIENTMETRICSW>()).unwrap_or(0),
+            ..Default::default()
+        };
+
+        // SAFETY: `metrics` is a live local whose `cbSize` describes it, which is what the
+        // call checks before writing into the pointer, and the pointer is not kept.
+        // `SPI_GETNONCLIENTMETRICS` reads system state and changes nothing; the zero
+        // update-flags ask for no broadcast.
+        let metrics_read = unsafe {
+            SystemParametersInfoW(
+                SPI_GETNONCLIENTMETRICS,
+                metrics.cbSize,
+                Some((&raw mut metrics).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        };
+
+        // NFR-13: examined. Without the metrics there is no menu font to measure with,
+        // and a guessed font would mislabel every measurement that follows.
+        if metrics_read.is_err() {
+            return None;
+        }
+
+        // SAFETY: `lfMenuFont` is part of the structure the successful call above filled;
+        // the pointer is read only for the length of the call. The handle, if valid,
+        // becomes the property of the value below and is destroyed exactly once — in
+        // `Drop`, or right here on the partially failed branch.
+        let font = unsafe { CreateFontIndirectW(&metrics.lfMenuFont) };
+
+        // SAFETY: the three calls take colours by value, read no memory of ours and
+        // return handles; every handle is examined below, and the valid ones are owned
+        // exactly as the font is.
+        let (window_bg, hover_bg, text_pen) = unsafe {
+            (
+                CreateSolidBrush(palette.window_bg),
+                CreateSolidBrush(palette.hover_bg),
+                CreatePen(PS_SOLID, 1, palette.text),
+            )
+        };
+
+        let handles: [HGDIOBJ; 4] = [
+            font.into(),
+            window_bg.into(),
+            hover_bg.into(),
+            text_pen.into(),
+        ];
+
+        // NFR-13: every handle is examined before anybody paints with it.
+        if handles.iter().any(HGDIOBJ::is_invalid) {
+            for handle in handles.into_iter().filter(|handle| !handle.is_invalid()) {
+                // SAFETY: `handle` came from one of the successful creations above, was
+                // handed to nobody, and this loop is the only thing that frees it — the
+                // failed constructor returns `None` and no `Drop` will run.
+                let deleted = unsafe { DeleteObject(handle) };
+
+                // NFR-13: examined — loudly where the tests run, in words here; the
+                // reasoning of `theme::Brushes::new`, which faces the same cleanup.
+                debug_assert!(
+                    deleted.as_bool(),
+                    "DeleteObject refused an object just made"
+                );
+            }
+
+            return None;
+        }
+
+        Some(Self {
+            items,
+            palette,
+            font,
+            window_bg,
+            hover_bg,
+            text_pen,
+        })
+    }
+
+    /// The entry `command` names, if the menu being shown has one.
+    ///
+    /// `None` for any other number — which is the whole of what a forged `itemData` can
+    /// achieve while the gate is up (SEC-05): a lookup that finds nothing.
+    fn item(&self, command: u32) -> Option<&MenuItem> {
+        self.items.iter().find(|item| item.command == command)
+    }
+
+    /// Measures one label with the menu font — the arithmetic of `WM_MEASUREITEM`.
+    ///
+    /// Width is the text plus the check column on the left and the paddings around both;
+    /// height is the text plus the vertical paddings. The width includes the check column
+    /// on purpose, even though some Windows versions add room of their own around
+    /// owner-drawn entries: a menu a few pixels wider than the minimum reads fine, a
+    /// clipped label does not.
+    fn measure(&self, label: &str) -> (u32, u32) {
+        let units: Vec<u16> = label.encode_utf16().collect();
+        let mut extent = SIZE::default();
+
+        // SAFETY: `None` asks for a DC of the screen, which needs no window of ours; a
+        // valid handle is released below, on this same thread, as `ReleaseDC` requires.
+        let dc = unsafe { GetDC(None) };
+
+        if !dc.is_invalid() {
+            // SAFETY: `dc` is the live DC just obtained and `self.font` is the live font
+            // this value owns; the previous selection is restored below, before the DC is
+            // released.
+            let previous = unsafe { SelectObject(dc, self.font.into()) };
+
+            // SAFETY: `units` is owned by this frame and only read; `extent` is a live
+            // local the call writes one `SIZE` into, and it keeps neither pointer.
+            let measured = unsafe { GetTextExtentPoint32W(dc, &units, &mut extent) };
+
+            // NFR-13: examined. A refused measurement falls into the metric fallback
+            // below rather than into a zero-height menu row.
+            if !measured.as_bool() {
+                extent = SIZE::default();
+            }
+
+            // SAFETY: restores what was selected before; both handles are live — the DC
+            // until the release below, the old object because the DC still refers to it.
+            let _ = unsafe { SelectObject(dc, previous) };
+
+            // SAFETY: the DC came from the `GetDC` above, on this same thread. NFR-13:
+            // nothing useful can be done about a refused release, and it is not made
+            // fatal — the DC was ours for one measurement.
+            let _ = unsafe { ReleaseDC(None, dc) };
+        }
+
+        let height = if extent.cy > 0 {
+            extent.cy + 2 * MENU_V_PAD
+        } else {
+            // The screen DC or the measurement was refused. `SM_CYMENU` is the system's
+            // own row height; nineteen is that metric at 100% scale.
+            //
+            // SAFETY: reads a system-wide metric, takes no pointer, touches no memory of
+            // ours.
+            let metric = unsafe { GetSystemMetrics(SM_CYMENU) };
+
+            if metric > 0 { metric } else { 19 }
+        };
+
+        let width = MENU_H_PAD + check_column() + MENU_CHECK_GAP + extent.cx + MENU_H_PAD;
+
+        // The conversions cannot fail on real coordinates; zero on the impossible branch
+        // gives Windows a degenerate entry rather than this thread a panic.
+        (
+            u32::try_from(width).unwrap_or(0),
+            u32::try_from(height).unwrap_or(0),
+        )
+    }
+
+    /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: background
+    /// `window_bg`, under the cursor `hover_bg`; text `text`, under the cursor `sel_fg`;
+    /// the check mark is [`MenuPaint::draw_check_mark`]. There are no disabled entries in
+    /// the menu of FR-91, so no third state is painted.
+    ///
+    /// Reads of `structure` are limited to `hDC`, `rcItem` and `itemState` — the SEC-05
+    /// list; the entry itself was already found by [`MenuPaint::item`].
+    fn draw(&self, structure: &DRAWITEMSTRUCT, item: &MenuItem) {
+        let dc = structure.hDC;
+        let rect = structure.rcItem;
+        let selected = structure.itemState.0 & ODS_SELECTED.0 != 0;
+
+        let background = if selected {
+            self.hover_bg
+        } else {
+            self.window_bg
+        };
+
+        // SAFETY: `dc` and `rect` came with the message; while the gate is up they
+        // describe an entry of our menu being painted, and every call below only writes
+        // pixels into that DC — the most a forged message can buy is a drawing on its own
+        // DC. `background` is a live brush this value owns.
+        let filled = unsafe { FillRect(dc, &rect, background) };
+
+        // NFR-13: examined in the only way available — a refused fill leaves the row
+        // unpainted for one frame and nothing here can repair it.
+        debug_assert!(filled != 0, "FillRect refused a live brush");
+
+        // SAFETY: `self.font` is live for the whole showing; the previous selection is
+        // restored at the end of this function, while the DC is still the message's.
+        let previous_font = unsafe { SelectObject(dc, self.font.into()) };
+
+        // SAFETY: a state call on the message's DC — a mode by value, no memory of ours.
+        let _ = unsafe { SetBkMode(dc, TRANSPARENT) };
+
+        let colour = if selected {
+            self.palette.sel_fg
+        } else {
+            self.palette.text
+        };
+
+        // SAFETY: as above — a colour by value.
+        let _ = unsafe { SetTextColor(dc, colour) };
+
+        let mut text_rect = RECT {
+            left: rect.left + MENU_H_PAD + check_column() + MENU_CHECK_GAP,
+            top: rect.top,
+            right: rect.right - MENU_H_PAD,
+            bottom: rect.bottom,
+        };
+
+        let mut units: Vec<u16> = item.label.encode_utf16().collect();
+
+        // SAFETY: `units` and `text_rect` are owned by this frame for the whole call and
+        // written by nobody else; the flags ask for one vertically centred line. NFR-13:
+        // a zero return would mean nothing was drawn, and there is nothing to do about it
+        // that the next paint will not do better.
+        let _ = unsafe {
+            DrawTextW(
+                dc,
+                &mut units,
+                &mut text_rect,
+                DT_SINGLELINE | DT_VCENTER | DT_NOCLIP,
+            )
+        };
+
+        if item.checked {
+            self.draw_check_mark(dc, &rect);
+        }
+
+        // SAFETY: restores the font that was selected when the message arrived.
+        let _ = unsafe { SelectObject(dc, previous_font) };
+    }
+
+    /// The check mark of FR-93 — two strokes of the `text` pen.
+    ///
+    /// Drawn by hand rather than by `DrawFrameControl(DFC_MENU, DFCS_MENUCHECK)`, because
+    /// that call paints the system's mark in the system's colours whatever the palette of
+    /// FR-92а says — the exact thing this task exists to stop.
+    fn draw_check_mark(&self, dc: HDC, rect: &RECT) {
+        let column = check_column();
+        let centre_x = rect.left + MENU_H_PAD + column / 2;
+        let centre_y = (rect.top + rect.bottom) / 2;
+
+        // A step that scales with the column keeps the mark proportional at any display
+        // scale; the floor of two keeps it visible at 100%.
+        let step = (column / 6).max(2);
+
+        // SAFETY: `self.text_pen` is live for the whole showing; the previous selection
+        // is restored below, while the DC is still the message's.
+        let previous_pen = unsafe { SelectObject(dc, self.text_pen.into()) };
+
+        // The two lines of the mark — the short down-stroke, then the long up-stroke —
+        // drawn as one polyline so they meet in a point.
+        //
+        // SAFETY: the three calls write pixels into the message's DC and touch no memory
+        // of ours; `None` declines the previous-position out-parameter. NFR-13: a refused
+        // stroke leaves the mark incomplete for one frame, and nothing can repair it here.
+        unsafe {
+            let _ = MoveToEx(dc, centre_x - 3 * step, centre_y, None);
+            let _ = LineTo(dc, centre_x - step, centre_y + 2 * step);
+            let _ = LineTo(dc, centre_x + 3 * step, centre_y - 2 * step);
+        }
+
+        // SAFETY: restores the pen that was selected when the message arrived.
+        let _ = unsafe { SelectObject(dc, previous_pen) };
+    }
+}
+
+impl Drop for MenuPaint {
+    fn drop(&mut self) {
+        let handles: [HGDIOBJ; 4] = [
+            self.font.into(),
+            self.window_bg.into(),
+            self.hover_bg.into(),
+            self.text_pen.into(),
+        ];
+
+        for handle in handles {
+            // SAFETY: every handle came from a successful creation in `new` and is freed
+            // exactly once: the type is neither `Copy` nor `Clone`, the fields are
+            // private and never reassigned, and `drop` runs once. The menu the objects
+            // painted is gone — `show_menu` drops this value only after `TrackPopupMenuEx`
+            // has returned.
+            let deleted = unsafe { DeleteObject(handle) };
+
+            // NFR-13: examined — loudly where the tests run, in words here; the same
+            // reasoning as `theme::Brushes`' own `Drop`, which faces the same refusal.
+            debug_assert!(deleted.as_bool(), "DeleteObject refused an owned object");
+        }
+    }
+}
+
+/// Width of the check column of an owner-drawn menu entry — `SM_CXMENUCHECK`.
+///
+/// Asked of the system so the column follows the display scale, like the icon sizes of
+/// FR-90. Sixteen is the metric at 100% scale and stands in for a metric the system
+/// refused (NFR-13: a zero would collapse the column).
+fn check_column() -> i32 {
+    // SAFETY: reads a system-wide metric, takes no pointer and touches no memory of ours.
+    let metric = unsafe { GetSystemMetrics(SM_CXMENUCHECK) };
+
+    if metric > 0 { metric } else { 16 }
+}
+
+/// The `WM_MEASUREITEM` of the menu of FR-91 — the measuring half of task T-11-10.
+///
+/// The gate first, everything else after: while [`MENU_PAINT`] holds `None` this program
+/// has no menu on the screen, the message cannot be the system working on our behalf, and
+/// the answer is [`Reaction::Ignored`] with nothing dereferenced (SEC-05). Past the gate,
+/// the reads are `CtlType` and `itemData` — the latter only as a number to look up — and
+/// the writes are `itemWidth` and `itemHeight`, which are the point of the message.
+fn measure_menu_item(lparam: LPARAM) -> Reaction {
+    MENU_PAINT.with(|slot| {
+        let paint = slot.borrow();
+
+        let Some(paint) = paint.as_ref() else {
+            return Reaction::Ignored;
+        };
+
+        if lparam.0 == 0 {
+            return Reaction::Ignored;
+        }
+
+        // SAFETY: the gate is up, so our menu is on the screen and this message is the
+        // system asking about one of its entries — `lParam` is then the address of a live
+        // `MEASUREITEMSTRUCT` for the length of the call, checked non-null above. The
+        // reference does not outlive this closure.
+        let structure = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
+
+        if structure.CtlType != ODT_MENU {
+            return Reaction::Ignored;
+        }
+
+        // `itemData` is used as a number and nothing else — SEC-05.
+        let Ok(command) = u32::try_from(structure.itemData) else {
+            return Reaction::Ignored;
+        };
+
+        let Some(item) = paint.item(command) else {
+            return Reaction::Ignored;
+        };
+
+        let (width, height) = paint.measure(&item.label);
+        structure.itemWidth = width;
+        structure.itemHeight = height;
+
+        Reaction::Handled(LRESULT(1))
+    })
+}
+
+/// The `WM_DRAWITEM` of the menu of FR-91 — the drawing half of task T-11-10.
+///
+/// The same gate, the same order: [`Reaction::Ignored`] with nothing dereferenced while
+/// [`MENU_PAINT`] holds `None` (SEC-05). Past the gate, the reads are `CtlType`, `hDC`,
+/// `rcItem`, `itemState` and `itemData` — the latter only as a number to look up.
+fn draw_menu_item(lparam: LPARAM) -> Reaction {
+    MENU_PAINT.with(|slot| {
+        let paint = slot.borrow();
+
+        let Some(paint) = paint.as_ref() else {
+            return Reaction::Ignored;
+        };
+
+        if lparam.0 == 0 {
+            return Reaction::Ignored;
+        }
+
+        // SAFETY: the gate is up, so our menu is on the screen and this message is the
+        // system asking for one of its entries — `lParam` is then the address of a live
+        // `DRAWITEMSTRUCT` for the length of the call, checked non-null above. The
+        // reference does not outlive this closure.
+        let structure = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+
+        if structure.CtlType != ODT_MENU || structure.hDC.is_invalid() {
+            return Reaction::Ignored;
+        }
+
+        // `itemData` is used as a number and nothing else — SEC-05.
+        let Ok(command) = u32::try_from(structure.itemData) else {
+            return Reaction::Ignored;
+        };
+
+        let Some(item) = paint.item(command) else {
+            return Reaction::Ignored;
+        };
+
+        paint.draw(structure, item);
+
+        Reaction::Handled(LRESULT(1))
+    })
+}
+
 /// Shows the menu of FR-91 at a point on the screen and carries out what was chosen.
 ///
 /// Called with no borrow of the tray held: `TrackPopupMenuEx` runs a modal message loop that
 /// dispatches back into our own window procedure.
 fn show_menu(x: i32, y: i32) {
-    let Some((hwnd, enabled, autostart)) =
-        with_tray(|tray| (tray.hwnd, tray.enabled(), tray.autostart()))
-    else {
+    let Some((hwnd, enabled, autostart, theme_setting)) = with_tray(|tray| {
+        (
+            tray.hwnd,
+            tray.enabled(),
+            tray.autostart(),
+            tray.config().general.theme,
+        )
+    }) else {
         return;
     };
 
@@ -898,6 +1428,11 @@ fn show_menu(x: i32, y: i32) {
             return;
         }
     };
+
+    // FR-92а: the palette of this showing, resolved exactly once — the setting the
+    // configuration holds, one reading of the system switch. It lives, with the brushes,
+    // the pen and the menu font of [`MenuPaint`], until `TrackPopupMenuEx` returns.
+    let palette = theme::resolve(theme_setting, theme::system_is_light());
 
     // ⚠ Documented Windows behaviour, not superstition. A popup menu tracked by a window that
     // is not in the foreground does not go away when the user clicks somewhere else: it stays
@@ -914,6 +1449,15 @@ fn show_menu(x: i32, y: i32) {
         // just clicked our icon, so in practice it succeeds. Not fatal when it does not: the
         // menu still appears, it may merely need a second click to be dismissed.
         app::report_non_critical("SetForegroundWindow", &WinError::from_thread());
+    }
+
+    // The gate of SEC-05 goes up here, immediately before `TrackPopupMenuEx`: from the
+    // next line until the take() below, `WM_MEASUREITEM` and `WM_DRAWITEM` are answered.
+    // A refused `MenuPaint::new` (GDI exhaustion; nothing to report — see its
+    // documentation) leaves the gate down and the menu is shown anyway: the rows come up
+    // unpainted, but every command of FR-91 still works and `Esc` still dismisses.
+    if let Some(paint) = MenuPaint::new(menu.items().to_vec(), palette) {
+        MENU_PAINT.with(|slot| slot.replace(Some(paint)));
     }
 
     // SAFETY: `menu.handle()` is a live popup menu owned by `menu` for the whole call — the
@@ -934,6 +1478,14 @@ fn show_menu(x: i32, y: i32) {
             None,
         )
     };
+
+    // The gate comes down here, immediately after the return: from this line on the two
+    // messages are foreign again (SEC-05) — in particular before `dispatch_command` below
+    // opens anything modal. Taken out of the `RefCell` before being dropped, like
+    // [`detach`] and for the same reason; the drop frees the brushes, the pen and the
+    // font, whose whole life is the one showing (FR-92а).
+    let paint = MENU_PAINT.with(|slot| slot.borrow_mut().take());
+    drop(paint);
 
     // The second half of the workaround: without a message arriving after the menu closes,
     // the window that tracked it can be left showing a menu that never repaints away.

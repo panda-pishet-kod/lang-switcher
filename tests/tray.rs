@@ -1,10 +1,16 @@
 //! Integration tests for the `tray` module, task T-01-4.
 //!
-//! The menu is not inspected by asking the module what it built: it is read back out of
-//! Windows with `GetMenuItemCount`, `GetMenuStringW` and `GetMenuState`, exactly as an
-//! outside observer would, and compared against literals written out here rather than
-//! against the crate's own constants. A test that imported `tray::LABEL_EXIT` and then
-//! asserted that the menu contains `tray::LABEL_EXIT` would pass whatever the label said.
+//! The menu is inspected in two halves since task T-11-10 put its entries on
+//! `MF_OWNERDRAW`. What Windows still knows is read back out of Windows with
+//! `GetMenuItemCount`, `GetMenuState`, `GetMenuItemID` and `GetMenuItemInfoW`, exactly as
+//! an outside observer would: the entry count, the rules, the owner-draw flag, the check
+//! mark, and the `itemData` that SEC-05 requires to be a command number and never a
+//! pointer. The labels are the half Windows no longer holds — an owner-drawn entry has no
+//! string inside the menu — so they are read from the builder's own record,
+//! [`Menu::items`], which is the very structure the drawing paints from. Both halves are
+//! compared against literals written out here rather than against the crate's own
+//! constants: a test that imported `tray::LABEL_EXIT` and then asserted that the menu
+//! contains `tray::LABEL_EXIT` would pass whatever the label said.
 //!
 //! Two of the tests put a real icon in the notification area for a few milliseconds and
 //! take it away again — there is no way to check `Shell_NotifyIcon` without calling it.
@@ -25,10 +31,12 @@ use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
 };
+use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuState, GetMenuStringW,
-    GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, RT_VERSION,
-    SM_CXSMICON, SM_CYSMICON, WM_ENDSESSION, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
+    GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
+    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, RT_VERSION, SM_CXSMICON, SM_CYSMICON,
+    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -91,77 +99,96 @@ fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
     guard
 }
 
-#[test]
-fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
-    let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
-
+/// Checks one built menu against one seven-line block of FR-91.
+///
+/// Since task T-11-10 the entries are `MF_OWNERDRAW`, so the check is in two halves. Out
+/// of Windows, as an outside observer would read them: the entry count, which positions
+/// are rules, that every command entry carries the owner-draw flag, and that its
+/// `itemData` is exactly its command identifier (SEC-05 — a number, not a pointer). Out of
+/// the builder's record, because Windows no longer holds a string for an owner-drawn
+/// entry: the labels, in order, against the literals of the block.
+fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
     assert_eq!(
         item_count(menu.handle()),
         7,
         "FR-91 lists five commands and two rules, which is seven entries"
     );
 
-    for (position, expected) in FR_91.iter().enumerate() {
-        let index = u32::try_from(position).expect("a menu position fits in a u32");
-        let label = label_at(menu.handle(), index);
-        let separator = is_separator(menu.handle(), index);
+    let mut items = menu.items().iter();
 
-        println!("{position}: separator={separator} label={label:?}");
+    for (position, expected) in block.iter().enumerate() {
+        let index = u32::try_from(position).expect("a menu position fits in a u32");
+        let separator = is_separator(menu.handle(), index);
 
         match expected {
             Some(text) => {
+                let item = items
+                    .next()
+                    .expect("the builder must have recorded every command entry");
+                let data = item_data_at(menu.handle(), index);
+
+                println!(
+                    "{position}: command={:#06x} itemData={data:#x} label={:?}",
+                    item.command, item.label
+                );
+
                 assert!(
                     !separator,
                     "entry {position} of FR-91 is a command, not a rule"
                 );
-                assert_eq!(label, *text, "entry {position} of FR-91 reads differently");
+                assert!(
+                    is_owner_drawn(menu.handle(), index),
+                    "entry {position} must be owner-drawn — FR-92а"
+                );
+                assert_eq!(
+                    item.label, *text,
+                    "entry {position} of FR-91 reads differently"
+                );
+                assert_eq!(
+                    data,
+                    usize::try_from(item.command).expect("a command fits in a usize"),
+                    "SEC-05: itemData of entry {position} must be its command number"
+                );
             }
             None => {
+                println!("{position}: separator={separator}");
+
                 assert!(separator, "entry {position} of FR-91 is a rule");
-                assert_eq!(label, "", "a rule carries no text");
+                assert!(
+                    !is_owner_drawn(menu.handle(), index),
+                    "a rule stays system-drawn — the accepted cost of section 10"
+                );
             }
         }
     }
+
+    assert!(
+        items.next().is_none(),
+        "the builder recorded exactly the five commands of FR-91"
+    );
+}
+
+#[test]
+fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
+    let _locale = product_strings(settings::Language::Ru);
+    let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
+
+    assert_menu_is(&menu, &FR_91);
 }
 
 #[test]
 fn the_menu_of_fr_91_is_the_same_menu_in_english() {
-    // **Criterion 12.** FR-94 translates the labels; FR-91 fixes what the menu *is*, and the
-    // second must survive the first — same seven entries, same two rules, same places.
+    // **Criterion 12 of T-08-2.** FR-94 translates the labels; FR-91 fixes what the menu
+    // *is*, and the second must survive the first — same seven entries, same two rules,
+    // same places.
     let _locale = product_strings(settings::Language::En);
     let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
 
-    assert_eq!(item_count(menu.handle()), 7);
-
-    for (position, expected) in FR_91_ENGLISH.iter().enumerate() {
-        let index = u32::try_from(position).expect("a menu position fits in a u32");
-        let label = label_at(menu.handle(), index);
-        let separator = is_separator(menu.handle(), index);
-
-        println!("{position}: separator={separator} label={label:?}");
-
-        match expected {
-            Some(text) => {
-                assert!(
-                    !separator,
-                    "entry {position} of FR-91 is a command, not a rule"
-                );
-                assert_eq!(
-                    label, *text,
-                    "entry {position} reads differently in English"
-                );
-            }
-            None => {
-                assert!(separator, "entry {position} of FR-91 is a rule");
-                assert_eq!(label, "", "a rule carries no text");
-            }
-        }
-    }
+    assert_menu_is(&menu, &FR_91_ENGLISH);
 
     // The suspended state moves the same entry in this locale as in the other one.
     let suspended = Menu::build(false, true).expect("the menu must be creatable");
-    assert_eq!(label_at(suspended.handle(), 0), "Resume");
+    assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
 }
@@ -172,17 +199,16 @@ fn the_first_entry_follows_the_state() {
     let active = Menu::build(true, true).expect("the menu must be creatable");
     let suspended = Menu::build(false, true).expect("the menu must be creatable");
 
-    assert_eq!(label_at(active.handle(), 0), "Приостановить");
-    assert_eq!(label_at(suspended.handle(), 0), "Возобновить");
+    assert_eq!(active.items()[0].label, "Приостановить");
+    assert_eq!(suspended.items()[0].label, "Возобновить");
 
-    // Only the first entry moves. Everything below it is the same menu.
-    for position in 1..7 {
-        assert_eq!(
-            label_at(active.handle(), position),
-            label_at(suspended.handle(), position),
-            "entry {position} must not depend on the state"
-        );
-    }
+    // Only the first entry moves. Everything below it — labels, commands and check marks
+    // alike — is the same menu.
+    assert_eq!(
+        active.items()[1..],
+        suspended.items()[1..],
+        "no entry below the first may depend on the state"
+    );
 }
 
 #[test]
@@ -200,9 +226,98 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
         "`general.autostart` = false must not show one"
     );
 
+    // The builder's record agrees with what Windows shows. Not a duplicate of the above:
+    // the drawing of T-11-10 paints the mark from this very field, so the two must never
+    // part ways.
+    assert!(on.items()[2].checked, "the record behind the drawn mark");
+    assert!(!off.items()[2].checked);
+
     // The check mark is the only difference: FR-93 is task T-08-1's, and this task must not
     // have grown a second way of showing the same thing.
-    assert_eq!(label_at(on.handle(), 3), label_at(off.handle(), 3));
+    assert_eq!(on.items()[2].label, off.items()[2].label);
+}
+
+#[test]
+fn the_item_data_of_every_command_entry_is_its_command_number() {
+    // **SEC-05, criterion 9 of T-11-10.** `WM_DRAWITEM` can be forged by any process of
+    // our integrity level, so what our entries carry in `itemData` must be a number a
+    // handler merely looks up — never a pointer it would dereference. Read back out of
+    // Windows: the `itemData` of every command entry equals the command identifier of the
+    // same entry, and both equal what the builder recorded.
+    let _locale = product_strings(settings::Language::Ru);
+    let menu = Menu::build(true, true).expect("the menu must be creatable");
+
+    // The five command positions of the FR-91 block — everything but the two rules.
+    let command_positions = [0u32, 2, 3, 5, 6];
+
+    assert_eq!(menu.items().len(), command_positions.len());
+
+    for (item, position) in menu.items().iter().zip(command_positions) {
+        let identifier = command_at(menu.handle(), position);
+        let data = item_data_at(menu.handle(), position);
+
+        println!("{position}: id={identifier:#06x} itemData={data:#x}");
+
+        assert_eq!(
+            identifier, item.command,
+            "the command identifier of entry {position} is the builder's"
+        );
+        assert_eq!(
+            data,
+            usize::try_from(identifier).expect("a command fits in a usize"),
+            "SEC-05: itemData of entry {position} is the command number, nothing else"
+        );
+    }
+}
+
+#[test]
+fn measure_and_draw_are_ignored_while_no_menu_of_ours_is_on_the_screen() {
+    // **SEC-05, criterion 10 of T-11-10.** `WM_MEASUREITEM` and `WM_DRAWITEM` are handled
+    // only while the program itself holds the menu on the screen. This tray has never
+    // shown one, so the gate is down for the whole test, and both messages must come back
+    // `Ignored` — like everything foreign.
+    let window = TestWindow::new();
+    let home = TestDir::new("od_gate");
+    let mut tray = install(&window, &home);
+
+    // A null lParam first: the handler must refuse before looking at any pointer.
+    assert_eq!(
+        tray.handle_message(WM_MEASUREITEM, WPARAM(0), LPARAM(0)),
+        Reaction::Ignored,
+        "WM_MEASUREITEM with the gate down"
+    );
+    assert_eq!(
+        tray.handle_message(WM_DRAWITEM, WPARAM(0), LPARAM(0)),
+        Reaction::Ignored,
+        "WM_DRAWITEM with the gate down"
+    );
+
+    // A well-formed forgery next — a real `MEASUREITEMSTRUCT` naming a real command,
+    // exactly what a process of our integrity level could send. The gate, not the shape
+    // of the structure, is what refuses it; and the structure must come back untouched.
+    let mut forged = MEASUREITEMSTRUCT {
+        CtlType: ODT_MENU,
+        CtlID: 0,
+        itemID: tray::CMD_TOGGLE,
+        itemWidth: 0xDEAD,
+        itemHeight: 0xBEEF,
+        itemData: usize::try_from(tray::CMD_TOGGLE).expect("a command fits in a usize"),
+    };
+
+    let reaction = tray.handle_message(
+        WM_MEASUREITEM,
+        WPARAM(0),
+        LPARAM((&raw mut forged) as isize),
+    );
+
+    println!("forged WM_MEASUREITEM -> {reaction:?}");
+
+    assert_eq!(reaction, Reaction::Ignored, "the gate is down: not ours");
+    assert_eq!(
+        (forged.itemWidth, forged.itemHeight),
+        (0xDEAD, 0xBEEF),
+        "and nothing was written into the forgery"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -646,19 +761,35 @@ fn item_count(menu: HMENU) -> i32 {
     unsafe { GetMenuItemCount(Some(menu)) }
 }
 
-/// `GetMenuStringW` on one entry, by position. Empty for a rule.
-fn label_at(menu: HMENU, position: u32) -> String {
-    let mut buffer = [0u16; 256];
+/// `GetMenuItemInfoW(MIIM_DATA)` on one entry, by position — what Windows really stored as
+/// the entry's `itemData`, which SEC-05 requires to be a command number and nothing else.
+fn item_data_at(menu: HMENU, position: u32) -> usize {
+    let mut info = MENUITEMINFOW {
+        cbSize: u32::try_from(size_of::<MENUITEMINFOW>()).expect("the size fits in a u32"),
+        fMask: MIIM_DATA,
+        ..Default::default()
+    };
 
-    // SAFETY: `menu` is a live menu owned by the calling frame. `buffer` is owned here and
-    // is the only thing the call writes to; its length is what bounds the write, and the
-    // slice is passed with that length. `MF_BYPOSITION` makes the second argument an index
-    // rather than a command identifier.
-    let copied = unsafe { GetMenuStringW(menu, position, Some(&mut buffer), MF_BYPOSITION) };
+    // SAFETY: `menu` is a live menu owned by the calling frame; `info` is a live local
+    // whose `cbSize` describes it, and `MIIM_DATA` asks the call to write only
+    // `dwItemData`. `true` makes the second argument an index rather than a command.
+    unsafe { GetMenuItemInfoW(menu, position, true, &mut info) }
+        .expect("the entry must be readable");
 
-    let copied = usize::try_from(copied).unwrap_or(0);
+    info.dwItemData
+}
 
-    String::from_utf16_lossy(&buffer[..copied])
+/// `GetMenuItemID` on one entry, by position.
+fn command_at(menu: HMENU, position: u32) -> u32 {
+    // SAFETY: `menu` is a live menu owned by the calling frame; the call reads no memory
+    // of ours and returns `0xFFFFFFFF` for a position that does not exist, which no
+    // command of the crate equals.
+    unsafe {
+        GetMenuItemID(
+            menu,
+            i32::try_from(position).expect("a position fits in an i32"),
+        )
+    }
 }
 
 /// The `MF_*` flags of one entry, by position.
@@ -677,4 +808,9 @@ fn is_separator(menu: HMENU, position: u32) -> bool {
 /// Whether the entry at `position` carries a check mark.
 fn is_checked(menu: HMENU, position: u32) -> bool {
     flags_at(menu, position).0 & MF_CHECKED.0 != 0
+}
+
+/// Whether the entry at `position` is owner-drawn — FR-92а, task T-11-10.
+fn is_owner_drawn(menu: HMENU, position: u32) -> bool {
+    flags_at(menu, position).0 & MF_OWNERDRAW.0 != 0
 }
