@@ -287,7 +287,7 @@ pub fn resolve(setting: ThemeSetting, system_light: bool) -> &'static Palette {
 /// A `WM_CTLCOLOR*` handler answers with an `HBRUSH`, and that brush must outlive every
 /// paint that uses it — a handler cannot create one per message and delete it on the way
 /// out. Somebody has to own the brushes for as long as a palette is on screen, and this
-/// type is that somebody: seven brushes for the palette fields the handlers of tasks
+/// type is that somebody: eight brushes for the palette fields the handlers of tasks
 /// T-11-4…T-11-10 fill areas with.
 ///
 /// # Where it lives — section 6.1
@@ -322,6 +322,9 @@ pub struct Brushes {
     button_border: HBRUSH,
     /// [`Palette::accent_bg`] — face of the accented default button (task T-11-5a).
     accent_bg: HBRUSH,
+    /// [`Palette::box_border`] — frame of an unchecked owner-drawn check box or radio
+    /// button (task T-11-5b): `FrameRect` takes a brush, not a colour.
+    box_border: HBRUSH,
 }
 
 impl Brushes {
@@ -336,7 +339,7 @@ impl Brushes {
     /// `None` and keeps its previous set.
     pub fn new(palette: &Palette) -> Option<Self> {
         // SAFETY: `CreateSolidBrush` takes one colour by value, reads no memory of ours
-        // and returns a handle. Every handle is examined below; the seven become the
+        // and returns a handle. Every handle is examined below; the eight become the
         // property of the returned value and are freed exactly once, in `Drop`.
         let handles = unsafe {
             [
@@ -347,6 +350,7 @@ impl Brushes {
                 CreateSolidBrush(palette.sel_bg),
                 CreateSolidBrush(palette.button_border),
                 CreateSolidBrush(palette.accent_bg),
+                CreateSolidBrush(palette.box_border),
             ]
         };
 
@@ -379,6 +383,7 @@ impl Brushes {
             sel_bg,
             button_border,
             accent_bg,
+            box_border,
         ] = handles;
 
         Some(Self {
@@ -389,6 +394,7 @@ impl Brushes {
             sel_bg,
             button_border,
             accent_bg,
+            box_border,
         })
     }
 
@@ -426,6 +432,11 @@ impl Brushes {
     pub fn accent_bg(&self) -> HBRUSH {
         self.accent_bg
     }
+
+    /// The brush of [`Palette::box_border`], borrowed — the owner frees it, nobody else.
+    pub fn box_border(&self) -> HBRUSH {
+        self.box_border
+    }
 }
 
 impl Drop for Brushes {
@@ -438,6 +449,7 @@ impl Drop for Brushes {
             self.sel_bg,
             self.button_border,
             self.accent_bg,
+            self.box_border,
         ] {
             // SAFETY: every field came from a successful `CreateSolidBrush` in `new` and
             // is freed exactly once: the type is neither `Copy` nor `Clone`, the fields

@@ -1040,6 +1040,139 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
 }
 
 // =========================================================================================
+// FR-92а — the owner-drawn check boxes and radio buttons: the closed glyph table.
+// Task T-11-5b.
+// =========================================================================================
+//
+// Criterion 9: the mapping «(вид, взведён, запрещён) → роли красок глифа» is a pure
+// function, closed here by the full 2×2×2 table — two kinds (check box, radio button) ×
+// two check states × two enablements. The drawing half needs a live dialog and is checked
+// by the controller on the real window at acceptance, along with clicks, Space and the
+// arrow keys.
+
+use lang_switcher::settings::{
+    GlyphColors, GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole,
+};
+
+#[test]
+fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
+    use GlyphFillRole as Fill;
+    use GlyphFrameRole as Frame;
+    use GlyphKind as Kind;
+    use GlyphMarkRole as Mark;
+    use GlyphTextRole as Ink;
+
+    // Every cell of the input space, with the whole expected answer beside it:
+    // - the checked, enabled check box is the one cell the accent covers whole — accent
+    //   fill edge to edge, accent-ink check mark, no frame;
+    // - the checked, enabled radio keeps the field ground and shows the accent as the
+    //   dot — an accent-filled circle would hide an accent dot;
+    // - disabling quenches the accent (the precedent of the button table): a checked but
+    //   disabled glyph drops to the box_border mark on the field ground, and the caption
+    //   ink goes muted with it;
+    // - every unchecked cell is the quiet ground itself: field fill, box_border frame,
+    //   no mark.
+    let table: [(Kind, bool, bool, GlyphColors); 8] = [
+        (
+            Kind::CheckBox,
+            true,
+            false,
+            GlyphColors {
+                fill: Fill::AccentBg,
+                frame: None,
+                mark: Some(Mark::AccentFg),
+                text: Ink::Text,
+            },
+        ),
+        (
+            Kind::CheckBox,
+            false,
+            false,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: None,
+                text: Ink::Text,
+            },
+        ),
+        (
+            Kind::CheckBox,
+            true,
+            true,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: Some(Mark::BoxBorder),
+                text: Ink::TextMuted,
+            },
+        ),
+        (
+            Kind::CheckBox,
+            false,
+            true,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: None,
+                text: Ink::TextMuted,
+            },
+        ),
+        (
+            Kind::RadioButton,
+            true,
+            false,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: Some(Mark::AccentBg),
+                text: Ink::Text,
+            },
+        ),
+        (
+            Kind::RadioButton,
+            false,
+            false,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: None,
+                text: Ink::Text,
+            },
+        ),
+        (
+            Kind::RadioButton,
+            true,
+            true,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: Some(Mark::BoxBorder),
+                text: Ink::TextMuted,
+            },
+        ),
+        (
+            Kind::RadioButton,
+            false,
+            true,
+            GlyphColors {
+                fill: Fill::FieldBg,
+                frame: Some(Frame::BoxBorder),
+                mark: None,
+                text: Ink::TextMuted,
+            },
+        ),
+    ];
+
+    for (kind, checked, disabled, expected) in table {
+        assert_eq!(
+            settings::glyph_color_roles(kind, checked, disabled),
+            expected,
+            "{kind:?}, checked = {checked}, disabled = {disabled}"
+        );
+    }
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //
@@ -1327,6 +1460,76 @@ fn the_nine_buttons_of_the_dialog_are_owner_drawn() {
             style & 0x0001_0000,
             0,
             "«{what}» ({id}) must keep WS_TABSTOP; the style is {style:#010x}"
+        );
+    }
+}
+
+// Criterion 10 of T-11-5b — read out of the **built** `LangSwitcher.exe`, exactly as the
+// nine buttons above. The same ⚠ applies: `BS_OWNERDRAW` (0x0B) is a button *type* in the
+// low nibble, so the check is equality of the nibble and not a bit test — and here the
+// former types were `BS_AUTOCHECKBOX` (0x03) and `BS_AUTORADIOBUTTON` (0x09), both of
+// which a bit test against 0x0B would also pass.
+#[test]
+fn the_eight_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The three check boxes and five radio buttons of FR-92, by their actual identifiers;
+    // the third column says which of them open a WS_GROUP run. The list-view ticks of the
+    // cycle list are not here — they belong to task T-11-7.
+    const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 8] = [
+        (1001, "Запускать при входе в систему", false),
+        (1020, "Пара", true),
+        (1021, "Несколько раскладок", false),
+        (1029, "Автоматически (рекомендуется)", true),
+        (1030, "Backspace", false),
+        (1031, "Выделение (совместимость)", false),
+        (1040, "Конвертировать выделенный текст", false),
+        (1060, "Вести журнал", false),
+    ];
+
+    for (id, what, opens_group) in OWNER_DRAWN_GLYPHS {
+        let style = template
+            .styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("the dialog has no control {id} — «{what}»"));
+
+        println!("«{what}» ({id}): style {style:#010x}");
+
+        assert_eq!(
+            style & 0x0F,
+            0x0B,
+            "«{what}» ({id}) must carry BS_OWNERDRAW as its button type — task T-11-5b; \
+             the style is {style:#010x}"
+        );
+
+        // BS_NOTIFY (0x4000) is load-bearing: without it a button sends no BN_SETFOCUS,
+        // and BN_SETFOCUS is what returns the arrow-key self-checking of the radio
+        // groups in src\settings.rs.
+        assert_ne!(
+            style & 0x4000,
+            0,
+            "«{what}» ({id}) must carry BS_NOTIFY; the style is {style:#010x}"
+        );
+
+        assert_ne!(
+            style & 0x0001_0000,
+            0,
+            "«{what}» ({id}) must keep WS_TABSTOP; the style is {style:#010x}"
+        );
+
+        // WS_GROUP (0x00020000) must sit exactly where it sat before the task — on the
+        // opener of each radio run and nowhere else among the eight: the ranges
+        // CheckRadioButton walks and the arrow-key navigation both end at the *next*
+        // control carrying WS_GROUP, so a lost opener merges two groups and an extra one
+        // splits a group in half.
+        assert_eq!(
+            style & 0x0002_0000 != 0,
+            opens_group,
+            "«{what}» ({id}) must {} WS_GROUP; the style is {style:#010x}",
+            if opens_group { "keep" } else { "not gain" }
         );
     }
 }

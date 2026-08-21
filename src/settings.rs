@@ -65,13 +65,14 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+    COLORREF, ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DrawFocusRect, DrawTextW, FillRect, FrameRect, HDC,
-    InvalidateRect, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SetBkColor,
-    SetBkMode, SetTextColor, TRANSPARENT,
+    CreatePen, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawFocusRect,
+    DrawTextW, Ellipse, FillRect, FrameRect, GetStockObject, HBRUSH, HDC, InvalidateRect, LineTo,
+    MoveToEx, NULL_PEN, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -91,21 +92,21 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
-    VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
-    VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
-    VK_SCROLL, VK_SHIFT, VK_SNAPSHOT,
+    VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU,
+    VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RIGHT,
+    VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_UP,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS,
-    DM_SETDEFID, DefWindowProcW, DialogBoxParamW, EndDialog, GWLP_USERDATA, GWLP_WNDPROC,
-    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW,
-    IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
-    LB_GETTEXTLEN, LB_RESETCONTENT, PostMessageW, SW_SHOWNORMAL, SendDlgItemMessageW,
-    SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM,
-    WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WNDPROC,
+    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL,
+    CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DefWindowProcW, DialogBoxParamW, EndDialog,
+    GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
+    GetParent, GetWindowLongPtrW, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, PostMessageW, SW_SHOWNORMAL,
+    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DRAWITEM, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2474,6 +2475,149 @@ pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> Button
     }
 }
 
+/// The two kinds of owner-drawn glyph element — FR-92а, task T-11-5b.
+///
+/// The kind decides the shape of the glyph: a check box is the 13×13 square with the
+/// two-stroke check mark, a radio button is the circle with the dot. It is also the first
+/// axis of the closed 2×2×2 table of [`glyph_color_roles`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphKind {
+    /// The three check boxes of the dialog.
+    CheckBox,
+    /// The five radio buttons — the mode pair and the three replacement methods.
+    RadioButton,
+}
+
+/// What the box or circle of the glyph is filled with, named as the palette field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphFillRole {
+    /// [`theme::Palette::field_bg`] — the quiet ground of every glyph but one.
+    FieldBg,
+    /// [`theme::Palette::accent_bg`] — the checked, enabled check box, filled whole.
+    AccentBg,
+}
+
+/// The frame of the glyph. One variant on purpose, exactly as [`ButtonBorderRole`]: the
+/// closed table frames every framed cell with the same [`theme::Palette::box_border`], and
+/// a second frame colour cannot appear without widening this enum first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphFrameRole {
+    /// [`theme::Palette::box_border`] — the field the palette names for exactly this.
+    BoxBorder,
+}
+
+/// The mark inside a checked glyph — the check strokes of a box, the dot of a radio —
+/// named as the palette field it is cut from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphMarkRole {
+    /// [`theme::Palette::accent_fg`] — the check mark over the accent-filled box.
+    AccentFg,
+    /// [`theme::Palette::accent_bg`] — the dot of a checked, enabled radio button.
+    AccentBg,
+    /// [`theme::Palette::box_border`] — the muted mark of a checked but disabled glyph.
+    BoxBorder,
+}
+
+/// The ink of the caption to the right of the glyph, named as the palette field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphTextRole {
+    /// [`theme::Palette::text`] — the ordinary caption.
+    Text,
+    /// [`theme::Palette::text_muted`] — the caption of a disabled element (the method
+    /// radios are the ones actually seen grey, under the «Пара» mode).
+    TextMuted,
+}
+
+/// Fill, frame, mark and caption ink of one owner-drawn glyph element — what
+/// [`glyph_color_roles`] answers and the whole of what the drawing half needs to choose
+/// colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlyphColors {
+    /// What the box or circle is filled with.
+    pub fill: GlyphFillRole,
+    /// The single-pixel frame — `None` for the one cell the accent fill covers whole.
+    pub frame: Option<GlyphFrameRole>,
+    /// The mark of a checked glyph — `None` while unchecked.
+    pub mark: Option<GlyphMarkRole>,
+    /// What the caption is drawn with.
+    pub text: GlyphTextRole,
+}
+
+/// The colour roles of one glyph in one state — FR-92а, task T-11-5b, the pure half of the
+/// glyph drawing, closed by a 2×2×2 table test: флажок/переключатель × взведён/снят ×
+/// разрешён/запрещён.
+///
+/// Roles and not colours, exactly as [`button_color_roles`] before it: not a single colour
+/// number enters this module — §6.2 gives every palette value to `theme` alone.
+///
+/// The shape of the table:
+/// - **the checked, enabled check box** is the one cell the accent covers whole: `accent_bg`
+///   fill edge to edge, `accent_fg` check mark, and no frame — the task words it so;
+/// - **the checked, enabled radio** keeps the quiet ground and shows the accent as the dot:
+///   an accent-filled circle would hide an accent dot, so the accent moves inside;
+/// - **запрещённость гасит акцент**, the precedent [`button_color_roles`] set: a disabled
+///   element must not advertise itself, so a checked-but-disabled glyph drops to the
+///   `box_border` mark on the ordinary ground — still readable as checked, no longer loud;
+/// - every other cell is the quiet ground itself: `field_bg` fill, `box_border` frame,
+///   no mark.
+///
+/// Focus is deliberately absent here, as it is in [`button_color_roles`]: `ODS_FOCUS`
+/// changes no colour — it adds the dotted `DrawFocusRect` frame around the caption, and
+/// that is the drawing half's business. The pressed state is absent too: the task's table
+/// is (вид, взведён, запрещён), and the glyph the eye needs to trust is the check state,
+/// not the length of a button press.
+pub fn glyph_color_roles(kind: GlyphKind, checked: bool, disabled: bool) -> GlyphColors {
+    let text = if disabled {
+        GlyphTextRole::TextMuted
+    } else {
+        GlyphTextRole::Text
+    };
+
+    if checked && !disabled {
+        return match kind {
+            GlyphKind::CheckBox => GlyphColors {
+                fill: GlyphFillRole::AccentBg,
+                frame: None,
+                mark: Some(GlyphMarkRole::AccentFg),
+                text,
+            },
+            GlyphKind::RadioButton => GlyphColors {
+                fill: GlyphFillRole::FieldBg,
+                frame: Some(GlyphFrameRole::BoxBorder),
+                mark: Some(GlyphMarkRole::AccentBg),
+                text,
+            },
+        };
+    }
+
+    GlyphColors {
+        fill: GlyphFillRole::FieldBg,
+        frame: Some(GlyphFrameRole::BoxBorder),
+        // A checked glyph keeps its mark when disabled — the state stays readable — but
+        // the mark goes muted with everything else.
+        mark: if checked {
+            Some(GlyphMarkRole::BoxBorder)
+        } else {
+            None
+        },
+        text,
+    }
+}
+
+/// The glyph kind of one control identifier, `None` for everything that is not one of the
+/// eight owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
+///
+/// The single place the eight are listed on the drawing side; the `WM_DRAWITEM` handler
+/// branches on this before its push-button path.
+fn glyph_kind(control: i32) -> Option<GlyphKind> {
+    match control {
+        IDC_AUTOSTART | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED => Some(GlyphKind::CheckBox),
+        IDC_MODE_PAIR | IDC_MODE_CYCLE | IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE
+        | IDC_METHOD_SELECTION => Some(GlyphKind::RadioButton),
+        _ => None,
+    }
+}
+
 /// Whether the non-client title bar is to be dark for this palette — FR-92а, task T-11-4.
 ///
 /// `theme::resolve` answers one of two `&'static` palettes, so identity with
@@ -2651,7 +2795,9 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
     brush.0 as isize
 }
 
-/// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a.
+/// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a; since task T-11-5b
+/// the eight check boxes and radio buttons arrive here too, recognised by identifier and
+/// handed to [`draw_glyph_element`] before the push-button path below.
 ///
 /// # SEC-05, last sentence, held to the letter
 ///
@@ -2718,6 +2864,16 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     let pressed = item_state.0 & ODS_SELECTED.0 != 0;
     let disabled = item_state.0 & ODS_DISABLED.0 != 0;
     let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
+
+    // FR-92а, task T-11-5b: the check boxes and radio buttons, by identifier, ahead of the
+    // push-button path. Everything they take out of the message is already on this frame —
+    // the same five fields, nothing else; the check state is deliberately *not* a field of
+    // the message at all, it is read from the dialog's own control (see the function).
+    if let Some(kind) = glyph_kind(control) {
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
+        // only to paint into for the length of this send.
+        return unsafe { draw_glyph_element(hwnd, kind, control, dc, rect, disabled, focused) };
+    }
 
     // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
     // borrow of the state ends before the DC is touched, and what leaves the closure is
@@ -2821,6 +2977,324 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     // TRUE — the button is drawn.
     1
+}
+
+/// Side of the check-box square and diameter of the radio circle, in pixels — the 13×13
+/// the task names, which is the size the native glyph draws at 96 DPI.
+const GLYPH_SIZE: i32 = 13;
+
+/// Gap between the right edge of the glyph and the caption, in pixels.
+const GLYPH_TEXT_GAP: i32 = 5;
+
+/// Inset of the radio dot from the circle, in pixels.
+const GLYPH_DOT_INSET: i32 = 4;
+
+/// One glyph mark, resolved to the currency its drawing needs: the check strokes take an
+/// ink for a transient pen, the dot takes a live brush of the dialog's state.
+enum GlyphMarkPaint {
+    /// The two strokes of a check mark, in this ink.
+    Check(COLORREF),
+    /// The dot of a radio button, filled with this brush.
+    Dot(HBRUSH),
+}
+
+/// Draws one owner-drawn check box or radio button — FR-92а, task T-11-5b.
+///
+/// # SEC-05, last sentence, held to the letter
+///
+/// Nothing here reads the message: [`on_draw_item`] copied the five allowed fields of
+/// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
+/// `rect` to paint within. The check state is deliberately *not* taken from the message
+/// either — `itemState` carries no check bit worth trusting and `itemData` is never read —
+/// it is the dialog's own `BM_GETCHECK` answer, read from its own control by identifier
+/// ([`is_checked`] → `IsDlgButtonChecked`), and the caption is the control's own text
+/// ([`get_text`] → `GetDlgItemTextW`). A forged message can therefore misdraw nothing but
+/// the rectangle it names.
+///
+/// # What is drawn
+///
+/// The glyph is a [`GLYPH_SIZE`]-sided square (check box) or circle (radio button) at the
+/// left edge of the rectangle, centred vertically; the colour choice is the closed table
+/// of [`glyph_color_roles`]. A checked box is filled whole with the accent and crossed by
+/// the two pen strokes of the check mark; an unchecked one is the field fill under the
+/// single-pixel `box_border` frame — `FrameRect` takes a brush, which is what the eighth
+/// brush of `theme::Brushes` exists for. The circle of a radio button is one `Ellipse` —
+/// outline of the frame ink, interior of the fill brush — and the checked dot is an inner
+/// `Ellipse` of the mark brush. The caption sits to the right in the dialog's own font
+/// (already selected into the DC), and focus adds the dotted `DrawFocusRect` frame around
+/// the caption — the caller already folded `ODS_NOFOCUSRECT` into `focused`, so the cue
+/// behaves as the native one does under the keyboard-cues setting.
+///
+/// Answers 1 — «drawn». 0 when the state is unreachable or `theme::Brushes::new` was
+/// refused at initialisation, for the reason [`on_draw_item`] gives: painting would need
+/// colour numbers this module is not allowed to hold (§6.2), and the refused-brushes
+/// dialog already lives degraded by the decision of T-11-4.
+///
+/// # Safety
+///
+/// Called from [`on_draw_item`] only, with the `hDC` and `rcItem` of the message it is
+/// inside of: both are owned by the dialog manager for the length of the send.
+unsafe fn draw_glyph_element(
+    hwnd: HWND,
+    kind: GlyphKind,
+    control: i32,
+    dc: HDC,
+    rect: RECT,
+    disabled: bool,
+    focused: bool,
+) -> isize {
+    // The dialog's own answer, not the message's: BM_GETCHECK of the very control the
+    // identifier names — the reading of one's own element the task words the rule around.
+    let checked = is_checked(hwnd, control);
+
+    // The colour choice, split from the painting as everywhere in this file: the borrow of
+    // the state ends before the DC is touched, and what leaves the closure is plain
+    // values — brushes the state keeps alive until the dialog ends, and inks.
+    //
+    // SAFETY: see the caller of `on_draw_item`.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            let colors = glyph_color_roles(kind, checked, disabled);
+
+            // The single place the glyph roles become brushes and colours of the resolved
+            // palette — the drawing below never sees a role.
+            let fill = match colors.fill {
+                GlyphFillRole::FieldBg => brushes.field_bg(),
+                GlyphFillRole::AccentBg => brushes.accent_bg(),
+            };
+
+            // Both currencies of the one frame role at once: `FrameRect` of the square
+            // takes the brush, the outline of the circle takes the ink for a pen.
+            let frame = colors
+                .frame
+                .map(|GlyphFrameRole::BoxBorder| (brushes.box_border(), palette.box_border));
+
+            let mark = colors.mark.map(|role| match kind {
+                GlyphKind::CheckBox => GlyphMarkPaint::Check(match role {
+                    GlyphMarkRole::AccentFg => palette.accent_fg,
+                    GlyphMarkRole::AccentBg => palette.accent_bg,
+                    GlyphMarkRole::BoxBorder => palette.box_border,
+                }),
+                GlyphKind::RadioButton => GlyphMarkPaint::Dot(match role {
+                    GlyphMarkRole::AccentBg => brushes.accent_bg(),
+                    GlyphMarkRole::BoxBorder => brushes.box_border(),
+                    // The closed table never marks a radio with the check-mark ink — the
+                    // 2×2×2 table test is what holds this arm unreachable. Answered with
+                    // the accent brush rather than a panic: a wrong dot colour would be a
+                    // cosmetic defect, a crash of the UI thread would not (NFR-13).
+                    GlyphMarkRole::AccentFg => brushes.accent_bg(),
+                }),
+            });
+
+            let ink = match colors.text {
+                GlyphTextRole::Text => palette.text,
+                GlyphTextRole::TextMuted => palette.text_muted,
+            };
+
+            Some((fill, frame, mark, ink))
+        })
+    };
+
+    let Some(Some((fill, frame, mark, ink))) = choice else {
+        return 0;
+    };
+
+    // The glyph: at the left edge, centred vertically, GLYPH_SIZE a side.
+    let glyph_top = rect.top + (rect.bottom - rect.top - GLYPH_SIZE) / 2;
+    let glyph = RECT {
+        left: rect.left,
+        top: glyph_top,
+        right: rect.left + GLYPH_SIZE,
+        bottom: glyph_top + GLYPH_SIZE,
+    };
+
+    // NFR-13, for every paint call below: each answers a success flag or a previous
+    // value, and every answer is deliberately dropped for the reason `on_draw_item` gives
+    // for its own — the manager never hands a dead DC, only a forged message could
+    // (SEC-05), and the right reaction to a forgery is indifference: no read-back, no
+    // `debug_assert` handing the forger a crash of a debug build, and no journal row for
+    // GDI refusals (reviews\T-11-1.md).
+    match kind {
+        GlyphKind::CheckBox => {
+            // SAFETY: `dc` and the rectangle are painted into for the length of this
+            // send; `fill` is a live brush of the dialog's state.
+            unsafe { FillRect(dc, &glyph, fill) };
+
+            if let Some((frame_brush, _)) = frame {
+                // SAFETY: as above; `frame_brush` is the live `box_border` brush — the
+                // single-pixel frame of the unchecked square.
+                unsafe { FrameRect(dc, &glyph, frame_brush) };
+            }
+
+            if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
+                draw_check_mark(dc, &glyph, mark_ink);
+            }
+        }
+        GlyphKind::RadioButton => {
+            paint_ellipse(dc, &glyph, frame.map(|(_, frame_ink)| frame_ink), fill);
+
+            if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
+                let dot = RECT {
+                    left: glyph.left + GLYPH_DOT_INSET,
+                    top: glyph.top + GLYPH_DOT_INSET,
+                    right: glyph.right - GLYPH_DOT_INSET,
+                    bottom: glyph.bottom - GLYPH_DOT_INSET,
+                };
+
+                paint_ellipse(dc, &dot, None, dot_brush);
+            }
+        }
+    }
+
+    // The caption, from the dialog's own control by identifier — never from the message.
+    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
+    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
+
+    if !caption.is_empty() {
+        // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the
+        // DC and touch no memory of this process.
+        unsafe { SetBkMode(dc, TRANSPARENT) };
+        // SAFETY: as above.
+        unsafe { SetTextColor(dc, ink) };
+
+        let mut text_rect = RECT {
+            left: rect.left + GLYPH_SIZE + GLYPH_TEXT_GAP,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        };
+
+        // SAFETY: `caption` and `text_rect` are live locals of this frame; the format has
+        // no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
+        // writes only pixels of the DC. The dialog's font is already selected into the DC
+        // the manager hands over — no font work here.
+        unsafe { DrawTextW(dc, &mut caption, &mut text_rect, DT_VCENTER | DT_SINGLELINE) };
+
+        if focused {
+            // The dotted frame goes around the caption, not the glyph — as the native
+            // control draws it. The width is measured with `DT_CALCRECT` into a scratch
+            // rectangle; the height is the control's own, the caption being vertically
+            // centred in it. (An element with no caption gets no cue — none of the eight
+            // is captionless, and a frame around nothing would be noise.)
+            let mut measured = text_rect;
+
+            // SAFETY: as above — `DT_CALCRECT` writes the measured extent into
+            // `measured`, a live local of this frame, and draws nothing.
+            unsafe { DrawTextW(dc, &mut caption, &mut measured, DT_CALCRECT | DT_SINGLELINE) };
+
+            let focus_rect = RECT {
+                left: text_rect.left - 1,
+                top: rect.top,
+                right: (measured.right + 2).min(rect.right),
+                bottom: rect.bottom,
+            };
+
+            // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
+            // comment above the glyph painting.
+            //
+            // SAFETY: `dc` is the DC of the message and `focus_rect` is a live local of
+            // this frame; the call keeps no pointer.
+            let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+        }
+    }
+
+    // TRUE — the element is drawn.
+    1
+}
+
+/// Two strokes of the check mark, with a transient pen of `ink` — FR-92а, task T-11-5b.
+///
+/// The pen lives for exactly this call: pens are not part of `theme::Brushes` — that owner
+/// exists because `WM_CTLCOLOR*` answers must outlive the paint, which nothing here needs.
+/// Created, selected, drawn with, deselected, deleted; the refusal of `CreatePen` skips
+/// the mark and nothing else (NFR-13: examined; the glyph stays a filled square, the state
+/// remains readable by the fill alone until the next repaint).
+fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF) {
+    // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
+    // frame until the `DeleteObject` below.
+    let pen = unsafe { CreatePen(PS_SOLID, 2, ink) };
+
+    if pen.is_invalid() {
+        return;
+    }
+
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of;
+    // `pen` is the live pen just made. The previous pen is kept and restored below.
+    let previous = unsafe { SelectObject(dc, pen.into()) };
+
+    // The two lines of the task: down-stroke into the corner, long stroke up and out.
+    // Coordinates are within the 13×13 glyph, chosen for the 2-pixel pen.
+    //
+    // SAFETY: plain coordinates into a live DC; no memory of ours is touched. The answers
+    // are dropped for the NFR-13 reason the caller states for all its paint calls.
+    let _ = unsafe { MoveToEx(dc, glyph.left + 3, glyph.top + 6, None) };
+    let _ = unsafe { LineTo(dc, glyph.left + 5, glyph.top + 9) };
+    let _ = unsafe { LineTo(dc, glyph.left + 10, glyph.top + 3) };
+
+    // SAFETY: `previous` is the pen that was in the DC a moment ago; putting it back ends
+    // this function's use of the DC.
+    unsafe { SelectObject(dc, previous) };
+
+    // SAFETY: `pen` was created above, handed to nobody — deselected the line before —
+    // and freed exactly once, here. The `BOOL` is dropped: a refusal would mean the
+    // handle was not a live GDI object of this process, which the ownership above makes
+    // unreachable, and the paint path deliberately carries no `debug_assert` (SEC-05).
+    let _ = unsafe { DeleteObject(pen.into()) };
+}
+
+/// One ellipse with an explicit outline and interior — FR-92а, task T-11-5b.
+///
+/// `outline` is the ink of a transient pen for the circle of a radio button; `None`
+/// selects the stock `NULL_PEN` — no outline, interior only, which is how the dot is
+/// painted. `fill` is a live brush of the dialog's state. The transient pen is owned for
+/// exactly this call, as in [`draw_check_mark`]; a refused `CreatePen` skips the ellipse
+/// (NFR-13: examined — better no circle for one paint than a circle in whatever pen the
+/// DC happens to hold).
+fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) {
+    let pen = match outline {
+        Some(ink) => {
+            // SAFETY: takes plain values, reads no memory of ours, answers a handle owned
+            // by this frame until the `DeleteObject` below.
+            let pen = unsafe { CreatePen(PS_SOLID, 1, ink) };
+
+            if pen.is_invalid() {
+                return;
+            }
+
+            Some(pen)
+        }
+        None => None,
+    };
+
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of; the
+    // handle selected is either the live pen just made or a stock object, which is owned
+    // by the system and never freed by anybody. The previous pen is restored below.
+    let previous_pen = match pen {
+        Some(pen) => unsafe { SelectObject(dc, pen.into()) },
+        None => unsafe { SelectObject(dc, GetStockObject(NULL_PEN)) },
+    };
+
+    // SAFETY: as above; `fill` is a live brush of the dialog's state.
+    let previous_brush = unsafe { SelectObject(dc, fill.into()) };
+
+    // SAFETY: plain coordinates into a live DC. The answer is dropped for the NFR-13
+    // reason the caller states for all its paint calls.
+    let _ = unsafe { Ellipse(dc, area.left, area.top, area.right, area.bottom) };
+
+    // SAFETY: both handles were in the DC a moment ago; putting them back ends this
+    // function's use of the DC.
+    unsafe { SelectObject(dc, previous_brush) };
+    unsafe { SelectObject(dc, previous_pen) };
+
+    if let Some(pen) = pen {
+        // SAFETY: `pen` was created above, deselected the line before, and freed exactly
+        // once, here. The `BOOL` is dropped — see `draw_check_mark`.
+        let _ = unsafe { DeleteObject(pen.into()) };
+    }
 }
 
 /// Puts the interface strings of the locale in force into the window — FR-94.
@@ -3107,12 +3581,86 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.diagnostics.log_enabled = is_checked(hwnd, IDC_LOG_ENABLED);
 }
 
+/// The self-switching `BS_OWNERDRAW` displaced, returned by hand — FR-92а, task T-11-5b.
+///
+/// `BS_OWNERDRAW` is a button *type*: it displaced `BS_AUTOCHECKBOX` and
+/// `BS_AUTORADIOBUTTON` in the template, and the flip on a click and on the arrow keys
+/// died with them. This function is that behaviour, spelled out again:
+///
+/// - **a check box flips on a click**: `BM_SETCHECK` of the opposite of its own state,
+///   then a repaint — `BM_SETCHECK` repaints no owner-drawn button. `BN_DBLCLK` counts as
+///   the click it is: an owner-drawn button folds the second press of a double click into
+///   `BN_DBLCLK` instead of a second `BN_CLICKED`, and the automatic type answered both
+///   presses with a toggle — dropping one would make a fast double click flip the box and
+///   leave it flipped;
+/// - **a radio button checks itself and unchecks its group**: `CheckRadioButton` over the
+///   very ranges the rest of the dialog already uses — `IDC_MODE_PAIR..IDC_MODE_CYCLE`
+///   and `IDC_METHOD_AUTO..IDC_METHOD_SELECTION`, the template's `WS_GROUP` runs — then a
+///   repaint of the whole range: the neighbour that just lost the dot must lose it on the
+///   same message;
+/// - **`BN_SETFOCUS` is the arrow keys**: the dialog manager answers an arrow key inside
+///   a `WS_GROUP` run by moving the focus, and an automatic radio button then checked
+///   itself on arrival — `BS_NOTIFY` in the template is what makes the arrival audible
+///   here. Answered **only while an arrow key is actually down**: focus also arrives by
+///   Tab, and Tab enters the group at its first tab stop, not at the checked element —
+///   nothing juggles `WS_TABSTOP` for a non-automatic type the way `BM_SETCHECK` does for
+///   an automatic one — so checking on every arrival would silently move the user's
+///   choice to the first radio of the group on a mere walk through the dialog.
+///
+/// The check state lives in the controls themselves: `BM_GETCHECK`/`BM_SETCHECK` and
+/// `CheckRadioButton` store and answer it for owner-drawn buttons exactly as they did for
+/// the automatic types, so [`set_check`], [`is_checked`] and [`check_radio`] are untouched
+/// and everything that reads the dialog keeps reading the truth.
+fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
+    let notification = u32::from(notification);
+    let clicked = notification == BN_CLICKED || notification == BN_DBLCLK;
+
+    // A radio answers a click, and it answers the focus arrival an arrow key caused — the
+    // two ways the automatic type checked itself. `key_is_down` is queue-synchronised, so
+    // the answer is the state as of the keystroke whose focus move is being handled.
+    let radio_checks = clicked || (notification == BN_SETFOCUS && arrow_key_is_down());
+
+    match control {
+        IDC_AUTOSTART | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED if clicked => {
+            set_check(hwnd, control, !is_checked(hwnd, control));
+            repaint_control(hwnd, control);
+        }
+
+        IDC_MODE_PAIR | IDC_MODE_CYCLE if radio_checks => {
+            check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, control);
+            repaint_control_range(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE);
+        }
+
+        IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE | IDC_METHOD_SELECTION if radio_checks => {
+            check_radio(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION, control);
+            repaint_control_range(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION);
+        }
+
+        _ => {}
+    }
+}
+
+/// Whether one of the four arrow keys is down right now — the keys the dialog manager
+/// walks a `WS_GROUP` run with. The same queue-synchronised [`key_is_down`] the capture
+/// uses, for the same reason: the state wanted is the one of the keystroke being handled.
+fn arrow_key_is_down() -> bool {
+    [VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN]
+        .into_iter()
+        .any(key_is_down)
+}
+
 /// One command from the dialog.
 ///
 /// # Safety
 ///
 /// Called from [`dialog_proc`] only, with the `hwnd` of the dialog it belongs to.
-unsafe fn on_command(hwnd: HWND, control: i32, _notification: u16) {
+unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
+    // FR-92а, task T-11-5b. ⚠ First, before the match below reads anything: the flip of
+    // the self-switching must land before any logic that reads `is_checked` — the mode
+    // branch below reads the state of `IDC_MODE_CYCLE`, and it must see the state as this
+    // very click has just made it, not as it was before.
+    restore_self_switching(hwnd, control, notification);
+
     match control {
         // Applying and leaving are one operation followed by the other, which is why «ОК»
         // makes the same call «Применить» makes and then ends the dialog.
@@ -3997,6 +4545,34 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
     // SAFETY: `window` is the live control just found. The `BOOL` returned is the *previous*
     // state and not a success flag, so NFR-13 has nothing to check here.
     let _ = unsafe { EnableWindow(window, enabled) };
+}
+
+/// Repaints one control now — task T-11-5b: `BM_SETCHECK` changes no pixels of an
+/// owner-drawn button, so the flip of [`restore_self_switching`] asks for the repaint
+/// itself.
+fn repaint_control(hwnd: HWND, control: i32) {
+    // SAFETY: `hwnd` is the live dialog and `control` names a control of its template;
+    // the crate turns a missing control into an error, which is the `Ok` guard below.
+    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // NFR-13: examined in words and deliberately dropped — the call refuses only for a
+    // window that is not alive, this one was found the line above, and the journal has no
+    // row for GDI refusals (reviews\T-11-1.md).
+    //
+    // SAFETY: `window` is the live control just found; a null rectangle means its whole
+    // client area, and the call keeps no pointer.
+    let _ = unsafe { InvalidateRect(Some(window), None, true) };
+}
+
+/// Repaints every control of one contiguous identifier range — the radio ranges of task
+/// T-11-5b, the same runs `CheckRadioButton` walks.
+fn repaint_control_range(hwnd: HWND, first: i32, last: i32) {
+    for control in first..=last {
+        repaint_control(hwnd, control);
+    }
 }
 
 /// Limits how much text one edit control accepts.
