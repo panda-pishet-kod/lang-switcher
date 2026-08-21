@@ -25,7 +25,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use lang_switcher::layouts::LayoutId;
 use lang_switcher::switch::{
-    self, Failures, Machine, Method, Outcome, Scope, SwitchError, VERIFY_BUDGET_MS, VERIFY_POLL_MS,
+    self, Failures, FocusThread, Machine, Method, Outcome, Scope, SwitchError, VERIFY_BUDGET_MS,
+    VERIFY_POLL_MS,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -804,39 +805,147 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
 // Point 9 — FR-52
 // ---------------------------------------------------------------------------------------
 
-/// **Point 9, FR-52.** The layout is read by the expression the requirement writes:
-/// `GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), null))`.
+/// **Point 9, FR-52.** The layout is read of the thread that owns the window with the **keyboard
+/// focus**.
 ///
-/// The test computes that expression itself, from the same three functions, and compares. It
-/// cannot prove the module contains those three calls — that is a reading of the source, and it
-/// is in the report — but it does pin the *answer*: a re-implementation that read
-/// `GetKeyboardLayout(0)`, the calling thread's layout, would disagree as soon as the foreground
-/// window belongs to another process, which is the case while `cargo test` runs.
+/// ⚠ **This test was rewritten by task T-10-20, and it is the only existing test that task
+/// touched.** It was not adjusted to make new code pass — it was a transcription of FR-52's old
+/// text, `GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), null))`, and the user
+/// replaced that text in `SPEC.md` (commit `13bd084`) on the measurement of task T-10-19: the
+/// layout is a property **of a thread**, and in a packaged application of Windows 11 the
+/// foreground window and the window that receives the input are different threads of one process.
+/// A test that goes on asserting a requirement that no longer exists is not a check, it is a
+/// second copy of the defect. The behavioural tests of FR-10 and FR-11 were not touched by that
+/// task at all.
+///
+/// The test computes the requirement's new expression itself, from the same four functions, and
+/// compares. It cannot prove the module contains those calls — that is a reading of the source,
+/// and it is in the report — but it pins the *answer*. On this machine, while `cargo test` runs,
+/// the foreground window is a classic one whose two threads coincide, so this case alone would
+/// **not** tell the old reading from the new one; that is what
+/// [`fr_52_falls_back_to_the_foreground_thread_exactly_where_the_requirement_says_to`] and the
+/// bench detector of task T-10-20 are for.
 #[test]
-fn fr_52_reads_the_layout_of_the_thread_that_owns_the_foreground_window() {
+fn fr_52_reads_the_layout_of_the_thread_that_owns_the_focus_window() {
     use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+    };
 
-    // SAFETY: the three calls of FR-52, each taking values and returning a value, none of them
-    // writing through a pointer of ours. `None` asks `GetWindowThreadProcessId` for the thread
-    // id alone. A null foreground window yields thread zero, which is handled below.
+    // SAFETY: the calls of FR-52, each taking values and returning a value. `None` asks
+    // `GetWindowThreadProcessId` for the thread id alone, and `info` is a live, aligned
+    // `GUITHREADINFO` of this frame whose `cbSize` describes it — the contract `GetGUIThreadInfo`
+    // takes before it writes. A null foreground window yields thread zero, handled below.
     let expected = unsafe {
         let foreground = GetForegroundWindow();
 
         if foreground.is_invalid() {
             LayoutId::default()
         } else {
-            let thread = GetWindowThreadProcessId(foreground, None);
+            let front = GetWindowThreadProcessId(foreground, None);
 
-            if thread == 0 {
+            if front == 0 {
                 LayoutId::default()
             } else {
+                let mut info = GUITHREADINFO {
+                    cbSize: u32::try_from(size_of::<GUITHREADINFO>()).unwrap_or(0),
+                    ..Default::default()
+                };
+
+                // The requirement's own fallback: a refusal or an empty `hwndFocus` means the
+                // foreground thread, which is the behaviour that was there before.
+                let thread = if GetGUIThreadInfo(front, &raw mut info).is_err()
+                    || info.hwndFocus.is_invalid()
+                {
+                    front
+                } else {
+                    match GetWindowThreadProcessId(info.hwndFocus, None) {
+                        0 => front,
+                        focus => focus,
+                    }
+                };
+
                 LayoutId::from_raw(GetKeyboardLayout(thread).0 as usize)
             }
         }
     };
 
     assert_eq!(switch::current(), expected);
+}
+
+/// **FR-52, sentence 2 — the fallback, all three branches, driven rather than hoped for.**
+///
+/// ⭐ This test exists because of a number in the review of task T-10-19: over **660 circles and
+/// three applications** `GetGUIThreadInfo` refused **0 times** and answered «no focus window» **0
+/// times**. Neither fallback branch can be reached by running the program, so neither of them is
+/// known to work from any live measurement — and an untested fallback in a requirement that has
+/// already been got wrong four times is exactly the place the fifth mistake would live.
+///
+/// [`switch::reading_thread`] is the rule with the Win32 taken out of it, so all three cases are
+/// ordinary values here:
+///
+/// | `GetGUIThreadInfo` said | FR-52 says to read | asserted |
+/// |---|---|---|
+/// | a focus window on thread `F` | thread `F` | ✔ |
+/// | answered, `hwndFocus` empty | the foreground thread | ✔ |
+/// | refused | the foreground thread — *the previous behaviour* | ✔ |
+#[test]
+fn fr_52_falls_back_to_the_foreground_thread_exactly_where_the_requirement_says_to() {
+    const FOREGROUND: u32 = 4444;
+    const FOCUS: u32 = 7777;
+
+    assert_eq!(
+        switch::reading_thread(FOREGROUND, FocusThread::Thread(FOCUS)),
+        FOCUS,
+        "sentence 1: the thread of the window with the keyboard focus"
+    );
+
+    assert_eq!(
+        switch::reading_thread(FOREGROUND, FocusThread::NoFocus),
+        FOREGROUND,
+        "sentence 2, «hwndFocus пуст»: the foreground thread, the previous behaviour"
+    );
+
+    assert_eq!(
+        switch::reading_thread(FOREGROUND, FocusThread::Refused),
+        FOREGROUND,
+        "sentence 2, «GetGUIThreadInfo отказал»: the foreground thread, the previous behaviour"
+    );
+}
+
+/// ⚠ **The two fallbacks are different facts and stay different facts.**
+///
+/// They have the same *effect* — the foreground thread — and that is precisely the shape in which
+/// an `Option<u32>` would have collapsed them into one. A thread that has no focus window is a
+/// state of the machine; a call that refused is a failure of a call, and NFR-13 is about the
+/// second. This asserts that the type still tells them apart, so that a later simplification has
+/// to argue with a test rather than with a comment.
+#[test]
+fn the_two_fallbacks_of_fr_52_are_not_the_same_answer() {
+    assert_ne!(FocusThread::NoFocus, FocusThread::Refused);
+    assert_eq!(FocusThread::Thread(1), FocusThread::Thread(1));
+    assert_ne!(FocusThread::Thread(1), FocusThread::Thread(2));
+}
+
+/// **NFR-13 for the two calls FR-52 gained** — a refusal is counted, not swallowed.
+///
+/// The counters are the only trace either fallback leaves, and the review of T-10-19 named this
+/// as the thing to watch: a branch that has never once been seen in 660 circles is one whose
+/// first occurrence must not be silent. This checks the pair starts at zero and is reported
+/// through [`switch::failures`] like every other counter of the module.
+#[test]
+fn the_fallbacks_of_fr_52_have_counters_of_their_own() {
+    let _guard = counters();
+
+    let counted = switch::failures();
+
+    assert_eq!(counted.focus_probe_refused, 0);
+    assert_eq!(counted.focus_window_absent, 0);
+    assert_eq!(
+        counted,
+        Failures::default(),
+        "reset_failures covers the two new counters as well"
+    );
 }
 
 // ---------------------------------------------------------------------------------------

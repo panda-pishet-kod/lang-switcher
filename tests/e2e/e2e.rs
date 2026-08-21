@@ -126,6 +126,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-voice") => experiment_voice(arguments),
         Some("--experiment-phase") => experiment_phase(arguments),
         Some("--experiment-threads") => experiment_threads(arguments),
+        Some("--experiment-belief") => experiment_belief(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -676,6 +677,36 @@ fn experiment_latency(arguments: &[String]) -> std::process::ExitCode {
     };
 
     scenarios::experiment_latency(&context, presses, words)
+}
+
+/// ⭐ **Task T-10-20** — the detector of defect E, on the mechanism itself.
+///
+/// `--experiment-belief [кругов]`, where the number is circles **per side**: the mode runs both
+/// directions and both arms, so `60` is 120 circles of the experiment and 120 of the negative
+/// control, per application. The same split as every mode of this file: the arm builds the
+/// context, the detector lives in `scenarios.rs`. See [`scenarios::experiment_belief`] for what
+/// the two arms and the two applications each prove.
+fn experiment_belief(arguments: &[String]) -> std::process::ExitCode {
+    let reps = arguments
+        .get(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(60);
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_belief(&context, reps)
 }
 
 /// ⭐ **The program the console item of the sequence hosts** — task T-10-11.

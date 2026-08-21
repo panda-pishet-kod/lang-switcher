@@ -127,13 +127,14 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 #[cfg(debug_assertions)]
 use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
-use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
+// ⭐ Task T-10-20: the three calls FR-52 is made of are gone from this module. They lived here in
+// a second copy of `switch::current`, and keeping two copies of one requirement in step by hand
+// is what let four repairs of defect E go past both. See [`foreground_layout`].
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
-    GetMessageW, GetWindowThreadProcessId, HWND_MESSAGE, MB_ICONINFORMATION, MB_OK,
-    MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW,
-    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
+    MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
+    RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
+    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -1189,46 +1190,27 @@ fn layout_refresh_needed(observed: LayoutId, recorded: Option<LayoutId>) -> bool
     }
 }
 
-/// The keyboard layout of the window the user is typing into.
+/// The keyboard layout of the window the user is typing into — **FR-52**, asked of the one
+/// reader there is.
 ///
-/// Not `GetKeyboardLayout(0)`: that answers for the *calling* thread, and the input thread of
-/// this program never has the keyboard focus, so it would report whatever layout that thread
-/// happened to inherit and never change again.
+/// ⭐ **Task T-10-20 emptied this function of its own Win32 calls, and that is the point of it.**
+/// It used to be a second, hand-written copy of the same four calls that live in
+/// [`crate::switch::current`], and the two had to be kept in step by hand. FR-52 then changed —
+/// the layout is read of the thread that owns the **focus** window, not the foreground one — and
+/// a requirement that has to be re-implemented in two places is a requirement that will one day
+/// be implemented in one. Four repairs of defect E went past both copies. There is one reader
+/// now; this is a caller of it and nothing else.
+///
+/// Kept as a named function rather than inlined at its three call sites so that the *reason* the
+/// program asks — FR-04's stamp and the cache of FR-20/FR-21, not FR-50's verdict — still has a
+/// name in this module.
 ///
 /// A zero answer is not an error and is returned as [`LayoutId::default`], which no cache
 /// contains: the buffer then records strokes with their scan codes and no characters, which is
 /// the same outcome as a key the layouts have nothing on, and FR-23 carries such a stroke
 /// through conversion unchanged.
 fn foreground_layout() -> LayoutId {
-    // SAFETY: GetForegroundWindow takes no arguments, returns a handle by value and touches no
-    // memory of ours. A null result is documented — no window has the focus, which happens
-    // while the desktop is switching and on the secure desktop — and is handled below.
-    let foreground = unsafe { GetForegroundWindow() };
-
-    if foreground.is_invalid() {
-        // NFR-13: examined. Passing a null window on would get a thread id of zero, and zero
-        // means "the calling thread" to `GetKeyboardLayout`, which is the one answer that
-        // would be wrong rather than merely unknown.
-        return LayoutId::default();
-    }
-
-    // SAFETY: `foreground` is the handle the call above returned and was checked non-null.
-    // `None` for the process id is the documented way to ask for the thread id alone, and it
-    // is what makes this call write nothing back through a pointer of ours.
-    let thread = unsafe { GetWindowThreadProcessId(foreground, None) };
-
-    if thread == 0 {
-        // NFR-13: zero is the documented failure — the window was destroyed between the two
-        // calls — and must not be forwarded as "the calling thread".
-        return LayoutId::default();
-    }
-
-    // SAFETY: takes a thread id by value and returns a layout handle by value; it dereferences
-    // nothing. The handle is never dereferenced here either — `LayoutId` keeps the numeric
-    // value, which is what module `layouts` identifies a layout by.
-    let layout = unsafe { GetKeyboardLayout(thread) };
-
-    LayoutId::from_raw(layout.0 as usize)
+    crate::switch::current()
 }
 
 /// Posts `message` to the window of `role`, if that thread has one right now.

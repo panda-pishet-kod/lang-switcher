@@ -8,7 +8,17 @@
 //! TSF/IME layout can never be a **target** — the backlog row of task T-05-1 names exactly
 //! these four, and the backlog is the source of truth for that distribution (decision R-17).
 //!
-//! Implemented by backlog tasks: T-05-1.
+//! Implemented by backlog tasks: T-05-1, T-10-20 (the new FR-52).
+//!
+//! # ⭐ One reader of the layout, and only one — task T-10-20
+//!
+//! [`current`] is the whole of how this program learns what layout a foreign window is in. Until
+//! task T-10-20 there was a second copy of the same four Win32 calls in `app::foreground_layout`,
+//! and the price of it came due in FR-52: the requirement changed, and a change that had to be
+//! made in two places by hand is a change that will one day be made in one. The duplicate is
+//! gone; `app::refresh_layout_and_cache` calls this function, and so do `buffer::Recorder::
+//! restamp` (task T-10-14), the selection path of FR-60/FR-61 and the verdict of every method of
+//! FR-50 (decision R-32).
 //!
 //! # The one thing that makes this module correct — decision R-32
 //!
@@ -69,8 +79,9 @@ use windows::Win32::UI::TextServices::{
     TF_PROFILETYPE_KEYBOARDLAYOUT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, PostMessageW, SPI_GETTHREADLOCALINPUTSETTINGS,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP, WM_INPUTLANGCHANGEREQUEST,
+    GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW,
+    SPI_GETTHREADLOCALINPUTSETTINGS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    WM_APP, WM_INPUTLANGCHANGEREQUEST,
 };
 use windows::core::{BOOL, GUID};
 
@@ -191,24 +202,149 @@ pub fn scope() -> Scope {
 // FR-52 — the layout of the foreground window
 // ---------------------------------------------------------------------------------------
 
+/// What [`focus_thread_of`] answered — **three outcomes, and not two**.
+///
+/// FR-52 names three cases and gives two of them the *same* behaviour, which is exactly the shape
+/// an `Option` would flatten. They are kept apart because they are different facts about the
+/// machine, they are counted separately in [`Failures`], and the review of task T-10-19 recorded
+/// that neither of the two fallback cases occurred once in 660 circles — a branch nobody has ever
+/// seen is a branch worth being able to name when it finally happens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FocusThread {
+    /// `GetGUIThreadInfo` answered and `hwndFocus` named a window that belongs to this thread.
+    Thread(u32),
+    /// `GetGUIThreadInfo` answered, and the thread has **no** window with the keyboard focus:
+    /// `hwndFocus` came back null. FR-52 sentence 2 — the foreground thread is used.
+    NoFocus,
+    /// `GetGUIThreadInfo` **refused**. FR-52 sentence 2, the other half — the foreground thread
+    /// is used, which is the behaviour that was in place before this requirement changed.
+    Refused,
+}
+
+/// **FR-52, sentence 1.** The thread that owns the window with the keyboard focus inside
+/// `foreground_thread`.
+///
+/// `GetGUIThreadInfo` and not `GetFocus`: `GetFocus` answers for the **calling** thread's queue,
+/// and no thread of this program ever holds the keyboard focus, so it would answer nothing for
+/// ever. `GetGUIThreadInfo` is the one call in Win32 that answers for somebody else's thread.
+///
+/// # NFR-01 to NFR-05 — this runs inside the hook callback
+///
+/// [`current`] is called from `buffer::Recorder::restamp`, which runs in the low-level keyboard
+/// callback, so this function is on the hot path and obeys its rules: `GUITHREADINFO` is a plain
+/// structure on this frame (no allocation, NFR-03), the call is a synchronous read of window-
+/// manager state (it cannot block, NFR-04), nothing is formatted and nothing is journalled
+/// (NFR-05). ⚠ In particular the refusal is **counted and not reported**: `report_non_critical`
+/// formats a string and allocates, which [`scope`] may do because it is never in the callback and
+/// this must not.
+fn focus_thread_of(foreground_thread: u32) -> FocusThread {
+    let mut info = GUITHREADINFO {
+        cbSize: u32::try_from(size_of::<GUITHREADINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: `info` is a live, properly aligned `GUITHREADINFO` owned by this frame, and its
+    // `cbSize` describes it, which is the contract the call demands before it writes anything
+    // into it. `foreground_thread` is the non-zero id the caller has just obtained from the
+    // system. Nothing else of ours is reachable from the call. NFR-13: the `Result` is examined
+    // below and a refusal is carried out of here as itself, never flattened into "no focus".
+    if unsafe { GetGUIThreadInfo(foreground_thread, &raw mut info) }.is_err() {
+        // NFR-13: examined and counted. A thread that is not a GUI thread, or one that has just
+        // gone, refuses here — and FR-52 says in as many words what to do about it.
+        GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
+        return FocusThread::Refused;
+    }
+
+    if info.hwndFocus.is_invalid() {
+        // The thread answered and has no focus window. FR-52 calls this «hwndFocus пуст».
+        FOCUS_WINDOW_ABSENT.fetch_add(1, Ordering::Relaxed);
+        return FocusThread::NoFocus;
+    }
+
+    // SAFETY: `info.hwndFocus` is the handle `GetGUIThreadInfo` has just written and was checked
+    // non-null. `None` for the process id is the documented way to ask for the thread id alone
+    // and is what keeps this call from writing back through a pointer of ours.
+    let thread = unsafe { GetWindowThreadProcessId(info.hwndFocus, None) };
+
+    if thread == 0 {
+        // NFR-13: zero is the documented failure — the focus window died between the two calls —
+        // and zero means "the calling thread" to `GetKeyboardLayout`, which is the one answer
+        // that would be wrong rather than merely unknown. Treated as a refusal, which FR-52
+        // already has a rule for.
+        GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
+        return FocusThread::Refused;
+    }
+
+    FocusThread::Thread(thread)
+}
+
+/// **FR-52, the whole rule, as a function of its two inputs.**
+///
+/// Split out from [`current`] for one reason, and it is the reason the four previous repairs of
+/// this defect are in the backlog: the two fallback cases of FR-52 **did not occur once in the
+/// 660 circles task T-10-19 measured**, so a live run cannot reach them, and a branch no test can
+/// reach is a branch that is not known to work. Here they are reachable from `tests\switch.rs`
+/// without a foreground window, without a focus window and without Windows agreeing to refuse a
+/// call on demand.
+///
+/// Public for that test and for nothing else — it has no callers outside [`current`].
+#[must_use]
+pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
+    match focus {
+        FocusThread::Thread(thread) => thread,
+        // ⚠ Both of these are FR-52's second sentence verbatim: «Если фокусное окно недоступно —
+        // GetGUIThreadInfo отказал или hwndFocus пуст, — используется поток переднего окна, то
+        // есть прежнее поведение.»
+        FocusThread::NoFocus | FocusThread::Refused => foreground_thread,
+    }
+}
+
 /// **FR-52.** The keyboard layout of the window the user is typing into.
 ///
-/// The requirement gives the expression word for word:
+/// ⭐ **This is the only place in the program that reads a keyboard layout of a foreign thread**,
+/// and it has to stay the only one. Until task T-10-20 the same four Win32 calls were written out
+/// a second time in `app::foreground_layout`, and the whole cost of that duplication was paid in
+/// this very requirement: the two copies were kept in step by hand across four repairs of defect
+/// E and would have had to be corrected twice more here. `app::refresh_layout_and_cache` calls
+/// this function now, `buffer::Recorder::restamp` already did (task T-10-14), and so do the
+/// selection path of FR-60/FR-61 and the verdict of every method of FR-50 (decision R-32).
 ///
-/// ```text
-/// GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), null))
-/// ```
+/// # The requirement, and why it is not the expression it used to be
 ///
-/// and that is what this is, split across three statements only so that each of the three
-/// return values can be examined as NFR-13 demands. Nothing is substituted and nothing is
-/// added: in particular this is **not** `GetKeyboardLayout(0)`, which answers for the *calling*
-/// thread — the input thread of this program never holds the keyboard focus, so that form would
-/// report a layout of ours and never change.
+/// FR-52 used to give the expression word for word, and it read the layout of the thread that
+/// owns the **foreground window**. Task **T-10-19** measured that this is the wrong thread: a
+/// keyboard layout in Windows is a property **of a thread**, and in the packaged applications of
+/// Windows 11 the top-level foreground window and the window that receives the input belong to
+/// **different threads of the same process** — `Notepad` and `RichEditD2DPT`. They did not
+/// coincide once in 220 circles of the packaged Notepad, and after a layout switch that moved
+/// only the focus thread the foreground thread's layout disagreed with what was actually being
+/// typed **120 times out of 120, and held for the whole two seconds** the series watched. The
+/// focus thread's layout disagreed **0 times out of 660**. The user rewrote FR-52 on that
+/// measurement; this is the new text of it, and the order below is its order:
+///
+/// 1. foreground window → its thread;
+/// 2. `GetGUIThreadInfo` of that thread → `hwndFocus`;
+/// 3. the thread of *that* window → `GetKeyboardLayout`.
+///
+/// **Fallback is part of the requirement, not a precaution.** If `GetGUIThreadInfo` refuses or
+/// `hwndFocus` is empty, the foreground thread is used — which is exactly the behaviour that was
+/// here before. See [`reading_thread`], which is that rule alone and is where it is tested.
+///
+/// This is still **not** `GetKeyboardLayout(0)`, which answers for the *calling* thread: no
+/// thread of this program ever holds the keyboard focus, so that form would report a layout of
+/// ours and never change.
 ///
 /// A zero answer is not an error. It means there is no foreground window — which happens while
-/// the desktop is switching and on the secure desktop — or that the window went away between
-/// two of the three calls. It is returned as [`LayoutId::default`], and [`to`] treats that as a
-/// reason to refuse rather than as a layout.
+/// the desktop is switching and on the secure desktop — or that the window went away between two
+/// of the calls. It is returned as [`LayoutId::default`], and [`to`] treats that as a reason to
+/// refuse rather than as a layout.
+///
+/// # What it costs, measured on the branch that really runs
+///
+/// One `GetGUIThreadInfo` and one more `GetWindowThreadProcessId` are added to a path that
+/// includes the hook callback (`Recorder::restamp`, task T-10-14). Measured with
+/// `--experiment-latency --words`, in which one callback sample in fourteen takes that branch:
+/// the numbers are in the report of task T-10-20.
 pub fn current() -> LayoutId {
     // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches
     // no memory of ours. A null result is documented and is checked immediately below.
@@ -224,17 +360,22 @@ pub fn current() -> LayoutId {
     // SAFETY: `foreground` is the handle the call above returned and was checked non-null.
     // `None` for the process id is the documented way to ask for the thread id alone, and it is
     // what keeps this call from writing back through a pointer of ours.
-    let thread = unsafe { GetWindowThreadProcessId(foreground, None) };
+    let foreground_thread = unsafe { GetWindowThreadProcessId(foreground, None) };
 
-    if thread == 0 {
+    if foreground_thread == 0 {
         // NFR-13: zero is the documented failure — the window was destroyed between the two
         // calls — and must not be forwarded as "the calling thread".
         return LayoutId::default();
     }
 
+    // FR-52 sentence 1, with sentence 2 as the fallback. Both live in `reading_thread`.
+    let thread = reading_thread(foreground_thread, focus_thread_of(foreground_thread));
+
     // SAFETY: takes a thread id by value, returns a layout handle by value, dereferences
-    // nothing. The handle is not dereferenced here either: `LayoutId` keeps the numeric value,
-    // which is what module `layouts` identifies a layout by.
+    // nothing. `thread` is non-zero on every path into here: `foreground_thread` was checked
+    // above and `focus_thread_of` refuses a zero of its own. The handle is not dereferenced here
+    // either: `LayoutId` keeps the numeric value, which is what module `layouts` identifies a
+    // layout by.
     let layout = unsafe { GetKeyboardLayout(thread) };
 
     LayoutId::from_raw(layout.0 as usize)
@@ -926,6 +1067,12 @@ static NO_FOREGROUND: AtomicU32 = AtomicU32::new(0);
 static EXHAUSTED: AtomicU32 = AtomicU32::new(0);
 /// The setting of FR-51 could not be read and the default was assumed.
 static SCOPE_UNREADABLE: AtomicU32 = AtomicU32::new(0);
+/// **FR-52, fallback.** `GetGUIThreadInfo` refused for the foreground thread, or the focus window
+/// it named died before its thread could be read; the foreground thread was used.
+static GUI_THREAD_INFO_REFUSED: AtomicU32 = AtomicU32::new(0);
+/// **FR-52, fallback.** `GetGUIThreadInfo` answered and the foreground thread has no window with
+/// the keyboard focus; the foreground thread was used.
+static FOCUS_WINDOW_ABSENT: AtomicU32 = AtomicU32::new(0);
 
 /// Everything this module counts.
 ///
@@ -961,6 +1108,15 @@ pub struct Failures {
     pub exhausted: u32,
     /// The setting of FR-51 could not be read; [`Scope::default`] was used.
     pub scope_unreadable: u32,
+    /// **FR-52.** `GetGUIThreadInfo` refused, or the focus window it named died before its thread
+    /// could be read (NFR-13). The foreground thread was used — which is what the requirement
+    /// says to do, so this is not an error; it is the count of how often the requirement's second
+    /// sentence was the one that applied. ⚠ Task T-10-19 measured **0 of 660**, so a number here
+    /// is worth looking at.
+    pub focus_probe_refused: u32,
+    /// **FR-52.** `GetGUIThreadInfo` answered and the foreground thread had no window with the
+    /// keyboard focus. The foreground thread was used. Also **0 of 660** in T-10-19.
+    pub focus_window_absent: u32,
 }
 
 /// The counters of this module, for the debug channel of SEC-04a, for the bench of section 11.5
@@ -979,6 +1135,8 @@ pub fn failures() -> Failures {
         no_foreground: NO_FOREGROUND.load(Ordering::Relaxed),
         exhausted: EXHAUSTED.load(Ordering::Relaxed),
         scope_unreadable: SCOPE_UNREADABLE.load(Ordering::Relaxed),
+        focus_probe_refused: GUI_THREAD_INFO_REFUSED.load(Ordering::Relaxed),
+        focus_window_absent: FOCUS_WINDOW_ABSENT.load(Ordering::Relaxed),
     }
 }
 
@@ -1001,6 +1159,8 @@ pub fn reset_failures() {
         &NO_FOREGROUND,
         &EXHAUSTED,
         &SCOPE_UNREADABLE,
+        &GUI_THREAD_INFO_REFUSED,
+        &FOCUS_WINDOW_ABSENT,
     ] {
         counter.store(0, Ordering::Relaxed);
     }

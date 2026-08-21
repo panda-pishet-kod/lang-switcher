@@ -11225,3 +11225,576 @@ fn threads_summary(
         std::process::ExitCode::from(1)
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Опыт T-10-20 — во что верит ПРОДУКТ против того, что фактически напечаталось
+// ---------------------------------------------------------------------------------------
+
+/// Where the raw numbers of the detector of task **T-10-20** are written — one line per circle,
+/// appended as it happens, so a run cut short leaves everything up to that point on disk.
+///
+/// Beside the report when that directory exists, under `%TEMP%` otherwise. No new environment
+/// variable (Р-53) — [`race_raw_path`]'s terms exactly.
+fn belief_raw_path() -> std::path::PathBuf {
+    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    if beside.is_dir() {
+        beside.join("T-10-20-серия.csv")
+    } else {
+        std::env::temp_dir().join("T-10-20-серия.csv")
+    }
+}
+
+/// The header of that file.
+const BELIEF_HEADER: &str = "приложение,род,ступень,направление,круг,построено,\
+     вера_до,переднее,фокус,проба_фокуса,напечаталось,правда,вера_после,вера=правда,\
+     переднее=правда,фокус=правда,перештамповка,примечание";
+
+/// Appends one raw line, opening the file per call — [`race_raw`]'s terms exactly.
+fn belief_raw(line: &str) {
+    use std::io::Write;
+
+    let path = belief_raw_path();
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path);
+
+    match opened {
+        Err(error) => eprintln!("⚠ сырой протокол {} не открылся: {error}", path.display()),
+        Ok(mut file) => {
+            if let Err(error) = writeln!(file, "{line}") {
+                eprintln!("⚠ сырой протокол не записался: {error}");
+            }
+        }
+    }
+}
+
+/// What one circle of the detector produced.
+#[derive(Debug, Clone, Default)]
+struct BeliefOutcome {
+    /// Whether the circle managed to build its own precondition. A circle that did not is not a
+    /// failure — it is a circle that did not happen, and it is counted separately.
+    built: bool,
+    /// ⭐ Whether the stimulus did what the circle needed it to do, judged **by the ground truth
+    /// alone**: with `Alt+Shift` the key must print the *other* layout's character, without it the
+    /// same one. See [`BeliefTally::stimulus_dead`] for the two circles that made this a field.
+    landed: bool,
+    /// ⭐ **The product's belief**, read off the SEC-04a channel after the stroke: `active_layout`
+    /// is the stamp of FR-04, the value the program decodes that stroke with. This is the
+    /// quantity under test.
+    belief: Option<u32>,
+    /// ⭐ **The ground truth** — the character the key actually put in the field.
+    truth: Option<u32>,
+    /// `GetKeyboardLayout` of the foreground window's thread at the instant of the stroke: what
+    /// the product read **before** this task.
+    front: Option<u32>,
+    /// `GetKeyboardLayout` of the focus window's thread at the same instant: what the new FR-52
+    /// says to read.
+    focus: Option<u32>,
+    /// Which single outcome of `Recorder::restamp` the stroke took, when exactly one moved.
+    restamp: Option<&'static str>,
+}
+
+impl BeliefOutcome {
+    /// ⚠ Compared **by language id**, never as whole numbers — see [`same_language`] for the
+    /// hundred-per-cent agreement that rule was bought with.
+    fn agrees(&self) -> Option<bool> {
+        match (self.belief, self.truth) {
+            (Some(belief), Some(truth)) => Some(same_language(belief, truth)),
+            _ => None,
+        }
+    }
+
+    fn front_true(&self) -> Option<bool> {
+        match (self.front, self.truth) {
+            (Some(front), Some(truth)) => Some(same_language(front, truth)),
+            _ => None,
+        }
+    }
+
+    fn focus_true(&self) -> Option<bool> {
+        match (self.focus, self.truth) {
+            (Some(focus), Some(truth)) => Some(same_language(focus, truth)),
+            _ => None,
+        }
+    }
+}
+
+/// What one application's series added up to.
+#[derive(Debug, Clone, Default)]
+struct BeliefTally {
+    circles: usize,
+    skipped: usize,
+    /// ⭐ **Circles in which the stimulus did not do what the circle needed it to do** — measured
+    /// against the ground truth and nothing else, and counted apart from everything.
+    ///
+    /// ⚠ Found by the first full run of this detector, and worth the line it costs. Two circles
+    /// out of 120 came back agreeing, and the raw file said why: the synthetic `Alt+Shift` had
+    /// simply not been acted on — both threads still read ru-RU and ru-RU is what printed, so
+    /// there was no layout change for the defect to be about. Scored as «совпало» those two would
+    /// have quietly diluted a red run; and a run in which the stimulus *never* worked would have
+    /// come out **green with no divergences at all**, which is the worst reading an instrument
+    /// can give. A circle whose stimulus did not land is a circle that did not happen.
+    stimulus_dead: usize,
+    /// ⭐ Circles in which the product's belief disagreed with what was typed. **This is the
+    /// detector.**
+    belief_wrong: usize,
+    /// Circles in which the belief could not be read at all — an instrument failure, counted
+    /// apart from a disagreement so that the two can never be confused.
+    belief_unreadable: usize,
+    /// Circles in which the ground truth could not be read at all.
+    truth_unreadable: usize,
+    /// What the foreground thread's layout said against the same truth, for the protocol.
+    front_wrong: usize,
+    /// What the focus thread's layout said against the same truth.
+    focus_wrong: usize,
+    /// Circles in which the two readings were different values.
+    readings_differ: usize,
+}
+
+impl BeliefTally {
+    fn absorb(&mut self, outcome: &BeliefOutcome) {
+        if !outcome.built {
+            self.skipped += 1;
+            return;
+        }
+        if !outcome.landed {
+            // ⚠ Not a circle and not a divergence: the stimulus did not happen, so there was
+            // nothing for the defect to be about. Counted where it can be seen.
+            self.stimulus_dead += 1;
+            return;
+        }
+        self.circles += 1;
+
+        if outcome.truth.is_none() {
+            self.truth_unreadable += 1;
+        }
+        if outcome.belief.is_none() {
+            self.belief_unreadable += 1;
+        }
+
+        if outcome.agrees() == Some(false) {
+            self.belief_wrong += 1;
+        }
+        if outcome.front_true() == Some(false) {
+            self.front_wrong += 1;
+        }
+        if outcome.focus_true() == Some(false) {
+            self.focus_wrong += 1;
+        }
+        if outcome.front.is_some() && outcome.focus.is_some() && outcome.front != outcome.focus {
+            self.readings_differ += 1;
+        }
+    }
+
+    fn row(&self, label: &str) -> String {
+        format!(
+            "  {label:<30} {:>7} {:>10} {:>13} {:>13} {:>14} {:>15} {:>13}",
+            self.circles,
+            self.skipped,
+            self.stimulus_dead,
+            self.belief_wrong,
+            self.belief_unreadable + self.truth_unreadable,
+            self.front_wrong,
+            self.focus_wrong,
+        )
+    }
+}
+
+/// The header of that table.
+const BELIEF_TABLE_HEADER: &str = "  приложение / ступень            кругов пропущено стимул-мимо \u{2B50}вера\u{2260}правда не-прочиталось переднее\u{2260}правда фокус\u{2260}правда";
+
+/// One circle: build the precondition, apply the stimulus, type **one** stroke, and ask the
+/// product what it believes it decoded that stroke under.
+///
+/// ⚠ **The stroke is the first of a word and the field is empty**, which is the only shape that
+/// reaches `Recorder::restamp` (task T-10-14): the ring is empty, so the branch is taken.
+///
+/// ⚠ **The hotkey is never pressed.** A conversion moves the layout and the stamp both, and the
+/// question here is narrower than a conversion — it is what the program believed at the instant
+/// it recorded one keystroke.
+fn belief_circle(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+    stage: &str,
+    from: u32,
+    rep: usize,
+    stimulus: bool,
+) -> Result<BeliefOutcome, String> {
+    let direction = if !stimulus {
+        "нет-стимула"
+    } else if same_language(from, layout::US) {
+        "US->RU"
+    } else {
+        "RU->US"
+    };
+    let prefix = format!(
+        "{},{},{stage},{direction},{rep}",
+        subject.name(),
+        subject.kind()
+    );
+
+    // Step 1 — the field, emptied with `Backspace` alone. ⚠ `Ctrl+A` ends in a modifier release,
+    // and a modifier release *is* the layout probe of T-03-3c: clearing that way would refresh
+    // the very stamp the circle exists to measure.
+    clear_field(target, content)?;
+
+    // Step 2 — the precondition, built and verified, never inherited.
+    if let Err(reason) = race_ensure(target.hwnd, from) {
+        belief_raw(&format!(
+            "{prefix},0,,,,,,,,,,,предусловие-не-построено: {reason}"
+        ));
+        return Ok(BeliefOutcome::default());
+    }
+
+    let (counts_before, belief_before) = race_channel();
+
+    // Step 3 — the stimulus, or, in the negative control, deliberately nothing at all.
+    if stimulus {
+        input::chord(&[VK_MENU.0], VK_SHIFT.0, target)
+            .map_err(|error| format!("Alt+Shift: {error}"))?;
+    }
+
+    // Step 4 — let it land. 150 ms sits three orders of magnitude above the race T-10-16
+    // measured (0,96 мс) and four orders below the two seconds T-10-19 watched the divergence
+    // hold for, so a circle can never confuse the two explanations.
+    race_pause(THREADS_SETTLE_MS);
+
+    // Step 5 — both system readings of the same instant, then the one stroke, then the truth.
+    let pair = layout::Pair::take();
+
+    let before = read_field(content).ok_or_else(|| "поле не читается перед штрихом".to_owned())?;
+    input::type_text("g", target).map_err(|error| format!("штрих: {error}"))?;
+    let after = wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|text| text != &before)
+    })
+    .ok_or_else(|| "штрих не дошёл до поля".to_owned())?;
+    let truth = threads_truth(&before, &after);
+
+    // Step 6 — ⭐ what the product believes, asked **after** the stroke it is about.
+    let (counts_after, belief) = race_channel();
+    let restamp = match (counts_before, counts_after) {
+        (Some(start), Some(end)) => sole_outcome(start, end),
+        _ => None,
+    };
+
+    // Step 7 — ⭐ **did this circle actually happen?** Judged by the ground truth alone: with the
+    // stimulus the key must print the *other* layout's character, without it the same one. A
+    // circle whose `Alt+Shift` was not acted on carries no divergence to find, and scoring it as
+    // «совпало» would let a run in which the stimulus never worked come out green.
+    let wanted = if stimulus { other_layout(from) } else { from };
+    let landed = truth.is_some_and(|value| same_language(value, wanted));
+
+    let outcome = BeliefOutcome {
+        built: true,
+        landed,
+        belief,
+        truth,
+        front: pair.front_layout,
+        focus: pair.focus_layout,
+        restamp,
+    };
+
+    let flag =
+        |value: Option<bool>| value.map_or_else(|| "?".to_owned(), |v| u8::from(v).to_string());
+
+    belief_raw(&format!(
+        "{prefix},1,{},{},{},{},{after:?},{},{},{},{},{},{},{}",
+        race_hex(belief_before),
+        race_hex(pair.front_layout),
+        race_hex(pair.focus_layout),
+        pair.focus.tag(),
+        race_hex(truth),
+        race_hex(belief),
+        flag(outcome.agrees()),
+        flag(outcome.front_true()),
+        flag(outcome.focus_true()),
+        restamp.unwrap_or("-"),
+        if landed {
+            ""
+        } else {
+            "СТИМУЛ-НЕ-ПОДЕЙСТВОВАЛ: раскладка не та, круг не состоялся"
+        }
+    ));
+
+    Ok(outcome)
+}
+
+/// A series of circles, both directions alternated inside it — [`threads_series`]'s shape, and
+/// for the reason given there.
+fn belief_series(
+    subject: Subject,
+    target: &input::Target,
+    content: &Element,
+    stage: &str,
+    reps: usize,
+    stimulus: bool,
+) -> Result<BeliefTally, String> {
+    let mut tally = BeliefTally::default();
+
+    for rep in 1..=reps {
+        for from in [layout::US, layout::RUSSIAN] {
+            let outcome = belief_circle(subject, target, content, stage, from, rep, stimulus)?;
+            tally.absorb(&outcome);
+
+            if rep <= 1 {
+                println!(
+                    "    круг {rep} из {}: переднее {} | фокус {} | напечаталось {} | \
+                     \u{2B50} продукт верит {} | перештамповка {}",
+                    layout::describe(from),
+                    race_hex(outcome.front),
+                    race_hex(outcome.focus),
+                    outcome
+                        .truth
+                        .map_or_else(|| "?".to_owned(), layout::describe),
+                    outcome
+                        .belief
+                        .map_or_else(|| "<не прочиталась>".to_owned(), layout::describe),
+                    outcome.restamp.unwrap_or("-"),
+                );
+            }
+        }
+
+        if rep % 10 == 0 {
+            println!(
+                "    …{rep} кругов на сторону: \u{2B50} вера\u{2260}правда {}, \
+                 переднее\u{2260}правда {}, фокус\u{2260}правда {}, показания\u{2260} {}",
+                tally.belief_wrong, tally.front_wrong, tally.focus_wrong, tally.readings_differ
+            );
+        }
+    }
+
+    Ok(tally)
+}
+
+/// ⭐ **The detector of task T-10-20** — the one that has to be **red before the repair and green
+/// after it**, on the mechanism itself.
+///
+/// # What is measured, and against what
+///
+/// | Quantity | Where it comes from |
+/// |---|---|
+/// | ⭐ **the product's belief** | `active_layout` on the SEC-04a channel — the stamp of FR-04 that decodes the stroke |
+/// | ⭐ **the ground truth** | the character the `G` key actually put in the field: `g` under en-US, `п` under ru-RU |
+/// | the two system readings | [`layout::Pair`] — the foreground thread's layout and the focus thread's, of the same instant |
+///
+/// ⚠ Compared **by language id** ([`same_language`]) and never as whole numbers: the channel
+/// publishes a whole `HKL` (`0x04190419`) and the ground truth is a language id (`0x0419`). The
+/// first pass of T-10-19's series compared them as integers and reported a hundred per cent
+/// agreement with its own hypothesis; the rule has had a name of its own ever since.
+///
+/// # Two sides inside one run — §3 of the task
+///
+/// A detector that only ever says one word measures nothing, so every application is run twice:
+///
+/// * **`контроль`** — the identical circle with **no `Alt+Shift` at all**. The two threads of the
+///   packaged Notepad are still different ones, and the belief must agree with the truth in every
+///   circle, before the repair and after it. T-10-19 measured exactly that on its own negative
+///   control: 100 circles, 0 divergences. This arm proves the instrument can say «совпало» — and
+///   with it, that *a difference of threads by itself is not the defect*.
+/// * **`опыт`** — the same circle with the stimulus. This is where the defect lives.
+///
+/// And two applications: the packaged Notepad, whose top-level window and input window belong to
+/// different threads, and a classic window of the bench's own, where they are one thread. The
+/// classic window is the second control — its answer must not change by a single circle between
+/// the two runs, which is requirement 12 of the task.
+///
+/// # ⛔ Why this is not a position of the matrix of §11.3
+///
+/// Position 10 is marked **П**: the shell and the person's own windows are not the bench's to
+/// touch. Every window here is one the bench opened itself (requirement B), and this mode is run
+/// deliberately, by name, like every other experiment of this series.
+pub fn experiment_belief(ctx: &Context, reps: usize) -> std::process::ExitCode {
+    println!("--- ДЕТЕКТОР T-10-20: во что верит ПРОДУКТ против того, что напечаталось ---\n");
+    println!(
+        "Прибор: ground truth — ЧТО ФАКТИЧЕСКИ НАПЕЧАТАЛОСЬ (клавиша G даёт g под en-US и \u{43F} \
+         под ru-RU), а не совпадение с образцом.\n\
+         Величина под опытом — active_layout канала SEC-04a: это штамп FR-04, которым продукт \
+         РАСШИФРОВЫВАЕТ штрих.\n\
+         \u{26A0} Сравнение — ТОЛЬКО по идентификатору языка: канал печатает целый HKL \
+         0x04190419, правда — 0x0419.\n\
+         Очистка поля — только Backspace: Ctrl+A отпускает Ctrl, а отпускание модификатора и \
+         есть зонд раскладки T-03-3c.\n\
+         Каждый круг строит своё предусловие; направления чередуются — они несимметричны \
+         (T-10-14).\n\
+         Горячая клавиша НЕ нажимается: вопрос — к одному штриху, а не к замене.\n\
+         \u{26D4} Окна открывает стенд сам (требование B). \u{26D4} Машина не усыпляется и не \
+         блокируется.\n"
+    );
+    println!("Сырые числа серии: {}\n", belief_raw_path().display());
+
+    // ⛔ Somebody else's copy would make every channel reading unattributable.
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Показания канала были бы неизвестно чьими. \
+             Детектор не ставится — снять `--experiment-threads clear`."
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut product = match crate::sut::Sut::launch_with(3600) {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
+        eprintln!("продукт не сообщил о готовности через канал SEC-04a за 30 с");
+        let _ = product.stop();
+        return std::process::ExitCode::from(1);
+    };
+    println!(
+        "Продукт PID {}, hook_installed={}, ключей в снимке {}",
+        product.pid,
+        ready.get("hook_installed").unwrap_or("?"),
+        ready.present_keys().len()
+    );
+
+    // ⛔ Without these keys every number below would be a fabricated zero.
+    for key in RESTAMP_KEYS
+        .iter()
+        .chain(core::iter::once(&"active_layout"))
+    {
+        if ready.get(key).is_none() {
+            eprintln!("⛔ сборка не публикует {key} — детектор не ставится");
+            let _ = product.stop();
+            return std::process::ExitCode::from(1);
+        }
+    }
+
+    belief_raw(BELIEF_HEADER);
+
+    let mut tallies: Vec<(Subject, &'static str, BeliefTally)> = Vec::new();
+    let mut refusals: Vec<String> = Vec::new();
+
+    for subject in [Subject::Notepad, Subject::Own] {
+        println!(
+            "\n==================== {} ({}) ====================",
+            subject.name(),
+            subject.kind()
+        );
+
+        let (mut app, target, content) = match subject.open(ctx) {
+            Ok(opened) => opened,
+            Err(reason) => {
+                let said = format!(
+                    "{} ({}): не открылось — {reason}",
+                    subject.name(),
+                    subject.kind()
+                );
+                eprintln!("  \u{26A0} {said}");
+                refusals.push(said);
+                continue;
+            }
+        };
+        println!("  окно открыто стендом: {} PID {}", app.name, app.pid);
+
+        let measured = (|| -> Result<(), String> {
+            // ⚠ The instrument before a single reading: the ground truth must answer in **both**
+            // layouts, and `GetGUIThreadInfo` must be asked and its answer named.
+            threads_instrument(subject, &target, &content)?;
+
+            println!(
+                "\n  ── ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ: {reps} кругов на сторону БЕЗ Alt+Shift, {} ──",
+                subject.name()
+            );
+            println!(
+                "  Расхождений быть не должно ни одного — это плечо «прибор умеет сказать \
+                 совпало»."
+            );
+            let control = belief_series(subject, &target, &content, "контроль", reps, false)?;
+            tallies.push((subject, "контроль", control));
+
+            println!(
+                "\n  ── ОПЫТ: {reps} кругов на сторону С Alt+Shift, {} ──",
+                subject.name()
+            );
+            let series = belief_series(subject, &target, &content, "опыт", reps, true)?;
+            tallies.push((subject, "опыт", series));
+
+            Ok(())
+        })();
+
+        // Requirement 5 of §11.5: the window goes back where it came from, whatever happened.
+        let _ = layout::ensure(target.hwnd, layout::US, Duration::from_secs(3));
+        println!("  {}", app.close());
+
+        if let Err(reason) = measured {
+            let said = format!("{} ({}): {reason}", subject.name(), subject.kind());
+            eprintln!("  \u{26D4} {said}");
+            refusals.push(said);
+        }
+    }
+
+    match product.stop() {
+        Ok(code) => println!("\nпродукт остановлен, код {code}"),
+        Err(error) => println!("\n⚠ {error}"),
+    }
+
+    belief_summary(&tallies, &refusals)
+}
+
+/// The table, the verdict, and the exit code that **is** the detector.
+fn belief_summary(
+    tallies: &[(Subject, &'static str, BeliefTally)],
+    refusals: &[String],
+) -> std::process::ExitCode {
+    println!("\n\n==================== ИТОГ ДЕТЕКТОРА T-10-20 ====================\n");
+
+    println!("{BELIEF_TABLE_HEADER}");
+    for (subject, stage, tally) in tallies {
+        println!("{}", tally.row(&format!("{} / {stage}", subject.name())));
+    }
+
+    let wrong: usize = tallies.iter().map(|(_, _, t)| t.belief_wrong).sum();
+    let circles: usize = tallies.iter().map(|(_, _, t)| t.circles).sum();
+    let dead: usize = tallies.iter().map(|(_, _, t)| t.stimulus_dead).sum();
+    let unread: usize = tallies
+        .iter()
+        .map(|(_, _, t)| t.belief_unreadable + t.truth_unreadable)
+        .sum();
+
+    println!("\n  состоявшихся кругов: {circles}");
+    println!(
+        "  \u{2B50} вера продукта \u{2260} напечатанному: {wrong} ({}%)",
+        race_percent(wrong, circles)
+    );
+    println!("  не прочиталось (вера или правда):  {unread}");
+    println!(
+        "  стимул не подействовал (круг не состоялся): {dead} — знаменатель за них не отвечает"
+    );
+
+    if !refusals.is_empty() {
+        println!("\n  ── что не измерялось и почему ──");
+        for refusal in refusals {
+            println!("  \u{26A0} {refusal}");
+        }
+    }
+
+    println!("\nСырые числа: {}", belief_raw_path().display());
+
+    // ⚠ An instrument that could not read is not a green run, and it is not a red one either: it
+    // is a run that did not happen, and it says so with a code of its own.
+    if !refusals.is_empty() || unread > 0 || circles == 0 {
+        eprintln!("\nВЕРДИКТ: детектор не доведён — прибор не отвечал");
+        return std::process::ExitCode::from(2);
+    }
+
+    if wrong == 0 {
+        println!(
+            "\nВЕРДИКТ: вера продукта совпала с напечатанным во всех {circles} кругах — ЗЕЛЁНЫЙ"
+        );
+        std::process::ExitCode::SUCCESS
+    } else {
+        println!(
+            "\nВЕРДИКТ: кругов, где продукт верил не в то, что напечаталось: {wrong} — \u{26D4} КРАСНЫЙ"
+        );
+        std::process::ExitCode::from(1)
+    }
+}
