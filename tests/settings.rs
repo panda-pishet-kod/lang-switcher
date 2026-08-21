@@ -1173,6 +1173,64 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 }
 
 // =========================================================================================
+// FR-92а — the panel map: containment of rectangles. Task T-11-5c.
+// =========================================================================================
+//
+// Criterion 10: the map «identifier → lies on a panel?» is a pure function of rectangles
+// alone, closed here on synthetic ones — inside, outside, and on the boundary. The
+// coordinate space is deliberately meaningless small integers: the dialog feeds the
+// function `GetWindowRect` screen rectangles, this test feeds it numbers it made up, and
+// containment does not care — which is the very property that makes the map testable
+// without a live window (the product is not started by any test).
+
+/// A rectangle from its four edges, in the order the `RECT` fields are declared.
+fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+    RECT {
+        left,
+        top,
+        right,
+        bottom,
+    }
+}
+
+#[test]
+fn the_panel_map_is_rectangle_containment_with_the_boundary_counted_in() {
+    // Two panels apart from each other, as the two columns of the dialog are.
+    let panels = [rect(10, 10, 110, 60), rect(10, 70, 110, 120)];
+
+    let controls = [
+        // Strictly inside the first panel.
+        (1, rect(20, 20, 40, 30)),
+        // Strictly outside every panel.
+        (2, rect(120, 10, 150, 30)),
+        // Coincides with the first panel edge for edge — the whole boundary at once.
+        (3, rect(10, 10, 110, 60)),
+        // Touches the left and bottom edges of the first panel from the inside.
+        (4, rect(10, 50, 30, 60)),
+        // Straddles the right edge of the first panel — partly off it, so not on it.
+        (5, rect(100, 20, 120, 30)),
+        // Straddles the gap between the two panels — inside neither.
+        (6, rect(20, 55, 40, 80)),
+        // Strictly inside the second panel.
+        (7, rect(50, 80, 90, 110)),
+    ];
+
+    assert_eq!(
+        settings::controls_on_panels(&panels, &controls),
+        vec![1, 3, 4, 7],
+        "containment must count the boundary as inside and an edge crossing as outside"
+    );
+
+    // No panels — nothing is on one: the degraded answer of a dialog whose child walk
+    // found no group rectangles, and the shape of the map before `WM_INITDIALOG` runs.
+    assert_eq!(
+        settings::controls_on_panels(&[], &controls),
+        Vec::<i32>::new(),
+        "with no panels no control can lie on one"
+    );
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //
@@ -1192,7 +1250,7 @@ use std::os::windows::ffi::OsStrExt;
 use lang_switcher::settings::LayoutRow;
 use lang_switcher::{app, guard, hook, inject, layouts, selection};
 
-use windows::Win32::Foundation::{FreeLibrary, HMODULE, HRSRC};
+use windows::Win32::Foundation::{FreeLibrary, HMODULE, HRSRC, RECT};
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
@@ -1530,6 +1588,56 @@ fn the_eight_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
             opens_group,
             "«{what}» ({id}) must {} WS_GROUP; the style is {style:#010x}",
             if opens_group { "keep" } else { "not gain" }
+        );
+    }
+}
+
+// Criterion 9 of T-11-5c — read out of the **built** `LangSwitcher.exe`, exactly as the
+// nine buttons and the eight glyphs above. The same ⚠ applies: `BS_OWNERDRAW` (0x0B) is a
+// button *type* in the low nibble, so the check is equality of the nibble and not a bit
+// test — the former type here was `BS_GROUPBOX` (0x07), which a bit test would also let
+// through (0x07 & 0x0B is 0x03, not zero).
+#[test]
+fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The eight groups of the dialog — the seven sections of the FR-92 table plus
+    // «Состояние» — by their actual identifiers.
+    const OWNER_DRAWN_GROUPS: [(u32, &str); 8] = [
+        (1090, "Общие"),
+        (1093, "Горячая клавиша"),
+        (1095, "Раскладки"),
+        (1099, "Замена"),
+        (1101, "Выделение"),
+        (1104, "Исключения"),
+        (1106, "Диагностика"),
+        (1108, "Состояние"),
+    ];
+
+    for (id, what) in OWNER_DRAWN_GROUPS {
+        let style = template
+            .styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("the dialog has no control {id} — «{what}»"));
+
+        println!("«{what}» ({id}): style {style:#010x}");
+
+        assert_eq!(
+            style & 0x0F,
+            0x0B,
+            "«{what}» ({id}) must carry BS_OWNERDRAW as its button type — task T-11-5c; \
+             the style is {style:#010x}"
+        );
+
+        // A group box never had WS_TABSTOP and must not gain one: a panel takes no focus,
+        // and a stop on it would add a dead stop to the keyboard loop of the dialog.
+        assert_eq!(
+            style & 0x0001_0000,
+            0,
+            "«{what}» ({id}) must not gain WS_TABSTOP; the style is {style:#010x}"
         );
     }
 }

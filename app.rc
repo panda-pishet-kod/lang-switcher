@@ -258,7 +258,17 @@ BEGIN
     // is why every one of the eight carries BS_NOTIFY). Coordinates are byte for byte what
     // the AUTO* statements had, and WS_GROUP stays on exactly the elements that had it —
     // the CheckRadioButton ranges and the arrow-key runs in src\settings.rs depend on it.
-    GROUPBOX        "Общие", IDC_GROUP_GENERAL, 7, 7, 200, 66
+    // ⚠ The eight GROUPBOX statements are CONTROL statements with BS_OWNERDRAW since task
+    // T-11-5c (FR-92а): a group box is the Button class too, and BS_OWNERDRAW is a button
+    // *type* that displaces BS_GROUPBOX (0x07) in the low nibble — the system frame-and-
+    // caption drawing dies with the type, and the dialog paints each group as a filled
+    // panel itself (WM_DRAWITEM in src\settings.rs: RoundRect of panel_bg under a 1 px
+    // panel_border frame, the caption in text_muted at the top edge). No WS_TABSTOP was
+    // on any group and none appears — a panel takes no focus. Coordinates are byte for
+    // byte what the GROUPBOX statements had, and the groups stay declared *before* their
+    // children: the children paint after them and therefore on top of the panel, which is
+    // the normal painting order of a dialog and exactly what the panel look needs.
+    CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW, 7, 7, 200, 66
     CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
@@ -272,14 +282,14 @@ BEGIN
     // task T-08-2. The button next to it arms the capture, the field then shows the name of
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
-    GROUPBOX        "Горячая клавиша", IDC_GROUP_HOTKEY, 7, 77, 200, 48
+    CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW, 7, 77, 200, 48
     LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9
     EDITTEXT        IDC_HOTKEY, 48, 90, 64, 12, ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14, BS_OWNERDRAW
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
-    GROUPBOX        "Раскладки", IDC_GROUP_LAYOUTS, 7, 129, 200, 132
+    CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW, 7, 129, 200, 132
     CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 141, 60, 10
     CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 141, 122, 10
     LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 157, 38, 9
@@ -297,7 +307,7 @@ BEGIN
     // «Автоматически» stands first and carries WS_GROUP: it is the default of section 7 and
     // the first thing the group shows. The whole right column below this group sits 13 units
     // lower than it did before FR-42а, which is the height of the row the third radio added.
-    GROUPBOX        "Замена", IDC_GROUP_REPLACEMENT, 213, 7, 200, 71
+    CONTROL         "Замена", IDC_GROUP_REPLACEMENT, "Button", BS_OWNERDRAW, 213, 7, 200, 71
     CONTROL         "Автоматически (рекомендуется)", IDC_METHOD_AUTO, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 220, 19, 180, 10
     CONTROL         "Backspace", IDC_METHOD_BACKSPACE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 32, 180, 10
     CONTROL         "Выделение (совместимость)", IDC_METHOD_SELECTION, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 45, 180, 10
@@ -305,7 +315,7 @@ BEGIN
     EDITTEXT        IDC_DELAY, 334, 59, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
 
     // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
-    GROUPBOX        "Выделение", IDC_GROUP_SELECTION, 213, 82, 200, 62
+    CONTROL         "Выделение", IDC_GROUP_SELECTION, "Button", BS_OWNERDRAW, 213, 82, 200, 62
     CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 94, 186, 10
     LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 110, 110, 9
     EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 108, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
@@ -313,7 +323,7 @@ BEGIN
     EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 124, 40, 12, ES_AUTOHSCROLL | ES_NUMBER
 
     // -- Исключения: FR-84 ---------------------------------------------------------------
-    GROUPBOX        "Исключения", IDC_GROUP_EXCLUSIONS, 213, 148, 200, 84
+    CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW, 213, 148, 200, 84
     LISTBOX         IDC_EXCLUSIONS, 220, 160, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_BORDER | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
     EDITTEXT        IDC_EXCLUSION_NAME, 220, 207, 120, 12, ES_AUTOHSCROLL
@@ -321,14 +331,14 @@ BEGIN
     LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
-    GROUPBOX        "Диагностика", IDC_GROUP_DIAGNOSTICS, 213, 236, 200, 58
+    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW, 213, 236, 200, 58
     CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 248, 90, 10
     PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14, BS_OWNERDRAW
     LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9
     LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
-    GROUPBOX        "Состояние", IDC_GROUP_STATE, 7, 298, 406, 44
+    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW, 7, 298, 406, 44
     LTEXT           "", IDC_STATE_HOOK, 14, 310, 392, 9
     LTEXT           "", IDC_STATE_LAYOUTS, 14, 321, 392, 9
     LTEXT           "", IDC_STATE_AUTOSTART, 14, 332, 392, 9
