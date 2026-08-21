@@ -111,10 +111,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
     LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW,
     SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-    WINDOW_LONG_PTR_INDEX, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
-    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NOTIFY, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WNDPROC,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_GETDLGCODE,
+    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NOTIFY, WM_SYSCHAR,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2110,6 +2110,10 @@ pub fn show_dialog(
     impl Drop for OpenGuard {
         fn drop(&mut self) {
             DIALOG_OPEN.with(|open| open.set(false));
+            // FR-92а, task T-11-9: the record must not outlive the dialog it names — see
+            // `DIALOG_WINDOW`. Cleared on the same guard so that no exit path, panic
+            // included, can leave a stale window behind.
+            DIALOG_WINDOW.with(|window| window.set(0));
         }
     }
 
@@ -2171,6 +2175,114 @@ pub fn show_dialog(
 thread_local! {
     /// Whether this thread already has a settings dialog on the screen — see [`show_dialog`].
     static DIALOG_OPEN: Cell<bool> = const { Cell::new(false) };
+
+    /// The window of that dialog while it is up, zero otherwise — FR-92а, task T-11-9.
+    ///
+    /// Recorded on `WM_INITDIALOG` and cleared by the guard of [`show_dialog`] however that
+    /// function leaves, so a non-zero record always names the live modal dialog of this
+    /// thread. Stored as the plain integer the handle is: `HWND` is a pointer type, and a
+    /// thread-local wants a value. A thread-local like its neighbour, because the dialog
+    /// belongs to the UI thread and to no other (section 6.1).
+    static DIALOG_WINDOW: Cell<isize> = const { Cell::new(0) };
+}
+
+// ---------------------------------------------------------------------------------------
+// The system theme changing under the open dialog — FR-92а, task T-11-9
+// ---------------------------------------------------------------------------------------
+
+/// The one string of `WM_SETTINGCHANGE` this program reacts to — FR-92а, task T-11-9.
+///
+/// Windows broadcasts a `WM_SETTINGCHANGE` naming this word when the personalization switch
+/// `AppsUseLightTheme` moves. SEC-05 allows exactly the comparison against it and forbids
+/// using the message's content any further.
+pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
+
+/// The dialog's own «системная тема сменилась» nudge — FR-92а, task T-11-9.
+///
+/// `WM_APP + 14`, the next free number of the program-wide row: `+ 1` is the wake-up of
+/// [`crate::app`] and `+ 5` its configuration nudge, `+ 2` the tray callback, `+ 3` and
+/// `+ 4` belong to [`crate::hook`], `+ 6`, `+ 7` and `+ 9` to [`crate::watchdog`], `+ 8` is
+/// [`crate::switch::WM_APP_SWITCH`], `+ 10` and `+ 11` are [`crate::guard`]'s pair, and
+/// `+ 12` and `+ 13` are [`crate::selection`]'s.
+///
+/// SEC-05: the message carries nothing and decides nothing. The handler in [`dialog_proc`]
+/// re-resolves the palette out of this program's own setting and the system switch
+/// ([`refresh_palette`]), and an unchanged resolution repaints nothing — so a forged message
+/// buys the sender one comparison of two pointers, and at worst one repaint of our own
+/// dialog with the palette it already ought to wear.
+pub const WM_APP_SYSTEM_THEME: u32 = WM_APP + 14;
+
+/// «Перекрашивать?» — the pure decision of task T-11-9, closed by a table in
+/// `tests\settings.rs`.
+///
+/// Yes exactly when three facts line up: the message named the theme switch — the string of
+/// the `WM_SETTINGCHANGE` is exactly [`IMMERSIVE_COLOR_SET`], a null `lParam` having read as
+/// `None` long before this point; the setting in force is `system` — under `light` and
+/// `dark` FR-92а fixes the palette and the system has no say; and the palette the system now
+/// resolves to differs from the one on the screen. Identity is the comparison because
+/// [`theme::resolve`] answers `&'static` identity — the same test [`refresh_palette`] runs
+/// again before repainting, which is what settles the batch Windows sends of these into one
+/// repaint.
+pub fn repaint_for_system_theme(
+    setting_string: Option<&str>,
+    setting: ThemeSetting,
+    current: &theme::Palette,
+    by_system: &theme::Palette,
+) -> bool {
+    setting_string == Some(IMMERSIVE_COLOR_SET)
+        && setting == ThemeSetting::System
+        && !std::ptr::eq(current, by_system)
+}
+
+/// The far end of the tray's `WM_SETTINGCHANGE` and `WM_THEMECHANGED` arms — FR-92а,
+/// task T-11-9.
+///
+/// `setting_string` is what the message named, already read within the bounds SEC-05
+/// prescribes — the reading belongs to the module that owns the receiving window. A closed
+/// dialog is the first exit and costs one thread-local read: it will resolve the fresh
+/// system switch when it opens ([`show_dialog`] reads it at initialisation), so there is
+/// nothing to tell it now. Otherwise the decision is [`repaint_for_system_theme`] over the
+/// dialog's own state, and a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to the
+/// dialog — posted, never sent, like everything this program tells its own windows (the
+/// implication of FR-72).
+///
+/// A message arriving while the state is borrowed — a re-entrant dispatch inside a handler —
+/// finds `with_state` answering `None` and does nothing; Windows sends these in a batch, and
+/// a later arrival of the batch finds the borrow free.
+pub fn on_system_theme_message(setting_string: Option<&str>) {
+    let raw = DIALOG_WINDOW.with(Cell::get);
+
+    if raw == 0 {
+        return;
+    }
+
+    let hwnd = HWND(raw as *mut std::ffi::c_void);
+
+    // SAFETY: a non-zero record names the live modal dialog of this thread — recorded on
+    // `WM_INITDIALOG`, cleared however `show_dialog` leaves — so `hwnd` is the window of a
+    // dialog created by `show_dialog`, which is the contract of `with_state`.
+    let repaint = unsafe {
+        with_state(hwnd, |state| {
+            repaint_for_system_theme(
+                setting_string,
+                state.working.general.theme,
+                state.palette,
+                theme::resolve(ThemeSetting::System, theme::system_is_light()),
+            )
+        })
+    };
+
+    if repaint == Some(true) {
+        // SAFETY: `hwnd` is the live dialog; the message carries two plain zeros and no
+        // pointer — `PostMessageW` queues them by value and returns.
+        if let Err(error) =
+            unsafe { PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME, WPARAM(0), LPARAM(0)) }
+        {
+            // NFR-13. Not fatal: the palette catches up on the next occasion — the next
+            // message of the batch, or a pressed «Применить» — and the journal is told.
+            crate::app::report_non_critical("PostMessageW", &error);
+        }
+    }
 }
 
 /// Everything the dialog procedure needs, for as long as the dialog is up.
@@ -2242,6 +2354,11 @@ unsafe extern "system" fn dialog_proc(
             // `DWLP_*` range. The value stored is the pointer the manager forwarded from
             // `DialogBoxParamW`; it is only ever read back by `with_state`, below.
             unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
+
+            // FR-92а, task T-11-9: the record `on_system_theme_message` finds the dialog
+            // by. Cleared by the guard of `show_dialog` however that function leaves, so
+            // it never outlives the window it names.
+            DIALOG_WINDOW.with(|window| window.set(hwnd.0 as isize));
 
             // SAFETY: the pointer has just been stored and names the `RefCell` on the frame of
             // `show_dialog`, which outlives this modal call.
@@ -2347,6 +2464,21 @@ unsafe extern "system" fn dialog_proc(
             0
         }
 
+        // FR-92а, task T-11-9: the system theme moved while this dialog is up — the far end
+        // of the nudge `on_system_theme_message` posted. The message carries nothing and
+        // decides nothing (SEC-05): `refresh_palette` resolves the palette afresh out of
+        // this program's own setting and the system switch, and leaves everything alone
+        // when the resolution did not move — the check that settles the batch Windows sends
+        // of these into one repaint. A forged message therefore buys the sender one pointer
+        // comparison, at worst one repaint of our own dialog in its own palette.
+        WM_APP_SYSTEM_THEME => {
+            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value it
+            // names is alive for the whole of this modal call.
+            unsafe { with_state(hwnd, |state| refresh_palette(hwnd, state)) };
+
+            0
+        }
+
         _ => 0,
     }
 }
@@ -2359,8 +2491,10 @@ unsafe extern "system" fn dialog_proc(
 ///
 /// # Safety
 ///
-/// May only be called from the dialog procedure of a dialog created by [`show_dialog`], whose
-/// `GWLP_USERDATA` therefore holds either zero or the pointer that function stored.
+/// May only be called with the window of a dialog created by [`show_dialog`] — the `hwnd` its
+/// dialog procedure was called with, or the live window [`DIALOG_WINDOW`] records (task
+/// T-11-9) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that function
+/// stored.
 unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -> Option<R> {
     // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
     let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
@@ -4541,6 +4675,44 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
     }
 }
 
+/// Re-resolves the palette and repaints the dialog if the resolution moved — FR-92а, the
+/// common tail of a pressed «Применить» (task T-11-4) and of the system theme changing under
+/// the open dialog (task T-11-9).
+///
+/// The palette is resolved afresh — the setting may have changed, and under `system` the
+/// system switch may have flipped while the dialog was up — and only a *changed* resolution
+/// repaints: `resolve` answers `&'static` identity, so pointer equality is the whole test,
+/// and an unchanged palette costs nothing here. That same comparison is the debounce of
+/// T-11-9: Windows sends `WM_SETTINGCHANGE` in a batch, the first arrival repaints, and
+/// every later one finds the palette already current and leaves.
+fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
+    let fresh = theme::resolve(state.working.general.theme, theme::system_is_light());
+
+    // The brushes are recreated from the new palette, never rewritten in place:
+    // the new set is built first and the old one is dropped by the assignment, as
+    // the documentation of `Brushes` prescribes. A refusal of `Brushes::new`
+    // (NFR-13) leaves palette and brushes exactly as they were — the previous
+    // consistent palette on screen is better than half a new one — and is not
+    // journaled (reviews\T-11-1.md).
+    if !std::ptr::eq(fresh, state.palette)
+        && let Some(brushes) = theme::Brushes::new(fresh)
+    {
+        state.palette = fresh;
+        state.brushes = Some(brushes);
+
+        apply_title_bar_theme(hwnd, fresh);
+
+        // FR-92а, task T-11-7: the list view holds palette state of its own —
+        // the three `LVM_SET*COLOR` colours and the state image list of the
+        // ticks — which no brush recreation reaches; both are handed the fresh
+        // palette here, so the repaint below shows one whole dialog.
+        paint_cycle_list(hwnd, fresh);
+        install_check_images(hwnd, fresh);
+
+        repaint_after_palette_change(hwnd);
+    }
+}
+
 /// Reads the controls and hands the result to the caller of [`show_dialog`].
 ///
 /// # Safety
@@ -4570,36 +4742,9 @@ unsafe fn apply_now(hwnd: HWND) {
 
             // FR-92а, task T-11-4 — the half of position 25 this dialog owns: the person
             // who chose «Тёмное» and pressed «Применить» sees the change now, not on the
-            // next opening. The palette is resolved afresh — the setting may have changed,
-            // and under `system` the system switch may have flipped while the dialog was
-            // up — and only a *changed* resolution repaints: `resolve` answers `&'static`
-            // identity, so pointer equality is the whole test, and an unchanged palette
-            // costs nothing here.
-            let fresh = theme::resolve(state.working.general.theme, theme::system_is_light());
-
-            // The brushes are recreated from the new palette, never rewritten in place:
-            // the new set is built first and the old one is dropped by the assignment, as
-            // the documentation of `Brushes` prescribes. A refusal of `Brushes::new`
-            // (NFR-13) leaves palette and brushes exactly as they were — the previous
-            // consistent palette on screen is better than half a new one — and is not
-            // journaled (reviews\T-11-1.md).
-            if !std::ptr::eq(fresh, state.palette)
-                && let Some(brushes) = theme::Brushes::new(fresh)
-            {
-                state.palette = fresh;
-                state.brushes = Some(brushes);
-
-                apply_title_bar_theme(hwnd, fresh);
-
-                // FR-92а, task T-11-7: the list view holds palette state of its own —
-                // the three `LVM_SET*COLOR` colours and the state image list of the
-                // ticks — which no brush recreation reaches; both are handed the fresh
-                // palette here, so the repaint below shows one whole dialog.
-                paint_cycle_list(hwnd, fresh);
-                install_check_images(hwnd, fresh);
-
-                repaint_after_palette_change(hwnd);
-            }
+            // next opening. Task T-11-9 runs the same refresh from its own message, which
+            // is why the body lives in `refresh_palette` rather than here.
+            refresh_palette(hwnd, state);
         })
     };
 

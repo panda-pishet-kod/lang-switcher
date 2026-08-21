@@ -98,7 +98,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
     SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP,
     WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL,
-    WM_QUERYENDSESSION, WM_USER,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -387,7 +387,10 @@ impl Tray {
     /// anything, the state of FR-90 and the exit, are reachable only through the menu, and
     /// the menu is not a message. The measure/draw pair of the owner-drawn menu (FR-92а)
     /// is answered only while this program itself holds the menu on the screen — the gate
-    /// of [`MENU_PAINT`]; at any other moment both are as foreign as anything else.
+    /// of [`MENU_PAINT`]; at any other moment both are as foreign as anything else. The
+    /// theme pair of task T-11-9 is the last sentence of SEC-05 verbatim: the reaction is
+    /// bounded to re-reading the system setting and repainting our own open dialog, and
+    /// the message's content is not used past the comparison of one string.
     pub fn handle_message(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Reaction {
         // FR-81. Tested before the `match` because the value is not a compile-time constant:
         // it is whatever `RegisterWindowMessageW` returned. Zero is excluded, or a failed
@@ -429,6 +432,39 @@ impl Tray {
             // other moment, before anything of the message is dereferenced.
             WM_MEASUREITEM => measure_menu_item(lparam),
             WM_DRAWITEM => draw_menu_item(lparam),
+
+            // FR-92а, task T-11-9: the two messages Windows broadcasts when the system
+            // theme moves, received here because the hidden UI window is the one top-level
+            // window of this process. The whole reaction is a call that may post one
+            // private message to the open settings dialog — a closed dialog and a fixed
+            // `theme != "system"` are both «nothing happens», decided in `settings`.
+            // `Ignored`, not `Handled`: the broadcast goes on to `DefWindowProcW` like any
+            // other message that is not ours to consume.
+            //
+            // SEC-05 verbatim: the string `lParam` names is compared against
+            // `"ImmersiveColorSet"` and is used for nothing further. The reading is
+            // careful — a null pointer is not ours, at most [`SETTING_NAME_CAP`] UTF-16
+            // units are ever looked at, the comparison is exact — and nothing of the
+            // message is kept: the copy below lives on this frame and dies with it.
+            WM_SETTINGCHANGE => {
+                // SAFETY: for the length of this delivery the system keeps the string the
+                // broadcast names readable in this process, and the reader checks for null
+                // and never looks past the terminator or the cap.
+                let name = unsafe { setting_change_name(lparam) };
+
+                settings::on_system_theme_message(name.as_deref());
+
+                Reaction::Ignored
+            }
+
+            // `WM_THEMECHANGED` carries no string: it *is* the theme notification, by its
+            // own name, so it enters the same decision as a `WM_SETTINGCHANGE` that named
+            // the switch — one path after the string check, not two.
+            WM_THEMECHANGED => {
+                settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
+
+                Reaction::Ignored
+            }
 
             _ => Reaction::Ignored,
         }
@@ -788,6 +824,50 @@ fn detach() {
 /// this when it adds the settings dialog.
 pub fn with_tray<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
     UI_TRAY.with(|slot| slot.borrow_mut().as_mut().map(f))
+}
+
+/// The ceiling on how many UTF-16 units of a `WM_SETTINGCHANGE` string are ever looked at —
+/// FR-92а, task T-11-9, the reading bounds of SEC-05.
+///
+/// `"ImmersiveColorSet"` is 17 units; 64 is that with room to spare, and a string still
+/// running at 64 is one this program was never going to match.
+const SETTING_NAME_CAP: usize = 64;
+
+/// The string a `WM_SETTINGCHANGE` names, read within the bounds of SEC-05 — task T-11-9.
+///
+/// `None` for a null `lParam` (then it is not ours), for a string that shows no terminator
+/// within [`SETTING_NAME_CAP`] units, and for units that are not UTF-16 — whatever either of
+/// those is, it is not the one word this program compares against. The value lives on the
+/// caller's frame and dies with the comparison it was read for: nothing of the message is
+/// kept.
+///
+/// # Safety
+///
+/// `lparam` must be the `lParam` of a `WM_SETTINGCHANGE` delivered to this thread: for the
+/// length of the delivery the system keeps the string it names readable in this process, and
+/// the loop below reads one unit at a time, never past the terminator and never past the
+/// cap.
+unsafe fn setting_change_name(lparam: LPARAM) -> Option<String> {
+    if lparam.0 == 0 {
+        return None;
+    }
+
+    let text = lparam.0 as *const u16;
+    let mut units = Vec::with_capacity(SETTING_NAME_CAP);
+
+    for offset in 0..SETTING_NAME_CAP {
+        // SAFETY: see above — every unit before `offset` was read and found non-zero, so
+        // the read is behind the terminator and below the cap.
+        let unit = unsafe { text.add(offset).read_unaligned() };
+
+        if unit == 0 {
+            return String::from_utf16(&units).ok();
+        }
+
+        units.push(unit);
+    }
+
+    None
 }
 
 /// The window-procedure entry point of the tray.

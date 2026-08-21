@@ -3077,3 +3077,94 @@ fn the_captured_key_reaches_the_hook_through_publish_configuration() {
     app::publish_configuration(&config);
     assert_eq!(hook::hotkey_vk(), hook::DEFAULT_HOTKEY_VK);
 }
+
+// ---------------------------------------------------------------------------------------
+// FR-92а — the system theme changing under the open dialog. Task T-11-9.
+// ---------------------------------------------------------------------------------------
+
+use lang_switcher::theme::Palette;
+
+/// **Criterion 9 of task T-11-9.** «Перекрашивать?» — the full table of the three axes
+/// the task names: the string the `WM_SETTINGCHANGE` carried (the exact word / a foreign
+/// word / an empty word / no string at all — a null `lParam` reads as `None` long before
+/// the decision), the setting in force (`system` / `dark` — under a fixed setting the
+/// system has no say), and whether the palette the system now resolves to is the one
+/// already on the screen. Sixteen rows, one `true`.
+///
+/// The rows are written out rather than derived, and the expectations are literals: a table
+/// computed the way the code computes it would check nothing.
+#[test]
+fn the_repaint_decision_of_fr_92a_follows_the_full_table() {
+    /// One row: the string, the setting, (палитра сейчас, палитра по системе), the answer.
+    type RepaintRow = (
+        Option<&'static str>,
+        ThemeSetting,
+        (&'static Palette, &'static Palette),
+        bool,
+    );
+
+    let same: (&Palette, &Palette) = (&GRAPHITE, &GRAPHITE);
+    let moved: (&Palette, &Palette) = (&GRAPHITE, &FOG);
+
+    #[rustfmt::skip]
+    let table: [RepaintRow; 16] = [
+        // The one row that repaints: the exact word, the setting `system`, the palette moved.
+        (Some("ImmersiveColorSet"),   ThemeSetting::System, moved, true),
+        (Some("ImmersiveColorSet"),   ThemeSetting::System, same,  false),
+        (Some("ImmersiveColorSet"),   ThemeSetting::Dark,   moved, false),
+        (Some("ImmersiveColorSet"),   ThemeSetting::Dark,   same,  false),
+        // A foreign word: no, whatever the setting and wherever the palettes stand.
+        (Some("WindowsThemeElement"), ThemeSetting::System, moved, false),
+        (Some("WindowsThemeElement"), ThemeSetting::System, same,  false),
+        (Some("WindowsThemeElement"), ThemeSetting::Dark,   moved, false),
+        (Some("WindowsThemeElement"), ThemeSetting::Dark,   same,  false),
+        // An empty word — a `WM_SETTINGCHANGE` that named nothing: same answer as foreign.
+        (Some(""),                    ThemeSetting::System, moved, false),
+        (Some(""),                    ThemeSetting::System, same,  false),
+        (Some(""),                    ThemeSetting::Dark,   moved, false),
+        (Some(""),                    ThemeSetting::Dark,   same,  false),
+        // No string at all — the null `lParam` of SEC-05, read as `None` by the receiver.
+        (None,                        ThemeSetting::System, moved, false),
+        (None,                        ThemeSetting::System, same,  false),
+        (None,                        ThemeSetting::Dark,   moved, false),
+        (None,                        ThemeSetting::Dark,   same,  false),
+    ];
+
+    for (string, setting, (current, by_system), expected) in table {
+        assert_eq!(
+            settings::repaint_for_system_theme(string, setting, current, by_system),
+            expected,
+            "for {string:?} under {setting:?}, palette moved: {}",
+            !std::ptr::eq(current, by_system)
+        );
+    }
+}
+
+/// **Criterion 12 of task T-11-9.** The dialog's system-theme message is `WM_APP + 14` — the
+/// literal `0x8000 + 14`, not the constant read back — and it collides with none of the
+/// public numbers of the occupied row. The three private ones (`+ 1` and `+ 5` of `app`,
+/// `+ 2` of the tray) are out of an integration test's reach; they are not `14` by the same
+/// literal this test pins.
+#[test]
+fn the_system_theme_message_is_wm_app_plus_14_and_collides_with_nothing_public() {
+    assert_eq!(settings::WM_APP_SYSTEM_THEME, 0x8000 + 14);
+
+    for occupied in [
+        lang_switcher::hook::WM_APP_HOTKEY,
+        lang_switcher::hook::WM_APP_FAIL_SAFE,
+        lang_switcher::watchdog::WM_APP_FLUSH,
+        lang_switcher::watchdog::WM_APP_LAYOUT,
+        lang_switcher::watchdog::WM_APP_REHOOK,
+        lang_switcher::switch::WM_APP_SWITCH,
+        lang_switcher::guard::WM_APP_PROBE,
+        lang_switcher::guard::WM_APP_FIELD,
+        lang_switcher::selection::WM_APP_SELECTION,
+        lang_switcher::selection::WM_APP_BUFFER_PATH,
+    ] {
+        assert_ne!(
+            settings::WM_APP_SYSTEM_THEME,
+            occupied,
+            "two private messages share a number"
+        );
+    }
+}
