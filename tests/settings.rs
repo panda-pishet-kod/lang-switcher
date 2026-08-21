@@ -1270,6 +1270,85 @@ fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
 }
 
 // =========================================================================================
+// FR-92а — the check frames of the layout list: the closed colour table and the untouched
+// participation bits. Task T-11-7.
+// =========================================================================================
+//
+// Criterion 9: the mapping «(взведена, палитра) → краски кадра» is a pure function, closed
+// here by the full 2×2 table — both states against both palettes, every answer a field of
+// the palette and nothing else. Criterion 11's other half: the state image bits the
+// participation mechanism of FR-31 reads and writes, and the frame order that gives those
+// bits their pictures, are held to the values they had before this task.
+
+use lang_switcher::settings::{
+    CHECK_FRAME_ORDER, CHECKED_IMAGE, CheckFrameColors, UNCHECKED_IMAGE,
+};
+
+#[test]
+fn the_check_frame_colours_follow_the_2x2_table_of_fr_92a() {
+    // Both palettes by name, so a swapped pair could not pass: the loop below asserts
+    // against the fields of the very palette it hands in.
+    for palette in [&GRAPHITE, &FOG] {
+        // Снята: the quiet ground of the list under the single-pixel box frame — the same
+        // cell the unchecked owner-drawn check box of the dialog paints.
+        assert_eq!(
+            settings::check_frame_colors(false, palette),
+            CheckFrameColors {
+                fill: palette.field_bg,
+                frame: Some(palette.box_border),
+                mark: None,
+            },
+            "unchecked frame, palette {:?}",
+            palette.field_bg
+        );
+
+        // Взведена: the accent covers the square whole — no frame — and the check mark is
+        // cut from the accent's own foreground, as on the dialog's check boxes.
+        assert_eq!(
+            settings::check_frame_colors(true, palette),
+            CheckFrameColors {
+                fill: palette.accent_bg,
+                frame: None,
+                mark: Some(palette.accent_fg),
+            },
+            "checked frame, palette {:?}",
+            palette.accent_bg
+        );
+    }
+}
+
+#[test]
+fn the_state_image_bits_and_the_frame_order_of_fr_31_are_unchanged() {
+    // The bits the participation mechanism speaks — written by set_row_check, read by
+    // read_cycle_checks — as literals, not as the crate's own constants read back: state
+    // image index 1 is the unticked square, index 2 the ticked one, in the form
+    // LVIS_STATEIMAGEMASK carries them (index << 12). The values predate this task and a
+    // drift here would corrupt every saved cycle.
+    assert_eq!(UNCHECKED_IMAGE, 0x1000, "index 1 — the unticked square");
+    assert_eq!(CHECKED_IMAGE, 0x2000, "index 2 — the ticked one");
+
+    // And the frames of the custom image list stand in exactly that order: the frame at
+    // position i answers state image index i + 1, so «снята» must come first and «взведена»
+    // second — the same order the system pair of LVS_EX_CHECKBOXES had, which is what keeps
+    // the replacement from moving a single state bit.
+    assert_eq!(CHECK_FRAME_ORDER, [false, true]);
+
+    for (position, checked) in CHECK_FRAME_ORDER.into_iter().enumerate() {
+        let mask = (u32::try_from(position).expect("two frames") + 1) << 12;
+
+        assert_eq!(
+            mask,
+            if checked {
+                CHECKED_IMAGE
+            } else {
+                UNCHECKED_IMAGE
+            },
+            "frame {position} carries the picture of the bits that name it"
+        );
+    }
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //

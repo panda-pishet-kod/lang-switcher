@@ -69,10 +69,11 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    CreatePen, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawFocusRect,
-    DrawTextW, Ellipse, FillRect, FrameRect, GetStockObject, HBRUSH, HDC, InvalidateRect, LineTo,
+    CreateCompatibleBitmap, CreateCompatibleDC, CreatePen, CreateSolidBrush, DT_CALCRECT,
+    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW,
+    Ellipse, FillRect, FrameRect, GetDC, GetStockObject, HBRUSH, HDC, InvalidateRect, LineTo,
     MoveToEx, NULL_PEN, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
-    RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+    ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -82,12 +83,16 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::Win32::UI::Controls::{
-    BST_CHECKED, BST_UNCHECKED, CheckDlgButton, CheckRadioButton, DRAWITEMSTRUCT, EM_LIMITTEXT,
-    ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, IsDlgButtonChecked,
+    BST_CHECKED, BST_UNCHECKED, CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT,
+    CDRF_NOTIFYITEMDRAW, CheckDlgButton, CheckRadioButton, DRAWITEMSTRUCT, EM_LIMITTEXT,
+    HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32, INITCOMMONCONTROLSEX, ImageList_Add,
+    ImageList_Create, ImageList_Destroy, InitCommonControlsEx, IsDlgButtonChecked,
     LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT, LVIS_FOCUSED,
     LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
-    LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE,
-    LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, MEASUREITEMSTRUCT,
+    LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
+    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
+    LVM_SETTEXTCOLOR, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, LVSIL_STATE,
+    MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLVCUSTOMDRAW,
     ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
     ODT_COMBOBOX,
 };
@@ -100,15 +105,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
-    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DefWindowProcW,
-    DialogBoxParamW, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
-    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL,
-    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DRAWITEM, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
-    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT,
+    DefWindowProcW, DialogBoxParamW, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC,
+    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW,
+    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
+    WINDOW_LONG_PTR_INDEX, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NOTIFY, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -1917,10 +1923,16 @@ const MS_FIELD_DIGITS: usize = 9;
 const EXCLUSION_NAME_CHARS: usize = 64;
 
 /// State image index of a ticked checkbox in a list view, in the form the item state carries it.
-const CHECKED_IMAGE: u32 = 0x2000;
+///
+/// One-based index 2 in the `LVIS_STATEIMAGEMASK` bits — the *second* frame of whatever state
+/// image list the control holds, the system's `LVS_EX_CHECKBOXES` pair and the palette frames
+/// of [`CHECK_FRAME_ORDER`] alike. Public since task T-11-7 so a test can hold the bits and the
+/// frame order together; the participation mechanism of FR-31 reads and writes exactly these
+/// bits ([`set_row_check`], [`read_cycle_checks`]) and is not allowed to drift.
+pub const CHECKED_IMAGE: u32 = 0x2000;
 
-/// State image index of an unticked one.
-const UNCHECKED_IMAGE: u32 = 0x1000;
+/// State image index of an unticked one — one-based index 1, the *first* frame.
+pub const UNCHECKED_IMAGE: u32 = 0x1000;
 
 /// One line of the layout list of FR-31: a layout of this session and whether it takes part.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2313,6 +2325,15 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: the sender owns the struct `lparam` names for the length of the send,
             // and this procedure is inside that send.
             unsafe { on_measure_item(hwnd, lparam) }
+        }
+
+        // FR-92а, task T-11-7: the custom-draw questions of the layout list. The gate SEC-05
+        // asks for is the handler's first act — `hwndFrom` and `code` are compared before
+        // any work — and the window of time is the same as for `WM_DRAWITEM` above.
+        WM_NOTIFY => {
+            // SAFETY: the sender owns the struct `lparam` names for the length of the send,
+            // and this procedure is inside that send.
+            unsafe { on_notify(hwnd, lparam) }
         }
 
         WM_COMMAND => {
@@ -3092,6 +3113,146 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     item.itemHeight = height;
 
     // TRUE — measured.
+    1
+}
+
+/// Answers `NM_CUSTOMDRAW` for the layout list — FR-92а, task T-11-7: the selected row in
+/// the selection pair of the palette instead of the system highlight.
+///
+/// # SEC-05 — the checks come before any work
+///
+/// The first dereference of the message takes the three fields of `NMHDR` and nothing else:
+/// `hwndFrom`, `idFrom`, `code`. All three are then compared — `code` against
+/// `NM_CUSTOMDRAW`, `idFrom` against `IDC_CYCLE_LIST`, and `hwndFrom` against the dialog's
+/// own `GetDlgItem` answer for that identifier — and only a message that passes every one
+/// is read any further, as the `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
+/// Out of that structure exactly three fields are read — `dwDrawStage`, `dwItemSpec`,
+/// `uItemState` — and three written — `clrText`, `clrTextBk`, `uItemState` — the documented
+/// answer protocol of item prepaint; the `hdc` and the rectangle of the message are not
+/// touched, and no pointer of the message is followed. Whether the row is selected is not
+/// taken from the message either: it is the list's own `LVM_GETITEMSTATE` answer, asked by
+/// identifier through [`send_to`] — the reading [`read_cycle_checks`] already does for the
+/// ticks. A forged message can therefore recolour one repaint of its own list and nothing
+/// else — no privileged action starts here, and the window of time is the same gate as for
+/// `WM_DRAWITEM`: outside the modal call there is no procedure to arrive at.
+///
+/// # The manoeuvre for the selected row, and the two answers
+///
+/// `CDDS_PREPAINT` is answered with `CDRF_NOTIFYITEMDRAW` — «ask me again for each item» —
+/// the documented door to item prepaint. There, for a selected row, `clrTextBk`/`clrText`
+/// take `sel_bg`/`sel_fg` — and the `CDIS_SELECTED` bit is *removed* from `uItemState`:
+/// while that bit stands the control paints the selection ground itself (the system
+/// highlight, or the theme's), and the two colour fields lose to it. Clearing the bit in
+/// the item-prepaint answer is the documented custom-draw lever for exactly this — the
+/// control then draws the row as an ordinary one, with the colours just set; the row still
+/// *is* selected (`LVIS_SELECTED` is untouched, `LVS_SHOWSELALWAYS` stays a style of the
+/// template). The answer is `CDRF_DODEFAULT` — «draw it yourself, with the fields I set»;
+/// `CDRF_NEWFONT` is the answer of a handler that swapped a font into the `hdc`, which
+/// this one never does. Chosen by the documentation — the product is not launched by the
+/// executor; the eye check is the controller's, at the final acceptance.
+///
+/// Answers through [`answer_notify`] — a dialog procedure hands a `WM_NOTIFY` result back
+/// in two moves, not by return value. 0 — «not handled» — for every stage this handler has
+/// no word for, for a message that fails the gate, and for the state being unreachable.
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the `lparam` of the message: the sender owns the
+/// structure for the length of the send, and this procedure is inside that send.
+unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
+    if lparam.0 == 0 {
+        return 0;
+    }
+
+    // The first dereference: the three header fields, copied out as plain values.
+    //
+    // SAFETY: see above.
+    let header = unsafe { &*(lparam.0 as *const NMHDR) };
+    let (from_window, from_id, code) = (header.hwndFrom, header.idFrom, header.code);
+
+    // SEC-05: the three comparisons, before any work.
+    if code != NM_CUSTOMDRAW || from_id != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX) {
+        return 0;
+    }
+
+    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
+    // ours, and answers a handle or an error.
+    if unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() != Some(from_window) {
+        return 0;
+    }
+
+    // Only now the payload. The mutable reference is the answer protocol of the message:
+    // the control reads the colour fields back when the send returns.
+    //
+    // SAFETY: see above — the header just checked is the head of this very structure.
+    let draw = unsafe { &mut *(lparam.0 as *mut NMLVCUSTOMDRAW) };
+
+    if draw.nmcd.dwDrawStage == CDDS_PREPAINT {
+        return answer_notify(hwnd, isize::try_from(CDRF_NOTIFYITEMDRAW).unwrap_or(0));
+    }
+
+    if draw.nmcd.dwDrawStage != CDDS_ITEMPREPAINT {
+        return 0;
+    }
+
+    // The list's own answer, not the message's: whether the row `dwItemSpec` names is
+    // selected. An out-of-range index answers 0 — not selected — and costs nothing.
+    let selected = u32::try_from(send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_GETITEMSTATE,
+        draw.nmcd.dwItemSpec,
+        isize::try_from(LVIS_SELECTED.0).unwrap_or(0),
+    ))
+    .unwrap_or(0)
+        & LVIS_SELECTED.0
+        != 0;
+
+    if selected {
+        // The colour choice, split from the write-back as everywhere in this file: the
+        // borrow of the state ends before the message structure is touched.
+        //
+        // SAFETY: see the caller.
+        let pair =
+            unsafe { with_state(hwnd, |state| (state.palette.sel_bg, state.palette.sel_fg)) };
+
+        let Some((sel_bg, sel_fg)) = pair else {
+            // No state to choose from — «not handled», the system selection stays (NFR-13).
+            return 0;
+        };
+
+        draw.clrTextBk = sel_bg;
+        draw.clrText = sel_fg;
+
+        // The lever of the doc comment: without `CDIS_SELECTED` the control paints the row
+        // as ordinary — with the pair just set instead of the system highlight.
+        draw.nmcd.uItemState =
+            NMCUSTOMDRAW_DRAW_STATE_FLAGS(draw.nmcd.uItemState.0 & !CDIS_SELECTED.0);
+    }
+
+    answer_notify(hwnd, isize::try_from(CDRF_DODEFAULT).unwrap_or(0))
+}
+
+/// Hands one `WM_NOTIFY` answer to the dialog manager — task T-11-7.
+///
+/// A dialog procedure cannot answer `WM_NOTIFY` by return value alone: the documented
+/// result protocol of a DLGPROC is two moves — the answer goes into the `DWLP_MSGRESULT`
+/// field of the dialog window, and the return of TRUE says «handled, the result is there».
+/// `DWLP_MSGRESULT` is a `DWLP_*` field — the dialog manager's own storage, the very range
+/// the `GWLP_USERDATA` comment of `WM_INITDIALOG` sets this file's pointer apart from.
+fn answer_notify(hwnd: HWND, result: isize) -> isize {
+    // SAFETY: `hwnd` is the live dialog and `DWLP_MSGRESULT` is the field every dialog
+    // reserves for exactly this; the previous value is dropped — the field is an answer
+    // slot, not state of ours.
+    unsafe {
+        SetWindowLongPtrW(
+            hwnd,
+            WINDOW_LONG_PTR_INDEX(i32::try_from(DWLP_MSGRESULT).unwrap_or(0)),
+            result,
+        )
+    };
+
+    // TRUE — handled; the manager reads the answer back from the field.
     1
 }
 
@@ -4125,6 +4286,14 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     );
 
     prepare_cycle_list(hwnd);
+
+    // FR-92а, task T-11-7: the list carries palette state of its own — the three colours
+    // and the state image list of the ticks — set here for the first showing and again by
+    // `apply_now` on every palette change. After `prepare_cycle_list`: the extended style
+    // must exist before the system pair it creates can be replaced.
+    paint_cycle_list(hwnd, state.palette);
+    install_check_images(hwnd, state.palette);
+
     fill_cycle_list(hwnd, &state.rows, 0);
     enable_by_mode(hwnd, state.working.layouts.mode);
 }
@@ -4421,6 +4590,14 @@ unsafe fn apply_now(hwnd: HWND) {
                 state.brushes = Some(brushes);
 
                 apply_title_bar_theme(hwnd, fresh);
+
+                // FR-92а, task T-11-7: the list view holds palette state of its own —
+                // the three `LVM_SET*COLOR` colours and the state image list of the
+                // ticks — which no brush recreation reaches; both are handed the fresh
+                // palette here, so the repaint below shows one whole dialog.
+                paint_cycle_list(hwnd, fresh);
+                install_check_images(hwnd, fresh);
+
                 repaint_after_palette_change(hwnd);
             }
         })
@@ -4850,6 +5027,285 @@ fn ensure_list_view_class() -> windows::core::Result<()> {
         // NFR-13: without the class the dialog cannot be created at all, so this is fatal to
         // the dialog and is reported as such rather than discovered later as a bare -1.
         Err(WinError::from_thread())
+    }
+}
+
+/// Side of one check frame of the layout list, in pixels — the 13×13 square the task names,
+/// and the same square the owner-drawn glyphs of the dialog use ([`GLYPH_SIZE`]), so a tick in
+/// the list and a tick on the dialog read as one element.
+const CHECK_FRAME_SIZE: i32 = 13;
+
+/// The order the two frames enter the state image list of [`build_check_image_list`]:
+/// frame 0 — снята, frame 1 — взведена.
+///
+/// This array is what couples the drawing to the participation bits of FR-31: a state image
+/// index is **one-based** — index 1 names frame 0 — so the frame at position `i` here answers
+/// the mask `(i + 1) << 12`, which is [`UNCHECKED_IMAGE`] for the first frame and
+/// [`CHECKED_IMAGE`] for the second, exactly the values [`set_row_check`] writes and
+/// [`read_cycle_checks`] reads. The system pair of `LVS_EX_CHECKBOXES` sits in the same
+/// order, which is why replacing the image list moves not a single state bit. A test holds
+/// the coupling.
+pub const CHECK_FRAME_ORDER: [bool; 2] = [false, true];
+
+/// Fill, frame and mark of one check frame of the layout list — what [`check_frame_colors`]
+/// answers and the whole of what [`draw_check_frame`] needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckFrameColors {
+    /// What the whole 13×13 square is filled with.
+    pub fill: COLORREF,
+    /// The single-pixel frame — `None` for the checked frame the accent fill covers whole.
+    pub frame: Option<COLORREF>,
+    /// The two-stroke check mark — `None` while unchecked.
+    pub mark: Option<COLORREF>,
+}
+
+/// The colours of one check frame in one palette — FR-92а, task T-11-7: the pure half of the
+/// custom state image list, closed by a table test over both states and both palettes.
+///
+/// Colours of the given palette rather than roles, unlike [`glyph_color_roles`] and its kin:
+/// the frames are painted into memory bitmaps outside any `WM_*` answer, so what the drawing
+/// needs is the palette's own values — and the task words the function as «(взведена,
+/// палитра) → краски кадра». The table stays closed all the same: every answer is a field of
+/// `palette` and nothing else, so not a single colour number enters this module (§6.2).
+///
+/// The two rows quote the check-box cells of the glyph table of T-11-5b, so the ticks of the
+/// list match the ticks of the dialog:
+/// - **снята** — `field_bg` fill under the single-pixel `box_border` frame, no mark;
+/// - **взведена** — `accent_bg` fill edge to edge, no frame, `accent_fg` check mark.
+pub fn check_frame_colors(checked: bool, palette: &theme::Palette) -> CheckFrameColors {
+    if checked {
+        CheckFrameColors {
+            fill: palette.accent_bg,
+            frame: None,
+            mark: Some(palette.accent_fg),
+        }
+    } else {
+        CheckFrameColors {
+            fill: palette.field_bg,
+            frame: Some(palette.box_border),
+            mark: None,
+        }
+    }
+}
+
+/// Hands the layout list the three colours of the resolved palette — FR-92а, task T-11-7.
+///
+/// `LVM_SETBKCOLOR` is the ground of the control below and around the rows, `LVM_SETTEXTCOLOR`
+/// the ink of every label, `LVM_SETTEXTBKCOLOR` the ground directly behind the text — all
+/// three the documented colour messages of a list view, named by FR-92а («`LVM_SETBKCOLOR` и
+/// родственные»). They exist because a `SysListView32` asks its parent no `WM_CTLCOLOR*`
+/// question: the brushes of T-11-4 cannot reach it. Sent with [`send_to`] — the way this file
+/// already talks to its own list — on initialisation and again on every palette change.
+fn paint_cycle_list(hwnd: HWND, palette: &theme::Palette) {
+    // NFR-13: each message answers a success flag, examined in words and dropped: a refused
+    // colour leaves the system one on exactly that surface — the dialog lives degraded, the
+    // precedent of the refused brushes of T-11-4 — and the journal has no row for cosmetics
+    // (reviews\T-11-1.md).
+    for (message, color) in [
+        (LVM_SETBKCOLOR, palette.field_bg),
+        (LVM_SETTEXTCOLOR, palette.text),
+        (LVM_SETTEXTBKCOLOR, palette.field_bg),
+    ] {
+        send_to(
+            hwnd,
+            IDC_CYCLE_LIST,
+            message,
+            0,
+            isize::try_from(color.0).unwrap_or(0),
+        );
+    }
+}
+
+/// Replaces the state image list of the layout list with the two palette frames — FR-92а,
+/// task T-11-7: `LVS_EX_CHECKBOXES` draws its ticks with the system pair, which stays light
+/// in the dark palette (§10 п.9 called that the accepted price; the documented state image
+/// list is what lifts it).
+///
+/// Everything else about the check boxes is untouched: the extended style stays on the
+/// control, so clicking a square still flips the item between state images 1 and 2, and
+/// [`set_row_check`]/[`read_cycle_checks`] keep speaking `LVIS_STATEIMAGEMASK` — the
+/// participation mechanism of FR-31 is the same mechanism with different pictures.
+fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
+    let Some(list) = build_check_image_list(palette) else {
+        // NFR-13, examined in words: with no frames of our own the system pair simply
+        // stays — light squares in the dark palette, exactly the price §10 п.9 already
+        // words — which is better than ticks nobody can see at all. No journal row for
+        // cosmetics (reviews\T-11-1.md).
+        return;
+    };
+
+    // `LVM_SETIMAGELIST` with `LVSIL_STATE` — the documented replacement. The answer is the
+    // handle of the list previously associated with the control, handed back precisely so
+    // the caller can dispose of it: after the swap the control holds no reference to it.
+    let previous = send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_SETIMAGELIST,
+        usize::try_from(LVSIL_STATE).unwrap_or(0),
+        list.0,
+    );
+
+    // The first swap answers the pair `LVS_EX_CHECKBOXES` created, every later one — the
+    // frames of the previous palette; both are equally ours to free once the control has
+    // let go. The list *currently* installed is deliberately never destroyed here: the
+    // control destroys the image lists it holds when it is itself destroyed — the template
+    // carries no `LVS_SHAREIMAGELISTS`, which is the one style that would keep it from
+    // doing so.
+    if previous != 0 {
+        // SAFETY: `previous` is the handle the control just answered and no longer holds;
+        // it is freed exactly once, here. The `BOOL` is examined in words and dropped —
+        // a refusal would mean the handle was not a live image list of this process, which
+        // the swap above makes unreachable (NFR-13).
+        let _ = unsafe { ImageList_Destroy(Some(HIMAGELIST(previous))) };
+    }
+}
+
+/// Builds the two-frame state image list of [`install_check_images`] — the outer layer of
+/// three: takes and releases the screen DC, which is where the colour depth of the frames
+/// comes from.
+fn build_check_image_list(palette: &theme::Palette) -> Option<HIMAGELIST> {
+    // SAFETY: the screen DC of this process; released below, on every path.
+    let screen = unsafe { GetDC(None) };
+
+    if screen.is_invalid() {
+        // NFR-13: examined — no DC, no frames; the caller words the degradation.
+        return None;
+    }
+
+    let list = build_check_frames(screen, palette);
+
+    // SAFETY: releases exactly the DC taken above, once.
+    unsafe { ReleaseDC(None, screen) };
+
+    list
+}
+
+/// The middle layer of [`build_check_image_list`]: owns the memory DC the frames are drawn
+/// through. ⚠ The bitmaps are compatible with the **screen**, not with this DC: a memory DC
+/// is born with a monochrome bitmap selected, and a bitmap compatible with *it* would carry
+/// one bit per pixel — the classic trap the task's «в память» route walks past.
+fn build_check_frames(screen: HDC, palette: &theme::Palette) -> Option<HIMAGELIST> {
+    // SAFETY: a memory DC over the live screen DC; deleted below, on every path.
+    let dc = unsafe { CreateCompatibleDC(Some(screen)) };
+
+    if dc.is_invalid() {
+        // NFR-13: examined — as in the caller.
+        return None;
+    }
+
+    let list = draw_frames_into_list(screen, dc, palette);
+
+    // SAFETY: deletes exactly the DC created above, once; the frame bitmaps were deselected
+    // before their own deletion, so nothing of ours is still selected into it.
+    let _ = unsafe { DeleteDC(dc) };
+
+    list
+}
+
+/// The inner layer of [`build_check_image_list`]: the image list itself and the two frames,
+/// in the order of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
+/// answers `None` — a one-frame list would silently shift the meaning of state image 2.
+fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Option<HIMAGELIST> {
+    // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
+    // to the caller or destroyed below. `ILC_COLOR32` — the frames are opaque squares.
+    let list = unsafe { ImageList_Create(CHECK_FRAME_SIZE, CHECK_FRAME_SIZE, ILC_COLOR32, 2, 0) };
+
+    if list.is_invalid() {
+        // NFR-13: examined — as in the callers.
+        return None;
+    }
+
+    for checked in CHECK_FRAME_ORDER {
+        // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
+        // frame until the `DeleteObject` below.
+        let bitmap = unsafe { CreateCompatibleBitmap(screen, CHECK_FRAME_SIZE, CHECK_FRAME_SIZE) };
+
+        if bitmap.is_invalid() {
+            // SAFETY: the half-built list is ours until handed out; freed exactly once.
+            let _ = unsafe { ImageList_Destroy(Some(list)) };
+            return None;
+        }
+
+        // SAFETY: both handles are live and ours; the previous bitmap is kept and put back
+        // below — `ImageList_Add` reads the bitmap's bits, and a bitmap still selected
+        // into a DC is not readable.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+
+        draw_check_frame(dc, checked, palette);
+
+        // SAFETY: restores the bitmap that was in the DC a moment ago.
+        unsafe { SelectObject(dc, previous) };
+
+        // SAFETY: `list` and `bitmap` are live and ours; the call copies the bits and keeps
+        // no handle. No mask — the frames are opaque.
+        let added = unsafe { ImageList_Add(list, bitmap, None) };
+
+        // SAFETY: deselected above, copied into the list, freed exactly once. The `BOOL`
+        // is dropped for the reason `draw_check_mark` gives for its pen.
+        let _ = unsafe { DeleteObject(bitmap.into()) };
+
+        if added < 0 {
+            // NFR-13: examined — `ImageList_Add` answers the index or -1.
+            //
+            // SAFETY: as for the refused bitmap above.
+            let _ = unsafe { ImageList_Destroy(Some(list)) };
+            return None;
+        }
+    }
+
+    Some(list)
+}
+
+/// Paints one frame of the state image list — the whole [`CHECK_FRAME_SIZE`] square of the
+/// bitmap currently selected into `dc`, in the colours of [`check_frame_colors`].
+///
+/// The brushes are transient, exactly as the pens of [`draw_check_mark`]: nothing here
+/// outlives the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is
+/// answers that must outlive it. The mark *is* [`draw_check_mark`] — the same two strokes,
+/// the same 2-pixel pen, so the tick of the list is the tick of the dialog stroke for
+/// stroke.
+fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette) {
+    let frame = RECT {
+        left: 0,
+        top: 0,
+        right: CHECK_FRAME_SIZE,
+        bottom: CHECK_FRAME_SIZE,
+    };
+
+    let colors = check_frame_colors(checked, palette);
+
+    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
+    // below.
+    let fill = unsafe { CreateSolidBrush(colors.fill) };
+
+    if fill.is_invalid() {
+        // NFR-13: examined — no brush, no fill; the frame stays whatever the fresh bitmap
+        // held, and the callers' degradation words cover it.
+        return;
+    }
+
+    // SAFETY: `dc` holds the frame bitmap for exactly this call; `fill` is the live brush
+    // just made. The answers of the paint calls are dropped for the NFR-13 reason
+    // `draw_glyph_element` states for its own.
+    unsafe { FillRect(dc, &frame, fill) };
+
+    // SAFETY: created above, handed to nobody, freed exactly once — see `draw_check_mark`
+    // on the dropped `BOOL`.
+    let _ = unsafe { DeleteObject(fill.into()) };
+
+    if let Some(border) = colors.frame {
+        // SAFETY: as for `fill`, all three calls.
+        let brush = unsafe { CreateSolidBrush(border) };
+
+        if !brush.is_invalid() {
+            unsafe { FrameRect(dc, &frame, brush) };
+
+            let _ = unsafe { DeleteObject(brush.into()) };
+        }
+    }
+
+    if let Some(ink) = colors.mark {
+        draw_check_mark(dc, &frame, ink);
     }
 }
 
