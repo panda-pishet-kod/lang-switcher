@@ -1231,6 +1231,45 @@ fn the_panel_map_is_rectangle_containment_with_the_boundary_counted_in() {
 }
 
 // =========================================================================================
+// FR-92а — the owner-drawn combo boxes: the closed colour-role table. Task T-11-6.
+// =========================================================================================
+//
+// Criterion 10: the mapping «(закрытая часть, подсвечен) → роли красок пункта» is a pure
+// function, closed here by the full 2×2 table — item of the dropped-down list against the
+// closed face, ordinary against highlighted. The drawing half needs a live dialog and is
+// checked by the controller on the real window at acceptance.
+
+use lang_switcher::settings::{ComboFillRole, ComboItemColors, ComboTextRole};
+
+#[test]
+fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
+    use ComboFillRole as Fill;
+    use ComboTextRole as Ink;
+
+    let table: [(bool, bool, Fill, Ink); 4] = [
+        // An ordinary item of the dropped-down list — the quiet ground of the list, the
+        // same colours WM_CTLCOLORLISTBOX erases it with.
+        (false, false, Fill::FieldBg, Ink::Text),
+        // The highlighted item — the selection pair of the palette.
+        (false, true, Fill::SelBg, Ink::SelFg),
+        // The closed face, quiet: a field to the eye.
+        (true, false, Fill::FieldBg, Ink::Text),
+        // The closed face while the manager marks it selected — the combo holding the
+        // focus, or the list dropped: still the field pair, or the face would sit on the
+        // dialog as a permanently lit stripe; the focus is the dotted rectangle's job.
+        (true, true, Fill::FieldBg, Ink::Text),
+    ];
+
+    for (closed_part, highlighted, fill, text) in table {
+        assert_eq!(
+            settings::combo_item_color_roles(closed_part, highlighted),
+            ComboItemColors { fill, text },
+            "closed_part = {closed_part}, highlighted = {highlighted}"
+        );
+    }
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //
@@ -1638,6 +1677,87 @@ fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
             style & 0x0001_0000,
             0,
             "«{what}» ({id}) must not gain WS_TABSTOP; the style is {style:#010x}"
+        );
+    }
+}
+
+// Criterion 9 of T-11-6 — read out of the **built** `LangSwitcher.exe`, exactly as the
+// buttons, glyphs and groups above. ⚠ The check differs from theirs in kind:
+// `CBS_OWNERDRAWFIXED` (0x0010) is a style *flag* that combines with the rest, unlike the
+// button type `BS_OWNERDRAW` — but the combo *type* lives in the low two bits, where
+// `CBS_DROPDOWNLIST` is 0x0003, so the type check is equality of that field and the flag
+// checks are bit tests. Everything the population and the keyboard relied on before the
+// task must survive next to the new flag: `CBS_HASSTRINGS` is what keeps the item strings
+// in the combo itself (the drawing reads them back with `CB_GETLBTEXT`), and a lost
+// `WS_TABSTOP` would drop the combo out of the keyboard loop.
+#[test]
+fn the_four_combo_boxes_are_owner_drawn_and_keep_their_old_styles() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The four combo boxes of FR-92, by their actual identifiers.
+    const OWNER_DRAWN_COMBOS: [(u32, &str); 4] = [
+        (1002, "язык интерфейса"),
+        (1003, "оформление"),
+        (1022, "источник пары"),
+        (1023, "цель пары"),
+    ];
+
+    for (id, what) in OWNER_DRAWN_COMBOS {
+        let style = template
+            .styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("the dialog has no control {id} — «{what}»"));
+
+        println!("«{what}» ({id}): style {style:#010x}");
+
+        // The flag of task T-11-6 appeared.
+        assert_ne!(
+            style & 0x0010,
+            0,
+            "«{what}» ({id}) must carry CBS_OWNERDRAWFIXED — task T-11-6; \
+             the style is {style:#010x}"
+        );
+
+        // And FIXED it is: CBS_OWNERDRAWVARIABLE (0x0020) is the neighbouring flag the
+        // task does not ask for — a variable-height combo would ask WM_MEASUREITEM per
+        // item, a protocol nobody here speaks.
+        assert_eq!(
+            style & 0x0020,
+            0,
+            "«{what}» ({id}) must not carry CBS_OWNERDRAWVARIABLE; the style is {style:#010x}"
+        );
+
+        // The combo *type* survived: CBS_DROPDOWNLIST (0x0003) — equality of the type
+        // field, not a bit test, or a demoted CBS_DROPDOWN (0x0002) would slip through.
+        assert_eq!(
+            style & 0x0003,
+            0x0003,
+            "«{what}» ({id}) must keep CBS_DROPDOWNLIST as its combo type; \
+             the style is {style:#010x}"
+        );
+
+        // CBS_HASSTRINGS (0x0200) survived — the existing population stands on it.
+        assert_ne!(
+            style & 0x0200,
+            0,
+            "«{what}» ({id}) must keep CBS_HASSTRINGS; the style is {style:#010x}"
+        );
+
+        // WS_VSCROLL (0x00200000) survived — the dropped-down list keeps its scroll bar.
+        assert_ne!(
+            style & 0x0020_0000,
+            0,
+            "«{what}» ({id}) must keep WS_VSCROLL; the style is {style:#010x}"
+        );
+
+        // WS_TABSTOP (0x00010000) survived — the combo stays in the keyboard loop.
+        assert_ne!(
+            style & 0x0001_0000,
+            0,
+            "«{what}» ({id}) must keep WS_TABSTOP; the style is {style:#010x}"
         );
     }
 }

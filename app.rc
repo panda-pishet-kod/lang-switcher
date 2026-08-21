@@ -148,6 +148,15 @@
 #define ES_NUMBER              0x2000
 #define CBS_DROPDOWNLIST       0x0003
 #define CBS_HASSTRINGS         0x0200
+// ⚠ CBS_OWNERDRAWFIXED is a style *flag*, unlike the button type BS_OWNERDRAW above: combo
+// types live in the low two bits (CBS_DROPDOWNLIST is 0x0003) and this bit combines with
+// them instead of replacing anything. The four combo boxes below carry it so the dialog
+// paints their closed face and their list items itself (FR-92а, task T-11-6), at the fixed
+// item height WM_MEASUREITEM answers once. CBS_HASSTRINGS stays load-bearing next to it:
+// it is what keeps the item strings stored in the combo itself — the existing population
+// writes them with CB_ADDSTRING and the drawing reads them back with CB_GETLBTEXT, neither
+// of which an owner-drawn combo does without that flag.
+#define CBS_OWNERDRAWFIXED     0x0010
 #define LBS_NOTIFY             0x0001
 #define LBS_HASSTRINGS         0x0040
 #define LBS_NOINTEGRALHEIGHT   0x0100
@@ -271,9 +280,9 @@ BEGIN
     CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW, 7, 7, 200, 66
     CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9
-    COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 48, 58, 9
-    COMBOBOX        IDC_THEME, 74, 46, 100, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_THEME, 74, 46, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18
 
     // -- Горячая клавиша -----------------------------------------------------------------
@@ -293,9 +302,9 @@ BEGIN
     CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 141, 60, 10
     CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 141, 122, 10
     LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 157, 38, 9
-    COMBOBOX        IDC_PAIR_SOURCE, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_PAIR_SOURCE, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 173, 38, 9
-    COMBOBOX        IDC_PAIR_TARGET, 54, 171, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_PAIR_TARGET, 54, 171, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 188, 186, 9
     CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 199, 142, 44
     PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 199, 40, 14, BS_OWNERDRAW

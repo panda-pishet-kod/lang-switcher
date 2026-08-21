@@ -87,8 +87,9 @@ use windows::Win32::UI::Controls::{
     LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT, LVIS_FOCUSED,
     LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE,
-    LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, ODS_DISABLED,
-    ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
+    LVM_SETITEMSTATE, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, MEASUREITEMSTRUCT,
+    ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
+    ODT_COMBOBOX,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
@@ -98,16 +99,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL,
-    CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DefWindowProcW, DialogBoxParamW, EndDialog,
-    GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
-    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, PostMessageW, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW,
-    SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_GETDLGCODE,
-    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WNDPROC,
+    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
+    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DefWindowProcW,
+    DialogBoxParamW, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
+    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
+    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL,
+    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DRAWITEM, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2302,6 +2303,18 @@ unsafe extern "system" fn dialog_proc(
             unsafe { on_draw_item(hwnd, lparam) }
         }
 
+        // FR-92а, task T-11-6: the item height of the four owner-drawn combo boxes. No gate
+        // beyond the window itself is needed — the message arrives at the procedure of the
+        // live dialog, and the dialog exists exactly while the program holds it on the
+        // screen, which is what SEC-05 asks; a foreign `CtlType` or identifier is answered
+        // with «not handled», which sends the message down the dialog manager's default
+        // path.
+        WM_MEASUREITEM => {
+            // SAFETY: the sender owns the struct `lparam` names for the length of the send,
+            // and this procedure is inside that send.
+            unsafe { on_measure_item(hwnd, lparam) }
+        }
+
         WM_COMMAND => {
             let control = i32::from(low_word(wparam.0));
             let notification = high_word(wparam.0);
@@ -2730,6 +2743,80 @@ fn collect_panel_children(hwnd: HWND) -> Vec<i32> {
     controls_on_panels(&panels, &candidates)
 }
 
+/// The four owner-drawn combo boxes of FR-92 — FR-92а, task T-11-6.
+///
+/// The single place the four are listed: both handlers of the owner-draw pair —
+/// [`on_measure_item`] and the combo branch of [`on_draw_item`] — check the incoming
+/// `CtlID` against this list **before any work**, and answer «not handled» for anything
+/// else. SEC-05 words the allowance around the identifier, and this list is that
+/// identifier check written down once.
+const COMBO_BOXES: [i32; 4] = [IDC_LANGUAGE, IDC_THEME, IDC_PAIR_SOURCE, IDC_PAIR_TARGET];
+
+/// What the ground of one combo-box item is filled with, named as the palette field —
+/// FR-92а, task T-11-6.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComboFillRole {
+    /// [`theme::Palette::field_bg`] — the quiet ground of an ordinary list item and of the
+    /// closed face: a combo is a field to the eye, wherever it sits.
+    FieldBg,
+    /// [`theme::Palette::sel_bg`] — the highlighted item of the dropped-down list.
+    SelBg,
+}
+
+/// The ink the item's text is drawn with, named as the palette field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComboTextRole {
+    /// [`theme::Palette::text`] — the ordinary item and the closed face.
+    Text,
+    /// [`theme::Palette::sel_fg`] — the pair the palette designed for the `sel_bg` ground.
+    SelFg,
+}
+
+/// Ground and ink of one combo-box item — what [`combo_item_color_roles`] answers and the
+/// whole of what the combo branch of `WM_DRAWITEM` needs to choose colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComboItemColors {
+    /// What the item's rectangle is filled with.
+    pub fill: ComboFillRole,
+    /// What the item's text is drawn with.
+    pub text: ComboTextRole,
+}
+
+/// The colour roles of one combo-box item in one state — FR-92а, task T-11-6, the pure
+/// half of the combo drawing, closed by a 2×2 table test: пункт списка/закрытая часть ×
+/// обычный/подсвеченный.
+///
+/// Roles and not colours, exactly as [`button_color_roles`] and [`glyph_color_roles`]
+/// before it: not a single colour number enters this module — §6.2 gives every palette
+/// value to `theme` alone.
+///
+/// The shape of the table:
+/// - **закрытая часть первой**: the closed face of the combo is a field to the eye, so it
+///   keeps `field_bg`/`text` whatever `ODS_SELECTED` says — the manager marks the face
+///   selected whenever the combo holds the focus, and a face that flipped to the selection
+///   pair would sit on the dialog as a permanently lit stripe. Focus is shown by the
+///   dotted `DrawFocusRect` alone, which is the drawing half's business — the same
+///   decision [`button_color_roles`] wrote down for `ODS_FOCUS`;
+/// - the **highlighted item** of the dropped-down list shows the selection pair
+///   `sel_bg`/`sel_fg` of the palette — the same pair every owner-drawn element of this
+///   dialog highlights with;
+/// - the ordinary item is the quiet ground of the list: `field_bg`/`text` — the very
+///   colours `WM_CTLCOLORLISTBOX` has erased the dropped list with since T-11-4, so an
+///   item and the list around it are one surface.
+pub fn combo_item_color_roles(closed_part: bool, highlighted: bool) -> ComboItemColors {
+    if !closed_part && highlighted {
+        return ComboItemColors {
+            fill: ComboFillRole::SelBg,
+            text: ComboTextRole::SelFg,
+        };
+    }
+
+    ComboItemColors {
+        fill: ComboFillRole::FieldBg,
+        text: ComboTextRole::Text,
+    }
+}
+
 /// Whether the non-client title bar is to be dark for this palette — FR-92а, task T-11-4.
 ///
 /// `theme::resolve` answers one of two `&'static` palettes, so identity with
@@ -2922,22 +3009,113 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
     brush.0 as isize
 }
 
+/// Air added to the dialog font's height to make one combo item's height, in pixels —
+/// the «+ 4» of task T-11-6: two pixels above the glyphs and two below.
+const COMBO_ITEM_EXTRA: i32 = 4;
+
+/// Answers `WM_MEASUREITEM` for the four owner-drawn combo boxes — FR-92а, task T-11-6.
+///
+/// # SEC-05, held to the letter
+///
+/// `lparam` points at the `MEASUREITEMSTRUCT` of the message. Two fields are read out of
+/// it — `CtlType` and `CtlID`, the checks that this is one of our four combo boxes,
+/// **both made before any work** — and exactly one is written: `itemHeight`, which is the
+/// documented protocol of the message. `itemData` is never read; no pointer of the message
+/// is followed anywhere. The window of time is the gate, as the last sentence of SEC-05
+/// words it: this message is handled by the dialog procedure alone, and the dialog window
+/// exists exactly while the program itself holds the dialog on the screen. A forged
+/// message therefore buys its sender a height written back into the sender's own struct,
+/// and nothing else.
+///
+/// # The height
+///
+/// The item height is the dialog font's height plus [`COMBO_ITEM_EXTRA`] pixels of air.
+/// The message arrives while the combo is being created — *before* `WM_INITDIALOG`, so
+/// before the dialog's state exists — but after the dialog has taken its `DS_SETFONT`
+/// font, which the dialog manager passes to the dialog before creating any control. The
+/// font's height is read through the documented `MapDialogRect`: the vertical dialog base
+/// unit is defined as the height of the dialog font and one vertical dialog unit as one
+/// eighth of it, so a rectangle 8 units tall maps to exactly one font height in pixels —
+/// no font handle changes hands and no message is sent.
+///
+/// Answers 1 — «measured» — for one of the four combos. 0 — «not handled», the dialog
+/// manager's default path — for a missing struct, a foreign `CtlType` or a foreign
+/// identifier, and for a refused `MapDialogRect` (NFR-13: examined in words and answered
+/// by falling back — the control's default item height is a legal, degraded-but-alive
+/// answer, and the journal has no row for GDI refusals, reviews\T-11-1.md).
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the `lparam` of the message: the sender owns
+/// the struct for the length of the send, and this procedure is inside that send.
+unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
+    if lparam.0 == 0 {
+        return 0;
+    }
+
+    // The one dereference of the message: two fields read, `itemHeight` written at the
+    // end. `itemData` — never.
+    //
+    // SAFETY: see above.
+    let item = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
+
+    if item.CtlType != ODT_COMBOBOX {
+        return 0;
+    }
+
+    // SEC-05: the identifier is checked against the four before any work.
+    if !COMBO_BOXES.contains(&i32::try_from(item.CtlID).unwrap_or(-1)) {
+        return 0;
+    }
+
+    // Eight vertical dialog units are one dialog-font height by the definition of the
+    // base units — see the doc comment above.
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 8,
+    };
+
+    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call rewrites in
+    // place; nothing else is written.
+    if unsafe { MapDialogRect(hwnd, &mut rect) }.is_err() {
+        return 0;
+    }
+
+    // A negative or overflowing height cannot come out of a font measurement; if a broken
+    // one did, keeping the control's own default is the degraded-but-alive answer again.
+    let Ok(height) = u32::try_from(rect.bottom + COMBO_ITEM_EXTRA) else {
+        return 0;
+    };
+
+    item.itemHeight = height;
+
+    // TRUE — measured.
+    1
+}
+
 /// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a; since task T-11-5b
 /// the eight check boxes and radio buttons arrive here too, recognised by identifier and
-/// handed to [`draw_glyph_element`] before the push-button path below.
+/// handed to [`draw_glyph_element`] before the push-button path below, and since task
+/// T-11-6 the items of the four combo boxes, recognised by `CtlType` and handed to
+/// [`draw_combo_item`] first of all.
 ///
 /// # SEC-05, last sentence, held to the letter
 ///
-/// `lparam` points at the `DRAWITEMSTRUCT` of the message. Exactly five fields are read
-/// out of it, all in one place at the top of this function: `CtlType` (the check that
-/// this is a button), `CtlID` (the identifier), `itemState` (pressed, disabled, focused),
-/// `hDC` (the DC to paint into) and `rcItem` (the rectangle to paint) — the identifier
-/// and the drawing rectangle SEC-05 words the allowance around, plus the two plain values
-/// that say what state to paint. **The pointer-sized `itemData` is never read**: no
-/// pointer of the incoming message is dereferenced beyond that one struct read, and
+/// `lparam` points at the `DRAWITEMSTRUCT` of the message. Exactly seven fields are read
+/// out of it, all in one place at the top of this function: `CtlType` (button or combo),
+/// `CtlID` (the identifier), `itemID` (which item of a combo), `itemState` (pressed,
+/// disabled, focused, closed part), `hDC` (the DC to paint into), `rcItem` (the rectangle
+/// to paint) and `hwndItem` (the window the message claims to speak for — only ever
+/// *compared* with the dialog's own control, never followed; see [`draw_combo_item`]) —
+/// the identifier and the drawing rectangle SEC-05 words the allowance around, plus the
+/// plain values that say what to paint. **The pointer-sized `itemData` is never read**:
+/// no pointer of the incoming message is dereferenced beyond that one struct read, and
 /// nothing in it is followed further. The caption is *not* taken from the message either —
 /// it is read from the dialog's own control by identifier (`get_text` →
-/// `GetDlgItemTextW`). The window of time is the gate: this message is handled by the
+/// `GetDlgItemTextW`; a combo item's text by `CB_GETLBTEXT` from the dialog's own combo).
+/// The window of time is the gate: this message is handled by the
 /// dialog procedure alone, and the dialog window exists exactly while the program itself
 /// holds the dialog on the screen — a forged message outside that window has no procedure
 /// to arrive at.
@@ -2968,25 +3146,43 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return 0;
     }
 
-    // The one dereference of the message, and the whole of what is taken out of it: five
+    // The one dereference of the message, and the whole of what is taken out of it: seven
     // fields, copied out as plain values before anything else runs. `itemData` — never.
     //
     // SAFETY: see above — the dialog manager owns the struct for the length of the send,
     // and this procedure is inside that send.
     let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    let (ctl_type, ctl_id, item_state, dc, rect) = (
+    let (ctl_type, ctl_id, item_id, item_state, dc, rect, item_window) = (
         item.CtlType,
         item.CtlID,
+        item.itemID,
         item.itemState,
         item.hDC,
         item.rcItem,
+        item.hwndItem,
     );
+
+    let control = i32::try_from(ctl_id).unwrap_or(-1);
+
+    // FR-92а, task T-11-6: the items of the four combo boxes, by control type — a combo
+    // item is not a button, so this branch comes before the button check. SEC-05: the
+    // identifier is checked against the four before any work.
+    if ctl_type == ODT_COMBOBOX {
+        if !COMBO_BOXES.contains(&control) {
+            return 0;
+        }
+
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
+        // only to paint into for the length of this send; `item_window` is compared and
+        // never followed.
+        return unsafe {
+            draw_combo_item(hwnd, control, item_id, item_state.0, dc, rect, item_window)
+        };
+    }
 
     if ctl_type != ODT_BUTTON {
         return 0;
     }
-
-    let control = i32::try_from(ctl_id).unwrap_or(-1);
 
     let pressed = item_state.0 & ODS_SELECTED.0 != 0;
     let disabled = item_state.0 & ODS_DISABLED.0 != 0;
@@ -2994,7 +3190,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     // FR-92а, task T-11-5b: the check boxes and radio buttons, by identifier, ahead of the
     // push-button path. Everything they take out of the message is already on this frame —
-    // the same five fields, nothing else; the check state is deliberately *not* a field of
+    // the same seven fields, nothing else; the check state is deliberately *not* a field of
     // the message at all, it is read from the dialog's own control (see the function).
     if let Some(kind) = glyph_kind(control) {
         // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
@@ -3115,6 +3311,192 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     1
 }
 
+/// Inset of a combo item's text from the left edge of its rectangle, in pixels — the air
+/// a native combo gives its text.
+const COMBO_TEXT_INSET_X: i32 = 4;
+
+/// Draws one item of an owner-drawn combo box — a row of the dropped-down list or the
+/// closed face with the chosen value — FR-92а, task T-11-6.
+///
+/// # SEC-05, last sentence, held to the letter
+///
+/// Nothing here dereferences the message: [`on_draw_item`] copied the seven allowed
+/// fields of `DRAWITEMSTRUCT` out as plain values and passed five of them in — the item
+/// index and state, `dc` to paint into, `rect` to paint within, and `item_window`. The
+/// last one is only ever *compared*: the window the message claims to speak for must be
+/// the dialog's own combo, the one `GetDlgItem` answers for the already-checked
+/// identifier, or nothing is painted at all — a forged message that names our identifier
+/// but somebody else's window buys its sender nothing. The item's text is then read from
+/// the dialog's own combo by identifier (`CB_GETLBTEXTLEN`/`CB_GETLBTEXT` through
+/// `SendDlgItemMessageW`) — never through the handle of the message, which would also be
+/// the bare `SendMessage` FR-72 bans program-wide. `itemData` is never read: the four
+/// combos keep their strings in the control itself (`CBS_HASSTRINGS`), and nothing was
+/// ever stored in their item data.
+///
+/// # What is drawn
+///
+/// The ground by `FillRect`, chosen by the closed table of [`combo_item_color_roles`]:
+/// `field_bg` for an ordinary item and for the closed face, the selection pair
+/// `sel_bg`/`sel_fg` for the highlighted item of the dropped-down list. An empty combo
+/// asks for its closed face with no item to name — `itemID` is −1 — and the filled
+/// ground is the whole of that answer. Otherwise the item's own text follows, in the
+/// dialog's font the DC already holds, vertically centred behind [`COMBO_TEXT_INSET_X`];
+/// and the dotted `DrawFocusRect` over the closed part while it holds the focus — unless
+/// the manager says the focus cue is hidden (`ODS_NOFOCUSRECT`), exactly as the buttons
+/// of T-11-5a behave.
+///
+/// Answers 1 — «drawn». 0 when the identifier and the window of the message disagree,
+/// when the state is unreachable, or when `theme::Brushes::new` was refused at
+/// initialisation, for the reason [`on_draw_item`] gives: painting would need colour
+/// numbers this module is not allowed to hold (§6.2), and the refused-brushes dialog
+/// already lives degraded by the decision of T-11-4.
+///
+/// # Safety
+///
+/// Called from [`on_draw_item`] only, with values copied out of the message it is inside
+/// of: `dc` and `rect` are owned by the sender for the length of the send.
+unsafe fn draw_combo_item(
+    hwnd: HWND,
+    control: i32,
+    item_id: u32,
+    item_state: u32,
+    dc: HDC,
+    rect: RECT,
+    item_window: HWND,
+) -> isize {
+    // The comparison SEC-05 allows and nothing more: the window the message claims to
+    // speak for must be the dialog's own combo. `GetDlgItem` refusing — no such control —
+    // fails the same way a mismatch does.
+    //
+    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
+    // ours, and answers a handle or an error.
+    if unsafe { GetDlgItem(Some(hwnd), control) }.ok() != Some(item_window) {
+        return 0;
+    }
+
+    let closed_part = item_state & ODS_COMBOBOXEDIT.0 != 0;
+    let highlighted = item_state & ODS_SELECTED.0 != 0;
+    let focused = item_state & ODS_FOCUS.0 != 0 && item_state & ODS_NOFOCUSRECT.0 == 0;
+
+    // The colour choice, split from the painting exactly as everywhere in this file: the
+    // borrow of the state ends before the DC is touched, and what leaves the closure is
+    // plain values — a brush the state keeps alive until the dialog ends, and an ink.
+    //
+    // SAFETY: see the caller of `on_draw_item`.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            let colors = combo_item_color_roles(closed_part, highlighted);
+
+            // The single place a role becomes a brush or a colour of the resolved
+            // palette — the drawing below never sees a role.
+            let fill = match colors.fill {
+                ComboFillRole::FieldBg => brushes.field_bg(),
+                ComboFillRole::SelBg => brushes.sel_bg(),
+            };
+
+            let ink = match colors.text {
+                ComboTextRole::Text => palette.text,
+                ComboTextRole::SelFg => palette.sel_fg,
+            };
+
+            Some((fill, ink))
+        })
+    };
+
+    let Some(Some((fill, ink))) = choice else {
+        return 0;
+    };
+
+    // NFR-13, for the paint calls below: each answers a success flag or a previous value,
+    // and every answer is deliberately dropped for the same reason `on_ctl_color` drops
+    // its own — the manager never hands a dead DC, only a forged message could (SEC-05),
+    // and the right reaction to a forgery is indifference: no read-back, no
+    // `debug_assert` handing the forger a crash of a debug build, and no journal row for
+    // GDI refusals (reviews\T-11-1.md).
+
+    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for
+    // the length of this send; `fill` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &rect, fill) };
+
+    // −1 — an empty combo asking for its closed face with no item to name: the filled
+    // ground above is the whole of the answer.
+    if item_id == u32::MAX {
+        return 1;
+    }
+
+    // The item's text, from the dialog's own combo by identifier — never through the
+    // handle of the message. `CB_GETLBTEXTLEN` sizes the buffer; either message answering
+    // the error value skips the text and keeps the filled ground (NFR-13: a row without
+    // its word is degraded but alive, and the journal has no row for it —
+    // reviews\T-11-1.md).
+    let index = usize::try_from(item_id).unwrap_or(usize::MAX);
+    let length = send_to(hwnd, control, CB_GETLBTEXTLEN, index, 0);
+
+    if let Ok(length) = usize::try_from(length) {
+        // One for the terminator the control writes and never counts.
+        let mut buffer = vec![0u16; length + 1];
+
+        // SAFETY: `buffer` is owned by this frame and holds the length the combo has just
+        // reported plus the terminator, which is exactly what `CB_GETLBTEXT` writes; the
+        // pointer is not retained by the call.
+        let copied = send_to(
+            hwnd,
+            control,
+            CB_GETLBTEXT,
+            index,
+            buffer.as_mut_ptr() as isize,
+        );
+
+        let copied = usize::try_from(copied).unwrap_or(0).min(length);
+
+        if copied > 0 {
+            // SAFETY: `dc` is a handle passed by value; both calls write an attribute of
+            // the DC and touch no memory of this process.
+            unsafe { SetBkMode(dc, TRANSPARENT) };
+            // SAFETY: as above.
+            unsafe { SetTextColor(dc, ink) };
+
+            let mut text_rect = RECT {
+                left: rect.left + COMBO_TEXT_INSET_X,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            };
+
+            // SAFETY: the slice and `text_rect` are live locals of this frame; the format
+            // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
+            // and writes only pixels of the DC. The dialog's font is already selected
+            // into the DC the manager hands over — no font work here.
+            unsafe {
+                DrawTextW(
+                    dc,
+                    &mut buffer[..copied],
+                    &mut text_rect,
+                    DT_SINGLELINE | DT_VCENTER,
+                )
+            };
+        }
+    }
+
+    if closed_part && focused {
+        // Over the whole closed face, which is where a native combo puts its cue.
+        //
+        // NFR-13: the `BOOL` is examined and deliberately dropped — the block comment
+        // above the paint calls says why.
+        //
+        // SAFETY: `dc` is the DC of the message and `rect` is a live local of this frame;
+        // the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(dc, &rect) };
+    }
+
+    // TRUE — the item is drawn.
+    1
+}
+
 /// Side of the check-box square and diameter of the radio circle, in pixels — the 13×13
 /// the task names, which is the size the native glyph draws at 96 DPI.
 const GLYPH_SIZE: i32 = 13;
@@ -3138,7 +3520,7 @@ enum GlyphMarkPaint {
 ///
 /// # SEC-05, last sentence, held to the letter
 ///
-/// Nothing here reads the message: [`on_draw_item`] copied the five allowed fields of
+/// Nothing here reads the message: [`on_draw_item`] copied the seven allowed fields of
 /// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
 /// `rect` to paint within. The check state is deliberately *not* taken from the message
 /// either — `itemState` carries no check bit worth trusting and `itemData` is never read —
@@ -3447,7 +3829,7 @@ const PANEL_CAPTION_INSET_Y: i32 = 4;
 ///
 /// # SEC-05, last sentence, held to the letter
 ///
-/// Nothing here reads the message: [`on_draw_item`] copied the five allowed fields of
+/// Nothing here reads the message: [`on_draw_item`] copied the seven allowed fields of
 /// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
 /// `rect` to paint within. The caption is *not* taken from the message — it is the
 /// control's own text, read by identifier ([`get_text`] → `GetDlgItemTextW`) — and
