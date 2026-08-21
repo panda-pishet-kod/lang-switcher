@@ -826,6 +826,42 @@ fn a_file_without_the_key_gains_an_explicit_system_and_loses_nothing() {
 }
 
 // =========================================================================================
+// FR-92а — the appearance combo of the dialog, the storage half. Task T-11-3.
+// =========================================================================================
+
+// Criterion 11 of T-11-3. The order of the three combo items is the order of the
+// `ThemeSetting` values, pinned through the very pair of functions the dialog calls —
+// `fill_dialog` adds the items with `theme_combo_index` saying where the current setting
+// sits, and `read_dialog` turns the selection back with `theme_from_combo_index`. A copy of
+// the mapping here would test the copy; calling the pair tests the dialog.
+#[test]
+fn the_theme_combo_order_is_the_order_of_the_theme_setting_values() {
+    // Index 0 is `System`, 1 is `Light`, 2 is `Dark` — the order the items 3058–3060 go
+    // into the combo, and the order the enum declares.
+    assert_eq!(settings::theme_combo_index(ThemeSetting::System), 0);
+    assert_eq!(settings::theme_combo_index(ThemeSetting::Light), 1);
+    assert_eq!(settings::theme_combo_index(ThemeSetting::Dark), 2);
+
+    // The inverse agrees with the forward map for every value, so a reordering of either
+    // function alone cannot pass.
+    for setting in [
+        ThemeSetting::System,
+        ThemeSetting::Light,
+        ThemeSetting::Dark,
+    ] {
+        let index = settings::theme_combo_index(setting);
+        let back = settings::theme_from_combo_index(
+            isize::try_from(index).expect("a combo index fits an isize"),
+        );
+        assert_eq!(back, setting, "index {index} does not round-trip");
+    }
+
+    // What `CB_GETCURSEL` answers when nothing is selected — a state the dropdown list
+    // cannot reach from the keyboard or the mouse — reads as the default of FR-92а.
+    assert_eq!(settings::theme_from_combo_index(-1), ThemeSetting::System);
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //
@@ -882,10 +918,13 @@ const FR_92_SECTIONS: [&str; 8] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 36] = [
+const TEMPLATE_TEXT: [&str; 37] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
+    // The appearance row of FR-92а, task T-11-3, declared right after the language combo;
+    // its own combo carries no text in the template — the items are added by the dialog.
+    "Оформление:",
     "вступит в силу после перезапуска",
     "Горячая клавиша",
     "Клавиша:",
@@ -926,9 +965,10 @@ const TEMPLATE_TEXT: [&str; 36] = [
 
 /// Identifiers `app.rc` gives the controls, and what each of them is for. One row per element
 /// FR-92 names, so that a section losing a control is a failing test and not a smaller window.
-const TEMPLATE_CONTROLS: [(u32, &str); 46] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 48] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
+    (1003, "Общие: оформление — FR-92а"),
     (1010, "Горячая клавиша: поле клавиши"),
     (1011, "Горячая клавиша: предупреждение"),
     (1012, "Горячая клавиша: кнопка захвата — FR-94"),
@@ -976,6 +1016,7 @@ const TEMPLATE_CONTROLS: [(u32, &str); 46] = [
     (1106, "Диагностика: заголовок группы"),
     (1107, "Диагностика: подпись «Папка журнала»"),
     (1108, "Состояние: заголовок группы"),
+    (1109, "Общие: подпись «Оформление» — FR-92а"),
 ];
 
 // -----------------------------------------------------------------------------------------
@@ -1640,7 +1681,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 63] = [
+const FR_94_STRINGS: [(u16, &str, &str); 67] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -1814,6 +1855,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 63] = [
         "Автоматически (рекомендуется)",
         "Automatic (recommended)",
     ),
+    (settings::IDS_THEME_LABEL, "Оформление:", "Appearance:"),
+    (settings::IDS_THEME_SYSTEM, "Как в системе", "Match system"),
+    (settings::IDS_THEME_LIGHT, "Светлое", "Light"),
+    (settings::IDS_THEME_DARK, "Тёмное", "Dark"),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
     (settings::IDS_MENU_SETTINGS, "Настройки…", "Settings…"),

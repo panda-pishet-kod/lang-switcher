@@ -52,6 +52,8 @@
 // owns the small numbers: IDOK is 1, IDCANCEL is 2, and IDHELP is 9.
 #define IDC_AUTOSTART          1001
 #define IDC_LANGUAGE           1002
+// The appearance combo box of FR-92а, task T-11-3. Continues the block of the «Общие» group.
+#define IDC_THEME              1003
 #define IDC_HOTKEY             1010
 #define IDC_HOTKEY_NOTE        1011
 // The button that arms the capture of FR-94, task T-08-2. Next to the field it fills.
@@ -110,6 +112,8 @@
 #define IDC_GROUP_DIAGNOSTICS  1106
 #define IDC_LOG_DIR_LABEL      1107
 #define IDC_GROUP_STATE        1108
+// The label of the appearance combo box, FR-92а, task T-11-3. Continues the label block.
+#define IDC_THEME_LABEL        1109
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -222,11 +226,21 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 CAPTION "Lang Switcher — настройки"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    // -- Общие: автозапуск и язык интерфейса ---------------------------------------------
-    GROUPBOX        "Общие", IDC_GROUP_GENERAL, 7, 7, 200, 50
+    // -- Общие: автозапуск, язык интерфейса и оформление ---------------------------------
+    //
+    // The appearance row is FR-92а, task T-11-3. The combo is declared right after
+    // IDC_LANGUAGE so the tab order runs language, then appearance; the restart note below
+    // is a static and takes no focus. The combo box items are not in the template: a
+    // CBS_DROPDOWNLIST is filled by the dialog, from strings 3058, 3059 and 3060 of the
+    // locale in force, in that order. The order is the contract: item index 0 is `system`,
+    // 1 is `light`, 2 is `dark`, and src\settings.rs holds the pair of functions that own
+    // this mapping. This element only stores the choice; painting arrives with T-11-4.
+    GROUPBOX        "Общие", IDC_GROUP_GENERAL, 7, 7, 200, 66
     AUTOCHECKBOX    "Запускать при входе в систему", IDC_AUTOSTART, 14, 19, 186, 10
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 48, 58, 9
+    COMBOBOX        IDC_THEME, 74, 46, 100, 80, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18
 
     // -- Горячая клавиша -----------------------------------------------------------------
@@ -235,25 +249,25 @@ BEGIN
     // task T-08-2. The button next to it arms the capture, the field then shows the name of
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
-    GROUPBOX        "Горячая клавиша", IDC_GROUP_HOTKEY, 7, 61, 200, 48
-    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 76, 32, 9
-    EDITTEXT        IDC_HOTKEY, 48, 74, 64, 12, ES_AUTOHSCROLL | ES_READONLY
-    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 73, 46, 14
-    LTEXT           "", IDC_HOTKEY_NOTE, 14, 90, 186, 16
+    GROUPBOX        "Горячая клавиша", IDC_GROUP_HOTKEY, 7, 77, 200, 48
+    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9
+    EDITTEXT        IDC_HOTKEY, 48, 90, 64, 12, ES_AUTOHSCROLL | ES_READONLY
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14
+    LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
-    GROUPBOX        "Раскладки", IDC_GROUP_LAYOUTS, 7, 113, 200, 132
-    AUTORADIOBUTTON "Пара", IDC_MODE_PAIR, 14, 125, 60, 10, WS_GROUP | WS_TABSTOP
-    AUTORADIOBUTTON "Несколько раскладок", IDC_MODE_CYCLE, 78, 125, 122, 10
-    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 141, 38, 9
-    COMBOBOX        IDC_PAIR_SOURCE, 54, 139, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 157, 38, 9
-    COMBOBOX        IDC_PAIR_TARGET, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 172, 186, 9
-    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 183, 142, 44
-    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 183, 40, 14
-    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 200, 40, 14
-    LTEXT           "", IDC_LAYOUT_NOTE, 14, 230, 186, 10
+    GROUPBOX        "Раскладки", IDC_GROUP_LAYOUTS, 7, 129, 200, 132
+    AUTORADIOBUTTON "Пара", IDC_MODE_PAIR, 14, 141, 60, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "Несколько раскладок", IDC_MODE_CYCLE, 78, 141, 122, 10
+    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 157, 38, 9
+    COMBOBOX        IDC_PAIR_SOURCE, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 173, 38, 9
+    COMBOBOX        IDC_PAIR_TARGET, 54, 171, 146, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 188, 186, 9
+    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP, 14, 199, 142, 44
+    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 199, 40, 14
+    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 216, 40, 14
+    LTEXT           "", IDC_LAYOUT_NOTE, 14, 246, 186, 10
 
     // -- Замена: FR-41, FR-42, FR-42а, FR-44 ---------------------------------------------
     //
@@ -403,6 +417,15 @@ END
 // src\settings.rs, and a renumbering is a silent mismatch waiting to happen. 3056 opens the
 // next sixteen-string block, contiguously -- no gap, so no empty block between.
 #define IDS_METHOD_AUTO         3056
+// The appearance row of FR-92а, task T-11-3: the label and the three items of the combo
+// box. They continue the sixteen-string block 3056 opened, contiguously, so no empty block
+// appears. The order of the three items is a contract: the dialog adds them to the combo in
+// exactly this order, and item index 0 is `system`, 1 is `light`, 2 is `dark`. Mirrored by
+// hand in src\settings.rs, like every identifier of this file; check twice.
+#define IDS_THEME_LABEL         3057
+#define IDS_THEME_SYSTEM        3058
+#define IDS_THEME_LIGHT         3059
+#define IDS_THEME_DARK          3060
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -478,6 +501,10 @@ BEGIN
     IDS_LAYOUT_WORD_TARGET  "цель"
     IDS_LOG_DIR_MISSING     "%APPDATA% не задан — журнал писать некуда"
     IDS_METHOD_AUTO         "Автоматически (рекомендуется)"
+    IDS_THEME_LABEL         "Оформление:"
+    IDS_THEME_SYSTEM        "Как в системе"
+    IDS_THEME_LIGHT         "Светлое"
+    IDS_THEME_DARK          "Тёмное"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -551,6 +578,10 @@ BEGIN
     IDS_LAYOUT_WORD_TARGET  "target"
     IDS_LOG_DIR_MISSING     "%APPDATA% is not set — there is nowhere to write the journal"
     IDS_METHOD_AUTO         "Automatic (recommended)"
+    IDS_THEME_LABEL         "Appearance:"
+    IDS_THEME_SYSTEM        "Match system"
+    IDS_THEME_LIGHT         "Light"
+    IDS_THEME_DARK          "Dark"
 END
 
 // ---------------------------------------------------------------------------------------

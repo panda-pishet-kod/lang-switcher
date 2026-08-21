@@ -1166,6 +1166,17 @@ pub const IDS_LOG_DIR_MISSING: u16 = 3055;
 /// every identifier here is mirrored by hand in `app.rc`, and a renumbering would be a
 /// silent mismatch waiting to happen.
 pub const IDS_METHOD_AUTO: u16 = 3056;
+/// The label of the appearance combo box — FR-92а, task T-11-3.
+pub const IDS_THEME_LABEL: u16 = 3057;
+/// The «Как в системе» item of the appearance combo box. The three items 3058–3060 are a
+/// contract of order, not just of text: the dialog adds them to the combo in identifier
+/// order, and [`theme_combo_index`] / [`theme_from_combo_index`] are the one place that
+/// order is written down in Rust.
+pub const IDS_THEME_SYSTEM: u16 = 3058;
+/// The «Светлое» item.
+pub const IDS_THEME_LIGHT: u16 = 3059;
+/// The «Тёмное» item.
+pub const IDS_THEME_DARK: u16 = 3060;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -1185,7 +1196,7 @@ pub const IDS_MENU_EXIT: u16 = 3077;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 63] = [
+pub const INTERFACE_STRINGS: [u16; 67] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1243,6 +1254,10 @@ pub const INTERFACE_STRINGS: [u16; 63] = [
     IDS_LAYOUT_WORD_TARGET,
     IDS_LOG_DIR_MISSING,
     IDS_METHOD_AUTO,
+    IDS_THEME_LABEL,
+    IDS_THEME_SYSTEM,
+    IDS_THEME_LIGHT,
+    IDS_THEME_DARK,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
     IDS_MENU_SETTINGS,
@@ -1727,6 +1742,7 @@ pub const IDD_SETTINGS: u16 = 200;
 // Control identifiers, mirrored from `app.rc`. Same rule as above.
 const IDC_AUTOSTART: i32 = 1001;
 const IDC_LANGUAGE: i32 = 1002;
+const IDC_THEME: i32 = 1003;
 const IDC_HOTKEY: i32 = 1010;
 const IDC_HOTKEY_NOTE: i32 = 1011;
 const IDC_HOTKEY_CAPTURE: i32 = 1012;
@@ -1782,6 +1798,39 @@ const IDC_EXCLUSION_HINT: i32 = 1105;
 const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
 const IDC_LOG_DIR_LABEL: i32 = 1107;
 const IDC_GROUP_STATE: i32 = 1108;
+const IDC_THEME_LABEL: i32 = 1109;
+
+/// The combo box index of one theme setting — FR-92а, task T-11-3.
+///
+/// The appearance combo of the dialog is filled with the three strings [`IDS_THEME_SYSTEM`],
+/// [`IDS_THEME_LIGHT`] and [`IDS_THEME_DARK`], in that order; this pair of functions is the
+/// one place that order is written down. No string of the configuration vocabulary appears
+/// here — the words `[general].theme` takes belong to `theme::ThemeSetting` alone (§6.2),
+/// and what the dialog trades in is only the position of an item in a list.
+///
+/// Public so that the test which pins the order of the items to the order of the values can
+/// call the very functions the dialog calls, rather than a copy of the mapping.
+pub fn theme_combo_index(setting: ThemeSetting) -> usize {
+    match setting {
+        ThemeSetting::System => 0,
+        ThemeSetting::Light => 1,
+        ThemeSetting::Dark => 2,
+    }
+}
+
+/// The theme setting a combo box index names — the inverse of [`theme_combo_index`].
+///
+/// Takes the answer of `CB_GETCURSEL` as it comes. The user cannot empty a
+/// `CBS_DROPDOWNLIST`, so anything outside the three items — `CB_ERR` included — is not a
+/// state the dialog can reach; it reads as the default of FR-92а rather than as a panic,
+/// the same way `read_dialog` treats the language combo.
+pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
+    match index {
+        1 => ThemeSetting::Light,
+        2 => ThemeSetting::Dark,
+        _ => ThemeSetting::System,
+    }
+}
 
 /// Every control of the dialog whose text is a fixed string of the interface, and the string
 /// that belongs in it — FR-94.
@@ -1798,6 +1847,7 @@ const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_GENERAL, IDS_GROUP_GENERAL),
     (IDC_AUTOSTART, IDS_AUTOSTART),
     (IDC_LANGUAGE_LABEL, IDS_LANGUAGE_LABEL),
+    (IDC_THEME_LABEL, IDS_THEME_LABEL),
     (IDC_LANGUAGE_RESTART, IDS_LANGUAGE_RESTART),
     (IDC_GROUP_HOTKEY, IDS_GROUP_HOTKEY),
     (IDC_HOTKEY_LABEL, IDS_HOTKEY_LABEL),
@@ -2221,6 +2271,23 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
         0,
     );
 
+    // The appearance combo of FR-92а, task T-11-3. The three items go in in the order the
+    // pair `theme_combo_index` / `theme_from_combo_index` writes down — `system`, `light`,
+    // `dark` — and unlike the language combo the items are localised, so they come out of
+    // the string table of the locale in force. This element only stores the choice: what
+    // the palette does to the windows is the business of tasks T-11-4 and later.
+    send_to(hwnd, IDC_THEME, CB_RESETCONTENT, 0, 0);
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_SYSTEM));
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_LIGHT));
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_DARK));
+    send_to(
+        hwnd,
+        IDC_THEME,
+        CB_SETCURSEL,
+        theme_combo_index(state.working.general.theme),
+        0,
+    );
+
     // Section «Горячая клавиша» of FR-92 and FR-94. The field is read-only because the key is
     // not typed into it: the button beside it arms a capture and the field then shows the name
     // of the key that was pressed. The note under it is the "предупреждение" the requirement
@@ -2394,6 +2461,8 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
         1 => Language::En,
         _ => Language::Ru,
     };
+    state.working.general.theme =
+        theme_from_combo_index(send_to(hwnd, IDC_THEME, CB_GETCURSEL, 0, 0));
 
     state.working.layouts.mode = if is_checked(hwnd, IDC_MODE_CYCLE) {
         LayoutMode::Cycle
