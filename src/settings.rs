@@ -102,6 +102,7 @@ use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
 use crate::CONFIG_DIR_NAME;
 use crate::layouts::{self, LayoutId, LayoutSpec};
+use crate::theme::ThemeSetting;
 
 /// File name of the configuration inside the program's application data directory.
 ///
@@ -243,6 +244,24 @@ pub struct General {
     /// Interface language. Default `ru`.
     #[serde(default)]
     pub language: Language,
+    /// Theme of everything visible, `general.theme` of section 7 — **FR-92а**. Default
+    /// [`ThemeSetting::System`].
+    ///
+    /// The vocabulary of the value — the three words and the rule that anything else reads
+    /// as the default — belongs to module `theme`, which FR-92а names the single owner.
+    /// This field only carries the setting through the file: the serde bridge below hands
+    /// the string to [`ThemeSetting::from_config_str`] on the way in and writes
+    /// [`ThemeSetting::as_config_str`] on the way out, so no theme word is ever spelled
+    /// in this module. Note the asymmetry with the neighbours: `language` outside its set
+    /// fails the read loudly, while an unknown theme word reads as `system` — that is not
+    /// an inconsistency of this module but the letter of FR-92а, built into
+    /// `from_config_str` itself.
+    #[serde(
+        default = "default_theme",
+        serialize_with = "theme_to_toml",
+        deserialize_with = "theme_from_toml"
+    )]
+    pub theme: ThemeSetting,
 }
 
 impl Default for General {
@@ -251,6 +270,7 @@ impl Default for General {
             enabled: true,
             autostart: true,
             language: Language::Ru,
+            theme: ThemeSetting::System,
         }
     }
 }
@@ -488,6 +508,44 @@ fn default_clipboard_restore_delay_ms() -> u32 {
 /// Serde default for `buffer.capacity`.
 fn default_buffer_capacity() -> usize {
     256
+}
+
+/// Serde default for `general.theme` — the default FR-92а names.
+///
+/// A function rather than `#[serde(default)]` because [`ThemeSetting`] implements no
+/// `Default`: module `theme` keeps the type bare, and giving it one from here would mean
+/// editing the owner. The same shape as [`default_true`] and its neighbours.
+fn default_theme() -> ThemeSetting {
+    ThemeSetting::System
+}
+
+// Serde bridge for `general.theme`. [`ThemeSetting`] deliberately carries no serde
+// derives: the three words of the value and the rule about every other word belong to
+// `ThemeSetting::from_config_str` (FR-92а names module `theme` the single owner), and a
+// derive here would mint a second spelling of them. The two functions below only carry
+// the string between the file and the owner — neither knows a single theme word.
+
+/// Reads `general.theme` from the file: the string goes to the owner of the vocabulary.
+///
+/// No error path for the *value*: by the construction of
+/// [`ThemeSetting::from_config_str`], every string is an answer — an unknown word is the
+/// default, which is how section 7 has garbage pass silently. What does fail is a value
+/// that is not a string at all, and that failure is the ordinary type error of the
+/// deserializer, same as for every other string field of the schema.
+fn theme_from_toml<'de, D>(deserializer: D) -> Result<ThemeSetting, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    Ok(ThemeSetting::from_config_str(&text))
+}
+
+/// Writes `general.theme` to the file: the word is the owner's, verbatim.
+fn theme_to_toml<S>(setting: &ThemeSetting, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(setting.as_config_str())
 }
 
 /// What reading a configuration ended up being.

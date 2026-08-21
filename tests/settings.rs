@@ -77,6 +77,7 @@ fn a_thoroughly_customised_config() -> Config {
     config.general.enabled = false;
     config.general.autostart = false;
     config.general.language = Language::En;
+    config.general.theme = ThemeSetting::Dark;
     config.hotkey.key = "ScrollLock".to_owned();
     config.layouts.mode = LayoutMode::Cycle;
     config.layouts.pair_source = "0x00000419".to_owned();
@@ -106,6 +107,7 @@ fn defaults_match_section_7_field_by_field() {
     assert!(config.general.enabled);
     assert!(config.general.autostart);
     assert_eq!(config.general.language, Language::Ru);
+    assert_eq!(config.general.theme, ThemeSetting::System);
 
     assert_eq!(config.hotkey.key, "Pause");
 
@@ -686,6 +688,141 @@ fn written_file_carries_every_section_of_section_7() {
     let (parsed, outcome) = Config::from_toml_str(&text).expect("the written file must parse");
     assert_eq!(parsed, Config::default());
     assert_eq!(outcome, ReadOutcome::Current);
+}
+
+// =========================================================================================
+// FR-92а — `[general].theme`, the file half of the setting. Task T-11-2.
+// =========================================================================================
+//
+// The three words of the value and the rule about every other word live in
+// `theme::ThemeSetting` and are tested with `tests\theme.rs`; what is tested here is that
+// the configuration carries the setting through the file — and that the file rules of
+// section 7 hold for this key the way they hold for its neighbours, with the one exception
+// FR-92а itself makes: an unknown word is not a malformed file but the default.
+
+use lang_switcher::theme::ThemeSetting;
+
+// Criterion 9 of T-11-2. Each of the three words of section 7 reads as its setting.
+#[test]
+fn each_of_the_three_theme_words_reads_as_its_setting() {
+    let dir = TestDir::new("theme_words");
+
+    for (word, setting) in [
+        ("system", ThemeSetting::System),
+        ("light", ThemeSetting::Light),
+        ("dark", ThemeSetting::Dark),
+    ] {
+        let path = write_file(
+            &dir,
+            &format!("schema_version = 2\n\n[general]\ntheme = \"{word}\"\n"),
+        );
+        let (config, outcome) =
+            settings::read_from(&path).expect("a theme word of section 7 must be readable");
+        assert_eq!(config.general.theme, setting, "for the word {word:?}");
+        assert_eq!(outcome, ReadOutcome::Current);
+    }
+}
+
+// Criterion 10 of T-11-2. A missing key is the default, and an unknown word is the default
+// too — silently, with the file read whole. This is the one asymmetry with `language` and
+// its kind (criterion 17 above): FR-92а spells the rule out for this value, and
+// `from_config_str` is built so that every string is an answer.
+#[test]
+fn a_missing_or_unknown_theme_reads_as_system_and_fails_nothing() {
+    let dir = TestDir::new("theme_default");
+
+    // No `theme` key at all: the theme is the default, the field beside it is read.
+    let path = write_file(&dir, "schema_version = 2\n\n[general]\nenabled = false\n");
+    let (config, outcome) =
+        settings::read_from(&path).expect("a file without the key must be readable");
+    assert_eq!(config.general.theme, ThemeSetting::System);
+    assert!(!config.general.enabled);
+    assert_eq!(outcome, ReadOutcome::Current);
+
+    // An unknown word: no error, the value is the default, and the field beside it still
+    // arrives — so it was the word that was ignored, not the file.
+    let path = write_file(
+        &dir,
+        "schema_version = 2\n\n[general]\nenabled = false\ntheme = \"midnight\"\n",
+    );
+    let (config, outcome) =
+        settings::read_from(&path).expect("an unknown theme word must not fail the file");
+    assert_eq!(config.general.theme, ThemeSetting::System);
+    assert!(!config.general.enabled);
+    assert_eq!(outcome, ReadOutcome::Current);
+}
+
+// Criterion 11 of T-11-2. Write → read brings each of the three settings back.
+#[test]
+fn every_theme_setting_survives_a_write_and_a_read() {
+    let dir = TestDir::new("theme_round_trip");
+    let path = dir.config();
+
+    for setting in [
+        ThemeSetting::System,
+        ThemeSetting::Light,
+        ThemeSetting::Dark,
+    ] {
+        let mut written = Config::default();
+        written.general.theme = setting;
+
+        settings::write_to(&path, &written).expect("writing the configuration must succeed");
+        let (read_back, outcome) = settings::read_from(&path).expect("reading back must succeed");
+
+        assert_eq!(read_back, written, "for the setting {setting:?}");
+        assert_eq!(read_back.general.theme, setting);
+        assert_eq!(outcome, ReadOutcome::Current);
+    }
+}
+
+// Criterion 12 of T-11-2. A file from before the key, once written back, carries
+// `theme = "system"` in so many words — and everything else it said is still what it says.
+// The «nothing else moved» half is a comparison of parsed structures, not of bytes: byte
+// identity is not what section 7 promises (the writer owns the formatting), field identity
+// is.
+#[test]
+fn a_file_without_the_key_gains_an_explicit_system_and_loses_nothing() {
+    let dir = TestDir::new("theme_written_back");
+
+    // A current file a person could have today: no `theme` anywhere, and the fields that
+    // are present are deliberately not the defaults, so damage would show.
+    let path = write_file(
+        &dir,
+        "schema_version = 2\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"en\"\n\
+         \n\
+         [hotkey]\n\
+         key = \"ScrollLock\"\n\
+         \n\
+         [exclusions]\n\
+         processes = [\"mstsc.exe\"]\n",
+    );
+
+    let (read, outcome) = settings::read_from(&path).expect("the file must be readable");
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(read.general.theme, ThemeSetting::System);
+
+    settings::write_to(&path, &read).expect("writing it back must succeed");
+
+    // The key is now in the file in so many words…
+    let text = fs::read_to_string(&path).expect("the written file must be readable");
+    assert!(
+        text.contains("theme = \"system\""),
+        "the written file does not spell the key out: {text}"
+    );
+
+    // …and nothing else moved: the structures are equal, and the fields the person had
+    // set are named one by one so a failure points at a field and not at a struct.
+    let (reread, outcome) = settings::read_from(&path).expect("the rewritten file must parse");
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(reread, read);
+    assert!(!reread.general.enabled);
+    assert_eq!(reread.general.language, Language::En);
+    assert_eq!(reread.hotkey.key, "ScrollLock");
+    assert_eq!(reread.exclusions.processes, ["mstsc.exe"]);
 }
 
 // =========================================================================================
