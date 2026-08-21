@@ -35,8 +35,9 @@ use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
     GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
-    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, RT_VERSION, SM_CXSMICON, SM_CYSMICON,
-    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
+    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, RT_DIALOG, RT_VERSION, SM_CXSMICON,
+    SM_CYSMICON, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -526,12 +527,14 @@ fn messages_the_tray_does_not_know_are_left_to_the_default_procedure() {
 }
 
 // ---------------------------------------------------------------------------------------
-// The about box
+// The about window — a MessageBoxW until task T-11-11 made it the dialog IDD_ABOUT
 // ---------------------------------------------------------------------------------------
 
 #[test]
 fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
-    // The about box shows what `VERSIONINFO` says, not what `Cargo.toml` says. The offset of
+    // The about window shows what `VERSIONINFO` says, not what `Cargo.toml` says — since
+    // task T-11-11 the number travels `file_version` → `settings::show_about_dialog` →
+    // the version line, but the reading is the same reading. The offset of
     // `VS_FIXEDFILEINFO` inside the resource is the one thing in that path that can be wrong
     // without any Win32 call failing, so it is checked against the bytes `rc.exe` really
     // produced rather than against a buffer built to match the code.
@@ -551,9 +554,36 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
         "app.rc declares FILEVERSION 0,1,0,0 (decision 8)"
     );
 
-    // The test binary itself carries no resources, so the about box of *this* process has no
-    // version to show — and says so instead of failing.
+    // The test binary itself carries no resources, so the about window of *this* process
+    // has no version to show — `file_version` says so instead of failing, and the dialog
+    // shows the absence as a dash.
     assert_eq!(tray::file_version(), None);
+}
+
+#[test]
+fn the_window_the_about_item_opens_ships_in_the_product_resources() {
+    // FR-92а, task T-11-11: «О программе» is no longer a `MessageBoxW` — `show_about`
+    // asks `DialogBoxParamW` for template 201 (`IDD_ABOUT`) of the running executable. A
+    // missing template would cost nothing at build time — `embed-resource` links whatever
+    // `app.rc` produced — and would fail at the moment the menu item is chosen, so the
+    // presence of the template is pinned here, in the file that ships. What is *in* the
+    // template — the elements, the styles, the strings of both locales — is the business
+    // of `tests\settings.rs`.
+    let product = ProductImage::open();
+    let template = product.resource(RT_DIALOG, 201);
+
+    println!("RT_DIALOG 201 is {} bytes", template.len());
+
+    // A DIALOGEX template opens with version 1, signature 0xFFFF — the same first four
+    // bytes the parser of tests\settings.rs demands.
+    assert_eq!(
+        (
+            u16::from_le_bytes([template[0], template[1]]),
+            u16::from_le_bytes([template[2], template[3]]),
+        ),
+        (1, 0xFFFF),
+        "RT_DIALOG 201 must be a DIALOGEX template"
+    );
 }
 
 // ---------------------------------------------------------------------------------------

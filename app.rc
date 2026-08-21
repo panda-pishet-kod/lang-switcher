@@ -42,6 +42,10 @@
 // rather than as the wrong one.
 #define IDD_SETTINGS 200
 
+// Identifier of the about dialog of FR-92а, task T-11-11 — the window the tray shows in
+// place of MessageBoxW, which no documented means can repaint. Next in the dialog row.
+#define IDD_ABOUT 201
+
 // The two identifiers the dialog manager itself acts on. Named here for the same reason
 // VS_VERSION_INFO is defined above: they are macros of windows.h, this script deliberately
 // does not include it, and their values are fixed by the window manager.
@@ -114,6 +118,16 @@
 #define IDC_GROUP_STATE        1108
 // The label of the appearance combo box, FR-92а, task T-11-3. Continues the label block.
 #define IDC_THEME_LABEL        1109
+
+// Controls of the about dialog IDD_ABOUT, task T-11-11. A block of their own from 1120,
+// contiguous and clear of everything above, exactly as the label block starts at 1090 clear
+// of the controls. The «ОК» button is not here: it is IDOK, the number the dialog manager
+// acts on. Mirrored by hand in src\settings.rs, like every identifier in this file.
+#define IDC_ABOUT_ICON         1120
+#define IDC_ABOUT_NAME         1121
+#define IDC_ABOUT_VERSION      1122
+#define IDC_ABOUT_LINE_1       1123
+#define IDC_ABOUT_LINE_2       1124
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -362,6 +376,43 @@ BEGIN
     PUSHBUTTON      "Применить", IDC_APPLY, 361, 348, 52, 14, BS_OWNERDRAW
 END
 
+// ---------------------------------------------------------------------------------------
+// FR-92а -- the about dialog. Task T-11-11.
+// ---------------------------------------------------------------------------------------
+//
+// The window FR-92а names alongside the settings dialog and the tray menu: «О программе» in
+// both palettes. A MessageBoxW cannot be repainted by any documented means, so the box the
+// tray used to show becomes this template, drawn by src\settings.rs with the same
+// WM_CTLCOLOR* answers and the same owner-drawn button path as the settings dialog.
+//
+// The rules of the template above hold here unchanged. The literals are Russian and are
+// character for character the rows of the Russian table below (FR-94 sets the text of every
+// control from the table of the locale in force; the literals keep the window readable if a
+// string fails to load). The version line is empty on purpose: it is composed at
+// WM_INITDIALOG from IDS_ABOUT_VERSION and the VERSIONINFO resource of the running
+// executable — the number is substituted, never spelled here (a second copy of it would be
+// a second place for it to be wrong). The name row stays a template literal and no table
+// row: «Lang Switcher» is not translated — decision on question 7 — and the about box
+// carries it unchanged.
+//
+// The icon control shows IDI_APP_ACTIVE at the large size: an SS_ICON static loads the
+// 32 px frame of the .ico, and the statement's width and height are ignored by the dialog
+// manager. «ОК» is BS_OWNERDRAW like the nine buttons above — the type displaces
+// BS_DEFPUSHBUTTON, so the default comes from DM_SETDEFID on WM_INITDIALOG, which keeps
+// Enter landing on it; Esc is IDCANCEL, which a dialog answers with or without a button.
+IDD_ABOUT DIALOGEX 0, 0, 240, 110
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "О программе Lang Switcher"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 14, 14, 21, 20
+    LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 48, 16, 178, 12
+    LTEXT           "", IDC_ABOUT_VERSION, 48, 30, 178, 9
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 14, 50, 212, 9
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 14, 61, 212, 9
+    PUSHBUTTON      "ОК", IDOK, 95, 88, 50, 14, BS_OWNERDRAW
+END
+
 // =======================================================================================
 // FR-94 -- the interface strings, one string table per locale. Task T-08-2.
 // =======================================================================================
@@ -473,6 +524,19 @@ END
 #define IDS_THEME_SYSTEM        3058
 #define IDS_THEME_LIGHT         3059
 #define IDS_THEME_DARK          3060
+// The about dialog of FR-92а, task T-11-11: the caption, the version line, the two
+// description lines and its «ОК». They continue the sixteen-string block 3056 opened,
+// contiguously — no gap, so no empty block between. «ОК» takes a row of its own rather
+// than borrowing IDS_OK 3034: that row belongs to the settings dialog, and a shared row
+// would make a rewording of one window silently reword the other. IDS_ABOUT_VERSION
+// carries a {0}: the number is substituted by settings::format_text from the VERSIONINFO
+// resource of the running executable, never spelled in this file twice. Mirrored by hand
+// in src\settings.rs, like every identifier of this file; check twice.
+#define IDS_ABOUT_CAPTION       3061
+#define IDS_ABOUT_VERSION       3062
+#define IDS_ABOUT_LINE_1        3063
+#define IDS_ABOUT_LINE_2        3064
+#define IDS_ABOUT_OK            3065
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -552,6 +616,11 @@ BEGIN
     IDS_THEME_SYSTEM        "Как в системе"
     IDS_THEME_LIGHT         "Светлое"
     IDS_THEME_DARK          "Тёмное"
+    IDS_ABOUT_CAPTION       "О программе Lang Switcher"
+    IDS_ABOUT_VERSION       "Версия {0}"
+    IDS_ABOUT_LINE_1        "Исправляет текст, набранный в неверной раскладке."
+    IDS_ABOUT_LINE_2        "Перекодировка — по нажатию одной клавиши."
+    IDS_ABOUT_OK            "ОК"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -629,6 +698,11 @@ BEGIN
     IDS_THEME_SYSTEM        "Match system"
     IDS_THEME_LIGHT         "Light"
     IDS_THEME_DARK          "Dark"
+    IDS_ABOUT_CAPTION       "About Lang Switcher"
+    IDS_ABOUT_VERSION       "Version {0}"
+    IDS_ABOUT_LINE_1        "Fixes text typed in the wrong keyboard layout."
+    IDS_ABOUT_LINE_2        "Conversion takes a single key press."
+    IDS_ABOUT_OK            "OK"
 END
 
 // ---------------------------------------------------------------------------------------

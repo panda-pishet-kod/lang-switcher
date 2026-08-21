@@ -1195,6 +1195,21 @@ pub const IDS_THEME_SYSTEM: u16 = 3058;
 pub const IDS_THEME_LIGHT: u16 = 3059;
 /// The «Тёмное» item.
 pub const IDS_THEME_DARK: u16 = 3060;
+/// Caption of the about dialog — FR-92а, task T-11-11. The five rows 3061–3065 continue
+/// the block 3056 opened, contiguously — no gap, so no empty block between.
+pub const IDS_ABOUT_CAPTION: u16 = 3061;
+/// The version line of the about dialog. Carries a `{0}`: the number is substituted by
+/// [`format_text`] from the `VERSIONINFO` resource of the running executable
+/// ([`about_version_line`]), never spelled in the resources twice.
+pub const IDS_ABOUT_VERSION: u16 = 3062;
+/// First description line of the about dialog.
+pub const IDS_ABOUT_LINE_1: u16 = 3063;
+/// Second description line of the about dialog.
+pub const IDS_ABOUT_LINE_2: u16 = 3064;
+/// The «ОК» of the about dialog. A row of its own rather than a borrow of [`IDS_OK`]: that
+/// row belongs to the settings dialog, and a shared row would make a rewording of one
+/// window silently reword the other.
+pub const IDS_ABOUT_OK: u16 = 3065;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -1214,7 +1229,7 @@ pub const IDS_MENU_EXIT: u16 = 3077;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 67] = [
+pub const INTERFACE_STRINGS: [u16; 72] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1276,6 +1291,11 @@ pub const INTERFACE_STRINGS: [u16; 67] = [
     IDS_THEME_SYSTEM,
     IDS_THEME_LIGHT,
     IDS_THEME_DARK,
+    IDS_ABOUT_CAPTION,
+    IDS_ABOUT_VERSION,
+    IDS_ABOUT_LINE_1,
+    IDS_ABOUT_LINE_2,
+    IDS_ABOUT_OK,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
     IDS_MENU_SETTINGS,
@@ -1757,6 +1777,10 @@ impl Drop for CaptureSession {
 /// reported, which is the reason the number is far away from the icon identifiers.
 pub const IDD_SETTINGS: u16 = 200;
 
+/// Resource identifier of the about dialog template in `app.rc` — FR-92а, task T-11-11.
+/// Kept equal by hand, exactly as [`IDD_SETTINGS`] above.
+pub const IDD_ABOUT: u16 = 201;
+
 // Control identifiers, mirrored from `app.rc`. Same rule as above.
 const IDC_AUTOSTART: i32 = 1001;
 const IDC_LANGUAGE: i32 = 1002;
@@ -1817,6 +1841,14 @@ const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
 const IDC_LOG_DIR_LABEL: i32 = 1107;
 const IDC_GROUP_STATE: i32 = 1108;
 const IDC_THEME_LABEL: i32 = 1109;
+
+// The controls of the about dialog `IDD_ABOUT` — FR-92а, task T-11-11. A block of their own
+// from 1120, contiguous and clear of everything above; its «ОК» is `IDOK` and is not here.
+const IDC_ABOUT_ICON: i32 = 1120;
+const IDC_ABOUT_NAME: i32 = 1121;
+const IDC_ABOUT_VERSION: i32 = 1122;
+const IDC_ABOUT_LINE_1: i32 = 1123;
+const IDC_ABOUT_LINE_2: i32 = 1124;
 
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
 ///
@@ -2496,6 +2528,39 @@ unsafe extern "system" fn dialog_proc(
 /// T-11-9) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that function
 /// stored.
 unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -> Option<R> {
+    // SAFETY: by this function's own contract, `GWLP_USERDATA` of `hwnd` holds either zero
+    // or the pointer `show_dialog` stored, which names a `RefCell<DialogState>` alive for
+    // the whole of that modal call.
+    unsafe { with_window_state(hwnd, f) }
+}
+
+/// Runs `f` against the [`AboutState`] of the about dialog — FR-92а, task T-11-11.
+///
+/// `None` on the same three occasions as [`with_state`].
+///
+/// # Safety
+///
+/// May only be called with the window of a dialog created by [`show_about_dialog`] — the
+/// `hwnd` its dialog procedure was called with — whose `GWLP_USERDATA` therefore holds
+/// either zero or the pointer that function stored.
+unsafe fn with_about_state<R>(hwnd: HWND, f: impl FnOnce(&mut AboutState) -> R) -> Option<R> {
+    // SAFETY: by this function's own contract, `GWLP_USERDATA` of `hwnd` holds either zero
+    // or the pointer `show_about_dialog` stored, which names a `RefCell<AboutState>` alive
+    // for the whole of that modal call.
+    unsafe { with_window_state(hwnd, f) }
+}
+
+/// The window-message plumbing behind [`with_state`] and [`with_about_state`] — one body,
+/// made generic by task T-11-11 instead of copied (§6.2).
+///
+/// # Safety
+///
+/// May only be called with a window whose `GWLP_USERDATA` holds either zero or a pointer to
+/// a `RefCell<S>` that outlives the modal call — which is what the two wrappers above
+/// guarantee through their own contracts: each names the one show function whose state type
+/// is `S`, and neither window can carry the other's pointer, because each show function
+/// stores its own frame's cell into the window it alone creates.
+unsafe fn with_window_state<S, R>(hwnd: HWND, f: impl FnOnce(&mut S) -> R) -> Option<R> {
     // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
     let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
 
@@ -2503,11 +2568,11 @@ unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -
         return None;
     }
 
-    // SAFETY: by the contract above, `raw` is the pointer `show_dialog` stored, which names a
-    // `RefCell<DialogState>` on that function's frame. The call is modal, so the frame is alive
+    // SAFETY: by the contract above, `raw` is the pointer the show function stored, which
+    // names a `RefCell<S>` on that function's frame. The call is modal, so the frame is alive
     // for as long as any message of this dialog can be handled. A shared reference is all that
     // is taken, and the `RefCell` is what governs the mutable access below.
-    let cell = unsafe { &*(raw as *const RefCell<DialogState<'_>>) };
+    let cell = unsafe { &*(raw as *const RefCell<S>) };
 
     let mut state = cell.try_borrow_mut().ok()?;
 
@@ -2661,6 +2726,47 @@ pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> Button
         text: ButtonTextRole::Text,
         border,
     }
+}
+
+/// The colours of one owner-drawn push button, resolved out of the palette: the face brush,
+/// the caption ink and the frame brush. What [`resolve_button_colors`] answers and the
+/// whole of what [`paint_push_button`] needs.
+#[derive(Clone, Copy)]
+struct ResolvedButtonColors {
+    /// What the button face is filled with.
+    face: HBRUSH,
+    /// What the caption is drawn with.
+    ink: COLORREF,
+    /// What the single-pixel frame is drawn with.
+    border: HBRUSH,
+}
+
+/// The single place a button role becomes a brush or a colour of the resolved palette —
+/// the drawing never sees a role. One body shared by the settings dialog and the about
+/// dialog (§6.2, task T-11-11), moved out of `on_draw_item` rather than copied.
+fn resolve_button_colors(
+    colors: ButtonColors,
+    brushes: &theme::Brushes,
+    palette: &theme::Palette,
+) -> ResolvedButtonColors {
+    let face = match colors.face {
+        ButtonFaceRole::ButtonBg => brushes.button_bg(),
+        ButtonFaceRole::AccentBg => brushes.accent_bg(),
+        ButtonFaceRole::SelBg => brushes.sel_bg(),
+    };
+
+    let ink = match colors.text {
+        ButtonTextRole::Text => palette.text,
+        ButtonTextRole::AccentFg => palette.accent_fg,
+        ButtonTextRole::SelFg => palette.sel_fg,
+        ButtonTextRole::TextMuted => palette.text_muted,
+    };
+
+    let border = match colors.border {
+        ButtonBorderRole::ButtonBorder => brushes.button_border(),
+    };
+
+    ResolvedButtonColors { face, ink, border }
 }
 
 /// The two kinds of owner-drawn glyph element — FR-92а, task T-11-5b.
@@ -3132,7 +3238,20 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
         })
     };
 
-    let Some((ink, opaque_bg, brush)) = choice.flatten() else {
+    apply_ctl_color(dc, choice.flatten())
+}
+
+/// One `WM_CTLCOLOR*` answer, chosen but not yet applied: the caption ink (`None` — no text
+/// on this DC), the opaque text background of a field (`None` — transparent), and the brush
+/// the control is erased with.
+type CtlColorChoice = (Option<COLORREF>, Option<COLORREF>, HBRUSH);
+
+/// Applies one chosen `WM_CTLCOLOR*` answer to the DC — the drawing half [`on_ctl_color`]
+/// and [`on_about_ctl_color`] share (§6.2, task T-11-11: one body, not a copy).
+///
+/// `None` is the «not handled» of both callers — the system colours — and answers zero.
+fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
+    let Some((ink, opaque_bg, brush)) = choice else {
         return 0;
     };
 
@@ -3512,61 +3631,67 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         with_state(hwnd, |state| {
             // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
             let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
 
-            let colors = button_color_roles(control, pressed, disabled);
-
-            // The single place a role becomes a brush or a colour of the resolved
-            // palette — the drawing below never sees a role.
-            let face = match colors.face {
-                ButtonFaceRole::ButtonBg => brushes.button_bg(),
-                ButtonFaceRole::AccentBg => brushes.accent_bg(),
-                ButtonFaceRole::SelBg => brushes.sel_bg(),
-            };
-
-            let ink = match colors.text {
-                ButtonTextRole::Text => palette.text,
-                ButtonTextRole::AccentFg => palette.accent_fg,
-                ButtonTextRole::SelFg => palette.sel_fg,
-                ButtonTextRole::TextMuted => palette.text_muted,
-            };
-
-            let border = match colors.border {
-                ButtonBorderRole::ButtonBorder => brushes.button_border(),
-            };
-
-            Some((face, ink, border))
+            Some(resolve_button_colors(
+                button_color_roles(control, pressed, disabled),
+                brushes,
+                state.palette,
+            ))
         })
     };
 
-    let Some(Some((face, ink, border))) = choice else {
+    let Some(Some(colors)) = choice else {
         return 0;
     };
 
-    // The caption, from the dialog's own control by identifier — never from the message.
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
+    // to paint into for the length of this send.
+    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused) }
+}
+
+/// Paints one owner-drawn push button: the filled face, the single-pixel frame, the
+/// caption and the focus cue. The drawing half [`on_draw_item`] and [`on_about_draw_item`]
+/// share — one body, moved out of `on_draw_item` by task T-11-11 rather than copied
+/// (§6.2).
+///
+/// The caption comes from the dialog's own control by identifier — never from the message.
+///
+/// # Safety
+///
+/// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of:
+/// `dc` and `rect` are owned by the sender for the length of the send, and `hwnd` is the
+/// live dialog whose state keeps the brushes of `colors` alive.
+unsafe fn paint_push_button(
+    hwnd: HWND,
+    control: i32,
+    dc: HDC,
+    rect: RECT,
+    colors: ResolvedButtonColors,
+    focused: bool,
+) -> isize {
     // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
     let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
 
     // NFR-13, for the paint calls below: each answers a success flag or a previous value,
-    // and every answer is deliberately dropped for the same reason `on_ctl_color` drops
+    // and every answer is deliberately dropped for the same reason `apply_ctl_color` drops
     // its own — the manager never hands a dead DC, only a forged message could (SEC-05),
     // and the right reaction to a forgery is indifference: no read-back, no
     // `debug_assert` handing the forger a crash of a debug build, and no journal row for
     // GDI refusals (reviews\T-11-1.md).
 
     // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for
-    // the length of this send; `face` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &rect, face) };
+    // the length of this send; `colors.face` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &rect, colors.face) };
 
-    // SAFETY: as above; `border` is a live brush of the dialog's state. `FrameRect`
+    // SAFETY: as above; `colors.border` is a live brush of the dialog's state. `FrameRect`
     // draws the single-pixel frame the task asks for.
-    unsafe { FrameRect(dc, &rect, border) };
+    unsafe { FrameRect(dc, &rect, colors.border) };
 
     // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC
     // and touch no memory of this process.
     unsafe { SetBkMode(dc, TRANSPARENT) };
     // SAFETY: as above.
-    unsafe { SetTextColor(dc, ink) };
+    unsafe { SetTextColor(dc, colors.ink) };
 
     if !caption.is_empty() {
         let mut text_rect = rect;
@@ -5917,4 +6042,371 @@ fn end_dialog(hwnd: HWND, result: isize) {
     if let Err(error) = unsafe { EndDialog(hwnd, result) } {
         crate::app::report_non_critical("EndDialog", &error);
     }
+}
+
+// =========================================================================================
+// FR-92а, task T-11-11 — the about dialog
+// =========================================================================================
+//
+// The window that replaces the tray's `MessageBoxW`, which no documented means can repaint.
+// It lives here with the settings dialog because §6.2 makes this module the owner of the
+// dialogs, and because everything it paints with — the `WM_CTLCOLOR*` answers, the
+// owner-drawn button path, the DWM title bar — already lives here and is *shared*, not
+// copied: `apply_ctl_color`, `button_color_roles` + `resolve_button_colors`,
+// `paint_push_button`, `apply_title_bar_theme`, `with_window_state`.
+
+/// Everything the about dialog needs, for as long as it is up.
+///
+/// Lives on the frame of [`show_about_dialog`] and is reached the way [`DialogState`] is:
+/// through a `RefCell` behind the pointer `GWLP_USERDATA` carries. Deliberately this small.
+/// SEC-05 says of the box this window replaces: a window that changes nothing — and a state
+/// holding no configuration and no callback is how the new window stays exactly that: there
+/// is nothing here a handler could change.
+struct AboutState {
+    /// The palette of this window, resolved once at the moment it is opened. The window is
+    /// short-lived and is not repainted on the fly: nobody posts it
+    /// [`WM_APP_SYSTEM_THEME`], and the next opening resolves afresh.
+    palette: &'static theme::Palette,
+    /// The brushes of `palette`, created for this window alone and dropped however
+    /// [`show_about_dialog`] leaves. `None` — `CreateSolidBrush` refused — is survived
+    /// exactly as the settings dialog survives it: every colour answer says «not handled»
+    /// and the window lives with the system colours (NFR-13).
+    brushes: Option<theme::Brushes>,
+    /// The four-part file version out of the `VERSIONINFO` resource of the running
+    /// executable, read by the caller the same way the old box read it
+    /// (`tray::file_version`). `None` — no resource — shows as a dash, not as an error.
+    version: Option<(u16, u16, u16, u16)>,
+}
+
+/// Shows the modal «О программе» window of FR-92а — what `tray` calls in place of the
+/// `MessageBoxW` it used to show, from the same place in the same order.
+///
+/// Same shape as [`show_dialog`]: the state lives on this frame, `DialogBoxParamW` runs
+/// the modal loop, and the palette is resolved here, at the moment of opening — from the
+/// setting the caller copied out of the configuration and one read of the system switch —
+/// so the first paint is one consistent palette; the brushes die with this frame.
+///
+/// SEC-05: the window changes nothing, exactly as the box it replaces — no configuration,
+/// no file, no registry; every command it answers ends it.
+pub fn show_about_dialog(
+    owner: HWND,
+    instance: HINSTANCE,
+    setting: ThemeSetting,
+    version: Option<(u16, u16, u16, u16)>,
+) -> windows::core::Result<()> {
+    let palette = theme::resolve(setting, theme::system_is_light());
+
+    let state = RefCell::new(AboutState {
+        palette,
+        brushes: theme::Brushes::new(palette),
+        version,
+    });
+
+    // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`, and the
+    // "name" is an integer identifier in the `MAKEINTRESOURCE` form — a value below 65536
+    // carried inside the pointer, never dereferenced as a string. `owner` is a live window
+    // of this thread. The parameter is a pointer to `state`, which lives on this frame:
+    // the call is modal and does not return until `EndDialog`, so the pointer cannot
+    // outlive the value it names. `about_proc` is the only reader of it and reads it
+    // through the `RefCell`, so no two borrows can overlap however the manager re-enters.
+    let result = unsafe {
+        DialogBoxParamW(
+            Some(instance),
+            resource_id(IDD_ABOUT),
+            Some(owner),
+            Some(about_proc),
+            LPARAM(std::ptr::from_ref(&state) as isize),
+        )
+    };
+
+    // NFR-13. `DialogBoxParamW` answers -1 when the dialog could not be created at all,
+    // and that is the one outcome that is a failure — exactly as in `show_dialog`.
+    if result == -1 {
+        return Err(WinError::from_thread());
+    }
+
+    Ok(())
+}
+
+/// The dialog procedure of the about window.
+///
+/// # Safety
+///
+/// Called by the dialog manager with the arguments of a window message. `hwnd` names the
+/// live dialog, and on `WM_INITDIALOG` `lparam` is the pointer [`show_about_dialog`]
+/// passed and nothing else — the manager forwards it unchanged and no other sender can
+/// reach this procedure (SEC-05), exactly as for [`dialog_proc`].
+unsafe extern "system" fn about_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> isize {
+    match message {
+        WM_INITDIALOG => {
+            // SAFETY: `hwnd` is the live dialog and `GWLP_USERDATA` is a field every
+            // window has, which the dialog manager does not use for itself. The value
+            // stored is the pointer the manager forwarded from `DialogBoxParamW`; it is
+            // only ever read back by `with_about_state`.
+            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
+
+            // SAFETY: the pointer has just been stored and names the `RefCell` on the
+            // frame of `show_about_dialog`, which outlives this modal call.
+            unsafe {
+                with_about_state(hwnd, |state| {
+                    fill_about(hwnd, state.version);
+
+                    // The non-client title bar follows the resolved palette from the
+                    // first showing — the same call the settings dialog makes.
+                    apply_title_bar_theme(hwnd, state.palette);
+                })
+            };
+
+            // «ОК» is BS_OWNERDRAW, so the default identifier is handed to the dialog
+            // manager by the documented replacement, `DM_SETDEFID` — *posted*, not sent,
+            // for the reasons written down at the same message of `dialog_proc` (FR-72).
+            // It is what keeps Enter landing on «ОК».
+            //
+            // SAFETY: `hwnd` is the live dialog; the message carries two plain integers
+            // and no pointer — `PostMessageW` queues them by value and returns.
+            if let Err(error) = unsafe {
+                PostMessageW(
+                    Some(hwnd),
+                    DM_SETDEFID,
+                    WPARAM(usize::try_from(OK_COMMAND).unwrap_or(0)),
+                    LPARAM(0),
+                )
+            } {
+                // NFR-13. Not fatal: Enter would be answered by the dialog manager's
+                // fallback instead of the named default, and the journal is told.
+                crate::app::report_non_critical("PostMessageW", &error);
+            }
+
+            // TRUE: let the dialog manager choose the focus — «ОК» is the one tab stop.
+            1
+        }
+
+        // The colour questions of this window, answered from its own palette; the applying
+        // half is the shared `apply_ctl_color` — task T-11-11 reuses the paths of the
+        // settings dialog rather than copying them (§6.2). `WM_CTLCOLOREDIT` and
+        // `WM_CTLCOLORLISTBOX` are deliberately not routed: this window has no field and
+        // no list.
+        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value
+            // it names is alive for the whole of this modal call.
+            unsafe { on_about_ctl_color(hwnd, message, wparam, lparam) }
+        }
+
+        // The one owner-drawn button of this window. The gate the last sentence of SEC-05
+        // names is the same as everywhere: the message is handled only while the program
+        // itself holds this dialog on the screen, and nothing of it is dereferenced
+        // beyond the checked fields and the drawing rectangle.
+        WM_DRAWITEM => {
+            // SAFETY: the sender owns the struct `lparam` names for the length of the
+            // send, and this procedure is inside that send.
+            unsafe { on_about_draw_item(hwnd, lparam) }
+        }
+
+        WM_COMMAND => {
+            let control = i32::from(low_word(wparam.0));
+
+            // «ОК» and Esc — `IDCANCEL`, which the dialog manager sends whether or not
+            // the window has the button — both simply end the window: it changes nothing,
+            // so there is nothing to apply and nothing to undo (SEC-05).
+            if control == OK_COMMAND || control == CANCEL_COMMAND {
+                end_dialog(hwnd, isize::try_from(control).unwrap_or(0));
+            }
+
+            0
+        }
+
+        _ => 0,
+    }
+}
+
+/// Puts the strings of the locale in force into the about window — FR-94 — and composes
+/// the version line out of the `VERSIONINFO` the caller read.
+///
+/// The name row is deliberately not set: «Lang Switcher» is not translated — decision on
+/// question 7 — and the template literal already is the name.
+fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
+    let caption = wide(&text(IDS_ABOUT_CAPTION));
+
+    // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer
+    // owned by this frame, neither moved nor dropped until the call returns; the call
+    // copies it.
+    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
+        crate::app::report_non_critical("SetWindowTextW", &error);
+    }
+
+    set_text(hwnd, IDC_ABOUT_VERSION, &about_version_line(version));
+    set_text(hwnd, IDC_ABOUT_LINE_1, &text(IDS_ABOUT_LINE_1));
+    set_text(hwnd, IDC_ABOUT_LINE_2, &text(IDS_ABOUT_LINE_2));
+    set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
+}
+
+/// The version line of the about window: [`IDS_ABOUT_VERSION`] with the four-part number
+/// substituted — FR-94. The number comes out of the `VERSIONINFO` resource of the running
+/// executable, read by the caller of [`show_about_dialog`] the same way the old box read
+/// it, and is never spelled in the source.
+///
+/// `None` — a binary without the resource — shows a dash: not a failure, and next to
+/// impossible for this window, because the template it was created from lives in the same
+/// `app.rc` as the version block.
+///
+/// Public so the test can call the very function the dialog calls.
+pub fn about_version_line(version: Option<(u16, u16, u16, u16)>) -> String {
+    let number = version.map_or_else(
+        || "—".to_owned(),
+        |(major, minor, build, revision)| format!("{major}.{minor}.{build}.{revision}"),
+    );
+
+    format_text(IDS_ABOUT_VERSION, &[&number])
+}
+
+/// The colour role of one static of the about window — the closed vocabulary
+/// [`static_color_role`] already answers with, reused rather than widened (§6.2): the
+/// version line is the quiet one, everything else — the icon, the name and the two
+/// description lines — is an ordinary caption. Nothing in this window is a field, so
+/// [`StaticColorRole::Field`] never comes out of it.
+///
+/// Public for the same reason as [`static_color_role`]: the table test calls the function
+/// the dialog calls.
+pub fn about_static_color_role(control: i32) -> StaticColorRole {
+    match control {
+        IDC_ABOUT_VERSION => StaticColorRole::Muted,
+        // Spelled out rather than swallowed by the catch-all, so the mirrored identifiers
+        // of the template stay load-bearing in exactly one function.
+        IDC_ABOUT_ICON | IDC_ABOUT_NAME | IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => {
+            StaticColorRole::Label
+        }
+        _ => StaticColorRole::Label,
+    }
+}
+
+/// The `WM_CTLCOLOR*` answers of the about window — the choosing half; the applying half
+/// is the shared [`apply_ctl_color`] (§6.2, task T-11-11: one body, not a copy).
+///
+/// SEC-05 is held exactly as in [`on_ctl_color`]: the whole of what is taken out of the
+/// message is two handles, the control is only asked for its identifier, the DC is only
+/// written to. Zero — «not handled», the system colours — whenever the state is not
+/// reachable or [`theme::Brushes::new`] was refused at initialisation (NFR-13).
+///
+/// # Safety
+///
+/// Called from [`about_proc`] only, with the arguments of the message.
+unsafe fn on_about_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> isize {
+    // The two handles of the message — see above; this is all that is ever read out of it.
+    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
+    let control = HWND(lparam.0 as *mut std::ffi::c_void);
+
+    // SAFETY: `control` is a window handle out of the message; asking for its identifier
+    // reads a field of that window and no memory of ours. For `WM_CTLCOLORDLG` the handle
+    // is the dialog itself and the identifier goes unused.
+    let control_id = unsafe { GetDlgCtrlID(control) };
+
+    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
+    // borrow of the state ends before the DC is touched.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            Some(match message {
+                // The window itself and the erase under the owner-drawn «ОК»: the window
+                // brush is the whole answer — this dialog has no panels.
+                WM_CTLCOLORDLG | WM_CTLCOLORBTN => (None, None, brushes.window_bg()),
+
+                // The statics: the role decides the ink, the ground is always the window
+                // brush. The `Field` arm keeps the match closed over the shared
+                // vocabulary; `about_static_color_role` never answers it.
+                WM_CTLCOLORSTATIC => match about_static_color_role(control_id) {
+                    StaticColorRole::Label => (Some(palette.text), None, brushes.window_bg()),
+                    StaticColorRole::Muted => (Some(palette.text_muted), None, brushes.window_bg()),
+                    StaticColorRole::Field => (
+                        Some(palette.text),
+                        Some(palette.field_bg),
+                        brushes.field_bg(),
+                    ),
+                },
+
+                // Unreachable: the caller only routes the three messages above here.
+                _ => return None,
+            })
+        })
+    };
+
+    apply_ctl_color(dc, choice.flatten())
+}
+
+/// The `WM_DRAWITEM` of the about window — one owner-drawn button, «ОК», painted by the
+/// shared [`paint_push_button`] with the colours the shared [`button_color_roles`] table
+/// chose, on which `IDOK` is the accent (§6.2, task T-11-11: the paths of the settings
+/// dialog, not copies of them).
+///
+/// SEC-05, held as in [`on_draw_item`]: the control type and the identifier are checked
+/// before any work, the same copied fields and nothing else are taken out of the message,
+/// `itemData` — never.
+///
+/// # Safety
+///
+/// Called from [`about_proc`] only, with the `lparam` of the message: the sender owns the
+/// struct it names for the length of the send, and this procedure is inside that send.
+unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
+    if lparam.0 == 0 {
+        return 0;
+    }
+
+    // The one dereference of the message — the same copied fields as `on_draw_item`,
+    // taken out as plain values before anything else runs.
+    //
+    // SAFETY: see above — the dialog manager owns the struct for the length of the send,
+    // and this procedure is inside that send.
+    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
+    let (ctl_type, ctl_id, item_state, dc, rect) = (
+        item.CtlType,
+        item.CtlID,
+        item.itemState,
+        item.hDC,
+        item.rcItem,
+    );
+
+    let control = i32::try_from(ctl_id).unwrap_or(-1);
+
+    // The only owner-drawn element of this window is its «ОК».
+    if ctl_type != ODT_BUTTON || control != OK_COMMAND {
+        return 0;
+    }
+
+    let pressed = item_state.0 & ODS_SELECTED.0 != 0;
+    let disabled = item_state.0 & ODS_DISABLED.0 != 0;
+    let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
+
+    // The colour choice, split from the painting — the borrow ends before the DC is
+    // touched, exactly as everywhere in this file.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+
+            Some(resolve_button_colors(
+                button_color_roles(control, pressed, disabled),
+                brushes,
+                state.palette,
+            ))
+        })
+    };
+
+    let Some(Some(colors)) = choice else {
+        return 0;
+    };
+
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
+    // to paint into for the length of this send.
+    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused) }
 }

@@ -1385,6 +1385,9 @@ const RT_STRING: PCWSTR = PCWSTR(std::ptr::without_provenance(6));
 /// Identifier `app.rc` gives the dialog of FR-92.
 const IDD_SETTINGS: u16 = 200;
 
+/// Identifier `app.rc` gives the about dialog of FR-92а — task T-11-11.
+const IDD_ABOUT: u16 = 201;
+
 /// The caption of the dialog, written out rather than imported — see the note above.
 const DIALOG_CAPTION: &str = "Lang Switcher — настройки";
 
@@ -1837,6 +1840,199 @@ fn the_four_combo_boxes_are_owner_drawn_and_keep_their_old_styles() {
             style & 0x0001_0000,
             0,
             "«{what}» ({id}) must keep WS_TABSTOP; the style is {style:#010x}"
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// The about dialog — FR-92а, task T-11-11, read out of the built binary like everything else
+// -----------------------------------------------------------------------------------------
+
+#[test]
+fn the_about_dialog_template_carries_its_elements() {
+    // Criterion 9 of T-11-11, by the instrument of T-08-1: the template of the window that
+    // replaced `MessageBoxW`, read out of the built `LangSwitcher.exe` and compared against
+    // literals written out here.
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    println!("caption: {}", template.caption);
+    for text in &template.text {
+        println!("  {text}");
+    }
+
+    assert_eq!(
+        template.caption, "О программе Lang Switcher",
+        "the caption came out of rc.exe wrong — check #pragma code_page(65001)"
+    );
+
+    // Every element the task names: the icon, the name row, the version row, the two
+    // description lines and the one button. One row per element, so a lost control is a
+    // failing test and not a smaller window.
+    const ABOUT_CONTROLS: [(u32, &str); 6] = [
+        (1120, "иконка программы"),
+        (1121, "имя программы"),
+        (1122, "строка версии"),
+        (1123, "первая строка описания"),
+        (1124, "вторая строка описания"),
+        (1, "кнопка «ОК»"),
+    ];
+
+    for (id, what) in ABOUT_CONTROLS {
+        assert!(
+            template.controls.contains(&id),
+            "the about dialog has no control {id} — {what}"
+        );
+    }
+
+    assert_eq!(
+        template.controls.len(),
+        ABOUT_CONTROLS.len(),
+        "the about dialog carries exactly its six controls and nothing else"
+    );
+
+    // The visible literals, in template order. The version row is empty on purpose — it is
+    // composed at run time from the version resource — and the icon control carries an
+    // ordinal, not a text, so neither appears here.
+    assert_eq!(
+        template.text,
+        [
+            "Lang Switcher",
+            "Исправляет текст, набранный в неверной раскладке.",
+            "Перекодировка — по нажатию одной клавиши.",
+            "ОК",
+        ],
+        "the visible strings of the about dialog came out of rc.exe wrong"
+    );
+}
+
+// The same ⚠ as for the nine buttons of the settings dialog: `BS_OWNERDRAW` (0x0B) is a
+// button *type* in the low nibble, so the check is equality of the nibble and not a bit
+// test.
+#[test]
+fn the_about_ok_button_is_owner_drawn_and_keeps_its_tab_stop() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    let style = template
+        .styles
+        .iter()
+        .find(|(control, _)| *control == 1)
+        .map(|(_, style)| *style)
+        .unwrap_or_else(|| panic!("the about dialog has no control 1 — «ОК»"));
+
+    println!("«ОК» (1): style {style:#010x}");
+
+    assert_eq!(
+        style & 0x0F,
+        0x0B,
+        "«ОК» (1) must carry BS_OWNERDRAW as its button type — FR-92а; \
+         the style is {style:#010x}"
+    );
+
+    assert_ne!(
+        style & 0x0001_0000,
+        0,
+        "«ОК» (1) must keep WS_TABSTOP; the style is {style:#010x}"
+    );
+}
+
+#[test]
+fn the_about_template_says_what_the_russian_table_says() {
+    // Two independent witnesses, exactly as for the settings dialog: the template literals
+    // keep the window readable if a string fails to load, the table is what the program
+    // actually shows, and a code page accident would have to corrupt both identically.
+    let product = ProductImage::shared();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    assert_eq!(
+        template.caption,
+        product.string(settings::Language::Ru, settings::IDS_ABOUT_CAPTION),
+        "the caption of the about template and of the Russian table have parted"
+    );
+
+    for (text, id) in [
+        (
+            "Исправляет текст, набранный в неверной раскладке.",
+            settings::IDS_ABOUT_LINE_1,
+        ),
+        (
+            "Перекодировка — по нажатию одной клавиши.",
+            settings::IDS_ABOUT_LINE_2,
+        ),
+        ("ОК", settings::IDS_ABOUT_OK),
+    ] {
+        assert_eq!(
+            product.string(settings::Language::Ru, id),
+            text,
+            "row {id} of the Russian table and the about template have parted"
+        );
+        assert!(
+            template.text.iter().any(|title| title == text),
+            "the about template does not show «{text}»"
+        );
+    }
+}
+
+#[test]
+fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
+    // Criterion 10 of T-11-11, the numbering half: the five identifiers continue the row
+    // at 3061 contiguously — written as literals, so a renumbering in the crate cannot
+    // silently agree with itself.
+    assert_eq!(settings::IDS_ABOUT_CAPTION, 3061);
+    assert_eq!(settings::IDS_ABOUT_VERSION, 3062);
+    assert_eq!(settings::IDS_ABOUT_LINE_1, 3063);
+    assert_eq!(settings::IDS_ABOUT_LINE_2, 3064);
+    assert_eq!(settings::IDS_ABOUT_OK, 3065);
+
+    // And the row they continue ends right in front of them.
+    assert_eq!(settings::IDS_THEME_DARK, 3060);
+}
+
+#[test]
+fn the_about_version_line_substitutes_the_number_the_resource_gave() {
+    // Criterion 12 of T-11-11: the version is *substituted* into the string of the locale
+    // in force — the number itself came out of the `VERSIONINFO` resource by
+    // `tray::file_version`, and no version literal exists in the source.
+    let _guard = with_product_strings();
+
+    settings::set_ui_language(settings::Language::Ru);
+    let russian = settings::about_version_line(Some((0, 1, 0, 0)));
+    let russian_missing = settings::about_version_line(None);
+
+    settings::set_ui_language(settings::Language::En);
+    let english = settings::about_version_line(Some((0, 1, 0, 0)));
+
+    println!("ru: {russian} / {russian_missing}");
+    println!("en: {english}");
+
+    assert_eq!(russian, "Версия 0.1.0.0");
+    // A binary without the resource shows a dash rather than failing — the reading the old
+    // box gave the same case.
+    assert_eq!(russian_missing, "Версия —");
+    assert_eq!(english, "Version 0.1.0.0");
+
+    settings::set_ui_language(settings::Language::Ru);
+}
+
+#[test]
+fn the_about_static_colour_roles_follow_their_table() {
+    // The role function the about dialog's `WM_CTLCOLORSTATIC` answers with — the closed
+    // vocabulary of the settings dialog, reused: the version line is muted, every other
+    // static is an ordinary caption, and nothing in that window is a field.
+    let cases = [
+        (1120, settings::StaticColorRole::Label, "иконка"),
+        (1121, settings::StaticColorRole::Label, "имя"),
+        (1122, settings::StaticColorRole::Muted, "строка версии"),
+        (1123, settings::StaticColorRole::Label, "описание, строка 1"),
+        (1124, settings::StaticColorRole::Label, "описание, строка 2"),
+    ];
+
+    for (control, expected, what) in cases {
+        assert_eq!(
+            settings::about_static_color_role(control),
+            expected,
+            "{what} ({control})"
         );
     }
 }
@@ -2426,7 +2622,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 67] = [
+const FR_94_STRINGS: [(u16, &str, &str); 72] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -2604,6 +2800,23 @@ const FR_94_STRINGS: [(u16, &str, &str); 67] = [
     (settings::IDS_THEME_SYSTEM, "Как в системе", "Match system"),
     (settings::IDS_THEME_LIGHT, "Светлое", "Light"),
     (settings::IDS_THEME_DARK, "Тёмное", "Dark"),
+    (
+        settings::IDS_ABOUT_CAPTION,
+        "О программе Lang Switcher",
+        "About Lang Switcher",
+    ),
+    (settings::IDS_ABOUT_VERSION, "Версия {0}", "Version {0}"),
+    (
+        settings::IDS_ABOUT_LINE_1,
+        "Исправляет текст, набранный в неверной раскладке.",
+        "Fixes text typed in the wrong keyboard layout.",
+    ),
+    (
+        settings::IDS_ABOUT_LINE_2,
+        "Перекодировка — по нажатию одной клавиши.",
+        "Conversion takes a single key press.",
+    ),
+    (settings::IDS_ABOUT_OK, "ОК", "OK"),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
     (settings::IDS_MENU_SETTINGS, "Настройки…", "Settings…"),

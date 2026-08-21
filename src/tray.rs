@@ -34,7 +34,8 @@
 //! thread-local `RefCell` across that call would turn any such message into a panic. So
 //! [`Tray::handle_message`] never shows the menu itself — it answers [`Reaction::ShowMenu`],
 //! and [`handle_ui_message`] shows the menu once the borrow has been dropped. The same rule
-//! covers `MessageBoxW` in the about box, which is modal for the same reason.
+//! covers the about dialog (`settings::show_about_dialog`, task T-11-11), which is modal
+//! for the same reason.
 //!
 //! The owner-draw state of task T-11-10 obeys the same rule from the other side: while
 //! `TrackPopupMenuEx` runs its loop, `WM_MEASUREITEM` and `WM_DRAWITEM` re-enter this
@@ -92,13 +93,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyIcon, DestroyMenu, GetSystemMetrics, HICON, HMENU,
-    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND,
-    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED, MessageBoxW, NONCLIENTMETRICSW,
-    PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU,
-    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
-    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP,
-    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
+    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED,
+    NONCLIENTMETRICSW, PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK,
+    SM_CXSMICON, SM_CYMENU, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SystemParametersInfoW, TPM_NONOTIFY,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM,
+    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -1602,7 +1603,7 @@ fn dispatch_command(hwnd: HWND, command: u32) {
         // FR-93, task T-08-1.
         CMD_AUTOSTART => toggle_autostart(),
 
-        // Outside any borrow of the tray: `MessageBoxW` is modal and pumps messages.
+        // Outside any borrow of the tray: the about dialog is modal and pumps messages.
         CMD_ABOUT => show_about(hwnd),
 
         // The ordinary way out. Nothing is cleaned up here: asking `app` to come down leads
@@ -1697,39 +1698,41 @@ fn toggle_autostart() {
 // The about box
 // ---------------------------------------------------------------------------------------
 
-/// Shows the "О программе" window: the name and the version, and nothing else.
+/// Shows the "О программе" window: the name, the version, two lines of description and an
+/// «ОК» — and nothing else. FR-92а, task T-11-11: the window is the own-drawn dialog
+/// `IDD_ABOUT` of [`crate::settings`], shown in the resolved palette, because the
+/// `MessageBoxW` this function used to call cannot be repainted by any documented means.
 ///
-/// Russian, like the menu, and hard-wired for the same reason the menu labels are: FR-91
-/// prints them in Russian, and FR-94 — the RU and EN resource strings — is task T-08-2,
-/// which owns `app.rc`. Moving these strings into the resources belongs with the rest of
-/// FR-94.
+/// Called in the same order the box was called: from [`dispatch_command`], reached only
+/// through [`handle_ui_message`], with **no borrow of the tray held** — the dialog is modal
+/// and pumps messages, exactly like `TrackPopupMenuEx` (the rule of the module
+/// documentation). The theme setting is *copied* out of the tray first, in a borrow that
+/// ends before the modal call begins — the same shape [`open_settings`] has.
 fn show_about(hwnd: HWND) {
-    let version = file_version().map_or_else(
-        || "версия недоступна".to_owned(),
-        |(major, minor, build, revision)| format!("Версия {major}.{minor}.{build}.{revision}"),
-    );
-
-    let text = wide(&format!("{APP_NAME}\n{version}"));
-    let caption = wide(APP_NAME);
-
-    // SAFETY: both strings are NUL-terminated UTF-16 buffers owned by this frame, neither
-    // moved nor dropped until the call returns, and `MessageBoxW` only reads through them.
-    // `hwnd` is our live window and becomes the owner of the box, which is what keeps the box
-    // in front of it. The call blocks and pumps messages, which is why it is made here and
-    // not from inside `with_tray`.
-    let result = unsafe {
-        MessageBoxW(
-            Some(hwnd),
-            PCWSTR(text.as_ptr()),
-            PCWSTR(caption.as_ptr()),
-            MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
-        )
+    let Some(setting) = with_tray(|tray| tray.config().general.theme) else {
+        return;
     };
 
-    if result.0 == 0 {
-        // NFR-13: zero is the documented failure value. Not fatal — nothing depends on the
-        // box having been shown.
-        app::report_non_critical("MessageBoxW", &WinError::from_thread());
+    // SAFETY: `None` asks for the handle of the file used to create the calling process,
+    // which is the running executable — the module `app.rc` was linked into, and therefore
+    // the one holding the dialog template. The handle is borrowed and must not be freed;
+    // nothing here frees it.
+    let module = match unsafe { GetModuleHandleW(PCWSTR::null()) } {
+        Ok(module) => module,
+        Err(error) => {
+            app::report_non_critical("GetModuleHandleW", &error);
+            return;
+        }
+    };
+
+    // The version travels the same road it always did: out of the `VERSIONINFO` resource
+    // of the running executable by [`file_version`], never out of a literal.
+    if let Err(error) =
+        settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version())
+    {
+        // NFR-13. The dialog either came up or it did not, and if it did not the user is
+        // told by the absence of a window; the reason goes to the journal.
+        app::report_non_critical("DialogBoxParamW", &error);
     }
 }
 
@@ -1908,11 +1911,6 @@ pub fn small_icon_size() -> (i32, i32) {
 /// mistaken for a pointer that could be read.
 fn resource_id(id: u16) -> PCWSTR {
     PCWSTR(std::ptr::without_provenance(usize::from(id)))
-}
-
-/// A NUL-terminated UTF-16 copy of `text`, for the Win32 calls that want one.
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Copies `text` into the fixed tooltip field, always leaving it NUL-terminated.
