@@ -862,6 +862,106 @@ fn the_theme_combo_order_is_the_order_of_the_theme_setting_values() {
 }
 
 // =========================================================================================
+// FR-92а — the painting half of the dialog: colour roles and the title bar. Task T-11-4.
+// =========================================================================================
+//
+// What is testable without a window is exactly the two pure functions the handlers call:
+// the mapping «identifier → colour role» and the choice of the DWM flag from the palette.
+// The `WM_CTLCOLOR*` handlers themselves need a live dialog and are checked by the
+// controller's instrument on the real window at acceptance.
+
+use lang_switcher::settings::StaticColorRole;
+use lang_switcher::theme::{FOG, GRAPHITE, resolve};
+
+// Criterion 10 of T-11-4. The mapping is closed by a table: every explanatory note of the
+// dialog by its actual identifier, the `ES_READONLY` trap, and every other static the
+// template carries as a sample of the default. The numbers are written out here rather
+// than imported — the same rule the template tests below follow: a test that imported the
+// identifiers would agree with any renumbering of them.
+#[test]
+fn the_static_colour_roles_follow_the_table_of_fr_92a() {
+    // The six explanatory notes and hints — muted ink over the window background.
+    for (control, name) in [
+        (1011, "IDC_HOTKEY_NOTE"),
+        (1092, "IDC_LANGUAGE_RESTART"),
+        (1098, "IDC_CYCLE_HINT"),
+        (1105, "IDC_EXCLUSION_HINT"),
+        (1027, "IDC_LAYOUT_NOTE"),
+        (1062, "IDC_LOG_DIR"),
+    ] {
+        assert_eq!(
+            settings::static_color_role(control),
+            StaticColorRole::Muted,
+            "{name} ({control}) is an explanatory note and must be muted"
+        );
+    }
+
+    // ⚠ The `ES_READONLY` trap: IDC_HOTKEY is an edit field to the eye, but a read-only
+    // edit is asked about with `WM_CTLCOLORSTATIC` — it must come out a field, not a
+    // caption, or the one field of the «Горячая клавиша» group stays window-coloured.
+    assert_eq!(
+        settings::static_color_role(1010),
+        StaticColorRole::Field,
+        "IDC_HOTKEY (1010) is a read-only edit and must be painted as a field"
+    );
+
+    // Everything else the message asks about is an ordinary caption: group boxes, labels,
+    // the text of checkboxes and radios, the state lines.
+    for (control, name) in [
+        (1090, "IDC_GROUP_GENERAL"),
+        (1091, "IDC_LANGUAGE_LABEL"),
+        (1109, "IDC_THEME_LABEL"),
+        (1094, "IDC_HOTKEY_LABEL"),
+        (1096, "IDC_PAIR_SOURCE_LABEL"),
+        (1097, "IDC_PAIR_TARGET_LABEL"),
+        (1100, "IDC_DELAY_LABEL"),
+        (1102, "IDC_CLIP_TIMEOUT_LABEL"),
+        (1103, "IDC_CLIP_RESTORE_LABEL"),
+        (1107, "IDC_LOG_DIR_LABEL"),
+        (1070, "IDC_STATE_HOOK"),
+        (1071, "IDC_STATE_LAYOUTS"),
+        (1072, "IDC_STATE_AUTOSTART"),
+        (1001, "IDC_AUTOSTART"),
+    ] {
+        assert_eq!(
+            settings::static_color_role(control),
+            StaticColorRole::Label,
+            "{name} ({control}) is an ordinary caption and must be a label"
+        );
+    }
+}
+
+// Criterion 11 of T-11-4. The DWM flag is a pure function of the palette — dark for
+// «Графит», light for «Туман» — checked for both palettes directly and through the six
+// rows of `resolve`, the way the dialog actually reaches a palette.
+#[test]
+fn the_title_bar_is_dark_exactly_for_the_graphite_palette() {
+    assert!(
+        settings::title_bar_is_dark(&GRAPHITE),
+        "the dark palette must ask for a dark title bar"
+    );
+    assert!(
+        !settings::title_bar_is_dark(&FOG),
+        "the light palette must not ask for a dark title bar"
+    );
+
+    for (setting, system_light, dark_expected) in [
+        (ThemeSetting::Light, true, false),
+        (ThemeSetting::Light, false, false),
+        (ThemeSetting::Dark, true, true),
+        (ThemeSetting::Dark, false, true),
+        (ThemeSetting::System, true, false),
+        (ThemeSetting::System, false, true),
+    ] {
+        assert_eq!(
+            settings::title_bar_is_dark(resolve(setting, system_light)),
+            dark_expected,
+            "{setting:?} with system_light = {system_light} chose the wrong flag"
+        );
+    }
+}
+
+// =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
 //

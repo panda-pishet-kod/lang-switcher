@@ -67,6 +67,11 @@ use serde::{Deserialize, Serialize};
 use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
 };
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Gdi::{
+    HDC, InvalidateRect, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SetBkColor,
+    SetBkMode, SetTextColor, TRANSPARENT,
+};
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
 };
@@ -92,17 +97,18 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CB_ADDSTRING, CB_GETCURSEL, CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS,
     DefWindowProcW, DialogBoxParamW, EndDialog, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-    GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW, IDCANCEL, IDOK, LB_ADDSTRING,
-    LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT,
-    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-    WM_CHAR, WM_COMMAND, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
-    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindowLongPtrW, IDCANCEL, IDOK,
+    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+    LB_RESETCONTENT, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW,
+    SetWindowTextW, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_GETDLGCODE, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
 use crate::CONFIG_DIR_NAME;
 use crate::layouts::{self, LayoutId, LayoutSpec};
-use crate::theme::ThemeSetting;
+use crate::theme::{self, ThemeSetting};
 
 /// File name of the configuration inside the program's application data directory.
 ///
@@ -2093,12 +2099,25 @@ pub fn show_dialog(
 
     let session = layouts::enumerate().unwrap_or_default();
 
+    // FR-92а, task T-11-4: the palette of this dialog, resolved once at initialisation —
+    // the setting comes from the configuration the dialog was opened with, and the system
+    // switch is read exactly once, so the first paint is one consistent palette. Who
+    // re-resolves and when is written down in `apply_now` (a pressed «Применить») and in
+    // task T-11-9 (`WM_SETTINGCHANGE`), not here.
+    let palette = theme::resolve(config.general.theme, theme::system_is_light());
+
     let state = RefCell::new(DialogState {
         working: config.clone(),
         rows: layout_rows(&config.layouts, &session),
         session,
         apply,
         capture: None,
+        palette,
+        // `None` — some `CreateSolidBrush` refused — is survived, not escalated: the dialog
+        // opens and works with the system colours, because not painting is better than not
+        // opening (NFR-13). Nothing is journaled on that path: `Brushes::new` documents
+        // why, and the vocabulary of `diag` is closed (reviews\T-11-1.md).
+        brushes: theme::Brushes::new(palette),
     });
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`, and the
@@ -2154,6 +2173,21 @@ struct DialogState<'a> {
     /// The capture of FR-94, while one is armed. `Some` is the whole of "armed": the value
     /// suspends the conversion path for as long as it lives and restores it when it is dropped.
     capture: Option<CaptureSession>,
+    /// The palette every colour answer of this dialog is chosen from — FR-92а, task T-11-4.
+    ///
+    /// Resolved once when the dialog is created — the setting from the configuration, the
+    /// system switch read exactly once — and replaced in exactly one place: a pressed
+    /// «Применить» that resolves to the other palette (see [`apply_now`]). `&'static`
+    /// because `theme::resolve` answers identity, not a copy, and identity is what
+    /// [`title_bar_is_dark`] and the change test in [`apply_now`] compare by.
+    palette: &'static theme::Palette,
+    /// The brushes of `palette`, owned for as long as the window can be asked to paint.
+    ///
+    /// `None` when [`theme::Brushes::new`] was refused: every `WM_CTLCOLOR*` then answers
+    /// «not handled» and the dialog lives on with the system colours — not painting is
+    /// better than not opening (NFR-13). On a palette change the set is recreated whole,
+    /// never mutated in place — see the type's own documentation for why.
+    brushes: Option<theme::Brushes>,
 }
 
 /// The dialog procedure of FR-92.
@@ -2180,10 +2214,29 @@ unsafe extern "system" fn dialog_proc(
 
             // SAFETY: the pointer has just been stored and names the `RefCell` on the frame of
             // `show_dialog`, which outlives this modal call.
-            unsafe { with_state(hwnd, |state| fill_dialog(hwnd, state)) };
+            unsafe {
+                with_state(hwnd, |state| {
+                    fill_dialog(hwnd, state);
+
+                    // FR-92а, task T-11-4: the non-client title bar follows the resolved
+                    // palette from the first showing. The client area needs no call — the
+                    // `WM_CTLCOLOR*` answers below paint it as soon as anything paints.
+                    apply_title_bar_theme(hwnd, state.palette);
+                })
+            };
 
             // TRUE: let the dialog manager choose the focus.
             1
+        }
+
+        // FR-92а, task T-11-4: the five colour questions the dialog manager asks while the
+        // window and its controls are painted. Answered with the brushes of the resolved
+        // palette; zero — the system colours — when there is nothing to answer with.
+        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX
+        | WM_CTLCOLORBTN => {
+            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
+            // and the value it names is alive for the whole of this modal call.
+            unsafe { on_ctl_color(hwnd, message, wparam, lparam) }
         }
 
         WM_COMMAND => {
@@ -2228,6 +2281,224 @@ unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -
     let mut state = cell.try_borrow_mut().ok()?;
 
     Some(f(&mut state))
+}
+
+/// The colour role a control plays when `WM_CTLCOLORSTATIC` asks about it — FR-92а,
+/// task T-11-4.
+///
+/// Three roles and not sixteen colours: the handler below turns a role into palette fields
+/// in one place, and the mapping «identifier → role» stays a pure function a table test can
+/// close (criterion 10 of T-11-4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaticColorRole {
+    /// An ordinary caption — group boxes, labels, the text of checkboxes and radios, the
+    /// state lines: `text` over the transparent window background.
+    Label,
+    /// An explanatory note beside the main text: `text_muted` over the transparent window
+    /// background.
+    Muted,
+    /// A control that is a field to the eye even though the message files it under static:
+    /// `text` over `field_bg`, exactly what `WM_CTLCOLOREDIT` would have painted.
+    Field,
+}
+
+/// The role of one control identifier — the single place the list is written down.
+///
+/// The muted list is the explanatory notes and hints of the dialog, by their actual
+/// identifiers; everything else the message asks about is an ordinary caption. The tasks
+/// that follow — T-11-5a/b/c and later — are to reuse this mapping rather than write a
+/// second list, which is why it sits here beside the handler and not inside it.
+///
+/// ⚠ `IDC_HOTKEY` is an `EDITTEXT` with `ES_READONLY`, and a read-only edit is asked about
+/// with `WM_CTLCOLORSTATIC`, not `WM_CTLCOLOREDIT` — so it appears in this mapping, and it
+/// is painted as the field it looks like, not as a caption.
+///
+/// Public, like the theme-combo pair above: the table test of T-11-4 calls the very
+/// function the handler calls, not a copy of the list.
+pub fn static_color_role(control: i32) -> StaticColorRole {
+    match control {
+        IDC_HOTKEY => StaticColorRole::Field,
+        IDC_HOTKEY_NOTE | IDC_LANGUAGE_RESTART | IDC_CYCLE_HINT | IDC_EXCLUSION_HINT
+        | IDC_LAYOUT_NOTE | IDC_LOG_DIR => StaticColorRole::Muted,
+        _ => StaticColorRole::Label,
+    }
+}
+
+/// Whether the non-client title bar is to be dark for this palette — FR-92а, task T-11-4.
+///
+/// `theme::resolve` answers one of two `&'static` palettes, so identity with
+/// [`theme::GRAPHITE`] *is* «разрешённая палитра тёмная» — no colour arithmetic, no third
+/// opinion, and the acceptance instrument of position 25 compares against the same
+/// constants. Public for the same reason as [`static_color_role`]: the test of criterion 11
+/// calls the function the dialog calls.
+pub fn title_bar_is_dark(palette: &theme::Palette) -> bool {
+    std::ptr::eq(palette, &theme::GRAPHITE)
+}
+
+/// Asks DWM to colour the non-client title bar after the palette — FR-92а, task T-11-4.
+///
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE` is the one documented way to a dark caption, named by
+/// FR-92а in so many words; the attribute is four bytes of `BOOL`, true exactly when the
+/// resolved palette is the dark one.
+///
+/// A refusal is survived and left alone on purpose (NFR-13: the result is examined right
+/// here and deliberately dropped). The attribute took its public number only in Windows 10
+/// 20H1, and on older builds the call answers an error for a perfectly live window — a
+/// legal state of the machine, not a violation of ownership, which is why there is no
+/// `debug_assert` on this path. It is not journaled either: the closed `OPERATIONS`
+/// vocabulary of `diag` has no row for it (decision of `reviews\T-11-1.md`), and the only
+/// consequence is a system-coloured title bar over a correctly painted client area.
+fn apply_title_bar_theme(hwnd: HWND, palette: &theme::Palette) {
+    let dark = windows::core::BOOL::from(title_bar_is_dark(palette));
+
+    // SAFETY: `hwnd` is the live dialog. The attribute pointer names `dark`, a live local
+    // of this frame, and the size passed is exactly its four bytes; the call copies the
+    // value and keeps no pointer once it returns.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            (&raw const dark).cast(),
+            size_of::<windows::core::BOOL>() as u32,
+        )
+    };
+}
+
+/// Repaints the dialog and every child in it — the visible half of a palette change.
+fn repaint_after_palette_change(hwnd: HWND) {
+    // NFR-13: both answers are examined in words and deliberately dropped. Either call
+    // refuses only for a window that is not alive, and `hwnd` is the dialog whose
+    // procedure is running; there is nothing to do about a refused invalidation beyond the
+    // next `WM_PAINT` arriving anyway, and the journal has no row for it
+    // (reviews\T-11-1.md).
+    //
+    // SAFETY: `hwnd` is the live dialog; a null rectangle means the whole client area, and
+    // neither call keeps a pointer.
+    let _ = unsafe { InvalidateRect(Some(hwnd), None, true) };
+
+    // `RDW_ALLCHILDREN` is the half `InvalidateRect` does not reach: the controls repaint
+    // too, so the person who pressed «Применить» sees one whole dialog in the new palette,
+    // not a new background behind stale controls.
+    //
+    // SAFETY: as above.
+    let _ = unsafe {
+        RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN,
+        )
+    };
+}
+
+/// The answer to one `WM_CTLCOLOR*` question — a colour choice and a brush, nothing else.
+///
+/// # SEC-05, last sentence, held to the letter
+///
+/// The whole of what this function takes out of the message is two handles: `wparam` — the
+/// DC the control is about to be painted with — and `lparam` — the window handle of the
+/// control, which is only asked for its identifier with `GetDlgCtrlID`. Nothing of the
+/// message is dereferenced as memory; the DC is only written to (`SetTextColor`,
+/// `SetBkColor`, `SetBkMode`), never read from; no privileged action starts here. A forged
+/// message from a process of the same integrity level therefore buys its sender a colour
+/// lookup and nothing else.
+///
+/// Zero — «not handled», the system colours — is the answer whenever the state is not
+/// reachable (no state yet, or a re-entrant message) or [`theme::Brushes::new`] was refused
+/// at initialisation: not painting is better than not opening (NFR-13).
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the arguments of the message.
+unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> isize {
+    // The two handles of the message — see above; this is all that is ever read out of it.
+    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
+    let control = HWND(lparam.0 as *mut std::ffi::c_void);
+
+    // SAFETY: `control` is a window handle out of the message; asking for its identifier
+    // reads a field of that window and no memory of ours. For `WM_CTLCOLORDLG` the handle
+    // is the dialog itself and the identifier goes unused.
+    let control_id = unsafe { GetDlgCtrlID(control) };
+
+    // The colour choice, split from the painting: the borrow of the state ends before the
+    // DC is touched, and what leaves the closure is plain values — an ink, an optional
+    // opaque background, and a brush handle the state keeps alive until the dialog ends.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation, the dialog lives with
+            // the system colours (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            Some(match message {
+                // The background of the dialog itself: no text ever lands on this DC, so
+                // the brush is the whole answer.
+                WM_CTLCOLORDLG => (None, None, brushes.window_bg()),
+
+                // Captions and notes — and the one read-only field the message files under
+                // static. The role decides the ink; the caption roles take no opaque
+                // background, so the text sits transparently on the window brush instead
+                // of in a box of a slightly different colour.
+                WM_CTLCOLORSTATIC => match static_color_role(control_id) {
+                    StaticColorRole::Label => (Some(palette.text), None, brushes.window_bg()),
+                    StaticColorRole::Muted => (Some(palette.text_muted), None, brushes.window_bg()),
+                    StaticColorRole::Field => (
+                        Some(palette.text),
+                        Some(palette.field_bg),
+                        brushes.field_bg(),
+                    ),
+                },
+
+                // Input fields, the exclusion list box — and the dropped-down list of
+                // every combo box, whose list window sends this message to the dialog too.
+                WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (
+                    Some(palette.text),
+                    Some(palette.field_bg),
+                    brushes.field_bg(),
+                ),
+
+                // The background around the text of checkboxes and radios, until their own
+                // drawing arrives with T-11-5a/b/c.
+                WM_CTLCOLORBTN => (None, None, brushes.window_bg()),
+
+                // Unreachable: the caller only routes the five messages above here.
+                _ => return None,
+            })
+        })
+    };
+
+    let Some((ink, opaque_bg, brush)) = choice.flatten() else {
+        return 0;
+    };
+
+    // NFR-13, for the three DC calls below: each answers the *previous* value, or
+    // `CLR_INVALID` (zero for `SetBkMode`) when the DC is not live. The dialog manager
+    // never sends a dead DC — only a forged message could (SEC-05), and the right reaction
+    // to a forgery is indifference: the answers are dropped, nothing is read back through
+    // the DC, no `debug_assert` hands the forger a crash of a debug build, and the journal
+    // has no row for GDI refusals (reviews\T-11-1.md).
+    if let Some(colour) = ink {
+        // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC
+        // and touches no memory of this process.
+        unsafe { SetTextColor(dc, colour) };
+
+        match opaque_bg {
+            // A field: the text background is the field colour, same as the brush.
+            Some(colour) => {
+                // SAFETY: as above.
+                unsafe { SetBkColor(dc, colour) };
+            }
+            // A caption: transparent over the window brush.
+            None => {
+                // SAFETY: as above.
+                unsafe { SetBkMode(dc, TRANSPARENT) };
+            }
+        }
+    }
+
+    brush.0 as isize
 }
 
 /// Puts the interface strings of the locale in force into the window — FR-94.
@@ -2594,6 +2865,31 @@ unsafe fn apply_now(hwnd: HWND) {
 
             let updated = state.working.clone();
             (state.apply)(&updated);
+
+            // FR-92а, task T-11-4 — the half of position 25 this dialog owns: the person
+            // who chose «Тёмное» and pressed «Применить» sees the change now, not on the
+            // next opening. The palette is resolved afresh — the setting may have changed,
+            // and under `system` the system switch may have flipped while the dialog was
+            // up — and only a *changed* resolution repaints: `resolve` answers `&'static`
+            // identity, so pointer equality is the whole test, and an unchanged palette
+            // costs nothing here.
+            let fresh = theme::resolve(state.working.general.theme, theme::system_is_light());
+
+            // The brushes are recreated from the new palette, never rewritten in place:
+            // the new set is built first and the old one is dropped by the assignment, as
+            // the documentation of `Brushes` prescribes. A refusal of `Brushes::new`
+            // (NFR-13) leaves palette and brushes exactly as they were — the previous
+            // consistent palette on screen is better than half a new one — and is not
+            // journaled (reviews\T-11-1.md).
+            if !std::ptr::eq(fresh, state.palette)
+                && let Some(brushes) = theme::Brushes::new(fresh)
+            {
+                state.palette = fresh;
+                state.brushes = Some(brushes);
+
+                apply_title_bar_theme(hwnd, fresh);
+                repaint_after_palette_change(hwnd);
+            }
         })
     };
 
