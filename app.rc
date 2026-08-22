@@ -293,7 +293,7 @@ END
 //
 // Coordinates are dialog units, so the layout follows the system font instead of a pixel
 // grid. Two columns, 200 units wide each, at x = 7 and x = 213.
-IDD_SETTINGS DIALOGEX 0, 0, 420, 369
+IDD_SETTINGS DIALOGEX 0, 0, 420, 385
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Lang Switcher — настройки"
 FONT 9, "Segoe UI", 400, 0, 0x1
@@ -404,7 +404,7 @@ BEGIN
     LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9, SS_OWNERDRAW
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
-    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 236, 200, 58
+    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 236, 200, 74
     CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 248, 90, 10
     PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14, BS_OWNERDRAW
     LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9, SS_OWNERDRAW
@@ -413,19 +413,19 @@ BEGIN
     LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16, SS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
-    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 298, 406, 44
-    LTEXT           "", IDC_STATE_HOOK, 14, 310, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_LAYOUTS, 14, 321, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_AUTOSTART, 14, 332, 392, 9, SS_OWNERDRAW
+    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 314, 406, 44
+    LTEXT           "", IDC_STATE_HOOK, 14, 326, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_LAYOUTS, 14, 337, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_AUTOSTART, 14, 348, 392, 9, SS_OWNERDRAW
 
     // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
     // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
     // survive owner drawing. The behaviour survives by the documented replacement: the dialog
     // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
     // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
-    PUSHBUTTON      "ОК", IDOK, 253, 348, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Отмена", IDCANCEL, 307, 348, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Применить", IDC_APPLY, 361, 348, 52, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 253, 364, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 307, 364, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 361, 364, 52, 14, BS_OWNERDRAW
 END
 
 // ---------------------------------------------------------------------------------------

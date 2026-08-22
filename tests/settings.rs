@@ -2348,6 +2348,120 @@ fn the_two_line_labels_keep_their_word_wrap() {
 }
 
 // -----------------------------------------------------------------------------------------
+// Task T-11-19 — the rhythm of the layout: the window is 16 dialog units taller
+// -----------------------------------------------------------------------------------------
+
+/// The height of the window and the eight rectangles task T-11-19 moved, read out of the
+/// **built** `LangSwitcher.exe` like every other statement about the template.
+///
+/// The measurement the task rests on: the appearance row of FR-92а grew 16 dialog units into
+/// «Общие» and pushed everything below it down by the same 16, which ate the air in front of
+/// «Состояние» — 53 units in the mock-ups, 37 in the product. The cure is not to move the
+/// left column back but to give the window the 16 units it is short of, so the rhythm below
+/// the last block is the mock-ups' again.
+///
+/// Two halves, and either alone would pass for the wrong reason. The numbers are asserted so
+/// that a rectangle that did not move is a failing test; the four gaps are asserted so that
+/// nine numbers changed in step — and not one of them typed a unit out — is what actually
+/// happened.
+#[test]
+fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    println!(
+        "IDD_SETTINGS: {} x {} dialog units",
+        template.size.0, template.size.1
+    );
+
+    // Width untouched — two columns 200 units wide at x = 7 and x = 213 — and the height is
+    // the 369 of before plus the 16 the appearance row cost.
+    assert_eq!(
+        template.size,
+        (420, 385),
+        "the settings dialog has to be 420 x 385 dialog units — task T-11-19"
+    );
+
+    // The eight rectangles that moved, in full: a `y` alone would say nothing about a width
+    // or a height that drifted with it. «Диагностика» is the one that grew rather than
+    // moved — the 16 units go on at its bottom edge and its children stay where they were.
+    const MOVED: [(u32, &str, i32, i32, i32, i32); 8] = [
+        (1106, "Диагностика: панель", 213, 236, 200, 74),
+        (1108, "Состояние: панель", 7, 314, 406, 44),
+        (1070, "Состояние: перехватчик", 14, 326, 392, 9),
+        (1071, "Состояние: раскладки", 14, 337, 392, 9),
+        (1072, "Состояние: автозапуск", 14, 348, 392, 9),
+        (1, "ОК", 253, 364, 50, 14),
+        (2, "Отмена", 307, 364, 50, 14),
+        (1080, "Применить", 361, 364, 52, 14),
+    ];
+
+    for (id, what, x, y, cx, cy) in MOVED {
+        let measured = template.rect_of(id);
+
+        println!("«{what}» ({id}): {measured:?}");
+
+        assert_eq!(
+            measured,
+            (x, y, x + cx, y + cy),
+            "«{what}» ({id}) is not where task T-11-19 puts it"
+        );
+    }
+
+    // The children of «Диагностика» did **not** move: the panel grew downwards. Their own
+    // rectangles are the witness — the growth is at the bottom edge or it is not this task.
+    for (id, what, bottom) in [
+        (1060u32, "Вести журнал", 258i32),
+        (1061, "Открыть папку журнала", 260),
+        (1107, "Папка журнала:", 273),
+        (1062, "путь к папке журнала", 291),
+    ] {
+        let (_, _, _, measured) = template.rect_of(id);
+
+        assert_eq!(
+            measured, bottom,
+            "«{what}» ({id}) moved; the 16 units of task T-11-19 go on below the children of \
+             «Диагностика», not through them"
+        );
+    }
+
+    // **The rhythm.** Four gaps, every one of them arithmetic on the numbers above, and every
+    // one of them what the mock-ups measure.
+    let (.., layouts_bottom) = template.rect_of(1095);
+    let (.., diagnostics_bottom) = template.rect_of(1106);
+    let (_, state_top, _, state_bottom) = template.rect_of(1108);
+    let (_, buttons_top, _, buttons_bottom) = template.rect_of(1);
+
+    let air_left = state_top - layouts_bottom;
+    let air_right = state_top - diagnostics_bottom;
+    let air_buttons = buttons_top - state_bottom;
+    let margin = template.size.1 - buttons_bottom;
+
+    println!(
+        "воздух: под «Раскладками» {air_left}, под «Диагностикой» {air_right}, \
+         перед кнопками {air_buttons}, поле снизу {margin}"
+    );
+
+    assert_eq!(
+        air_left, 53,
+        "the air under «Раскладки» has to be the 53 units of the mock-ups; it is the whole \
+         point of task T-11-19"
+    );
+    assert_eq!(
+        air_right, 4,
+        "the air under «Диагностика» has to stay the 4 units of the mock-ups"
+    );
+    assert_eq!(
+        air_buttons, 6,
+        "the air between «Состояние» and the buttons has to stay the 6 units it was"
+    );
+    assert_eq!(
+        margin, 7,
+        "the margin under the buttons has to stay the 7 units it was"
+    );
+}
+
+// -----------------------------------------------------------------------------------------
 // Task T-11-13 — the defect, and the mock-ups
 // -----------------------------------------------------------------------------------------
 
@@ -4651,6 +4765,11 @@ impl Drop for ProductImage {
 struct DialogTemplate {
     /// The caption of the window.
     caption: String,
+    /// The window's own size in dialog units — `(cx, cy)` of the header. Read out by task
+    /// T-11-19, whose whole substance is the height: the rhythm of the layout is the air
+    /// left between the last block and the bottom edge, and that is arithmetic on this
+    /// number and the rectangles below.
+    size: (i32, i32),
     /// Every non-empty control caption, in template order.
     text: Vec<String>,
     /// The identifier of every control.
@@ -4713,10 +4832,14 @@ impl DialogTemplate {
         let style = read_u32(bytes, &mut at);
         let items = read_u16(bytes, &mut at);
 
-        // x, y, cx, cy.
-        for _ in 0..4 {
-            let _ = read_u16(bytes, &mut at);
-        }
+        // x, y, cx, cy. The position is the dialog manager's own business — `DS_CENTER`
+        // places the window — but the size is the layout's, and task T-11-19 measures it.
+        let _x = read_u16(bytes, &mut at);
+        let _y = read_u16(bytes, &mut at);
+        let size = (
+            i32::from(read_u16(bytes, &mut at) as i16),
+            i32::from(read_u16(bytes, &mut at) as i16),
+        );
 
         let _menu = read_name(bytes, &mut at);
         let _class = read_name(bytes, &mut at);
@@ -4783,6 +4906,7 @@ impl DialogTemplate {
 
         Self {
             caption,
+            size,
             text,
             controls,
             styles,
