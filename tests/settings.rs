@@ -2320,29 +2320,245 @@ fn the_corner_radii_are_the_six_and_four_of_the_mock_ups() {
     assert_eq!(settings::FIELD_CORNER_RADIUS, 4, "fields and lists — 4 px");
 }
 
-/// **Criterion 12 of T-11-13, the DPI half** — every length of the mock-ups is a length at
-/// 100 %, and the window scales it.
+/// **Criterion 12 of T-11-13, the DPI half; criterion 9 of T-11-15** — every length of the
+/// mock-ups is a length *of the pictures*, and the window scales it.
+///
+/// The pictures are drawn at 140 %: `scratchpad\ui.ps1`, line 7, `$DPI = 1.4`. So the scale
+/// divides by 96 × 1,4 = 134,4 DPI and not by 96, and a length of the picture comes out
+/// **smaller** on a 100 % screen — which is the whole of task T-11-15.
 #[test]
 fn the_lengths_of_the_mock_ups_scale_with_the_dpi_of_the_window() {
-    // 100 % is the picture itself.
-    assert_eq!(settings::scaled(6, 96), 6);
-    assert_eq!(settings::scaled(4, 96), 4);
+    // The scale itself, in the shape the module writes it: tenths of a DPI, because 134,4 is
+    // not whole, and the factor named apart so the source of the number stays visible.
+    assert_eq!(settings::SCREEN_DPI, 96, "100 % is 96 DPI");
+    assert_eq!(
+        settings::MOCKUP_SCALE_TENTHS,
+        14,
+        "the `$DPI = 1.4` of ui.ps1"
+    );
+    assert_eq!(
+        settings::MOCKUP_DPI_TENTHS,
+        1344,
+        "96 × 1,4 = 134,4 DPI, carried in tenths"
+    );
+    assert_eq!(
+        settings::MOCKUP_DPI_TENTHS,
+        settings::SCREEN_DPI * settings::MOCKUP_SCALE_TENTHS,
+        "the mock-up DPI must stay 96 × 1,4 and not a number of its own"
+    );
+
+    // 100 % — the picture divided by 1,4, rounded to nearest.
+    assert_eq!(settings::scaled(6, 96), 4);
+    assert_eq!(settings::scaled(4, 96), 3);
 
     // 125 %, 150 %, 200 % — rounded to nearest, so a one-pixel frame never rounds away.
-    assert_eq!(settings::scaled(6, 120), 8);
-    assert_eq!(settings::scaled(4, 120), 5);
-    assert_eq!(settings::scaled(6, 144), 9);
-    assert_eq!(settings::scaled(4, 192), 8);
+    assert_eq!(settings::scaled(6, 120), 5);
+    assert_eq!(settings::scaled(4, 120), 4);
+    assert_eq!(settings::scaled(6, 144), 6);
+    assert_eq!(settings::scaled(4, 192), 6);
     assert_eq!(settings::scaled(1, 120), 1);
-    assert_eq!(settings::scaled(1, 144), 2);
+    assert_eq!(settings::scaled(1, 144), 1);
 
     // The letter spacing is carried in tenths of a pixel, and scales as a tenth does.
-    assert_eq!(settings::scaled(11, 96), 11);
-    assert_eq!(settings::scaled(11, 192), 22);
+    assert_eq!(settings::scaled(11, 96), 8);
+    assert_eq!(settings::scaled(11, 192), 16);
 
-    // A device that will not say what its DPI is gets the 100 % look, not a zero-sized one.
-    assert_eq!(settings::scaled(6, 0), 6);
-    assert_eq!(settings::scaled(6, -1), 6);
+    // A device that will not say what its DPI is gets the 100 % look, and — since T-11-15 —
+    // that is the *scaled* 100 % look and not the mock-up number handed over unchanged.
+    assert_eq!(settings::scaled(6, 0), 4);
+    assert_eq!(settings::scaled(6, -1), 4);
+    assert_eq!(
+        settings::scaled_tenths(15, 0),
+        settings::scaled_tenths(15, 96)
+    );
+
+    // The scale is one division and nothing else, and at 96 DPI it is an exact fraction:
+    // 96 / 134,4 = **5 / 7**. Every mock-up length must therefore come out as the nearest
+    // whole of five sevenths of itself — written here as arithmetic that does not go anywhere
+    // near the module's own formula.
+    for pixels in [1, 2, 3, 4, 5, 6, 8, 11, 12, 16, 33] {
+        let five_sevenths = (pixels * 10 + 7) / 14;
+
+        assert_eq!(
+            settings::scaled(pixels, 96),
+            five_sevenths,
+            "{pixels} px of the mock-ups must be {five_sevenths} px at 96 DPI"
+        );
+    }
+}
+
+/// **Criterion 10 of T-11-15** — the table «величина → пиксели макета → пиксели при 96 DPI»,
+/// every length of the mock-ups this module holds, in one place.
+///
+/// This is the test the task asks for by name: it is what makes the correction of the scale
+/// checkable without opening the window. The middle column is the constant as the module
+/// writes it — a length of pictures drawn at 140 % — and the right column is what the dialog
+/// puts on the user's 100 % screen. Everything in it goes through [`settings::scaled`] or
+/// [`settings::scaled_tenths`]; a length that stopped doing so would take its row down with
+/// it.
+#[test]
+fn every_length_of_the_mock_ups_goes_through_the_scale() {
+    // название | пиксели макета | при 96 DPI
+    let table: [(&str, i32, i32); 11] = [
+        ("радиус панели", settings::PANEL_CORNER_RADIUS, 4),
+        ("радиус кнопки", settings::BUTTON_CORNER_RADIUS, 3),
+        ("радиус поля и списка", settings::FIELD_CORNER_RADIUS, 3),
+        ("радиус глифа", settings::GLYPH_CORNER_RADIUS, 2),
+        ("толщина рамки", settings::FIELD_BORDER_THICKNESS, 1),
+        ("отступ текста", settings::TEXT_INSET_X, 9),
+        ("воздух строки", settings::COMBO_ITEM_EXTRA, 9),
+        (
+            "отступ заголовка сверху",
+            settings::PANEL_CAPTION_INSET_Y,
+            4,
+        ),
+        ("размах шеврона", settings::COMBO_CHEVRON_WIDTH, 6),
+        (
+            "шеврон от правого края",
+            settings::COMBO_CHEVRON_INSET_X,
+            11,
+        ),
+        (
+            "зазор шеврона и текста",
+            settings::COMBO_CHEVRON_TEXT_GAP,
+            3,
+        ),
+    ];
+
+    for (name, mockup, at_96) in table {
+        let scaled = settings::scaled(mockup, 96);
+
+        println!("{name}: {mockup} px макета → {scaled} px при 96 DPI");
+
+        assert_eq!(
+            scaled, at_96,
+            "{name}: {mockup} px of a 140 % picture must be {at_96} px at 96 DPI, not {scaled}"
+        );
+    }
+
+    // The two lengths written in tenths of a mock-up pixel, in the same shape: 1,5 px of the
+    // picture is one pixel of pen at 100 %, and the 1,1 px of letter spacing is 0,8 px —
+    // eight tenths, the unit the caption drawing carries its pen position in.
+    println!(
+        "толщина шеврона: 1,5 px макета → {} px при 96 DPI",
+        settings::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96)
+    );
+    assert_eq!(
+        settings::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96),
+        1
+    );
+
+    println!(
+        "разрядка заголовка: 1,1 px макета → 0,{} px при 96 DPI",
+        settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96)
+    );
+    assert_eq!(
+        settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96),
+        8
+    );
+
+    // And the state image cell of the layout list, whose width *is* the inset of that row's
+    // text: the air of the mock-ups plus the 13-pixel square of the tick.
+    assert_eq!(
+        settings::check_cell_width(96),
+        settings::scaled(settings::TEXT_INSET_X, 96) + settings::CHECK_FRAME_SIZE
+    );
+    assert_eq!(settings::check_cell_width(96), 9 + 13);
+}
+
+/// **Criteria 9 and 12 of T-11-15** — the corrected scale names where its number comes from,
+/// and the text inset of the mock-ups reaches all five places through it.
+///
+/// Read out of the module's own source, in the manner of the sweeps of `tests\guard.rs`: what
+/// is asserted here is not a value but a shape — that no call site went back to a bare number.
+#[test]
+fn the_text_inset_reaches_all_five_places_through_the_scale() {
+    let source = settings_module_source();
+
+    // Criterion 9: the source of the number is named where the number is.
+    let scale = source
+        .split_once("pub const MOCKUP_SCALE_TENTHS")
+        .expect("the module must still declare the mock-up scale")
+        .0;
+
+    for named in ["scratchpad\\ui.ps1", "$DPI = 1.4", "140 %"] {
+        assert!(
+            scale.contains(named),
+            "the comment on the mock-up scale must name `{named}` — the source of the number"
+        );
+    }
+
+    // Criterion 12: the five places, each by the function that owns it.
+    let places = [
+        ("fn set_field_margins(", "EM_SETMARGINS"),
+        ("unsafe fn draw_list_item(", "text_rect"),
+        ("pub fn check_cell_width(", "CHECK_FRAME_SIZE"),
+        ("unsafe fn draw_combo_closed_part(", "text_rect"),
+        ("unsafe fn draw_combo_item(", "text_rect"),
+    ];
+
+    for (signature, marker) in places {
+        let body = function_body(&source, signature);
+
+        assert!(
+            body.contains(marker),
+            "`{signature}` must still be the place that draws or sets `{marker}`"
+        );
+        assert!(
+            body.contains("scaled(TEXT_INSET_X"),
+            "`{signature}` must take the inset of the mock-ups through the scale"
+        );
+    }
+
+    // And nowhere is the old bare inset left: the constant it lived in is gone by name.
+    assert!(
+        !source.contains("COMBO_TEXT_INSET_X"),
+        "the 4-pixel inset of T-11-14 must be gone, not renamed around"
+    );
+}
+
+/// **Criterion 12 of T-11-15, the fifth place** — the air beside the tick of the layout list is
+/// a colour no palette owns, so the mask of the image list can never punch a hole in a tick.
+#[test]
+fn the_key_colour_of_the_check_cell_is_in_neither_palette() {
+    let source = settings_module_source();
+
+    assert!(
+        source.contains("ImageList_AddMasked(list, bitmap, CHECK_CELL_KEY)"),
+        "the state image list must build its mask from the key colour"
+    );
+
+    // Magenta, the traditional key — against every colour of both palettes, from the module
+    // that owns them (§6.2: the numbers live in `theme` alone). The three the frames actually
+    // use — `field_bg`, `box_border`, `accent_bg`, `accent_fg` — are in the list, and so is
+    // everything a later palette could reach for.
+    let key = 0x00FF_00FF_u32;
+
+    for palette in [&GRAPHITE, &FOG] {
+        for (name, colour) in [
+            ("window_bg", palette.window_bg),
+            ("title_bg", palette.title_bg),
+            ("panel_bg", palette.panel_bg),
+            ("panel_border", palette.panel_border),
+            ("text", palette.text),
+            ("text_muted", palette.text_muted),
+            ("field_bg", palette.field_bg),
+            ("field_border", palette.field_border),
+            ("button_bg", palette.button_bg),
+            ("button_border", palette.button_border),
+            ("accent_bg", palette.accent_bg),
+            ("accent_fg", palette.accent_fg),
+            ("box_border", palette.box_border),
+            ("sel_bg", palette.sel_bg),
+            ("sel_fg", palette.sel_fg),
+            ("hover_bg", palette.hover_bg),
+        ] {
+            assert_ne!(
+                colour.0, key,
+                "{name} must not be the key colour of the check cell"
+            );
+        }
+    }
 }
 
 /// **Criterion 10 of T-11-13** — the panels and their captions are drawn by the background,
@@ -2578,9 +2794,10 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
         "the apex must lie below the arms — «галочка вниз»"
     );
 
-    // The span of the mock-up, and the drop of half of it.
-    assert_eq!(right - left, 8, "the span of the chevron is 8 px at 100 %");
-    assert_eq!(apex_y - top, 4, "the drop is half the span");
+    // The span of the mock-up, and the drop of half of it. 8 pixels *of the picture*, which
+    // since T-11-15 is 6 pixels of a 100 % screen — the picture is drawn at 140 %.
+    assert_eq!(right - left, 6, "8 px of the mock-up are 6 px at 100 %");
+    assert_eq!(apex_y - top, 3, "the drop is half the span");
     assert_eq!(apex_x - left, right - apex_x, "the apex is in the middle");
 
     // Vertically centred in the field it is given.
@@ -2604,21 +2821,22 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
     let wide = settings::combo_chevron_points(&rect(0, 0, 280, 66), 192);
 
     println!("chevron at 192 dpi: {wide:?}");
-    assert_eq!(wide[2].0 - wide[0].0, 16, "the span doubles at 200 %");
-    assert_eq!(wide[1].1 - wide[0].1, 8, "the drop doubles with it");
+    assert_eq!(wide[2].0 - wide[0].0, 11, "the span doubles at 200 %");
+    assert_eq!(wide[1].1 - wide[0].1, 5, "the drop doubles with it");
 
-    // The stroke is the one length of the mock-ups written in tenths of a pixel: 1,5 px.
+    // The stroke is the one length of the mock-ups written in tenths of a pixel: 1,5 px of the
+    // picture, which is 1,07 px of a 100 % screen — one pixel, and two at 200 % (T-11-15).
     assert_eq!(
         settings::scaled_tenths(15, 96),
-        2,
-        "1,5 px rounds to 2 at 100 %"
+        1,
+        "1,5 px of a 140 % picture is one pixel at 100 %"
     );
-    assert_eq!(settings::scaled_tenths(15, 192), 3, "3 px at 200 %");
+    assert_eq!(settings::scaled_tenths(15, 192), 2, "2 px at 200 %");
     // Never a zero-width pen, which GDI would read as a hairline drawn by other rules.
     assert_eq!(settings::scaled_tenths(1, 96), 1);
     assert_eq!(
         settings::scaled_tenths(15, 0),
-        2,
+        1,
         "the 100 % look when the DPI is refused"
     );
 }
@@ -2724,9 +2942,10 @@ fn the_check_box_glyph_is_rounded_by_the_three_pixels_of_the_mock_ups() {
         "the check-box square — 3 px, smaller than the 4 of a field because the figure is"
     );
 
-    // A length of the mock-ups like every other since T-11-13.
-    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96), 3);
-    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 192), 6);
+    // A length of the mock-ups like every other since T-11-13 — and since T-11-15 a length of
+    // pictures drawn at 140 %, so the three pixels of the picture are two on a 100 % screen.
+    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96), 2);
+    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 192), 4);
 
     let source = settings_module_source();
     let body = function_body(&source, "unsafe fn draw_glyph_element(");

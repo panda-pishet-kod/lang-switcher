@@ -87,11 +87,11 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Controls::{
     CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW,
-    DRAWITEMSTRUCT, EM_LIMITTEXT, HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32,
-    INITCOMMONCONTROLSEX, ImageList_Add, ImageList_Create, ImageList_Destroy, InitCommonControlsEx,
-    LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT, LVIS_FOCUSED,
-    LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS, LVM_GETITEMSTATE,
-    LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
+    DRAWITEMSTRUCT, EM_LIMITTEXT, EM_SETMARGINS, HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32,
+    ILC_MASK, INITCOMMONCONTROLSEX, ImageList_AddMasked, ImageList_Create, ImageList_Destroy,
+    InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT,
+    LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS,
+    LVM_GETITEMSTATE, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
     LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
@@ -111,16 +111,16 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
     CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT,
-    DefWindowProcW, DialogBoxParamW, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC,
-    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW,
-    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SYSCHAR,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    DefWindowProcW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
+    GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
+    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK,
+    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+    LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL, SendDlgItemMessageW,
+    SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
+    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
+    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY,
+    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -3630,11 +3630,20 @@ fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
     brush.0 as isize
 }
 
-/// Air added to the dialog font's height to make one owner-drawn item's height, in pixels —
-/// the «+ 4» of task T-11-6: two pixels above the glyphs and two below. Since task T-11-14
-/// the rows of the exclusion list are measured by the same number, so a row of a list and an
-/// item of a combo are the same height to the eye.
-const COMBO_ITEM_EXTRA: i32 = 4;
+/// Air added to the dialog font's height to make one owner-drawn item's height, in the pixels
+/// of the mock-ups — п. 4 of task T-11-15, in place of the bare «+ 4» of task T-11-6.
+///
+/// The mock-ups draw the closed part of a combo box **33 of their own pixels high**, and the
+/// dialog font is 21 of their pixels tall there (15 px at 96 DPI × 1,4) — so the air of the
+/// picture is 33 − 21 = **12 mock-up pixels**, six above the text and six below. Through
+/// [`scaled`] that is 9 px at 96 DPI, and the item stands 15 + 9 = **24 px** against the
+/// picture's 33 ÷ 1,4 = 23,6. The bare 4 it replaces made a 19-pixel item — a fifth shorter
+/// than the mock-up, which is the «расходится существенно» п. 4 asks to be brought in line.
+///
+/// One number for three controls, as since task T-11-14: the rows of the exclusion list and
+/// the items of a dropped-down list are measured by the same message, so a row of a list and
+/// an item of a combo stay the same height to the eye.
+pub const COMBO_ITEM_EXTRA: i32 = 12;
 
 /// Whether this `CtlType`/`CtlID` pair is one of the dialog's own owner-drawn item holders —
 /// the identifier gate SEC-05 asks for, written down once and shared by `WM_MEASUREITEM` and
@@ -3672,8 +3681,11 @@ pub fn owner_drawn_item(ctl_type: u32, control: i32) -> bool {
 ///
 /// # The height
 ///
-/// The item height is the dialog font's height plus [`COMBO_ITEM_EXTRA`] pixels of air.
-/// The message arrives while the combo is being created — *before* `WM_INITDIALOG`, so
+/// The item height is the dialog font's height plus [`COMBO_ITEM_EXTRA`] **mock-up** pixels
+/// of air, taken through [`scaled`] at the DPI of the dialog's own DC (task T-11-15: the air
+/// is a length of the picture like every other, and until this task it was a bare 4 that
+/// neither followed the picture nor the DPI). The message arrives while the combo is being
+/// created — *before* `WM_INITDIALOG`, so
 /// before the dialog's state exists — but after the dialog has taken its `DS_SETFONT`
 /// font, which the dialog manager passes to the dialog before creating any control. The
 /// font's height is read through the documented `MapDialogRect`: the vertical dialog base
@@ -3714,9 +3726,24 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return 0;
     };
 
+    // The air of the mock-ups, in this window's pixels — п. 4 of task T-11-15.
+    //
+    // SAFETY: `hwnd` is the window being built; the call answers its DC or an invalid handle,
+    // and the DC is released below on both paths.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    // NFR-13: examined — `dc_dpi` answers 96 for a DC that will not say, which is the 100 %
+    // air and a legal item height.
+    let extra = scaled(COMBO_ITEM_EXTRA, dc_dpi(dc));
+
+    if !dc.is_invalid() {
+        // SAFETY: releases exactly the DC taken above, once.
+        unsafe { ReleaseDC(Some(hwnd), dc) };
+    }
+
     // A negative or overflowing height cannot come out of a font measurement; if a broken
     // one did, keeping the control's own default is the degraded-but-alive answer again.
-    let Ok(height) = u32::try_from(font_height + COMBO_ITEM_EXTRA) else {
+    let Ok(height) = u32::try_from(font_height + extra) else {
         return 0;
     };
 
@@ -4173,12 +4200,6 @@ unsafe fn paint_push_button(
     1
 }
 
-/// Inset of a combo item's text from the left edge of its rectangle, in pixels — the air
-/// a native combo gives its text. Since task T-11-14 the closed face drawn by the subclass
-/// and the rows of the exclusion list take the same inset, so every owner-drawn line of text
-/// in this dialog starts at the same distance from its own left edge.
-const COMBO_TEXT_INSET_X: i32 = 4;
-
 /// One [`ComboFillRole`] resolved against the brushes of the dialog — the single place these
 /// two roles become a brush, shared by the item drawing, the row drawing of the exclusion
 /// list and the closed-face drawing of the subclass (§6.2: one body, not three copies).
@@ -4224,7 +4245,8 @@ fn combo_text_ink(role: ComboTextRole, palette: &theme::Palette) -> COLORREF {
 /// `sel_bg`/`sel_fg` for the highlighted item of the dropped-down list. An empty combo
 /// asks for its closed face with no item to name — `itemID` is −1 — and the filled
 /// ground is the whole of that answer. Otherwise the item's own text follows, in the
-/// dialog's font the DC already holds, vertically centred behind [`COMBO_TEXT_INSET_X`];
+/// dialog's font the DC already holds, vertically centred behind [`TEXT_INSET_X`] mock-up
+/// pixels of air;
 /// and the dotted `DrawFocusRect` over the closed part while it holds the focus — unless
 /// the manager says the focus cue is hidden (`ODS_NOFOCUSRECT`), exactly as the buttons
 /// of T-11-5a behave.
@@ -4336,7 +4358,7 @@ unsafe fn draw_combo_item(
             unsafe { SetTextColor(dc, ink) };
 
             let mut text_rect = RECT {
-                left: rect.left + COMBO_TEXT_INSET_X,
+                left: rect.left + scaled(TEXT_INSET_X, dc_dpi(dc)),
                 top: rect.top,
                 right: rect.right,
                 bottom: rect.bottom,
@@ -4397,7 +4419,8 @@ unsafe fn draw_combo_item(
 ///
 /// The ground by `FillRect`, chosen by [`list_item_color_roles`] — `field_bg`/`text` for an
 /// ordinary row, the palette's own `sel_bg`/`sel_fg` for the selected one — then the row's
-/// text behind [`COMBO_TEXT_INSET_X`], and the dotted `DrawFocusRect` when the manager says
+/// text behind [`TEXT_INSET_X`] mock-up pixels of air, and the dotted `DrawFocusRect` when
+/// the manager says
 /// this row carries the focus and the focus cues are not hidden, exactly as everywhere else
 /// in this dialog. An empty list asks for the cue with no row to name (`itemID` is −1); the
 /// filled ground and the cue are then the whole of the answer.
@@ -4487,7 +4510,7 @@ unsafe fn draw_list_item(
                 unsafe { SetTextColor(dc, ink) };
 
                 let mut text_rect = RECT {
-                    left: rect.left + COMBO_TEXT_INSET_X,
+                    left: rect.left + scaled(TEXT_INSET_X, dc_dpi(dc)),
                     top: rect.top,
                     right: rect.right,
                     bottom: rect.bottom,
@@ -4814,9 +4837,15 @@ fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF) {
 fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) {
     let pen = match outline {
         Some(ink) => {
+            // The same frame every other figure of the dialog is outlined with — one pixel at
+            // 96 DPI through [`FIELD_BORDER_THICKNESS`], and it grows with the DPI like the
+            // rest of the mock-up (п. 3 of task T-11-15; the circle of a radio button is
+            // framed exactly as the square of a check box beside it).
+            let thickness = scaled(FIELD_BORDER_THICKNESS, dc_dpi(dc)).max(1);
+
             // SAFETY: takes plain values, reads no memory of ours, answers a handle owned
             // by this frame until the `DeleteObject` below.
-            let pen = unsafe { CreatePen(PS_SOLID, 1, ink) };
+            let pen = unsafe { CreatePen(PS_SOLID, thickness, ink) };
 
             if pen.is_invalid() {
                 return;
@@ -4856,46 +4885,69 @@ fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) 
 
 // =========================================================================================
 // The lengths of the mock-ups, and the two ways this dialog turns its own numbers into
-// pixels — FR-92а, task T-11-13
+// pixels — FR-92а, tasks T-11-13 and T-11-15
 // =========================================================================================
 
-/// The DPI every pixel number of the mock-ups is written at — 100 %.
+/// The DPI of a screen at 100 % — the ground everything below is measured against, and the
+/// answer this file falls back to whenever the device will not say what its DPI is.
+pub const SCREEN_DPI: i32 = 96;
+
+/// The scale the mock-ups were **actually** drawn at, in tenths — task T-11-15.
 ///
-/// The approved mock-ups (`ui-02-graphite.png`, `ui-03-fog.png`) are drawn at 100 %, so
-/// every `_RADIUS`, `_INSET` and `_TENTHS` constant below is a length *of that picture*.
-/// [`scaled`] is the one place they become pixels of the window actually on screen.
-const MOCKUP_DPI: i32 = 96;
+/// ⚠ The approved mock-ups `ui-02-graphite.png` and `ui-03-fog.png` are not pictures of a
+/// dialog at 100 %. Their generator — `scratchpad\ui.ps1`, line 7 — carries `$DPI = 1.4`,
+/// so the pictures were drawn at **140 %** and every length in them is
+/// **1,4 × the length at 100 %**: one horizontal dialog unit
+/// measures 2,45 px there against 1,75 px at 96 DPI, and the panel of 200 units that is
+/// 350 px wide at 100 % is 488 px wide in the picture.
+///
+/// This number is therefore not decoration: tasks T-11-13 and T-11-14 handed out mock-up
+/// pixels believing the pictures were drawn at 100 %, so every `_RADIUS`, `_INSET`,
+/// `_WIDTH`, `_EXTRA` and `_TENTHS` constant of this file is 1,4 × too large *as a screen
+/// length* — and is right again the moment it goes through [`scaled`], which divides by the
+/// DPI of the pictures rather than by 96.
+pub const MOCKUP_SCALE_TENTHS: i32 = 14;
+
+/// The DPI of the mock-ups, in **tenths** of a DPI — 96 × 1,4 = **134,4**, task T-11-15.
+///
+/// Tenths because the number is not whole and rounding it would put the error back: 134 DPI
+/// and 135 DPI each miss the picture by about half a percent, and a 33-pixel field of the
+/// mock-ups would land a pixel off. Tenths cost one multiplication by ten in each of the two
+/// functions below and nothing else.
+pub const MOCKUP_DPI_TENTHS: i32 = SCREEN_DPI * MOCKUP_SCALE_TENTHS;
 
 /// One length of the mock-ups in the pixels of a window at `dpi` — the pixel half of «числа
-/// масштабируются по DPI окна».
+/// масштабируются по DPI окна», and **the one place a mock-up pixel becomes a screen pixel**.
 ///
 /// Pure, and rounded to nearest rather than truncated: a 1 px frame that truncates to zero
-/// at 125 % would simply disappear. A `dpi` of zero or less — a refused `GetDeviceCaps` —
-/// answers the mock-up number unchanged, which is the 100 % look on a machine that would
-/// not say what its DPI is (NFR-13).
+/// at 125 % would simply disappear.
+///
+/// A `dpi` of zero or less — a refused `GetDeviceCaps` — is answered as 96, the 100 % look on
+/// a machine that would not say what its DPI is (NFR-13). ⚠ Until task T-11-15 this branch
+/// answered the mock-up number *unchanged*, which was the same thing only because the mock-up
+/// DPI was believed to be 96; with the true 134,4 it would have handed the refusing machine
+/// the 140 % look. The two are separate numbers now and the fallback names its own.
 pub fn scaled(pixels: i32, dpi: i32) -> i32 {
-    if dpi <= 0 {
-        return pixels;
-    }
+    let dpi = if dpi > 0 { dpi } else { SCREEN_DPI };
 
-    (pixels * dpi + MOCKUP_DPI / 2) / MOCKUP_DPI
+    (pixels * dpi * 10 + MOCKUP_DPI_TENTHS / 2) / MOCKUP_DPI_TENTHS
 }
 
-/// One length of the mock-ups given in **tenths** of a pixel, in whole pixels of a window at
-/// `dpi` — task T-11-14, for the one length of the mock-ups that is not a whole number: the
-/// 1,5 px stroke of the combo chevron.
+/// One length of the mock-ups given in **tenths** of a mock-up pixel, in whole pixels of a
+/// window at `dpi` — task T-11-14, for the lengths of the mock-ups that are not whole
+/// numbers: the 1,5 px stroke of the combo chevron.
 ///
 /// Pure, rounded to nearest like [`scaled`], and never less than one: GDI has no fractional
 /// pen, and a pen of zero width is not «thin» but a hairline of one pixel drawn by different
-/// rules — asking for one pixel outright is the honest answer. A `dpi` of zero or less — a
-/// refused `GetDeviceCaps` — is the 100 % look, as in [`scaled`].
+/// rules — asking for one pixel outright is the honest answer. A `dpi` of zero or less is
+/// the 100 % look, as in [`scaled`].
 pub fn scaled_tenths(tenths: i32, dpi: i32) -> i32 {
-    let dpi = if dpi > 0 { dpi } else { MOCKUP_DPI };
+    let dpi = if dpi > 0 { dpi } else { SCREEN_DPI };
 
-    ((tenths * dpi + MOCKUP_DPI * 5) / (MOCKUP_DPI * 10)).max(1)
+    ((tenths * dpi * 10 + MOCKUP_DPI_TENTHS * 5) / (MOCKUP_DPI_TENTHS * 10)).max(1)
 }
 
-/// The DPI of the device a DC paints on — [`MOCKUP_DPI`] when the device will not say.
+/// The DPI of the device a DC paints on — [`SCREEN_DPI`] when the device will not say.
 ///
 /// The manifest of this program declares `PerMonitorV2`, so the DC of a window answers the
 /// DPI of *that window's* monitor, which is what «по DPI окна» means on a machine with two
@@ -4908,7 +4960,7 @@ fn dc_dpi(dc: HDC) -> i32 {
     // touches no memory of this process.
     let dpi = unsafe { GetDeviceCaps(Some(dc), LOGPIXELSY) };
 
-    if dpi > 0 { dpi } else { MOCKUP_DPI }
+    if dpi > 0 { dpi } else { SCREEN_DPI }
 }
 
 /// A rectangle given in the dialog's own units, in pixels — the *other* half of «числа
@@ -4960,6 +5012,32 @@ pub const FIELD_CORNER_RADIUS: i32 = 4;
 /// it is an `Ellipse` and was already right.
 pub const GLYPH_CORNER_RADIUS: i32 = 3;
 
+/// Thickness of the single outline of every rounded figure of the dialog, in the pixels of
+/// the mock-ups — п. 3 of task T-11-15.
+///
+/// The mock-ups draw a field frame two pixels wide, which through [`scaled`] is **one** pixel
+/// at 96 DPI — exactly the pen [`paint_rounded`] has always made, so nothing changes on the
+/// user's screen. It is written down as a mock-up length all the same, for the reason the
+/// whole of task T-11-15 exists: a bare `1` in the pen is a length that cannot follow the
+/// picture anywhere else, and at 200 % it stayed one pixel while every radius beside it
+/// doubled.
+pub const FIELD_BORDER_THICKNESS: i32 = 2;
+
+/// Inset of text from the left edge of the field, row or item it sits in, in the pixels of
+/// the mock-ups — п. 2 of task T-11-15.
+///
+/// The mock-ups keep every line of text 12 of their own pixels away from the left edge of
+/// whatever holds it — **≈ 8,6 px at 96 DPI**, where until this task the dialog put a bare 4.
+/// One number for the five places text meets an edge, all five through [`scaled`]:
+///
+/// 1. the five input fields — `EM_SETMARGINS`, the documented message ([`set_field_margins`]);
+/// 2. the rows of the exclusion list ([`draw_list_item`]);
+/// 3. the rows of the layout list — the width of the state image the list draws before the
+///    text ([`check_cell_width`]);
+/// 4. the closed part of a combo box ([`draw_combo_closed_part`]);
+/// 5. the items of a dropped-down list ([`draw_combo_item`]).
+pub const TEXT_INSET_X: i32 = 12;
+
 /// Inset of the panel caption from the panel's left edge, in **dialog units** — п. 2.1.
 ///
 /// Dialog units and not pixels on purpose: this is a horizontal position on a grid whose
@@ -4968,7 +5046,7 @@ pub const GLYPH_CORNER_RADIUS: i32 = 3;
 const PANEL_CAPTION_INSET_DLU: i32 = 7;
 
 /// Inset of the panel caption from the panel's top edge, in mock-up pixels — п. 2.1.
-const PANEL_CAPTION_INSET_Y: i32 = 5;
+pub const PANEL_CAPTION_INSET_Y: i32 = 5;
 
 /// Height of the caption face as a percentage of the dialog font — п. 2.1, «≈ 0,85».
 const PANEL_CAPTION_FONT_PERCENT: i32 = 85;
@@ -4979,7 +5057,7 @@ const PANEL_CAPTION_FONT_PERCENT: i32 = 85;
 /// 2 px per character stretches «АВТОЗАПУСК» by nine pixels, rounding it down to 1 px loses
 /// the spacing the mock-ups have. The pen position is therefore carried in tenths of a pixel
 /// through the whole caption and divided only at the moment a character is placed.
-const PANEL_CAPTION_TRACKING_TENTHS: i32 = 11;
+pub const PANEL_CAPTION_TRACKING_TENTHS: i32 = 11;
 
 /// Width of a character the DC measures as nothing, as a percentage of the caption font's
 /// height — п. 2.1, the explicit space width.
@@ -5205,17 +5283,22 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
         let _ = unsafe { DeleteObject(face.into()) };
     }
 
-    // Pass two — the fields and lists, one pixel outside each rectangle (п. 2.3).
+    // Pass two — the fields and lists, one frame's thickness outside each rectangle (п. 2.3
+    // of T-11-13; the thickness is [`FIELD_BORDER_THICKNESS`] through the scale since task
+    // T-11-15, so the frame stands outside the control at every DPI and not only at 96,
+    // where it is the single pixel it always was).
+    let border = scaled(FIELD_BORDER_THICKNESS, dpi).max(1);
+
     for (control, rect) in &children {
         if background_figure(*control) != Some(BackgroundFigure::Field) {
             continue;
         }
 
         let frame = RECT {
-            left: rect.left - 1,
-            top: rect.top - 1,
-            right: rect.right + 1,
-            bottom: rect.bottom + 1,
+            left: rect.left - border,
+            top: rect.top - border,
+            right: rect.right + border,
+            bottom: rect.bottom + border,
         };
 
         paint_rounded(
@@ -5401,9 +5484,14 @@ unsafe fn draw_panel_caption(
 /// refused `CreatePen` skips the figure (NFR-13: examined — better no panel for one paint
 /// than a panel framed in whatever pen the DC happens to hold).
 fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBRUSH) {
+    // The frame of the mock-ups is [`FIELD_BORDER_THICKNESS`] of their own pixels — one pixel
+    // at 96 DPI, which is the pen this call has always made (п. 3 of task T-11-15), and two
+    // at 125 % rather than the lonely hairline a bare `1` would have kept drawing.
+    let thickness = scaled(FIELD_BORDER_THICKNESS, dc_dpi(dc)).max(1);
+
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
-    let pen = unsafe { CreatePen(PS_SOLID, 1, outline) };
+    let pen = unsafe { CreatePen(PS_SOLID, thickness, outline) };
 
     if pen.is_invalid() {
         return;
@@ -5640,7 +5728,8 @@ unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
 /// 2. the chevron at the right edge, [`combo_chevron_points`] wide and stroked in
 ///    `text_muted` — the flat «⌄» of the mock-ups, in place of the system button;
 /// 3. the text of the chosen item, read from the control by identifier, behind
-///    [`COMBO_TEXT_INSET_X`] and clipped short of the chevron; `text` normally, `text_muted`
+///    [`TEXT_INSET_X`] mock-up pixels of air and clipped short of the chevron; `text`
+///    normally, `text_muted`
 ///    when the mode has disabled this combo ([`combo_closed_color_roles`]);
 /// 4. the dotted `DrawFocusRect` inside the frame while the control holds the focus and the
 ///    keyboard cues are not hidden — the same cue, the same inset of two pixels, as the
@@ -5784,7 +5873,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         };
 
         let mut text_rect = RECT {
-            left: area.left + COMBO_TEXT_INSET_X,
+            left: area.left + scaled(TEXT_INSET_X, dpi),
             top: area.top,
             right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
             bottom: area.bottom,
@@ -5864,20 +5953,20 @@ fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
 
 /// Width of the chevron of a closed combo box, in the pixels of the mock-ups — measured off
 /// `ui-03-fog.png`, where its two arms stand at `x` = 352 and 360.
-const COMBO_CHEVRON_WIDTH: i32 = 8;
+pub const COMBO_CHEVRON_WIDTH: i32 = 8;
 
 /// Distance from the right edge of the closed part to the **centre** of the chevron, in
 /// mock-up pixels — measured off the same picture: the apex sits at `x` = 356 in a field whose
 /// right edge is at 372.
-const COMBO_CHEVRON_INSET_X: i32 = 16;
+pub const COMBO_CHEVRON_INSET_X: i32 = 16;
 
 /// Thickness of the chevron's stroke, in **tenths** of a mock-up pixel — the 1,5 px the task
 /// names, which is what the measured picture shows: a one-pixel core with half a pixel of
 /// feathering on either side. [`scaled_tenths`] turns it into the whole pixels GDI draws with.
-const COMBO_CHEVRON_PEN_TENTHS: i32 = 15;
+pub const COMBO_CHEVRON_PEN_TENTHS: i32 = 15;
 
 /// Air between the text of the closed part and the chevron, in mock-up pixels.
-const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
+pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
 
 /// The three points of the chevron of a closed combo box — FR-92а, task T-11-14, the pure
 /// half of its drawing, closed by a table test.
@@ -5938,6 +6027,66 @@ fn draw_combo_chevron(dc: HDC, points: [(i32, i32); 3], ink: COLORREF, dpi: i32)
     let _ = unsafe { DeleteObject(pen.into()) };
 }
 
+/// The five input fields of the dialog — the ones [`set_field_margins`] gives the text inset
+/// of the mock-ups to.
+///
+/// All five are `EDITTEXT` of the template and all five are drawn by the dialog's own
+/// background as a rounded field (task T-11-13), so all five put their text where this file
+/// says and not where a native edit would.
+const TEXT_FIELDS: [i32; 5] = [
+    IDC_HOTKEY,
+    IDC_DELAY,
+    IDC_CLIPBOARD_TIMEOUT,
+    IDC_CLIPBOARD_RESTORE,
+    IDC_EXCLUSION_NAME,
+];
+
+/// Puts [`TEXT_INSET_X`] mock-up pixels of air on both sides of the text of every input
+/// field — п. 2 of task T-11-15, the first of the five places that inset lives.
+///
+/// `EM_SETMARGINS` is the documented message for exactly this and the only one there is: an
+/// edit control positions its own text, and no `WM_CTLCOLOREDIT` or owner-draw of ours can
+/// move it (an `EDITTEXT` has no owner-draw at all). `EC_LEFTMARGIN | EC_RIGHTMARGIN` in the
+/// `wparam` names both margins; the `lparam` carries the left one in the low word and the
+/// right one in the high word, which is what the shift by 16 is.
+///
+/// Both margins get the same number: the mock-ups inset the text of a field from both edges,
+/// and a right margin also keeps the caret of a full field off the rounded frame.
+///
+/// The DPI is the dialog's own, read through its DC — the same road [`dc_dpi`] takes for
+/// every painted length, so a field on a 150 % monitor gets the inset that monitor's pixels
+/// ask for. A refused `GetDC` leaves [`dc_dpi`] to answer 96 (NFR-13): the 100 % inset on a
+/// machine that would not say, which is a field looking slightly tight and nothing worse.
+fn set_field_margins(hwnd: HWND) {
+    // SAFETY: `hwnd` is the live dialog; the call answers its DC or an invalid handle, and
+    // the DC is released below on both paths.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    // NFR-13: examined — `dc_dpi` of an invalid DC is `GetDeviceCaps` refusing, which is the
+    // 96 the fallback names, so the fields still get the 100 % inset.
+    let inset = scaled(TEXT_INSET_X, dc_dpi(dc));
+
+    if !dc.is_invalid() {
+        // SAFETY: releases exactly the DC taken above, once.
+        unsafe { ReleaseDC(Some(hwnd), dc) };
+    }
+
+    // The two margins in one `lparam`, low word left and high word right — the documented
+    // shape of the message. Both fit in a word: the inset is a dozen pixels even at 400 %.
+    let margins =
+        isize::try_from((inset.max(0) as u32) | ((inset.max(0) as u32) << 16)).unwrap_or(0);
+
+    for control in TEXT_FIELDS {
+        send_to(
+            hwnd,
+            control,
+            EM_SETMARGINS,
+            usize::try_from(EC_LEFTMARGIN | EC_RIGHTMARGIN).unwrap_or(0),
+            margins,
+        );
+    }
+}
+
 /// Puts the interface strings of the locale in force into the window — FR-94.
 ///
 /// Runs before anything is filled in, so that a control is never seen carrying the literal the
@@ -5966,6 +6115,9 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // `WM_DESTROY` branch of `dialog_proc`, and nothing else in the file installs or removes
     // this subclass. See `subclass_combo_boxes` for why the pairing is written that way.
     subclass_combo_boxes(hwnd);
+    // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
+    // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
+    set_field_margins(hwnd);
 
     // Section «Общие» of FR-92.
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
@@ -6879,7 +7031,7 @@ fn ensure_list_view_class() -> windows::core::Result<()> {
 /// Side of one check frame of the layout list, in pixels — the 13×13 square the task names,
 /// and the same square the owner-drawn glyphs of the dialog use ([`GLYPH_SIZE`]), so a tick in
 /// the list and a tick on the dialog read as one element.
-const CHECK_FRAME_SIZE: i32 = 13;
+pub const CHECK_FRAME_SIZE: i32 = 13;
 
 /// The order the two frames enter the state image list of [`build_check_image_list`]:
 /// frame 0 — снята, frame 1 — взведена.
@@ -7101,13 +7253,49 @@ fn build_check_frames(screen: HDC, palette: &theme::Palette) -> Option<HIMAGELIS
     list
 }
 
+/// Width of one cell of the state image list — п. 2 of task T-11-15, the third of the five
+/// places the text inset of the mock-ups lives.
+///
+/// The rows of the layout list are the one place in this dialog where the text is placed by
+/// `SysListView32` itself: the custom draw of [`on_notify`] answers `CDRF_DODEFAULT` with the
+/// colours filled in, and the control then draws the state image at the left edge of the row
+/// and the label immediately after it. So the width of the state image **is** the inset of
+/// that row's text, and it is the one lever this file holds over it — no message moves the
+/// label of a report-view item, and the styles of the control live in `app.rc`.
+///
+/// A cell is therefore [`TEXT_INSET_X`] mock-up pixels of air followed by the
+/// [`CHECK_FRAME_SIZE`] square of the tick: the tick starts where the text of every other
+/// field starts, and the label starts after the tick. The air is transparent — see
+/// [`CHECK_CELL_KEY`] — so the row's own ground, selected or not, shows through it.
+pub fn check_cell_width(dpi: i32) -> i32 {
+    scaled(TEXT_INSET_X, dpi) + CHECK_FRAME_SIZE
+}
+
+/// The colour of the air beside the tick, made transparent by the mask of the image list —
+/// task T-11-15.
+///
+/// `ImageList_AddMasked` is the documented way to a mask: it builds one from the bitmap
+/// itself, turning every pixel of this colour into a hole the row shows through. The colour
+/// is therefore never seen — it only has to be a colour the frames themselves never use, and
+/// magenta is the traditional key for exactly that reason. A test holds it apart from every
+/// colour of both palettes, so a palette can never grow a field that would punch a hole in
+/// its own tick.
+const CHECK_CELL_KEY: COLORREF = COLORREF(0x00FF_00FF);
+
 /// The inner layer of [`build_check_image_list`]: the image list itself and the two frames,
 /// in the order of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
 /// answers `None` — a one-frame list would silently shift the meaning of state image 2.
 fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Option<HIMAGELIST> {
+    // The air before the tick, in the pixels of the screen the frames are made for — the DPI
+    // of the screen DC this whole build hangs from (NFR-13: a DC that will not say is
+    // answered as 96 by `dc_dpi`, which is the 100 % inset).
+    let inset = scaled(TEXT_INSET_X, dc_dpi(screen));
+    let width = check_cell_width(dc_dpi(screen));
+
     // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
-    // to the caller or destroyed below. `ILC_COLOR32` — the frames are opaque squares.
-    let list = unsafe { ImageList_Create(CHECK_FRAME_SIZE, CHECK_FRAME_SIZE, ILC_COLOR32, 2, 0) };
+    // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — the tick is opaque
+    // and the air beside it is a hole, which is what [`CHECK_CELL_KEY`] is for.
+    let list = unsafe { ImageList_Create(width, CHECK_FRAME_SIZE, ILC_COLOR32 | ILC_MASK, 2, 0) };
 
     if list.is_invalid() {
         // NFR-13: examined — as in the callers.
@@ -7117,7 +7305,7 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
     for checked in CHECK_FRAME_ORDER {
         // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
         // frame until the `DeleteObject` below.
-        let bitmap = unsafe { CreateCompatibleBitmap(screen, CHECK_FRAME_SIZE, CHECK_FRAME_SIZE) };
+        let bitmap = unsafe { CreateCompatibleBitmap(screen, width, CHECK_FRAME_SIZE) };
 
         if bitmap.is_invalid() {
             // SAFETY: the half-built list is ours until handed out; freed exactly once.
@@ -7126,25 +7314,25 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
         }
 
         // SAFETY: both handles are live and ours; the previous bitmap is kept and put back
-        // below — `ImageList_Add` reads the bitmap's bits, and a bitmap still selected
+        // below — `ImageList_AddMasked` reads the bitmap's bits, and a bitmap still selected
         // into a DC is not readable.
         let previous = unsafe { SelectObject(dc, bitmap.into()) };
 
-        draw_check_frame(dc, checked, palette);
+        draw_check_frame(dc, checked, palette, inset);
 
         // SAFETY: restores the bitmap that was in the DC a moment ago.
         unsafe { SelectObject(dc, previous) };
 
-        // SAFETY: `list` and `bitmap` are live and ours; the call copies the bits and keeps
-        // no handle. No mask — the frames are opaque.
-        let added = unsafe { ImageList_Add(list, bitmap, None) };
+        // SAFETY: `list` and `bitmap` are live and ours; the call copies the bits, builds the
+        // mask from [`CHECK_CELL_KEY`] and keeps no handle.
+        let added = unsafe { ImageList_AddMasked(list, bitmap, CHECK_CELL_KEY) };
 
         // SAFETY: deselected above, copied into the list, freed exactly once. The `BOOL`
         // is dropped for the reason `draw_check_mark` gives for its pen.
         let _ = unsafe { DeleteObject(bitmap.into()) };
 
         if added < 0 {
-            // NFR-13: examined — `ImageList_Add` answers the index or -1.
+            // NFR-13: examined — `ImageList_AddMasked` answers the index or -1.
             //
             // SAFETY: as for the refused bitmap above.
             let _ = unsafe { ImageList_Destroy(Some(list)) };
@@ -7155,21 +7343,51 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
     Some(list)
 }
 
-/// Paints one frame of the state image list — the whole [`CHECK_FRAME_SIZE`] square of the
-/// bitmap currently selected into `dc`, in the colours of [`check_frame_colors`].
+/// Paints one cell of the state image list into the bitmap currently selected into `dc`:
+/// `inset` pixels of [`CHECK_CELL_KEY`] air, then the [`CHECK_FRAME_SIZE`] square of the tick
+/// in the colours of [`check_frame_colors`] — task T-11-15 for the air, task T-11-7 for the
+/// square.
 ///
 /// The brushes are transient, exactly as the pens of [`draw_check_mark`]: nothing here
 /// outlives the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is
 /// answers that must outlive it. The mark *is* [`draw_check_mark`] — the same two strokes,
 /// the same 2-pixel pen, so the tick of the list is the tick of the dialog stroke for
 /// stroke.
-fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette) {
-    let frame = RECT {
+fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, inset: i32) {
+    let cell = RECT {
         left: 0,
         top: 0,
-        right: CHECK_FRAME_SIZE,
+        right: inset + CHECK_FRAME_SIZE,
         bottom: CHECK_FRAME_SIZE,
     };
+
+    let frame = RECT {
+        left: inset,
+        top: 0,
+        right: inset + CHECK_FRAME_SIZE,
+        bottom: CHECK_FRAME_SIZE,
+    };
+
+    // The air first, over the whole cell: the tick is painted on top of it, and what stays
+    // uncovered becomes the hole of the mask.
+    //
+    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
+    // below.
+    let key = unsafe { CreateSolidBrush(CHECK_CELL_KEY) };
+
+    if key.is_invalid() {
+        // NFR-13: examined — no brush, no air; without a key colour the mask would come out
+        // of whatever the fresh bitmap held, so the honest answer is to leave the cell alone
+        // and let the callers' degradation words cover it.
+        return;
+    }
+
+    // SAFETY: `dc` holds the cell bitmap for exactly this call; `key` is the live brush just
+    // made. The answer is dropped for the NFR-13 reason `draw_glyph_element` gives.
+    unsafe { FillRect(dc, &cell, key) };
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(key.into()) };
 
     let colors = check_frame_colors(checked, palette);
 
