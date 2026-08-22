@@ -5273,7 +5273,7 @@ unsafe fn draw_glyph_element(
 /// `dpi` is passed in rather than read off `dc`: one of the two callers paints into a memory
 /// DC of the state image list, whose own answer to `GetDeviceCaps` is not the DPI the frames
 /// are being built for.
-fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
+pub fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
     // The two strokes of the generator: down into the corner, long up and out. The three
     // points are `mark`'s own, measured from the corner of the square through the scale.
     let points = check_mark_points((glyph.left, glyph.top), mark, dpi);
@@ -5520,7 +5520,7 @@ pub fn scaled_tenths_offset(tenths: i32, dpi: i32) -> i32 {
 /// The manifest of this program declares `PerMonitorV2`, so the DC of a window answers the
 /// DPI of *that window's* monitor, which is what «по DPI окна» means on a machine with two
 /// screens at different scales.
-fn dc_dpi(dc: HDC) -> i32 {
+pub fn dc_dpi(dc: HDC) -> i32 {
     // NFR-13: examined right here. `GetDeviceCaps` answers zero for a DC that is not live,
     // and a zero would turn every scaled length into zero — the fallback is the 100 % look.
     //

@@ -14,7 +14,10 @@
 //! the menu now opens the settings dialog of FR-92, which lives in [`crate::settings`], and
 //! the check mark of FR-93 now writes and removes the value under
 //! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; T-11-10 (done) put the menu items
-//! on `MF_OWNERDRAW` and paints them in the palette of FR-92а.
+//! on `MF_OWNERDRAW` and paints them in the palette of FR-92а; T-11-21 (done) brought the
+//! smoothing wave of tasks T-11-13…T-11-20 to this file — the check mark and the highlight
+//! under the cursor are the smoothed figures of [`crate::settings`] and the entries are set
+//! in its grey-antialiased face, so that one product no longer has two qualities of drawing.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -78,10 +81,9 @@ use std::path::PathBuf;
 
 use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontIndirectW, CreatePen, CreateSolidBrush, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER,
-    DeleteObject, DrawTextW, FillRect, GetDC, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ,
-    HPEN, LineTo, MoveToEx, PS_SOLID, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
-    TRANSPARENT,
+    CreateFontIndirectW, CreateSolidBrush, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, DeleteObject,
+    DrawTextW, FillRect, GetDC, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ, LOGFONTW,
+    ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -177,13 +179,61 @@ const TASKBAR_CREATED: PCWSTR = w!("TaskbarCreated");
 
 /// Horizontal padding of an owner-drawn menu item: before the check column and after the
 /// text — FR-92а, task T-11-10.
-const MENU_H_PAD: i32 = 6;
+pub const MENU_H_PAD: i32 = 6;
 
 /// Gap between the check column and the text of an owner-drawn menu item.
-const MENU_CHECK_GAP: i32 = 4;
+pub const MENU_CHECK_GAP: i32 = 4;
 
 /// Vertical padding above and below the text of an owner-drawn menu item.
 const MENU_V_PAD: i32 = 5;
+
+/// The check mark of FR-93 as the mock-up draws it — FR-92а, task T-11-21.
+///
+/// Read out of `scratchpad\chrome.ps1`, which is the generator the mock-up `ui-06-chrome.png`
+/// was drawn by, and not measured off the picture: the menu arm strokes
+/// `(PtF $bx ($by+1))`, `(PtF ($bx+4) ($by+5))`, `(PtF ($bx+11) ($by-6))` with
+/// `New-Object System.Drawing.Pen($T.Fg,[single]2.1)`, where `$bx` is the left edge of the
+/// mark and `$by` the vertical middle of the entry.
+///
+/// ⚠ The generator draws at 140 %, so every one of its pixels is 1,4 screen pixels — which is
+/// exactly what [`crate::settings::scaled_tenths_offset`] divides by, and the reason these
+/// literals are the generator's own numbers rather than numbers somebody has already divided.
+///
+/// The offsets are measured from the corner of [`menu_check_cell`] and not from `($bx, $by)`:
+/// [`crate::settings::draw_check_mark`] clamps the tile it smooths in to the square it is
+/// given, so the square has to hold the pen and the fading edge as well as the path. That is
+/// the whole of [`MENU_CHECK_AIR`] — the three points below are the generator's, moved by it.
+pub const MENU_CHECK_MARK: settings::CheckMark = settings::CheckMark {
+    points_tenths: [(30, 100), (70, 140), (140, 30)],
+    pen_tenths: 21,
+};
+
+/// Air around the path of [`MENU_CHECK_MARK`] inside the square it is drawn in, in the pixels
+/// of the mock-up.
+///
+/// Not a number of the mock-up and not meant to be one: it is what keeps the tile of
+/// [`crate::settings::draw_check_mark`] — which is clamped to this square — from cutting the
+/// ends of the strokes off. That tile is `settings::stroke_bounds`, which reaches
+/// `thickness / 2 + 1` **screen** pixels past the outermost point: two of them at 96 DPI, and
+/// two mock-up pixels are only 1,43 of those. Three is the first number that covers it, and a
+/// test walks four display scales to say so.
+///
+/// The air is added on all four sides, so it moves the path inside the square and not on the
+/// screen: the mark lands on the same pixels it would have without it.
+pub const MENU_CHECK_AIR: i32 = 3;
+
+/// Side of the square [`MENU_CHECK_MARK`] is drawn in, in the pixels of the mock-up.
+///
+/// The path of the generator spans eleven of its pixels each way — `$bx … $bx+11` across and
+/// `$by-6 … $by+5` down — and [`MENU_CHECK_AIR`] is added on each of the four sides.
+pub const MENU_CHECK_CELL: i32 = 11 + 2 * MENU_CHECK_AIR;
+
+/// Inset of the highlight under the cursor from the left and the right edge of the entry, in
+/// the pixels of the mock-up — the `($mX+5)` and `($mW-10)` of
+/// `FillR $g ($mX+5) $iy ($mW-10) $itemH $T.Hover 6`.
+///
+/// Left and right only: the generator gives the stripe the whole height of the entry.
+pub const MENU_HOVER_INSET: i32 = 5;
 
 /// Offset of `VS_FIXEDFILEINFO` inside a `VS_VERSIONINFO` resource.
 ///
@@ -1058,8 +1108,8 @@ impl Drop for Menu {
 ///
 /// Built by [`show_menu`] immediately before `TrackPopupMenuEx` and dropped immediately
 /// after it returns. The palette is resolved exactly once per showing — the setting out of
-/// the configuration, the system switch read once — and the two brushes, the pen and the
-/// font live exactly that long. `theme::Brushes` is deliberately not used: that set belongs
+/// the configuration, the system switch read once — and the two brushes and the font live
+/// exactly that long. `theme::Brushes` is deliberately not used: that set belongs
 /// to the long-lived dialog of FR-92, while these die with the menu.
 ///
 /// # Why a thread-local of its own — the rule of the module header
@@ -1076,15 +1126,13 @@ struct MenuPaint {
     items: Vec<MenuItem>,
     /// The palette of this showing, resolved once — FR-92а.
     palette: &'static theme::Palette,
-    /// The menu font of `SPI_GETNONCLIENTMETRICS`, created for this showing.
+    /// The menu face of [`menu_item_logfont`], created for this showing.
     font: HFONT,
     /// Brush of [`theme::Palette::window_bg`] — the background of an entry at rest.
     window_bg: HBRUSH,
-    /// Brush of [`theme::Palette::hover_bg`] — the background of the entry under the
-    /// cursor (`ODS_SELECTED`).
+    /// Brush of [`theme::Palette::hover_bg`] — the fill of the rounded stripe under the
+    /// entry the cursor is on (`ODS_SELECTED`).
     hover_bg: HBRUSH,
-    /// Pen of [`theme::Palette::text`], for the two strokes of the check mark.
-    text_pen: HPEN,
 }
 
 thread_local! {
@@ -1104,53 +1152,33 @@ impl MenuPaint {
     /// because these calls do not promise a last-error code. The caller shows the menu
     /// anyway — unpainted rows over no menu at all.
     fn new(items: Vec<MenuItem>, palette: &'static theme::Palette) -> Option<Self> {
-        let mut metrics = NONCLIENTMETRICSW {
-            cbSize: u32::try_from(size_of::<NONCLIENTMETRICSW>()).unwrap_or(0),
-            ..Default::default()
-        };
+        // NFR-13: `None` — the non-client metrics were refused. Without them there is no
+        // menu face to measure with, and a guessed face would mislabel every measurement
+        // that follows. Task T-11-21: the face that comes back is already the smoothed
+        // one — see [`menu_item_logfont`].
+        let face = menu_item_logfont()?;
 
-        // SAFETY: `metrics` is a live local whose `cbSize` describes it, which is what the
-        // call checks before writing into the pointer, and the pointer is not kept.
-        // `SPI_GETNONCLIENTMETRICS` reads system state and changes nothing; the zero
-        // update-flags ask for no broadcast.
-        let metrics_read = unsafe {
-            SystemParametersInfoW(
-                SPI_GETNONCLIENTMETRICS,
-                metrics.cbSize,
-                Some((&raw mut metrics).cast()),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            )
-        };
+        // SAFETY: `face` is a live local of this frame, read only for the length of the
+        // call. The handle, if valid, becomes the property of the value below and is
+        // destroyed exactly once — in `Drop`, or right here on the partially failed branch.
+        let font = unsafe { CreateFontIndirectW(&raw const face) };
 
-        // NFR-13: examined. Without the metrics there is no menu font to measure with,
-        // and a guessed font would mislabel every measurement that follows.
-        if metrics_read.is_err() {
-            return None;
-        }
-
-        // SAFETY: `lfMenuFont` is part of the structure the successful call above filled;
-        // the pointer is read only for the length of the call. The handle, if valid,
-        // becomes the property of the value below and is destroyed exactly once — in
-        // `Drop`, or right here on the partially failed branch.
-        let font = unsafe { CreateFontIndirectW(&metrics.lfMenuFont) };
-
-        // SAFETY: the three calls take colours by value, read no memory of ours and
-        // return handles; every handle is examined below, and the valid ones are owned
-        // exactly as the font is.
-        let (window_bg, hover_bg, text_pen) = unsafe {
+        // SAFETY: both calls take a colour by value, read no memory of ours and return a
+        // handle; every handle is examined below, and the valid ones are owned exactly as
+        // the font is.
+        //
+        // ⚠ There is no pen here since task T-11-21. The check mark is drawn by
+        // [`crate::settings::draw_check_mark`], which owns a pen for exactly the one call —
+        // a smoothed stroke is drawn twice, once enlarged and once not, with two different
+        // thicknesses, so a pen made once for the showing could not have served it.
+        let (window_bg, hover_bg) = unsafe {
             (
                 CreateSolidBrush(palette.window_bg),
                 CreateSolidBrush(palette.hover_bg),
-                CreatePen(PS_SOLID, 1, palette.text),
             )
         };
 
-        let handles: [HGDIOBJ; 4] = [
-            font.into(),
-            window_bg.into(),
-            hover_bg.into(),
-            text_pen.into(),
-        ];
+        let handles: [HGDIOBJ; 3] = [font.into(), window_bg.into(), hover_bg.into()];
 
         // NFR-13: every handle is examined before anybody paints with it.
         if handles.iter().any(HGDIOBJ::is_invalid) {
@@ -1177,7 +1205,6 @@ impl MenuPaint {
             font,
             window_bg,
             hover_bg,
-            text_pen,
         })
     }
 
@@ -1253,10 +1280,11 @@ impl MenuPaint {
         )
     }
 
-    /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: background
-    /// `window_bg`, under the cursor `hover_bg`; text `text`, under the cursor `sel_fg`;
-    /// the check mark is [`MenuPaint::draw_check_mark`]. There are no disabled entries in
-    /// the menu of FR-91, so no third state is painted.
+    /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: the ground is
+    /// `window_bg`, and the entry under the cursor carries the rounded `hover_bg` stripe of
+    /// [`menu_hover_rect`] over it; text `text`, under the cursor `sel_fg`; the check mark
+    /// is [`MenuPaint::draw_check_mark`]. There are no disabled entries in the menu of
+    /// FR-91, so no third state is painted.
     ///
     /// Reads of `structure` are limited to `hDC`, `rcItem` and `itemState` — the SEC-05
     /// list; the entry itself was already found by [`MenuPaint::item`].
@@ -1265,21 +1293,37 @@ impl MenuPaint {
         let rect = structure.rcItem;
         let selected = structure.itemState.0 & ODS_SELECTED.0 != 0;
 
-        let background = if selected {
-            self.hover_bg
-        } else {
-            self.window_bg
-        };
+        // The DPI of the device the entry is being painted on — every mock-up length below
+        // goes through it. The menu window is a real window of the screen, so its DC
+        // answers the scale of the monitor the menu came up on (NFR-13: a refusal is the
+        // 100 % look, which `settings::dc_dpi` decides).
+        let dpi = settings::dc_dpi(dc);
 
         // SAFETY: `dc` and `rect` came with the message; while the gate is up they
         // describe an entry of our menu being painted, and every call below only writes
         // pixels into that DC — the most a forged message can buy is a drawing on its own
-        // DC. `background` is a live brush this value owns.
-        let filled = unsafe { FillRect(dc, &rect, background) };
+        // DC. `self.window_bg` is a live brush this value owns.
+        let filled = unsafe { FillRect(dc, &rect, self.window_bg) };
 
         // NFR-13: examined in the only way available — a refused fill leaves the row
         // unpainted for one frame and nothing here can repair it.
         debug_assert!(filled != 0, "FillRect refused a live brush");
+
+        // Task T-11-21: the highlight is a **figure on top of the ground** and no longer
+        // the ground itself, because the mock-up rounds it and holds it off the edges —
+        // `FillR $g ($mX+5) $iy ($mW-10) $itemH $T.Hover 6`. `paint_rounded` smooths the
+        // four corners the same way every rounded figure of the dialog is smoothed; the
+        // outline is handed the fill's own colour, so the figure has a fill and no frame.
+        if selected {
+            settings::paint_rounded(
+                dc,
+                &menu_hover_rect(&rect, dpi),
+                settings::scaled(settings::CORNER_RADIUS, dpi),
+                self.palette.hover_bg,
+                self.hover_bg,
+                dpi,
+            );
+        }
 
         // SAFETY: `self.font` is live for the whole showing; the previous selection is
         // restored at the end of this function, while the DC is still the message's.
@@ -1320,55 +1364,38 @@ impl MenuPaint {
         };
 
         if item.checked {
-            self.draw_check_mark(dc, &rect);
+            self.draw_check_mark(dc, &rect, dpi);
         }
 
         // SAFETY: restores the font that was selected when the message arrived.
         let _ = unsafe { SelectObject(dc, previous_font) };
     }
 
-    /// The check mark of FR-93 — two strokes of the `text` pen.
+    /// The check mark of FR-93 — the smoothed figure of the mock-up, task T-11-21.
     ///
     /// Drawn by hand rather than by `DrawFrameControl(DFC_MENU, DFCS_MENUCHECK)`, because
     /// that call paints the system's mark in the system's colours whatever the palette of
-    /// FR-92а says — the exact thing this task exists to stop.
-    fn draw_check_mark(&self, dc: HDC, rect: &RECT) {
-        let column = check_column();
-        let centre_x = rect.left + MENU_H_PAD + column / 2;
-        let centre_y = (rect.top + rect.bottom) / 2;
+    /// FR-92а says — the exact thing task T-11-10 existed to stop. Since task T-11-21 the
+    /// hand is [`crate::settings::draw_check_mark`] and not this file's own two lines: the
+    /// figure is [`MENU_CHECK_MARK`], the square is [`menu_check_cell`], and the smoothing
+    /// is the one supersampling this program has — no second copy of it lives here.
+    ///
+    /// The ink is [`theme::Palette::text`] in both states, which is what it was before this
+    /// task and what the mock-up draws (`$T.Fg`, on the highlighted row as on any other):
+    /// the palette is task T-11-10's and is not touched here.
+    fn draw_check_mark(&self, dc: HDC, rect: &RECT, dpi: i32) {
+        let cell = menu_check_cell(rect, check_column(), dpi);
 
-        // A step that scales with the column keeps the mark proportional at any display
-        // scale; the floor of two keeps it visible at 100%.
-        let step = (column / 6).max(2);
-
-        // SAFETY: `self.text_pen` is live for the whole showing; the previous selection
-        // is restored below, while the DC is still the message's.
-        let previous_pen = unsafe { SelectObject(dc, self.text_pen.into()) };
-
-        // The two lines of the mark — the short down-stroke, then the long up-stroke —
-        // drawn as one polyline so they meet in a point.
-        //
-        // SAFETY: the three calls write pixels into the message's DC and touch no memory
-        // of ours; `None` declines the previous-position out-parameter. NFR-13: a refused
-        // stroke leaves the mark incomplete for one frame, and nothing can repair it here.
-        unsafe {
-            let _ = MoveToEx(dc, centre_x - 3 * step, centre_y, None);
-            let _ = LineTo(dc, centre_x - step, centre_y + 2 * step);
-            let _ = LineTo(dc, centre_x + 3 * step, centre_y - 2 * step);
-        }
-
-        // SAFETY: restores the pen that was selected when the message arrived.
-        let _ = unsafe { SelectObject(dc, previous_pen) };
+        settings::draw_check_mark(dc, &cell, self.palette.text, MENU_CHECK_MARK, dpi);
     }
 }
 
 impl Drop for MenuPaint {
     fn drop(&mut self) {
-        let handles: [HGDIOBJ; 4] = [
+        let handles: [HGDIOBJ; 3] = [
             self.font.into(),
             self.window_bg.into(),
             self.hover_bg.into(),
-            self.text_pen.into(),
         ];
 
         for handle in handles {
@@ -1396,6 +1423,91 @@ fn check_column() -> i32 {
     let metric = unsafe { GetSystemMetrics(SM_CXMENUCHECK) };
 
     if metric > 0 { metric } else { 16 }
+}
+
+/// The highlight under the cursor, in the pixels of an entry whose rectangle is `item` —
+/// FR-92а, task T-11-21.
+///
+/// [`MENU_HOVER_INSET`] of the mock-up off the left and the right edge and the whole height of
+/// the entry, exactly as the generator draws it. Pure, so the geometry is a table a test reads
+/// without a menu on the screen; the rounding of the corners is [`crate::settings::paint_rounded`]
+/// with [`crate::settings::CORNER_RADIUS`], which is the `6` the same call carries.
+pub fn menu_hover_rect(item: &RECT, dpi: i32) -> RECT {
+    let inset = settings::scaled(MENU_HOVER_INSET, dpi);
+
+    RECT {
+        left: item.left + inset,
+        top: item.top,
+        right: item.right - inset,
+        bottom: item.bottom,
+    }
+}
+
+/// The square the check mark of FR-93 is drawn in, for an entry whose rectangle is `item` and
+/// a check column `column` pixels wide — FR-92а, task T-11-21.
+///
+/// [`MENU_CHECK_CELL`] mock-up pixels a side, centred on the check column that
+/// [`check_column`] measures and on the middle of the entry — which is where the generator
+/// puts it (`$by = $iy + $itemH/2`).
+///
+/// ⚠ The horizontal anchor is the column and **not** the `$mX + 16` of the generator, and this
+/// is deliberate: the width of an entry, the left edge of its text and the column itself are
+/// all built on `SM_CXMENUCHECK` (task T-11-10, and no part of this task), so a fixed mock-up
+/// offset would walk into the text at a display scale where the metric grows and the offset
+/// does not. At 96 DPI the two land within three pixels of each other. The **figure** — the
+/// three points, the pen and the square around them — is the generator's own.
+///
+/// Pure, for the reason [`menu_hover_rect`] is.
+pub fn menu_check_cell(item: &RECT, column: i32, dpi: i32) -> RECT {
+    let side = settings::scaled(MENU_CHECK_CELL, dpi);
+    let left = item.left + MENU_H_PAD + (column - side) / 2;
+    let top = (item.top + item.bottom) / 2 - side / 2;
+
+    RECT {
+        left,
+        top,
+        right: left + side,
+        bottom: top + side,
+    }
+}
+
+/// The face the entries of FR-91 are measured and drawn in — FR-92а, task T-11-21.
+///
+/// `lfMenuFont` of `SPI_GETNONCLIENTMETRICS`, which is the face a menu of this system is set
+/// in, put through [`crate::settings::antialiased_logfont`]: one field changed — the quality —
+/// and not a byte else, so the entries keep the system's type face, size, weight and character
+/// set and lose only the colour fringe of ClearType. **The metrics do not move.** That is not
+/// an assumption: task T-11-20 measured the same substitution on the dialog's own face with
+/// `GetTextMetricsW` (eight fields) and `GetTextExtentPoint32W` (eight strings) and found both
+/// identical, and the two tests that hold it live in `tests\settings.rs`.
+///
+/// `None` when the non-client metrics cannot be read (NFR-13) — there is then no menu face to
+/// modify, and guessing one would mislabel every measurement made with it.
+pub fn menu_item_logfont() -> Option<LOGFONTW> {
+    let mut metrics = NONCLIENTMETRICSW {
+        cbSize: u32::try_from(size_of::<NONCLIENTMETRICSW>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: `metrics` is a live local whose `cbSize` describes it, which is what the call
+    // checks before writing into the pointer, and the pointer is not kept.
+    // `SPI_GETNONCLIENTMETRICS` reads system state and changes nothing; the zero update-flags
+    // ask for no broadcast.
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETNONCLIENTMETRICS,
+            metrics.cbSize,
+            Some((&raw mut metrics).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+
+    // NFR-13: examined.
+    if read.is_err() {
+        return None;
+    }
+
+    Some(settings::antialiased_logfont(metrics.lfMenuFont))
 }
 
 /// The `WM_MEASUREITEM` of the menu of FR-91 — the measuring half of task T-11-10.
@@ -1511,8 +1623,8 @@ fn show_menu(x: i32, y: i32) {
     };
 
     // FR-92а: the palette of this showing, resolved exactly once — the setting the
-    // configuration holds, one reading of the system switch. It lives, with the brushes,
-    // the pen and the menu font of [`MenuPaint`], until `TrackPopupMenuEx` returns.
+    // configuration holds, one reading of the system switch. It lives, with the brushes and
+    // the menu face of [`MenuPaint`], until `TrackPopupMenuEx` returns.
     let palette = theme::resolve(theme_setting, theme::system_is_light());
 
     // ⚠ Documented Windows behaviour, not superstition. A popup menu tracked by a window that
@@ -1563,8 +1675,8 @@ fn show_menu(x: i32, y: i32) {
     // The gate comes down here, immediately after the return: from this line on the two
     // messages are foreign again (SEC-05) — in particular before `dispatch_command` below
     // opens anything modal. Taken out of the `RefCell` before being dropped, like
-    // [`detach`] and for the same reason; the drop frees the brushes, the pen and the
-    // font, whose whole life is the one showing (FR-92а).
+    // [`detach`] and for the same reason; the drop frees the two brushes and the menu face,
+    // whose whole life is the one showing (FR-92а).
     let paint = MENU_PAINT.with(|slot| slot.borrow_mut().take());
     drop(paint);
 

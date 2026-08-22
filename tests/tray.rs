@@ -27,6 +27,7 @@ use lang_switcher::settings::{self, CONFIG_FILE_NAME};
 use lang_switcher::tray::{self, Menu, Reaction, Tray};
 
 use windows::Win32::Foundation::{FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{ANTIALIASED_QUALITY, LOGFONTW};
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
@@ -35,9 +36,10 @@ use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
     GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
-    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, RT_DIALOG, RT_VERSION, SM_CXSMICON,
-    SM_CYSMICON, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW,
-    WS_POPUP,
+    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW, RT_DIALOG, RT_VERSION,
+    SM_CXMENUCHECK, SM_CXSMICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_DRAWITEM, WM_ENDSESSION,
+    WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -319,6 +321,300 @@ fn measure_and_draw_are_ignored_while_no_menu_of_ours_is_on_the_screen() {
         (0xDEAD, 0xBEEF),
         "and nothing was written into the forgery"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-92а, task T-11-21 — the menu drawn as the mock-up draws it
+// ---------------------------------------------------------------------------------------
+
+/// The three points of the menu's check mark as `scratchpad\chrome.ps1` strokes them, in
+/// **tenths of a mock-up pixel** and measured from `($bx, $by)` — the left edge of the mark
+/// and the vertical middle of the entry.
+///
+/// Written out here rather than imported, for the reason the FR-91 block above is written
+/// out: a test that read the crate's own constant and then asserted the crate's own constant
+/// would pass whatever the constant said. These are the numbers of the generator the mock-up
+/// `ui-06-chrome.png` was drawn by — `(PtF $bx ($by+1))`, `(PtF ($bx+4) ($by+5))`,
+/// `(PtF ($bx+11) ($by-6))`.
+const CHROME_CHECK_POINTS: [(i32, i32); 3] = [(0, 10), (40, 50), (110, -60)];
+
+/// The pen of that mark, in tenths of a mock-up pixel — `Pen($T.Fg,[single]2.1)`.
+const CHROME_CHECK_PEN: i32 = 21;
+
+/// Inset of the highlight from the left and right edges of the menu, in mock-up pixels —
+/// the `($mX+5)` … `($mW-10)` of `FillR $g ($mX+5) $iy ($mW-10) $itemH $T.Hover 6`.
+const CHROME_HOVER_INSET: i32 = 5;
+
+/// Corner radius of that highlight, in mock-up pixels — the trailing `6` of the same call.
+const CHROME_HOVER_RADIUS: i32 = 6;
+
+/// The DPI the «при 96 DPI» column of the report is written at.
+const SCREEN_DPI: i32 = 96;
+
+#[test]
+fn the_check_mark_of_the_menu_is_the_figure_the_mock_up_strokes() {
+    // **Criterion 9 of T-11-21, the figure half.** The mark of FR-93 used to be two lines
+    // of a step invented from `SM_CXMENUCHECK`; it is now the generator's own polyline,
+    // moved by `MENU_CHECK_AIR` so that the square handed to the smoothing holds the pen
+    // and its fading edge as well as the path.
+    let air = tray::MENU_CHECK_AIR * 10;
+    let across: [i32; 3] = CHROME_CHECK_POINTS.map(|point| point.0);
+    let down: [i32; 3] = CHROME_CHECK_POINTS.map(|point| point.1);
+
+    let left = across.into_iter().min().expect("three points");
+    let top = down.into_iter().min().expect("three points");
+    let right = across.into_iter().max().expect("three points");
+    let bottom = down.into_iter().max().expect("three points");
+
+    let expected = CHROME_CHECK_POINTS.map(|(x, y)| (x - left + air, y - top + air));
+
+    println!("chrome.ps1 {CHROME_CHECK_POINTS:?} + air {air} -> {expected:?}");
+
+    assert_eq!(
+        tray::MENU_CHECK_MARK.points_tenths,
+        expected,
+        "the polyline of the menu is the generator's, moved by the air around it"
+    );
+    assert_eq!(
+        tray::MENU_CHECK_MARK.pen_tenths,
+        CHROME_CHECK_PEN,
+        "and the pen is the generator's 2,1 mock-up pixels"
+    );
+
+    // The path is square — eleven mock-up pixels each way — so the square around it is that
+    // plus the air on all four sides.
+    assert_eq!(right - left, bottom - top, "the path of the mark is square");
+    assert_eq!(
+        tray::MENU_CHECK_CELL,
+        (right - left) / 10 + 2 * tray::MENU_CHECK_AIR,
+        "the square is the path plus the air on each side"
+    );
+}
+
+#[test]
+fn the_smoothing_tile_of_the_check_mark_cuts_nothing_off_it() {
+    // **Criterion 9 of T-11-21, the reason `MENU_CHECK_AIR` exists.**
+    // `settings::draw_check_mark` clamps the tile it smooths in to the square it is given,
+    // and everything of the stroke outside that tile is simply never drawn. So the stroke —
+    // the path plus half a pen plus the row the smoothed edge fades into, which is exactly
+    // what `stroke_bounds` answers — has to fit inside the square at every scale.
+    for dpi in [SCREEN_DPI, 120, 144, 192] {
+        let side = settings::scaled(tray::MENU_CHECK_CELL, dpi);
+        let points = settings::check_mark_points((0, 0), tray::MENU_CHECK_MARK, dpi);
+        let thickness = settings::scaled_tenths(tray::MENU_CHECK_MARK.pen_tenths, dpi);
+        let bounds = settings::stroke_bounds(&points, thickness);
+
+        println!(
+            "{dpi} DPI: square {side}, points {points:?}, pen {thickness}, stroke \
+             {}..{} x {}..{}",
+            bounds.left, bounds.right, bounds.top, bounds.bottom
+        );
+
+        assert!(
+            bounds.left >= 0 && bounds.top >= 0,
+            "the stroke may not start above or left of the square at {dpi} DPI"
+        );
+        assert!(
+            bounds.right <= side && bounds.bottom <= side,
+            "the stroke may not run past the square at {dpi} DPI"
+        );
+    }
+}
+
+#[test]
+fn the_highlight_of_an_entry_is_the_inset_rounded_stripe_of_the_mock_up() {
+    // **Criterion 9 of T-11-21, the highlight half.** The entry under the cursor used to be
+    // a `FillRect` of the whole row; the mock-up holds the stripe five of its pixels off
+    // each edge, gives it the whole height of the entry and rounds it by six.
+    let item = windows::Win32::Foundation::RECT {
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 27,
+    };
+
+    let inset = settings::scaled(CHROME_HOVER_INSET, SCREEN_DPI);
+    let stripe = tray::menu_hover_rect(&item, SCREEN_DPI);
+
+    println!(
+        "inset {CHROME_HOVER_INSET} px макета -> {inset} px at 96 DPI; stripe \
+         {}..{} x {}..{}",
+        stripe.left, stripe.right, stripe.top, stripe.bottom
+    );
+
+    assert_eq!(
+        inset, 4,
+        "five mock-up pixels are four screen pixels at 96 DPI"
+    );
+    assert_eq!(
+        (stripe.left, stripe.right),
+        (item.left + inset, item.right - inset),
+        "the stripe is held off both edges"
+    );
+    assert_eq!(
+        (stripe.top, stripe.bottom),
+        (item.top, item.bottom),
+        "and takes the whole height of the entry"
+    );
+
+    // The radius is the one number the generator gives every rounded figure it draws, which
+    // is the constant the dialog already rounds by — there is no second radius for the menu.
+    assert_eq!(settings::CORNER_RADIUS, CHROME_HOVER_RADIUS);
+    assert_eq!(
+        settings::scaled(settings::CORNER_RADIUS, SCREEN_DPI),
+        4,
+        "six mock-up pixels are four screen pixels at 96 DPI"
+    );
+}
+
+#[test]
+fn the_check_mark_stands_inside_the_check_column_of_the_entry() {
+    // The square of the mark is centred on the check column and on the middle of the entry,
+    // and it may not grow out of that column — the width of an entry and the left edge of
+    // its text are both built on the same metric (task T-11-10, untouched here).
+    let column = check_column();
+    let item = windows::Win32::Foundation::RECT {
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 27,
+    };
+
+    let cell = tray::menu_check_cell(&item, column, SCREEN_DPI);
+
+    println!(
+        "SM_CXMENUCHECK={column}; cell {}..{} x {}..{}",
+        cell.left, cell.right, cell.top, cell.bottom
+    );
+
+    assert_eq!(
+        cell.right - cell.left,
+        cell.bottom - cell.top,
+        "the square of the mark is square"
+    );
+    assert_eq!(
+        cell.right - cell.left,
+        settings::scaled(tray::MENU_CHECK_CELL, SCREEN_DPI),
+        "and is the mock-up's own side through the scale"
+    );
+    assert_eq!(
+        (cell.top + cell.bottom) / 2,
+        (item.top + item.bottom) / 2,
+        "centred on the middle of the entry, as `$by = $iy + $itemH/2` centres it"
+    );
+
+    // The square fits in the column, and therefore cannot reach the text: the left edge of
+    // the label is the column plus the gap of T-11-10, and that layout is not this task's.
+    let text_left = item.left + tray::MENU_H_PAD + column + tray::MENU_CHECK_GAP;
+
+    assert!(
+        cell.right - cell.left <= column,
+        "the square of the mark fits inside the check column"
+    );
+    assert!(
+        cell.left >= item.left && cell.right <= text_left,
+        "and stands between the edge of the entry and its text"
+    );
+}
+
+#[test]
+fn the_entries_are_drawn_in_our_own_grey_antialiased_face() {
+    // **Criterion 10 of T-11-21.** The entries are measured and drawn in `lfMenuFont` of
+    // `SPI_GETNONCLIENTMETRICS` put through `settings::antialiased_logfont` — one field
+    // changed, the quality, and not a byte else. The metrics therefore do not move: that
+    // was measured by task T-11-20 on the dialog's own face and is held by two tests of
+    // `tests\settings.rs`; what is checked here is that the menu really does ask for it.
+    let system = menu_logfont();
+    let ours = tray::menu_item_logfont().expect("SPI_GETNONCLIENTMETRICS must answer");
+
+    println!(
+        "lfMenuFont: height={} weight={} charset={:?} quality={:?} -> quality={:?}",
+        system.lfHeight, system.lfWeight, system.lfCharSet, system.lfQuality, ours.lfQuality
+    );
+
+    assert_eq!(
+        ours.lfQuality, ANTIALIASED_QUALITY,
+        "the face of the menu asks for grey coverage and not for ClearType"
+    );
+    assert_ne!(
+        system.lfQuality, ANTIALIASED_QUALITY,
+        "and that is a change: the system's own menu face does not ask for it"
+    );
+
+    // Everything else is the system's, field for field — the same type face at the same
+    // size and weight, so nothing a person sees moves by a pixel.
+    assert_eq!(
+        (
+            ours.lfHeight,
+            ours.lfWidth,
+            ours.lfEscapement,
+            ours.lfOrientation,
+            ours.lfWeight,
+        ),
+        (
+            system.lfHeight,
+            system.lfWidth,
+            system.lfEscapement,
+            system.lfOrientation,
+            system.lfWeight,
+        )
+    );
+    assert_eq!(
+        (
+            ours.lfItalic,
+            ours.lfUnderline,
+            ours.lfStrikeOut,
+            ours.lfCharSet,
+            ours.lfOutPrecision,
+            ours.lfClipPrecision,
+            ours.lfPitchAndFamily,
+        ),
+        (
+            system.lfItalic,
+            system.lfUnderline,
+            system.lfStrikeOut,
+            system.lfCharSet,
+            system.lfOutPrecision,
+            system.lfClipPrecision,
+            system.lfPitchAndFamily,
+        )
+    );
+    assert_eq!(
+        ours.lfFaceName, system.lfFaceName,
+        "the type face itself is the system's"
+    );
+}
+
+/// `lfMenuFont` of `SPI_GETNONCLIENTMETRICS`, read here rather than through the crate — the
+/// face the system says a menu is set in, which is what the crate's answer is compared with.
+fn menu_logfont() -> LOGFONTW {
+    let mut metrics = NONCLIENTMETRICSW {
+        cbSize: u32::try_from(size_of::<NONCLIENTMETRICSW>()).expect("the size fits in a u32"),
+        ..Default::default()
+    };
+
+    // SAFETY: `metrics` is a live local of this frame whose `cbSize` describes it, which is
+    // what the call checks before writing into the pointer; the pointer is not kept, and the
+    // zero update-flags ask for no broadcast.
+    unsafe {
+        SystemParametersInfoW(
+            SPI_GETNONCLIENTMETRICS,
+            metrics.cbSize,
+            Some((&raw mut metrics).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    }
+    .expect("SPI_GETNONCLIENTMETRICS must answer");
+
+    metrics.lfMenuFont
+}
+
+/// `SM_CXMENUCHECK`, the width of the check column of a menu entry.
+fn check_column() -> i32 {
+    // SAFETY: reads a system-wide metric, takes no pointer and touches no memory of ours.
+    let metric = unsafe { GetSystemMetrics(SM_CXMENUCHECK) };
+
+    if metric > 0 { metric } else { 16 }
 }
 
 // ---------------------------------------------------------------------------------------
