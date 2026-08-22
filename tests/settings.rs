@@ -14,6 +14,12 @@ use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
     ReadOutcome, ReplacementMethod,
 };
+use windows::Win32::Foundation::COLORREF;
+use windows::Win32::Graphics::Gdi::{
+    ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLEARTYPE_QUALITY,
+    CreateCompatibleDC, CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DeleteDC, DeleteObject,
+    FW_BOLD, FillRect, GetPixel, HBITMAP, HDC, LOGFONTW, SelectObject,
+};
 
 /// A directory under `%TEMP%` that removes itself, panic or no panic.
 ///
@@ -2344,8 +2350,11 @@ fn one_radius_rounds_the_panel_the_field_the_combo_the_button_and_both_lists() {
     // that owns the figure, so a call site that quietly went back to a number of its own takes
     // its row down with it.
     let places = [
-        // панель и оба списка — обе половины фона диалога
-        ("unsafe fn on_erase_background(", 2),
+        // панель и оба списка — обе половины фона диалога. ⚠ Тело переехало из
+        // `on_erase_background` в `paint_background` задачей T-11-17: обработчик сообщения
+        // теперь отдаёт готовую картинку, а рисует фон эта функция. Существо строки то же —
+        // обе половины фона скругляются одним именем.
+        ("unsafe fn paint_background(", 2),
         // кнопка
         ("unsafe fn paint_push_button(", 1),
         // закрытая часть комбобокса, она же поле на вид
@@ -2912,10 +2921,9 @@ fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
         ("unsafe fn draw_list_item(", "scaled(LIST_TEXT_TOP"),
         ("pub fn check_cell(", "scaled(LIST_TEXT_INSET"),
         ("pub fn check_cell(", "scaled(LIST_CHECK_TEXT_GAP"),
-        (
-            "unsafe fn on_erase_background(",
-            "scaled(LIST_FIRST_ROW_TOP",
-        ),
+        // ⚠ `paint_background` и не `on_erase_background`: тело переехало задачей T-11-17,
+        // см. пояснение в `one_radius_rounds_…`. Проверяемое — то же.
+        ("unsafe fn paint_background(", "scaled(LIST_FIRST_ROW_TOP"),
     ];
 
     for (signature, call) in in_pixels {
@@ -2966,13 +2974,26 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
         );
     }
 
-    // Every pen of the dialog is now a length of the mock-ups in tenths, through the scale.
+    // Every pen of the dialog is still a length of the mock-ups in tenths, through the scale.
+    //
+    // ⚠ Named as the length and not as the whole `CreatePen(…)` line since task T-11-17: both
+    // strokes are made by the one `stroke_polyline`, which is handed the thickness — the
+    // smoothed drawing hands it the same number multiplied by `SUPERSAMPLE`, and a `CreatePen`
+    // spelled out at each figure could not do that. The substance of the row is unchanged: the
+    // thickness of both pens is a `_TENTHS` constant of the mock-ups through `scaled_tenths`,
+    // and the assertion below holds that the one `CreatePen` left takes a name and not a
+    // number.
     for pen in [
-        "CreatePen(PS_SOLID, scaled_tenths(mark.pen_tenths, dpi), ink)",
-        "CreatePen(PS_SOLID, scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi), ink)",
+        "scaled_tenths(mark.pen_tenths, dpi)",
+        "scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi)",
     ] {
         assert!(source.contains(pen), "the pen `{pen}` must be the one made");
     }
+
+    assert!(
+        source.contains("CreatePen(PS_SOLID, thickness, ink)"),
+        "the one pen of the two strokes must take the thickness it is handed"
+    );
 
     // The three points of a check mark are a table of the module and not coordinates written
     // where they are drawn.
@@ -5287,4 +5308,631 @@ fn the_system_theme_message_is_wm_app_plus_14_and_collides_with_nothing_public()
             "two private messages share a number"
         );
     }
+}
+
+// =========================================================================================
+// FR-92а — своё сглаживание на чистом GDI и серое сглаживание нашего текста. Task T-11-17.
+// =========================================================================================
+//
+// What is measurable without a window: the pure halves — the two `LOGFONTW` builders, the four
+// corner tiles of a rounded rectangle, the bounding box of a stroke — and the shape of the
+// module's own source, where the supersampling factor, the `HALFTONE` reduction with the
+// `SetBrushOrgEx` the documentation pairs with it, the ownership of every GDI object and the
+// caching of the background live. The look on the screen is the controller's, on the real
+// window: the product is not started by any test.
+
+/// The lines of the module source that are **not** comments and hold `needle`.
+///
+/// The sweeps below have to separate a call from a sentence about a call: the section of the
+/// module this task added explains `HALFTONE` and `SetBrushOrgEx` at length, and a count that
+/// swept the prose in with the code would prove nothing.
+fn product_lines_with(needle: &str) -> Vec<String> {
+    settings_module_source()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//") && line.contains(needle))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// **Criterion 13 of T-11-17** — every face this program sets its own text in is asked for grey
+/// antialiasing, and the ask is a pure function of a `LOGFONTW`.
+///
+/// The expected value is written out here as the `ANTIALIASED_QUALITY` of `wingdi.h` — the
+/// literal 4 — and not only read back from the crate: a builder that quietly left the manager's
+/// ClearType in place would agree with itself and disagree with the decision of 2026-08-22.
+#[test]
+fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
+    // A face with something recognisable in every field the builders must not touch.
+    let mut base = LOGFONTW {
+        lfHeight: -18,
+        lfWidth: 7,
+        lfWeight: 400,
+        lfItalic: 1,
+        lfUnderline: 1,
+        lfStrikeOut: 1,
+        // The manager's own face renders with ClearType — the starting point this task moves
+        // our own text away from.
+        lfQuality: CLEARTYPE_QUALITY,
+        ..Default::default()
+    };
+
+    // «Segoe UI», the face the template asks for, as UTF-16 into the fixed array.
+    for (slot, unit) in base.lfFaceName.iter_mut().zip("Segoe UI".encode_utf16()) {
+        *slot = unit;
+    }
+
+    let text = settings::antialiased_logfont(base);
+
+    assert_eq!(
+        text.lfQuality.0, 4,
+        "the quality must be ANTIALIASED_QUALITY — the 4 of wingdi.h"
+    );
+    assert_eq!(
+        text.lfQuality, ANTIALIASED_QUALITY,
+        "and it must be the constant the crate names 4 by"
+    );
+    assert_ne!(
+        text.lfQuality, CLEARTYPE_QUALITY,
+        "ClearType is what this task takes off our own text"
+    );
+
+    // And not one other field moved: the face, the size, the weight and the rest are the
+    // window's own, which is why the builder takes a `LOGFONTW` instead of naming a face.
+    assert_eq!(text.lfHeight, base.lfHeight);
+    assert_eq!(text.lfWidth, base.lfWidth);
+    assert_eq!(text.lfWeight, base.lfWeight);
+    assert_eq!(text.lfItalic, base.lfItalic);
+    assert_eq!(text.lfUnderline, base.lfUnderline);
+    assert_eq!(text.lfStrikeOut, base.lfStrikeOut);
+    assert_eq!(text.lfFaceName, base.lfFaceName);
+
+    // The caption face: the same antialiasing, and the two changes п. 2.1 of T-11-13 asks for.
+    let caption = settings::caption_logfont(base);
+
+    assert_eq!(
+        caption.lfQuality.0, 4,
+        "a panel caption is our own text as much as a button caption is"
+    );
+    assert_eq!(
+        caption.lfHeight,
+        (base.lfHeight * 76) / 90,
+        "7,6 pt against 9 pt — the two sizes the mock-ups were drawn with"
+    );
+    assert!(
+        caption.lfHeight < 0,
+        "a height asked for by character height stays negative"
+    );
+    assert_eq!(caption.lfWeight, 700, "FW_BOLD");
+    assert_eq!(
+        caption.lfWeight,
+        i32::try_from(FW_BOLD.0).expect("FW_BOLD fits in an i32"),
+        "and it is the constant the crate names 700 by"
+    );
+    assert_eq!(
+        caption.lfFaceName, base.lfFaceName,
+        "the caption is the dialog's own face, shrunk — never a face named in the module"
+    );
+}
+
+/// **Criterion 10 of T-11-17** — the supersampling factor is a constant, the reduction is
+/// `HALFTONE`, and the `SetBrushOrgEx` the documentation pairs with it is made right after it.
+#[test]
+fn the_smoothing_is_a_named_factor_a_halftone_reduction_and_the_brush_origin_beside_it() {
+    // Four samples each way, sixteen per pixel — the factor `tools\make-icons.ps1` draws at.
+    assert_eq!(settings::SUPERSAMPLE, 4);
+
+    // And a ceiling on what may be enlarged whole, so that a smoothed detail cannot quietly
+    // become a smoothed panel: the largest surface this file can ask for is 256 × 256.
+    assert_eq!(settings::SUPERSAMPLE_MAX_SIDE, 64);
+    assert_eq!(
+        settings::SUPERSAMPLE_MAX_SIDE * settings::SUPERSAMPLE,
+        256,
+        "the widest enlarged surface the module can ask for"
+    );
+
+    let source = settings_module_source();
+
+    // The reduction, and only the reduction, is `HALFTONE`: the enlargement is
+    // `COLORONCOLOR`, because a ground that arrived already smeared would smear the tile.
+    let halftone = product_lines_with("SetStretchBltMode(dc, HALFTONE)");
+    assert_eq!(
+        halftone.len(),
+        1,
+        "the module sets HALFTONE in exactly one place: {halftone:?}"
+    );
+
+    let enlarging = product_lines_with("SetStretchBltMode(dc, COLORONCOLOR)");
+    assert_eq!(
+        enlarging.len(),
+        1,
+        "and replicates, not blends, on the way up: {enlarging:?}"
+    );
+
+    // ⚠ The pairing the documentation demands: `SetBrushOrgEx` **after** the mode is set.
+    let mode_at = source
+        .find("let previous_mode = unsafe { SetStretchBltMode(dc, HALFTONE) };")
+        .expect("the reduction must set HALFTONE on the destination DC");
+    let origin_at = source
+        .find("SetBrushOrgEx(dc, 0, 0, Some(&raw mut previous_origin))")
+        .expect("HALFTONE must be followed by a SetBrushOrgEx — otherwise brushes misalign");
+
+    assert!(
+        origin_at > mode_at,
+        "the brush origin must be set *after* the stretch mode, as the documentation words it"
+    );
+
+    // Both are put back, so the caller's DC leaves as it came.
+    assert!(
+        source.contains("SetBrushOrgEx(dc, previous_origin.x, previous_origin.y, None)"),
+        "the previous brush origin must be restored"
+    );
+    assert!(
+        source.contains("SetStretchBltMode(dc, STRETCH_BLT_MODE(previous_mode))"),
+        "the previous stretch mode must be restored"
+    );
+
+    // No length of an enlarged figure is a multiplication written at the figure: the factor
+    // reaches a drawing through `Canvas`, which is the one place it is applied.
+    for through_the_canvas in ["(x - self.origin_x) * SUPERSAMPLE", "pixels * SUPERSAMPLE"] {
+        assert!(
+            source.contains(through_the_canvas),
+            "`{through_the_canvas}` — the factor must reach a drawing through `Canvas`"
+        );
+    }
+}
+
+/// **Criterion 11 of T-11-17** — every GDI object this task added is owned by a value with a
+/// `Drop`, and no handle is used before it is examined.
+#[test]
+fn every_surface_picture_and_face_of_this_task_is_owned_and_freed_in_drop() {
+    let source = settings_module_source();
+
+    // The three owners this task added, beside the two the module already had.
+    for owner in [
+        "impl Drop for Supersample {",
+        "impl Drop for BackgroundCache {",
+        "impl Drop for DialogFonts {",
+    ] {
+        assert!(
+            source.contains(owner),
+            "`{owner}` — the owner must free its own"
+        );
+    }
+
+    // The one DIB section of the module is the enlarged surface, and it is examined both ways
+    // the call can decline — an `Err` and an invalid handle.
+    let sections = product_lines_with("CreateDIBSection(");
+    assert_eq!(
+        sections.len(),
+        1,
+        "the enlarged surface is the one DIB section of the module: {sections:?}"
+    );
+    assert!(
+        source.contains("let Ok(bitmap) = created else {"),
+        "a refused DIB section must be examined (NFR-13)"
+    );
+    assert!(
+        source.contains("if bitmap.is_invalid() {"),
+        "and so must an invalid handle from a call that answered `Ok`"
+    );
+
+    // Every memory DC and every bitmap of the module is bound to a name the line after it is
+    // made, which is where it is examined — never used inline.
+    for made in ["CreateCompatibleDC(", "CreateCompatibleBitmap("] {
+        for line in product_lines_with(made) {
+            assert!(
+                line.starts_with("let ") && line.contains("unsafe {"),
+                "`{line}` — a handle must be bound and examined, never used inline"
+            );
+        }
+    }
+    assert!(
+        source.contains("if dc.is_invalid() {"),
+        "a refused memory DC must be examined (NFR-13)"
+    );
+
+    // The bitmap a memory DC was born with is kept and put back before ours is deleted — a
+    // bitmap still selected into a DC cannot be freed.
+    assert_eq!(
+        product_lines_with("unsafe { SelectObject(self.dc, self.previous) };").len(),
+        2,
+        "both owners of a bitmap must deselect before they delete"
+    );
+
+    // And the face that used to be made and deleted on every erase is an owned pair now.
+    assert!(
+        !source.contains("fn caption_font("),
+        "`caption_font` made a face on every WM_ERASEBKGND — the faces are owned since T-11-17"
+    );
+    assert!(
+        source.contains("fn new(hwnd: HWND, control: i32) -> Option<Self> {"),
+        "`DialogFonts::new` must be the one place the two faces are made"
+    );
+}
+
+/// **Criterion 12 of T-11-17** — the background is a picture built once, not eight panels on
+/// every repaint, and the picture is rebuilt when the palette moves.
+#[test]
+fn the_background_is_a_cached_picture_rebuilt_on_a_palette_change() {
+    let source = settings_module_source();
+
+    // The erase handler no longer draws a figure of its own: it decides whether the picture in
+    // hand still fits, hands it over, and paints straight into the DC only when there is none.
+    let erase = function_body(&source, "unsafe fn on_erase_background(");
+
+    assert!(
+        !erase.contains("paint_rounded("),
+        "the erase handler must not round off a figure — that is `paint_background`'s work now"
+    );
+    assert!(
+        erase.contains("picture.show(dc)"),
+        "an erase with a picture in hand must cost one blit"
+    );
+    assert!(
+        erase.contains("BackgroundCache::build("),
+        "and must build one when there is none"
+    );
+
+    // The picture is handed over with one `BitBlt` of the whole client area.
+    assert!(
+        source.contains("BitBlt("),
+        "the picture must be handed over by a blit, not repainted"
+    );
+
+    // The two halves of «still the right picture»: the client size, and the palette by
+    // identity — `theme::resolve` answers `&'static`, and `refresh_palette` is the one place
+    // the answer can change.
+    assert!(
+        source.contains(
+            "self.width == width && self.height == height && std::ptr::eq(self.palette, palette)"
+        ),
+        "the picture must be compared against both the size and the palette it was painted in"
+    );
+
+    // Rebuilt whole and never repainted in place: the assignment drops the stale picture.
+    assert!(
+        source.contains("with_state(hwnd, |state| state.background = built)"),
+        "a stale picture must be replaced by the assignment, which drops it and its GDI objects"
+    );
+}
+
+/// **Criterion 1 of T-11-17, the pure half** — the four corner tiles of a rounded rectangle are
+/// a table, and they are what makes the smoothing affordable.
+#[test]
+fn the_four_corner_tiles_are_the_corners_and_nothing_between_them() {
+    let area = RECT {
+        left: 10,
+        top: 20,
+        right: 360,
+        bottom: 144,
+    };
+
+    // Radius 4 plus a one-pixel frame — the panel of the mock-ups at 96 DPI.
+    let tiles = settings::corner_tiles(&area, 5);
+
+    let corners = [
+        (10, 20, 15, 25),
+        (355, 20, 360, 25),
+        (10, 139, 15, 144),
+        (355, 139, 360, 144),
+    ];
+
+    for (tile, expected) in tiles.iter().zip(corners) {
+        assert_eq!(
+            (tile.left, tile.top, tile.right, tile.bottom),
+            expected,
+            "the tiles are the four corners, in the order top-left, top-right, bottom-left, \
+             bottom-right"
+        );
+    }
+
+    // The cost of the decision, in the numbers the report states: four tiles of 5 × 5 enlarged
+    // four times each way, against the whole 350 × 124 figure enlarged the same way.
+    let enlarged_corners: i32 = tiles
+        .iter()
+        .map(|tile| {
+            (tile.right - tile.left)
+                * settings::SUPERSAMPLE
+                * ((tile.bottom - tile.top) * settings::SUPERSAMPLE)
+        })
+        .sum();
+
+    let enlarged_whole = (area.right - area.left)
+        * settings::SUPERSAMPLE
+        * ((area.bottom - area.top) * settings::SUPERSAMPLE);
+
+    println!(
+        "panel {}×{}: corners {enlarged_corners} px enlarged against {enlarged_whole} px whole \
+         — {} times less",
+        area.right - area.left,
+        area.bottom - area.top,
+        enlarged_whole / enlarged_corners
+    );
+
+    assert!(
+        enlarged_whole / enlarged_corners > 100,
+        "smoothing the corners alone must be orders of magnitude cheaper than the whole figure"
+    );
+}
+
+/// **Criterion 1 of T-11-17, the pure half** — the tile a stroke is smoothed in holds the whole
+/// stroke, pen and all.
+#[test]
+fn the_tile_of_a_stroke_holds_the_pen_around_every_point() {
+    // The three points of a dialog check mark at 96 DPI, with its two-pixel pen.
+    let points = [(3, 6), (5, 8), (9, 4)];
+    let tile = settings::stroke_bounds(&points, 2);
+
+    // Half the pen on each side, and one pixel more for the smoothed edge itself.
+    assert_eq!(
+        (tile.left, tile.top, tile.right, tile.bottom),
+        (1, 2, 11, 10)
+    );
+
+    for (x, y) in points {
+        assert!(
+            x > tile.left && x < tile.right && y > tile.top && y < tile.bottom,
+            "the point ({x}, {y}) must sit inside the tile with room for the pen"
+        );
+    }
+
+    // A thicker pen widens the tile by half of itself on each side.
+    let thick = settings::stroke_bounds(&points, 8);
+    assert_eq!(
+        (thick.left, thick.top, thick.right, thick.bottom),
+        (-2, -1, 14, 13)
+    );
+
+    // No points at all is no tile — and the caller draws nothing either way.
+    let nothing = settings::stroke_bounds(&[], 2);
+    assert_eq!(
+        (nothing.left, nothing.top, nothing.right, nothing.bottom),
+        (0, 0, 0, 0)
+    );
+}
+
+/// **The one deliberate exception of T-11-17** — the rounded square of a layout-list tick keeps
+/// its aliased corner, because `ImageList_AddMasked` makes a hole only of a pixel that is
+/// *exactly* the key colour, and a smoothed corner is a blend of the key and the fill.
+///
+/// The tick itself — the figure the eye reads — is smoothed like every other mark: it is
+/// stroked well inside the fill, where no mask can be harmed.
+#[test]
+fn the_tick_of_the_layout_list_keeps_its_square_aliased_and_smooths_its_mark() {
+    let source = settings_module_source();
+    let body = function_body(&source, "fn draw_check_frame(");
+
+    assert!(
+        body.contains("stroke_rounded("),
+        "the cell drawn over the mask key must take the aliased core"
+    );
+    assert!(
+        !body.contains("paint_rounded("),
+        "a smoothed corner over the key colour would carry a magenta fringe onto every row"
+    );
+    assert!(
+        body.contains("draw_check_mark(dc, &frame, ink, LIST_CHECK_MARK, dpi)"),
+        "the mark itself is smoothed — it is stroked inside the fill, not over the key"
+    );
+}
+
+// -----------------------------------------------------------------------------------------
+// Настоящие пиксели: сглаженный угол против прямой стороны — задача T-11-17, критерий 1
+// -----------------------------------------------------------------------------------------
+//
+// `paint_rounded` needs a DC and nothing else, so the whole of this runs in a memory bitmap:
+// no window is created, no message loop is pumped, and the product is not started.
+
+/// A 32-bit top-down DIB the size of a square, with its memory DC — the ground the figures
+/// below are drawn on. Freed by [`Sheet`]'s own `Drop`, exactly as the module's own surfaces
+/// are.
+struct Sheet {
+    dc: HDC,
+    bitmap: HBITMAP,
+    side: i32,
+}
+
+impl Sheet {
+    fn new(side: i32) -> Self {
+        // SAFETY: a memory DC over the screen, freed in `Drop`.
+        let dc = unsafe { CreateCompatibleDC(None) };
+        assert!(
+            !dc.is_invalid(),
+            "a memory DC must be available to the tests"
+        );
+
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: side,
+                biHeight: -side,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        // SAFETY: `info` lives on this frame and is read by the call; `bits` receives the
+        // address of the pixels and is never followed here — the reading goes through `GetPixel`.
+        let bitmap = unsafe {
+            CreateDIBSection(
+                Some(dc),
+                &raw const info,
+                DIB_RGB_COLORS,
+                &raw mut bits,
+                None,
+                0,
+            )
+        }
+        .expect("the DIB section of the test sheet");
+
+        // SAFETY: both handles are live and ours.
+        unsafe { SelectObject(dc, bitmap.into()) };
+
+        Self { dc, bitmap, side }
+    }
+
+    /// Fills the whole sheet with one colour.
+    fn clear(&self, colour: COLORREF) {
+        let whole = RECT {
+            left: 0,
+            top: 0,
+            right: self.side,
+            bottom: self.side,
+        };
+
+        // SAFETY: the brush is made and freed here; `whole` lives on this frame.
+        unsafe {
+            let brush = CreateSolidBrush(colour);
+            FillRect(self.dc, &whole, brush);
+            let _ = DeleteObject(brush.into());
+        }
+    }
+
+    /// The grey level of one pixel — every colour used here is a grey, so one channel says it.
+    fn grey(&self, x: i32, y: i32) -> i32 {
+        // SAFETY: `self.dc` holds this sheet's bitmap; the coordinates are inside it.
+        (unsafe { GetPixel(self.dc, x, y) }.0 & 0xFF) as i32
+    }
+}
+
+impl Drop for Sheet {
+    fn drop(&mut self) {
+        // SAFETY: both came from the successful calls in `new` and are freed exactly once.
+        unsafe {
+            let _ = DeleteObject(self.bitmap.into());
+            let _ = DeleteDC(self.dc);
+        }
+    }
+}
+
+/// **Criterion 1 of T-11-17, on real pixels** — a smoothed corner meets the aliased straight
+/// edge beside it without a seam, and the frame keeps the width and the position it had.
+///
+/// This is the check the whole `stroke_shift` correction exists for. GDI centres a pen on its
+/// path, and an enlarged odd pen straddles the block boundary of the reduction: without the
+/// correction the one-pixel frame *inside the four corner tiles* comes back spread over two
+/// pixels at roughly half strength, which is a step visible to the naked eye exactly where the
+/// tile ends. With it, the frame inside a tile is the same pixel at the same strength as the
+/// frame outside it, and only the curve itself is smoothed.
+#[test]
+fn a_smoothed_corner_meets_the_straight_edge_without_a_seam() {
+    let ground = COLORREF(0x0020_2020);
+    let fill_colour = COLORREF(0x0080_8080);
+    let ink = COLORREF(0x00FF_FFFF);
+
+    let sheet = Sheet::new(40);
+    sheet.clear(ground);
+
+    // SAFETY: a brush made and freed by this frame, live for every call that uses it.
+    let fill = unsafe { CreateSolidBrush(fill_colour) };
+
+    // The panel of the mock-ups in miniature: a rounded rectangle inset by two pixels, with the
+    // corner radius of `CORNER_RADIUS` at 96 DPI and the one-pixel frame of `BORDER_THICKNESS`.
+    let area = RECT {
+        left: 2,
+        top: 2,
+        right: 38,
+        bottom: 38,
+    };
+
+    settings::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(fill.into()) };
+
+    // The tiles are `radius + thickness` a side, so the straight run of the left edge is
+    // everything between them.
+    let side = 6 + 1;
+    let straight = (area.top + side)..(area.bottom - side);
+
+    for y in straight.clone() {
+        assert_eq!(
+            sheet.grey(area.left, y),
+            0xFF,
+            "the straight left edge must be the untouched one-pixel frame at y = {y}"
+        );
+        assert_eq!(
+            sheet.grey(area.left + 1, y),
+            0x80,
+            "and the fill must start the very next pixel at y = {y}"
+        );
+        assert_eq!(
+            sheet.grey(area.left - 1, y),
+            0x20,
+            "and the ground must be untouched outside it at y = {y}"
+        );
+    }
+
+    // And the rows the corner tiles own, where the arc has already come down onto the straight
+    // edge: the same column, at the same strength. A seam would show here as a frame pixel at
+    // half the ink and a second half-lit one beside it.
+    for y in [area.top + side - 1, area.bottom - side] {
+        let frame = sheet.grey(area.left, y);
+        let outside = sheet.grey(area.left - 1, y);
+
+        println!("tile row y = {y}: outside {outside:#04X}, frame {frame:#04X}");
+
+        assert!(
+            frame > 0xE0,
+            "the frame inside the corner tile must be the same pixel at the same strength as \
+             the frame outside it — got {frame:#04X} at y = {y}, which is the seam \
+             `stroke_shift` exists to close"
+        );
+        assert!(
+            outside < 0x40,
+            "and nothing of the frame may have spilled a pixel outwards — got {outside:#04X} \
+             at y = {y}"
+        );
+    }
+
+    // The curve itself *is* smoothed: somewhere along the arc there are pixels that are neither
+    // ground, nor ink, nor fill — the partial coverage that has no place in an aliased figure.
+    let mut blended = 0;
+
+    for y in area.top..(area.top + side) {
+        for x in area.left..(area.left + side) {
+            let value = sheet.grey(x, y);
+
+            if value != 0x20 && value != 0x80 && value != 0xFF {
+                blended += 1;
+            }
+        }
+    }
+
+    println!(
+        "blended pixels in the top-left corner tile: {blended} of {}",
+        side * side
+    );
+
+    assert!(
+        blended >= 8,
+        "a smoothed corner must carry partial coverage — {blended} blended pixels is a \
+         staircase, not a curve"
+    );
+}
+
+/// **Criterion 1 of T-11-17, the pure half of the correction** — the half-pixel an odd pen
+/// needs, and nothing for an even one.
+#[test]
+fn only_an_odd_pen_takes_the_half_pixel_of_the_enlarged_path() {
+    // One pixel at 96 DPI, three at 250 % — the frame is odd at most scales, which is why the
+    // correction is the difference between a smoothed corner and a seam.
+    assert_eq!(settings::stroke_shift(1), settings::SUPERSAMPLE / 2);
+    assert_eq!(settings::stroke_shift(3), settings::SUPERSAMPLE / 2);
+    assert_eq!(settings::stroke_shift(5), settings::SUPERSAMPLE / 2);
+
+    // An even pen has no centre pixel to lose: enlarged, it lands on the block boundary of its
+    // own accord.
+    assert_eq!(settings::stroke_shift(0), 0);
+    assert_eq!(settings::stroke_shift(2), 0);
+    assert_eq!(settings::stroke_shift(4), 0);
+
+    // Half of one pixel of the window, in the pixels of the enlarged surface.
+    assert_eq!(settings::SUPERSAMPLE / 2, 2);
 }

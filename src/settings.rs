@@ -70,13 +70,16 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontIndirectW,
-    CreatePen, CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE,
-    DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint, FW_BOLD,
-    FillRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject, GetTextExtentPoint32W, HBRUSH, HDC,
-    HFONT, InvalidateRect, LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN, PAINTSTRUCT, PS_SOLID,
-    Polyline, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, RoundRect,
-    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
+    ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, COLORONCOLOR,
+    ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection,
+    CreateFontIndirectW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
+    DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW,
+    Ellipse, EndPaint, ExcludeClipRect, FW_BOLD, FillRect, GetDC, GetDeviceCaps, GetObjectW,
+    GetStockObject, GetTextExtentPoint32W, HALFTONE, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    InvalidateRect, LOGFONTW, LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline,
+    RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect,
+    SRCCOPY, STRETCH_BLT_MODE, SaveDC, SelectObject, SetBkColor, SetBkMode, SetBrushOrgEx,
+    SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -2185,6 +2188,11 @@ pub fn show_dialog(
             // Empty until `WM_INITDIALOG`: the map is geometry of live windows, and there are
             // no windows yet. Filled exactly once — see the field's own documentation.
             panel_children: Vec::new(),
+            // `None` until `WM_INITDIALOG` for the same reason: the faces are made out of the
+            // font the dialog manager gives the window, and there is no window yet.
+            fonts: None,
+            // `None` until the first `WM_ERASEBKGND`, which is where the picture is built.
+            background: None,
         }),
     };
 
@@ -2481,6 +2489,23 @@ struct DialogState<'a> {
     /// palette change: rectangles do not move when colours change, which is why
     /// [`apply_now`] recreates the brushes and leaves this map alone.
     panel_children: Vec<i32>,
+    /// The two faces this dialog sets **its own** text in — FR-92а, task T-11-17.
+    ///
+    /// Owned for as long as the dialog is up and freed in `Drop`, exactly as the brushes are
+    /// and for the same reason: a font selected into a DC must outlive the paint. `None` —
+    /// the dialog font could not be read or the faces could not be made — leaves every
+    /// drawing to the manager's own font, which is what every task before this one drew in
+    /// (NFR-13).
+    fonts: Option<DialogFonts>,
+    /// The whole background of the window, drawn once and kept as a picture — task T-11-17.
+    ///
+    /// `WM_ERASEBKGND` then costs one `BitBlt` instead of eight rounded panels with their
+    /// letter-spaced captions and seven rounded field frames. Rebuilt — not repainted in
+    /// place — when the picture no longer fits the window: another client size, or another
+    /// palette after [`refresh_palette`]. `None` before the first paint and after a refused
+    /// build, which [`on_erase_background`] answers by painting straight into the message's
+    /// DC as it did before this task.
+    background: Option<BackgroundCache>,
 }
 
 /// The dialog procedure of FR-92.
@@ -2522,6 +2547,12 @@ unsafe extern "system" fn dialog_proc(
                     // read here once and never again: rectangles do not move when the
                     // palette changes, so «Применить» has nothing to rebuild.
                     state.panel_children = collect_panel_children(hwnd);
+
+                    // FR-92а, task T-11-17: the two faces this dialog sets its own text in,
+                    // made out of the font the manager gave the window and asked to render
+                    // with grey antialiasing instead of ClearType. Once, here — a face is a
+                    // property of the window, not of a paint — and freed with the state.
+                    state.fonts = DialogFonts::new(hwnd, GROUP_BOXES[0]);
 
                     // FR-92а, task T-11-4: the non-client title bar follows the resolved
                     // palette from the first showing. The client area needs no call — the
@@ -4108,21 +4139,24 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
             let brushes = state.brushes.as_ref()?;
 
-            Some(resolve_button_colors(
-                button_color_roles(control, pressed, disabled),
-                brushes,
-                state.palette,
+            Some((
+                resolve_button_colors(
+                    button_color_roles(control, pressed, disabled),
+                    brushes,
+                    state.palette,
+                ),
+                state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some(colors)) = choice else {
+    let Some(Some((colors, face))) = choice else {
         return 0;
     };
 
     // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
-    // to paint into for the length of this send.
-    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused) }
+    // to paint into for the length of this send; `face` is a face the state owns for longer.
+    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
 
 /// Paints one owner-drawn push button: the rounded face under its single-pixel frame, the
@@ -4144,6 +4178,7 @@ unsafe fn paint_push_button(
     rect: RECT,
     colors: ResolvedButtonColors,
     focused: bool,
+    face: Option<HFONT>,
 ) -> isize {
     // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
     let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
@@ -4160,12 +4195,15 @@ unsafe fn paint_push_button(
     // else the dialog rounds off, since task T-11-16 — and a square `FillRect` under a square
     // `FrameRect` cannot have any. The corners the rounding cuts away keep the erase of
     // `WM_CTLCOLORBTN`, which is the ground the button stands on.
+    let dpi = dc_dpi(dc);
+
     paint_rounded(
         dc,
         &rect,
-        scaled(CORNER_RADIUS, dc_dpi(dc)),
+        scaled(CORNER_RADIUS, dpi),
         colors.border,
         colors.face,
+        dpi,
     );
 
     // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC
@@ -4177,10 +4215,16 @@ unsafe fn paint_push_button(
     if !caption.is_empty() {
         let mut text_rect = rect;
 
+        // Our own face, grey-antialiased — task T-11-17. `None` leaves the manager's own font
+        // in the DC, which is what this drawing used before that task (NFR-13).
+        //
+        // SAFETY: `dc` is the DC of the message and `face` is a live font the window's state
+        // owns for longer than this call; the previous handle is put back below.
+        let previous_face = unsafe { select_face(dc, face) };
+
         // SAFETY: `caption` and `text_rect` are live locals of this frame; the format
         // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption
-        // and writes only pixels of the DC. The dialog's font is already selected into
-        // the DC the manager hands over — no font work here.
+        // and writes only pixels of the DC.
         unsafe {
             DrawTextW(
                 dc,
@@ -4189,6 +4233,10 @@ unsafe fn paint_push_button(
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
             )
         };
+
+        // SAFETY: `previous_face` is what `select_face` answered for this same DC, and
+        // nothing between the two calls selected another font.
+        unsafe { restore_face(dc, previous_face) };
     }
 
     if focused {
@@ -4312,11 +4360,12 @@ unsafe fn draw_combo_item(
             Some((
                 combo_fill_brush(colors.fill, brushes),
                 combo_text_ink(colors.text, palette),
+                state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some((fill, ink))) = choice else {
+    let Some(Some((fill, ink, face))) = choice else {
         return 0;
     };
 
@@ -4383,10 +4432,15 @@ unsafe fn draw_combo_item(
                 bottom: rect.bottom,
             };
 
+            // Our own face, grey-antialiased — task T-11-17.
+            //
+            // SAFETY: `dc` is the DC of the message and `face` is a live font the dialog's
+            // state owns for longer than this call; the previous handle is put back below.
+            let previous_face = unsafe { select_face(dc, face) };
+
             // SAFETY: the slice and `text_rect` are live locals of this frame; the format
             // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
-            // and writes only pixels of the DC. The dialog's font is already selected
-            // into the DC the manager hands over — no font work here.
+            // and writes only pixels of the DC.
             unsafe {
                 DrawTextW(
                     dc,
@@ -4395,6 +4449,9 @@ unsafe fn draw_combo_item(
                     DT_SINGLELINE | DT_VCENTER,
                 )
             };
+
+            // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+            unsafe { restore_face(dc, previous_face) };
         }
     }
 
@@ -4489,11 +4546,12 @@ unsafe fn draw_list_item(
                     ComboFillRole::SelBg => state.palette.sel_bg,
                 },
                 combo_text_ink(colors.text, state.palette),
+                state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some((ground, fill, fill_ink, ink))) = choice else {
+    let Some(Some((ground, fill, fill_ink, ink, face))) = choice else {
         return 0;
     };
 
@@ -4528,6 +4586,7 @@ unsafe fn draw_list_item(
             scaled(LIST_SELECTION_RADIUS, dpi),
             fill_ink,
             fill,
+            dpi,
         );
     }
 
@@ -4575,11 +4634,19 @@ unsafe fn draw_list_item(
                     bottom: rect.bottom,
                 };
 
+                // Our own face, grey-antialiased — task T-11-17.
+                //
+                // SAFETY: `dc` is the DC of the message and `face` is a live font the
+                // dialog's state owns for longer than this call.
+                let previous_face = unsafe { select_face(dc, face) };
+
                 // SAFETY: the slice and `text_rect` are live locals of this frame; the format
                 // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
-                // and writes only pixels of the DC. The dialog's font is already selected
-                // into the DC the manager hands over — no font work here.
+                // and writes only pixels of the DC.
                 unsafe { DrawTextW(dc, &mut buffer[..copied], &mut text_rect, DT_SINGLELINE) };
+
+                // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+                unsafe { restore_face(dc, previous_face) };
             }
         }
     }
@@ -4765,11 +4832,18 @@ unsafe fn draw_glyph_element(
                 GlyphTextRole::TextMuted => palette.text_muted,
             };
 
-            Some((fill, fill_ink, frame, mark, ink))
+            Some((
+                fill,
+                fill_ink,
+                frame,
+                mark,
+                ink,
+                state.fonts.as_ref().map(DialogFonts::text),
+            ))
         })
     };
 
-    let Some(Some((fill, fill_ink, frame, mark, ink))) = choice else {
+    let Some(Some((fill, fill_ink, frame, mark, ink, face))) = choice else {
         return 0;
     };
 
@@ -4806,6 +4880,7 @@ unsafe fn draw_glyph_element(
                 scaled(GLYPH_CORNER_RADIUS, dpi),
                 frame.unwrap_or(fill_ink),
                 fill,
+                dpi,
             );
 
             if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
@@ -4813,7 +4888,7 @@ unsafe fn draw_glyph_element(
             }
         }
         GlyphKind::RadioButton => {
-            paint_ellipse(dc, &glyph, frame, fill);
+            paint_ellipse(dc, &glyph, frame, fill, dpi);
 
             if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
                 // The 4,6 mock-up pixels of the generator; the 7,8 of the dot's own diameter
@@ -4827,7 +4902,7 @@ unsafe fn draw_glyph_element(
                     bottom: glyph.bottom - dot_inset,
                 };
 
-                paint_ellipse(dc, &dot, None, dot_brush);
+                paint_ellipse(dc, &dot, None, dot_brush, dpi);
             }
         }
     }
@@ -4858,10 +4933,18 @@ unsafe fn draw_glyph_element(
             bottom: rect.bottom,
         };
 
+        // Our own face, grey-antialiased — task T-11-17. Selected before the measurement as
+        // well as before the drawing: `DT_CALCRECT` below measures with whatever font the DC
+        // holds, and a cue measured in one face around a caption drawn in another would sit
+        // wrong.
+        //
+        // SAFETY: `dc` is the DC of the message and `face` is a live font the dialog's state
+        // owns for longer than this call; the previous handle is put back below.
+        let previous_face = unsafe { select_face(dc, face) };
+
         // SAFETY: `caption` and `text_rect` are live locals of this frame; the format has
         // no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
-        // writes only pixels of the DC. The dialog's font is already selected into the DC
-        // the manager hands over — no font work here.
+        // writes only pixels of the DC.
         unsafe { DrawTextW(dc, &mut caption, &mut text_rect, DT_VCENTER | DT_SINGLELINE) };
 
         if focused {
@@ -4890,6 +4973,10 @@ unsafe fn draw_glyph_element(
             // this frame; the call keeps no pointer.
             let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
         }
+
+        // SAFETY: `previous_face` is what `select_face` answered for this same DC, and
+        // nothing between the two calls selected another font.
+        unsafe { restore_face(dc, previous_face) };
     }
 
     // TRUE — the element is drawn.
@@ -4909,9 +4996,45 @@ unsafe fn draw_glyph_element(
 /// DC of the state image list, whose own answer to `GetDeviceCaps` is not the DPI the frames
 /// are being built for.
 fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
+    // The two strokes of the generator: down into the corner, long up and out. The three
+    // points are `mark`'s own, measured from the corner of the square through the scale.
+    let points = check_mark_points((glyph.left, glyph.top), mark, dpi);
+    let thickness = scaled_tenths(mark.pen_tenths, dpi);
+
+    // The tile is the mark and nothing else — never the whole glyph. Two reasons, and both
+    // matter: the strokes then blend into the flat interior the square has just been filled
+    // with, and the smoothed corners of that square are not dragged through a second reduction
+    // that would blur what [`paint_rounded`] has already got right. Both marks of the mock-ups
+    // sit well inside their square, so the clamp below never actually cuts anything.
+    let tile = clamped_to(glyph, &stroke_bounds(&points, thickness));
+
+    let smoothed = Supersample::for_tile(tile.right - tile.left, tile.bottom - tile.top)
+        .is_some_and(|surface| {
+            surface.render(dc, &tile, thickness, |canvas| {
+                let enlarged = points.map(|(x, y)| canvas.point(x, y));
+
+                stroke_polyline(canvas.dc, &enlarged, ink, canvas.length(thickness));
+            })
+        });
+
+    if !smoothed {
+        stroke_polyline(dc, &points, ink, thickness);
+    }
+}
+
+/// Strokes a polyline through `points` with a transient pen of `ink` — the aliased core of
+/// [`draw_check_mark`] and of [`draw_combo_chevron`], which are the same two strokes with
+/// different numbers (§6.2: one body, not two copies).
+///
+/// The pen lives for exactly this call: pens are not part of `theme::Brushes` — that owner
+/// exists because `WM_CTLCOLOR*` answers must outlive the paint, which nothing here needs.
+/// Created, selected, drawn with, deselected, deleted; the refusal of `CreatePen` skips the
+/// figure and nothing else (NFR-13: examined; a checked glyph stays a filled square and a combo
+/// box stays a field, both readable, until the next repaint).
+fn stroke_polyline(dc: HDC, points: &[(i32, i32); 3], ink: COLORREF, thickness: i32) {
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
-    let pen = unsafe { CreatePen(PS_SOLID, scaled_tenths(mark.pen_tenths, dpi), ink) };
+    let pen = unsafe { CreatePen(PS_SOLID, thickness, ink) };
 
     if pen.is_invalid() {
         return;
@@ -4921,16 +5044,11 @@ fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i
     // `pen` is the live pen just made. The previous pen is kept and restored below.
     let previous = unsafe { SelectObject(dc, pen.into()) };
 
-    // The two strokes of the generator: down into the corner, long up and out. The three
-    // points are `mark`'s own, measured from the corner of the square through the scale.
-    let [(first_x, first_y), (corner_x, corner_y), (last_x, last_y)] =
-        check_mark_points((glyph.left, glyph.top), mark, dpi);
+    let corners = points.map(|(x, y)| POINT { x, y });
 
-    // SAFETY: plain coordinates into a live DC; no memory of ours is touched. The answers
-    // are dropped for the NFR-13 reason the caller states for all its paint calls.
-    let _ = unsafe { MoveToEx(dc, first_x, first_y, None) };
-    let _ = unsafe { LineTo(dc, corner_x, corner_y) };
-    let _ = unsafe { LineTo(dc, last_x, last_y) };
+    // SAFETY: `corners` is a live local of this frame, read by the call and not retained. The
+    // answer is dropped for the NFR-13 reason the callers state for all their paint calls.
+    let _ = unsafe { Polyline(dc, &corners) };
 
     // SAFETY: `previous` is the pen that was in the DC a moment ago; putting it back ends
     // this function's use of the DC.
@@ -4943,23 +5061,64 @@ fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i
     let _ = unsafe { DeleteObject(pen.into()) };
 }
 
-/// One ellipse with an explicit outline and interior — FR-92а, task T-11-5b.
+/// One ellipse with an explicit outline and interior, smoothed — FR-92а, task T-11-5b,
+/// smoothed whole by task T-11-17.
 ///
 /// `outline` is the ink of a transient pen for the circle of a radio button; `None`
 /// selects the stock `NULL_PEN` — no outline, interior only, which is how the dot is
-/// painted. `fill` is a live brush of the dialog's state. The transient pen is owned for
-/// exactly this call, as in [`draw_check_mark`]; a refused `CreatePen` skips the ellipse
-/// (NFR-13: examined — better no circle for one paint than a circle in whatever pen the
-/// DC happens to hold).
-fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) {
+/// painted. `fill` is a live brush of the dialog's state. `dpi` is the DPI of the window, for
+/// the reason [`paint_rounded`] states.
+///
+/// A circle has no straight part at all, so — unlike a rounded rectangle — it is enlarged
+/// **whole**: both ellipses this dialog draws are a glyph under 24 px a side, which is the
+/// cheap half of the cost rule of this section. A refused surface or a refused blit falls
+/// straight through to [`stroke_ellipse`], the aliased drawing of every task before this one
+/// (NFR-13).
+fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH, dpi: i32) {
+    // The same frame every other figure of the dialog is outlined with — one pixel at
+    // 96 DPI through [`BORDER_THICKNESS`], and it grows with the DPI like the rest of the
+    // mock-up (п. 3 of task T-11-15; the circle of a radio button is framed exactly as the
+    // square of a check box beside it).
+    let thickness = scaled(BORDER_THICKNESS, dpi).max(1);
+
+    // A figure with no pen — the dot of a radio button — is all fill and takes neither the
+    // path correction nor the far-edge one; a stroked circle takes both. See [`Canvas::area`].
+    let pen = if outline.is_some() { thickness } else { 0 };
+
+    let smoothed = Supersample::for_tile(area.right - area.left, area.bottom - area.top)
+        .is_some_and(|surface| {
+            surface.render(dc, area, pen, |canvas| {
+                let enlarged = if outline.is_some() {
+                    canvas.outline(area)
+                } else {
+                    canvas.area(area)
+                };
+
+                stroke_ellipse(
+                    canvas.dc,
+                    &enlarged,
+                    outline,
+                    fill,
+                    canvas.length(thickness),
+                );
+            })
+        });
+
+    if !smoothed {
+        stroke_ellipse(dc, area, outline, fill, thickness);
+    }
+}
+
+/// The aliased core of [`paint_ellipse`] — one `Ellipse` with a transient pen of `outline`
+/// and the interior of `fill`; the body that function had before task T-11-17, with the pen
+/// thickness handed in for the reason [`stroke_rounded`] states.
+///
+/// The transient pen is owned for exactly this call, as in [`draw_check_mark`]; a refused
+/// `CreatePen` skips the ellipse (NFR-13: examined — better no circle for one paint than a
+/// circle in whatever pen the DC happens to hold).
+fn stroke_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH, thickness: i32) {
     let pen = match outline {
         Some(ink) => {
-            // The same frame every other figure of the dialog is outlined with — one pixel at
-            // 96 DPI through [`BORDER_THICKNESS`], and it grows with the DPI like the
-            // rest of the mock-up (п. 3 of task T-11-15; the circle of a radio button is
-            // framed exactly as the square of a check box beside it).
-            let thickness = scaled(BORDER_THICKNESS, dc_dpi(dc)).max(1);
-
             // SAFETY: takes plain values, reads no memory of ours, answers a handle owned
             // by this frame until the `DeleteObject` below.
             let pen = unsafe { CreatePen(PS_SOLID, thickness, ink) };
@@ -5479,29 +5638,6 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
     // to and never read from, and no pointer of the message is followed.
     let dc = HDC(wparam.0 as *mut std::ffi::c_void);
 
-    // SAFETY: see the caller — the pointer was stored on `WM_INITDIALOG` and the value it
-    // names is alive for the whole of this modal call.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            Some(BackgroundColors {
-                window: brushes.window_bg(),
-                panel: brushes.panel_bg(),
-                field: brushes.field_bg(),
-                panel_border: palette.panel_border,
-                field_border: palette.field_border,
-                caption: palette.text_muted,
-            })
-        })
-    };
-
-    let Some(Some(colors)) = choice else {
-        return 0;
-    };
-
     let mut client = RECT::default();
 
     // NFR-13: examined — a refused `GetClientRect` means no rectangle to paint in, and the
@@ -5512,20 +5648,120 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
         return 0;
     }
 
-    // SAFETY: `dc` is the DC of the message, painted into for the length of this send;
-    // `colors.window` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &client, colors.window) };
+    let width = client.right - client.left;
+    let height = client.bottom - client.top;
+
+    // SAFETY: see the caller — the pointer was stored on `WM_INITDIALOG` and the value it
+    // names is alive for the whole of this modal call.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            // Task T-11-17, criterion 12: is the picture in hand still a picture of *this*
+            // window in *this* palette? Both halves are compared before anything is drawn —
+            // the size, because the window may have moved to a screen at another scale, and
+            // the palette by identity, because `theme::resolve` answers `&'static` and
+            // [`refresh_palette`] is the one place it can change.
+            let ready = state
+                .background
+                .as_ref()
+                .is_some_and(|picture| picture.shows(width, height, palette));
+
+            Some((
+                BackgroundColors {
+                    window: brushes.window_bg(),
+                    panel: brushes.panel_bg(),
+                    field: brushes.field_bg(),
+                    panel_border: palette.panel_border,
+                    field_border: palette.field_border,
+                    caption: palette.text_muted,
+                },
+                ready,
+                palette,
+                state.fonts.as_ref().map(DialogFonts::caption),
+            ))
+        })
+    };
+
+    let Some(Some((colors, ready, palette, caption_face))) = choice else {
+        return 0;
+    };
 
     let dpi = dc_dpi(dc);
+
+    if !ready {
+        // Built **outside** every borrow of the state, exactly as the drawing of every other
+        // handler of this file happens outside its own: painting a panel asks the panel for
+        // its caption, and a `GetDlgItemTextW` is a send.
+        //
+        // SAFETY: `dc` is the DC of the message, owned by the manager for the length of this
+        // send and read here only for its colour depth; `hwnd` is the live dialog, and
+        // `caption_face` a face the state owns for longer than this call.
+        let built = unsafe {
+            BackgroundCache::build(hwnd, dc, &client, palette, colors, caption_face, dpi)
+        };
+
+        // The stale picture is dropped by the assignment; a refused build stores `None`, which
+        // the direct painting below answers (NFR-13).
+        //
+        // SAFETY: as for the borrow above.
+        unsafe { with_state(hwnd, |state| state.background = built) };
+    }
+
+    // SAFETY: as above. The blit reads the picture's own memory DC and writes the message's.
+    let shown = unsafe {
+        with_state(hwnd, |state| {
+            state
+                .background
+                .as_ref()
+                .is_some_and(|picture| picture.show(dc))
+        })
+    };
+
+    if shown != Some(true) {
+        // No picture — straight into the DC of the message, which is what this handler did
+        // before task T-11-17 and is still the right answer when GDI will not give a surface.
+        //
+        // SAFETY: `dc` is the DC of the message, painted into for the length of this send,
+        // and `caption_face` is a face the state owns for longer than this call.
+        unsafe { paint_background(hwnd, dc, &client, colors, caption_face, dpi) };
+    }
+
+    // TRUE — the background is drawn; the manager must not erase over it.
+    1
+}
+
+/// The whole background of the dialog, drawn into `dc` — the body [`on_erase_background`] had
+/// before task T-11-17, called now against the picture of [`BackgroundCache`] and, when there
+/// is no picture, against the DC of the message itself.
+///
+/// `area` is the rectangle to fill, in the coordinates the children are measured in:
+/// `GetClientRect` answers from zero, and [`child_rects_in_client`] answers in the same
+/// system, so the picture and the window use one set of numbers.
+///
+/// # Safety
+///
+/// `dc` is painted into for the length of the call and is owned by the caller — the DC of the
+/// message, or the memory DC of a picture the caller keeps alive; `caption_face` is a face
+/// somebody else owns for longer than this call.
+unsafe fn paint_background(
+    hwnd: HWND,
+    dc: HDC,
+    area: &RECT,
+    colors: BackgroundColors,
+    caption_face: Option<HFONT>,
+    dpi: i32,
+) {
+    // SAFETY: `dc` is painted into for the length of this call; `colors.window` is a live
+    // brush of the dialog's state.
+    unsafe { FillRect(dc, area, colors.window) };
+
     let children = child_rects_in_client(hwnd);
 
-    // The caption face: one font for all eight panels, made from the dialog's own font so
-    // that the face and the DPI-scaled size come from the window and not from a literal
-    // here. `None` — the font could not be read or made — costs the captions and nothing
-    // else (NFR-13).
-    let caption_face = caption_font(hwnd);
-
-    // Pass one — the panels. See the doc comment for why they go first.
+    // Pass one — the panels. See the doc comment of `on_erase_background` for why they go
+    // first.
     for (control, rect) in &children {
         if background_figure(*control) != Some(BackgroundFigure::Panel) {
             continue;
@@ -5537,21 +5773,14 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
             scaled(CORNER_RADIUS, dpi),
             colors.panel_border,
             colors.panel,
+            dpi,
         );
 
         if let Some(face) = caption_face {
-            // SAFETY: `dc` is the DC of the message; `face` is the live font made above and
-            // deleted below, after every use of it has ended.
+            // SAFETY: `dc` is the caller's; `face` is a live font the dialog's state owns for
+            // longer than this call, and `draw_panel_caption` puts the previous one back.
             unsafe { draw_panel_caption(hwnd, *control, dc, *rect, colors.caption, dpi, face) };
         }
-    }
-
-    if let Some(face) = caption_face {
-        // SAFETY: `face` was created by `caption_font` above, is selected into no DC any
-        // more — `draw_panel_caption` puts the previous font back before it returns — and
-        // is freed exactly once, here. The `BOOL` is dropped for the reason
-        // `draw_check_mark` gives.
-        let _ = unsafe { DeleteObject(face.into()) };
     }
 
     // Pass two — the fields and lists, one frame's thickness outside each rectangle (п. 2.3
@@ -5591,32 +5820,254 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
             scaled(CORNER_RADIUS, dpi),
             colors.field_border,
             colors.field,
+            dpi,
         );
     }
-
-    // TRUE — the background is drawn; the manager must not erase over it.
-    1
 }
 
-/// The face the panel captions are set in — п. 2.1 of task T-11-13.
+// =========================================================================================
+// Стоимость фона: одна готовая картинка вместо восьми панелей на каждую перерисовку —
+// FR-92а, task T-11-17, criterion 12
+// =========================================================================================
+
+/// The background of the dialog as a finished picture, owned: memory DC and bitmap created
+/// together, freed together in `Drop` — NFR-13.
 ///
-/// Built out of the dialog's **own** font rather than out of a face name written here: the
-/// dialog font is what the template asks for and what the manager already created at the
-/// window's DPI, so taking its `LOGFONTW` and changing two fields — the height to
+/// # Why there is one at all
+///
+/// `WM_ERASEBKGND` arrives on every repaint, and the background of this dialog is not cheap:
+/// eight rounded panels, eight captions set character by character with fractional letter
+/// spacing, seven rounded field frames — and since task T-11-17 every one of those figures
+/// smooths four corners through an off-screen surface. Doing that work again for a repaint
+/// that changed nothing would be paying it for nothing. The picture is built once, and every
+/// later erase is one `BitBlt` of the whole client area.
+///
+/// # When it is rebuilt
+///
+/// Never repainted in place — rebuilt whole, exactly as `theme::Brushes` is, and for the same
+/// reason: a half-updated picture is worse than an old one. [`BackgroundCache::shows`] is the
+/// whole test, and it has two halves:
+///
+/// * the **client size**, because a window that moved to a screen at another scale has other
+///   lengths in it and a picture of the old size would be stretched or clipped;
+/// * the **palette**, by identity — `theme::resolve` answers `&'static`, and
+///   [`refresh_palette`] is the one place in this file the answer can change. A pressed
+///   «Применить» and the system switch flipping under `theme = "system"` both go through it,
+///   both end in [`repaint_after_palette_change`], and the erase that follows finds the
+///   picture painted in the previous palette and builds a new one.
+///
+/// The interface language is deliberately **not** part of the test: the captions come from the
+/// hidden panels ([`draw_panel_caption`] → [`get_text`]), those are written exactly once by
+/// [`localise_dialog`] inside `WM_INITDIALOG`, and FR-94 makes a language change take effect
+/// on the next start — so no caption of an open dialog can change under the picture.
+struct BackgroundCache {
+    /// The memory DC the picture is held in, with `bitmap` selected and ready to blit.
+    dc: HDC,
+    /// The picture itself — compatible with the **window's** DC, not with `dc`: a bitmap
+    /// compatible with a memory DC would be monochrome (the trap `build_check_frames` words).
+    bitmap: HBITMAP,
+    /// The bitmap the fresh memory DC was born with, put back in `Drop` before `bitmap` is
+    /// deleted — a bitmap still selected into a DC cannot be freed.
+    previous: HGDIOBJ,
+    /// Width of the picture, in pixels of the window.
+    width: i32,
+    /// Height of the picture, in pixels of the window.
+    height: i32,
+    /// The palette the picture was painted in — compared by identity, see the type's own
+    /// documentation.
+    palette: &'static theme::Palette,
+}
+
+impl BackgroundCache {
+    /// Makes the surface and paints the background onto it. `None` on every refusal of GDI
+    /// (NFR-13): the caller then paints straight into the DC of the message.
+    ///
+    /// # Safety
+    ///
+    /// `target` is the DC of the window the picture is for — read for its colour depth and
+    /// never written to; `hwnd` is the live dialog whose children are measured, and
+    /// `caption_face` a face the dialog's state owns for longer than this call.
+    unsafe fn build(
+        hwnd: HWND,
+        target: HDC,
+        client: &RECT,
+        palette: &'static theme::Palette,
+        colors: BackgroundColors,
+        caption_face: Option<HFONT>,
+        dpi: i32,
+    ) -> Option<Self> {
+        let width = client.right - client.left;
+        let height = client.bottom - client.top;
+
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+
+        // SAFETY: a memory DC over the window's DC; deleted in `Drop` and on every failing
+        // path below.
+        let dc = unsafe { CreateCompatibleDC(Some(target)) };
+
+        // NFR-13: examined — no DC, no picture.
+        if dc.is_invalid() {
+            return None;
+        }
+
+        // SAFETY: compatible with the *window's* DC — see the field's ⚠ — and owned by this
+        // value until `Drop`.
+        let bitmap = unsafe { CreateCompatibleBitmap(target, width, height) };
+
+        // NFR-13: examined.
+        if bitmap.is_invalid() {
+            // SAFETY: deletes exactly the DC made above, once; nothing of ours is in it.
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // SAFETY: both handles are live and ours; the bitmap the memory DC was born with is
+        // kept and put back in `Drop`.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+
+        // NFR-13: examined — a refused selection would leave the drawing going nowhere.
+        if previous.is_invalid() {
+            // SAFETY: the bitmap is selected into nothing, so it is free to delete; each
+            // handle is freed exactly once.
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        let picture = Self {
+            dc,
+            bitmap,
+            previous,
+            width,
+            height,
+            palette,
+        };
+
+        let area = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+
+        // SAFETY: `picture.dc` holds the bitmap just selected and is alive for as long as
+        // `picture` is; the caller's contract carries `hwnd` and `caption_face`.
+        unsafe { paint_background(hwnd, picture.dc, &area, colors, caption_face, dpi) };
+
+        Some(picture)
+    }
+
+    /// Whether this picture is still a picture of a window this size in this palette.
+    fn shows(&self, width: i32, height: i32, palette: &theme::Palette) -> bool {
+        self.width == width && self.height == height && std::ptr::eq(self.palette, palette)
+    }
+
+    /// Hands the picture to `dc` — the whole of what a repaint costs once the picture exists.
+    ///
+    /// Answers whether it was handed over; `false` (NFR-13) sends the caller to the direct
+    /// painting, so a refused blit is a slow erase and never an unpainted window.
+    fn show(&self, dc: HDC) -> bool {
+        // SAFETY: `dc` is the caller's, painted into for the length of the send it is inside
+        // of; `self.dc` holds this value's own bitmap. Neither call touches memory of ours.
+        unsafe {
+            BitBlt(
+                dc,
+                0,
+                0,
+                self.width,
+                self.height,
+                Some(self.dc),
+                0,
+                0,
+                SRCCOPY,
+            )
+        }
+        .is_ok()
+    }
+}
+
+impl Drop for BackgroundCache {
+    fn drop(&mut self) {
+        // SAFETY: `self.previous` is the bitmap this DC was born with, kept since `build`;
+        // putting it back frees `self.bitmap` to be deleted. The answers are dropped for the
+        // reason `theme::Brushes` gives for its own cleanup — there is no journal row for GDI.
+        unsafe { SelectObject(self.dc, self.previous) };
+
+        // SAFETY: both came from the successful calls in `build`, were handed to nobody, and
+        // are freed exactly once — the type is neither `Copy` nor `Clone`, its fields are
+        // private and never reassigned, and `drop` runs once.
+        let _ = unsafe { DeleteObject(self.bitmap.into()) };
+        let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
+
+// =========================================================================================
+// Серое сглаживание нашего текста — FR-92а, task T-11-17, пункт 2
+// =========================================================================================
+//
+// The second half of the user's decision of 2026-08-22: the text **this file draws itself** is
+// set with `ANTIALIASED_QUALITY` — grey antialiasing — instead of the ClearType the dialog
+// manager's own font asks for. ClearType tints the edge of every stroke red and blue; against
+// the graphite ground of FR-92а that fringe is what `zoom-pairs.png` shows as colour around
+// the live captions, and the mock-ups have none of it because they were drawn with grey
+// coverage.
+//
+// ⚠ **The captions of system controls are not touched and are not a defect.** The five
+// `STATIC` labels, the text inside the five `EDITTEXT` fields and the text a dropped-down list
+// draws for itself are painted by the system with the font the dialog manager created, and
+// this program does not own that font: changing it would mean either creating a face of our
+// own and pushing it onto controls with `WM_SETFONT` — which is a change of the dialog's
+// metrics, not of its smoothing — or reaching for the undocumented, which the decision
+// recorded in `theme-own-draw-decision.md` closed. What this section covers is exactly the
+// text of this file's own drawing: the captions of the nine owner-drawn buttons, the eight
+// panel captions, the rows of both lists, the items and the closed face of the four combo
+// boxes and the captions of the eight glyph elements.
+
+/// The `LOGFONTW` of the dialog's own face, asked to render with grey antialiasing — the pure
+/// half of [`DialogFonts`], and the whole of «наш текст — серое сглаживание».
+///
+/// One field changed and not a byte else: the face, the size, the weight and the character set
+/// are the window's own, because the dialog font is what the template asks for and what the
+/// manager already created at the window's DPI. Pure, so criterion 13 of task T-11-17 is a
+/// test on a `LOGFONTW` and needs no window.
+pub fn antialiased_logfont(base: LOGFONTW) -> LOGFONTW {
+    LOGFONTW {
+        // Grey coverage instead of the manager's ClearType — the ⚠ of this section.
+        lfQuality: ANTIALIASED_QUALITY,
+        ..base
+    }
+}
+
+/// The `LOGFONTW` of a panel caption — п. 2.1 of task T-11-13, with the antialiasing of
+/// task T-11-17 on top.
+///
+/// Three fields changed against the dialog's own face: the height to
 /// [`PANEL_CAPTION_POINTS_TENTHS`] over [`DIALOG_FONT_POINTS_TENTHS`] of what it was (7,6 pt
-/// against 9 pt, the two sizes the mock-ups were drawn with), the weight to bold — keeps the
-/// face and the DPI of the window and copies neither into this file.
+/// against 9 pt, the two sizes the mock-ups were drawn with), the weight to bold, and the
+/// quality — through [`antialiased_logfont`], so there is one place that names the quality and
+/// not two. Pure, like it.
+pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
+    let mut logical = antialiased_logfont(base);
+
+    // `lfHeight` is negative for a font asked for by character height, which is how the
+    // manager creates a `DS_SETFONT` face; the multiplication keeps whichever sign it has.
+    logical.lfHeight = (base.lfHeight * PANEL_CAPTION_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
+    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(base.lfWeight);
+
+    logical
+}
+
+/// The `LOGFONTW` of the font the dialog manager gave one of the window's own controls.
 ///
-/// The font is asked of one of the panels themselves (`WM_GETFONT` through
-/// `SendDlgItemMessageW`, the one way this module sends anything to its own controls): the
-/// dialog manager gives its font to every control it creates, and an invisible control has
-/// it like any other.
+/// The font is asked of a control (`WM_GETFONT` through `SendDlgItemMessageW`, the one way
+/// this module sends anything to its own controls): the dialog manager gives its font to every
+/// control it creates, and an invisible control has it like any other.
 ///
-/// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, a refused
-/// `CreateFontIndirectW`. The captions are then not drawn, which is the degraded-but-alive
-/// answer of NFR-13: the panels are still there and the dialog still opens.
-fn caption_font(hwnd: HWND) -> Option<HFONT> {
-    let font = HFONT(send_to(hwnd, GROUP_BOXES[0], WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
+/// `None` on every refusal — no font on the control, an unreadable `LOGFONTW` (NFR-13).
+fn dialog_logfont(hwnd: HWND, control: i32) -> Option<LOGFONTW> {
+    let font = HFONT(send_to(hwnd, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
 
     // NFR-13: examined. A control with no font of its own answers zero.
     if font.is_invalid() {
@@ -5625,7 +6076,7 @@ fn caption_font(hwnd: HWND) -> Option<HFONT> {
 
     let mut logical = LOGFONTW::default();
 
-    // NFR-13: examined — zero is «this is not a font», and there is nothing to shrink.
+    // NFR-13: examined — zero is «this is not a font», and there is nothing to copy.
     //
     // SAFETY: `font` is the live font just read off the control; the size argument is the
     // size of `logical`, a live local of this frame, so the call cannot write past it.
@@ -5641,22 +6092,121 @@ fn caption_font(hwnd: HWND) -> Option<HFONT> {
         return None;
     }
 
-    // `lfHeight` is negative for a font asked for by character height, which is how the
-    // manager creates a `DS_SETFONT` face; the multiplication keeps whichever sign it has.
-    logical.lfHeight = (logical.lfHeight * PANEL_CAPTION_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
-    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(logical.lfWeight);
+    Some(logical)
+}
 
-    // SAFETY: `logical` is a live local of this frame, fully initialised by `GetObjectW`
-    // above and read by the call; the handle it answers is owned by the caller.
+/// One `HFONT` from a `LOGFONTW`, examined — `None` for a refused `CreateFontIndirectW`.
+fn create_font(logical: LOGFONTW) -> Option<HFONT> {
+    // SAFETY: `logical` is a live local of this frame, read by the call; the handle it answers
+    // is owned by the caller.
     let created = unsafe { CreateFontIndirectW(&raw const logical) };
 
-    // NFR-13: examined — a refused font is no captions, not a caption in whatever face the
-    // DC happens to hold.
+    // NFR-13: examined — a refused font is the manager's own face, not a face nobody looked at.
     if created.is_invalid() {
         return None;
     }
 
     Some(created)
+}
+
+/// The two faces one window sets **its own** text in, owned: created together, freed together
+/// in `Drop` — FR-92а, task T-11-17.
+///
+/// Owned rather than made per paint for the reason `theme::Brushes` gives for the brushes: a
+/// face selected into a DC has to outlive the drawing, and a paint that makes and deletes a
+/// font on every message pays for a face lookup on every message as well. The captions used to
+/// be exactly that — [`on_erase_background`] made and deleted one on every erase — and since
+/// this task both faces are made once, on `WM_INITDIALOG`, and die with the window's state.
+///
+/// # Where it lives — section 6.1
+///
+/// On the UI thread and nowhere else, exactly as `theme::Brushes`: the faces are selected into
+/// DCs by window procedures, the windows of this program live on the UI thread, and GDI objects
+/// are not shared across threads. Nothing enforces the thread beyond the fact that no other
+/// thread ever sees the value.
+struct DialogFonts {
+    /// The dialog's own face with grey antialiasing — button captions, list rows, combo text,
+    /// the captions of the glyph elements.
+    text: HFONT,
+    /// The same face smaller and bolder, for the eight panel captions.
+    caption: HFONT,
+}
+
+impl DialogFonts {
+    /// Both faces out of the font `control` was given, every handle examined.
+    ///
+    /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, either
+    /// `CreateFontIndirectW` declining. The window then draws in the manager's own face, which
+    /// is what it drew in before this task: degraded-but-alive, and the whole loss is the
+    /// smoothing (NFR-13).
+    fn new(hwnd: HWND, control: i32) -> Option<Self> {
+        let base = dialog_logfont(hwnd, control)?;
+
+        let text = create_font(antialiased_logfont(base))?;
+
+        let Some(caption) = create_font(caption_logfont(base)) else {
+            // SAFETY: `text` was created a line above, handed to nobody, and is freed exactly
+            // once here — the failed constructor answers `None` and no `Drop` will run.
+            let _ = unsafe { DeleteObject(text.into()) };
+            return None;
+        };
+
+        Some(Self { text, caption })
+    }
+
+    /// The face of the window's own text, borrowed — the owner frees it, nobody else.
+    fn text(&self) -> HFONT {
+        self.text
+    }
+
+    /// The face of a panel caption, borrowed — the owner frees it, nobody else.
+    fn caption(&self) -> HFONT {
+        self.caption
+    }
+}
+
+impl Drop for DialogFonts {
+    fn drop(&mut self) {
+        for face in [self.text, self.caption] {
+            // SAFETY: each came from a successful `CreateFontIndirectW` in `new` and is freed
+            // exactly once: the type is neither `Copy` nor `Clone`, its fields are private and
+            // never reassigned, and `drop` runs once. Every drawing that selected a face put
+            // the previous one back before it returned, so neither is in a DC any more. The
+            // `BOOL` is dropped for the reason `theme::Brushes` gives for its own cleanup.
+            let _ = unsafe { DeleteObject(face.into()) };
+        }
+    }
+}
+
+/// Selects a face of ours into `dc` for the length of one piece of drawing — task T-11-17.
+///
+/// Answers what was in the DC before, for [`restore_face`] to put back. `None` in, `None`
+/// out: a window whose faces could not be made draws in the manager's own font, which is what
+/// every task before this one drew in (NFR-13).
+///
+/// # Safety
+///
+/// `dc` is painted into for the length of the send the caller is inside of, and `face` is a
+/// live font somebody else owns for longer than the drawing.
+unsafe fn select_face(dc: HDC, face: Option<HFONT>) -> Option<HGDIOBJ> {
+    let face = face?;
+
+    // SAFETY: see the contract above; the previous handle is answered to the caller, which
+    // hands it to `restore_face`.
+    Some(unsafe { SelectObject(dc, face.into()) })
+}
+
+/// Puts back what [`select_face`] took out. `None` — nothing was selected — does nothing.
+///
+/// # Safety
+///
+/// `previous` is the handle [`select_face`] answered for this same DC, and no other selection
+/// happened in between.
+unsafe fn restore_face(dc: HDC, previous: Option<HGDIOBJ>) {
+    if let Some(previous) = previous {
+        // SAFETY: see the contract above.
+        unsafe { SelectObject(dc, previous) };
+    }
 }
 
 /// Draws the caption of one panel, character by character — п. 2.1 of task T-11-13.
@@ -5754,25 +6304,627 @@ unsafe fn draw_panel_caption(
     unsafe { SelectObject(dc, previous_font) };
 }
 
-/// One rounded rectangle with an outline and an interior — FR-92а, tasks T-11-5c and
-/// T-11-13.
+// =========================================================================================
+// Своё сглаживание краёв: сверхдискретизация и уменьшение — FR-92а, task T-11-17
+// =========================================================================================
+//
+// GDI does not smooth an edge. A circle, a check mark, a chevron and the corner of a rounded
+// rectangle therefore leave `Ellipse`, `Polyline` and `RoundRect` as a staircase, while the
+// mock-ups of FR-92а were drawn by an engine that smooths every one of them. The decision of
+// the user (2026-08-22) is to smooth them **with our own hands, on plain GDI** — no second
+// drawing library and no new feature, «программа остаётся самодостаточной» — by the one
+// technique plain GDI has for it, and the same one `tools\make-icons.ps1` already uses: draw
+// the figure enlarged, then average it back down.
+//
+// One piece of a picture is smoothed in three steps, which are [`Supersample::render`]:
+//
+// 1. the ground the figure will stand on is enlarged [`SUPERSAMPLE`] times each way into an
+//    off-screen surface — a plain replication, because enlarging blends nothing;
+// 2. the figure is drawn into that surface at [`SUPERSAMPLE`] times its size, so one pixel of
+//    the window is `SUPERSAMPLE × SUPERSAMPLE` pixels there;
+// 3. the surface goes back with `StretchBlt` in `HALFTONE` mode, which averages the block of
+//    source pixels behind every destination pixel. That average **is** the smoothing: a pixel
+//    the figure covers by a third comes back as a third of the figure's colour over two thirds
+//    of the ground.
+//
+// ⚠ `SetStretchBltMode(HALFTONE)` is documented to require a `SetBrushOrgEx` after it — without
+// one, brushes can misalign and the reduction moirés on some machines. [`Supersample::render`]
+// makes that call, and puts the previous origin and the previous mode back afterwards: the
+// caller's DC leaves exactly as it came.
+//
+// # Стоимость — что смягчается целиком и что только по углам
+//
+// Sixteen times the pixels is sixteen times the work, so **what** is enlarged decides whether
+// this is affordable at all. Two rules, and no third:
+//
+// * a **small glyph** — the circle of a radio button, its dot, either check mark, the chevron
+//   of a combo box — is enlarged **whole**. The largest of them is under 24 px a side even at
+//   150 %, so the surface is under 96 × 96 = 9 216 pixels, and [`SUPERSAMPLE_MAX_SIDE`] is the
+//   ceiling that keeps it that way: a piece larger than that is drawn the old aliased way
+//   rather than dragged through a buffer.
+// * a **rounded rectangle** — panel, field, list frame, button, closed combo box, selection
+//   stripe — is enlarged **at its four corners only**. Enlarging a 350 × 124 panel whole would
+//   ask for 1 400 × 496 = 694 400 pixels, and eight panels on every repaint of the background
+//   is not a cost this dialog may pay. The corner square is `radius + thickness` a side — 5 px
+//   at 96 DPI, 7 at 140 % — so the four of them together are ~100 px enlarged to ~1 600, which
+//   is **four hundred times less** than the whole figure. The straight edges have no staircase
+//   to remove: they are drawn by the same `RoundRect` as before, with the four corner squares
+//   held out of the clip so the smoothed corner is blended into the true ground and not into
+//   an aliased corner drawn a moment earlier.
+//
+// The background of the dialog — the ground, the eight panels with their captions and the
+// seven field frames — is built **once** into a picture and handed over with one `BitBlt`
+// afterwards ([`BackgroundCache`]), so even the corner arithmetic above is paid at the first
+// paint and at a palette change, and not on every `WM_ERASEBKGND`.
+
+/// How many times each way a figure is enlarged before it is averaged back down — the
+/// «кратность сверхдискретизации» of task T-11-17.
+///
+/// Four, not two and not eight: two gives three levels of coverage per pixel and still reads as
+/// a staircase on a shallow curve, eight costs four times as much as four for a difference the
+/// eye does not find on a 12-pixel glyph. Sixteen samples per pixel is the classic choice of
+/// this technique and the one `tools\make-icons.ps1` already draws icons at.
+pub const SUPERSAMPLE: i32 = 4;
+
+/// The largest side, in pixels of the window, a piece may have and still be enlarged whole.
+///
+/// A ceiling and not a preference: `SUPERSAMPLE_MAX_SIDE` squared times `SUPERSAMPLE` squared
+/// is the largest surface this file will ever ask for — 256 × 256 pixels, a quarter of a
+/// megabyte at four bytes each. Everything the dialog smooths whole is far below it (the
+/// tallest glyph is under 24 px at 150 %), so the ceiling never bites in practice; it is there
+/// so that a future caller cannot quietly turn a smoothed detail into a smoothed panel.
+pub const SUPERSAMPLE_MAX_SIDE: i32 = 64;
+
+/// How far the **path** of an enlarged stroke moves so that the stroke lands back on the pixels
+/// the unenlarged one would have covered — the half-pixel of an odd pen, in enlarged pixels.
+///
+/// ⚠ Not decoration, and the one piece of arithmetic without which this whole technique
+/// produces a *seam*. GDI centres a pen on its path, and a pen of even width has no centre
+/// pixel: measured on this machine, a pen `w` wide on a path at `p` covers
+/// `p − w/2 … p + w/2 − 1`. Enlarge a figure by [`SUPERSAMPLE`] and its pen with it, and the
+/// band the enlarged pen covers is no longer the band the plain one covered multiplied by four —
+/// for an odd thickness it straddles the block boundary, and the reduction turns a crisp
+/// one-pixel frame into two half-lit ones. That is invisible while a whole figure is smoothed
+/// and *very* visible where a smoothed corner meets the straight edge [`paint_rounded`] leaves
+/// aliased.
+///
+/// The correction is `SUPERSAMPLE / 2` for an odd thickness and nothing for an even one:
+///
+/// * `t = 1`, path `p` → covers `[p, p]`; enlarged `4p + 2` with pen 4 → covers
+///   `[4p, 4p + 3]`, which is exactly block `p`;
+/// * `t = 2`, path `p` → covers `[p − 1, p]`; enlarged `4p` with pen 8 → covers
+///   `[4p − 4, 4p + 3]`, exactly blocks `p − 1` and `p`.
+///
+/// Pure, and closed by a test that draws both and compares the pixels.
+pub fn stroke_shift(thickness: i32) -> i32 {
+    if thickness % 2 == 0 {
+        0
+    } else {
+        SUPERSAMPLE / 2
+    }
+}
+
+/// The enlarged surface a figure is drawn onto, with the arithmetic that takes a length of the
+/// window into a length of that surface.
+///
+/// Handed to the closure of [`Supersample::render`] so that the drawing inside it never has to
+/// know where the tile sits on the screen: it names the same rectangles and the same points it
+/// would have named on the window, and every one of them goes through this type.
+#[derive(Clone, Copy)]
+struct Canvas {
+    /// The memory DC of the enlarged surface, with its bitmap already selected.
+    dc: HDC,
+    /// Left edge of the tile on the window — the point that is `0` on the surface.
+    origin_x: i32,
+    /// Top edge of the tile on the window — the point that is `0` on the surface.
+    origin_y: i32,
+    /// [`stroke_shift`] of the pen the figure is stroked with — zero for a figure with no pen.
+    shift: i32,
+}
+
+impl Canvas {
+    /// One **path** point of the window on the enlarged surface — the line a pen runs along,
+    /// with the correction of [`stroke_shift`].
+    fn point(&self, x: i32, y: i32) -> (i32, i32) {
+        (
+            (x - self.origin_x) * SUPERSAMPLE + self.shift,
+            (y - self.origin_y) * SUPERSAMPLE + self.shift,
+        )
+    }
+
+    /// One rectangle of a **stroked** figure — `RoundRect` and `Ellipse` — on the enlarged
+    /// surface.
+    ///
+    /// ⚠ `right` and `bottom` are exclusive on both sides of the conversion, but the path they
+    /// name is one short of them: a figure given `(L, T, R, B)` is bounded by
+    /// `L … R − 1`. So the far edge is converted as the path it is and turned back into an
+    /// exclusive coordinate afterwards — multiplying `R` outright would put the far edge a
+    /// quarter of a pixel wrong and re-open the seam [`stroke_shift`] exists to close.
+    ///
+    /// The rectangle may well fall outside the surface — a corner tile is drawn by naming the
+    /// **whole** figure and letting GDI clip it to the 20-odd pixels the tile holds, which is
+    /// the whole reason a corner comes out of the same `RoundRect` as the figure it belongs to.
+    fn outline(&self, area: &RECT) -> RECT {
+        let (left, top) = self.point(area.left, area.top);
+        let (right, bottom) = self.point(area.right - 1, area.bottom - 1);
+
+        RECT {
+            left,
+            top,
+            right: right + 1,
+            bottom: bottom + 1,
+        }
+    }
+
+    /// One rectangle of a figure with **no pen** — the dot of a radio button, whose whole edge
+    /// is the fill. A fill has no path to centre anything on, so the plain multiplication is
+    /// the right conversion here and the corrections above would shrink the figure.
+    fn area(&self, area: &RECT) -> RECT {
+        RECT {
+            left: (area.left - self.origin_x) * SUPERSAMPLE,
+            top: (area.top - self.origin_y) * SUPERSAMPLE,
+            right: (area.right - self.origin_x) * SUPERSAMPLE,
+            bottom: (area.bottom - self.origin_y) * SUPERSAMPLE,
+        }
+    }
+
+    /// One length of the window on the enlarged surface — a radius, a pen thickness.
+    fn length(&self, pixels: i32) -> i32 {
+        pixels * SUPERSAMPLE
+    }
+}
+
+/// An off-screen surface [`SUPERSAMPLE`] times the size of the piece being smoothed, owned:
+/// memory DC and DIB section created together, freed together in `Drop` — NFR-13.
+///
+/// One value is made per figure and used for each of its pieces in turn: a rounded rectangle
+/// has four corners and makes one surface, not four. Nothing here is cached between figures —
+/// a `CreateCompatibleDC` and a `CreateDIBSection` of a few kilobytes are cheap beside the
+/// enlarged drawing itself, and a surface kept alive between paints would be a GDI object held
+/// for as long as the dialog is up in exchange for nothing.
+struct Supersample {
+    /// The memory DC the enlarged figure is drawn through.
+    dc: HDC,
+    /// The 32-bit top-down DIB section selected into `dc`.
+    bitmap: HBITMAP,
+    /// The bitmap the fresh memory DC was born with — put back before `bitmap` is deleted,
+    /// because a bitmap still selected into a DC cannot be freed.
+    previous: HGDIOBJ,
+    /// Width of the surface, in its own enlarged pixels.
+    width: i32,
+    /// Height of the surface, in its own enlarged pixels.
+    height: i32,
+}
+
+impl Supersample {
+    /// The surface for a tile `width` × `height` pixels **of the window**.
+    ///
+    /// `None` for a tile of nothing, for a tile past [`SUPERSAMPLE_MAX_SIDE`] — the cost
+    /// ceiling — and for every refusal of GDI (NFR-13): the caller then draws the figure the
+    /// aliased way it drew it before this task, which is degraded-but-alive in the exact sense
+    /// of the requirement.
+    fn for_tile(width: i32, height: i32) -> Option<Self> {
+        if width <= 0
+            || height <= 0
+            || width > SUPERSAMPLE_MAX_SIDE
+            || height > SUPERSAMPLE_MAX_SIDE
+        {
+            return None;
+        }
+
+        Self::new(width * SUPERSAMPLE, height * SUPERSAMPLE)
+    }
+
+    /// The surface itself, `width` × `height` of its **own** pixels. Every handle examined.
+    fn new(width: i32, height: i32) -> Option<Self> {
+        // SAFETY: a memory DC over the screen — no reference DC of ours is needed, and one
+        // taken from a window would tie this surface to a window it does not belong to. It is
+        // deleted in `Drop`, and on every failing path below.
+        let dc = unsafe { CreateCompatibleDC(None) };
+
+        // NFR-13: examined — no DC, no surface.
+        if dc.is_invalid() {
+            return None;
+        }
+
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                // Negative — the rows run top down, so a coordinate on this surface means what
+                // it means on the window and the figure is not drawn upside down.
+                biHeight: -height,
+                biPlanes: 1,
+                // Thirty-two bits, so the averaging of `HALFTONE` has full colour to average
+                // and the reduction cannot dither. ⚠ A bitmap compatible with a *memory* DC
+                // would be monochrome — the classic trap `build_check_frames` words as well.
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+
+        // SAFETY: `info` is a fully initialised header living on this frame and read by the
+        // call; `bits` receives the address of the pixels the section owns, and nothing here
+        // ever follows it — every drawing goes through the DC. `DIB_RGB_COLORS` needs no
+        // palette, so no colour table is read past the header.
+        let created = unsafe {
+            CreateDIBSection(
+                Some(dc),
+                &raw const info,
+                DIB_RGB_COLORS,
+                &raw mut bits,
+                None,
+                0,
+            )
+        };
+
+        // NFR-13: examined, both ways the call can decline.
+        let Ok(bitmap) = created else {
+            // SAFETY: deletes exactly the DC created above, once; nothing of ours is selected
+            // into it.
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        };
+
+        if bitmap.is_invalid() {
+            // SAFETY: as above.
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // SAFETY: both handles are live and ours; the bitmap the memory DC was born with is
+        // kept and put back in `Drop`.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+
+        // NFR-13: examined — a refused selection means an empty DC, and drawing into one
+        // would silently produce nothing.
+        if previous.is_invalid() {
+            // SAFETY: the bitmap was selected into nothing, so it is free to delete; the DC is
+            // deleted after it, exactly once each.
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // Enlarging *into* this surface must replicate and not blend — the ground is carried
+        // up so the figure can be blended into it on the way down, and a ground that arrived
+        // already smeared would smear the whole tile. NFR-13: the previous mode is answered and
+        // deliberately dropped — this DC is one line old and nobody else can hold its mode.
+        unsafe { SetStretchBltMode(dc, COLORONCOLOR) };
+
+        Some(Self {
+            dc,
+            bitmap,
+            previous,
+            width,
+            height,
+        })
+    }
+
+    /// Draws `figure` into `tile` of `dc`, smoothed — the three steps of this section.
+    ///
+    /// `thickness` is the pen the figure is stroked with, in pixels of the **window**: it is
+    /// what [`stroke_shift`] needs, and handing it in here is what keeps every drawing closure
+    /// from having to remember the correction. Zero for a figure with no pen at all.
+    ///
+    /// Answers whether the tile was painted. `false` — a refused blit, a tile larger than the
+    /// surface — leaves the tile exactly as it was, and the caller falls back to the aliased
+    /// drawing (NFR-13).
+    fn render(&self, dc: HDC, tile: &RECT, thickness: i32, figure: impl FnOnce(Canvas)) -> bool {
+        let width = tile.right - tile.left;
+        let height = tile.bottom - tile.top;
+
+        if width <= 0 || height <= 0 {
+            return false;
+        }
+
+        let enlarged_width = width * SUPERSAMPLE;
+        let enlarged_height = height * SUPERSAMPLE;
+
+        if enlarged_width > self.width || enlarged_height > self.height {
+            return false;
+        }
+
+        // 1. The ground, enlarged. `COLORONCOLOR` was set on this DC when it was made, so the
+        // pixels are replicated and not blended.
+        //
+        // SAFETY: both DCs are live — `dc` is the caller's, painted into for the length of the
+        // send it is inside of, and `self.dc` holds our own bitmap. Neither call touches memory
+        // of this process.
+        let enlarged = unsafe {
+            StretchBlt(
+                self.dc,
+                0,
+                0,
+                enlarged_width,
+                enlarged_height,
+                Some(dc),
+                tile.left,
+                tile.top,
+                width,
+                height,
+                SRCCOPY,
+            )
+        };
+
+        // NFR-13: examined — without the ground there is nothing to blend into, and the
+        // aliased fallback of the caller is the honest answer.
+        if !enlarged.as_bool() {
+            return false;
+        }
+
+        // 2. The figure, at `SUPERSAMPLE` times its size, on a canvas that already carries the
+        // path correction its pen needs — see [`stroke_shift`].
+        figure(Canvas {
+            dc: self.dc,
+            origin_x: tile.left,
+            origin_y: tile.top,
+            shift: stroke_shift(thickness),
+        });
+
+        // 3. Back down, averaging. ⚠ `HALFTONE` and the `SetBrushOrgEx` the documentation pairs
+        // with it — see the ⚠ of this section. Both the mode and the origin the caller had are
+        // restored below, so this function leaves no trace on the caller's DC.
+        //
+        // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC.
+        let previous_mode = unsafe { SetStretchBltMode(dc, HALFTONE) };
+
+        let mut previous_origin = POINT::default();
+
+        // SAFETY: `previous_origin` is a live local of this frame, written by the call and
+        // read by nobody else; the call keeps no pointer. NFR-13: the `BOOL` is examined in
+        // words and dropped — a refusal would mean a dead DC, which the send this paint is
+        // inside of makes unreachable.
+        let _ = unsafe { SetBrushOrgEx(dc, 0, 0, Some(&raw mut previous_origin)) };
+
+        // SAFETY: as for the enlargement above, with the two DCs the other way round.
+        let reduced = unsafe {
+            StretchBlt(
+                dc,
+                tile.left,
+                tile.top,
+                width,
+                height,
+                Some(self.dc),
+                0,
+                0,
+                enlarged_width,
+                enlarged_height,
+                SRCCOPY,
+            )
+        };
+
+        // SAFETY: puts back the origin read a few lines above; `None` asks for no read-back.
+        let _ = unsafe { SetBrushOrgEx(dc, previous_origin.x, previous_origin.y, None) };
+
+        // Zero is «the mode could not be read», and there is then nothing to put back.
+        if previous_mode != 0 {
+            // SAFETY: as for the call that changed it.
+            unsafe { SetStretchBltMode(dc, STRETCH_BLT_MODE(previous_mode)) };
+        }
+
+        // NFR-13: examined — the caller repaints the tile the aliased way if this refused.
+        reduced.as_bool()
+    }
+}
+
+impl Drop for Supersample {
+    fn drop(&mut self) {
+        // SAFETY: `self.previous` is the bitmap this DC was born with, kept since `new`;
+        // putting it back frees `self.bitmap` to be deleted. The answer is dropped — there is
+        // nothing to put back if the DC is already gone, and this path carries no journal row
+        // for the reason `theme::Brushes` gives for its own cleanup.
+        unsafe { SelectObject(self.dc, self.previous) };
+
+        // SAFETY: both came from the successful calls in `new`, were handed to nobody, and are
+        // freed exactly once — the type is neither `Copy` nor `Clone`, its fields are private
+        // and never reassigned, and `drop` runs once.
+        let _ = unsafe { DeleteObject(self.bitmap.into()) };
+        let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
+
+/// The four corner squares of a rounded rectangle, `side` pixels each — the tiles
+/// [`paint_rounded`] smooths, and the pure half of its cost decision.
+///
+/// In the order top-left, top-right, bottom-left, bottom-right. Pure, so the geometry of the
+/// four is one table a test can read without a window.
+pub fn corner_tiles(area: &RECT, side: i32) -> [RECT; 4] {
+    [
+        RECT {
+            left: area.left,
+            top: area.top,
+            right: area.left + side,
+            bottom: area.top + side,
+        },
+        RECT {
+            left: area.right - side,
+            top: area.top,
+            right: area.right,
+            bottom: area.top + side,
+        },
+        RECT {
+            left: area.left,
+            top: area.bottom - side,
+            right: area.left + side,
+            bottom: area.bottom,
+        },
+        RECT {
+            left: area.right - side,
+            top: area.bottom - side,
+            right: area.right,
+            bottom: area.bottom,
+        },
+    ]
+}
+
+/// The rectangle a polyline through `points` covers when it is stroked with a pen `thickness`
+/// pixels wide — the tile a check mark and a chevron are smoothed in.
+///
+/// Half the pen reaches past a point on each side, and one pixel more is added for the smoothed
+/// edge itself: a stroke that ends exactly on the tile's edge would have nothing to fade into
+/// there. Pure, and answered as an empty rectangle for no points at all — a figure with no
+/// points has no tile, and the caller draws nothing either way.
+pub fn stroke_bounds(points: &[(i32, i32)], thickness: i32) -> RECT {
+    let Some((first_x, first_y)) = points.first().copied() else {
+        return RECT::default();
+    };
+
+    let margin = thickness / 2 + 1;
+
+    let mut bounds = RECT {
+        left: first_x,
+        top: first_y,
+        right: first_x,
+        bottom: first_y,
+    };
+
+    for (x, y) in points {
+        bounds.left = bounds.left.min(*x);
+        bounds.top = bounds.top.min(*y);
+        bounds.right = bounds.right.max(*x);
+        bounds.bottom = bounds.bottom.max(*y);
+    }
+
+    RECT {
+        left: bounds.left - margin,
+        top: bounds.top - margin,
+        right: bounds.right + margin,
+        bottom: bounds.bottom + margin,
+    }
+}
+
+/// One rectangle held inside another — the tile of a mark, kept inside the glyph it belongs to.
+fn clamped_to(area: &RECT, bounds: &RECT) -> RECT {
+    RECT {
+        left: area.left.max(bounds.left),
+        top: area.top.max(bounds.top),
+        right: area.right.min(bounds.right),
+        bottom: area.bottom.min(bounds.bottom),
+    }
+}
+
+/// One rounded rectangle with an outline and an interior, its four corners smoothed —
+/// FR-92а, tasks T-11-5c and T-11-13, smoothed by task T-11-17.
 ///
 /// `radius` is the corner radius in pixels of the window, already scaled by
 /// [`scaled`]; `RoundRect` takes the *diameter* of the corner ellipse, and doubling it is
-/// this function's business so that [`CORNER_RADIUS`] reads as the mock-ups describe it.
+/// [`stroke_rounded`]'s business so that [`CORNER_RADIUS`] reads as the mock-ups describe it.
 ///
 /// `outline` is the ink of a transient pen for the single-pixel frame; `fill` is a live
-/// brush of the dialog's state. `RoundRect` draws both at once — frame with the selected
-/// pen, interior with the selected brush — which is why this looks like [`paint_ellipse`]
-/// with a different figure. The transient pen is owned for exactly this call, as there; a
-/// refused `CreatePen` skips the figure (NFR-13: examined — better no panel for one paint
-/// than a panel framed in whatever pen the DC happens to hold).
-fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBRUSH) {
+/// brush of the dialog's state. `dpi` is the DPI of the **window**, passed in rather than read
+/// off the DC: since task T-11-17 the background of the dialog is built in a memory DC, whose
+/// own answer to `GetDeviceCaps` is not the DPI the figure is being drawn for.
+///
+/// # What is smoothed, and what is not
+///
+/// The four corners only — the cost rule of this section. The straight edges have no staircase
+/// to remove and keep the one `RoundRect` they always had; the corner squares are held out of
+/// its clip while it runs, so each smoothed corner is blended into the true ground under the
+/// figure and not into an aliased corner drawn a moment before. Every refusal on the smoothing
+/// path — a refused surface, a refused blit, a rectangle too small to hold four corner squares —
+/// leaves the figure exactly as this function drew it before task T-11-17 (NFR-13).
+///
+/// Public for the reason [`check_cell`] and [`combo_chevron_points`] are: a test draws it into
+/// a memory bitmap and reads the pixels back, which is how «шов между сглаженным углом и прямой
+/// стороной» is held closed without a window and without starting the product.
+pub fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBRUSH, dpi: i32) {
     // The frame of the mock-ups is [`BORDER_THICKNESS`] of their own pixels — one pixel
     // at 96 DPI, which is the pen this call has always made (п. 3 of task T-11-15), and two
     // at 125 % rather than the lonely hairline a bare `1` would have kept drawing.
-    let thickness = scaled(BORDER_THICKNESS, dc_dpi(dc)).max(1);
+    let thickness = scaled(BORDER_THICKNESS, dpi).max(1);
 
+    // The corner square holds the whole curve and the frame that runs around it.
+    let side = radius + thickness;
+
+    // A figure too small to hold four of them is drawn whole and aliased: two overlapping
+    // tiles would smooth one corner into another.
+    let smoothed = radius > 0 && side * 2 <= (area.right - area.left).min(area.bottom - area.top);
+
+    if !smoothed {
+        stroke_rounded(dc, area, radius, thickness, outline, fill);
+        return;
+    }
+
+    let tiles = corner_tiles(area, side);
+
+    // The straight part, with the four corners held back. `SaveDC` is what puts the clip
+    // region back afterwards — the caller's DC leaves as it came.
+    //
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of; the call
+    // takes no memory of ours.
+    let saved = unsafe { SaveDC(dc) };
+
+    // NFR-13: examined. Zero is «the state could not be saved», and the honest answer is to
+    // draw the whole figure and smooth the corners over it — a corner blended into an aliased
+    // corner instead of into the ground, which is still nearer the mock-up than no smoothing.
+    if saved != 0 {
+        for tile in &tiles {
+            // NFR-13: the region type is answered and deliberately dropped — every outcome,
+            // including an empty region, leaves a clip this drawing is correct under.
+            //
+            // SAFETY: `dc` is the live DC and the four numbers are plain values.
+            let _ = unsafe { ExcludeClipRect(dc, tile.left, tile.top, tile.right, tile.bottom) };
+        }
+    }
+
+    stroke_rounded(dc, area, radius, thickness, outline, fill);
+
+    if saved != 0 {
+        // SAFETY: `saved` is the state this function pushed a few lines above, and nothing
+        // between the two calls pushed another.
+        let _ = unsafe { RestoreDC(dc, saved) };
+    }
+
+    // The four corners, each drawn at `SUPERSAMPLE` times its size and averaged back down. One
+    // surface for the four: the tiles are the same size, and a figure that made four would pay
+    // four `CreateDIBSection`s for nothing.
+    let Some(surface) = Supersample::for_tile(side, side) else {
+        return;
+    };
+
+    for tile in &tiles {
+        // The **whole** figure is named inside the tile and GDI clips it: a corner drawn by the
+        // same `RoundRect` as the figure it belongs to cannot disagree with it by a pixel.
+        surface.render(dc, tile, thickness, |canvas| {
+            stroke_rounded(
+                canvas.dc,
+                &canvas.outline(area),
+                canvas.length(radius),
+                canvas.length(thickness),
+                outline,
+                fill,
+            );
+        });
+    }
+}
+
+/// The aliased core of [`paint_rounded`]: one `RoundRect` with a transient pen of `outline`
+/// and the interior of `fill` — the body this function had before task T-11-17, with the pen
+/// thickness handed in.
+///
+/// `RoundRect` draws both at once — frame with the selected pen, interior with the selected
+/// brush — which is why this looks like [`stroke_ellipse`] with a different figure. The pen is
+/// owned for exactly this call, as there; a refused `CreatePen` skips the figure (NFR-13:
+/// examined — better no panel for one paint than a panel framed in whatever pen the DC happens
+/// to hold).
+///
+/// Called twice per smoothed figure with two different scales: once on the window, once on the
+/// enlarged surface of [`Supersample`], where every length has been multiplied by
+/// [`SUPERSAMPLE`]. That is the whole reason `thickness` is a parameter and not a `scaled`
+/// call inside.
+fn stroke_rounded(
+    dc: HDC,
+    area: &RECT,
+    radius: i32,
+    thickness: i32,
+    outline: COLORREF,
+    fill: HBRUSH,
+) {
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
     let pen = unsafe { CreatePen(PS_SOLID, thickness, outline) };
@@ -6107,11 +7259,12 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
                 match roles.chevron {
                     ComboChevronRole::TextMuted => palette.text_muted,
                 },
+                state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some((ground, fill, border, ink, chevron_ink))) = choice else {
+    let Some(Some((ground, fill, border, ink, chevron_ink, face))) = choice else {
         return;
     };
 
@@ -6127,7 +7280,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
     // `ground` is a live brush of the dialog's state.
     unsafe { FillRect(dc, &area, ground) };
 
-    paint_rounded(dc, &area, scaled(CORNER_RADIUS, dpi), border, fill);
+    paint_rounded(dc, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
 
     // 2. The chevron, in place of the system button.
     let chevron = combo_chevron_points(&area, dpi);
@@ -6143,16 +7296,23 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         // SAFETY: as above.
         unsafe { SetTextColor(dc, ink) };
 
-        // The control's own font, for the length of the drawing — see the doc comment.
-        let font = HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
+        // The face for the length of the drawing — see the doc comment. Since task T-11-17 it
+        // is the dialog's own grey-antialiased face; the control's own font, which the manager
+        // created and renders with ClearType, is the fallback for a window whose faces could
+        // not be made (NFR-13).
+        let font = match face {
+            Some(face) => face,
+            None => HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void),
+        };
 
         // NFR-13: examined. A control with no font of its own answers zero, and the stock
         // font of the DC is then the degraded-but-alive answer.
         let previous_font = if font.is_invalid() {
             None
         } else {
-            // SAFETY: `dc` is the DC of this paint and `font` is the live font of the
-            // control, owned by the manager; the previous handle is put back below.
+            // SAFETY: `dc` is the DC of this paint and `font` is either a live face the
+            // dialog's state owns for longer than this call or the live font of the control,
+            // owned by the manager; the previous handle is put back below.
             Some(unsafe { SelectObject(dc, font.into()) })
         };
 
@@ -6295,39 +7455,30 @@ pub fn combo_chevron_points(area: &RECT, dpi: i32) -> [(i32, i32); 3] {
     ]
 }
 
-/// Strokes the chevron with a transient pen of `ink` — the drawing half of
-/// [`combo_chevron_points`].
+/// Strokes the chevron with a transient pen of `ink`, smoothed — the drawing half of
+/// [`combo_chevron_points`], smoothed whole by task T-11-17.
 ///
-/// The pen lives for exactly this call, as in [`draw_check_mark`] and [`paint_ellipse`]: pens
-/// are not part of `theme::Brushes`, whose members exist because a `WM_CTLCOLOR*` answer must
-/// outlive the paint. A refused `CreatePen` skips the chevron and nothing else (NFR-13: the
-/// field is still drawn, still opens on a click, and simply carries no hint for one paint).
+/// Two shallow diagonals are exactly the figure GDI draws worst: without smoothing the arms of
+/// the mock-up's chevron come out notched, which is the defect `zoom-pairs.png` shows on the
+/// `combo-source` row. The figure is a dozen pixels across, so it is enlarged whole — the
+/// cheap half of the cost rule; a refused surface or blit falls through to the aliased stroke
+/// of every task before this one (NFR-13: the field is still drawn, still opens on a click).
 fn draw_combo_chevron(dc: HDC, points: [(i32, i32); 3], ink: COLORREF, dpi: i32) {
-    // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
-    // frame until the `DeleteObject` below.
-    let pen = unsafe { CreatePen(PS_SOLID, scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi), ink) };
+    let thickness = scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi);
+    let tile = stroke_bounds(&points, thickness);
 
-    if pen.is_invalid() {
-        return;
+    let smoothed = Supersample::for_tile(tile.right - tile.left, tile.bottom - tile.top)
+        .is_some_and(|surface| {
+            surface.render(dc, &tile, thickness, |canvas| {
+                let enlarged = points.map(|(x, y)| canvas.point(x, y));
+
+                stroke_polyline(canvas.dc, &enlarged, ink, canvas.length(thickness));
+            })
+        });
+
+    if !smoothed {
+        stroke_polyline(dc, &points, ink, thickness);
     }
-
-    // SAFETY: `dc` is painted into for the length of the paint this call is inside of; `pen`
-    // is the live pen just made. The previous pen is restored below.
-    let previous = unsafe { SelectObject(dc, pen.into()) };
-
-    let points = points.map(|(x, y)| POINT { x, y });
-
-    // SAFETY: `points` is a live local of this frame, read by the call and not retained. The
-    // answer is dropped for the NFR-13 reason every paint call of this file drops its own.
-    let _ = unsafe { Polyline(dc, &points) };
-
-    // SAFETY: `previous` is the pen that was in the DC a moment ago; putting it back ends this
-    // function's use of the DC.
-    unsafe { SelectObject(dc, previous) };
-
-    // SAFETY: `pen` was created above, deselected the line before, and freed exactly once,
-    // here. The `BOOL` is dropped — see `draw_check_mark`.
-    let _ = unsafe { DeleteObject(pen.into()) };
 }
 
 /// The five input fields of the dialog — the ones [`set_field_margins`] gives the text inset
@@ -7742,10 +8893,20 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: Chec
     // frame, exactly as the glyph of a dialog check box is drawn: a square `FillRect` under a
     // square `FrameRect` cannot have a corner radius at all, and the frameless cell — the
     // checked one, whose accent fill covers it whole — is outlined in its own fill.
-    paint_rounded(
+    //
+    // ⚠ [`stroke_rounded`] and **not** [`paint_rounded`]: this cell is drawn over
+    // [`CHECK_CELL_KEY`], and `ImageList_AddMasked` makes a hole of every pixel that is
+    // *exactly* that colour. A smoothed corner is a blend of the key and the fill — no longer
+    // the key, so no longer a hole — and the tick would carry a magenta fringe on every row.
+    // The corner it costs is [`LIST_CHECK_CORNER_RADIUS`] — one pixel at 96 DPI, two at 140 % —
+    // while the figure the eye actually reads here, the tick itself, **is** smoothed below by
+    // [`draw_check_mark`], which strokes it well inside the fill where no mask can be harmed.
+    // Written down in the report of task T-11-17 as the one deliberate exception.
+    stroke_rounded(
         dc,
         &frame,
         scaled(LIST_CHECK_CORNER_RADIUS, dpi),
+        scaled(BORDER_THICKNESS, dpi).max(1),
         colors.frame.unwrap_or(colors.fill),
         fill,
     );
@@ -8282,6 +9443,13 @@ struct AboutState {
     /// executable, read by the caller the same way the old box read it
     /// (`tray::file_version`). `None` — no resource — shows as a dash, not as an error.
     version: Option<(u16, u16, u16, u16)>,
+    /// The face this window sets the caption of its own «ОК» in — FR-92а, task T-11-17.
+    ///
+    /// The same owner the settings dialog keeps, for the same reason and with the same
+    /// degradation: `None` draws in the manager's own font. `None` until `WM_INITDIALOG` —
+    /// the face is made out of the font the manager gives the window, and there is no window
+    /// when this value is built.
+    fonts: Option<DialogFonts>,
 }
 
 /// Shows the modal «О программе» window of FR-92а — what `tray` calls in place of the
@@ -8306,6 +9474,8 @@ pub fn show_about_dialog(
         palette,
         brushes: theme::Brushes::new(palette),
         version,
+        // `None` until `WM_INITDIALOG` — see the field.
+        fonts: None,
     });
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`, and the
@@ -8361,6 +9531,11 @@ unsafe extern "system" fn about_proc(
             unsafe {
                 with_about_state(hwnd, |state| {
                     fill_about(hwnd, state.version);
+
+                    // FR-92а, task T-11-17: the face the caption of «ОК» is set in, made out
+                    // of the font the manager gave the window — the same call, and the same
+                    // ownership, as in the settings dialog.
+                    state.fonts = DialogFonts::new(hwnd, OK_COMMAND);
 
                     // The non-client title bar follows the resolved palette from the
                     // first showing — the same call the settings dialog makes.
@@ -8600,19 +9775,22 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             // `None` — the brushes were refused at initialisation (NFR-13).
             let brushes = state.brushes.as_ref()?;
 
-            Some(resolve_button_colors(
-                button_color_roles(control, pressed, disabled),
-                brushes,
-                state.palette,
+            Some((
+                resolve_button_colors(
+                    button_color_roles(control, pressed, disabled),
+                    brushes,
+                    state.palette,
+                ),
+                state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some(colors)) = choice else {
+    let Some(Some((colors, face))) = choice else {
         return 0;
     };
 
     // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
-    // to paint into for the length of this send.
-    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused) }
+    // to paint into for the length of this send; `face` is a face the state owns for longer.
+    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
