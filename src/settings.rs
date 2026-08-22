@@ -124,7 +124,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
     WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
     WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY,
-    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2541,6 +2542,19 @@ unsafe extern "system" fn dialog_proc(
             // of `show_dialog`, which outlives this modal call.
             unsafe {
                 with_state(hwnd, |state| {
+                    // FR-92а, task T-11-17: the two faces this dialog sets its own text in,
+                    // made out of the font the manager gave the window and asked to render
+                    // with grey antialiasing instead of ClearType. Once, here — a face is a
+                    // property of the window, not of a paint — and freed with the state.
+                    //
+                    // ⚠ **Before `fill_dialog`, and that ordering is task T-11-20's.** Since
+                    // that task the text face is not only selected into DCs by our own
+                    // drawing: it is handed to the five input fields and to the layout list,
+                    // which draw their own text and have to be holding it before anything is
+                    // put into them. `fill_dialog` does the handing over and then the
+                    // filling; it can only do the first of those if the face already exists.
+                    state.fonts = DialogFonts::new(hwnd, GROUP_BOXES[0]);
+
                     fill_dialog(hwnd, state);
 
                     // FR-92а, task T-11-5c: the panel map — which controls lie on one of
@@ -2548,12 +2562,6 @@ unsafe extern "system" fn dialog_proc(
                     // read here once and never again: rectangles do not move when the
                     // palette changes, so «Применить» has nothing to rebuild.
                     state.panel_children = collect_panel_children(hwnd);
-
-                    // FR-92а, task T-11-17: the two faces this dialog sets its own text in,
-                    // made out of the font the manager gave the window and asked to render
-                    // with grey antialiasing instead of ClearType. Once, here — a face is a
-                    // property of the window, not of a paint — and freed with the state.
-                    state.fonts = DialogFonts::new(hwnd, GROUP_BOXES[0]);
 
                     // FR-92а, task T-11-4: the non-client title bar follows the resolved
                     // palette from the first showing. The client area needs no call — the
@@ -6284,15 +6292,14 @@ impl Drop for BackgroundCache {
 // the live captions, and the mock-ups have none of it because they were drawn with grey
 // coverage.
 //
-// ⚠ **What is drawn with this face, and what is left to the system.** The face covers the text
-// this file draws itself: the captions of the nine owner-drawn buttons, the eight panel
-// captions, the rows of both lists, the items and the closed face of the four combo boxes, the
-// captions of the eight glyph elements — and, since task T-11-18, **every label of both
-// templates**, the twenty-two `SS_OWNERDRAW` statics of [`OWNER_DRAWN_LABELS`] and
-// [`OWNER_DRAWN_ABOUT_LABELS`].
+// ⚠ **What is drawn with this face.** The face covers the text this file draws itself: the
+// captions of the nine owner-drawn buttons, the eight panel captions, the rows of both lists,
+// the items and the closed face of the four combo boxes, the captions of the eight glyph
+// elements — and, since task T-11-18, **every label of both templates**, the twenty-two
+// `SS_OWNERDRAW` statics of [`OWNER_DRAWN_LABELS`] and [`OWNER_DRAWN_ABOUT_LABELS`].
 //
-// Two kinds of text are left to the system, and both are named remainders rather than
-// oversights:
+// Two kinds of text are **not** drawn by this file, and since task T-11-20 they are set in this
+// same face all the same — see [`hand_our_face_to_the_controls_that_draw_their_own_text`]:
 //
 // - the text **inside the five `EDITTEXT` fields** of [`TEXT_FIELDS`] — the three numeric
 //   fields, the exclusion name and the read-only hotkey field. An `EDIT` has no owner-drawn
@@ -6303,9 +6310,17 @@ impl Drop for BackgroundCache {
 //   `CDRF_DODEFAULT` — «draw it yourself, with the fields I set». The control draws the words,
 //   in the font it was given.
 //
-// Owning either would mean pushing a face of our own onto the control with `WM_SETFONT`, which
-// is a change of the dialog's metrics and not of its smoothing, or reaching for the
-// undocumented, which the decision recorded in `theme-own-draw-decision.md` closed.
+// ⚠ **Task T-11-18 wrote here that owning either «would mean pushing a face of our own onto the
+// control with `WM_SETFONT`, which is a change of the dialog's metrics and not of its
+// smoothing». That sentence was wrong, and task T-11-20 replaced it with a measurement.** The
+// face handed over is [`DialogFonts::text`] — [`antialiased_logfont`] of the window's own
+// `LOGFONTW`, one field changed and not a byte else. Same type face, same character height,
+// same weight, same character set: `GetTextMetricsW` answers the identical height, ascent,
+// descent, internal and external leading, average and maximum character width and weight for
+// both, and real strings take the identical number of pixels in both. See the two tests of
+// `tests\settings.rs` that measure it. Nothing undocumented is reached for, so the decision
+// recorded in `theme-own-draw-decision.md` is untouched: `WM_SETFONT` is the documented way to
+// tell a control which face to draw in, and the only thing this one changes is the rasteriser.
 
 /// The `LOGFONTW` of the dialog's own face, asked to render with grey antialiasing — the pure
 /// half of [`DialogFonts`], and the whole of «наш текст — серое сглаживание».
@@ -7815,6 +7830,66 @@ fn set_field_margins(hwnd: HWND) {
     }
 }
 
+/// The six controls that draw their **own** text and are therefore the only ones a face has to
+/// be handed to — the five input fields of [`TEXT_FIELDS`] and the layout list.
+///
+/// Everything else in this window is drawn by this file, which selects the face into the DC of
+/// the message; these six never see that DC. See the ⚠ of the antialiasing section for why the
+/// two kinds cannot be treated the same way.
+///
+/// Public for the reason [`FRAMED_FIELDS`] is: `tests\settings.rs` reads the classes of the
+/// template and asserts that this list is **exactly** the controls of the window that draw
+/// their own text — every `EDIT` of the template and the one `SysListView32` — so a control
+/// added to the template later cannot quietly stay behind on the manager's ClearType.
+pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] = [
+    IDC_HOTKEY,
+    IDC_DELAY,
+    IDC_CLIPBOARD_TIMEOUT,
+    IDC_CLIPBOARD_RESTORE,
+    IDC_EXCLUSION_NAME,
+    IDC_CYCLE_LIST,
+];
+
+/// Hands [`DialogFonts::text`] to the six controls of [`CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`] —
+/// FR-92а, task T-11-20, the last text of the window still set on the manager's ClearType.
+///
+/// # Why this is not a change of metrics — the measurement, not the argument
+///
+/// The face is the dialog's own `LOGFONTW` with `lfQuality` moved to `ANTIALIASED_QUALITY` and
+/// **nothing else touched** ([`antialiased_logfont`]): same type face, same character height,
+/// same weight, same character set, same escapement. `GetTextMetricsW` answers the same height,
+/// ascent, descent, internal and external leading, average and maximum character width and
+/// weight for it as for the manager's own face, and real strings measure the same number of
+/// pixels — so no field's text moves by a pixel and no row of the list changes height. Both
+/// halves are tests in `tests\settings.rs`; the change was measured before it was made.
+///
+/// # Why `send_to` and not a bare send — FR-72
+///
+/// `send_to` is `SendDlgItemMessageW`, «the one way this module sends anything to its own
+/// controls», and a bare `SendMessage` is banned program-wide by the implication of FR-72: to a
+/// window whose thread is not pumping it blocks the caller for ever. `tests\guard.rs` sweeps the
+/// whole of `src\` for the name and this file adds none.
+///
+/// # The `lparam`
+///
+/// `TRUE` — redraw. The controls are handed the face on `WM_INITDIALOG`, before the window is
+/// on the screen, so the repaint it asks for costs nothing; asking for it is what keeps the
+/// call correct if it is ever made again while the window is visible.
+///
+/// `None` — the faces could not be made — hands over nothing and leaves all six on the
+/// manager's own face, which is what they were on before this task (NFR-13).
+fn hand_our_face_to_the_controls_that_draw_their_own_text(hwnd: HWND, face: Option<HFONT>) {
+    let Some(face) = face else {
+        return;
+    };
+
+    for control in CONTROLS_THAT_DRAW_THEIR_OWN_TEXT {
+        // `WM_SETFONT` answers nothing — it is documented to return zero — so there is no
+        // result to examine here beyond the one `send_to` describes.
+        send_to(hwnd, control, WM_SETFONT, face.0 as usize, 1);
+    }
+}
+
 /// Puts the interface strings of the locale in force into the window — FR-94.
 ///
 /// Runs before anything is filled in, so that a control is never seen carrying the literal the
@@ -7846,6 +7921,16 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
     // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
     set_field_margins(hwnd);
+
+    // FR-92а, task T-11-20: the six controls that draw their own text get the face this
+    // window draws all its other text in, so the whole window is on one smoothing. Once,
+    // here — a face is a property of the control, exactly as the margin above is — and
+    // **before anything is put into any of them**, so no control is ever holding text it was
+    // given in one face and is about to redraw in another.
+    hand_our_face_to_the_controls_that_draw_their_own_text(
+        hwnd,
+        state.fonts.as_ref().map(DialogFonts::text),
+    );
 
     // Section «Общие» of FR-92.
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);

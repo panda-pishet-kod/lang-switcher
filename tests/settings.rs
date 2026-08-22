@@ -17,8 +17,10 @@ use lang_switcher::settings::{
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLEARTYPE_QUALITY,
-    CreateCompatibleDC, CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DeleteDC, DeleteObject,
-    FW_BOLD, FillRect, GetPixel, HBITMAP, HDC, LOGFONTW, SelectObject,
+    CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreateSolidBrush, DEFAULT_QUALITY,
+    DIB_RGB_COLORS, DeleteDC, DeleteObject, FONT_CHARSET, FONT_QUALITY, FW_BOLD, FillRect,
+    GetDeviceCaps, GetPixel, GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HDC, HFONT, LOGFONTW,
+    LOGPIXELSY, SelectObject, TEXTMETRICW,
 };
 
 /// A directory under `%TEMP%` that removes itself, panic or no panic.
@@ -1668,7 +1670,7 @@ use std::os::windows::ffi::OsStrExt;
 use lang_switcher::settings::LayoutRow;
 use lang_switcher::{app, guard, hook, inject, layouts, selection};
 
-use windows::Win32::Foundation::{FreeLibrary, HMODULE, HRSRC, RECT};
+use windows::Win32::Foundation::{FreeLibrary, HMODULE, HRSRC, RECT, SIZE};
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
@@ -4670,6 +4672,28 @@ struct DialogTemplate {
     /// `LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS` is 0x0D, the very number
     /// `SS_OWNERDRAW` is.
     classes: Vec<(u32, Option<u16>)>,
+    /// The `DS_SETFONT` declaration of the template, or `None` for a template without one.
+    ///
+    /// Read out by task T-11-20, which measures the dialog's own face against the face this
+    /// module sets its own text in: the numbers have to be the window's own, and the window's
+    /// own font is what these five fields say.
+    font: Option<TemplateFont>,
+}
+
+/// The `DS_SETFONT` declaration of a dialog template — what the dialog manager builds a
+/// window's own face out of, exactly as rc.exe wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TemplateFont {
+    /// Point size — `9` for both templates of this program.
+    points: u16,
+    /// `lfWeight`.
+    weight: u16,
+    /// `lfItalic`.
+    italic: u8,
+    /// `lfCharSet`.
+    charset: u8,
+    /// The type face — «Segoe UI».
+    face: String,
 }
 
 impl DialogTemplate {
@@ -4700,12 +4724,22 @@ impl DialogTemplate {
 
         // `DS_SETFONT`, which the template declares: point size, weight, italic, charset and
         // the type face follow the caption.
-        if style & 0x0000_0040 != 0 {
-            let _points = read_u16(bytes, &mut at);
-            let _weight = read_u16(bytes, &mut at);
+        let font = (style & 0x0000_0040 != 0).then(|| {
+            let points = read_u16(bytes, &mut at);
+            let weight = read_u16(bytes, &mut at);
+            let italic = bytes[at];
+            let charset = bytes[at + 1];
             at += 2;
-            let _face = read_string(bytes, &mut at);
-        }
+            let face = read_string(bytes, &mut at);
+
+            TemplateFont {
+                points,
+                weight,
+                italic,
+                charset,
+                face,
+            }
+        });
 
         let mut text = Vec::new();
         let mut controls = Vec::new();
@@ -4754,6 +4788,7 @@ impl DialogTemplate {
             styles,
             bounds,
             classes,
+            font,
         }
     }
 
@@ -6435,4 +6470,447 @@ fn a_caption_too_long_for_one_line_wraps_onto_the_next() {
          {one_line}) — DT_WORDBREAK is not reaching the drawing, and the two-line labels of \
          the template lose their tails"
     );
+}
+
+// =========================================================================================
+// FR-92а — остаток текста: пять полей ввода и строки списка раскладок. Task T-11-20.
+// =========================================================================================
+//
+// The objection this task rests on is one sentence: a `LOGFONTW` that differs from the dialog's
+// own face in `lfQuality` **and in nothing else** names the same type face at the same size, the
+// same weight and the same character set, so a `WM_SETFONT` with it changes the rasterisation
+// and not the metrics.
+//
+// That is a measurement, not an argument, and it is made here — the numbers below decided
+// whether `src\settings.rs` was touched at all. Both faces are created in memory and selected
+// into a **32-bit** memory DC: that is the depth ClearType is actually applied at, and a 1-bit
+// DC would switch the smoothing off by itself and make the two sides agree for the wrong
+// reason.
+//
+// The base is not a font invented by the test: it is built out of the `DS_SETFONT` declaration
+// rc.exe wrote into the product's own resource, which is what the dialog manager builds the
+// window's face out of.
+
+/// The face the dialog manager creates for a window, as a `LOGFONTW` with `quality` on it.
+///
+/// The height is the manager's own arithmetic — a point size becomes a negative character
+/// height at the DPI of the device — and the `+ 36` is the rounding `MulDiv` does.
+fn manager_logfont(dc: HDC, font: &TemplateFont, quality: FONT_QUALITY) -> LOGFONTW {
+    // SAFETY: `dc` is the live memory DC of the caller's sheet.
+    let dpi = unsafe { GetDeviceCaps(Some(dc), LOGPIXELSY) };
+
+    let mut logical = LOGFONTW {
+        lfHeight: -((i32::from(font.points) * dpi + 36) / 72),
+        lfWeight: i32::from(font.weight),
+        lfItalic: font.italic,
+        lfCharSet: FONT_CHARSET(font.charset),
+        lfQuality: quality,
+        ..Default::default()
+    };
+
+    for (slot, unit) in logical.lfFaceName.iter_mut().zip(font.face.encode_utf16()) {
+        *slot = unit;
+    }
+
+    logical
+}
+
+/// One created face, freed on the way out — no test leaks a GDI object (NFR-13).
+struct Face(HFONT);
+
+impl Face {
+    fn new(logical: LOGFONTW) -> Self {
+        // SAFETY: `logical` is a live local of the caller's frame, read by the call; the handle
+        // it answers is owned by this value and freed in `Drop`.
+        let handle = unsafe { CreateFontIndirectW(&raw const logical) };
+        assert!(
+            !handle.is_invalid(),
+            "CreateFontIndirectW must answer a face for the dialog's own LOGFONTW"
+        );
+        Self(handle)
+    }
+}
+
+impl Drop for Face {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from a successful `CreateFontIndirectW` above and is freed
+        // exactly once — this type is neither `Copy` nor `Clone`, and every measurement that
+        // selected it put the previous face back before it returned.
+        let _ = unsafe { DeleteObject(self.0.into()) };
+    }
+}
+
+/// `GetTextMetricsW` for one face on one sheet, with the previous face put back.
+fn metrics_of(sheet: &Sheet, face: &Face) -> TEXTMETRICW {
+    let mut metrics = TEXTMETRICW::default();
+
+    // SAFETY: both handles are live; the out-pointer addresses a live local of this frame and
+    // the call writes exactly one `TEXTMETRICW` through it. The previous face is put back
+    // before the borrow ends. NFR-13: the result is examined.
+    unsafe {
+        let previous = SelectObject(sheet.dc, face.0.into());
+        let read = GetTextMetricsW(sheet.dc, &raw mut metrics);
+        SelectObject(sheet.dc, previous);
+        assert!(
+            read.as_bool(),
+            "GetTextMetricsW must answer for a live face"
+        );
+    }
+
+    metrics
+}
+
+/// The width `text` takes in one face on one sheet — `GetTextExtentPoint32W`.
+fn extent_of(sheet: &Sheet, face: &Face, text: &str) -> SIZE {
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let mut size = SIZE::default();
+
+    // SAFETY: `wide` and `size` are live locals of this frame; the call reads the units of the
+    // one and writes the other. The previous face is put back. NFR-13: the result is examined.
+    unsafe {
+        let previous = SelectObject(sheet.dc, face.0.into());
+        let measured = GetTextExtentPoint32W(sheet.dc, &wide, &raw mut size);
+        SelectObject(sheet.dc, previous);
+        assert!(
+            measured.as_bool(),
+            "GetTextExtentPoint32W must answer for a live face"
+        );
+    }
+
+    size
+}
+
+/// The fields task T-11-20 names, as a printable row.
+fn metrics_row(what: &str, metrics: &TEXTMETRICW) -> String {
+    format!(
+        "{what:<18} height={:<4} ascent={:<4} descent={:<4} internal={:<4} external={:<4} \
+         ave={:<4} max={:<4} weight={}",
+        metrics.tmHeight,
+        metrics.tmAscent,
+        metrics.tmDescent,
+        metrics.tmInternalLeading,
+        metrics.tmExternalLeading,
+        metrics.tmAveCharWidth,
+        metrics.tmMaxCharWidth,
+        metrics.tmWeight,
+    )
+}
+
+/// The dialog font of the settings template and a sheet to measure it on.
+fn template_font_and_sheet() -> (TemplateFont, Sheet) {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let font = template
+        .font
+        .clone()
+        .expect("the settings template declares DS_SETFONT");
+
+    (font, Sheet::new(64))
+}
+
+/// The two starting points the manager's own `lfQuality` can be.
+///
+/// It is not written down anywhere this program can read: `DEFAULT_QUALITY` is what a zeroed
+/// `LOGFONTW` carries, and `CLEARTYPE_QUALITY` is what the machine resolves it to. Both are
+/// measured, so the answer does not depend on which one the manager actually passed.
+const BASE_QUALITIES: [(&str, FONT_QUALITY); 2] = [
+    ("DEFAULT_QUALITY", DEFAULT_QUALITY),
+    ("CLEARTYPE_QUALITY", CLEARTYPE_QUALITY),
+];
+
+/// **Criterion 9 of T-11-20 — the whole of the controller's objection, as a measurement.**
+///
+/// The dialog's own face and [`settings::antialiased_logfont`] of it are created side by side
+/// and measured on the same memory DC. Height, ascent, descent, internal and external leading,
+/// average and maximum character width and weight must come back **equal**. Had one field
+/// disagreed, the remainder would have been honestly unfixable and nothing would have been
+/// handed to the five fields at all.
+#[test]
+fn our_face_measures_the_same_as_the_dialog_font_in_every_field_the_task_names() {
+    let (font, sheet) = template_font_and_sheet();
+
+    println!(
+        "template font: {:?} {} pt, weight {}, italic {}, charset {}",
+        font.face, font.points, font.weight, font.italic, font.charset
+    );
+
+    for (name, quality) in BASE_QUALITIES {
+        let base = manager_logfont(sheet.dc, &font, quality);
+        let ours = settings::antialiased_logfont(base);
+
+        // The premise first: one field moved and not a byte else. A base that differed
+        // somewhere else would make the metrics agree for a reason this task cannot claim.
+        assert_eq!(
+            ours.lfQuality, ANTIALIASED_QUALITY,
+            "our face is the one asked for grey coverage"
+        );
+        assert_ne!(ours.lfQuality, base.lfQuality, "and the base is not");
+        assert_eq!(ours.lfHeight, base.lfHeight);
+        assert_eq!(ours.lfWidth, base.lfWidth);
+        assert_eq!(ours.lfWeight, base.lfWeight);
+        assert_eq!(ours.lfItalic, base.lfItalic);
+        assert_eq!(ours.lfUnderline, base.lfUnderline);
+        assert_eq!(ours.lfStrikeOut, base.lfStrikeOut);
+        assert_eq!(ours.lfCharSet, base.lfCharSet);
+        assert_eq!(ours.lfOutPrecision, base.lfOutPrecision);
+        assert_eq!(ours.lfClipPrecision, base.lfClipPrecision);
+        assert_eq!(ours.lfPitchAndFamily, base.lfPitchAndFamily);
+        assert_eq!(ours.lfEscapement, base.lfEscapement);
+        assert_eq!(ours.lfOrientation, base.lfOrientation);
+        assert_eq!(ours.lfFaceName, base.lfFaceName);
+
+        let dialog_face = Face::new(base);
+        let our_face = Face::new(ours);
+
+        let dialog_metrics = metrics_of(&sheet, &dialog_face);
+        let our_metrics = metrics_of(&sheet, &our_face);
+
+        println!("--- base {name} ---");
+        println!("{}", metrics_row("шрифт диалога", &dialog_metrics));
+        println!("{}", metrics_row("наше начертание", &our_metrics));
+
+        for (field, dialog_value, our_value) in [
+            (
+                "высота (tmHeight)",
+                dialog_metrics.tmHeight,
+                our_metrics.tmHeight,
+            ),
+            (
+                "подъём (tmAscent)",
+                dialog_metrics.tmAscent,
+                our_metrics.tmAscent,
+            ),
+            (
+                "спуск (tmDescent)",
+                dialog_metrics.tmDescent,
+                our_metrics.tmDescent,
+            ),
+            (
+                "внутренний интерлиньяж (tmInternalLeading)",
+                dialog_metrics.tmInternalLeading,
+                our_metrics.tmInternalLeading,
+            ),
+            (
+                "внешний интерлиньяж (tmExternalLeading)",
+                dialog_metrics.tmExternalLeading,
+                our_metrics.tmExternalLeading,
+            ),
+            (
+                "средняя ширина знака (tmAveCharWidth)",
+                dialog_metrics.tmAveCharWidth,
+                our_metrics.tmAveCharWidth,
+            ),
+            (
+                "максимальная ширина знака (tmMaxCharWidth)",
+                dialog_metrics.tmMaxCharWidth,
+                our_metrics.tmMaxCharWidth,
+            ),
+            (
+                "насыщенность (tmWeight)",
+                dialog_metrics.tmWeight,
+                our_metrics.tmWeight,
+            ),
+        ] {
+            assert_eq!(
+                dialog_value, our_value,
+                "base {name}: {field} — шрифт диалога {dialog_value}, наше начертание \
+                 {our_value}. Метрики разошлись: WM_SETFONT с этим начертанием сдвинул бы \
+                 текст, и остаток честно неисправим"
+            );
+        }
+    }
+}
+
+/// **Criterion 11 of T-11-20 — `WM_SETFONT` leaves by the way the FR-72 guard allows.**
+///
+/// The guard is `tests\guard.rs`, `send_message_is_used_nowhere_and_the_timeout_is_the_fifty_of_fr72`:
+/// it sweeps every source of `src\` for the literal `SendMessage` and lets a line through only
+/// when it is `SendMessageTimeout`. `SendDlgItemMessageW` does not contain the literal and is
+/// what this module already calls «the one way this module sends anything to its own controls»;
+/// `send_to` is the wrapper. So the check here is that the hand-over goes through `send_to` and
+/// that no second path was opened beside it.
+#[test]
+fn the_face_is_handed_over_by_the_one_send_this_module_uses_for_its_own_controls() {
+    // The message name also stands in the `use` list at the top of the module. A row of that
+    // list is names and commas and has no call in it, so a bracket is what separates the
+    // declaration of the name from a use of it.
+    let sends: Vec<String> = product_lines_with("WM_SETFONT")
+        .into_iter()
+        .filter(|line| line.contains('('))
+        .collect();
+
+    for line in &sends {
+        println!("{line}");
+    }
+
+    assert_eq!(
+        sends.len(),
+        1,
+        "the face is handed over in one place and not in several: {sends:?}"
+    );
+
+    assert!(
+        sends[0].contains("send_to("),
+        "WM_SETFONT must go through `send_to`, the SendDlgItemMessageW wrapper the FR-72 guard \
+         lets past — the line is {:?}",
+        sends[0]
+    );
+
+    // And the file opened no bare send of its own. The guard says this for the whole of `src\`;
+    // it is repeated on this one file because this task is the one that added a send.
+    let bare: Vec<String> = product_lines_with("SendMessage")
+        .into_iter()
+        .filter(|line| !line.contains("SendMessageTimeout"))
+        .collect();
+
+    assert!(
+        bare.is_empty(),
+        "FR-72: a bare SendMessage appeared in src\\settings.rs: {bare:?}"
+    );
+}
+
+/// **Criterion 10 of T-11-20 — no second face was created for this.**
+///
+/// The face handed to the six controls is [`settings::CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`]'s
+/// share of the one the window already owned: `DialogFonts::text`, made once on
+/// `WM_INITDIALOG` and freed in `Drop`. The sweep says so of the source — every face of this
+/// module is made by the single `create_font`, which is called exactly twice, both times by the
+/// constructor of `DialogFonts`, and there is no `CreateFontIndirectW` anywhere else.
+#[test]
+fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
+    let made = product_lines_with("CreateFontIndirectW(");
+    for line in &made {
+        println!("{line}");
+    }
+    assert_eq!(
+        made.len(),
+        1,
+        "every face of this module comes out of the one `create_font`: {made:?}"
+    );
+
+    let created = product_lines_with("create_font(");
+    for line in &created {
+        println!("{line}");
+    }
+    assert_eq!(
+        created.len(),
+        3,
+        "the declaration and the two faces of `DialogFonts::new` — and nothing else asks for a \
+         face: {created:?}"
+    );
+
+    // The hand-over takes a face it was given, and takes it from the owner.
+    let handed = product_lines_with("hand_our_face_to_the_controls_that_draw_their_own_text");
+    for line in &handed {
+        println!("{line}");
+    }
+    assert_eq!(handed.len(), 2, "declared once and called once: {handed:?}");
+
+    let source = settings_module_source();
+
+    assert!(
+        source.contains("state.fonts = DialogFonts::new(hwnd, GROUP_BOXES[0]);\n\n                    fill_dialog(hwnd, state);"),
+        "the face has to be made before the filling that hands it over — task T-11-20's ordering"
+    );
+
+    assert!(
+        source.contains("impl Drop for DialogFonts"),
+        "the faces are still freed in Drop"
+    );
+}
+
+/// **Criterion 10 of T-11-20, from the resource** — the list of controls the face is handed to
+/// is exactly the controls of the template that draw their own text.
+///
+/// Read from the compiled template and not from a list written twice: every control of class
+/// `EDIT` — the ordinal `0x0081` — plus the one control named by a registered class string,
+/// `SysListView32`, which is the layout list. Everything else of the window is drawn by the
+/// module itself and needs no face of its own. A field added to the template later shows up
+/// here as a control the hand-over does not name.
+#[test]
+fn the_face_goes_to_every_control_of_the_template_that_draws_its_own_text_and_to_no_other() {
+    const EDIT_CLASS_ORDINAL: u16 = 0x0081;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let mut own_text: Vec<u32> = template
+        .classes
+        .iter()
+        .filter(|(_, class)| *class == Some(EDIT_CLASS_ORDINAL) || class.is_none())
+        .map(|(id, _)| *id)
+        .collect();
+    own_text.sort_unstable();
+
+    let mut handed: Vec<u32> = settings::CONTROLS_THAT_DRAW_THEIR_OWN_TEXT
+        .iter()
+        .map(|id| u32::try_from(*id).expect("a control identifier is positive"))
+        .collect();
+    handed.sort_unstable();
+
+    println!("template: {own_text:?}");
+    println!("handed:   {handed:?}");
+
+    assert_eq!(
+        own_text, handed,
+        "the controls of the template that draw their own text are {own_text:?}, and the face \
+         is handed to {handed:?} — a control in the first list and not in the second stays on \
+         the manager's ClearType while the rest of the window is grey-antialiased"
+    );
+
+    assert_eq!(
+        handed.len(),
+        6,
+        "the five EDITTEXT fields and the layout list — the remainder task T-11-20 names"
+    );
+}
+
+/// **Criterion 12 of T-11-20 — the width of real text did not move either.**
+///
+/// A metric is an average; what the five fields and the rows of the layout list actually put on
+/// the screen is a string. The strings measured here are the ones those controls hold: the
+/// digits of the three numeric fields, the name of a key, a process name of the exclusion list,
+/// the names of two layouts, and a line whose letters are the widest and the narrowest there
+/// are — a face that rounded advances differently would show it here first.
+#[test]
+fn real_strings_take_the_same_width_in_our_face_as_in_the_dialog_font() {
+    let (font, sheet) = template_font_and_sheet();
+
+    for (name, quality) in BASE_QUALITIES {
+        let base = manager_logfont(sheet.dc, &font, quality);
+
+        let dialog_face = Face::new(base);
+        let our_face = Face::new(settings::antialiased_logfont(base));
+
+        for text in [
+            "0",
+            "1500",
+            "99999",
+            "Pause",
+            "notepad.exe",
+            "Русский (Россия)",
+            "English (United States)",
+            "Шшщ ЖЮЯ — jgqy WMil",
+        ] {
+            let dialog_size = extent_of(&sheet, &dialog_face, text);
+            let our_size = extent_of(&sheet, &our_face, text);
+
+            println!(
+                "{name}: {text:?} — шрифт диалога {}x{}, наше начертание {}x{}",
+                dialog_size.cx, dialog_size.cy, our_size.cx, our_size.cy
+            );
+
+            assert_eq!(
+                (dialog_size.cx, dialog_size.cy),
+                (our_size.cx, our_size.cy),
+                "base {name}: «{text}» is {}x{} in the dialog's own face and {}x{} in ours — \
+                 the text would move, and criterion 12 forbids it",
+                dialog_size.cx,
+                dialog_size.cy,
+                our_size.cx,
+                our_size.cy
+            );
+        }
+    }
 }
