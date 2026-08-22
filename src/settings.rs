@@ -65,15 +65,18 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use windows::Win32::Foundation::{
-    COLORREF, ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+    COLORREF, ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE,
+    WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleBitmap, CreateCompatibleDC, CreatePen, CreateSolidBrush, DT_CALCRECT,
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW,
-    Ellipse, FillRect, FrameRect, GetDC, GetStockObject, HBRUSH, HDC, InvalidateRect, LineTo,
-    MoveToEx, NULL_PEN, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
-    ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+    ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontIndirectW, CreatePen,
+    CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+    DrawFocusRect, DrawTextW, Ellipse, FW_BOLD, FillRect, FrameRect, GetDC, GetDeviceCaps,
+    GetObjectW, GetStockObject, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, InvalidateRect,
+    LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE,
+    RDW_INVALIDATE, RedrawWindow, ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode,
+    SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -111,9 +114,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW,
     SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
     WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_GETDLGCODE,
-    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NOTIFY, WM_SYSCHAR,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
+    WM_NOTIFY, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -1892,7 +1895,7 @@ pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
 /// The caption of the window is not in the table — it is not a control — and neither are the
 /// two entries of the language combo box: a language is named in its own language in a language
 /// chooser, so «Русский» and «English» stand as they are in both locales.
-const LOCALISED_CONTROLS: &[(i32, u16)] = &[
+pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_GENERAL, IDS_GROUP_GENERAL),
     (IDC_AUTOSTART, IDS_AUTOSTART),
     (IDC_LANGUAGE_LABEL, IDS_LANGUAGE_LABEL),
@@ -2567,6 +2570,16 @@ unsafe extern "system" fn dialog_proc(
             unsafe { on_ctl_color(hwnd, message, wparam, lparam) }
         }
 
+        // FR-92а, task T-11-13: the whole background of the window — the ground, the eight
+        // panels with their captions, and the frames of the fields and lists. The one thing
+        // taken out of the message is the DC to paint into (SEC-05), and the window of time
+        // is the same as for `WM_DRAWITEM` below.
+        WM_ERASEBKGND => {
+            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
+            // and the value it names is alive for the whole of this modal call.
+            unsafe { on_erase_background(hwnd, wparam) }
+        }
+
         // FR-92а, task T-11-5a: the nine owner-drawn buttons. Handled here and nowhere
         // else — the dialog window exists exactly while the program itself holds the
         // dialog on the screen, which is the gate the last sentence of SEC-05 names.
@@ -2901,8 +2914,10 @@ struct ResolvedButtonColors {
     face: HBRUSH,
     /// What the caption is drawn with.
     ink: COLORREF,
-    /// What the single-pixel frame is drawn with.
-    border: HBRUSH,
+    /// What the single-pixel frame is drawn with. An ink and not a brush since task
+    /// T-11-13: the frame and the face are one rounded `RoundRect` now, and `RoundRect`
+    /// frames with the selected *pen*.
+    border: COLORREF,
 }
 
 /// The single place a button role becomes a brush or a colour of the resolved palette —
@@ -2927,7 +2942,7 @@ fn resolve_button_colors(
     };
 
     let border = match colors.border {
-        ButtonBorderRole::ButtonBorder => brushes.button_border(),
+        ButtonBorderRole::ButtonBorder => palette.button_border,
     };
 
     ResolvedButtonColors { face, ink, border }
@@ -3076,12 +3091,15 @@ fn glyph_kind(control: i32) -> Option<GlyphKind> {
     }
 }
 
-/// The eight owner-drawn group boxes of FR-92 — FR-92а, task T-11-5c.
+/// The eight group panels of FR-92 — FR-92а, tasks T-11-5c and T-11-13.
 ///
-/// The single place the eight are listed: the `WM_DRAWITEM` handler branches on it to
-/// paint a panel instead of a button, and [`collect_panel_children`] reads it to split the
-/// dialog's children into the panels and the controls that may lie on one.
-const GROUP_BOXES: [i32; 8] = [
+/// The single place the eight are listed. Since task T-11-13 they are not visible elements
+/// at all (`NOT WS_VISIBLE` in `app.rc`) and no `WM_DRAWITEM` can reach them: what reads
+/// this list now is [`background_figure`], which tells the dialog's own background drawing
+/// that the rectangle of one of these controls is a panel — and [`collect_panel_children`],
+/// which reads it to split the dialog's children into the panels and the controls that may
+/// lie on one.
+pub const GROUP_BOXES: [i32; 8] = [
     IDC_GROUP_GENERAL,
     IDC_GROUP_HOTKEY,
     IDC_GROUP_LAYOUTS,
@@ -3140,6 +3158,35 @@ fn collect_panel_children(hwnd: HWND) -> Vec<i32> {
     let mut panels: Vec<RECT> = Vec::with_capacity(GROUP_BOXES.len());
     let mut candidates: Vec<(i32, RECT)> = Vec::new();
 
+    for (control, rect) in child_rects(hwnd) {
+        if GROUP_BOXES.contains(&control) {
+            panels.push(rect);
+        } else {
+            candidates.push((control, rect));
+        }
+    }
+
+    controls_on_panels(&panels, &candidates)
+}
+
+/// Every child of the dialog, with its identifier and its **screen** rectangle, in Z order.
+///
+/// The one walk of the dialog's children (§6.2): [`collect_panel_children`] splits its
+/// answer into panels and candidates, and [`child_rects_in_client`] moves it into the
+/// dialog's client coordinates for the background drawing. Invisible children — the eight
+/// panels since task T-11-13 — are in the answer like any other: a window that is not shown
+/// still has the rectangle the template gave it, which is exactly what both callers want of
+/// the panels.
+///
+/// NFR-13: both calls are examined. `GetWindow` answering an error is the documented end of
+/// the walk — a window with no more children is not a failure of anything. A refused
+/// `GetWindowRect` leaves that one control out: it then keeps the window-coloured ground it
+/// had before task T-11-5c and no frame of its own, which is the degraded-but-alive answer
+/// this file gives everywhere, and the journal has no row for GDI refusals
+/// (reviews\T-11-1.md).
+fn child_rects(hwnd: HWND) -> Vec<(i32, RECT)> {
+    let mut children: Vec<(i32, RECT)> = Vec::new();
+
     // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
     // ours, and answers a handle or an error.
     let mut child = unsafe { GetWindow(hwnd, GW_CHILD) }.ok();
@@ -3154,18 +3201,50 @@ fn collect_panel_children(hwnd: HWND) -> Vec<i32> {
         // SAFETY: `window` is the live child and `rect` is a live local the call fills;
         // nothing else is written.
         if unsafe { GetWindowRect(window, &mut rect) }.is_ok() {
-            if GROUP_BOXES.contains(&control) {
-                panels.push(rect);
-            } else {
-                candidates.push((control, rect));
-            }
+            children.push((control, rect));
         }
 
         // SAFETY: as for the first step of the walk.
         child = unsafe { GetWindow(window, GW_HWNDNEXT) }.ok();
     }
 
-    controls_on_panels(&panels, &candidates)
+    children
+}
+
+/// Every child of the dialog, with its identifier and its rectangle **in the client
+/// coordinates of the dialog** — what the background drawing of task T-11-13 paints in.
+///
+/// `GetWindowRect` speaks screen coordinates and a `WM_ERASEBKGND` DC speaks the client
+/// coordinates of the window being erased, so the whole set is shifted by one vector: the
+/// screen position of the dialog's own client origin, asked for once with `ClientToScreen`
+/// instead of once per child.
+///
+/// NFR-13: a refused `ClientToScreen` answers an empty list rather than a list in the wrong
+/// coordinate space — a background drawn at an offset would be worse than none at all, and
+/// the caller then leaves the erase to the dialog manager.
+fn child_rects_in_client(hwnd: HWND) -> Vec<(i32, RECT)> {
+    let mut origin = POINT { x: 0, y: 0 };
+
+    // SAFETY: `hwnd` is the live dialog and `origin` is a live local the call rewrites in
+    // place; nothing else is written.
+    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
+        return Vec::new();
+    }
+
+    child_rects(hwnd)
+        .into_iter()
+        .map(|(control, rect)| {
+            (
+                control,
+                RECT {
+                    left: rect.left - origin.x,
+                    top: rect.top - origin.y,
+                    right: rect.right - origin.x,
+                    bottom: rect.bottom - origin.y,
+                },
+            )
+        })
+        .collect()
 }
 
 /// The four owner-drawn combo boxes of FR-92 — FR-92а, task T-11-6.
@@ -3390,10 +3469,9 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
                 ),
 
                 // The erase under every owner-drawn button — the ground the glyphs of
-                // T-11-5b and the buttons of T-11-5a are painted over, and the panels of
-                // T-11-5c erase with it too: for the eight groups `ground` is the window
-                // brush (a panel is not on a panel), which is what the rounded corners of
-                // the panel are cut from.
+                // T-11-5b and the buttons of T-11-5a are painted over, and what the rounded
+                // corners of a button are cut from (task T-11-13). The eight panels no
+                // longer ask this question at all: an invisible window is never erased.
                 WM_CTLCOLORBTN => (None, None, ground),
 
                 // Unreachable: the caller only routes the five messages above here.
@@ -3508,22 +3586,13 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     // Eight vertical dialog units are one dialog-font height by the definition of the
     // base units — see the doc comment above.
-    let mut rect = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 8,
-    };
-
-    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call rewrites in
-    // place; nothing else is written.
-    if unsafe { MapDialogRect(hwnd, &mut rect) }.is_err() {
+    let Some((_, font_height)) = dialog_units(hwnd, 0, 8) else {
         return 0;
-    }
+    };
 
     // A negative or overflowing height cannot come out of a font measurement; if a broken
     // one did, keeping the control's own default is the degraded-but-alive answer again.
-    let Ok(height) = u32::try_from(rect.bottom + COMBO_ITEM_EXTRA) else {
+    let Ok(height) = u32::try_from(font_height + COMBO_ITEM_EXTRA) else {
         return 0;
     };
 
@@ -3842,19 +3911,21 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return unsafe { draw_glyph_element(hwnd, kind, control, dc, rect, disabled, focused) };
     }
 
-    // FR-92а, task T-11-5c: the eight group boxes, by identifier, ahead of the push-button
-    // path too. A group takes no input, so the state bits above are deliberately not passed
-    // on: a panel has no pressed, no disabled and no focus to show.
-    if GROUP_BOXES.contains(&control) {
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
-        // only to paint into for the length of this send.
-        return unsafe { draw_group_panel(hwnd, control, dc, rect) };
-    }
-
+    // ⚠ There is deliberately **no branch for the eight group panels here** — task T-11-13.
+    // A panel used to be drawn from this message, and being drawable from a message meant
+    // being an element: it covered the whole area of its block, took every click that landed
+    // on the block's empty ground, redrew itself on the click, and laid its own fill over
+    // its neighbours, which were never invalidated and did not come back. The panels are the
+    // *background* of their blocks now — `on_erase_background` draws them, and the eight
+    // controls are invisible in the template, so no `WM_DRAWITEM` names them any more. A
+    // forged message that named one would fall through to the push-button path below and
+    // paint a button face inside the rectangle it named, which is the same nothing every
+    // other forged identifier buys (SEC-05).
+    //
     // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
     // borrow of the state ends before the DC is touched, and what leaves the closure is
-    // plain values — two brush handles the state keeps alive until the dialog ends, and
-    // an ink.
+    // plain values — a brush handle the state keeps alive until the dialog ends, and two
+    // inks.
     //
     // SAFETY: see the caller.
     let choice = unsafe {
@@ -3879,10 +3950,10 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused) }
 }
 
-/// Paints one owner-drawn push button: the filled face, the single-pixel frame, the
+/// Paints one owner-drawn push button: the rounded face under its single-pixel frame, the
 /// caption and the focus cue. The drawing half [`on_draw_item`] and [`on_about_draw_item`]
 /// share — one body, moved out of `on_draw_item` by task T-11-11 rather than copied
-/// (§6.2).
+/// (§6.2). Sharing it is why the «ОК» of the about window rounds off with the rest.
 ///
 /// The caption comes from the dialog's own control by identifier — never from the message.
 ///
@@ -3909,13 +3980,17 @@ unsafe fn paint_push_button(
     // `debug_assert` handing the forger a crash of a debug build, and no journal row for
     // GDI refusals (reviews\T-11-1.md).
 
-    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for
-    // the length of this send; `colors.face` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &rect, colors.face) };
-
-    // SAFETY: as above; `colors.border` is a live brush of the dialog's state. `FrameRect`
-    // draws the single-pixel frame the task asks for.
-    unsafe { FrameRect(dc, &rect, colors.border) };
+    // The face and the single-pixel frame in one figure — п. 2.2 of task T-11-13: the
+    // buttons of the mock-ups have [`BUTTON_CORNER_RADIUS`] corners, and a square
+    // `FillRect` under a square `FrameRect` cannot have any. The corners the rounding cuts
+    // away keep the erase of `WM_CTLCOLORBTN`, which is the ground the button stands on.
+    paint_rounded(
+        dc,
+        &rect,
+        scaled(BUTTON_CORNER_RADIUS, dc_dpi(dc)),
+        colors.border,
+        colors.face,
+    );
 
     // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC
     // and touch no memory of this process.
@@ -4469,112 +4544,529 @@ fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) 
     }
 }
 
-/// Corner ellipse of a group panel's `RoundRect`, in pixels — the diameter, so the corner
-/// radius is half of it: the small 4–5 px the task names.
-const PANEL_CORNER: i32 = 9;
+// =========================================================================================
+// The lengths of the mock-ups, and the two ways this dialog turns its own numbers into
+// pixels — FR-92а, task T-11-13
+// =========================================================================================
 
-/// Inset of the panel caption from the panel's left edge, in pixels.
-const PANEL_CAPTION_INSET_X: i32 = 8;
+/// The DPI every pixel number of the mock-ups is written at — 100 %.
+///
+/// The approved mock-ups (`ui-02-graphite.png`, `ui-03-fog.png`) are drawn at 100 %, so
+/// every `_RADIUS`, `_INSET` and `_TENTHS` constant below is a length *of that picture*.
+/// [`scaled`] is the one place they become pixels of the window actually on screen.
+const MOCKUP_DPI: i32 = 96;
 
-/// Inset of the panel caption from the panel's top edge, in pixels.
-const PANEL_CAPTION_INSET_Y: i32 = 4;
+/// One length of the mock-ups in the pixels of a window at `dpi` — the pixel half of «числа
+/// масштабируются по DPI окна».
+///
+/// Pure, and rounded to nearest rather than truncated: a 1 px frame that truncates to zero
+/// at 125 % would simply disappear. A `dpi` of zero or less — a refused `GetDeviceCaps` —
+/// answers the mock-up number unchanged, which is the 100 % look on a machine that would
+/// not say what its DPI is (NFR-13).
+pub fn scaled(pixels: i32, dpi: i32) -> i32 {
+    if dpi <= 0 {
+        return pixels;
+    }
 
-/// Draws one owner-drawn group box as a filled panel — FR-92а, task T-11-5c.
+    (pixels * dpi + MOCKUP_DPI / 2) / MOCKUP_DPI
+}
+
+/// The DPI of the device a DC paints on — [`MOCKUP_DPI`] when the device will not say.
 ///
-/// # SEC-05, last sentence, held to the letter
+/// The manifest of this program declares `PerMonitorV2`, so the DC of a window answers the
+/// DPI of *that window's* monitor, which is what «по DPI окна» means on a machine with two
+/// screens at different scales.
+fn dc_dpi(dc: HDC) -> i32 {
+    // NFR-13: examined right here. `GetDeviceCaps` answers zero for a DC that is not live,
+    // and a zero would turn every scaled length into zero — the fallback is the 100 % look.
+    //
+    // SAFETY: `dc` is a handle passed by value; the call reads a property of the device and
+    // touches no memory of this process.
+    let dpi = unsafe { GetDeviceCaps(Some(dc), LOGPIXELSY) };
+
+    if dpi > 0 { dpi } else { MOCKUP_DPI }
+}
+
+/// A rectangle given in the dialog's own units, in pixels — the *other* half of «числа
+/// масштабируются по DPI окна», and the way this dialog has scaled since task T-11-6.
 ///
-/// Nothing here reads the message: [`on_draw_item`] copied the seven allowed fields of
-/// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
-/// `rect` to paint within. The caption is *not* taken from the message — it is the
-/// control's own text, read by identifier ([`get_text`] → `GetDlgItemTextW`) — and
-/// `itemData` is never read. A forged message can therefore misdraw nothing but the
-/// rectangle it names.
+/// `MapDialogRect` is the documented conversion, and it is already the dialog's own: the
+/// vertical dialog base unit is the height of the dialog font, and the dialog manager
+/// creates that font at the DPI of the window — so a dialog unit is a DPI-scaled length by
+/// construction, with no arithmetic of ours in the middle. [`on_measure_item`] has measured
+/// the combo item height this way since T-11-6; the body was extracted here rather than
+/// copied (§6.2), and that function now calls this one.
 ///
-/// # What is drawn
+/// `None` for a refused call (NFR-13: examined; every caller then keeps the default it had).
+fn dialog_units(hwnd: HWND, horizontal: i32, vertical: i32) -> Option<(i32, i32)> {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: horizontal,
+        bottom: vertical,
+    };
+
+    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call rewrites in
+    // place; nothing else is written.
+    unsafe { MapDialogRect(hwnd, &mut rect) }.ok()?;
+
+    Some((rect.right, rect.bottom))
+}
+
+/// Corner radius of a group panel, in the pixels of the mock-ups — п. 2.2 of task T-11-13.
 ///
-/// The panel of the approved mock-ups: one `RoundRect` over the whole rectangle —
-/// `panel_bg` fill under a single-pixel `panel_border` outline, corners rounded by
-/// [`PANEL_CORNER`] — and the caption in `text_muted` at the top edge, inset by
-/// [`PANEL_CAPTION_INSET_X`]/[`PANEL_CAPTION_INSET_Y`], transparently over the fill. The
-/// corners outside the rounding keep the erase of `WM_CTLCOLORBTN`, which answers the
-/// *window* brush for the eight groups — a panel is not on a panel — so the rounding is
-/// cut from the dialog's own ground. The children of the group are declared after it in
-/// the template and paint after it, on top: the panel never covers them.
+/// A radius, not the ellipse diameter `RoundRect` takes: [`paint_rounded`] doubles it in the
+/// one place that speaks to GDI, so the three constants here read as the mock-ups describe
+/// them.
+pub const PANEL_CORNER_RADIUS: i32 = 6;
+
+/// Corner radius of an owner-drawn push button — п. 2.2 of task T-11-13.
+pub const BUTTON_CORNER_RADIUS: i32 = 4;
+
+/// Corner radius of an input field or a list — п. 2.2 of task T-11-13.
+pub const FIELD_CORNER_RADIUS: i32 = 4;
+
+/// Inset of the panel caption from the panel's left edge, in **dialog units** — п. 2.1.
 ///
-/// Answers 1 — «drawn». 0 when the state is unreachable or `theme::Brushes::new` was
-/// refused at initialisation, for the reason [`on_draw_item`] gives: painting would need
-/// colour numbers this module is not allowed to hold (§6.2), and the refused-brushes
-/// dialog already lives degraded by the decision of T-11-4.
+/// Dialog units and not pixels on purpose: this is a horizontal position on a grid whose
+/// every other number — the 7 the panels start at, the 14 their children start at — is in
+/// the same units, and [`dialog_units`] is what turns it into pixels.
+const PANEL_CAPTION_INSET_DLU: i32 = 7;
+
+/// Inset of the panel caption from the panel's top edge, in mock-up pixels — п. 2.1.
+const PANEL_CAPTION_INSET_Y: i32 = 5;
+
+/// Height of the caption face as a percentage of the dialog font — п. 2.1, «≈ 0,85».
+const PANEL_CAPTION_FONT_PERCENT: i32 = 85;
+
+/// Letter spacing of a panel caption, in **tenths** of a mock-up pixel — п. 2.1, «≈ 1,1 px».
+///
+/// Tenths because the number is not whole and the difference shows: rounding 1,1 px up to
+/// 2 px per character stretches «АВТОЗАПУСК» by nine pixels, rounding it down to 1 px loses
+/// the spacing the mock-ups have. The pen position is therefore carried in tenths of a pixel
+/// through the whole caption and divided only at the moment a character is placed.
+const PANEL_CAPTION_TRACKING_TENTHS: i32 = 11;
+
+/// Width of a character the DC measures as nothing, as a percentage of the caption font's
+/// height — п. 2.1, the explicit space width.
+const PANEL_CAPTION_BLANK_PERCENT: i32 = 28;
+
+/// The caption of one group panel, as the mock-ups set it — п. 2.1 of task T-11-13, the
+/// pure «строка → выводимая строка» of criterion 11.
+///
+/// Upper case by the locale of the string itself (`str::to_uppercase` is the full Unicode
+/// mapping, so «Горячая клавиша» becomes «ГОРЯЧАЯ КЛАВИША» and «General» becomes
+/// «GENERAL»), and **nothing else**: the space inside a caption is a character of the
+/// answer like any other. That is the whole reason this is a function with a test rather
+/// than a `to_uppercase()` at the call site — the drawing places the characters one by one
+/// (the letter spacing of the mock-ups is not a whole number of pixels), and a caption
+/// whose spaces went missing on the way to the pen reads «ГОРЯЧАЯКЛАВИША».
+pub fn panel_caption(text: &str) -> String {
+    text.to_uppercase()
+}
+
+/// The advance of one caption character: what the DC measured, or an explicit width when it
+/// measured nothing — п. 2.1 of task T-11-13.
+///
+/// A character-by-character caption asks the DC for the width of one character at a time,
+/// and a layout that measures a blank as zero would put the next word on top of the previous
+/// one. Nothing is trusted to be non-zero: any measurement that comes back as nothing gets
+/// [`PANEL_CAPTION_BLANK_PERCENT`] of the caption font's height instead, which is the width
+/// a space has in a face of that size. Pure, so the rule is a table and not a hope.
+pub fn caption_advance(measured: i32, font_height: i32) -> i32 {
+    if measured > 0 {
+        return measured;
+    }
+
+    (font_height.abs() * PANEL_CAPTION_BLANK_PERCENT) / 100
+}
+
+/// What the dialog's own background draws under one control — FR-92а, task T-11-13, the
+/// pure half of the background drawing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackgroundFigure {
+    /// A group panel: the rounded [`theme::Palette::panel_bg`] fill under a single-pixel
+    /// [`theme::Palette::panel_border`] frame, over the control's whole rectangle, with the
+    /// caption of the (invisible) control at its top edge.
+    Panel,
+    /// An input field or a list: the rounded [`theme::Palette::field_bg`] fill under a
+    /// single-pixel [`theme::Palette::field_border`] frame, one pixel outside the control's
+    /// rectangle on every side — so the corners the rounding cuts away are the field's own
+    /// colour and not the panel's.
+    Field,
+}
+
+/// What the background draws under the control with this identifier — `None` for every
+/// control the background leaves alone.
+///
+/// The single place the two lists meet, and the reason the background drawing needs no
+/// geometry of its own: it walks the dialog's children, asks this function about each
+/// identifier, and paints what it answers inside that child's own rectangle.
+pub fn background_figure(control: i32) -> Option<BackgroundFigure> {
+    if GROUP_BOXES.contains(&control) {
+        return Some(BackgroundFigure::Panel);
+    }
+
+    if FRAMED_FIELDS.contains(&control) {
+        return Some(BackgroundFigure::Field);
+    }
+
+    None
+}
+
+/// The five input fields and two lists that lost `WS_BORDER` in task T-11-13 — п. 2.3.
+///
+/// The system border was a sunken rectangle in the system's colours; these seven now carry
+/// the rounded [`theme::Palette::field_border`] frame the mock-ups show, drawn by the
+/// dialog's background one pixel outside each rectangle. The list is what
+/// [`background_figure`] answers `Field` for, and a test reads the same seven identifiers
+/// out of the built binary to check that not one of them kept `WS_BORDER`.
+pub const FRAMED_FIELDS: [i32; 7] = [
+    IDC_HOTKEY,
+    IDC_DELAY,
+    IDC_CLIPBOARD_TIMEOUT,
+    IDC_CLIPBOARD_RESTORE,
+    IDC_EXCLUSION_NAME,
+    IDC_EXCLUSIONS,
+    IDC_CYCLE_LIST,
+];
+
+/// The colours one whole background pass needs, taken out of the state in one borrow.
+///
+/// The same split every drawing handler of this file makes: the borrow ends before the DC
+/// is touched, and what leaves the closure is plain values — three brushes the state keeps
+/// alive until the dialog ends, and three inks.
+#[derive(Clone, Copy)]
+struct BackgroundColors {
+    /// [`theme::Palette::window_bg`] — the ground the whole client area starts as.
+    window: HBRUSH,
+    /// [`theme::Palette::panel_bg`] — the fill of a panel.
+    panel: HBRUSH,
+    /// [`theme::Palette::field_bg`] — the fill under a field or a list.
+    field: HBRUSH,
+    /// [`theme::Palette::panel_border`] — the single-pixel frame of a panel.
+    panel_border: COLORREF,
+    /// [`theme::Palette::field_border`] — the single-pixel frame of a field.
+    field_border: COLORREF,
+    /// [`theme::Palette::text_muted`] — the ink of a panel caption.
+    caption: COLORREF,
+}
+
+/// Draws the whole background of the settings dialog — FR-92а, task T-11-13.
+///
+/// # Why the panels live here and not in `WM_DRAWITEM`
+///
+/// Until this task each of the eight panels was an owner-drawn `Button` covering the whole
+/// area of its block. That made the panel an *element*: it took every click that landed on
+/// the empty ground of the block, redrew itself on the click, and — no control of a dialog
+/// carries `WS_CLIPSIBLINGS` — laid its own fill straight over its neighbours, which were
+/// never told to repaint. One click emptied a whole block. A panel is not an element; a
+/// panel **is** the background of its block, and this is where a background is drawn. The
+/// eight controls stay in the template, invisible (`NOT WS_VISIBLE` in `app.rc`): an
+/// invisible window takes no click, paints nothing and covers nobody, while it keeps the
+/// identifier FR-94 sets the caption on and the rectangle that says where the panel goes.
+///
+/// # What is drawn, in this order
+///
+/// 1. the whole client area in `window_bg` — the ground the dialog stands on;
+/// 2. every panel, in the rectangle of its own hidden control: the rounded fill and frame
+///    of [`BackgroundFigure::Panel`], then the caption — upper case, smaller and bolder
+///    than the dialog font, letter-spaced, in `text_muted` — read off that same hidden
+///    control with `GetDlgItemTextW`, which is what keeps FR-94 working with no second
+///    source of truth for the eight strings;
+/// 3. every field and list, one pixel outside its own rectangle: the rounded fill and frame
+///    of [`BackgroundFigure::Field`].
+///
+/// Panels before fields, in two passes over one walk of the children: a field can lie on a
+/// panel and a panel never lies on a field, so the order is the answer whatever the Z order
+/// of the two happens to be. The children themselves paint after this message, on top of
+/// all of it — which is what a background is for.
+///
+/// Answers 1 — «erased» — when the background was drawn, and 0 when the state is
+/// unreachable (no state yet, or a re-entrant message) or `theme::Brushes::new` was refused
+/// at initialisation: the dialog manager then erases with the answer of `WM_CTLCOLORDLG`,
+/// exactly as it did before this task (NFR-13, T-11-4).
 ///
 /// # Safety
 ///
-/// Called from [`on_draw_item`] only, with the `hDC` and `rcItem` of the message it is
-/// inside of: both are owned by the dialog manager for the length of the send.
-unsafe fn draw_group_panel(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
-    // The colour choice, split from the painting as everywhere in this file: the borrow
-    // of the state ends before the DC is touched, and what leaves the closure is plain
-    // values — a brush the state keeps alive until the dialog ends, and two inks.
-    //
-    // SAFETY: see the caller of `on_draw_item`.
+/// Called from [`dialog_proc`] only, with the `wparam` of the message — the DC the manager
+/// owns for the length of the send.
+unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
+    // The one thing taken out of the message (SEC-05): the DC to paint into. It is written
+    // to and never read from, and no pointer of the message is followed.
+    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
+
+    // SAFETY: see the caller — the pointer was stored on `WM_INITDIALOG` and the value it
+    // names is alive for the whole of this modal call.
     let choice = unsafe {
         with_state(hwnd, |state| {
             // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
             let brushes = state.brushes.as_ref()?;
             let palette = state.palette;
 
-            Some((brushes.panel_bg(), palette.panel_border, palette.text_muted))
+            Some(BackgroundColors {
+                window: brushes.window_bg(),
+                panel: brushes.panel_bg(),
+                field: brushes.field_bg(),
+                panel_border: palette.panel_border,
+                field_border: palette.field_border,
+                caption: palette.text_muted,
+            })
         })
     };
 
-    let Some(Some((fill, border_ink, caption_ink))) = choice else {
+    let Some(Some(colors)) = choice else {
         return 0;
     };
 
-    paint_panel(dc, &rect, border_ink, fill);
+    let mut client = RECT::default();
 
-    // The caption, from the dialog's own control by identifier — never from the message.
-    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
-    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
-
-    if !caption.is_empty() {
-        // NFR-13, for the calls below: each answers a previous value or a success flag,
-        // and every answer is deliberately dropped for the reason `on_draw_item` gives
-        // for its own paint calls (SEC-05: indifference to a forged DC, no read-back, no
-        // `debug_assert`, no journal row).
-        //
-        // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the
-        // DC and touch no memory of this process.
-        unsafe { SetBkMode(dc, TRANSPARENT) };
-        // SAFETY: as above.
-        unsafe { SetTextColor(dc, caption_ink) };
-
-        let mut text_rect = RECT {
-            left: rect.left + PANEL_CAPTION_INSET_X,
-            top: rect.top + PANEL_CAPTION_INSET_Y,
-            right: rect.right - PANEL_CAPTION_INSET_X,
-            bottom: rect.bottom,
-        };
-
-        // SAFETY: `caption` and `text_rect` are live locals of this frame; the format has
-        // no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
-        // writes only pixels of the DC. The dialog's font is already selected into the DC
-        // the manager hands over — no font work here.
-        unsafe { DrawTextW(dc, &mut caption, &mut text_rect, DT_SINGLELINE) };
+    // NFR-13: examined — a refused `GetClientRect` means no rectangle to paint in, and the
+    // manager's own erase is the degraded-but-alive answer.
+    //
+    // SAFETY: `hwnd` is the live dialog and `client` is a live local the call fills.
+    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
+        return 0;
     }
 
-    // TRUE — the panel is drawn.
+    // SAFETY: `dc` is the DC of the message, painted into for the length of this send;
+    // `colors.window` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &client, colors.window) };
+
+    let dpi = dc_dpi(dc);
+    let children = child_rects_in_client(hwnd);
+
+    // The caption face: one font for all eight panels, made from the dialog's own font so
+    // that the face and the DPI-scaled size come from the window and not from a literal
+    // here. `None` — the font could not be read or made — costs the captions and nothing
+    // else (NFR-13).
+    let caption_face = caption_font(hwnd);
+
+    // Pass one — the panels. See the doc comment for why they go first.
+    for (control, rect) in &children {
+        if background_figure(*control) != Some(BackgroundFigure::Panel) {
+            continue;
+        }
+
+        paint_rounded(
+            dc,
+            rect,
+            scaled(PANEL_CORNER_RADIUS, dpi),
+            colors.panel_border,
+            colors.panel,
+        );
+
+        if let Some(face) = caption_face {
+            // SAFETY: `dc` is the DC of the message; `face` is the live font made above and
+            // deleted below, after every use of it has ended.
+            unsafe { draw_panel_caption(hwnd, *control, dc, *rect, colors.caption, dpi, face) };
+        }
+    }
+
+    if let Some(face) = caption_face {
+        // SAFETY: `face` was created by `caption_font` above, is selected into no DC any
+        // more — `draw_panel_caption` puts the previous font back before it returns — and
+        // is freed exactly once, here. The `BOOL` is dropped for the reason
+        // `draw_check_mark` gives.
+        let _ = unsafe { DeleteObject(face.into()) };
+    }
+
+    // Pass two — the fields and lists, one pixel outside each rectangle (п. 2.3).
+    for (control, rect) in &children {
+        if background_figure(*control) != Some(BackgroundFigure::Field) {
+            continue;
+        }
+
+        let frame = RECT {
+            left: rect.left - 1,
+            top: rect.top - 1,
+            right: rect.right + 1,
+            bottom: rect.bottom + 1,
+        };
+
+        paint_rounded(
+            dc,
+            &frame,
+            scaled(FIELD_CORNER_RADIUS, dpi),
+            colors.field_border,
+            colors.field,
+        );
+    }
+
+    // TRUE — the background is drawn; the manager must not erase over it.
     1
 }
 
-/// One rounded panel with an outline and an interior — FR-92а, task T-11-5c.
+/// The face the panel captions are set in — п. 2.1 of task T-11-13.
 ///
-/// `outline` is the ink of a transient pen for the single-pixel `panel_border` frame;
-/// `fill` is a live brush of the dialog's state. `RoundRect` draws both at once — frame
-/// with the selected pen, interior with the selected brush — which is why this looks like
-/// [`paint_ellipse`] with a different figure. The transient pen is owned for exactly this
-/// call, as there; a refused `CreatePen` skips the panel (NFR-13: examined — better no
-/// panel for one paint than a panel framed in whatever pen the DC happens to hold).
-fn paint_panel(dc: HDC, area: &RECT, outline: COLORREF, fill: HBRUSH) {
+/// Built out of the dialog's **own** font rather than out of a face name written here: the
+/// dialog font is what the template asks for and what the manager already created at the
+/// window's DPI, so taking its `LOGFONTW` and changing two fields — the height to
+/// [`PANEL_CAPTION_FONT_PERCENT`] of what it was, the weight to bold — keeps the face and
+/// the DPI of the window and copies neither into this file.
+///
+/// The font is asked of one of the panels themselves (`WM_GETFONT` through
+/// `SendDlgItemMessageW`, the one way this module sends anything to its own controls): the
+/// dialog manager gives its font to every control it creates, and an invisible control has
+/// it like any other.
+///
+/// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, a refused
+/// `CreateFontIndirectW`. The captions are then not drawn, which is the degraded-but-alive
+/// answer of NFR-13: the panels are still there and the dialog still opens.
+fn caption_font(hwnd: HWND) -> Option<HFONT> {
+    let font = HFONT(send_to(hwnd, GROUP_BOXES[0], WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
+
+    // NFR-13: examined. A control with no font of its own answers zero.
+    if font.is_invalid() {
+        return None;
+    }
+
+    let mut logical = LOGFONTW::default();
+
+    // NFR-13: examined — zero is «this is not a font», and there is nothing to shrink.
+    //
+    // SAFETY: `font` is the live font just read off the control; the size argument is the
+    // size of `logical`, a live local of this frame, so the call cannot write past it.
+    let copied = unsafe {
+        GetObjectW(
+            font.into(),
+            i32::try_from(size_of::<LOGFONTW>()).unwrap_or(0),
+            Some((&raw mut logical).cast()),
+        )
+    };
+
+    if copied == 0 {
+        return None;
+    }
+
+    // `lfHeight` is negative for a font asked for by character height, which is how the
+    // manager creates a `DS_SETFONT` face; the multiplication keeps whichever sign it has.
+    logical.lfHeight = (logical.lfHeight * PANEL_CAPTION_FONT_PERCENT) / 100;
+    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(logical.lfWeight);
+
+    // SAFETY: `logical` is a live local of this frame, fully initialised by `GetObjectW`
+    // above and read by the call; the handle it answers is owned by the caller.
+    let created = unsafe { CreateFontIndirectW(&raw const logical) };
+
+    // NFR-13: examined — a refused font is no captions, not a caption in whatever face the
+    // DC happens to hold.
+    if created.is_invalid() {
+        return None;
+    }
+
+    Some(created)
+}
+
+/// Draws the caption of one panel, character by character — п. 2.1 of task T-11-13.
+///
+/// The text is the **hidden control's own**, read by identifier ([`get_text`] →
+/// `GetDlgItemTextW`) and put through [`panel_caption`]; FR-94 rewrites those controls when
+/// the interface language changes, so the captions follow the language with no second store
+/// of the eight strings anywhere.
+///
+/// Character by character because the letter spacing of the mock-ups is 1,1 px and GDI has
+/// no fractional advance: the pen position is carried in tenths of a pixel across the whole
+/// caption and divided down only where a character is placed, so the error never
+/// accumulates. Every character's own width comes from the DC, through [`caption_advance`],
+/// which is where a character the DC measures as nothing gets an explicit width instead —
+/// without it the words of a caption run together.
+///
+/// # Safety
+///
+/// `dc` is the DC of the message the caller is inside of, and `face` is a live font the
+/// caller owns for longer than this call.
+unsafe fn draw_panel_caption(
+    hwnd: HWND,
+    control: i32,
+    dc: HDC,
+    panel: RECT,
+    ink: COLORREF,
+    dpi: i32,
+    face: HFONT,
+) {
+    let caption = panel_caption(&get_text(hwnd, control));
+
+    if caption.is_empty() {
+        return;
+    }
+
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of, and
+    // `face` is the live font of the caller. The previous font is put back below.
+    let previous_font = unsafe { SelectObject(dc, face.into()) };
+
+    // NFR-13, for the calls below: each answers a previous value or a success flag, and
+    // every answer is deliberately dropped for the reason [`on_draw_item`] gives for its
+    // own paint calls.
+    //
+    // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC.
+    unsafe { SetBkMode(dc, TRANSPARENT) };
+    // SAFETY: as above.
+    unsafe { SetTextColor(dc, ink) };
+
+    // The caption font's cell height, for the explicit width of a character the DC measures
+    // as nothing: the dialog font's height ([`dialog_units`], the dialog's own scaling)
+    // taken down to the same percentage the face was.
+    let font_height = dialog_units(hwnd, 0, 8)
+        .map(|(_, height)| (height * PANEL_CAPTION_FONT_PERCENT) / 100)
+        .unwrap_or(0);
+
+    // 7 dialog units from the left edge of the panel, 5 mock-up pixels from the top.
+    let inset_x = dialog_units(hwnd, PANEL_CAPTION_INSET_DLU, 0)
+        .map(|(horizontal, _)| horizontal)
+        .unwrap_or(PANEL_CAPTION_INSET_DLU);
+
+    let top = panel.top + scaled(PANEL_CAPTION_INSET_Y, dpi);
+    let tracking = scaled(PANEL_CAPTION_TRACKING_TENTHS, dpi);
+
+    // Tenths of a pixel — see the doc comment.
+    let mut pen_tenths = (panel.left + inset_x) * 10;
+
+    for character in caption.chars() {
+        let mut units = [0u16; 2];
+        let encoded = character.encode_utf16(&mut units);
+
+        let mut extent = SIZE::default();
+
+        // NFR-13: examined — a refused measurement is «nothing», which
+        // [`caption_advance`] turns into the explicit width.
+        //
+        // SAFETY: `encoded` and `extent` are live locals of this frame; the call reads the
+        // one character and writes only `extent`.
+        let measured = if unsafe { GetTextExtentPoint32W(dc, encoded, &mut extent) }.as_bool() {
+            extent.cx
+        } else {
+            0
+        };
+
+        // NFR-13: the `BOOL` is examined and deliberately dropped — see the block comment
+        // above.
+        //
+        // SAFETY: `encoded` is a live local of this frame and the DC is the caller's.
+        let _ = unsafe { TextOutW(dc, pen_tenths / 10, top, encoded) };
+
+        pen_tenths += caption_advance(measured, font_height) * 10 + tracking;
+    }
+
+    // SAFETY: the handle was in the DC a moment ago; putting it back ends this function's
+    // use of the DC and leaves the caller free to delete `face`.
+    unsafe { SelectObject(dc, previous_font) };
+}
+
+/// One rounded rectangle with an outline and an interior — FR-92а, tasks T-11-5c and
+/// T-11-13.
+///
+/// `radius` is the corner radius in pixels of the window, already scaled by
+/// [`scaled`]; `RoundRect` takes the *diameter* of the corner ellipse, and doubling it is
+/// this function's business so that [`PANEL_CORNER_RADIUS`], [`BUTTON_CORNER_RADIUS`] and
+/// [`FIELD_CORNER_RADIUS`] read as the mock-ups describe them.
+///
+/// `outline` is the ink of a transient pen for the single-pixel frame; `fill` is a live
+/// brush of the dialog's state. `RoundRect` draws both at once — frame with the selected
+/// pen, interior with the selected brush — which is why this looks like [`paint_ellipse`]
+/// with a different figure. The transient pen is owned for exactly this call, as there; a
+/// refused `CreatePen` skips the figure (NFR-13: examined — better no panel for one paint
+/// than a panel framed in whatever pen the DC happens to hold).
+fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBRUSH) {
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
     let pen = unsafe { CreatePen(PS_SOLID, 1, outline) };
@@ -4599,8 +5091,8 @@ fn paint_panel(dc: HDC, area: &RECT, outline: COLORREF, fill: HBRUSH) {
             area.top,
             area.right,
             area.bottom,
-            PANEL_CORNER,
-            PANEL_CORNER,
+            radius * 2,
+            radius * 2,
         )
     };
 

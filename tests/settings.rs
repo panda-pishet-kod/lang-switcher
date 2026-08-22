@@ -2057,6 +2057,416 @@ fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
     }
 }
 
+// -----------------------------------------------------------------------------------------
+// Task T-11-13 — the defect, and the mock-ups
+// -----------------------------------------------------------------------------------------
+
+/// `WS_VISIBLE`. rc.exe ORs it into every control statement of a dialog whatever the style
+/// expression says; the only way to take it back off is the `NOT` operator of the
+/// expression, which is what `app.rc` now does for the eight panels.
+const WS_VISIBLE: u32 = 0x1000_0000;
+
+/// `WS_BORDER` — the sunken system rectangle. rc.exe adds this one to `EDITTEXT` and
+/// `LISTBOX` on top of `WS_VISIBLE`, and the same `NOT` takes it off.
+const WS_BORDER: u32 = 0x0080_0000;
+
+/// `WS_CLIPSIBLINGS` — the style the hypothesis of task T-11-13 named. Not a single control
+/// of this template has ever carried it; see the test below.
+const WS_CLIPSIBLINGS: u32 = 0x0400_0000;
+
+/// The eight group panels, by identifier and caption — the same eight
+/// `settings::GROUP_BOXES` lists, written out as literals by the rule the other template
+/// tests follow.
+const PANELS: [(u32, &str); 8] = [
+    (1090, "Общие"),
+    (1093, "Горячая клавиша"),
+    (1095, "Раскладки"),
+    (1099, "Замена"),
+    (1101, "Выделение"),
+    (1104, "Исключения"),
+    (1106, "Диагностика"),
+    (1108, "Состояние"),
+];
+
+/// **Criterion 10 of T-11-13, and the two-sided detector of the defect** — read out of the
+/// **built** `LangSwitcher.exe`, like every other statement about the template.
+///
+/// The defect: a click anywhere on the empty ground of a block emptied the whole block. The
+/// hypothesis named the cause — the panel is an owner-drawn `Button` covering the whole area
+/// of its block, so the click lands on it, it redraws itself, and nothing clips its fill away
+/// from its neighbours, which are never invalidated. This test measures every premise of that
+/// hypothesis that can be measured without a window, and then asserts the cure: the panel is
+/// **not a visible element any more**, so no click can reach it and it paints nothing.
+///
+/// Before the fix the same test failed on the `WS_VISIBLE` assertion with `0x5000000b`
+/// printed for all eight — that is the «ДО» half of the detector, and the «ПОСЛЕ» half is
+/// this test passing with `0x4000000b`. The live half — the click that used to empty the
+/// block and no longer does — is the controller's, on a debug build of his own.
+#[test]
+fn the_eight_panels_are_not_elements_that_can_swallow_their_block() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // Premise the hypothesis names: nothing in this template clips siblings. Measured over
+    // *every* control, not only the panels — the style is absent from the whole dialog, so
+    // no drawing of any control is clipped away from any other.
+    for (id, style) in &template.styles {
+        assert_eq!(
+            style & WS_CLIPSIBLINGS,
+            0,
+            "control {id} carries WS_CLIPSIBLINGS ({style:#010x}); the measurement of task \
+             T-11-13 recorded that not one control of this dialog does"
+        );
+    }
+
+    for (id, what) in PANELS {
+        let style = template.style_of(id, what);
+        let (left, top, right, bottom) = template.rect_of(id);
+
+        // Premise: the panel is an owner-drawn Button — a class that takes clicks and
+        // redraws itself on them. Still true after the fix, and harmless now.
+        assert_eq!(
+            style & 0x0F,
+            0x0B,
+            "«{what}» ({id}) must keep BS_OWNERDRAW; the style is {style:#010x}"
+        );
+
+        // Premise: the panel covers the whole area of its block — it overlaps the controls
+        // of the block, and there is ground inside it that belongs to no other control, so
+        // a click on the empty part of the block can only land on the panel.
+        let mut overlapped = Vec::new();
+
+        for (other, x, y, cx, cy) in &template.bounds {
+            if *other == id {
+                continue;
+            }
+
+            if *x < right && x + cx > left && *y < bottom && y + cy > top {
+                overlapped.push(*other);
+            }
+        }
+
+        let mut bare = 0usize;
+
+        for y in top..bottom {
+            for x in left..right {
+                let covered = template.bounds.iter().any(|(other, ox, oy, cx, cy)| {
+                    *other != id && *ox <= x && x < ox + cx && *oy <= y && y < oy + cy
+                });
+
+                if !covered {
+                    bare += 1;
+                }
+            }
+        }
+
+        println!(
+            "«{what}» ({id}): style {style:#010x}, rect {left},{top}..{right},{bottom}, \
+             overlaps {} controls, {bare} dialog units of bare ground",
+            overlapped.len()
+        );
+
+        assert!(
+            !overlapped.is_empty(),
+            "«{what}» ({id}) overlaps nothing — the premise of the defect is not what was \
+             measured"
+        );
+        assert!(
+            bare > 0,
+            "«{what}» ({id}) has no ground of its own — the premise of the defect is not \
+             what was measured"
+        );
+
+        // **The cure.** The panel is not a visible element: an invisible window takes no
+        // click, sends no `WM_DRAWITEM`, paints nothing and covers nobody. The rectangle
+        // and the identifier stay — the background drawing reads both off this very
+        // control.
+        assert_eq!(
+            style & WS_VISIBLE,
+            0,
+            "«{what}» ({id}) is still a visible element — the defect of task T-11-13 is \
+             back; the style is {style:#010x}"
+        );
+    }
+}
+
+/// **Criterion 13 of T-11-13** — п. 2.3: no field and no list keeps the system border.
+///
+/// The system border is a sunken rectangle in the system's colours, which is not what the
+/// mock-ups show; the rounded `field_border` frame the dialog draws instead lives one pixel
+/// outside each of these rectangles, in the dialog's own background drawing. Read out of the
+/// built binary, and everything else about each style has to survive — a lost `WS_VSCROLL`
+/// or `WS_TABSTOP` would cost the control its scroll bar or its place in the keyboard loop.
+#[test]
+fn no_field_or_list_of_the_dialog_carries_the_system_border() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The seven of `settings::FRAMED_FIELDS`, by their actual identifiers; the third column
+    // is the bit that must still be there next to the border that must not.
+    const FIELDS: [(u32, &str, u32, &str); 7] = [
+        (1010, "поле горячей клавиши", 0x0001_0000, "WS_TABSTOP"),
+        (1032, "задержка между событиями", 0x2000, "ES_NUMBER"),
+        (1041, "таймаут буфера обмена", 0x2000, "ES_NUMBER"),
+        (1042, "задержка восстановления", 0x2000, "ES_NUMBER"),
+        (1051, "имя процесса", 0x0080, "ES_AUTOHSCROLL"),
+        (1050, "список исключений", 0x0020_0000, "WS_VSCROLL"),
+        (1024, "список раскладок", 0x0001, "LVS_REPORT"),
+    ];
+
+    for (id, what, kept, kept_name) in FIELDS {
+        let style = template.style_of(id, what);
+
+        println!("«{what}» ({id}): style {style:#010x}");
+
+        assert_eq!(
+            style & WS_BORDER,
+            0,
+            "«{what}» ({id}) still carries WS_BORDER — task T-11-13, п. 2.3; the style is \
+             {style:#010x}"
+        );
+
+        assert_ne!(
+            style & kept,
+            0,
+            "«{what}» ({id}) lost {kept_name} along with the border; the style is \
+             {style:#010x}"
+        );
+    }
+
+    // And the seven are the seven the module names: a field added to the template without
+    // being added to `FRAMED_FIELDS` would keep a system border nobody draws a frame for.
+    let listed: Vec<i32> = FIELDS.iter().map(|(id, ..)| *id as i32).collect();
+    let mut mine = settings::FRAMED_FIELDS.to_vec();
+    let mut theirs = listed.clone();
+    mine.sort_unstable();
+    theirs.sort_unstable();
+
+    assert_eq!(
+        mine, theirs,
+        "the module's list of framed fields and the template's have parted"
+    );
+}
+
+/// **Criterion 11 of T-11-13** — п. 2.1: the caption the mock-ups show is the upper case of
+/// the control's text, and the space inside a caption survives the trip to the pen.
+#[test]
+fn a_panel_caption_is_the_upper_case_of_the_control_text() {
+    // The eight captions of the dialog, in both locales — the strings FR-94 puts on the
+    // eight controls, and what the background drawing must make of them.
+    for (source, expected) in [
+        ("Общие", "ОБЩИЕ"),
+        ("Горячая клавиша", "ГОРЯЧАЯ КЛАВИША"),
+        ("Раскладки", "РАСКЛАДКИ"),
+        ("Замена", "ЗАМЕНА"),
+        ("Выделение", "ВЫДЕЛЕНИЕ"),
+        ("Исключения", "ИСКЛЮЧЕНИЯ"),
+        ("Диагностика", "ДИАГНОСТИКА"),
+        ("Состояние", "СОСТОЯНИЕ"),
+        ("General", "GENERAL"),
+        ("Hotkey", "HOTKEY"),
+        ("Replacement", "REPLACEMENT"),
+        ("", ""),
+    ] {
+        assert_eq!(
+            settings::panel_caption(source),
+            expected,
+            "«{source}» must be set as «{expected}»"
+        );
+    }
+
+    // The space, said out loud: the trap of п. 2.1 is a caption drawn character by
+    // character whose blank went missing, and «ГОРЯЧАЯКЛАВИША» is what that looks like.
+    let two_words = settings::panel_caption("Горячая клавиша");
+    assert!(
+        two_words.contains(' '),
+        "the space inside a caption must survive: «{two_words}»"
+    );
+    assert_ne!(two_words, "ГОРЯЧАЯКЛАВИША");
+}
+
+/// **Criterion 11 of T-11-13, the second half** — the blank that measures as nothing still
+/// takes room on the line.
+#[test]
+fn a_character_the_device_measures_as_nothing_still_takes_room() {
+    // A measured character keeps its own width whatever the font height is.
+    assert_eq!(settings::caption_advance(9, 12), 9);
+    assert_eq!(settings::caption_advance(1, 12), 1);
+
+    // A blank — measured as zero, or as a negative by a refused measurement — takes the
+    // explicit width instead, and that width is never zero for a font of any real size.
+    for height in [10, 12, 16, 24] {
+        let blank = settings::caption_advance(0, height);
+
+        assert!(
+            blank > 0,
+            "a blank in a {height} px face must take room, not {blank}"
+        );
+        assert!(
+            blank < height,
+            "a blank in a {height} px face must be narrower than the face is tall, not \
+             {blank}"
+        );
+        assert_eq!(settings::caption_advance(-1, height), blank);
+    }
+}
+
+/// **Criterion 12 of T-11-13** — п. 2.2: the three radii are named constants with the values
+/// the mock-ups have, and not numbers written where they are used.
+#[test]
+fn the_corner_radii_are_the_six_and_four_of_the_mock_ups() {
+    assert_eq!(settings::PANEL_CORNER_RADIUS, 6, "panels — 6 px");
+    assert_eq!(settings::BUTTON_CORNER_RADIUS, 4, "buttons — 4 px");
+    assert_eq!(settings::FIELD_CORNER_RADIUS, 4, "fields and lists — 4 px");
+}
+
+/// **Criterion 12 of T-11-13, the DPI half** — every length of the mock-ups is a length at
+/// 100 %, and the window scales it.
+#[test]
+fn the_lengths_of_the_mock_ups_scale_with_the_dpi_of_the_window() {
+    // 100 % is the picture itself.
+    assert_eq!(settings::scaled(6, 96), 6);
+    assert_eq!(settings::scaled(4, 96), 4);
+
+    // 125 %, 150 %, 200 % — rounded to nearest, so a one-pixel frame never rounds away.
+    assert_eq!(settings::scaled(6, 120), 8);
+    assert_eq!(settings::scaled(4, 120), 5);
+    assert_eq!(settings::scaled(6, 144), 9);
+    assert_eq!(settings::scaled(4, 192), 8);
+    assert_eq!(settings::scaled(1, 120), 1);
+    assert_eq!(settings::scaled(1, 144), 2);
+
+    // The letter spacing is carried in tenths of a pixel, and scales as a tenth does.
+    assert_eq!(settings::scaled(11, 96), 11);
+    assert_eq!(settings::scaled(11, 192), 22);
+
+    // A device that will not say what its DPI is gets the 100 % look, not a zero-sized one.
+    assert_eq!(settings::scaled(6, 0), 6);
+    assert_eq!(settings::scaled(6, -1), 6);
+}
+
+/// **Criterion 10 of T-11-13** — the panels and their captions are drawn by the background,
+/// and the branch that used to draw them from `WM_DRAWITEM` is gone.
+///
+/// The first half is the table of `background_figure`: every group is a panel, every field
+/// and list is a frame, and nothing else is either. The second half is read out of the
+/// source of the module, in the manner of the sweeps in `tests\guard.rs` and
+/// `tests\diag.rs` — the drawing of a panel must not be reachable from a message again.
+#[test]
+fn the_background_draws_the_panels_and_wm_drawitem_no_longer_knows_them() {
+    use lang_switcher::settings::BackgroundFigure;
+
+    for panel in settings::GROUP_BOXES {
+        assert_eq!(
+            settings::background_figure(panel),
+            Some(BackgroundFigure::Panel),
+            "control {panel} is a group panel"
+        );
+    }
+
+    for field in settings::FRAMED_FIELDS {
+        assert_eq!(
+            settings::background_figure(field),
+            Some(BackgroundFigure::Field),
+            "control {field} is a field or a list"
+        );
+    }
+
+    // A push button, a check box, a combo box, a static — the background leaves all of them
+    // to their own drawing.
+    for other in [1, 2, 1080, 1001, 1002, 1012, 1091, 1070] {
+        assert_eq!(
+            settings::background_figure(other),
+            None,
+            "control {other} must be left to its own drawing"
+        );
+    }
+
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("the module source must be readable");
+
+    assert!(
+        !source.contains("draw_group_panel"),
+        "`draw_group_panel` is back — a panel drawn from a message is an element again"
+    );
+
+    // The one handler that draws a panel is the background one, and it is wired to
+    // `WM_ERASEBKGND` and to nothing else.
+    assert!(
+        source.contains("WM_ERASEBKGND => {"),
+        "the dialog must answer WM_ERASEBKGND"
+    );
+    assert!(
+        source.contains("unsafe fn on_erase_background("),
+        "the background handler must exist"
+    );
+}
+
+/// **Criterion 14 of T-11-13** — FR-94: the caption of a panel is the text of the hidden
+/// control, so changing the interface language changes the panels too.
+///
+/// The path is one road with no fork: `SetDlgItemTextW` writes the string of the locale in
+/// force onto the control (the `LOCALISED_CONTROLS` table, run by `localise_dialog`), and
+/// `GetDlgItemTextW` reads it back off the same control when the background draws
+/// (`get_text` inside `draw_panel_caption`). This test walks that road: the eight panels are
+/// all in the localisation table, each with a string row of its own, and the drawing takes
+/// its text from `get_text` and from no store of its own.
+#[test]
+fn the_panel_captions_are_read_off_the_controls_fr_94_writes() {
+    let product = ProductImage::shared();
+
+    for panel in settings::GROUP_BOXES {
+        let row = settings::LOCALISED_CONTROLS
+            .iter()
+            .find(|(control, _)| *control == panel)
+            .map(|(_, string)| *string)
+            .unwrap_or_else(|| {
+                panic!(
+                    "panel {panel} is in no row of the localisation table — FR-94 would \
+                        never rewrite its caption"
+                )
+            });
+
+        let russian = product.string(settings::Language::Ru, row);
+        let english = product.string(settings::Language::En, row);
+
+        println!(
+            "panel {panel}: ru «{russian}» → «{}», en «{english}» → «{}»",
+            settings::panel_caption(&russian),
+            settings::panel_caption(&english)
+        );
+
+        assert!(!russian.is_empty(), "panel {panel} has no Russian caption");
+        assert!(!english.is_empty(), "panel {panel} has no English caption");
+        assert_ne!(
+            russian, english,
+            "panel {panel} would look the same in both locales — the test would prove \
+             nothing about the language"
+        );
+    }
+
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("the module source must be readable");
+
+    // The one place the caption string is obtained, and it is the control's own text.
+    assert!(
+        source.contains("let caption = panel_caption(&get_text(hwnd, control));"),
+        "the caption must come from the control itself (get_text → GetDlgItemTextW)"
+    );
+    assert!(
+        source.contains("fn get_text(hwnd: HWND, control: i32) -> String {"),
+        "`get_text` must still be the GetDlgItemTextW wrapper the caption path goes through"
+    );
+}
+
 // Criterion 9 of T-11-6 — read out of the **built** `LangSwitcher.exe`, exactly as the
 // buttons, glyphs and groups above. ⚠ The check differs from theirs in kind:
 // `CBS_OWNERDRAWFIXED` (0x0010) is a style *flag* that combines with the rest, unlike the
@@ -2769,6 +3179,10 @@ struct DialogTemplate {
     /// The style of every control, paired with its identifier, in template order — task
     /// T-11-5a reads the button types of the nine owner-drawn buttons out of this.
     styles: Vec<(u32, u32)>,
+    /// The rectangle of every control in dialog units — `(id, x, y, cx, cy)`, in template
+    /// order. Read out by task T-11-13, whose defect is one control covering the whole area
+    /// of the others: the measurement of that is arithmetic on these four numbers.
+    bounds: Vec<(u32, i32, i32, i32, i32)>,
 }
 
 impl DialogTemplate {
@@ -2809,6 +3223,7 @@ impl DialogTemplate {
         let mut text = Vec::new();
         let mut controls = Vec::new();
         let mut styles = Vec::new();
+        let mut bounds = Vec::new();
 
         for _ in 0..items {
             at = (at + 3) & !3;
@@ -2817,9 +3232,12 @@ impl DialogTemplate {
             let _ex_style = read_u32(bytes, &mut at);
             let style = read_u32(bytes, &mut at);
 
-            for _ in 0..4 {
-                let _ = read_u16(bytes, &mut at);
-            }
+            // x, y, cx, cy — dialog units, `i16` in the template and widened here so that
+            // the containment arithmetic of task T-11-13 has room to add.
+            let x = i32::from(read_u16(bytes, &mut at) as i16);
+            let y = i32::from(read_u16(bytes, &mut at) as i16);
+            let cx = i32::from(read_u16(bytes, &mut at) as i16);
+            let cy = i32::from(read_u16(bytes, &mut at) as i16);
 
             let id = read_u32(bytes, &mut at);
 
@@ -2831,6 +3249,7 @@ impl DialogTemplate {
 
             controls.push(id);
             styles.push((id, style));
+            bounds.push((id, x, y, cx, cy));
 
             if let Some(title) = title
                 && !title.is_empty()
@@ -2844,7 +3263,27 @@ impl DialogTemplate {
             text,
             controls,
             styles,
+            bounds,
         }
+    }
+
+    /// The style of one control, by identifier.
+    fn style_of(&self, id: u32, what: &str) -> u32 {
+        self.styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("the dialog has no control {id} — «{what}»"))
+    }
+
+    /// The rectangle of one control, by identifier, as `(left, top, right, bottom)` in
+    /// dialog units.
+    fn rect_of(&self, id: u32) -> (i32, i32, i32, i32) {
+        self.bounds
+            .iter()
+            .find(|(control, ..)| *control == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *x + *cx, *y + *cy))
+            .unwrap_or_else(|| panic!("the dialog has no control {id}"))
     }
 }
 
