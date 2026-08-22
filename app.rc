@@ -199,6 +199,20 @@
 #define LVS_SINGLESEL          0x0004
 #define LVS_SHOWSELALWAYS      0x0008
 #define LVS_NOCOLUMNHEADER     0x4000
+// ⚠ SS_OWNERDRAW is the static TYPE, exactly as BS_OWNERDRAW above is the button type: static
+// types live in the low nibble of the style (SS_LEFT 0x00, SS_CENTER 0x01, SS_RIGHT 0x02,
+// SS_ICON 0x03 …) and replace one another rather than combine. Every LTEXT statement below
+// carries it since task T-11-18 (FR-92а) so that the dialog paints its labels itself
+// (WM_DRAWITEM, branch ODT_STATIC, in src\settings.rs). The reason is the same one that put
+// BS_OWNERDRAW on the buttons and CBS_OWNERDRAWFIXED on the combo boxes, sharpened by task
+// T-11-17: this program draws its own text with grey antialiasing, a system-drawn STATIC draws
+// its own with the ClearType of the dialog font, and the two smoothings standing in one window
+// read as two different type faces on neighbouring lines.
+// ⚠ LTEXT's own default type is SS_LEFT 0x00 and it is absorbed by this one exactly as
+// BS_PUSHBUTTON 0x00 is absorbed by BS_OWNERDRAW: 0x00|0x0D is 0x0D. What must NOT be absorbed
+// is WS_GROUP, which rc.exe adds to an LTEXT with or without a style expression -- the tab
+// order of the dialog stands on it, and tests\settings.rs reads it back out of the built exe.
+#define SS_OWNERDRAW           0x0D
 
 // FR-90: two visually distinct tray states, each icon carrying the 16/20/24/32 px frames.
 // The paths are relative to this file, which sits next to Cargo.toml -- exactly the layout
@@ -322,11 +336,14 @@ BEGIN
     // was on any group and none appears: a panel takes no focus.
     CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 7, 200, 66
     CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
-    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9
+    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9, SS_OWNERDRAW
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 48, 58, 9
+    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 48, 58, 9, SS_OWNERDRAW
     COMBOBOX        IDC_THEME, 74, 46, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18
+    // ⚠ Two lines high (18 units against the 9 of a one-line label) and the text does not fit
+    // on one: the drawing of task T-11-18 keeps DT_WORDBREAK, which is what an SS_LEFT static
+    // wrapped with. IDC_LOG_DIR below is the other one of these.
+    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18, SS_OWNERDRAW
 
     // -- Горячая клавиша -----------------------------------------------------------------
     //
@@ -335,20 +352,20 @@ BEGIN
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
     CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 77, 200, 48
-    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9
+    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9, SS_OWNERDRAW
     EDITTEXT        IDC_HOTKEY, 48, 90, 64, 12, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
     PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16
+    LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16, SS_OWNERDRAW
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
     CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 129, 200, 132
     CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 141, 60, 10
     CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 141, 122, 10
-    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 157, 38, 9
+    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 157, 38, 9, SS_OWNERDRAW
     COMBOBOX        IDC_PAIR_SOURCE, 54, 155, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 173, 38, 9
+    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 173, 38, 9, SS_OWNERDRAW
     COMBOBOX        IDC_PAIR_TARGET, 54, 171, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 188, 186, 9
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 188, 186, 9, SS_OWNERDRAW
     // ⚠ No WS_BORDER since task T-11-13: the system border is a sunken rectangle drawn by
     // the system in the system's colours, and the mock-ups ask for a rounded field_border
     // frame. The frame is drawn by the dialog's own background drawing, one pixel outside
@@ -356,7 +373,7 @@ BEGIN
     CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 199, 142, 44
     PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 199, 40, 14, BS_OWNERDRAW
     PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 216, 40, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LAYOUT_NOTE, 14, 246, 186, 10
+    LTEXT           "", IDC_LAYOUT_NOTE, 14, 246, 186, 10, SS_OWNERDRAW
 
     // -- Замена: FR-41, FR-42, FR-42а, FR-44 ---------------------------------------------
     //
@@ -367,15 +384,15 @@ BEGIN
     CONTROL         "Автоматически (рекомендуется)", IDC_METHOD_AUTO, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 220, 19, 180, 10
     CONTROL         "Backspace", IDC_METHOD_BACKSPACE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 32, 180, 10
     CONTROL         "Выделение (совместимость)", IDC_METHOD_SELECTION, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 45, 180, 10
-    LTEXT           "Задержка между событиями, мс:", IDC_DELAY_LABEL, 220, 61, 110, 9
+    LTEXT           "Задержка между событиями, мс:", IDC_DELAY_LABEL, 220, 61, 110, 9, SS_OWNERDRAW
     EDITTEXT        IDC_DELAY, 334, 59, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
 
     // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
     CONTROL         "Выделение", IDC_GROUP_SELECTION, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 82, 200, 62
     CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 94, 186, 10
-    LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 110, 110, 9
+    LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 110, 110, 9, SS_OWNERDRAW
     EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 108, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
-    LTEXT           "Задержка восстановления, мс:", IDC_CLIP_RESTORE_LABEL, 220, 126, 110, 9
+    LTEXT           "Задержка восстановления, мс:", IDC_CLIP_RESTORE_LABEL, 220, 126, 110, 9, SS_OWNERDRAW
     EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 124, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
 
     // -- Исключения: FR-84 ---------------------------------------------------------------
@@ -384,20 +401,22 @@ BEGIN
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
     EDITTEXT        IDC_EXCLUSION_NAME, 220, 207, 120, 12, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14, BS_OWNERDRAW
-    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9
+    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9, SS_OWNERDRAW
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
     CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 236, 200, 58
     CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 248, 90, 10
     PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14, BS_OWNERDRAW
-    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9
-    LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16
+    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9, SS_OWNERDRAW
+    // ⚠ The second two-line label — 16 units for a path that does not fit on one line. Its
+    // DT_WORDBREAK is load-bearing exactly as IDC_LANGUAGE_RESTART's is; task T-11-18.
+    LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16, SS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 298, 406, 44
-    LTEXT           "", IDC_STATE_HOOK, 14, 310, 392, 9
-    LTEXT           "", IDC_STATE_LAYOUTS, 14, 321, 392, 9
-    LTEXT           "", IDC_STATE_AUTOSTART, 14, 332, 392, 9
+    LTEXT           "", IDC_STATE_HOOK, 14, 310, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_LAYOUTS, 14, 321, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_AUTOSTART, 14, 332, 392, 9, SS_OWNERDRAW
 
     // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
     // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
@@ -439,10 +458,10 @@ CAPTION "О программе Lang Switcher"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 14, 14, 21, 20
-    LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 48, 16, 178, 12
-    LTEXT           "", IDC_ABOUT_VERSION, 48, 30, 178, 9
-    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 14, 50, 212, 9
-    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 14, 61, 212, 9
+    LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 48, 16, 178, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_VERSION, 48, 30, 178, 9, SS_OWNERDRAW
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 14, 50, 212, 9, SS_OWNERDRAW
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 14, 61, 212, 9, SS_OWNERDRAW
     PUSHBUTTON      "ОК", IDOK, 95, 88, 50, 14, BS_OWNERDRAW
 END
 

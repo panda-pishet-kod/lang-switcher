@@ -2064,6 +2064,288 @@ fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
 }
 
 // -----------------------------------------------------------------------------------------
+// Task T-11-18 — every label of both templates is owner-drawn
+// -----------------------------------------------------------------------------------------
+//
+// ⚠ `SS_OWNERDRAW` (0x0D) is a static *type*, exactly as `BS_OWNERDRAW` (0x0B) is a button
+// type: types live in the low nibble of the style and replace one another, so the check is
+// equality of the nibble and not a bit test — the type these labels carried before the task
+// was `SS_LEFT` (0x00), and `style & 0x0D != 0` would pass for `SS_ICON` (0x03) or
+// `SS_BLACKFRAME` (0x07) just as happily.
+//
+// The list is every `LTEXT` of the settings template — field labels, notes, hints, the three
+// rows of the «Состояние» block and the journal path — and every `LTEXT` of the about
+// template. The icon of the about window is an `ICON` statement and deliberately not here:
+// `SS_ICON` is the type that loads the 32 px frame of the `.ico`, and it draws no text.
+
+/// Every `LTEXT` of the settings template, by identifier and by what it says on the window.
+const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
+    (1091, "Общие: подпись «Язык интерфейса»"),
+    (1109, "Общие: подпись «Оформление»"),
+    (1092, "Общие: «вступит в силу после перезапуска»"),
+    (1094, "Горячая клавиша: подпись «Клавиша»"),
+    (1011, "Горячая клавиша: предупреждение"),
+    (1096, "Раскладки: подпись «Источник»"),
+    (1097, "Раскладки: подпись «Цель»"),
+    (1098, "Раскладки: пояснение к списку цикла"),
+    (1027, "Раскладки: замечание о ненайденной раскладке"),
+    (1100, "Замена: подпись задержки"),
+    (1102, "Выделение: подпись таймаута буфера обмена"),
+    (1103, "Выделение: подпись задержки восстановления"),
+    (1105, "Исключения: пояснение об имени процесса"),
+    (1107, "Диагностика: подпись «Папка журнала»"),
+    (1062, "Диагностика: путь папки журнала"),
+    (1070, "Состояние: перехват клавиатуры"),
+    (1071, "Состояние: раскладки сеанса"),
+    (1072, "Состояние: автозапуск в реестре"),
+];
+
+/// Every `LTEXT` of the about template. The `ICON` is not one of them — see above.
+const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 4] = [
+    (1121, "О программе: имя"),
+    (1122, "О программе: версия"),
+    (1123, "О программе: первая строка"),
+    (1124, "О программе: вторая строка"),
+];
+
+/// **Criterion 9 of T-11-18** — read out of the **built** `LangSwitcher.exe`, exactly as the
+/// buttons, the glyphs and the panels above are.
+#[test]
+fn every_label_of_both_templates_is_owner_drawn() {
+    let product = ProductImage::open();
+
+    for (resource, labels) in [
+        (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice()),
+        (IDD_ABOUT, OWNER_DRAWN_ABOUT_LABELS.as_slice()),
+    ] {
+        let template = DialogTemplate::parse(&product.resource(RT_DIALOG, resource));
+
+        for (id, what) in labels {
+            let style = template.style_of(*id, what);
+
+            println!("«{what}» ({id}): style {style:#010x}");
+
+            assert_eq!(
+                style & 0x0F,
+                0x0D,
+                "«{what}» ({id}) must carry SS_OWNERDRAW as its static type — task T-11-18; \
+                 the style is {style:#010x}"
+            );
+
+            // The task changes the static type and nothing else about the template. rc.exe
+            // gives an `LTEXT` WS_GROUP whether or not a style expression is written out, and
+            // the tab order of the dialog stands on it: a label that lost WS_GROUP would let
+            // the arrow keys of the run before it walk on into the next block.
+            assert_ne!(
+                style & 0x0002_0000,
+                0,
+                "«{what}» ({id}) must keep WS_GROUP; the style is {style:#010x}"
+            );
+
+            // A label never had WS_TABSTOP and must not gain one: static text takes no focus.
+            assert_eq!(
+                style & 0x0001_0000,
+                0,
+                "«{what}» ({id}) must not gain WS_TABSTOP; the style is {style:#010x}"
+            );
+        }
+    }
+}
+
+/// **Criterion 9 of T-11-18, the closing half** — the two lists above are *every* label of
+/// their template and not a convenient subset: no static may stay on the system's own drawing.
+///
+/// The question the lists cannot answer by themselves is «is that all of them», and it is the
+/// one that decides the task: a single label left behind puts a ClearType line next to the
+/// grey-antialiased ones and the window still reads as two type faces. So the walk goes the
+/// other way round — over every control the built resource carries, picking out the ones whose
+/// **class** is `Static`, and every one of those has to be either a listed label or the icon.
+///
+/// The class and not the style, because the low nibble means a different thing for every
+/// class: `LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS` of the cycle list is 0x0D, which is
+/// the very number `SS_OWNERDRAW` is, and a style-only test would count that list as a label.
+#[test]
+fn no_static_of_either_template_was_left_on_the_system_drawing() {
+    let product = ProductImage::open();
+
+    /// The ordinal of the predefined `Static` class in a dialog template.
+    const STATIC_CLASS: u16 = 0x0082;
+
+    // The one static of either template that is *not* a label: the `ICON` statement of the
+    // about window, whose `SS_ICON` (0x03) type is what loads the 32 px frame of the `.ico`.
+    const ABOUT_ICON: u32 = 1120;
+
+    for (resource, labels) in [
+        (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice()),
+        (IDD_ABOUT, OWNER_DRAWN_ABOUT_LABELS.as_slice()),
+    ] {
+        let template = DialogTemplate::parse(&product.resource(RT_DIALOG, resource));
+
+        let statics: Vec<u32> = template
+            .classes
+            .iter()
+            .filter(|(_, class)| *class == Some(STATIC_CLASS))
+            .map(|(id, _)| *id)
+            .collect();
+
+        println!(
+            "{resource}: statics {statics:?}, {} labels listed",
+            labels.len()
+        );
+
+        for id in &statics {
+            if *id == ABOUT_ICON {
+                let icon = template.style_of(*id, "О программе: значок");
+
+                println!("  {id}: SS_ICON, style {icon:#010x}");
+
+                assert_eq!(
+                    icon & 0x0F,
+                    0x03,
+                    "the about icon must stay SS_ICON — it draws no text at all, and owner \
+                     drawing it would only lose the icon; the style is {icon:#010x}"
+                );
+
+                continue;
+            }
+
+            assert!(
+                labels.iter().any(|(listed, _)| listed == id),
+                "template {resource} carries a static {id} that task T-11-18 does not name — \
+                 a label added to app.rc without being put on the list above is a label still \
+                 drawn by the system, on ClearType, next to the grey-antialiased rest"
+            );
+        }
+
+        // And the list holds no ghosts: every identifier it names is really a static of this
+        // template. Without this half a renumbered label would silently drop out of both.
+        for (id, what) in labels {
+            assert!(
+                statics.contains(id),
+                "«{what}» ({id}) is on the T-11-18 list but is not a static of template \
+                 {resource}"
+            );
+        }
+    }
+}
+
+/// **Criterion 9 of T-11-18, the third side** — the gate the drawing stands on and the
+/// template agree, control for control.
+///
+/// The two lists above are the test's own reading of `app.rc`; `settings::OWNER_DRAWN_LABELS`
+/// and `settings::OWNER_DRAWN_ABOUT_LABELS` are the gate `WM_DRAWITEM` refuses foreign
+/// identifiers with (SEC-05). A label carrying `SS_OWNERDRAW` but missing from the gate is
+/// the worst of the three failures this file can catch: the system stops drawing it, the
+/// program refuses to draw it, and the label goes **blank**.
+#[test]
+fn the_drawing_gate_and_the_templates_name_the_same_labels() {
+    let mut settings_gate = settings::OWNER_DRAWN_LABELS.to_vec();
+    let mut about_gate = settings::OWNER_DRAWN_ABOUT_LABELS.to_vec();
+
+    let mut settings_template: Vec<i32> = OWNER_DRAWN_LABELS
+        .iter()
+        .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
+        .collect();
+    let mut about_template: Vec<i32> = OWNER_DRAWN_ABOUT_LABELS
+        .iter()
+        .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
+        .collect();
+
+    // Sorted before the comparison: the two orders are the template's and the source's, and
+    // neither is the contract — the membership is.
+    for list in [
+        &mut settings_gate,
+        &mut about_gate,
+        &mut settings_template,
+        &mut about_template,
+    ] {
+        list.sort_unstable();
+    }
+
+    println!("settings gate:     {settings_gate:?}");
+    println!("settings template: {settings_template:?}");
+    println!("about gate:        {about_gate:?}");
+    println!("about template:    {about_template:?}");
+
+    assert_eq!(
+        settings_gate, settings_template,
+        "settings::OWNER_DRAWN_LABELS and the SS_OWNERDRAW statics of the settings template \
+         have to name the same controls — a label in one and not the other is a label that \
+         nobody draws"
+    );
+    assert_eq!(
+        about_gate, about_template,
+        "settings::OWNER_DRAWN_ABOUT_LABELS and the SS_OWNERDRAW statics of the about \
+         template have to name the same controls"
+    );
+}
+
+/// **Criterion 11 of T-11-18** — the word wrap of the two-line labels survived the move to
+/// owner drawing.
+///
+/// The regression this closes is silent and permanent: an `SS_LEFT` static wraps its text, a
+/// `DrawTextW` without `DT_WORDBREAK` does not, and the two labels whose text does not fit on
+/// one line would come back as one clipped line with the tail simply gone. Nothing would
+/// error, and the window would still open.
+///
+/// Both halves are asserted, because either alone passes for the wrong reason: the format the
+/// drawing uses **carries `DT_WORDBREAK`**, and the two labels the flag exists for are really
+/// **two lines high in the template** — a `cy` quietly reduced to one line would leave a
+/// correct format wrapping into a rectangle with no second line in it.
+#[test]
+fn the_two_line_labels_keep_their_word_wrap() {
+    // The four `DT_*` of the format, spelled out here rather than imported: the point of the
+    // test is that the number the product uses is the one an `SS_LEFT` static drew with, and a
+    // test that imports the product's own arithmetic proves nothing about the number.
+    const DT_LEFT: u32 = 0x0000_0000;
+    const DT_TOP: u32 = 0x0000_0000;
+    const DT_WORDBREAK: u32 = 0x0000_0010;
+    const DT_EXPANDTABS: u32 = 0x0000_0040;
+
+    let format = settings::LABEL_TEXT_FORMAT.0;
+
+    println!("LABEL_TEXT_FORMAT = {format:#010x}");
+
+    assert_ne!(
+        format & DT_WORDBREAK,
+        0,
+        "the labels must be drawn with DT_WORDBREAK — task T-11-18; the format is {format:#010x}"
+    );
+
+    // And nothing else crept in: DT_CENTER, DT_RIGHT, DT_VCENTER or DT_SINGLELINE would each
+    // move a caption that has not moved since task T-11-16.
+    assert_eq!(
+        format,
+        DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EXPANDTABS,
+        "the format has to be exactly what an SS_LEFT static drew with — left, top, wrapping, \
+         tabs expanded; it is {format:#010x}"
+    );
+
+    // The two labels the wrap exists for, and the height they need for a second line. A
+    // one-line label of this dialog is 9 dialog units high; these two are 18 and 16.
+    const TWO_LINE_LABELS: [(u32, &str, i32); 2] = [
+        (1092, "вступит в силу после перезапуска", 18),
+        (1062, "путь к папке журнала", 16),
+    ];
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    for (id, what, height) in TWO_LINE_LABELS {
+        let (_, top, _, bottom) = template.rect_of(id);
+
+        println!("«{what}» ({id}): {} dialog units high", bottom - top);
+
+        assert_eq!(
+            bottom - top,
+            height,
+            "«{what}» ({id}) has to keep room for its second line — the wrap has nowhere to go \
+             in a one-line rectangle"
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------------------
 // Task T-11-13 — the defect, and the mock-ups
 // -----------------------------------------------------------------------------------------
 
@@ -4378,6 +4660,16 @@ struct DialogTemplate {
     /// order. Read out by task T-11-13, whose defect is one control covering the whole area
     /// of the others: the measurement of that is arithmetic on these four numbers.
     bounds: Vec<(u32, i32, i32, i32, i32)>,
+    /// The window class of every control, paired with its identifier, in template order —
+    /// the ordinal of a predefined class, or `None` for a registered one named by string
+    /// (`SysListView32` is the only such control of this program).
+    ///
+    /// Read out by task T-11-18, which has to say «every static of the template» and cannot
+    /// say it from the style alone: the low nibble is the control *type*, and it means one
+    /// thing for a static and another for every other class — the cycle list's
+    /// `LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS` is 0x0D, the very number
+    /// `SS_OWNERDRAW` is.
+    classes: Vec<(u32, Option<u16>)>,
 }
 
 impl DialogTemplate {
@@ -4419,6 +4711,7 @@ impl DialogTemplate {
         let mut controls = Vec::new();
         let mut styles = Vec::new();
         let mut bounds = Vec::new();
+        let mut classes = Vec::new();
 
         for _ in 0..items {
             at = (at + 3) & !3;
@@ -4436,7 +4729,7 @@ impl DialogTemplate {
 
             let id = read_u32(bytes, &mut at);
 
-            let _class = read_name(bytes, &mut at);
+            let class = read_class(bytes, &mut at);
             let title = read_name(bytes, &mut at);
 
             let extra = usize::from(read_u16(bytes, &mut at));
@@ -4445,6 +4738,7 @@ impl DialogTemplate {
             controls.push(id);
             styles.push((id, style));
             bounds.push((id, x, y, cx, cy));
+            classes.push((id, class));
 
             if let Some(title) = title
                 && !title.is_empty()
@@ -4459,6 +4753,7 @@ impl DialogTemplate {
             controls,
             styles,
             bounds,
+            classes,
         }
     }
 
@@ -4513,6 +4808,28 @@ fn read_string(bytes: &[u8], at: &mut usize) -> String {
     // Not `from_utf16_lossy`: a replacement character would hide exactly the damage this file
     // is here to detect.
     String::from_utf16(&units).expect("the template must hold valid UTF-16")
+}
+
+/// The class field of one control of the template: `Some` ordinal for one of the six
+/// predefined classes, `None` for a class named by string.
+///
+/// The same `sz_Or_Ord` shape [`read_name`] reads, but keeping the number instead of throwing
+/// it away — task T-11-18 asks «which of these controls is a static», and only the class
+/// answers that. The values are the ones `winuser.h` fixes and the dialog manager acts on:
+/// 0x0080 `Button`, 0x0081 `Edit`, 0x0082 `Static`, 0x0083 `ListBox`, 0x0084 `ScrollBar`,
+/// 0x0085 `ComboBox`.
+fn read_class(bytes: &[u8], at: &mut usize) -> Option<u16> {
+    if u16::from_le_bytes([bytes[*at], bytes[*at + 1]]) == 0xFFFF {
+        *at += 2;
+        return Some(read_u16(bytes, at));
+    }
+
+    // A registered class named by string — `SysListView32`, the one this program creates —
+    // or the empty name. Consumed exactly as `read_name` consumes it, and not reported: this
+    // test has nothing to say about a class it did not predefine.
+    let _ = read_name(bytes, at);
+
+    None
 }
 
 /// The `sz_Or_Ord` field of the template: an empty string, an ordinal, or a string.
@@ -5935,4 +6252,187 @@ fn only_an_odd_pen_takes_the_half_pixel_of_the_enlarged_path() {
 
     // Half of one pixel of the window, in the pixels of the enlarged surface.
     assert_eq!(settings::SUPERSAMPLE / 2, 2);
+}
+
+// -----------------------------------------------------------------------------------------
+// Настоящие пиксели: подпись собственной отрисовкой — задача T-11-18, критерии 11 и 12
+// -----------------------------------------------------------------------------------------
+//
+// `settings::paint_label` needs a DC, a rectangle, a brush and an ink — no window, no message
+// and no state — so the whole of this section runs in the memory bitmap of [`Sheet`] above:
+// no dialog is created, no message loop is pumped, and **the product is not started**.
+//
+// The face handed in is `None` throughout, which leaves whatever font the DC holds. That is
+// deliberate: the subject here is the *shape* of the drawing — what is filled, what is
+// written and where the lines fall — and the face is the subject of the T-11-17 tests above.
+
+/// The grey of the ground these labels are painted on, and of their ink. Both are greys
+/// because [`Sheet::grey`] reads one channel, and they are far apart so that a partially
+/// covered pixel still lands unambiguously on one side of `INKED`.
+const LABEL_GROUND: COLORREF = COLORREF(0x0040_4040);
+const LABEL_INK: COLORREF = COLORREF(0x00FF_FFFF);
+/// The grey of the sheet outside the label's rectangle — a colour the drawing must never
+/// reach, and a colour the ground is not, so «the fill stayed inside» is decidable.
+const LABEL_OUTSIDE: COLORREF = COLORREF(0x0000_0000);
+/// Anything brighter than this is ink and not ground.
+const INKED: i32 = 0x80;
+
+impl Sheet {
+    /// The lowest row of the sheet that carries any ink, or `None` for a sheet with none.
+    fn lowest_inked_row(&self, area: &RECT) -> Option<i32> {
+        (area.top..area.bottom).rfind(|y| (area.left..area.right).any(|x| self.grey(x, *y) > INKED))
+    }
+}
+
+/// Paints one caption into `area` of `sheet` through the product's own [`settings::paint_label`],
+/// with a brush this function makes and frees.
+fn paint_label_on(sheet: &Sheet, area: RECT, caption: &str) -> isize {
+    let mut text: Vec<u16> = caption.encode_utf16().collect();
+
+    // SAFETY: the brush is made here, used only by the call below and freed here.
+    let ground = unsafe { CreateSolidBrush(LABEL_GROUND) };
+
+    // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
+    // frame, and `ground` is live for the whole call. `None` leaves the DC's own font in place.
+    let answer =
+        unsafe { settings::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, None) };
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(ground.into()) };
+
+    answer
+}
+
+/// **Criterion 12 of T-11-18, on real pixels** — an empty label draws its ground and not one
+/// pixel more, and it takes the words of the label that stood there before it with it.
+///
+/// The second half is the one that matters and the one a «returns early on an empty string»
+/// implementation fails. `IDC_HOTKEY_NOTE` and `IDC_LAYOUT_NOTE` are **written empty while the
+/// window is up** — `show_hotkey` clears the note after a capture, `fill_layouts` clears the
+/// layout note the moment both combo boxes name layouts the session has — and an owner-drawn
+/// static is answerable for the whole of its rectangle. A paint that returns before the
+/// `FillRect` leaves the previous sentence on the screen, unerasable, for as long as the
+/// dialog is open.
+///
+/// So the test paints a sentence first and then empties the label, which is exactly the
+/// sequence the two notes go through, and reads the pixels back.
+#[test]
+fn an_empty_label_erases_the_words_that_stood_there_and_draws_nothing_else() {
+    let sheet = Sheet::new(80);
+    sheet.clear(LABEL_OUTSIDE);
+
+    let area = RECT {
+        left: 8,
+        top: 8,
+        right: 72,
+        bottom: 40,
+    };
+
+    // The note as it stands while it has something to say.
+    assert_eq!(
+        paint_label_on(&sheet, area, "no such layout"),
+        1,
+        "a label with text answers «drawn»"
+    );
+
+    let inked = (area.top..area.bottom)
+        .flat_map(|y| (area.left..area.right).map(move |x| (x, y)))
+        .filter(|(x, y)| sheet.grey(*x, *y) > INKED)
+        .count();
+
+    println!("with text: {inked} inked pixels inside the label");
+    assert!(
+        inked > 0,
+        "the sheet has to carry the sentence before the emptying can be shown to remove it"
+    );
+
+    // And the same label after the note was cleared — the very `String::new()` `fill_layouts`
+    // writes.
+    assert_eq!(
+        paint_label_on(&sheet, area, ""),
+        1,
+        "an empty label answers «drawn» too: the ground is the whole of it, and answering \
+         «not drawn» would hand the rectangle back to a system drawing that no longer exists"
+    );
+
+    for y in area.top..area.bottom {
+        for x in area.left..area.right {
+            assert_eq!(
+                sheet.grey(x, y),
+                0x40,
+                "({x}, {y}) inside the emptied label is not the ground — the words of the \
+                 previous note are still there"
+            );
+        }
+    }
+
+    // And nothing left the rectangle: the row and the column just outside it are untouched.
+    for x in 0..80 {
+        assert_eq!(
+            sheet.grey(x, area.top - 1),
+            0x00,
+            "the row above the label was painted into at x = {x}"
+        );
+        assert_eq!(
+            sheet.grey(x, area.bottom),
+            0x00,
+            "the row below the label was painted into at x = {x}"
+        );
+    }
+    for y in 0..80 {
+        assert_eq!(
+            sheet.grey(area.left - 1, y),
+            0x00,
+            "the column left of the label was painted into at y = {y}"
+        );
+        assert_eq!(
+            sheet.grey(area.right, y),
+            0x00,
+            "the column right of the label was painted into at y = {y}"
+        );
+    }
+}
+
+/// **Criterion 11 of T-11-18, on real pixels** — a caption too long for one line really does
+/// wrap onto the next one.
+///
+/// The flag test above says the format carries `DT_WORDBREAK`; this one says the flag does
+/// what the two-line labels need it to do, without knowing anything about the font in the DC:
+/// a short caption and a long one are painted into the very same rectangle, and the long one's
+/// last inked row has to sit **below** the short one's. One line cannot reach there.
+#[test]
+fn a_caption_too_long_for_one_line_wraps_onto_the_next() {
+    let sheet = Sheet::new(120);
+
+    let area = RECT {
+        left: 4,
+        top: 4,
+        right: 60,
+        bottom: 116,
+    };
+
+    sheet.clear(LABEL_OUTSIDE);
+    paint_label_on(&sheet, area, "one");
+    let one_line = sheet
+        .lowest_inked_row(&area)
+        .expect("the short caption must leave ink on the sheet");
+
+    sheet.clear(LABEL_OUTSIDE);
+    paint_label_on(
+        &sheet,
+        area,
+        "one two three four five six seven eight nine ten",
+    );
+    let wrapped = sheet
+        .lowest_inked_row(&area)
+        .expect("the long caption must leave ink on the sheet");
+
+    println!("one line ends at row {one_line}, the wrapped caption at row {wrapped}");
+
+    assert!(
+        wrapped > one_line,
+        "the long caption ended on the same line as the short one ({wrapped} against \
+         {one_line}) — DT_WORDBREAK is not reaching the drawing, and the two-line labels of \
+         the template lose their tails"
+    );
 }

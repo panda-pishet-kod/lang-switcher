@@ -72,14 +72,15 @@ use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowA
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, COLORONCOLOR,
     ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection,
-    CreateFontIndirectW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
-    DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW,
-    Ellipse, EndPaint, ExcludeClipRect, FW_BOLD, FillRect, GetDC, GetDeviceCaps, GetObjectW,
-    GetStockObject, GetTextExtentPoint32W, HALFTONE, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
-    InvalidateRect, LOGFONTW, LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline,
-    RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect,
-    SRCCOPY, STRETCH_BLT_MODE, SaveDC, SelectObject, SetBkColor, SetBkMode, SetBrushOrgEx,
-    SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT, TextOutW,
+    CreateFontIndirectW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT,
+    DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_EXPANDTABS, DT_LEFT, DT_SINGLELINE, DT_TOP,
+    DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint,
+    ExcludeClipRect, FW_BOLD, FillRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject,
+    GetTextExtentPoint32W, HALFTONE, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
+    LOGFONTW, LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE,
+    RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect, SRCCOPY, STRETCH_BLT_MODE,
+    SaveDC, SelectObject, SetBkColor, SetBkMode, SetBrushOrgEx, SetStretchBltMode, SetTextColor,
+    StretchBlt, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -99,7 +100,7 @@ use windows::Win32::UI::Controls::{
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
     LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
     NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
-    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
+    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, VIRTUAL_KEY, VK_APPS,
@@ -2845,6 +2846,93 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
     }
 }
 
+/// One [`StaticColorRole`] resolved against the palette — the single place a role of a
+/// **label** becomes an ink, shared by the labels of both windows (§6.2: one body, not two).
+///
+/// The identifier never appears here: which role a control plays is the business of
+/// [`static_color_role`] and [`about_static_color_role`], and this function only turns the
+/// answer into a colour. That split is what keeps task T-11-18 from growing a second
+/// «identifier → colour» list beside the one task T-11-4 wrote.
+///
+/// `Field` is spelled out and not swallowed by a catch-all so the match stays closed over the
+/// shared vocabulary: no label of either template is a field — the one control that answers
+/// `Field` is `IDC_HOTKEY`, an `EDITTEXT`, which draws its own text and is not owner-drawn at
+/// all — and if one ever became one, `text` on `field_bg` is what `WM_CTLCOLORSTATIC` already
+/// answers for it.
+fn label_ink(role: StaticColorRole, palette: &theme::Palette) -> COLORREF {
+    match role {
+        StaticColorRole::Label | StaticColorRole::Field => palette.text,
+        StaticColorRole::Muted => palette.text_muted,
+    }
+}
+
+/// The `SS_OWNERDRAW` labels of the settings template — FR-92а, task T-11-18.
+///
+/// The single place the eighteen are listed on the drawing side, and the identifier gate the
+/// last sentence of SEC-05 asks for: a `WM_DRAWITEM` naming `ODT_STATIC` and anything else is
+/// refused before a DC is touched. Mirrored by hand from the `LTEXT` rows of `app.rc`, exactly
+/// as [`GROUP_BOXES`] and [`COMBO_BOXES`] are, and a test compares this list against the
+/// statics of the **built** template so the two cannot drift apart.
+///
+/// ⚠ This is a list of *controls*, not of colours: the colour role of every one of them comes
+/// from [`static_color_role`], which task T-11-4 wrote and this task reuses unchanged.
+pub const OWNER_DRAWN_LABELS: [i32; 18] = [
+    IDC_LANGUAGE_LABEL,
+    IDC_THEME_LABEL,
+    IDC_LANGUAGE_RESTART,
+    IDC_HOTKEY_LABEL,
+    IDC_HOTKEY_NOTE,
+    IDC_PAIR_SOURCE_LABEL,
+    IDC_PAIR_TARGET_LABEL,
+    IDC_CYCLE_HINT,
+    IDC_LAYOUT_NOTE,
+    IDC_DELAY_LABEL,
+    IDC_CLIP_TIMEOUT_LABEL,
+    IDC_CLIP_RESTORE_LABEL,
+    IDC_EXCLUSION_HINT,
+    IDC_LOG_DIR_LABEL,
+    IDC_LOG_DIR,
+    IDC_STATE_HOOK,
+    IDC_STATE_LAYOUTS,
+    IDC_STATE_AUTOSTART,
+];
+
+/// The `SS_OWNERDRAW` labels of the about template — the same gate for the other window.
+///
+/// `IDC_ABOUT_ICON` is deliberately absent: it is an `SS_ICON` static, the type that loads the
+/// 32 px frame of the `.ico`, it draws no text at all, and owner drawing it would only lose
+/// the icon.
+pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 4] = [
+    IDC_ABOUT_NAME,
+    IDC_ABOUT_VERSION,
+    IDC_ABOUT_LINE_1,
+    IDC_ABOUT_LINE_2,
+];
+
+/// The `DrawTextW` format of every owner-drawn label — FR-92а, task T-11-18.
+///
+/// Byte for byte what an `SS_LEFT` static drew these labels with before the task, which is the
+/// whole requirement: the smoothing changes and nothing else does.
+///
+/// - `DT_LEFT | DT_TOP` — the alignment of `SS_LEFT`: against the left edge, against the top,
+///   never centred. Both are zero, and both are written out because a format built out of
+///   silence is a format nobody can read.
+/// - **`DT_WORDBREAK`** — the one flag that is load-bearing rather than cosmetic. Two labels of
+///   the settings template are two lines high and their text does not fit on one: the note
+///   «вступит в силу после перезапуска» (`IDC_LANGUAGE_RESTART`, 70 × 18 dialog units) and the
+///   journal path (`IDC_LOG_DIR`, 186 × 16). A static wraps them; without this flag they would
+///   come back as one clipped line, and the wrap is a regression the task names by name.
+/// - `DT_EXPANDTABS` — also what the static did. No string of either locale carries a tab
+///   today, so it changes no pixel today; it is here so that one arriving tomorrow lands the
+///   same way it would have before the task.
+///
+/// No `DT_NOPREFIX`: `LTEXT` carries no `SS_NOPREFIX`, so an `&` in a label was an underscore
+/// before this task and stays one after it — the journal path is the one label a stray `&`
+/// could ever reach, and changing what it does there would be a change of behaviour smuggled
+/// in under a change of smoothing.
+pub const LABEL_TEXT_FORMAT: DRAW_TEXT_FORMAT =
+    DRAW_TEXT_FORMAT(DT_LEFT.0 | DT_TOP.0 | DT_WORDBREAK.0 | DT_EXPANDTABS.0);
+
 /// The face of one owner-drawn button, named as the palette field it is filled with —
 /// FR-92а, task T-11-5a.
 ///
@@ -3585,6 +3673,14 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
                 // static. The role decides the ink; the caption roles take no opaque
                 // background, so the text sits transparently on the ground brush instead
                 // of in a box of a slightly different colour.
+                //
+                // ⚠ Still answered for the eighteen labels since task T-11-18, even though
+                // they are `SS_OWNERDRAW` and paint themselves: a static asks this question
+                // before it hands the drawing over, the answer costs a table lookup, and the
+                // ground and the ink it names are the very ones `draw_label` paints with —
+                // `static_color_role` is asked by both, so the two cannot disagree. What the
+                // message is still load-bearing *for* is `IDC_HOTKEY`: a read-only `EDIT` is
+                // asked about with this message and has no owner drawing to take over from it.
                 WM_CTLCOLORSTATIC => match static_color_role(control_id) {
                     StaticColorRole::Label => (Some(palette.text), None, ground),
                     StaticColorRole::Muted => (Some(palette.text_muted), None, ground),
@@ -4099,6 +4195,21 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         };
     }
 
+    // FR-92а, task T-11-18: the labels of the template, by control type — a static is not a
+    // button, so this branch comes before the button check, exactly as the two above do. SEC-05:
+    // the identifier is checked against [`OWNER_DRAWN_LABELS`] before any work, and the state of
+    // the message is never even looked at — a label takes no focus and none of them is ever
+    // disabled, so `itemState` says nothing about how a label is painted.
+    if ctl_type == ODT_STATIC {
+        if !OWNER_DRAWN_LABELS.contains(&control) {
+            return 0;
+        }
+
+        // SAFETY: as for the combo branch above — `dc` and `rect` are the values of the
+        // message, used only to paint into for the length of this send.
+        return unsafe { draw_label(hwnd, control, dc, rect) };
+    }
+
     if ctl_type != ODT_BUTTON {
         return 0;
     }
@@ -4257,6 +4368,165 @@ unsafe fn paint_push_button(
     }
 
     // TRUE — the button is drawn.
+    1
+}
+
+/// Draws one owner-drawn label of the settings dialog — FR-92а, task T-11-18.
+///
+/// The choosing half: the ground the label stands on, the ink its role asks for and the face
+/// this window sets its own text in. The painting half is the shared [`paint_label`], which
+/// the about window uses too (§6.2: one body, not a copy).
+///
+/// # SEC-05, and FR-94
+///
+/// Nothing here dereferences the message: [`on_draw_item`] copied the allowed fields out as
+/// plain values and passed two of them in — `dc` to paint into and `rect` to paint within —
+/// and the identifier was checked against [`OWNER_DRAWN_LABELS`] before this function was
+/// called at all. **The text is not in the message either**: it is read from the dialog's own
+/// control by identifier (`get_text` → `GetDlgItemTextW`), which is the whole of why the
+/// language switch of FR-94 keeps working — `SetDlgItemTextW` writes the string of the locale
+/// into the control, the control invalidates itself, and the very next `WM_DRAWITEM` reads
+/// back what was written. There is no second source of the caption to fall out of step with it.
+///
+/// Answers 1 — «drawn» — and 0 when the state is unreachable or [`theme::Brushes::new`] was
+/// refused at initialisation, for the reason [`on_draw_item`] gives.
+///
+/// # Safety
+///
+/// Called from [`on_draw_item`] only, with values copied out of the `WM_DRAWITEM` message it
+/// is inside of: the sender owns `dc` for the length of the send.
+unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
+    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
+    // borrow of the state ends before the DC is touched, and what leaves the closure is plain
+    // values — a brush and a face the state keeps alive until the dialog ends, and an ink.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13). The label then
+            // keeps whatever the system painted, which is the degraded-but-alive answer of
+            // T-11-4.
+            let brushes = state.brushes.as_ref()?;
+
+            // The very ground `WM_CTLCOLORSTATIC` answers for this control: the panel brush
+            // for a label lying on one of the eight panels, the window brush everywhere else.
+            // The map is `panel_children`, built once on `WM_INITDIALOG` — not a second
+            // opinion about the geometry.
+            let ground = if state.panel_children.contains(&control) {
+                brushes.panel_bg()
+            } else {
+                brushes.window_bg()
+            };
+
+            Some((
+                ground,
+                label_ink(static_color_role(control), state.palette),
+                state.fonts.as_ref().map(DialogFonts::text),
+            ))
+        })
+    };
+
+    let Some(Some((ground, ink, face))) = choice else {
+        return 0;
+    };
+
+    // Read after the borrow ends: `get_text` sends a message to a control, and a message sent
+    // while the state is borrowed can come back into the procedure.
+    //
+    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
+    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
+
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
+    // `face` are objects the dialog's state owns for longer than this call.
+    unsafe { paint_label(dc, rect, &mut caption, ground, ink, face) }
+}
+
+/// Paints one owner-drawn label: the ground it stands on, then its text in our own
+/// grey-antialiased face — FR-92а, task T-11-18. The drawing half [`draw_label`] and
+/// [`draw_about_label`] share, exactly as [`paint_push_button`] is shared by the two windows'
+/// button paths (§6.2: one body, not a copy).
+///
+/// # Why the ground is filled here and not left to the system
+///
+/// ⚠ **An owner-drawn static is responsible for the whole of its rectangle.** A plain
+/// `SS_LEFT` static filled its client area with the brush `WM_CTLCOLORSTATIC` answered and
+/// wrote the text over it; `SS_OWNERDRAW` replaces that drawing outright, and whether the
+/// system still lays the brush down first is not something the documentation promises. Filling
+/// here is right under either behaviour — a second `FillRect` over the same colour is
+/// invisible — and skipping it is right under only one.
+///
+/// It is not a theoretical worry: the text of these labels **changes while the window is up**.
+/// `fill_layouts` writes `String::new()` into `IDC_LAYOUT_NOTE` the moment the two combo boxes
+/// name layouts the session has again, `show_hotkey` does the same to `IDC_HOTKEY_NOTE` after
+/// a capture, and every state line is rewritten with a shorter or longer sentence. Without the
+/// fill the old words would stay under the new ones, and a note that was cleared would never
+/// go away.
+///
+/// # The empty label
+///
+/// A caption of no characters is drawn as the ground and nothing else: no font is selected, no
+/// text colour is set, `DrawTextW` is not called. `IDC_HOTKEY_NOTE` and `IDC_LAYOUT_NOTE` are
+/// empty most of the time a person has the window open, and the three rows of the «Состояние»
+/// block and the journal path are empty in the template until `WM_INITDIALOG` fills them —
+/// so this is the ordinary case, not the corner one (NFR-13).
+///
+/// # Safety
+///
+/// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of: `dc` is
+/// owned by the sender for the length of the send, and `ground` and `face` are objects
+/// somebody else owns for longer than the drawing.
+pub unsafe fn paint_label(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    ground: HBRUSH,
+    ink: COLORREF,
+    face: Option<HFONT>,
+) -> isize {
+    // NFR-13, for the paint calls below: each answers a success flag or a previous value, and
+    // every answer is deliberately dropped for the reason `paint_push_button` gives for its
+    // own — the manager never hands a dead DC, only a forged message could (SEC-05), and the
+    // right reaction to a forgery is indifference.
+    //
+    // SAFETY: `dc` is the DC of the message and `rect` is a live local of the caller's frame;
+    // `ground` is a live brush somebody else owns.
+    unsafe { FillRect(dc, &rect, ground) };
+
+    if caption.is_empty() {
+        // TRUE — the label is drawn, and the ground is the whole of it.
+        return 1;
+    }
+
+    // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC and
+    // touch no memory of this process.
+    unsafe { SetBkMode(dc, TRANSPARENT) };
+    // SAFETY: as above.
+    unsafe { SetTextColor(dc, ink) };
+
+    // Our own face, grey-antialiased — task T-11-17, and the whole point of this one: the
+    // labels used to be the last text in the window still drawn on the manager's ClearType.
+    // `None` leaves the manager's own font in the DC, which is what a window whose faces could
+    // not be made draws in (NFR-13).
+    //
+    // SAFETY: `dc` is the DC of the message and `face` is a live font the window's state owns
+    // for longer than this call; the previous handle is put back below.
+    let previous_face = unsafe { select_face(dc, face) };
+
+    // The whole rectangle of the control, with no inset of its own — the very rectangle an
+    // `SS_LEFT` static drew into, so no caption moves by a pixel (T-11-16 and T-11-17 settled
+    // the values and this task changes none of them).
+    let mut text_rect = rect;
+
+    // SAFETY: `caption` and `text_rect` are live locals of this frame and the caller's; the
+    // format has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
+    // writes only pixels of the DC.
+    unsafe { DrawTextW(dc, caption, &mut text_rect, LABEL_TEXT_FORMAT) };
+
+    // SAFETY: `previous_face` is what `select_face` answered for this same DC, and nothing
+    // between the two calls selected another font.
+    unsafe { restore_face(dc, previous_face) };
+
+    // TRUE — the label is drawn.
     1
 }
 
@@ -6014,16 +6284,28 @@ impl Drop for BackgroundCache {
 // the live captions, and the mock-ups have none of it because they were drawn with grey
 // coverage.
 //
-// ⚠ **The captions of system controls are not touched and are not a defect.** The five
-// `STATIC` labels, the text inside the five `EDITTEXT` fields and the text a dropped-down list
-// draws for itself are painted by the system with the font the dialog manager created, and
-// this program does not own that font: changing it would mean either creating a face of our
-// own and pushing it onto controls with `WM_SETFONT` — which is a change of the dialog's
-// metrics, not of its smoothing — or reaching for the undocumented, which the decision
-// recorded in `theme-own-draw-decision.md` closed. What this section covers is exactly the
-// text of this file's own drawing: the captions of the nine owner-drawn buttons, the eight
-// panel captions, the rows of both lists, the items and the closed face of the four combo
-// boxes and the captions of the eight glyph elements.
+// ⚠ **What is drawn with this face, and what is left to the system.** The face covers the text
+// this file draws itself: the captions of the nine owner-drawn buttons, the eight panel
+// captions, the rows of both lists, the items and the closed face of the four combo boxes, the
+// captions of the eight glyph elements — and, since task T-11-18, **every label of both
+// templates**, the twenty-two `SS_OWNERDRAW` statics of [`OWNER_DRAWN_LABELS`] and
+// [`OWNER_DRAWN_ABOUT_LABELS`].
+//
+// Two kinds of text are left to the system, and both are named remainders rather than
+// oversights:
+//
+// - the text **inside the five `EDITTEXT` fields** of [`TEXT_FIELDS`] — the three numeric
+//   fields, the exclusion name and the read-only hotkey field. An `EDIT` has no owner-drawn
+//   type at all: the low nibble of an edit style is not a type, the `ES_*` are flags, and no
+//   message hands the parent the drawing of a field's own text;
+// - the **row text of the cycle list** `IDC_CYCLE_LIST`. Its rows are coloured through
+//   `NM_CUSTOMDRAW`, whose item prepaint sets `clrText`/`clrTextBk` and then answers
+//   `CDRF_DODEFAULT` — «draw it yourself, with the fields I set». The control draws the words,
+//   in the font it was given.
+//
+// Owning either would mean pushing a face of our own onto the control with `WM_SETFONT`, which
+// is a change of the dialog's metrics and not of its smoothing, or reaching for the
+// undocumented, which the decision recorded in `theme-own-draw-decision.md` closed.
 
 /// The `LOGFONTW` of the dialog's own face, asked to render with grey antialiasing — the pure
 /// half of [`DialogFonts`], and the whole of «наш текст — серое сглаживание».
@@ -9723,10 +10005,57 @@ unsafe fn on_about_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: L
     apply_ctl_color(dc, choice.flatten())
 }
 
-/// The `WM_DRAWITEM` of the about window — one owner-drawn button, «ОК», painted by the
-/// shared [`paint_push_button`] with the colours the shared [`button_color_roles`] table
-/// chose, on which `IDOK` is the accent (§6.2, task T-11-11: the paths of the settings
-/// dialog, not copies of them).
+/// Draws one owner-drawn label of the about window — FR-92а, task T-11-18.
+///
+/// The choosing half; the painting half is the shared [`paint_label`] (§6.2: the settings
+/// dialog's path, not a copy of it). Three differences from [`draw_label`] and no more: the
+/// state is this window's, the ground is always the window brush — this dialog has no panels —
+/// and the identifier's role comes from [`about_static_color_role`], the mapping task T-11-11
+/// already wrote for exactly these five controls.
+///
+/// FR-94 holds here as it does there: the caption is read back off the control `fill_about`
+/// wrote it into, and the version line composed from the `VERSIONINFO` resource arrives by the
+/// same road.
+///
+/// # Safety
+///
+/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM`
+/// message it is inside of.
+unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
+    // The colour choice, split from the painting — the borrow ends before the DC is touched,
+    // exactly as everywhere in this file.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+
+            Some((
+                brushes.window_bg(),
+                label_ink(about_static_color_role(control), state.palette),
+                state.fonts.as_ref().map(DialogFonts::text),
+            ))
+        })
+    };
+
+    let Some(Some((ground, ink, face))) = choice else {
+        return 0;
+    };
+
+    // Read after the borrow ends, for the reason `draw_label` gives. Without the trailing NUL:
+    // `DrawTextW` takes the length of the slice it is given.
+    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
+
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
+    // `face` are objects this window's state owns for longer than this call.
+    unsafe { paint_label(dc, rect, &mut caption, ground, ink, face) }
+}
+
+/// The `WM_DRAWITEM` of the about window — the four labels of task T-11-18 and one
+/// owner-drawn button, «ОК», painted by the shared [`paint_push_button`] with the colours the
+/// shared [`button_color_roles`] table chose, on which `IDOK` is the accent (§6.2, task
+/// T-11-11: the paths of the settings dialog, not copies of them).
 ///
 /// SEC-05, held as in [`on_draw_item`]: the control type and the identifier are checked
 /// before any work, the same copied fields and nothing else are taken out of the message,
@@ -9757,7 +10086,20 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     let control = i32::try_from(ctl_id).unwrap_or(-1);
 
-    // The only owner-drawn element of this window is its «ОК».
+    // FR-92а, task T-11-18: the four labels of this window, by control type and then by
+    // identifier — the same gate and the same order the settings dialog uses. `itemState` is
+    // deliberately not consulted: a label takes no focus and none of these is ever disabled.
+    if ctl_type == ODT_STATIC {
+        if !OWNER_DRAWN_ABOUT_LABELS.contains(&control) {
+            return 0;
+        }
+
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
+        // to paint into for the length of this send.
+        return unsafe { draw_about_label(hwnd, control, dc, rect) };
+    }
+
+    // The only owner-drawn *button* of this window is its «ОК».
     if ctl_type != ODT_BUTTON || control != OK_COMMAND {
         return 0;
     }
