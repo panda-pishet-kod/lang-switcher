@@ -184,6 +184,17 @@
 #define LBS_NOTIFY             0x0001
 #define LBS_HASSTRINGS         0x0040
 #define LBS_NOINTEGRALHEIGHT   0x0100
+// ⚠ LBS_OWNERDRAWFIXED is a style *flag*, like CBS_OWNERDRAWFIXED above and unlike the button
+// type BS_OWNERDRAW: it combines with the LBS_* flags instead of replacing any of them. The
+// exclusion list below carries it (FR-92а, task T-11-14) so that the dialog paints its rows
+// itself and the selected row shows the palette's own sel_bg/sel_fg instead of the system
+// COLOR_HIGHLIGHT blue -- WM_CTLCOLORLISTBOX can colour the ground of a list but never the
+// stripe of its selection. LBS_HASSTRINGS stays load-bearing next to it for exactly the
+// reason CBS_HASSTRINGS does: it is what keeps the row strings stored in the control itself,
+// so the existing population (LB_ADDSTRING) and the existing reading (LB_GETTEXT, both in
+// src\settings.rs) keep working unchanged -- an owner-drawn list box without that flag stores
+// no strings at all and would break FR-84.
+#define LBS_OWNERDRAWFIXED     0x0010
 #define LVS_REPORT             0x0001
 #define LVS_SINGLESEL          0x0004
 #define LVS_SHOWSELALWAYS      0x0008
@@ -369,7 +380,7 @@ BEGIN
 
     // -- Исключения: FR-84 ---------------------------------------------------------------
     CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 148, 200, 84
-    LISTBOX         IDC_EXCLUSIONS, 220, 160, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    LISTBOX         IDC_EXCLUSIONS, 220, 160, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
     EDITTEXT        IDC_EXCLUSION_NAME, 220, 207, 120, 12, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14, BS_OWNERDRAW

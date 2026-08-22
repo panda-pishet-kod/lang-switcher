@@ -2467,6 +2467,450 @@ fn the_panel_captions_are_read_off_the_controls_fr_94_writes() {
     );
 }
 
+// =========================================================================================
+// FR-92а — the closed part of the combo boxes, the rounded check-box glyph and the exclusion
+// list that paints its own selection. Task T-11-14.
+// =========================================================================================
+//
+// What is measurable without a window: the pure halves — the colour table of the closed part,
+// the geometry of the chevron, the radius of the glyph, the colour table of a list row, the
+// gate that says which control may draw its own items — and the shape of the module's own
+// source, where the pairing of the subclass and the fate of `WM_PAINT` live. The look on the
+// screen is the controller's, on the real window: the product is not started by any test.
+
+/// The module source, with the line endings normalised — the sweeps below match on it.
+fn settings_module_source() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("the module source must be readable")
+    .replace("\r\n", "\n")
+}
+
+/// The body of one function of the module source, from the opening of its signature to the
+/// closing brace in the first column — enough to sweep one function without dragging the
+/// neighbours in.
+fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
+    let after = source
+        .split_once(signature)
+        .unwrap_or_else(|| panic!("the module must still declare `{signature}`"))
+        .1;
+
+    after
+        .split_once("\n}\n")
+        .unwrap_or_else(|| panic!("`{signature}` must end at a brace in the first column"))
+        .0
+}
+
+/// **Criterion 10 of T-11-14** — the closed part of a combo box is drawn from a closed table
+/// of roles, and the table is a pure function.
+///
+/// Two rows, because the state that moves is one: разрешён / запрещён. The ground and the
+/// frame are the field pair whatever happens — a combo box is a field to the eye, exactly as
+/// the five input fields and the two lists of `FRAMED_FIELDS` are since T-11-13 — and the
+/// chevron is the muted hint in every cell. What the disabled state moves is the text, the
+/// precedent `button_color_roles` and `glyph_color_roles` set: запрещённость гасит.
+#[test]
+fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
+    use lang_switcher::settings::{ComboBorderRole, ComboChevronRole, ComboClosedColors};
+
+    use ComboFillRole as Fill;
+    use ComboTextRole as Ink;
+
+    let table: [(bool, Fill, ComboBorderRole, Ink, ComboChevronRole); 2] = [
+        // Разрешённый: the value in the ordinary ink.
+        (
+            false,
+            Fill::FieldBg,
+            ComboBorderRole::FieldBorder,
+            Ink::Text,
+            ComboChevronRole::TextMuted,
+        ),
+        // Запрещённый — «Источник» and «Цель» under the «Несколько раскладок» mode: the same
+        // field, the same chevron, the muted value.
+        (
+            true,
+            Fill::FieldBg,
+            ComboBorderRole::FieldBorder,
+            Ink::TextMuted,
+            ComboChevronRole::TextMuted,
+        ),
+    ];
+
+    for (disabled, fill, border, text, chevron) in table {
+        assert_eq!(
+            settings::combo_closed_color_roles(disabled),
+            ComboClosedColors {
+                fill,
+                border,
+                text,
+                chevron
+            },
+            "disabled = {disabled}"
+        );
+    }
+}
+
+/// **Criterion 10 of T-11-14, the geometry half** — the chevron stands where the mock-up was
+/// measured to put it, and grows with the DPI of the window.
+///
+/// The numbers come from `ui-03-fog.png`, read pixel by pixel: the two arms at `x` = 352 and
+/// 360 (a span of 8), the apex 4 pixels below them at `y` = 199, the whole figure centred on
+/// the middle of a field whose top and bottom edges are at `y` = 181 and 213.
+#[test]
+fn the_chevron_stands_where_the_mock_up_measured_it() {
+    // A closed part 140 × 33 at 100 %, the proportions of the measured picture.
+    let area = rect(0, 0, 140, 33);
+    let points = settings::combo_chevron_points(&area, 96);
+
+    println!("chevron at 96 dpi: {points:?}");
+
+    let (left, top) = points[0];
+    let (apex_x, apex_y) = points[1];
+    let (right, right_top) = points[2];
+
+    // Two arms of equal height and one apex below them — a chevron pointing down, and not up.
+    assert_eq!(top, right_top, "the two arms must stand at one height");
+    assert!(
+        apex_y > top,
+        "the apex must lie below the arms — «галочка вниз»"
+    );
+
+    // The span of the mock-up, and the drop of half of it.
+    assert_eq!(right - left, 8, "the span of the chevron is 8 px at 100 %");
+    assert_eq!(apex_y - top, 4, "the drop is half the span");
+    assert_eq!(apex_x - left, right - apex_x, "the apex is in the middle");
+
+    // Vertically centred in the field it is given.
+    assert_eq!(
+        (top + apex_y) / 2,
+        (area.top + area.bottom) / 2,
+        "the chevron must be centred on the middle of the closed part"
+    );
+
+    // On the right, well clear of the text, and inside the field.
+    assert!(
+        apex_x > (area.left + area.right) / 2,
+        "the chevron belongs to the right half of the field"
+    );
+    assert!(
+        right < area.right && left > area.left,
+        "the chevron must stay inside the field"
+    );
+
+    // And it scales, like every other length of the mock-ups since T-11-13.
+    let wide = settings::combo_chevron_points(&rect(0, 0, 280, 66), 192);
+
+    println!("chevron at 192 dpi: {wide:?}");
+    assert_eq!(wide[2].0 - wide[0].0, 16, "the span doubles at 200 %");
+    assert_eq!(wide[1].1 - wide[0].1, 8, "the drop doubles with it");
+
+    // The stroke is the one length of the mock-ups written in tenths of a pixel: 1,5 px.
+    assert_eq!(
+        settings::scaled_tenths(15, 96),
+        2,
+        "1,5 px rounds to 2 at 100 %"
+    );
+    assert_eq!(settings::scaled_tenths(15, 192), 3, "3 px at 200 %");
+    // Never a zero-width pen, which GDI would read as a hairline drawn by other rules.
+    assert_eq!(settings::scaled_tenths(1, 96), 1);
+    assert_eq!(
+        settings::scaled_tenths(15, 0),
+        2,
+        "the 100 % look when the DPI is refused"
+    );
+}
+
+/// **Criteria 9 and 11 of T-11-14** — the subclass is installed and removed as one pair, and
+/// `WM_PAINT` never reaches the procedure that draws the system button.
+///
+/// Both facts live in the shape of the module's own source, which is where the sweeps of
+/// `tests\guard.rs` and `tests\diag.rs` read their kind of fact from. Criterion 9: exactly one
+/// install site and exactly one removal site of the pair, walking the same list with the same
+/// procedure and the same identifier, plus the `WM_NCDESTROY` safety net inside the procedure.
+/// Criterion 11: the `WM_PAINT` arm of the procedure ends in a `return`, so the fall-through
+/// to `DefSubclassProc` — and with it the control's own painting — is unreachable from it.
+#[test]
+fn the_combo_subclass_is_one_pair_and_wm_paint_never_falls_through() {
+    let source = settings_module_source();
+
+    // The pair, by its call sites. The install is matched with its own indentation, because
+    // «unsubclass_combo_boxes» contains «subclass_combo_boxes» as a substring.
+    assert_eq!(
+        source.matches("\n    subclass_combo_boxes(hwnd);").count(),
+        1,
+        "the subclass must be installed in exactly one place"
+    );
+    assert_eq!(
+        source.matches("unsubclass_combo_boxes(hwnd);").count(),
+        1,
+        "the subclass must be removed in exactly one place"
+    );
+    assert!(
+        source.contains("WM_DESTROY => {"),
+        "the removal hangs on the dialog's WM_DESTROY, where the children are still alive"
+    );
+
+    // The same procedure and the same identifier on both sides — one install, two removals
+    // (the pair's own, and the WM_NCDESTROY safety net inside the procedure).
+    assert_eq!(
+        source
+            .matches("SetWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID, 0)")
+            .count(),
+        1,
+        "exactly one SetWindowSubclass, with the procedure and the identifier of the pair"
+    );
+    assert_eq!(
+        source
+            .matches("RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID)")
+            .count(),
+        2,
+        "the removal of the pair and the WM_NCDESTROY safety net, and nothing else"
+    );
+
+    let body = function_body(&source, "unsafe extern \"system\" fn combo_box_proc(");
+
+    // The whole of criterion 11: the WM_PAINT arm answers and returns.
+    let paint_arm = body
+        .split_once("WM_PAINT => {")
+        .expect("the subclass must answer WM_PAINT")
+        .1
+        .split_once("\n        }")
+        .expect("the WM_PAINT arm must be an arm of the match")
+        .0;
+
+    println!("--- the WM_PAINT arm of combo_box_proc ---\n{paint_arm}");
+
+    assert!(
+        paint_arm.contains("paint_combo_closed_part(combo)"),
+        "the WM_PAINT arm must draw the closed part itself"
+    );
+    assert!(
+        paint_arm.contains("return LRESULT(0);"),
+        "the WM_PAINT arm must return — a fall-through would let the control draw the \
+         system arrow button, which is the whole defect of this task"
+    );
+    assert!(
+        !paint_arm.contains("DefSubclassProc"),
+        "the WM_PAINT arm must not reach the displaced procedure"
+    );
+
+    // One tail call to the displaced procedure in the whole body, and it is the tail.
+    assert_eq!(
+        body.matches("DefSubclassProc(").count(),
+        1,
+        "everything that is not answered here goes on, once, at the end"
+    );
+
+    // The dialog itself does not answer WM_PAINT: the closed part is the subclass's business
+    // and the background is WM_ERASEBKGND's (T-11-13).
+    let dialog = function_body(&source, "unsafe extern \"system\" fn dialog_proc(");
+
+    assert!(
+        !dialog.contains("WM_PAINT"),
+        "the dialog procedure must not have grown a WM_PAINT branch"
+    );
+}
+
+/// **Criterion 12 of T-11-14** — the check-box square is rounded by a named constant of 3 px,
+/// and it is one figure now rather than a fill under a frame.
+#[test]
+fn the_check_box_glyph_is_rounded_by_the_three_pixels_of_the_mock_ups() {
+    assert_eq!(
+        settings::GLYPH_CORNER_RADIUS,
+        3,
+        "the check-box square — 3 px, smaller than the 4 of a field because the figure is"
+    );
+
+    // A length of the mock-ups like every other since T-11-13.
+    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96), 3);
+    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 192), 6);
+
+    let source = settings_module_source();
+    let body = function_body(&source, "unsafe fn draw_glyph_element(");
+
+    let square = body
+        .split_once("GlyphKind::CheckBox => {")
+        .expect("the glyph drawing must still have its check-box arm")
+        .1
+        .split_once("GlyphKind::RadioButton => {")
+        .expect("the radio arm must still follow it")
+        .0;
+
+    println!("--- the check-box arm of draw_glyph_element ---\n{square}");
+
+    assert!(
+        square.contains("paint_rounded("),
+        "the square must be drawn by the rounded figure"
+    );
+    assert!(
+        square.contains("GLYPH_CORNER_RADIUS"),
+        "and by the named radius, not by a number written where it is used"
+    );
+    assert!(
+        !square.contains("FillRect("),
+        "a square FillRect cannot have a corner radius"
+    );
+    assert!(
+        !square.contains("FrameRect("),
+        "nor can a square FrameRect over it"
+    );
+}
+
+/// **Criterion 13 of T-11-14** — the exclusion list paints its own rows, so the selected one
+/// wears `sel_bg`/`sel_fg` instead of the system's `COLOR_HIGHLIGHT` blue; and everything the
+/// population and the reading of FR-84 stand on survived the new style.
+#[test]
+fn the_exclusion_list_paints_its_own_selection() {
+    use windows::Win32::UI::Controls::{ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX};
+
+    use ComboFillRole as Fill;
+    use ComboTextRole as Ink;
+
+    // The colours: the very table the combo items answer, reused and not copied.
+    assert_eq!(
+        settings::list_item_color_roles(false),
+        ComboItemColors {
+            fill: Fill::FieldBg,
+            text: Ink::Text
+        },
+        "an ordinary row is the quiet ground of the list"
+    );
+    assert_eq!(
+        settings::list_item_color_roles(true),
+        ComboItemColors {
+            fill: Fill::SelBg,
+            text: Ink::SelFg
+        },
+        "the selected row is the selection pair of the palette — the point of the task"
+    );
+
+    // The gate SEC-05 asks for: one list box and four combo boxes, and nothing else.
+    assert!(settings::owner_drawn_item(ODT_LISTBOX.0, 1050));
+    assert!(
+        !settings::owner_drawn_item(ODT_LISTBOX.0, 1024),
+        "the layout list is a SysListView32 drawn by NM_CUSTOMDRAW — not this road"
+    );
+    assert!(
+        !settings::owner_drawn_item(ODT_COMBOBOX.0, 1050),
+        "the right identifier under the wrong type is still refused"
+    );
+    assert!(!settings::owner_drawn_item(ODT_BUTTON.0, 1050));
+
+    for combo in [1002, 1003, 1022, 1023] {
+        assert!(
+            settings::owner_drawn_item(ODT_COMBOBOX.0, combo),
+            "combo {combo} must keep its owner drawing of T-11-6"
+        );
+    }
+
+    for stranger in [1, 1080, 1051, 1012] {
+        assert!(
+            !settings::owner_drawn_item(ODT_LISTBOX.0, stranger),
+            "control {stranger} must not be able to ask for a drawing"
+        );
+    }
+
+    // And the style, out of the built binary.
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let style = template
+        .styles
+        .iter()
+        .find(|(control, _)| *control == 1050)
+        .map(|(_, style)| *style)
+        .expect("the dialog has no control 1050 — the exclusion list");
+
+    println!("exclusion list (1050): style {style:#010x}");
+
+    // LBS_OWNERDRAWFIXED (0x0010) appeared.
+    assert_ne!(
+        style & 0x0010,
+        0,
+        "the list must carry LBS_OWNERDRAWFIXED; the style is {style:#010x}"
+    );
+    // LBS_OWNERDRAWVARIABLE (0x0020) did not: a variable-height list asks WM_MEASUREITEM per
+    // row, a protocol nobody here speaks.
+    assert_eq!(
+        style & 0x0020,
+        0,
+        "the list must not carry LBS_OWNERDRAWVARIABLE; the style is {style:#010x}"
+    );
+    // LBS_HASSTRINGS (0x0040) survived — LB_ADDSTRING and LB_GETTEXT of FR-84 stand on it,
+    // and an owner-drawn list without it stores no strings at all.
+    assert_ne!(
+        style & 0x0040,
+        0,
+        "the list must keep LBS_HASSTRINGS; the style is {style:#010x}"
+    );
+    // LBS_NOTIFY (0x0001) — the selection change «Удалить» listens for.
+    assert_ne!(
+        style & 0x0001,
+        0,
+        "the list must keep LBS_NOTIFY; the style is {style:#010x}"
+    );
+    // LBS_NOINTEGRALHEIGHT (0x0100), WS_VSCROLL, WS_TABSTOP — untouched.
+    assert_ne!(style & 0x0100, 0, "LBS_NOINTEGRALHEIGHT; {style:#010x}");
+    assert_ne!(style & 0x0020_0000, 0, "WS_VSCROLL; {style:#010x}");
+    assert_ne!(style & 0x0001_0000, 0, "WS_TABSTOP; {style:#010x}");
+    // And the system border stayed off, as task T-11-13 left it.
+    assert_eq!(
+        style & WS_BORDER,
+        0,
+        "the list must keep its rounded frame of T-11-13, not the system one; {style:#010x}"
+    );
+}
+
+/// **Criterion 14 of T-11-14** — the module names no system theme and reads no `itemData`.
+///
+/// The ban of FR-92а is on the undocumented ordinals of `uxtheme.dll` and on the names of the
+/// dark system themes; a documented subclass and a `WM_PAINT` of one's own are not that, and
+/// this test is what keeps the difference from eroding. The word `uxtheme` itself does appear
+/// once in the module — in the ⚠ that says why the trick is not used — so what is swept for
+/// is *use*: the crate module that holds the theme API, the calls, the ordinal wrappers and
+/// the theme-name strings.
+#[test]
+fn the_settings_module_names_no_system_theme_and_reads_no_item_data() {
+    let source = settings_module_source();
+
+    for forbidden in [
+        // The theme API itself.
+        "Uxtheme",
+        "SetWindowTheme(",
+        "OpenThemeData(",
+        "OpenThemeDataForDpi(",
+        "DrawThemeBackground(",
+        "DrawThemeText(",
+        "GetThemeColor(",
+        // The undocumented ordinals of the dark mode, by the names they go under.
+        "AllowDarkModeForWindow",
+        "AllowDarkModeForApp",
+        "SetPreferredAppMode",
+        "ShouldAppsUseDarkMode",
+        "RefreshImmersiveColorPolicyState",
+        "FlushMenuThemes",
+        // And the names of the dark system themes.
+        "DarkMode_Explorer",
+        "DarkMode_CFD",
+        "DarkMode_ItemsView",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "`{forbidden}` is in src\\settings.rs — FR-92а forbids exactly this"
+        );
+    }
+
+    // SEC-05: `itemData` is named in the comments that promise it is never read, and read
+    // nowhere. A field access is what a read looks like.
+    assert!(
+        !source.contains(".itemData"),
+        "the module must not touch the itemData of any message struct — SEC-05"
+    );
+}
+
 // Criterion 9 of T-11-6 — read out of the **built** `LangSwitcher.exe`, exactly as the
 // buttons, glyphs and groups above. ⚠ The check differs from theirs in kind:
 // `CBS_OWNERDRAWFIXED` (0x0010) is a style *flag* that combines with the rest, unlike the

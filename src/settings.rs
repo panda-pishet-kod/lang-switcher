@@ -70,13 +70,13 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontIndirectW, CreatePen,
-    CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
-    DrawFocusRect, DrawTextW, Ellipse, FW_BOLD, FillRect, FrameRect, GetDC, GetDeviceCaps,
-    GetObjectW, GetStockObject, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, InvalidateRect,
-    LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN, PS_SOLID, RDW_ALLCHILDREN, RDW_ERASE,
-    RDW_INVALIDATE, RedrawWindow, ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode,
-    SetTextColor, TRANSPARENT, TextOutW,
+    BeginPaint, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontIndirectW,
+    CreatePen, CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE,
+    DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint, FW_BOLD,
+    FillRect, FrameRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject, GetTextExtentPoint32W,
+    HBRUSH, HDC, HFONT, InvalidateRect, LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN,
+    PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
+    ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -96,15 +96,18 @@ use windows::Win32::UI::Controls::{
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
     LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
     NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
-    ODT_BUTTON, ODT_COMBOBOX,
+    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetKeyState, SetFocus, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE,
-    VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU,
-    VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RIGHT,
-    VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_UP,
+    EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, VIRTUAL_KEY, VK_APPS,
+    VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT,
+    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE,
+    VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    VK_SNAPSHOT, VK_UP,
 };
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::Shell::{
+    DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
     CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT,
@@ -113,10 +116,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
     LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW,
     SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
-    WM_NOTIFY, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SYSCHAR,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2621,6 +2625,19 @@ unsafe extern "system" fn dialog_proc(
             0
         }
 
+        // FR-92а, task T-11-14: the far half of the subclass pair. `WM_DESTROY` reaches the
+        // dialog while its children are still live windows — the manager destroys them only
+        // after this returns — so the four combo boxes are still there to be handed back
+        // their own procedure. The message carries nothing and is not dereferenced (SEC-05);
+        // a forged one would remove a subclass that is either already ours to remove or not
+        // installed at all, and `RemoveWindowSubclass` simply answers FALSE for the latter.
+        WM_DESTROY => {
+            unsubclass_combo_boxes(hwnd);
+
+            // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
+            0
+        }
+
         // FR-92а, task T-11-9: the system theme moved while this dialog is up — the far end
         // of the nudge `on_system_theme_message` posted. The message carries nothing and
         // decides nothing (SEC-05): `refresh_palette` resolves the palette afresh out of
@@ -3274,6 +3291,10 @@ pub enum ComboTextRole {
     Text,
     /// [`theme::Palette::sel_fg`] — the pair the palette designed for the `sel_bg` ground.
     SelFg,
+    /// [`theme::Palette::text_muted`] — the value shown by a **disabled** closed face
+    /// (task T-11-14). Never answered for an item of a dropped-down list: a list that can be
+    /// dropped down at all belongs to a combo that is not disabled.
+    TextMuted,
 }
 
 /// Ground and ink of one combo-box item — what [`combo_item_color_roles`] answers and the
@@ -3318,6 +3339,90 @@ pub fn combo_item_color_roles(closed_part: bool, highlighted: bool) -> ComboItem
     ComboItemColors {
         fill: ComboFillRole::FieldBg,
         text: ComboTextRole::Text,
+    }
+}
+
+/// The colours of one row of the exclusion list — FR-92а, task T-11-14.
+///
+/// The very table the combo items answer, **reused and not copied** (§6.2): a row of a list
+/// is the quiet `field_bg`/`text` ground, and the selected row is the selection pair
+/// `sel_bg`/`sel_fg` — the same pair every owner-drawn element of this dialog highlights
+/// with, and the whole point of taking the rows away from the system, whose selection stripe
+/// is `COLOR_HIGHLIGHT` blue in both palettes. `closed_part` is `false` because a list box
+/// has no closed part; that argument exists for the combo alone.
+pub fn list_item_color_roles(selected: bool) -> ComboItemColors {
+    combo_item_color_roles(false, selected)
+}
+
+/// The frame around the closed part of a combo box, named as the palette field — FR-92а,
+/// task T-11-14.
+///
+/// One variant on purpose, exactly as [`ButtonBorderRole`] and [`GlyphFrameRole`] before it:
+/// the closed table frames the closed face with the same [`theme::Palette::field_border`]
+/// every other field of the dialog is framed with, and a second frame colour cannot appear
+/// without widening this enum first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComboBorderRole {
+    /// [`theme::Palette::field_border`] — the frame the mock-ups draw around every field.
+    FieldBorder,
+}
+
+/// The ink of the chevron at the right edge of a closed combo box — FR-92а, task T-11-14.
+///
+/// One variant, for the reason [`ComboBorderRole`] gives: the mock-ups draw the chevron in
+/// the muted ink in both palettes and in every state, disabled included — it is a hint of
+/// what the control does, never an advertisement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComboChevronRole {
+    /// [`theme::Palette::text_muted`] — the quiet ink of the mock-ups' chevron.
+    TextMuted,
+}
+
+/// Ground, frame, ink and chevron of the **closed part** of one combo box — what
+/// [`combo_closed_color_roles`] answers and the whole of what the subclass painting of
+/// task T-11-14 needs to choose colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComboClosedColors {
+    /// What the rounded rectangle of the closed face is filled with.
+    pub fill: ComboFillRole,
+    /// The single-pixel frame around that rectangle.
+    pub border: ComboBorderRole,
+    /// What the text of the chosen value is drawn with.
+    pub text: ComboTextRole,
+    /// What the chevron is stroked with.
+    pub chevron: ComboChevronRole,
+}
+
+/// The colour roles of the closed part of a combo box in one state — FR-92а, task T-11-14,
+/// the pure half of the subclass drawing, closed by a table test: разрешён / запрещён.
+///
+/// Roles and not colours, exactly as [`button_color_roles`], [`glyph_color_roles`] and
+/// [`combo_item_color_roles`] before it: not a single colour number enters this module —
+/// §6.2 gives every palette value to `theme` alone.
+///
+/// The shape of the table:
+/// - the closed face **is a field to the eye**, so it keeps `field_bg` under the
+///   `field_border` frame whatever else is true — the same surface the five input fields and
+///   the two lists of [`FRAMED_FIELDS`] wear since task T-11-13;
+/// - **запрещённость гасит текст**, the precedent [`button_color_roles`] and
+///   [`glyph_color_roles`] set: a combo the mode has switched off (the pair «Источник» and
+///   «Цель» under «Несколько раскладок») shows its value in `text_muted`;
+/// - the chevron and the frame do not move with the state: a muted hint stays muted, and a
+///   field that lost its frame when disabled would stop reading as a field at all.
+///
+/// Focus is deliberately absent here, exactly as it is in [`button_color_roles`]: `ODS_FOCUS`
+/// changes no colour — it adds the dotted `DrawFocusRect`, and that is the drawing half's
+/// business (the decision of task T-11-5a, kept uniform here).
+pub fn combo_closed_color_roles(disabled: bool) -> ComboClosedColors {
+    ComboClosedColors {
+        fill: ComboFillRole::FieldBg,
+        border: ComboBorderRole::FieldBorder,
+        text: if disabled {
+            ComboTextRole::TextMuted
+        } else {
+            ComboTextRole::Text
+        },
+        chevron: ComboChevronRole::TextMuted,
     }
 }
 
@@ -3525,9 +3630,31 @@ fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
     brush.0 as isize
 }
 
-/// Air added to the dialog font's height to make one combo item's height, in pixels —
-/// the «+ 4» of task T-11-6: two pixels above the glyphs and two below.
+/// Air added to the dialog font's height to make one owner-drawn item's height, in pixels —
+/// the «+ 4» of task T-11-6: two pixels above the glyphs and two below. Since task T-11-14
+/// the rows of the exclusion list are measured by the same number, so a row of a list and an
+/// item of a combo are the same height to the eye.
 const COMBO_ITEM_EXTRA: i32 = 4;
+
+/// Whether this `CtlType`/`CtlID` pair is one of the dialog's own owner-drawn item holders —
+/// the identifier gate SEC-05 asks for, written down once and shared by `WM_MEASUREITEM` and
+/// the item branches of `WM_DRAWITEM`.
+///
+/// `ctl_type` is the plain number of the message, so the gate is a pure function a table test
+/// can drive: [`ODT_COMBOBOX`] for the four combo boxes of [`COMBO_BOXES`] (task T-11-6),
+/// [`ODT_LISTBOX`] for the single exclusion list (task T-11-14), and nothing else — a foreign
+/// type or a foreign identifier is «not handled» before any work is done.
+pub fn owner_drawn_item(ctl_type: u32, control: i32) -> bool {
+    if ctl_type == ODT_COMBOBOX.0 {
+        return COMBO_BOXES.contains(&control);
+    }
+
+    if ctl_type == ODT_LISTBOX.0 {
+        return control == IDC_EXCLUSIONS;
+    }
+
+    false
+}
 
 /// Answers `WM_MEASUREITEM` for the four owner-drawn combo boxes — FR-92а, task T-11-6.
 ///
@@ -3575,12 +3702,9 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // SAFETY: see above.
     let item = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
 
-    if item.CtlType != ODT_COMBOBOX {
-        return 0;
-    }
-
-    // SEC-05: the identifier is checked against the four before any work.
-    if !COMBO_BOXES.contains(&i32::try_from(item.CtlID).unwrap_or(-1)) {
+    // SEC-05: the type and the identifier are checked before any work — the four combo boxes
+    // of task T-11-6 and, since task T-11-14, the one owner-drawn list box.
+    if !owner_drawn_item(item.CtlType.0, i32::try_from(item.CtlID).unwrap_or(-1)) {
         return 0;
     }
 
@@ -3881,7 +4005,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // item is not a button, so this branch comes before the button check. SEC-05: the
     // identifier is checked against the four before any work.
     if ctl_type == ODT_COMBOBOX {
-        if !COMBO_BOXES.contains(&control) {
+        if !owner_drawn_item(ctl_type.0, control) {
             return 0;
         }
 
@@ -3890,6 +4014,19 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         // never followed.
         return unsafe {
             draw_combo_item(hwnd, control, item_id, item_state.0, dc, rect, item_window)
+        };
+    }
+
+    // FR-92а, task T-11-14: the rows of the exclusion list, by control type — the same gate,
+    // the same seven fields, and the same «not handled» for anything the gate refuses.
+    if ctl_type == ODT_LISTBOX {
+        if !owner_drawn_item(ctl_type.0, control) {
+            return 0;
+        }
+
+        // SAFETY: as for the combo branch above.
+        return unsafe {
+            draw_list_item(hwnd, control, item_id, item_state.0, dc, rect, item_window)
         };
     }
 
@@ -4037,8 +4174,30 @@ unsafe fn paint_push_button(
 }
 
 /// Inset of a combo item's text from the left edge of its rectangle, in pixels — the air
-/// a native combo gives its text.
+/// a native combo gives its text. Since task T-11-14 the closed face drawn by the subclass
+/// and the rows of the exclusion list take the same inset, so every owner-drawn line of text
+/// in this dialog starts at the same distance from its own left edge.
 const COMBO_TEXT_INSET_X: i32 = 4;
+
+/// One [`ComboFillRole`] resolved against the brushes of the dialog — the single place these
+/// two roles become a brush, shared by the item drawing, the row drawing of the exclusion
+/// list and the closed-face drawing of the subclass (§6.2: one body, not three copies).
+fn combo_fill_brush(role: ComboFillRole, brushes: &theme::Brushes) -> HBRUSH {
+    match role {
+        ComboFillRole::FieldBg => brushes.field_bg(),
+        ComboFillRole::SelBg => brushes.sel_bg(),
+    }
+}
+
+/// One [`ComboTextRole`] resolved against the palette — the single place these three roles
+/// become an ink, shared by the same three drawings [`combo_fill_brush`] serves.
+fn combo_text_ink(role: ComboTextRole, palette: &theme::Palette) -> COLORREF {
+    match role {
+        ComboTextRole::Text => palette.text,
+        ComboTextRole::SelFg => palette.sel_fg,
+        ComboTextRole::TextMuted => palette.text_muted,
+    }
+}
 
 /// Draws one item of an owner-drawn combo box — a row of the dropped-down list or the
 /// closed face with the chosen value — FR-92а, task T-11-6.
@@ -4116,19 +4275,10 @@ unsafe fn draw_combo_item(
 
             let colors = combo_item_color_roles(closed_part, highlighted);
 
-            // The single place a role becomes a brush or a colour of the resolved
-            // palette — the drawing below never sees a role.
-            let fill = match colors.fill {
-                ComboFillRole::FieldBg => brushes.field_bg(),
-                ComboFillRole::SelBg => brushes.sel_bg(),
-            };
-
-            let ink = match colors.text {
-                ComboTextRole::Text => palette.text,
-                ComboTextRole::SelFg => palette.sel_fg,
-            };
-
-            Some((fill, ink))
+            Some((
+                combo_fill_brush(colors.fill, brushes),
+                combo_text_ink(colors.text, palette),
+            ))
         })
     };
 
@@ -4219,6 +4369,155 @@ unsafe fn draw_combo_item(
     }
 
     // TRUE — the item is drawn.
+    1
+}
+
+/// Draws one row of the exclusion list — FR-92а, task T-11-14.
+///
+/// # Why the list draws its own rows at all
+///
+/// `WM_CTLCOLORLISTBOX` has coloured the ground of this list since task T-11-4, but a list
+/// box paints its **selection stripe** itself, out of the system `COLOR_HIGHLIGHT` — the blue
+/// bar the mock-ups do not have in either palette. There is no message that recolours it:
+/// the documented way to own the stripe is to own the row, which is what `LBS_OWNERDRAWFIXED`
+/// in `app.rc` and this function are. `LBS_HASSTRINGS` stays beside it, so the population
+/// (`LB_ADDSTRING`) and the reading (`LB_GETTEXT` in [`list_items`]) of FR-84 are untouched —
+/// the strings still live in the control.
+///
+/// # SEC-05, last sentence, held to the letter
+///
+/// Nothing here dereferences the message, exactly as in [`draw_combo_item`]: the seven
+/// allowed fields were copied out as plain values by [`on_draw_item`], `item_window` is only
+/// ever *compared* against the dialog's own control, and the row's text is then read from the
+/// dialog's own list by identifier through `SendDlgItemMessageW`. `itemData` is never read:
+/// the list keeps its strings in the control itself and nothing was ever stored in its item
+/// data.
+///
+/// # What is drawn
+///
+/// The ground by `FillRect`, chosen by [`list_item_color_roles`] — `field_bg`/`text` for an
+/// ordinary row, the palette's own `sel_bg`/`sel_fg` for the selected one — then the row's
+/// text behind [`COMBO_TEXT_INSET_X`], and the dotted `DrawFocusRect` when the manager says
+/// this row carries the focus and the focus cues are not hidden, exactly as everywhere else
+/// in this dialog. An empty list asks for the cue with no row to name (`itemID` is −1); the
+/// filled ground and the cue are then the whole of the answer.
+///
+/// Answers 1 — «drawn» — or 0 for the reasons [`draw_combo_item`] answers 0.
+///
+/// # Safety
+///
+/// Called from [`on_draw_item`] only, with values copied out of the message it is inside of:
+/// `dc` and `rect` are owned by the sender for the length of the send.
+unsafe fn draw_list_item(
+    hwnd: HWND,
+    control: i32,
+    item_id: u32,
+    item_state: u32,
+    dc: HDC,
+    rect: RECT,
+    item_window: HWND,
+) -> isize {
+    // The comparison SEC-05 allows and nothing more — see `draw_combo_item`.
+    //
+    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
+    // ours, and answers a handle or an error.
+    if unsafe { GetDlgItem(Some(hwnd), control) }.ok() != Some(item_window) {
+        return 0;
+    }
+
+    let selected = item_state & ODS_SELECTED.0 != 0;
+    let focused = item_state & ODS_FOCUS.0 != 0 && item_state & ODS_NOFOCUSRECT.0 == 0;
+
+    // The colour choice, split from the painting exactly as everywhere in this file.
+    //
+    // SAFETY: see the caller of `on_draw_item`.
+    let choice = unsafe {
+        with_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let colors = list_item_color_roles(selected);
+
+            Some((
+                combo_fill_brush(colors.fill, brushes),
+                combo_text_ink(colors.text, state.palette),
+            ))
+        })
+    };
+
+    let Some(Some((fill, ink))) = choice else {
+        return 0;
+    };
+
+    // NFR-13, for the paint calls below: every answer is deliberately dropped, for the reason
+    // `draw_combo_item` states for its own.
+
+    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for the
+    // length of this send; `fill` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &rect, fill) };
+
+    // −1 — an empty list asking for the focus cue with no row to name.
+    if item_id != u32::MAX {
+        let index = usize::try_from(item_id).unwrap_or(usize::MAX);
+        let length = send_to(hwnd, control, LB_GETTEXTLEN, index, 0);
+
+        // `LB_ERR` is negative and fails the conversion, which skips the text and keeps the
+        // filled ground (NFR-13, as in `draw_combo_item`).
+        if let Ok(length) = usize::try_from(length) {
+            // One for the terminator the control writes and never counts.
+            let mut buffer = vec![0u16; length + 1];
+
+            // SAFETY: `buffer` is owned by this frame and holds the length the list has just
+            // reported plus the terminator, which is exactly what `LB_GETTEXT` writes; the
+            // pointer is not retained by the call.
+            let copied = send_to(
+                hwnd,
+                control,
+                LB_GETTEXT,
+                index,
+                buffer.as_mut_ptr() as isize,
+            );
+
+            let copied = usize::try_from(copied).unwrap_or(0).min(length);
+
+            if copied > 0 {
+                // SAFETY: `dc` is a handle passed by value; both calls write an attribute of
+                // the DC and touch no memory of this process.
+                unsafe { SetBkMode(dc, TRANSPARENT) };
+                // SAFETY: as above.
+                unsafe { SetTextColor(dc, ink) };
+
+                let mut text_rect = RECT {
+                    left: rect.left + COMBO_TEXT_INSET_X,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                };
+
+                // SAFETY: the slice and `text_rect` are live locals of this frame; the format
+                // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
+                // and writes only pixels of the DC. The dialog's font is already selected
+                // into the DC the manager hands over — no font work here.
+                unsafe {
+                    DrawTextW(
+                        dc,
+                        &mut buffer[..copied],
+                        &mut text_rect,
+                        DT_SINGLELINE | DT_VCENTER,
+                    )
+                };
+            }
+        }
+    }
+
+    if focused {
+        // NFR-13: the `BOOL` is examined and deliberately dropped — see above.
+        //
+        // SAFETY: `dc` is the DC of the message and `rect` is a live local of this frame;
+        // the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(dc, &rect) };
+    }
+
+    // TRUE — the row is drawn.
     1
 }
 
@@ -4314,11 +4613,19 @@ unsafe fn draw_glyph_element(
                 GlyphFillRole::AccentBg => brushes.accent_bg(),
             };
 
-            // Both currencies of the one frame role at once: `FrameRect` of the square
-            // takes the brush, the outline of the circle takes the ink for a pen.
+            // The same fill as a colour. Task T-11-14 rounded the square off, and `RoundRect`
+            // draws fill and frame in one figure: the cell that has no frame — the checked,
+            // enabled check box — is outlined in its own fill instead, so nothing shows.
+            let fill_ink = match colors.fill {
+                GlyphFillRole::FieldBg => palette.field_bg,
+                GlyphFillRole::AccentBg => palette.accent_bg,
+            };
+
+            // The frame role as an ink: both figures are now drawn with a pen — the rounded
+            // square of task T-11-14 and the circle of the radio button.
             let frame = colors
                 .frame
-                .map(|GlyphFrameRole::BoxBorder| (brushes.box_border(), palette.box_border));
+                .map(|GlyphFrameRole::BoxBorder| palette.box_border);
 
             let mark = colors.mark.map(|role| match kind {
                 GlyphKind::CheckBox => GlyphMarkPaint::Check(match role {
@@ -4342,11 +4649,11 @@ unsafe fn draw_glyph_element(
                 GlyphTextRole::TextMuted => palette.text_muted,
             };
 
-            Some((fill, frame, mark, ink))
+            Some((fill, fill_ink, frame, mark, ink))
         })
     };
 
-    let Some(Some((fill, frame, mark, ink))) = choice else {
+    let Some(Some((fill, fill_ink, frame, mark, ink))) = choice else {
         return 0;
     };
 
@@ -4367,22 +4674,25 @@ unsafe fn draw_glyph_element(
     // GDI refusals (reviews\T-11-1.md).
     match kind {
         GlyphKind::CheckBox => {
-            // SAFETY: `dc` and the rectangle are painted into for the length of this
-            // send; `fill` is a live brush of the dialog's state.
-            unsafe { FillRect(dc, &glyph, fill) };
-
-            if let Some((frame_brush, _)) = frame {
-                // SAFETY: as above; `frame_brush` is the live `box_border` brush — the
-                // single-pixel frame of the unchecked square.
-                unsafe { FrameRect(dc, &glyph, frame_brush) };
-            }
+            // п. 2 of task T-11-14: the square of the mock-ups is rounded off by
+            // [`GLYPH_CORNER_RADIUS`], and a square `FillRect` under a square `FrameRect`
+            // cannot have a corner radius at all. One `RoundRect` draws both — the frame with
+            // the pen, the interior with the brush — so the frameless cell of the closed
+            // table is outlined in its own fill.
+            paint_rounded(
+                dc,
+                &glyph,
+                scaled(GLYPH_CORNER_RADIUS, dc_dpi(dc)),
+                frame.unwrap_or(fill_ink),
+                fill,
+            );
 
             if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
                 draw_check_mark(dc, &glyph, mark_ink);
             }
         }
         GlyphKind::RadioButton => {
-            paint_ellipse(dc, &glyph, frame.map(|(_, frame_ink)| frame_ink), fill);
+            paint_ellipse(dc, &glyph, frame, fill);
 
             if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
                 let dot = RECT {
@@ -4571,6 +4881,20 @@ pub fn scaled(pixels: i32, dpi: i32) -> i32 {
     (pixels * dpi + MOCKUP_DPI / 2) / MOCKUP_DPI
 }
 
+/// One length of the mock-ups given in **tenths** of a pixel, in whole pixels of a window at
+/// `dpi` — task T-11-14, for the one length of the mock-ups that is not a whole number: the
+/// 1,5 px stroke of the combo chevron.
+///
+/// Pure, rounded to nearest like [`scaled`], and never less than one: GDI has no fractional
+/// pen, and a pen of zero width is not «thin» but a hairline of one pixel drawn by different
+/// rules — asking for one pixel outright is the honest answer. A `dpi` of zero or less — a
+/// refused `GetDeviceCaps` — is the 100 % look, as in [`scaled`].
+pub fn scaled_tenths(tenths: i32, dpi: i32) -> i32 {
+    let dpi = if dpi > 0 { dpi } else { MOCKUP_DPI };
+
+    ((tenths * dpi + MOCKUP_DPI * 5) / (MOCKUP_DPI * 10)).max(1)
+}
+
 /// The DPI of the device a DC paints on — [`MOCKUP_DPI`] when the device will not say.
 ///
 /// The manifest of this program declares `PerMonitorV2`, so the DC of a window answers the
@@ -4623,8 +4947,18 @@ pub const PANEL_CORNER_RADIUS: i32 = 6;
 /// Corner radius of an owner-drawn push button — п. 2.2 of task T-11-13.
 pub const BUTTON_CORNER_RADIUS: i32 = 4;
 
-/// Corner radius of an input field or a list — п. 2.2 of task T-11-13.
+/// Corner radius of an input field or a list — п. 2.2 of task T-11-13. Since task T-11-14
+/// the closed part of a combo box is drawn with the same radius: it is a field to the eye,
+/// and the mock-ups round it exactly as they round the five input fields beside it.
 pub const FIELD_CORNER_RADIUS: i32 = 4;
+
+/// Corner radius of the check-box square, in the pixels of the mock-ups — п. 2 of task
+/// T-11-14.
+///
+/// Smaller than [`FIELD_CORNER_RADIUS`] because the figure is smaller: a 13-pixel square
+/// rounded by 4 would read as a lozenge. The circle of a radio button has no radius to set —
+/// it is an `Ellipse` and was already right.
+pub const GLYPH_CORNER_RADIUS: i32 = 3;
 
 /// Inset of the panel caption from the panel's left edge, in **dialog units** — п. 2.1.
 ///
@@ -5106,6 +5440,504 @@ fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBR
     let _ = unsafe { DeleteObject(pen.into()) };
 }
 
+// =========================================================================================
+// The closed part of the four combo boxes — FR-92а, task T-11-14
+// =========================================================================================
+//
+// ⚠ What this section is and is not. `CBS_OWNERDRAWFIXED` (task T-11-6) hands the program the
+// *items* of a combo box — the rows of the dropped-down list and the text of the closed face.
+// It hands over neither the frame of the closed part nor the button with the arrow beside it:
+// those the control paints for itself, out of the system's own colours, and the result is the
+// pale square that broke both palettes and that the user named first. The only way to that
+// square is to be the one who answers the control's `WM_PAINT`, and the documented way to
+// answer another window's message is a subclass.
+//
+// ⚠ This is **not** the forbidden trick of FR-92а. The ban of that requirement is on the
+// undocumented ordinals of `uxtheme.dll` and on the names of the dark system themes — see
+// `theme-own-draw-decision`. `SetWindowSubclass` is a documented, exported, headline function
+// of `comctl32.dll` with its own MSDN page, and painting one's own control is what
+// `WM_PAINT` is for. Nothing here reads a private ordinal, a theme name or a theme handle.
+
+/// Which of the two documented ways of putting a procedure in front of a control's own was
+/// chosen, and why — the reasoning behind [`subclass_combo_boxes`], written where the code is.
+///
+/// `SetWindowLongPtrW(GWLP_WNDPROC)` is already used in this file, by
+/// [`subclass_hotkey_field`], and would have worked. `SetWindowSubclass` was chosen for the
+/// four combo boxes for three reasons, all of which the hotkey field does not have:
+///
+/// 1. **Four windows, one procedure.** The `GWLP_WNDPROC` road has to store the displaced
+///    procedure of each window somewhere; with one window that is one thread-local `Cell`
+///    ([`HOTKEY_FIELD_PROC`]), with four it is a table keyed by window handle. The subclass
+///    API keeps that association itself, per window, and hands it back through
+///    [`DefSubclassProc`].
+/// 2. **The removal is documented and exact.** `RemoveWindowSubclass` takes the window, the
+///    procedure and the identifier and unhooks *that* subclass wherever it sits in the chain.
+///    Putting a `GWLP_WNDPROC` back is only correct while nothing else has subclassed the
+///    control after us — and `comctl32` does subclass its own controls.
+/// 3. **The pair is visible.** One call installs, one call removes, and the two are named for
+///    each other, which is what criterion 9 of the task asks to be shown.
+///
+/// The identifier is a constant of this file and not a handle or an address: the pair
+/// (procedure, identifier) is what names our subclass, and one number for all four windows is
+/// enough because the key is per window.
+const COMBO_SUBCLASS_ID: usize = 1;
+
+/// Puts [`combo_box_proc`] in front of each of the four combo boxes — FR-92а, task T-11-14.
+///
+/// **The pair.** Called exactly once, from [`fill_dialog`] on `WM_INITDIALOG`; the other half
+/// is [`unsubclass_combo_boxes`], called exactly once, from the `WM_DESTROY` branch of
+/// [`dialog_proc`], while the children are still alive. Both walk the same [`COMBO_BOXES`]
+/// list with the same procedure and the same [`COMBO_SUBCLASS_ID`], so every install has its
+/// removal by construction rather than by discipline. [`combo_box_proc`] additionally removes
+/// itself on `WM_NCDESTROY`, which is the belt to that pair's braces: a control destroyed by
+/// any road other than the dialog's own `WM_DESTROY` still lets go of the procedure. The two
+/// removals cannot double-free anything — `RemoveWindowSubclass` on a window that no longer
+/// carries the subclass answers `FALSE` and does nothing.
+///
+/// A refused install is survived (NFR-13): that combo then paints itself the way it did before
+/// this task — the system's own frame and arrow — which is visibly wrong rather than silently
+/// broken, and the dialog still opens. Why the refusal is not journaled is written at the call.
+fn subclass_combo_boxes(hwnd: HWND) {
+    for control in COMBO_BOXES {
+        // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
+        let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+            continue;
+        };
+
+        // SAFETY: `combo` is a live control of this dialog, created by the dialog manager on
+        // this thread, and `combo_box_proc` is a function of exactly the signature
+        // `SUBCLASSPROC` names. The reference data is zero — this subclass keeps no state of
+        // its own; everything it needs it reads off the dialog through `with_state`.
+        // ⚠ NFR-13: the `BOOL` is examined right here, in words, and deliberately dropped —
+        // and the reason it is not journaled is not indifference. The operation vocabulary of
+        // `diag` is closed (reviews\T-11-1.md) and has no row for this call; adding one would
+        // mean editing `src\diag.rs`, which is outside the bounds of this task, and a test of
+        // `tests\diag.rs` guards that closure. The consequence of a refusal is visible rather
+        // than silent — that one combo box then paints itself the way it did before this task,
+        // with the system's own frame and arrow — and the dialog opens and works either way.
+        // No `debug_assert` either: a machine that refused is a legal state, not a violation
+        // of ownership, and crashing a debug build over a cosmetic degradation is what NFR-13
+        // exists to prevent.
+        let _ = unsafe { SetWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID, 0) };
+    }
+}
+
+/// Takes [`combo_box_proc`] back off the four combo boxes — the far half of the pair
+/// [`subclass_combo_boxes`] describes.
+///
+/// The refusal is deliberately **not** journaled: this runs on `WM_DESTROY`, where a `FALSE`
+/// means the subclass was already gone (never installed, or removed by the `WM_NCDESTROY` arm
+/// of the procedure), and neither is a fault worth a journal row.
+fn unsubclass_combo_boxes(hwnd: HWND) {
+    for control in COMBO_BOXES {
+        // SAFETY: `hwnd` is the live dialog — `WM_DESTROY` reaches it before its children are
+        // destroyed — and the crate turns a missing control into an error.
+        let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            continue;
+        };
+
+        // SAFETY: `combo` is the live control the subclass was installed on, and the
+        // procedure and identifier are the very pair `SetWindowSubclass` was given.
+        let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
+    }
+}
+
+/// The procedure that stands in front of each combo box while this dialog is up — FR-92а,
+/// task T-11-14.
+///
+/// Three messages are its own; everything else goes straight on to [`DefSubclassProc`], so a
+/// combo box behaves in every other way exactly as it did before the subclass — the list still
+/// drops down, the keyboard still chooses, `CB_*` still works, and the dropped-down list is
+/// still coloured by `WM_CTLCOLORLISTBOX` and drawn item by item by `WM_DRAWITEM`.
+///
+/// ⚠ **`WM_PAINT` does not reach the original procedure.** The arm ends in `return`, not in a
+/// fall-through: the control's own painting — the frame and the pale system button with the
+/// arrow — never runs. The one road back to it is a refused `BeginPaint`, and then nothing of
+/// ours could have been drawn either; letting the message through is what keeps the window
+/// validated instead of asking for a paint for ever (NFR-13).
+///
+/// # Safety
+///
+/// Called by the window manager with the arguments of a window message, on one of the four
+/// controls [`subclass_combo_boxes`] installed it on.
+unsafe extern "system" fn combo_box_proc(
+    combo: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    _reference_data: usize,
+) -> LRESULT {
+    match message {
+        // The whole reason this procedure exists — see the ⚠ above.
+        //
+        // SAFETY: `combo` is the control this procedure is installed on, and the call is
+        // inside the window's own `WM_PAINT`, which is where `BeginPaint` may be used.
+        WM_PAINT => {
+            if unsafe { paint_combo_closed_part(combo) } {
+                return LRESULT(0);
+            }
+        }
+
+        // «Erased» without erasing anything: the closed face is repainted whole by the arm
+        // above, and an erase before it is exactly the two-step repaint that flickers.
+        WM_ERASEBKGND => return LRESULT(1),
+
+        // The belt to the braces of the pair — see `subclass_combo_boxes`. Forwarded on
+        // afterwards: `WM_NCDESTROY` must reach every procedure of the chain.
+        //
+        // SAFETY: `combo` is that control, and the procedure and identifier are the pair the
+        // subclass was installed with.
+        WM_NCDESTROY => {
+            let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
+        }
+
+        _ => {}
+    }
+
+    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
+    // unchanged; this is what `DefSubclassProc` exists for.
+    unsafe { DefSubclassProc(combo, message, wparam, lparam) }
+}
+
+/// Answers one `WM_PAINT` of a combo box; `false` when `BeginPaint` refused and the message
+/// has to go on to the control's own procedure — see [`combo_box_proc`].
+///
+/// # Safety
+///
+/// Called from [`combo_box_proc`] alone, inside the `WM_PAINT` of the window it names.
+unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
+    let mut paint = PAINTSTRUCT::default();
+
+    // SAFETY: `combo` is the live control inside its own `WM_PAINT`, and `paint` is a live
+    // local of this frame that the call fills in.
+    let dc = unsafe { BeginPaint(combo, &mut paint) };
+
+    if dc.is_invalid() {
+        // NFR-13: examined. Nothing of ours can be drawn without a DC, and the window still
+        // has to be validated — which the control's own procedure will do.
+        return false;
+    }
+
+    // SAFETY: `dc` is the DC `BeginPaint` has just answered, owned until `EndPaint` below.
+    unsafe { draw_combo_closed_part(combo, dc) };
+
+    // SAFETY: the same window and the very `PAINTSTRUCT` `BeginPaint` filled in. The `BOOL`
+    // is dropped for the reason the paint calls of this file drop theirs.
+    let _ = unsafe { EndPaint(combo, &paint) };
+
+    true
+}
+
+/// Draws the closed part of one combo box the way the mock-ups draw it — FR-92а, task T-11-14.
+///
+/// # What is drawn
+///
+/// 1. the client area as a rounded rectangle of [`FIELD_CORNER_RADIUS`]: `field_bg` under a
+///    single-pixel `field_border` frame — the same figure the five input fields and the two
+///    lists wear since task T-11-13, so a combo box is a field to the eye like the rest;
+/// 2. the chevron at the right edge, [`combo_chevron_points`] wide and stroked in
+///    `text_muted` — the flat «⌄» of the mock-ups, in place of the system button;
+/// 3. the text of the chosen item, read from the control by identifier, behind
+///    [`COMBO_TEXT_INSET_X`] and clipped short of the chevron; `text` normally, `text_muted`
+///    when the mode has disabled this combo ([`combo_closed_color_roles`]);
+/// 4. the dotted `DrawFocusRect` inside the frame while the control holds the focus and the
+///    keyboard cues are not hidden — the same cue, the same inset of two pixels, as the
+///    owner-drawn push buttons of task T-11-5a.
+///
+/// # The font
+///
+/// Unlike a `WM_DRAWITEM`, a `WM_PAINT` hands over a DC with the *stock* font in it — the
+/// dialog manager selects a control's font only into the DC it makes for an owner-draw
+/// message. So the control's own font is asked for (`WM_GETFONT`), selected for the length of
+/// the drawing and put back. No face name and no point size appear in this file; the font is
+/// the one the manager already created at the window's DPI.
+///
+/// Nothing is drawn at all when the state is unreachable or `theme::Brushes::new` was refused
+/// at initialisation — the reason [`on_draw_item`] gives for its own zeroes.
+///
+/// # Safety
+///
+/// Called from [`paint_combo_closed_part`] alone, with the DC of the paint it is inside of.
+unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
+    // The dialog is the parent of its own control; everything below is read through it, by
+    // identifier, exactly as every other drawing of this file reads what it draws.
+    //
+    // SAFETY: `combo` is the live control; a window with no parent answers an error.
+    let Ok(dialog) = (unsafe { GetParent(combo) }) else {
+        return;
+    };
+
+    // SAFETY: reading a window's identifier reads a field of that window and no memory of
+    // ours.
+    let control = unsafe { GetDlgCtrlID(combo) };
+
+    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
+    // be reached on a window it was installed on: one list of four, checked before any work.
+    if !COMBO_BOXES.contains(&control) {
+        return;
+    }
+
+    let mut area = RECT::default();
+
+    // SAFETY: `combo` is the live control and `area` is a live local the call fills.
+    if unsafe { GetClientRect(combo, &mut area) }.is_err() {
+        return;
+    }
+
+    // SAFETY: `combo` is the live control; the call reads a window style and answers a flag.
+    let disabled = !unsafe { IsWindowEnabled(combo) }.as_bool();
+
+    // The focus cue on the same terms as the buttons of task T-11-5a: shown while the control
+    // holds the focus, hidden while the window manager says the keyboard cues are hidden —
+    // which is what `ODS_NOFOCUSRECT` carries into an owner-draw message and what
+    // `WM_QUERYUISTATE` answers outside one.
+    //
+    // SAFETY: the call reads the focus of this thread and touches no memory of ours.
+    let has_focus = unsafe { GetFocus() } == combo;
+    let cues_hidden =
+        send_to(dialog, control, WM_QUERYUISTATE, 0, 0) & (UISF_HIDEFOCUS as isize) != 0;
+    let focused = has_focus && !cues_hidden;
+
+    let roles = combo_closed_color_roles(disabled);
+
+    // The colour choice, split from the painting exactly as everywhere in this file: the
+    // borrow of the state ends before the DC is touched, and what leaves the closure is plain
+    // values — a brush the state keeps alive until the dialog ends, and three inks.
+    //
+    // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
+    // window `show_dialog` created — the contract of `with_state`.
+    let choice = unsafe {
+        with_state(dialog, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+            let palette = state.palette;
+
+            // The ground the corners the rounding cuts away are left standing on — the very
+            // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with: the panel brush for a
+            // control lying on one of the eight group panels, the window brush elsewhere.
+            // All four combo boxes do lie on a panel, but the rule is asked and not assumed.
+            let ground = if state.panel_children.contains(&control) {
+                brushes.panel_bg()
+            } else {
+                brushes.window_bg()
+            };
+
+            Some((
+                ground,
+                combo_fill_brush(roles.fill, brushes),
+                match roles.border {
+                    ComboBorderRole::FieldBorder => palette.field_border,
+                },
+                combo_text_ink(roles.text, palette),
+                match roles.chevron {
+                    ComboChevronRole::TextMuted => palette.text_muted,
+                },
+            ))
+        })
+    };
+
+    let Some(Some((ground, fill, border, ink, chevron_ink))) = choice else {
+        return;
+    };
+
+    let dpi = dc_dpi(dc);
+
+    // 1. The ground, then the field on top of it. `WM_ERASEBKGND` deliberately erases
+    // nothing (see `combo_box_proc`), so this is the one erase of the closed part — and it
+    // is what the four corners the rounding cuts away are filled with. Without it those
+    // corners would hold whatever the parent last painted there, which is right only for as
+    // long as the dialog carries no `WS_CLIPCHILDREN`.
+    //
+    // SAFETY: `dc` is the DC of this paint and `area` is a live local of this frame;
+    // `ground` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &area, ground) };
+
+    paint_rounded(dc, &area, scaled(FIELD_CORNER_RADIUS, dpi), border, fill);
+
+    // 2. The chevron, in place of the system button.
+    let chevron = combo_chevron_points(&area, dpi);
+    draw_combo_chevron(dc, chevron, chevron_ink, dpi);
+
+    // 3. The chosen value, from the control by identifier — never from anywhere else.
+    let mut value = combo_selected_text(dialog, control);
+
+    if !value.is_empty() {
+        // SAFETY: `dc` is the DC of this paint; both calls write an attribute of the DC and
+        // touch no memory of this process.
+        unsafe { SetBkMode(dc, TRANSPARENT) };
+        // SAFETY: as above.
+        unsafe { SetTextColor(dc, ink) };
+
+        // The control's own font, for the length of the drawing — see the doc comment.
+        let font = HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
+
+        // NFR-13: examined. A control with no font of its own answers zero, and the stock
+        // font of the DC is then the degraded-but-alive answer.
+        let previous_font = if font.is_invalid() {
+            None
+        } else {
+            // SAFETY: `dc` is the DC of this paint and `font` is the live font of the
+            // control, owned by the manager; the previous handle is put back below.
+            Some(unsafe { SelectObject(dc, font.into()) })
+        };
+
+        let mut text_rect = RECT {
+            left: area.left + COMBO_TEXT_INSET_X,
+            top: area.top,
+            right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
+            bottom: area.bottom,
+        };
+
+        // SAFETY: `value` and `text_rect` are live locals of this frame; the format has no
+        // `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text and writes only
+        // pixels of the DC.
+        unsafe {
+            DrawTextW(
+                dc,
+                &mut value,
+                &mut text_rect,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            )
+        };
+
+        if let Some(previous) = previous_font {
+            // SAFETY: `previous` is the font that was in the DC a moment ago; putting it back
+            // ends this function's use of it.
+            unsafe { SelectObject(dc, previous) };
+        }
+    }
+
+    // 4. The focus cue, on the terms of task T-11-5a.
+    if focused {
+        let focus_rect = RECT {
+            left: area.left + 2,
+            top: area.top + 2,
+            right: area.right - 2,
+            bottom: area.bottom - 2,
+        };
+
+        // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
+        //
+        // SAFETY: `dc` is the DC of this paint and `focus_rect` is a live local of this frame;
+        // the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+    }
+}
+
+/// The text of the item a combo box currently shows, as UTF-16 without the terminator — read
+/// from the dialog's own control by identifier, the one road this file reads a control's
+/// content by.
+///
+/// Empty for a combo with nothing chosen (`CB_ERR`), for a refused length, and for a refused
+/// copy — the closed face then shows its ground and its chevron and no word, which is the
+/// degraded-but-alive answer of NFR-13.
+fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
+    let Ok(index) = usize::try_from(send_to(dialog, control, CB_GETCURSEL, 0, 0)) else {
+        return Vec::new();
+    };
+
+    let Ok(length) = usize::try_from(send_to(dialog, control, CB_GETLBTEXTLEN, index, 0)) else {
+        return Vec::new();
+    };
+
+    // One for the terminator the control writes and never counts.
+    let mut buffer = vec![0u16; length + 1];
+
+    // SAFETY: `buffer` is owned by this frame and holds the length the combo has just
+    // reported plus the terminator, which is exactly what `CB_GETLBTEXT` writes; the pointer
+    // is not retained by the call.
+    let copied = send_to(
+        dialog,
+        control,
+        CB_GETLBTEXT,
+        index,
+        buffer.as_mut_ptr() as isize,
+    );
+
+    let copied = usize::try_from(copied).unwrap_or(0).min(length);
+
+    buffer.truncate(copied);
+    buffer
+}
+
+/// Width of the chevron of a closed combo box, in the pixels of the mock-ups — measured off
+/// `ui-03-fog.png`, where its two arms stand at `x` = 352 and 360.
+const COMBO_CHEVRON_WIDTH: i32 = 8;
+
+/// Distance from the right edge of the closed part to the **centre** of the chevron, in
+/// mock-up pixels — measured off the same picture: the apex sits at `x` = 356 in a field whose
+/// right edge is at 372.
+const COMBO_CHEVRON_INSET_X: i32 = 16;
+
+/// Thickness of the chevron's stroke, in **tenths** of a mock-up pixel — the 1,5 px the task
+/// names, which is what the measured picture shows: a one-pixel core with half a pixel of
+/// feathering on either side. [`scaled_tenths`] turns it into the whole pixels GDI draws with.
+const COMBO_CHEVRON_PEN_TENTHS: i32 = 15;
+
+/// Air between the text of the closed part and the chevron, in mock-up pixels.
+const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
+
+/// The three points of the chevron of a closed combo box — FR-92а, task T-11-14, the pure
+/// half of its drawing, closed by a table test.
+///
+/// A chevron is one polyline through three points and therefore two strokes, which is exactly
+/// what the mock-ups show: two arms meeting at an apex below them. The drop is half the width,
+/// again as measured — 8 px across, 4 px down — and the whole figure is centred on the
+/// vertical middle of the field it is given, so it follows the height of the control instead
+/// of a number written here.
+///
+/// Every length is a mock-up length put through [`scaled`], so the chevron grows with the DPI
+/// of the window like the radii and insets of task T-11-13.
+pub fn combo_chevron_points(area: &RECT, dpi: i32) -> [(i32, i32); 3] {
+    let width = scaled(COMBO_CHEVRON_WIDTH, dpi).max(2);
+    let drop = width / 2;
+
+    let centre_x = area.right - scaled(COMBO_CHEVRON_INSET_X, dpi);
+    let centre_y = (area.top + area.bottom) / 2;
+
+    let left = centre_x - width / 2;
+    let top = centre_y - drop / 2;
+
+    [(left, top), (centre_x, top + drop), (left + width, top)]
+}
+
+/// Strokes the chevron with a transient pen of `ink` — the drawing half of
+/// [`combo_chevron_points`].
+///
+/// The pen lives for exactly this call, as in [`draw_check_mark`] and [`paint_ellipse`]: pens
+/// are not part of `theme::Brushes`, whose members exist because a `WM_CTLCOLOR*` answer must
+/// outlive the paint. A refused `CreatePen` skips the chevron and nothing else (NFR-13: the
+/// field is still drawn, still opens on a click, and simply carries no hint for one paint).
+fn draw_combo_chevron(dc: HDC, points: [(i32, i32); 3], ink: COLORREF, dpi: i32) {
+    // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
+    // frame until the `DeleteObject` below.
+    let pen = unsafe { CreatePen(PS_SOLID, scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi), ink) };
+
+    if pen.is_invalid() {
+        return;
+    }
+
+    // SAFETY: `dc` is painted into for the length of the paint this call is inside of; `pen`
+    // is the live pen just made. The previous pen is restored below.
+    let previous = unsafe { SelectObject(dc, pen.into()) };
+
+    let points = points.map(|(x, y)| POINT { x, y });
+
+    // SAFETY: `points` is a live local of this frame, read by the call and not retained. The
+    // answer is dropped for the NFR-13 reason every paint call of this file drops its own.
+    let _ = unsafe { Polyline(dc, &points) };
+
+    // SAFETY: `previous` is the pen that was in the DC a moment ago; putting it back ends this
+    // function's use of the DC.
+    unsafe { SelectObject(dc, previous) };
+
+    // SAFETY: `pen` was created above, deselected the line before, and freed exactly once,
+    // here. The `BOOL` is dropped — see `draw_check_mark`.
+    let _ = unsafe { DeleteObject(pen.into()) };
+}
+
 /// Puts the interface strings of the locale in force into the window — FR-94.
 ///
 /// Runs before anything is filled in, so that a control is never seen carrying the literal the
@@ -5130,6 +5962,10 @@ fn localise_dialog(hwnd: HWND) {
 fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     localise_dialog(hwnd);
     subclass_hotkey_field(hwnd);
+    // FR-92а, task T-11-14. The other half of this pair — `unsubclass_combo_boxes` — is the
+    // `WM_DESTROY` branch of `dialog_proc`, and nothing else in the file installs or removes
+    // this subclass. See `subclass_combo_boxes` for why the pairing is written that way.
+    subclass_combo_boxes(hwnd);
 
     // Section «Общие» of FR-92.
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
