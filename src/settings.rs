@@ -73,10 +73,10 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontIndirectW,
     CreatePen, CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE,
     DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint, FW_BOLD,
-    FillRect, FrameRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject, GetTextExtentPoint32W,
-    HBRUSH, HDC, HFONT, InvalidateRect, LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN,
-    PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
-    ReleaseDC, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
+    FillRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject, GetTextExtentPoint32W, HBRUSH, HDC,
+    HFONT, InvalidateRect, LOGFONTW, LOGPIXELSY, LineTo, MoveToEx, NULL_PEN, PAINTSTRUCT, PS_SOLID,
+    Polyline, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, RoundRect,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -3720,30 +3720,41 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return 0;
     }
 
-    // Eight vertical dialog units are one dialog-font height by the definition of the
-    // base units — see the doc comment above.
-    let Some((_, font_height)) = dialog_units(hwnd, 0, 8) else {
+    // The exclusion list has a row height of its own since task T-11-16: the generator gives
+    // its `'lbox'` rows `Y 11` — [`EXCLUSION_ROW_HEIGHT_DLU`] vertical dialog units — where a
+    // combo box has no height in the mock-ups at all and keeps the font-plus-air of T-11-15.
+    let measured = if item.CtlType.0 == ODT_LISTBOX.0 {
+        dialog_units(hwnd, 0, EXCLUSION_ROW_HEIGHT_DLU).map(|(_, row)| row)
+    } else {
+        // Eight vertical dialog units are one dialog-font height by the definition of the
+        // base units — see the doc comment above.
+        dialog_units(hwnd, 0, DIALOG_FONT_HEIGHT_DLU).map(|(_, font_height)| {
+            // The air of the mock-ups, in this window's pixels — п. 4 of task T-11-15.
+            //
+            // SAFETY: `hwnd` is the window being built; the call answers its DC or an invalid
+            // handle, and the DC is released below on both paths.
+            let dc = unsafe { GetDC(Some(hwnd)) };
+
+            // NFR-13: examined — `dc_dpi` answers 96 for a DC that will not say, which is the
+            // 100 % air and a legal item height.
+            let extra = scaled(COMBO_ITEM_EXTRA, dc_dpi(dc));
+
+            if !dc.is_invalid() {
+                // SAFETY: releases exactly the DC taken above, once.
+                unsafe { ReleaseDC(Some(hwnd), dc) };
+            }
+
+            font_height + extra
+        })
+    };
+
+    let Some(measured) = measured else {
         return 0;
     };
 
-    // The air of the mock-ups, in this window's pixels — п. 4 of task T-11-15.
-    //
-    // SAFETY: `hwnd` is the window being built; the call answers its DC or an invalid handle,
-    // and the DC is released below on both paths.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    // NFR-13: examined — `dc_dpi` answers 96 for a DC that will not say, which is the 100 %
-    // air and a legal item height.
-    let extra = scaled(COMBO_ITEM_EXTRA, dc_dpi(dc));
-
-    if !dc.is_invalid() {
-        // SAFETY: releases exactly the DC taken above, once.
-        unsafe { ReleaseDC(Some(hwnd), dc) };
-    }
-
     // A negative or overflowing height cannot come out of a font measurement; if a broken
     // one did, keeping the control's own default is the degraded-but-alive answer again.
-    let Ok(height) = u32::try_from(font_height + extra) else {
+    let Ok(height) = u32::try_from(measured) else {
         return 0;
     };
 
@@ -4145,13 +4156,14 @@ unsafe fn paint_push_button(
     // GDI refusals (reviews\T-11-1.md).
 
     // The face and the single-pixel frame in one figure — п. 2.2 of task T-11-13: the
-    // buttons of the mock-ups have [`BUTTON_CORNER_RADIUS`] corners, and a square
-    // `FillRect` under a square `FrameRect` cannot have any. The corners the rounding cuts
-    // away keep the erase of `WM_CTLCOLORBTN`, which is the ground the button stands on.
+    // buttons of the mock-ups have [`CORNER_RADIUS`] corners — the same radius as everything
+    // else the dialog rounds off, since task T-11-16 — and a square `FillRect` under a square
+    // `FrameRect` cannot have any. The corners the rounding cuts away keep the erase of
+    // `WM_CTLCOLORBTN`, which is the ground the button stands on.
     paint_rounded(
         dc,
         &rect,
-        scaled(BUTTON_CORNER_RADIUS, dc_dpi(dc)),
+        scaled(CORNER_RADIUS, dc_dpi(dc)),
         colors.border,
         colors.face,
     );
@@ -4182,10 +4194,10 @@ unsafe fn paint_push_button(
     if focused {
         // Inside the single-pixel border, over whatever face was chosen above.
         let focus_rect = RECT {
-            left: rect.left + 2,
-            top: rect.top + 2,
-            right: rect.right - 2,
-            bottom: rect.bottom - 2,
+            left: rect.left + FOCUS_CUE_INSET,
+            top: rect.top + FOCUS_CUE_INSET,
+            right: rect.right - FOCUS_CUE_INSET,
+            bottom: rect.bottom - FOCUS_CUE_INSET,
         };
 
         // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
@@ -4245,7 +4257,7 @@ fn combo_text_ink(role: ComboTextRole, palette: &theme::Palette) -> COLORREF {
 /// `sel_bg`/`sel_fg` for the highlighted item of the dropped-down list. An empty combo
 /// asks for its closed face with no item to name — `itemID` is −1 — and the filled
 /// ground is the whole of that answer. Otherwise the item's own text follows, in the
-/// dialog's font the DC already holds, vertically centred behind [`TEXT_INSET_X`] mock-up
+/// dialog's font the DC already holds, vertically centred behind [`FIELD_TEXT_INSET_DLU`]
 /// pixels of air;
 /// and the dotted `DrawFocusRect` over the closed part while it holds the focus — unless
 /// the manager says the focus cue is hidden (`ODS_NOFOCUSRECT`), exactly as the buttons
@@ -4357,8 +4369,15 @@ unsafe fn draw_combo_item(
             // SAFETY: as above.
             unsafe { SetTextColor(dc, ink) };
 
+            // The same three dialog units the closed face above it uses — an item of the
+            // dropped-down list stands directly under the closed part and shares its left
+            // edge, so a second inset would make the word jump on opening (task T-11-16).
+            let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
+                .map(|(horizontal, _)| horizontal)
+                .unwrap_or(FIELD_TEXT_INSET_DLU);
+
             let mut text_rect = RECT {
-                left: rect.left + scaled(TEXT_INSET_X, dc_dpi(dc)),
+                left: rect.left + inset,
                 top: rect.top,
                 right: rect.right,
                 bottom: rect.bottom,
@@ -4419,7 +4438,7 @@ unsafe fn draw_combo_item(
 ///
 /// The ground by `FillRect`, chosen by [`list_item_color_roles`] — `field_bg`/`text` for an
 /// ordinary row, the palette's own `sel_bg`/`sel_fg` for the selected one — then the row's
-/// text behind [`TEXT_INSET_X`] mock-up pixels of air, and the dotted `DrawFocusRect` when
+/// text behind [`LIST_TEXT_INSET`] mock-up pixels of air, and the dotted `DrawFocusRect` when
 /// the manager says
 /// this row carries the focus and the focus cues are not hidden, exactly as everywhere else
 /// in this dialog. An empty list asks for the cue with no row to name (`itemID` is −1); the
@@ -4461,22 +4480,56 @@ unsafe fn draw_list_item(
             let colors = list_item_color_roles(selected);
 
             Some((
+                // The ground of the row itself — the field the list is, whatever the row is
+                // doing. The selection is a figure *on* it since task T-11-16.
+                brushes.field_bg(),
                 combo_fill_brush(colors.fill, brushes),
+                match colors.fill {
+                    ComboFillRole::FieldBg => state.palette.field_bg,
+                    ComboFillRole::SelBg => state.palette.sel_bg,
+                },
                 combo_text_ink(colors.text, state.palette),
             ))
         })
     };
 
-    let Some(Some((fill, ink))) = choice else {
+    let Some(Some((ground, fill, fill_ink, ink))) = choice else {
         return 0;
     };
+
+    let dpi = dc_dpi(dc);
 
     // NFR-13, for the paint calls below: every answer is deliberately dropped, for the reason
     // `draw_combo_item` states for its own.
 
     // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for the
-    // length of this send; `fill` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &rect, fill) };
+    // length of this send; `ground` is a live brush of the dialog's state.
+    unsafe { FillRect(dc, &rect, ground) };
+
+    // The selection stripe of the mock-ups: not the whole row, but a rounded rectangle
+    // [`LIST_SELECTION_INSET`] mock-up pixels in from each side of it —
+    // `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3` of the `'lbox'` arm, task T-11-16.
+    // Left and right only, exactly as there: the stripe keeps the full height of the row.
+    // Outlined in its own fill, because `paint_rounded` draws frame and interior in one figure
+    // and this one has no frame.
+    if selected {
+        let inset = scaled(LIST_SELECTION_INSET, dpi);
+
+        let stripe = RECT {
+            left: rect.left + inset,
+            top: rect.top,
+            right: rect.right - inset,
+            bottom: rect.bottom,
+        };
+
+        paint_rounded(
+            dc,
+            &stripe,
+            scaled(LIST_SELECTION_RADIUS, dpi),
+            fill_ink,
+            fill,
+        );
+    }
 
     // −1 — an empty list asking for the focus cue with no row to name.
     if item_id != u32::MAX {
@@ -4509,9 +4562,15 @@ unsafe fn draw_list_item(
                 // SAFETY: as above.
                 unsafe { SetTextColor(dc, ink) };
 
+                // `TxtPx $g $it $F $brFg ($px + 7) ($ry + 2)` of the `'lbox'` arm: seven
+                // mock-up pixels in from the left edge of the list, two below the top of the
+                // row — task T-11-16, п. 3. Measured in the pixels of the picture and not in
+                // dialog units, because that is the unit the generator states them in; and
+                // top-aligned rather than `DT_VCENTER`, because the picture places the line
+                // and does not centre it.
                 let mut text_rect = RECT {
-                    left: rect.left + scaled(TEXT_INSET_X, dc_dpi(dc)),
-                    top: rect.top,
+                    left: rect.left + scaled(LIST_TEXT_INSET, dpi),
+                    top: rect.top + scaled(LIST_TEXT_TOP, dpi),
                     right: rect.right,
                     bottom: rect.bottom,
                 };
@@ -4520,14 +4579,7 @@ unsafe fn draw_list_item(
                 // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
                 // and writes only pixels of the DC. The dialog's font is already selected
                 // into the DC the manager hands over — no font work here.
-                unsafe {
-                    DrawTextW(
-                        dc,
-                        &mut buffer[..copied],
-                        &mut text_rect,
-                        DT_SINGLELINE | DT_VCENTER,
-                    )
-                };
+                unsafe { DrawTextW(dc, &mut buffer[..copied], &mut text_rect, DT_SINGLELINE) };
             }
         }
     }
@@ -4544,15 +4596,56 @@ unsafe fn draw_list_item(
     1
 }
 
-/// Side of the check-box square and diameter of the radio circle, in pixels — the 13×13
-/// the task names, which is the size the native glyph draws at 96 DPI.
-const GLYPH_SIZE: i32 = 13;
+/// One check mark of the mock-ups: the three points of its polyline and the pen it is drawn
+/// with — task T-11-16.
+///
+/// A type and not six loose constants because the dialog draws **two** check marks of
+/// different sizes, and the generator gives each its own literals: the tick of a dialog check
+/// box lives in a 17-pixel square, the tick of a layout-list row in a 13-pixel one, and their
+/// pens are 2,1 and 1,8 mock-up pixels. Both are drawn by [`draw_check_mark`], which is handed
+/// one of these instead of holding either set.
+///
+/// Every number is in **tenths of a mock-up pixel**: the generator writes them with one
+/// decimal, and rounding them to whole pixels before the scale is applied is exactly the kind
+/// of loss task T-11-16 exists to undo. The points are offsets from the top-left corner of the
+/// square, in the order the polyline visits them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckMark {
+    /// The three points, in tenths of a mock-up pixel from the square's top-left corner.
+    pub points_tenths: [(i32, i32); 3],
+    /// The thickness of the pen, in tenths of a mock-up pixel.
+    pub pen_tenths: i32,
+}
 
-/// Gap between the right edge of the glyph and the caption, in pixels.
-const GLYPH_TEXT_GAP: i32 = 5;
+/// The check mark of a dialog check box — `(PtF ($px+4.5) ($by+8.6))`, `(PtF ($px+7.3)
+/// ($by+11.8))`, `(PtF ($px+12.5) ($by+5.2))` and `[single]2.1` of the `'check'` arm.
+pub const GLYPH_CHECK_MARK: CheckMark = CheckMark {
+    points_tenths: [(45, 86), (73, 118), (125, 52)],
+    pen_tenths: 21,
+};
 
-/// Inset of the radio dot from the circle, in pixels.
-const GLYPH_DOT_INSET: i32 = 4;
+/// The check mark of a layout-list tick — `(PtF ($bx+3.4) ($by+6.6))`, `(PtF ($bx+5.6)
+/// ($by+9.0))`, `(PtF ($bx+9.6) ($by+4.0))` and `[single]1.8` of the `'lview'` arm.
+pub const LIST_CHECK_MARK: CheckMark = CheckMark {
+    points_tenths: [(34, 66), (56, 90), (96, 40)],
+    pen_tenths: LIST_CHECK_PEN_TENTHS,
+};
+
+/// The three points of one check mark in the pixels of a window at `dpi`, measured from the
+/// top-left corner of the square it is drawn in — the pure half of [`draw_check_mark`], task
+/// T-11-16.
+///
+/// Every offset goes through [`scaled_tenths_offset`], which is [`scaled`] for a length given
+/// with one decimal and without the floor of one a pen needs: a point may legitimately land on
+/// the corner itself.
+pub fn check_mark_points(corner: (i32, i32), mark: CheckMark, dpi: i32) -> [(i32, i32); 3] {
+    mark.points_tenths.map(|(x, y)| {
+        (
+            corner.0 + scaled_tenths_offset(x, dpi),
+            corner.1 + scaled_tenths_offset(y, dpi),
+        )
+    })
+}
 
 /// One glyph mark, resolved to the currency its drawing needs: the check strokes take an
 /// ink for a transient pen, the dot takes a live brush of the dialog's state.
@@ -4680,13 +4773,18 @@ unsafe fn draw_glyph_element(
         return 0;
     };
 
-    // The glyph: at the left edge, centred vertically, GLYPH_SIZE a side.
-    let glyph_top = rect.top + (rect.bottom - rect.top - GLYPH_SIZE) / 2;
+    let dpi = dc_dpi(dc);
+
+    // The glyph: at the left edge, centred vertically, [`GLYPH_SIZE`] mock-up pixels a side
+    // through the scale — the `$bs = 17` of the generator, and `$by = $py + [int](($ph -
+    // $bs)/2)` for the centring (task T-11-16).
+    let side = scaled(GLYPH_SIZE, dpi);
+    let glyph_top = rect.top + (rect.bottom - rect.top - side) / 2;
     let glyph = RECT {
         left: rect.left,
         top: glyph_top,
-        right: rect.left + GLYPH_SIZE,
-        bottom: glyph_top + GLYPH_SIZE,
+        right: rect.left + side,
+        bottom: glyph_top + side,
     };
 
     // NFR-13, for every paint call below: each answers a success flag or a previous
@@ -4705,24 +4803,28 @@ unsafe fn draw_glyph_element(
             paint_rounded(
                 dc,
                 &glyph,
-                scaled(GLYPH_CORNER_RADIUS, dc_dpi(dc)),
+                scaled(GLYPH_CORNER_RADIUS, dpi),
                 frame.unwrap_or(fill_ink),
                 fill,
             );
 
             if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
-                draw_check_mark(dc, &glyph, mark_ink);
+                draw_check_mark(dc, &glyph, mark_ink, GLYPH_CHECK_MARK, dpi);
             }
         }
         GlyphKind::RadioButton => {
             paint_ellipse(dc, &glyph, frame, fill);
 
             if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
+                // The 4,6 mock-up pixels of the generator; the 7,8 of the dot's own diameter
+                // then falls out of the circle around it, as it does there.
+                let dot_inset = scaled_tenths_offset(GLYPH_DOT_INSET_TENTHS, dpi);
+
                 let dot = RECT {
-                    left: glyph.left + GLYPH_DOT_INSET,
-                    top: glyph.top + GLYPH_DOT_INSET,
-                    right: glyph.right - GLYPH_DOT_INSET,
-                    bottom: glyph.bottom - GLYPH_DOT_INSET,
+                    left: glyph.left + dot_inset,
+                    top: glyph.top + dot_inset,
+                    right: glyph.right - dot_inset,
+                    bottom: glyph.bottom - dot_inset,
                 };
 
                 paint_ellipse(dc, &dot, None, dot_brush);
@@ -4741,8 +4843,16 @@ unsafe fn draw_glyph_element(
         // SAFETY: as above.
         unsafe { SetTextColor(dc, ink) };
 
+        // Twelve dialog units from the **left edge of the element** — the `($c.x + 12)` of both
+        // the `'check'` and the `'radio'` arm of the generator, task T-11-16. A refused
+        // `MapDialogRect` keeps the bare unit count, which is the fallback
+        // [`draw_panel_caption`] takes for its own inset (NFR-13).
+        let caption_inset = dialog_units(hwnd, GLYPH_TEXT_INSET_DLU, 0)
+            .map(|(horizontal, _)| horizontal)
+            .unwrap_or(GLYPH_TEXT_INSET_DLU);
+
         let mut text_rect = RECT {
-            left: rect.left + GLYPH_SIZE + GLYPH_TEXT_GAP,
+            left: rect.left + caption_inset,
             top: rect.top,
             right: rect.right,
             bottom: rect.bottom,
@@ -4767,9 +4877,9 @@ unsafe fn draw_glyph_element(
             unsafe { DrawTextW(dc, &mut caption, &mut measured, DT_CALCRECT | DT_SINGLELINE) };
 
             let focus_rect = RECT {
-                left: text_rect.left - 1,
+                left: text_rect.left - FOCUS_CUE_TEXT_INSET,
                 top: rect.top,
-                right: (measured.right + 2).min(rect.right),
+                right: (measured.right + FOCUS_CUE_INSET).min(rect.right),
                 bottom: rect.bottom,
             };
 
@@ -4786,17 +4896,22 @@ unsafe fn draw_glyph_element(
     1
 }
 
-/// Two strokes of the check mark, with a transient pen of `ink` — FR-92а, task T-11-5b.
+/// Two strokes of the check mark, with a transient pen of `ink` — FR-92а, task T-11-5b; the
+/// figure and the pen come from `mark` and the window's `dpi` since task T-11-16.
 ///
 /// The pen lives for exactly this call: pens are not part of `theme::Brushes` — that owner
 /// exists because `WM_CTLCOLOR*` answers must outlive the paint, which nothing here needs.
 /// Created, selected, drawn with, deselected, deleted; the refusal of `CreatePen` skips
 /// the mark and nothing else (NFR-13: examined; the glyph stays a filled square, the state
 /// remains readable by the fill alone until the next repaint).
-fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF) {
+///
+/// `dpi` is passed in rather than read off `dc`: one of the two callers paints into a memory
+/// DC of the state image list, whose own answer to `GetDeviceCaps` is not the DPI the frames
+/// are being built for.
+fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
-    let pen = unsafe { CreatePen(PS_SOLID, 2, ink) };
+    let pen = unsafe { CreatePen(PS_SOLID, scaled_tenths(mark.pen_tenths, dpi), ink) };
 
     if pen.is_invalid() {
         return;
@@ -4806,14 +4921,16 @@ fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF) {
     // `pen` is the live pen just made. The previous pen is kept and restored below.
     let previous = unsafe { SelectObject(dc, pen.into()) };
 
-    // The two lines of the task: down-stroke into the corner, long stroke up and out.
-    // Coordinates are within the 13×13 glyph, chosen for the 2-pixel pen.
-    //
+    // The two strokes of the generator: down into the corner, long up and out. The three
+    // points are `mark`'s own, measured from the corner of the square through the scale.
+    let [(first_x, first_y), (corner_x, corner_y), (last_x, last_y)] =
+        check_mark_points((glyph.left, glyph.top), mark, dpi);
+
     // SAFETY: plain coordinates into a live DC; no memory of ours is touched. The answers
     // are dropped for the NFR-13 reason the caller states for all its paint calls.
-    let _ = unsafe { MoveToEx(dc, glyph.left + 3, glyph.top + 6, None) };
-    let _ = unsafe { LineTo(dc, glyph.left + 5, glyph.top + 9) };
-    let _ = unsafe { LineTo(dc, glyph.left + 10, glyph.top + 3) };
+    let _ = unsafe { MoveToEx(dc, first_x, first_y, None) };
+    let _ = unsafe { LineTo(dc, corner_x, corner_y) };
+    let _ = unsafe { LineTo(dc, last_x, last_y) };
 
     // SAFETY: `previous` is the pen that was in the DC a moment ago; putting it back ends
     // this function's use of the DC.
@@ -4838,10 +4955,10 @@ fn paint_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH) 
     let pen = match outline {
         Some(ink) => {
             // The same frame every other figure of the dialog is outlined with — one pixel at
-            // 96 DPI through [`FIELD_BORDER_THICKNESS`], and it grows with the DPI like the
+            // 96 DPI through [`BORDER_THICKNESS`], and it grows with the DPI like the
             // rest of the mock-up (п. 3 of task T-11-15; the circle of a radio button is
             // framed exactly as the square of a check box beside it).
-            let thickness = scaled(FIELD_BORDER_THICKNESS, dc_dpi(dc)).max(1);
+            let thickness = scaled(BORDER_THICKNESS, dc_dpi(dc)).max(1);
 
             // SAFETY: takes plain values, reads no memory of ours, answers a handle owned
             // by this frame until the `DeleteObject` below.
@@ -4942,9 +5059,23 @@ pub fn scaled(pixels: i32, dpi: i32) -> i32 {
 /// rules — asking for one pixel outright is the honest answer. A `dpi` of zero or less is
 /// the 100 % look, as in [`scaled`].
 pub fn scaled_tenths(tenths: i32, dpi: i32) -> i32 {
+    scaled_tenths_offset(tenths, dpi).max(1)
+}
+
+/// The same fractional length as [`scaled_tenths`] and **without** its floor of one — task
+/// T-11-16, for the fractional lengths that are *positions* rather than pens.
+///
+/// The generator states the strokes of both check marks and the dot of a radio button as
+/// offsets with one decimal — `(PtF ($px+4.5) ($by+8.6))`, `($px+4.6)` — and an offset of zero
+/// is a perfectly good offset: a floor of one would push a point off the corner it belongs on.
+/// [`scaled_tenths`] is this function with the floor put back, so there is one piece of
+/// arithmetic and two names for it (§6.2) rather than two copies drifting apart.
+///
+/// Pure; a `dpi` of zero or less is the 100 % look, as in [`scaled`].
+pub fn scaled_tenths_offset(tenths: i32, dpi: i32) -> i32 {
     let dpi = if dpi > 0 { dpi } else { SCREEN_DPI };
 
-    ((tenths * dpi * 10 + MOCKUP_DPI_TENTHS * 5) / (MOCKUP_DPI_TENTHS * 10)).max(1)
+    (tenths * dpi * 10 + MOCKUP_DPI_TENTHS * 5) / (MOCKUP_DPI_TENTHS * 10)
 }
 
 /// The DPI of the device a DC paints on — [`SCREEN_DPI`] when the device will not say.
@@ -4989,67 +5120,198 @@ fn dialog_units(hwnd: HWND, horizontal: i32, vertical: i32) -> Option<(i32, i32)
     Some((rect.right, rect.bottom))
 }
 
-/// Corner radius of a group panel, in the pixels of the mock-ups — п. 2.2 of task T-11-13.
+/// Corner radius of **everything this dialog rounds off** — group panel, input field, closed
+/// part of a combo box, push button and both lists — in the pixels of the mock-ups, п. 1 of
+/// task T-11-16.
+///
+/// ⚠ One constant because the generator of the mock-ups has one number. `scratchpad\ui.ps1`
+/// keeps the radius in the style table — `Radius = 6` for «02 Графит» and «03 Туман» — and
+/// hands that same `$S.Radius` to every figure it draws: `'group'`, `'edit'`, `'combo'`,
+/// `'btn'`, `'def'`, `'lbox'` and `'lview'`. Tasks T-11-13 and T-11-14 read the pictures with
+/// the eye and split the number into «панель 6 / прочее 4»; the pictures never carried the
+/// split, and the three constants T-11-13 wrote it into are one name again.
 ///
 /// A radius, not the ellipse diameter `RoundRect` takes: [`paint_rounded`] doubles it in the
-/// one place that speaks to GDI, so the three constants here read as the mock-ups describe
-/// them.
-pub const PANEL_CORNER_RADIUS: i32 = 6;
+/// one place that speaks to GDI, so this constant reads as the generator writes it.
+pub const CORNER_RADIUS: i32 = 6;
 
-/// Corner radius of an owner-drawn push button — п. 2.2 of task T-11-13.
-pub const BUTTON_CORNER_RADIUS: i32 = 4;
-
-/// Corner radius of an input field or a list — п. 2.2 of task T-11-13. Since task T-11-14
-/// the closed part of a combo box is drawn with the same radius: it is a field to the eye,
-/// and the mock-ups round it exactly as they round the five input fields beside it.
-pub const FIELD_CORNER_RADIUS: i32 = 4;
-
-/// Corner radius of the check-box square, in the pixels of the mock-ups — п. 2 of task
-/// T-11-14.
+/// Corner radius of the check-box square, in the pixels of the mock-ups — `FillRectPx $g $px
+/// $by $bs $bs $S.Mark 3` of the `'check'` arm.
 ///
-/// Smaller than [`FIELD_CORNER_RADIUS`] because the figure is smaller: a 13-pixel square
-/// rounded by 4 would read as a lozenge. The circle of a radio button has no radius to set —
-/// it is an `Ellipse` and was already right.
+/// Its own number and not [`CORNER_RADIUS`] because the generator gives it its own: the square
+/// is a small figure, and a 17-pixel square rounded by 6 would read as a lozenge. The circle
+/// of a radio button has no radius to set — it is an `Ellipse`.
 pub const GLYPH_CORNER_RADIUS: i32 = 3;
 
-/// Thickness of the single outline of every rounded figure of the dialog, in the pixels of
-/// the mock-ups — п. 3 of task T-11-15.
-///
-/// The mock-ups draw a field frame two pixels wide, which through [`scaled`] is **one** pixel
-/// at 96 DPI — exactly the pen [`paint_rounded`] has always made, so nothing changes on the
-/// user's screen. It is written down as a mock-up length all the same, for the reason the
-/// whole of task T-11-15 exists: a bare `1` in the pen is a length that cannot follow the
-/// picture anywhere else, and at 200 % it stayed one pixel while every radius beside it
-/// doubled.
-pub const FIELD_BORDER_THICKNESS: i32 = 2;
+/// Corner radius of the tick of the layout list, in mock-up pixels — `FillRectPx $g $bx $by
+/// $bs $bs $S.Mark 2` of the `'lview'` arm. Smaller again, because the figure is smaller
+/// again: 13 mock-up pixels a side against the 17 of a dialog glyph.
+pub const LIST_CHECK_CORNER_RADIUS: i32 = 2;
 
-/// Inset of text from the left edge of the field, row or item it sits in, in the pixels of
-/// the mock-ups — п. 2 of task T-11-15.
+/// Thickness of the single outline of every rounded figure of the dialog, in the pixels of
+/// the mock-ups — every `StrokeRectPx … 1` of `Draw-Control`, task T-11-16.
 ///
-/// The mock-ups keep every line of text 12 of their own pixels away from the left edge of
-/// whatever holds it — **≈ 8,6 px at 96 DPI**, where until this task the dialog put a bare 4.
-/// One number for the five places text meets an edge, all five through [`scaled`]:
+/// ⚠ **One** mock-up pixel, not the two T-11-15 wrote down off the picture: a stroke of
+/// GDI+ straddles the path, so a one-pixel pen covers two rows of pixels in the picture and
+/// measures as two. Through [`scaled`] the number matters only above 100 %: `.max(1)` keeps
+/// the frame a pixel wide wherever the division would round it away, which is what the
+/// mock-ups show at every scale.
+pub const BORDER_THICKNESS: i32 = 1;
+
+/// Inset of the text of an input field and of the closed part of a combo box from its own
+/// left edge, in **dialog units** — п. 2 of task T-11-16.
+///
+/// ⚠ Dialog units and not pixels, because that is the unit the generator states it in:
+/// `Txt … ($c.x + 3) …` in the `'edit'` and `'combo'` arms, where `$c.x` is a coordinate of
+/// the dialog grid. Three units are ≈ 5,25 px at 96 DPI. T-11-15 read the same inset off the
+/// picture as «12 px макета» — 9 px at 96 DPI, almost twice too much, and the single most
+/// visible disagreement with the mock-ups after the radii.
+///
+/// The three places it reaches, all three through [`dialog_units`]:
 ///
 /// 1. the five input fields — `EM_SETMARGINS`, the documented message ([`set_field_margins`]);
-/// 2. the rows of the exclusion list ([`draw_list_item`]);
-/// 3. the rows of the layout list — the width of the state image the list draws before the
-///    text ([`check_cell_width`]);
-/// 4. the closed part of a combo box ([`draw_combo_closed_part`]);
-/// 5. the items of a dropped-down list ([`draw_combo_item`]).
-pub const TEXT_INSET_X: i32 = 12;
+/// 2. the closed part of a combo box ([`draw_combo_closed_part`]);
+/// 3. the items of a dropped-down list ([`draw_combo_item`]).
+pub const FIELD_TEXT_INSET_DLU: i32 = 3;
 
-/// Inset of the panel caption from the panel's left edge, in **dialog units** — п. 2.1.
+/// Inset of the text of one row of the exclusion list from the **left edge of the list**, in
+/// mock-up pixels — `TxtPx $g $it $F $brFg ($px + 7) …` of the `'lbox'` arm, п. 3 of T-11-16.
+///
+/// Mock-up pixels and not dialog units, again because that is what the generator writes: the
+/// row of a list is measured from the frame around it, in the pixels of the picture, while
+/// the text of a field is measured on the dialog grid. The same 7 is the air before the tick
+/// of the layout list ([`check_cell`]).
+pub const LIST_TEXT_INSET: i32 = 7;
+
+/// Top of the text of one row of the exclusion list below the top of the row, in mock-up
+/// pixels — the `($ry + 2)` of the `'lbox'` arm.
+pub const LIST_TEXT_TOP: i32 = 2;
+
+/// Top of the **first** row of a list below the inner edge of its frame, in mock-up pixels —
+/// the `$ry = $py + 3 + $i * $rowH` both list arms of the generator start from.
+///
+/// A list box positions its own rows, starting at the top of its client area, and no message
+/// moves them; the one lever this file holds over the distance between the frame and the first
+/// row is therefore **where the frame is drawn** — the frame is the dialog's own background
+/// ([`on_erase_background`]), and for the two lists it is lifted this far above the control
+/// instead of the [`BORDER_THICKNESS`] every field gets.
+pub const LIST_FIRST_ROW_TOP: i32 = 3;
+
+/// Inset of the selection rectangle of a list row from the **left and right** edges of the
+/// row, in mock-up pixels — `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3`.
+///
+/// Left and right only: the generator gives the stripe the whole height of the row (`$ry`,
+/// `$rowH`) and takes 2 px off each side of its width (`$px+2`, `$pw-4`).
+pub const LIST_SELECTION_INSET: i32 = 2;
+
+/// Corner radius of that selection rectangle, in mock-up pixels — the trailing `3` of the
+/// same call.
+pub const LIST_SELECTION_RADIUS: i32 = 3;
+
+/// Height of one row of the exclusion list, in **dialog units** — the `$rowH = Y 11` of the
+/// `'lbox'` arm, п. 5 of task T-11-16.
+///
+/// Dialog units, so the row follows the dialog font and the DPI of the window with no
+/// arithmetic of ours in the middle — the same road [`on_measure_item`] already takes for the
+/// font height itself.
+pub const EXCLUSION_ROW_HEIGHT_DLU: i32 = 11;
+
+/// Height of one row of the layout list, in **dialog units** — the `$rowH = Y 12` of the
+/// `'lview'` arm, п. 5 of task T-11-16.
+///
+/// One unit taller than a row of the exclusion list, exactly as the generator has it. A
+/// report-mode `SysListView32` takes no `WM_MEASUREITEM` and has no height message; the
+/// documented lever is the **state image list**, whose cell height the control takes as the
+/// row height — which is why [`build_check_image_list`] is given this number.
+pub const LAYOUT_ROW_HEIGHT_DLU: i32 = 12;
+
+/// Side of the tick of the layout list, in mock-up pixels — the `$bs = 13` of the `'lview'`
+/// arm, п. 4 of task T-11-16.
+pub const LIST_CHECK_SIZE: i32 = 13;
+
+/// Air between the tick of the layout list and the label after it, in mock-up pixels — the
+/// `($bx + $bs + 7)` the generator places the label at.
+pub const LIST_CHECK_TEXT_GAP: i32 = 7;
+
+/// Thickness of the pen of the tick of the layout list, in **tenths** of a mock-up pixel —
+/// the `[single]1.8` of the `'lview'` arm.
+pub const LIST_CHECK_PEN_TENTHS: i32 = 18;
+
+/// Side of the check-box square and diameter of the radio circle, in mock-up pixels — the
+/// `$bs = 17` both the `'check'` and the `'radio'` arm of the generator open with, п. 6 of
+/// task T-11-16.
+///
+/// ⚠ Mock-up pixels since this task. It used to be a bare 13 screen pixels — «the size the
+/// native glyph draws at 96 DPI» — which is neither the mock-up's figure nor a length that
+/// grows with the DPI of the window.
+pub const GLYPH_SIZE: i32 = 17;
+
+/// Inset of the caption of a check box or radio button from the **left edge of the element**,
+/// in dialog units — `Txt $g $c.s $F $brFg ($c.x + 12) …` in both arms, п. 6 of T-11-16.
+///
+/// ⚠ Measured from the element, not from the glyph: the glyph stands at the left edge and the
+/// text starts twelve units to the right of that same edge, so the air between them is
+/// whatever is left over. It used to be a bare «glyph + 5 px» gap, which put the text 18 px
+/// from the edge against the mock-up's 21.
+pub const GLYPH_TEXT_INSET_DLU: i32 = 12;
+
+/// Inset of the dot of a radio button from the circle around it, in **tenths** of a mock-up
+/// pixel — `$p2.AddEllipse(($px+4.6),($by+4.6),($bs-9.2),($bs-9.2))`.
+///
+/// The diameter of the dot is not a number of its own: 17 − 2 × 4,6 = 7,8 mock-up pixels
+/// falls out of the inset and the circle, exactly as it does in the generator.
+pub const GLYPH_DOT_INSET_TENTHS: i32 = 46;
+
+/// Inset of the panel caption from the panel's left edge, in **dialog units** — п. 2.1 of
+/// T-11-13, `($px + (X 7))` of the `'group'` arm.
 ///
 /// Dialog units and not pixels on purpose: this is a horizontal position on a grid whose
 /// every other number — the 7 the panels start at, the 14 their children start at — is in
 /// the same units, and [`dialog_units`] is what turns it into pixels.
-const PANEL_CAPTION_INSET_DLU: i32 = 7;
+pub const PANEL_CAPTION_INSET_DLU: i32 = 7;
 
-/// Inset of the panel caption from the panel's top edge, in mock-up pixels — п. 2.1.
+/// Inset of the panel caption from the panel's top edge, in mock-up pixels — the `($py + 5)`
+/// of the same call.
 pub const PANEL_CAPTION_INSET_Y: i32 = 5;
 
-/// Height of the caption face as a percentage of the dialog font — п. 2.1, «≈ 0,85».
-const PANEL_CAPTION_FONT_PERCENT: i32 = 85;
+/// Point size of the caption face, in **tenths of a point** — the `$FSCAP = 7.6 * $DPI` of
+/// the generator, п. 7 of task T-11-16.
+///
+/// Tenths of a point rather than a percentage of the dialog font, because that is how the
+/// generator states it: two point sizes, `7.6` and `9`, whose ratio is 0,844. T-11-15 carried
+/// the ratio as a rounded «85 %», which is a number the pictures do not have.
+pub const PANEL_CAPTION_POINTS_TENTHS: i32 = 76;
+
+/// Point size of the dialog font itself, in **tenths of a point** — the `$FS = 9 * $DPI` of
+/// the generator, and the denominator [`PANEL_CAPTION_POINTS_TENTHS`] is a numerator of.
+///
+/// Never used to *make* a font: the dialog font comes from the template and the manager, at
+/// the DPI of the window. It is here so the ratio the caption is shrunk by is the ratio of
+/// the two sizes the pictures were drawn with, and not a percentage written down by hand.
+pub const DIALOG_FONT_POINTS_TENTHS: i32 = 90;
+
+/// The height of the dialog font, in vertical **dialog units** — eight of them, by the
+/// definition of the vertical dialog base unit.
+///
+/// Not a length of the mock-ups and not a choice: `MapDialogRect` is documented to map one
+/// vertical unit to an eighth of the dialog font's height, so a rectangle this tall maps to
+/// exactly one font height in the pixels of the window, whatever face and DPI the manager
+/// gave the dialog. It is the one way this file learns the size of a font it never creates.
+pub const DIALOG_FONT_HEIGHT_DLU: i32 = 8;
+
+/// Air between the dotted focus cue and the figure it goes around, in **screen pixels** —
+/// tasks T-11-5a and T-11-5b, written down as a name by task T-11-16.
+///
+/// ⚠ Not a length of the mock-ups, and the only length of this file that is not: the pictures
+/// draw no focused control at all, so there is nothing in them to take it from. Deliberately
+/// **not** scaled either — `DrawFocusRect` paints a hairline of alternating pixels that stays
+/// one pixel wide at every DPI, and an inset that grew with the window would pull the cue away
+/// from the frame it is supposed to sit just inside of.
+const FOCUS_CUE_INSET: i32 = 2;
+
+/// The same air on the left of a cue that goes around a **line of text** rather than a figure —
+/// one pixel, because there is no frame on that side for the cue to clear.
+const FOCUS_CUE_TEXT_INSET: i32 = 1;
 
 /// Letter spacing of a panel caption, in **tenths** of a mock-up pixel — п. 2.1, «≈ 1,1 px».
 ///
@@ -5142,6 +5404,15 @@ pub const FRAMED_FIELDS: [i32; 7] = [
     IDC_EXCLUSIONS,
     IDC_CYCLE_LIST,
 ];
+
+/// The two of [`FRAMED_FIELDS`] that hold rows rather than a line of text — task T-11-16.
+///
+/// Named apart because the mock-ups treat them apart in one respect: the frame of a list
+/// stands [`LIST_FIRST_ROW_TOP`] mock-up pixels above its first row, where the frame of a
+/// field stands one [`BORDER_THICKNESS`] above its text. Both lists are in
+/// [`FRAMED_FIELDS`] as well — this is a subset of it and not a second list of controls, and
+/// a test holds the containment.
+pub const FRAMED_LISTS: [i32; 2] = [IDC_EXCLUSIONS, IDC_CYCLE_LIST];
 
 /// The colours one whole background pass needs, taken out of the state in one borrow.
 ///
@@ -5263,7 +5534,7 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
         paint_rounded(
             dc,
             rect,
-            scaled(PANEL_CORNER_RADIUS, dpi),
+            scaled(CORNER_RADIUS, dpi),
             colors.panel_border,
             colors.panel,
         );
@@ -5284,19 +5555,32 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
     }
 
     // Pass two — the fields and lists, one frame's thickness outside each rectangle (п. 2.3
-    // of T-11-13; the thickness is [`FIELD_BORDER_THICKNESS`] through the scale since task
+    // of T-11-13; the thickness is [`BORDER_THICKNESS`] through the scale since task
     // T-11-15, so the frame stands outside the control at every DPI and not only at 96,
     // where it is the single pixel it always was).
-    let border = scaled(FIELD_BORDER_THICKNESS, dpi).max(1);
+    let border = scaled(BORDER_THICKNESS, dpi).max(1);
+
+    // …except above a list, where the mock-ups leave [`LIST_FIRST_ROW_TOP`] of their own
+    // pixels between the frame and the first row (`$ry = $py + 3 + …` in both list arms of the
+    // generator). A list box lays its rows out from the top of its client area and no message
+    // moves them, so the air of the picture is made by lifting the frame instead — task
+    // T-11-16, п. 5.
+    let list_top = scaled(LIST_FIRST_ROW_TOP, dpi).max(border);
 
     for (control, rect) in &children {
         if background_figure(*control) != Some(BackgroundFigure::Field) {
             continue;
         }
 
+        let top = if FRAMED_LISTS.contains(control) {
+            list_top
+        } else {
+            border
+        };
+
         let frame = RECT {
             left: rect.left - border,
-            top: rect.top - border,
+            top: rect.top - top,
             right: rect.right + border,
             bottom: rect.bottom + border,
         };
@@ -5304,7 +5588,7 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
         paint_rounded(
             dc,
             &frame,
-            scaled(FIELD_CORNER_RADIUS, dpi),
+            scaled(CORNER_RADIUS, dpi),
             colors.field_border,
             colors.field,
         );
@@ -5319,8 +5603,9 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
 /// Built out of the dialog's **own** font rather than out of a face name written here: the
 /// dialog font is what the template asks for and what the manager already created at the
 /// window's DPI, so taking its `LOGFONTW` and changing two fields — the height to
-/// [`PANEL_CAPTION_FONT_PERCENT`] of what it was, the weight to bold — keeps the face and
-/// the DPI of the window and copies neither into this file.
+/// [`PANEL_CAPTION_POINTS_TENTHS`] over [`DIALOG_FONT_POINTS_TENTHS`] of what it was (7,6 pt
+/// against 9 pt, the two sizes the mock-ups were drawn with), the weight to bold — keeps the
+/// face and the DPI of the window and copies neither into this file.
 ///
 /// The font is asked of one of the panels themselves (`WM_GETFONT` through
 /// `SendDlgItemMessageW`, the one way this module sends anything to its own controls): the
@@ -5358,7 +5643,7 @@ fn caption_font(hwnd: HWND) -> Option<HFONT> {
 
     // `lfHeight` is negative for a font asked for by character height, which is how the
     // manager creates a `DS_SETFONT` face; the multiplication keeps whichever sign it has.
-    logical.lfHeight = (logical.lfHeight * PANEL_CAPTION_FONT_PERCENT) / 100;
+    logical.lfHeight = (logical.lfHeight * PANEL_CAPTION_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
     logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(logical.lfWeight);
 
     // SAFETY: `logical` is a live local of this frame, fully initialised by `GetObjectW`
@@ -5423,8 +5708,8 @@ unsafe fn draw_panel_caption(
     // The caption font's cell height, for the explicit width of a character the DC measures
     // as nothing: the dialog font's height ([`dialog_units`], the dialog's own scaling)
     // taken down to the same percentage the face was.
-    let font_height = dialog_units(hwnd, 0, 8)
-        .map(|(_, height)| (height * PANEL_CAPTION_FONT_PERCENT) / 100)
+    let font_height = dialog_units(hwnd, 0, DIALOG_FONT_HEIGHT_DLU)
+        .map(|(_, height)| (height * PANEL_CAPTION_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS)
         .unwrap_or(0);
 
     // 7 dialog units from the left edge of the panel, 5 mock-up pixels from the top.
@@ -5474,8 +5759,7 @@ unsafe fn draw_panel_caption(
 ///
 /// `radius` is the corner radius in pixels of the window, already scaled by
 /// [`scaled`]; `RoundRect` takes the *diameter* of the corner ellipse, and doubling it is
-/// this function's business so that [`PANEL_CORNER_RADIUS`], [`BUTTON_CORNER_RADIUS`] and
-/// [`FIELD_CORNER_RADIUS`] read as the mock-ups describe them.
+/// this function's business so that [`CORNER_RADIUS`] reads as the mock-ups describe it.
 ///
 /// `outline` is the ink of a transient pen for the single-pixel frame; `fill` is a live
 /// brush of the dialog's state. `RoundRect` draws both at once — frame with the selected
@@ -5484,10 +5768,10 @@ unsafe fn draw_panel_caption(
 /// refused `CreatePen` skips the figure (NFR-13: examined — better no panel for one paint
 /// than a panel framed in whatever pen the DC happens to hold).
 fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill: HBRUSH) {
-    // The frame of the mock-ups is [`FIELD_BORDER_THICKNESS`] of their own pixels — one pixel
+    // The frame of the mock-ups is [`BORDER_THICKNESS`] of their own pixels — one pixel
     // at 96 DPI, which is the pen this call has always made (п. 3 of task T-11-15), and two
     // at 125 % rather than the lonely hairline a bare `1` would have kept drawing.
-    let thickness = scaled(FIELD_BORDER_THICKNESS, dc_dpi(dc)).max(1);
+    let thickness = scaled(BORDER_THICKNESS, dc_dpi(dc)).max(1);
 
     // SAFETY: takes plain values, reads no memory of ours, answers a handle owned by this
     // frame until the `DeleteObject` below.
@@ -5722,13 +6006,13 @@ unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
 ///
 /// # What is drawn
 ///
-/// 1. the client area as a rounded rectangle of [`FIELD_CORNER_RADIUS`]: `field_bg` under a
+/// 1. the client area as a rounded rectangle of [`CORNER_RADIUS`]: `field_bg` under a
 ///    single-pixel `field_border` frame — the same figure the five input fields and the two
 ///    lists wear since task T-11-13, so a combo box is a field to the eye like the rest;
 /// 2. the chevron at the right edge, [`combo_chevron_points`] wide and stroked in
 ///    `text_muted` — the flat «⌄» of the mock-ups, in place of the system button;
 /// 3. the text of the chosen item, read from the control by identifier, behind
-///    [`TEXT_INSET_X`] mock-up pixels of air and clipped short of the chevron; `text`
+///    [`FIELD_TEXT_INSET_DLU`] dialog units of air and clipped short of the chevron; `text`
 ///    normally, `text_muted`
 ///    when the mode has disabled this combo ([`combo_closed_color_roles`]);
 /// 4. the dotted `DrawFocusRect` inside the frame while the control holds the focus and the
@@ -5843,7 +6127,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
     // `ground` is a live brush of the dialog's state.
     unsafe { FillRect(dc, &area, ground) };
 
-    paint_rounded(dc, &area, scaled(FIELD_CORNER_RADIUS, dpi), border, fill);
+    paint_rounded(dc, &area, scaled(CORNER_RADIUS, dpi), border, fill);
 
     // 2. The chevron, in place of the system button.
     let chevron = combo_chevron_points(&area, dpi);
@@ -5872,8 +6156,15 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
             Some(unsafe { SelectObject(dc, font.into()) })
         };
 
+        // Three dialog units from the left edge — the `($c.x + 3)` of the `'combo'` arm of the
+        // generator (task T-11-16). The dialog is the window the units belong to; a refused
+        // `MapDialogRect` keeps the bare unit count, as everywhere else (NFR-13).
+        let inset = dialog_units(dialog, FIELD_TEXT_INSET_DLU, 0)
+            .map(|(horizontal, _)| horizontal)
+            .unwrap_or(FIELD_TEXT_INSET_DLU);
+
         let mut text_rect = RECT {
-            left: area.left + scaled(TEXT_INSET_X, dpi),
+            left: area.left + inset,
             top: area.top,
             right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
             bottom: area.bottom,
@@ -5901,10 +6192,10 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
     // 4. The focus cue, on the terms of task T-11-5a.
     if focused {
         let focus_rect = RECT {
-            left: area.left + 2,
-            top: area.top + 2,
-            right: area.right - 2,
-            bottom: area.bottom - 2,
+            left: area.left + FOCUS_CUE_INSET,
+            top: area.top + FOCUS_CUE_INSET,
+            right: area.right - FOCUS_CUE_INSET,
+            bottom: area.bottom - FOCUS_CUE_INSET,
         };
 
         // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
@@ -5951,18 +6242,27 @@ fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
     buffer
 }
 
-/// Width of the chevron of a closed combo box, in the pixels of the mock-ups — measured off
-/// `ui-03-fog.png`, where its two arms stand at `x` = 352 and 360.
-pub const COMBO_CHEVRON_WIDTH: i32 = 8;
+/// Half-width of the chevron of a closed combo box, in mock-up pixels — the `±4` by `x` of
+/// `(PtF ($cx-4) …), (PtF $cx …), (PtF ($cx+4) …)` in the `'combo'` arm, п. 8 of T-11-16.
+///
+/// An arm and not the whole span since this task: the generator states the figure as three
+/// points around a centre, and building it out of a span and a drop of half the span put the
+/// apex 0,57 px below where the picture has it — the one place the old arithmetic fell outside
+/// the half-pixel the task allows.
+pub const COMBO_CHEVRON_ARM_X: i32 = 4;
+
+/// Half-height of the chevron, in mock-up pixels — the `∓2` by `y` of the same three points:
+/// the two arms stand this far above the middle of the field and the apex this far below it.
+pub const COMBO_CHEVRON_ARM_Y: i32 = 2;
 
 /// Distance from the right edge of the closed part to the **centre** of the chevron, in
-/// mock-up pixels — measured off the same picture: the apex sits at `x` = 356 in a field whose
-/// right edge is at 372.
-pub const COMBO_CHEVRON_INSET_X: i32 = 16;
+/// mock-up pixels — the `$cx = $px + $pw - 14` of the `'combo'` arm, п. 8 of T-11-16. It used
+/// to be a 16 read off `ui-03-fog.png` with the eye.
+pub const COMBO_CHEVRON_INSET_X: i32 = 14;
 
-/// Thickness of the chevron's stroke, in **tenths** of a mock-up pixel — the 1,5 px the task
-/// names, which is what the measured picture shows: a one-pixel core with half a pixel of
-/// feathering on either side. [`scaled_tenths`] turns it into the whole pixels GDI draws with.
+/// Thickness of the chevron's stroke, in **tenths** of a mock-up pixel — the `[single]1.5` the
+/// generator makes its pen with. [`scaled_tenths`] turns it into the whole pixels GDI draws
+/// with.
 pub const COMBO_CHEVRON_PEN_TENTHS: i32 = 15;
 
 /// Air between the text of the closed part and the chevron, in mock-up pixels.
@@ -5972,24 +6272,27 @@ pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
 /// half of its drawing, closed by a table test.
 ///
 /// A chevron is one polyline through three points and therefore two strokes, which is exactly
-/// what the mock-ups show: two arms meeting at an apex below them. The drop is half the width,
-/// again as measured — 8 px across, 4 px down — and the whole figure is centred on the
-/// vertical middle of the field it is given, so it follows the height of the control instead
-/// of a number written here.
+/// what the mock-ups show: two arms meeting at an apex below them. Since task T-11-16 the
+/// three points are built the way the generator builds them — one centre and two half-lengths,
+/// `±`[`COMBO_CHEVRON_ARM_X`] by `x` and `∓`[`COMBO_CHEVRON_ARM_Y`] by `y` — instead of a span
+/// halved twice, which rounded the apex a whole pixel low at 96 DPI. The centre sits on the
+/// vertical middle of the field it is given, so the figure follows the height of the control
+/// instead of a number written here.
 ///
 /// Every length is a mock-up length put through [`scaled`], so the chevron grows with the DPI
 /// of the window like the radii and insets of task T-11-13.
 pub fn combo_chevron_points(area: &RECT, dpi: i32) -> [(i32, i32); 3] {
-    let width = scaled(COMBO_CHEVRON_WIDTH, dpi).max(2);
-    let drop = width / 2;
+    let arm_x = scaled(COMBO_CHEVRON_ARM_X, dpi).max(1);
+    let arm_y = scaled(COMBO_CHEVRON_ARM_Y, dpi).max(1);
 
     let centre_x = area.right - scaled(COMBO_CHEVRON_INSET_X, dpi);
     let centre_y = (area.top + area.bottom) / 2;
 
-    let left = centre_x - width / 2;
-    let top = centre_y - drop / 2;
-
-    [(left, top), (centre_x, top + drop), (left + width, top)]
+    [
+        (centre_x - arm_x, centre_y - arm_y),
+        (centre_x, centre_y + arm_y),
+        (centre_x + arm_x, centre_y - arm_y),
+    ]
 }
 
 /// Strokes the chevron with a transient pen of `ink` — the drawing half of
@@ -6041,8 +6344,8 @@ const TEXT_FIELDS: [i32; 5] = [
     IDC_EXCLUSION_NAME,
 ];
 
-/// Puts [`TEXT_INSET_X`] mock-up pixels of air on both sides of the text of every input
-/// field — п. 2 of task T-11-15, the first of the five places that inset lives.
+/// Puts [`FIELD_TEXT_INSET_DLU`] dialog units of air on both sides of the text of every input
+/// field — п. 2 of task T-11-16, the first of the three places that inset lives.
 ///
 /// `EM_SETMARGINS` is the documented message for exactly this and the only one there is: an
 /// edit control positions its own text, and no `WM_CTLCOLOREDIT` or owner-draw of ours can
@@ -6053,23 +6356,15 @@ const TEXT_FIELDS: [i32; 5] = [
 /// Both margins get the same number: the mock-ups inset the text of a field from both edges,
 /// and a right margin also keeps the caret of a full field off the rounded frame.
 ///
-/// The DPI is the dialog's own, read through its DC — the same road [`dc_dpi`] takes for
-/// every painted length, so a field on a 150 % monitor gets the inset that monitor's pixels
-/// ask for. A refused `GetDC` leaves [`dc_dpi`] to answer 96 (NFR-13): the 100 % inset on a
-/// machine that would not say, which is a field looking slightly tight and nothing worse.
+/// The unit is the dialog's own: [`dialog_units`] maps three units through `MapDialogRect`,
+/// whose base units come from the dialog font the manager created at the window's DPI — so a
+/// field on a 150 % monitor gets the inset that monitor's pixels ask for, with no arithmetic
+/// of ours in the middle. A refused `MapDialogRect` keeps the bare unit count (NFR-13): a
+/// field looking slightly tight and nothing worse.
 fn set_field_margins(hwnd: HWND) {
-    // SAFETY: `hwnd` is the live dialog; the call answers its DC or an invalid handle, and
-    // the DC is released below on both paths.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    // NFR-13: examined — `dc_dpi` of an invalid DC is `GetDeviceCaps` refusing, which is the
-    // 96 the fallback names, so the fields still get the 100 % inset.
-    let inset = scaled(TEXT_INSET_X, dc_dpi(dc));
-
-    if !dc.is_invalid() {
-        // SAFETY: releases exactly the DC taken above, once.
-        unsafe { ReleaseDC(Some(hwnd), dc) };
-    }
+    let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
+        .map(|(horizontal, _)| horizontal)
+        .unwrap_or(FIELD_TEXT_INSET_DLU);
 
     // The two margins in one `lparam`, low word left and high word right — the documented
     // shape of the message. Both fit in a word: the inset is a dozen pixels even at 400 %.
@@ -7028,10 +7323,48 @@ fn ensure_list_view_class() -> windows::core::Result<()> {
     }
 }
 
-/// Side of one check frame of the layout list, in pixels — the 13×13 square the task names,
-/// and the same square the owner-drawn glyphs of the dialog use ([`GLYPH_SIZE`]), so a tick in
-/// the list and a tick on the dialog read as one element.
-pub const CHECK_FRAME_SIZE: i32 = 13;
+/// The whole geometry of one cell of the state image list of the layout list, in the pixels
+/// of the window it is built for — task T-11-16, the pure half of [`draw_check_frame`].
+///
+/// The cell is what the row is laid out around: the control draws the state image at the left
+/// edge of the row and the label immediately after it, so the cell carries the air before the
+/// tick, the tick, and the air after it — [`LIST_TEXT_INSET`], [`LIST_CHECK_SIZE`] and
+/// [`LIST_CHECK_TEXT_GAP`] mock-up pixels, in that order. Its **height** is the height of the
+/// row ([`LAYOUT_ROW_HEIGHT_DLU`], in the pixels the caller mapped it to), because a report
+/// list view takes the row height from the state image list and from nowhere a message can
+/// reach; the tick is centred in it, as `$by = $ry + [int](($rowH - $bs)/2)` centres it in the
+/// generator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckCell {
+    /// Width of the whole cell — air, tick, air.
+    pub width: i32,
+    /// Height of the whole cell, which is the height of the row.
+    pub height: i32,
+    /// Left edge of the tick inside the cell.
+    pub glyph_left: i32,
+    /// Top edge of the tick inside the cell.
+    pub glyph_top: i32,
+    /// Side of the tick.
+    pub glyph_side: i32,
+}
+
+/// The cell of the layout list at `dpi`, for a row `row_height` pixels tall — task T-11-16.
+///
+/// Pure, so the whole layout of a row is one table a test can read: the air of the mock-ups
+/// before the tick, the tick itself, the air after it, and the tick centred on the row.
+pub fn check_cell(dpi: i32, row_height: i32) -> CheckCell {
+    let glyph_side = scaled(LIST_CHECK_SIZE, dpi);
+    let glyph_left = scaled(LIST_TEXT_INSET, dpi);
+    let height = row_height.max(glyph_side);
+
+    CheckCell {
+        width: glyph_left + glyph_side + scaled(LIST_CHECK_TEXT_GAP, dpi),
+        height,
+        glyph_left,
+        glyph_top: (height - glyph_side) / 2,
+        glyph_side,
+    }
+}
 
 /// The order the two frames enter the state image list of [`build_check_image_list`]:
 /// frame 0 — снята, frame 1 — взведена.
@@ -7177,7 +7510,16 @@ fn paint_cycle_list(hwnd: HWND, palette: &theme::Palette) {
 /// [`set_row_check`]/[`read_cycle_checks`] keep speaking `LVIS_STATEIMAGEMASK` — the
 /// participation mechanism of FR-31 is the same mechanism with different pictures.
 fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
-    let Some(list) = build_check_image_list(palette) else {
+    // The height of a row of the layout list — [`LAYOUT_ROW_HEIGHT_DLU`] dialog units of this
+    // window (task T-11-16). It travels down the build because the **cell** of the state image
+    // list is what a report list view takes its row height from; a refused `MapDialogRect`
+    // leaves the cell as tall as the tick, which is the height the control had before this task
+    // (NFR-13).
+    let row_height = dialog_units(hwnd, 0, LAYOUT_ROW_HEIGHT_DLU)
+        .map(|(_, vertical)| vertical)
+        .unwrap_or(0);
+
+    let Some(list) = build_check_image_list(palette, row_height) else {
         // NFR-13, examined in words: with no frames of our own the system pair simply
         // stays — light squares in the dark palette, exactly the price §10 п.9 already
         // words — which is better than ticks nobody can see at all. No journal row for
@@ -7214,7 +7556,7 @@ fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
 /// Builds the two-frame state image list of [`install_check_images`] — the outer layer of
 /// three: takes and releases the screen DC, which is where the colour depth of the frames
 /// comes from.
-fn build_check_image_list(palette: &theme::Palette) -> Option<HIMAGELIST> {
+fn build_check_image_list(palette: &theme::Palette, row_height: i32) -> Option<HIMAGELIST> {
     // SAFETY: the screen DC of this process; released below, on every path.
     let screen = unsafe { GetDC(None) };
 
@@ -7223,7 +7565,7 @@ fn build_check_image_list(palette: &theme::Palette) -> Option<HIMAGELIST> {
         return None;
     }
 
-    let list = build_check_frames(screen, palette);
+    let list = build_check_frames(screen, palette, row_height);
 
     // SAFETY: releases exactly the DC taken above, once.
     unsafe { ReleaseDC(None, screen) };
@@ -7235,7 +7577,11 @@ fn build_check_image_list(palette: &theme::Palette) -> Option<HIMAGELIST> {
 /// through. ⚠ The bitmaps are compatible with the **screen**, not with this DC: a memory DC
 /// is born with a monochrome bitmap selected, and a bitmap compatible with *it* would carry
 /// one bit per pixel — the classic trap the task's «в память» route walks past.
-fn build_check_frames(screen: HDC, palette: &theme::Palette) -> Option<HIMAGELIST> {
+fn build_check_frames(
+    screen: HDC,
+    palette: &theme::Palette,
+    row_height: i32,
+) -> Option<HIMAGELIST> {
     // SAFETY: a memory DC over the live screen DC; deleted below, on every path.
     let dc = unsafe { CreateCompatibleDC(Some(screen)) };
 
@@ -7244,31 +7590,13 @@ fn build_check_frames(screen: HDC, palette: &theme::Palette) -> Option<HIMAGELIS
         return None;
     }
 
-    let list = draw_frames_into_list(screen, dc, palette);
+    let list = draw_frames_into_list(screen, dc, palette, row_height);
 
     // SAFETY: deletes exactly the DC created above, once; the frame bitmaps were deselected
     // before their own deletion, so nothing of ours is still selected into it.
     let _ = unsafe { DeleteDC(dc) };
 
     list
-}
-
-/// Width of one cell of the state image list — п. 2 of task T-11-15, the third of the five
-/// places the text inset of the mock-ups lives.
-///
-/// The rows of the layout list are the one place in this dialog where the text is placed by
-/// `SysListView32` itself: the custom draw of [`on_notify`] answers `CDRF_DODEFAULT` with the
-/// colours filled in, and the control then draws the state image at the left edge of the row
-/// and the label immediately after it. So the width of the state image **is** the inset of
-/// that row's text, and it is the one lever this file holds over it — no message moves the
-/// label of a report-view item, and the styles of the control live in `app.rc`.
-///
-/// A cell is therefore [`TEXT_INSET_X`] mock-up pixels of air followed by the
-/// [`CHECK_FRAME_SIZE`] square of the tick: the tick starts where the text of every other
-/// field starts, and the label starts after the tick. The air is transparent — see
-/// [`CHECK_CELL_KEY`] — so the row's own ground, selected or not, shows through it.
-pub fn check_cell_width(dpi: i32) -> i32 {
-    scaled(TEXT_INSET_X, dpi) + CHECK_FRAME_SIZE
 }
 
 /// The colour of the air beside the tick, made transparent by the mask of the image list —
@@ -7285,17 +7613,22 @@ const CHECK_CELL_KEY: COLORREF = COLORREF(0x00FF_00FF);
 /// The inner layer of [`build_check_image_list`]: the image list itself and the two frames,
 /// in the order of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
 /// answers `None` — a one-frame list would silently shift the meaning of state image 2.
-fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Option<HIMAGELIST> {
-    // The air before the tick, in the pixels of the screen the frames are made for — the DPI
-    // of the screen DC this whole build hangs from (NFR-13: a DC that will not say is
-    // answered as 96 by `dc_dpi`, which is the 100 % inset).
-    let inset = scaled(TEXT_INSET_X, dc_dpi(screen));
-    let width = check_cell_width(dc_dpi(screen));
+fn draw_frames_into_list(
+    screen: HDC,
+    dc: HDC,
+    palette: &theme::Palette,
+    row_height: i32,
+) -> Option<HIMAGELIST> {
+    // The whole cell, in the pixels of the screen the frames are made for — the DPI of the
+    // screen DC this whole build hangs from (NFR-13: a DC that will not say is answered as 96
+    // by `dc_dpi`, which is the 100 % cell).
+    let dpi = dc_dpi(screen);
+    let cell = check_cell(dpi, row_height);
 
     // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
     // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — the tick is opaque
     // and the air beside it is a hole, which is what [`CHECK_CELL_KEY`] is for.
-    let list = unsafe { ImageList_Create(width, CHECK_FRAME_SIZE, ILC_COLOR32 | ILC_MASK, 2, 0) };
+    let list = unsafe { ImageList_Create(cell.width, cell.height, ILC_COLOR32 | ILC_MASK, 2, 0) };
 
     if list.is_invalid() {
         // NFR-13: examined — as in the callers.
@@ -7305,7 +7638,7 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
     for checked in CHECK_FRAME_ORDER {
         // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
         // frame until the `DeleteObject` below.
-        let bitmap = unsafe { CreateCompatibleBitmap(screen, width, CHECK_FRAME_SIZE) };
+        let bitmap = unsafe { CreateCompatibleBitmap(screen, cell.width, cell.height) };
 
         if bitmap.is_invalid() {
             // SAFETY: the half-built list is ours until handed out; freed exactly once.
@@ -7318,7 +7651,7 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
         // into a DC is not readable.
         let previous = unsafe { SelectObject(dc, bitmap.into()) };
 
-        draw_check_frame(dc, checked, palette, inset);
+        draw_check_frame(dc, checked, palette, cell, dpi);
 
         // SAFETY: restores the bitmap that was in the DC a moment ago.
         unsafe { SelectObject(dc, previous) };
@@ -7344,28 +7677,31 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, palette: &theme::Palette) -> Opti
 }
 
 /// Paints one cell of the state image list into the bitmap currently selected into `dc`:
-/// `inset` pixels of [`CHECK_CELL_KEY`] air, then the [`CHECK_FRAME_SIZE`] square of the tick
-/// in the colours of [`check_frame_colors`] — task T-11-15 for the air, task T-11-7 for the
-/// square.
+/// [`CHECK_CELL_KEY`] air over the whole of `cell`, then the square of the tick where
+/// [`check_cell`] puts it, in the colours of [`check_frame_colors`] — task T-11-16 for the
+/// geometry, task T-11-7 for the colours.
 ///
 /// The brushes are transient, exactly as the pens of [`draw_check_mark`]: nothing here
 /// outlives the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is
-/// answers that must outlive it. The mark *is* [`draw_check_mark`] — the same two strokes,
-/// the same 2-pixel pen, so the tick of the list is the tick of the dialog stroke for
-/// stroke.
-fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, inset: i32) {
-    let cell = RECT {
+/// answers that must outlive it. The square is rounded by [`LIST_CHECK_CORNER_RADIUS`] and the
+/// mark is [`draw_check_mark`] with [`LIST_CHECK_MARK`] — the tick of the list has its own
+/// figure in the mock-ups, one size smaller than the tick of a dialog check box.
+///
+/// `dpi` is the DPI the frames are being built for and is passed in rather than read off `dc`:
+/// this is a memory DC, whose own answer is not it.
+fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: CheckCell, dpi: i32) {
+    let whole = RECT {
         left: 0,
         top: 0,
-        right: inset + CHECK_FRAME_SIZE,
-        bottom: CHECK_FRAME_SIZE,
+        right: cell.width,
+        bottom: cell.height,
     };
 
     let frame = RECT {
-        left: inset,
-        top: 0,
-        right: inset + CHECK_FRAME_SIZE,
-        bottom: CHECK_FRAME_SIZE,
+        left: cell.glyph_left,
+        top: cell.glyph_top,
+        right: cell.glyph_left + cell.glyph_side,
+        bottom: cell.glyph_top + cell.glyph_side,
     };
 
     // The air first, over the whole cell: the tick is painted on top of it, and what stays
@@ -7384,7 +7720,7 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, inset: i32
 
     // SAFETY: `dc` holds the cell bitmap for exactly this call; `key` is the live brush just
     // made. The answer is dropped for the NFR-13 reason `draw_glyph_element` gives.
-    unsafe { FillRect(dc, &cell, key) };
+    unsafe { FillRect(dc, &whole, key) };
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(key.into()) };
@@ -7401,28 +7737,25 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, inset: i32
         return;
     }
 
-    // SAFETY: `dc` holds the frame bitmap for exactly this call; `fill` is the live brush
-    // just made. The answers of the paint calls are dropped for the NFR-13 reason
-    // `draw_glyph_element` states for its own.
-    unsafe { FillRect(dc, &frame, fill) };
+    // The square, rounded by [`LIST_CHECK_CORNER_RADIUS`] — `FillRectPx … 2` and
+    // `StrokeRectPx … 2 1` of the `'lview'` arm (task T-11-16). One `RoundRect` for fill and
+    // frame, exactly as the glyph of a dialog check box is drawn: a square `FillRect` under a
+    // square `FrameRect` cannot have a corner radius at all, and the frameless cell — the
+    // checked one, whose accent fill covers it whole — is outlined in its own fill.
+    paint_rounded(
+        dc,
+        &frame,
+        scaled(LIST_CHECK_CORNER_RADIUS, dpi),
+        colors.frame.unwrap_or(colors.fill),
+        fill,
+    );
 
     // SAFETY: created above, handed to nobody, freed exactly once — see `draw_check_mark`
     // on the dropped `BOOL`.
     let _ = unsafe { DeleteObject(fill.into()) };
 
-    if let Some(border) = colors.frame {
-        // SAFETY: as for `fill`, all three calls.
-        let brush = unsafe { CreateSolidBrush(border) };
-
-        if !brush.is_invalid() {
-            unsafe { FrameRect(dc, &frame, brush) };
-
-            let _ = unsafe { DeleteObject(brush.into()) };
-        }
-    }
-
     if let Some(ink) = colors.mark {
-        draw_check_mark(dc, &frame, ink);
+        draw_check_mark(dc, &frame, ink, LIST_CHECK_MARK, dpi);
     }
 }
 

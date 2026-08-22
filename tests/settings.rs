@@ -2311,13 +2311,69 @@ fn a_character_the_device_measures_as_nothing_still_takes_room() {
     }
 }
 
-/// **Criterion 12 of T-11-13** — п. 2.2: the three radii are named constants with the values
-/// the mock-ups have, and not numbers written where they are used.
+/// **Criterion 10 of T-11-16; criterion 12 of T-11-13** — one radius, one name, five figures.
+///
+/// The generator of the mock-ups keeps the radius in its style table (`Radius = 6` for both
+/// approved styles) and hands that same `$S.Radius` to `'group'`, `'edit'`, `'combo'`, `'btn'`,
+/// `'def'`, `'lbox'` and `'lview'` alike. Tasks T-11-13 and T-11-14 split it into «панель 6 /
+/// прочее 4» off a reading of the picture; this test is what holds the split from coming back.
 #[test]
-fn the_corner_radii_are_the_six_and_four_of_the_mock_ups() {
-    assert_eq!(settings::PANEL_CORNER_RADIUS, 6, "panels — 6 px");
-    assert_eq!(settings::BUTTON_CORNER_RADIUS, 4, "buttons — 4 px");
-    assert_eq!(settings::FIELD_CORNER_RADIUS, 4, "fields and lists — 4 px");
+fn one_radius_rounds_the_panel_the_field_the_combo_the_button_and_both_lists() {
+    assert_eq!(
+        settings::CORNER_RADIUS,
+        6,
+        "the `Radius = 6` of the style table of ui.ps1"
+    );
+
+    let source = settings_module_source();
+
+    // The three names of T-11-13 are gone, not renamed around: a second radius could only come
+    // back as a second constant.
+    for gone in [
+        "PANEL_CORNER_RADIUS",
+        "BUTTON_CORNER_RADIUS",
+        "FIELD_CORNER_RADIUS",
+    ] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` must be gone — the mock-ups have one radius, not three"
+        );
+    }
+
+    // And the five places round off by the one name that is left. Each is named by the function
+    // that owns the figure, so a call site that quietly went back to a number of its own takes
+    // its row down with it.
+    let places = [
+        // панель и оба списка — обе половины фона диалога
+        ("unsafe fn on_erase_background(", 2),
+        // кнопка
+        ("unsafe fn paint_push_button(", 1),
+        // закрытая часть комбобокса, она же поле на вид
+        ("unsafe fn draw_combo_closed_part(", 1),
+    ];
+
+    for (signature, times) in places {
+        let body = function_body(&source, signature);
+
+        assert_eq!(
+            body.matches("scaled(CORNER_RADIUS,").count(),
+            times,
+            "`{signature}` must round off by the one radius, {times} time(s)"
+        );
+    }
+
+    // The two figures that keep a radius of their own, because the generator gives them one:
+    // the square of a dialog check box and the smaller square of a layout-list tick.
+    assert_eq!(
+        settings::GLYPH_CORNER_RADIUS,
+        3,
+        "the `… $S.Mark 3` of 'check'"
+    );
+    assert_eq!(
+        settings::LIST_CHECK_CORNER_RADIUS,
+        2,
+        "the `… $S.Mark 2` of 'lview'"
+    );
 }
 
 /// **Criterion 12 of T-11-13, the DPI half; criterion 9 of T-11-15** — every length of the
@@ -2387,95 +2443,427 @@ fn the_lengths_of_the_mock_ups_scale_with_the_dpi_of_the_window() {
     }
 }
 
-/// **Criterion 10 of T-11-15** — the table «величина → пиксели макета → пиксели при 96 DPI»,
-/// every length of the mock-ups this module holds, in one place.
+/// One row of `scratchpad\design-tokens.md` — task T-11-16, criterion 9.
+struct Token {
+    /// Раздел и название величины, как их пишет эталон.
+    what: &'static str,
+    /// Как эталон записывает величину — для вывода в отчёт теста.
+    reference: &'static str,
+    /// Пары «величина продукта при 96 DPI в сотых пикселя, эталон в них же». Пустой список —
+    /// у строки эталона нет числа (например «текст по центру»).
+    pixels: Vec<(i32, i32)>,
+    /// Пары «величина продукта, эталон» для того, что от DPI не зависит и переносится как
+    /// есть: единицы диалога и отношение кеглей.
+    exact: Vec<(i32, i32)>,
+    /// Кусок исходника, которым держится строка без числа.
+    shape: Option<&'static str>,
+}
+
+/// The reference length at 96 DPI, in hundredths of a pixel: the number the generator writes,
+/// given in **tenths of a mock-up pixel**, divided by the 1,4 the pictures were drawn at.
+fn at_96(mockup_tenths: i32) -> i32 {
+    // tenths of a mock-up pixel → hundredths of a screen pixel: × 100 ÷ 10 ÷ 1,4 = × 100 ÷ 14.
+    mockup_tenths * 100 / 14
+}
+
+/// A whole screen pixel in hundredths, for the left-hand column.
+fn px(pixels: i32) -> i32 {
+    pixels * 100
+}
+
+/// **Criterion 9 of T-11-16 — the table the task is about**: every row of
+/// `scratchpad\design-tokens.md` against the constant of the product that answers it.
 ///
-/// This is the test the task asks for by name: it is what makes the correction of the scale
-/// checkable without opening the window. The middle column is the constant as the module
-/// writes it — a length of pictures drawn at 140 % — and the right column is what the dialog
-/// puts on the user's 100 % screen. Everything in it goes through [`settings::scaled`] or
-/// [`settings::scaled_tenths`]; a length that stopped doing so would take its row down with
-/// it.
+/// The reference is not a measurement of the pictures: `scratchpad\design-tokens.md` was
+/// extracted from `scratchpad\ui.ps1`, the generator that *drew* them, where every size is a
+/// literal. So each row here is «what the generator writes» against «what this dialog puts on
+/// a 96 DPI screen», and the two must agree to within **half a pixel** — the tolerance the
+/// task names.
+///
+/// Rows: 6 + 6 + 3 + 5 + 3 + 6 + 8 = **37**, one for every row of the seven tables of the
+/// reference. The count is asserted, so a row of the reference cannot quietly go missing.
 #[test]
-fn every_length_of_the_mock_ups_goes_through_the_scale() {
-    // название | пиксели макета | при 96 DPI
-    let table: [(&str, i32, i32); 11] = [
-        ("радиус панели", settings::PANEL_CORNER_RADIUS, 4),
-        ("радиус кнопки", settings::BUTTON_CORNER_RADIUS, 3),
-        ("радиус поля и списка", settings::FIELD_CORNER_RADIUS, 3),
-        ("радиус глифа", settings::GLYPH_CORNER_RADIUS, 2),
-        ("толщина рамки", settings::FIELD_BORDER_THICKNESS, 1),
-        ("отступ текста", settings::TEXT_INSET_X, 9),
-        ("воздух строки", settings::COMBO_ITEM_EXTRA, 9),
-        (
-            "отступ заголовка сверху",
-            settings::PANEL_CAPTION_INSET_Y,
-            4,
+fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
+    // The height of a row of the layout list at 96 DPI: 12 vertical dialog units, which
+    // `MapDialogRect` maps as MulDiv(12, 15, 8) for the 15-pixel base unit of Segoe UI 9 pt.
+    let layout_row = 12 * 15 / 8;
+    let cell = settings::check_cell(96, layout_row);
+    let glyph_side = settings::scaled(settings::GLYPH_SIZE, 96);
+    let dot_inset = settings::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, 96);
+    let glyph_mark = settings::check_mark_points((0, 0), settings::GLYPH_CHECK_MARK, 96);
+
+    // The radius and the frame are one number for five figures each, so the three rows that
+    // ask for them in three different tables are answered by the same two expressions.
+    let radius = || vec![(px(settings::scaled(settings::CORNER_RADIUS, 96)), at_96(60))];
+    // ⚠ The frame is the one row whose «при 96 DPI» column the reference does not divide: a
+    // pen has no fractional width, and `.max(1)` is what keeps the single pixel at every scale.
+    let border = || {
+        vec![(
+            px(settings::scaled(settings::BORDER_THICKNESS, 96).max(1)),
+            px(1),
+        )]
+    };
+
+    let token = |what, reference, pixels: Vec<(i32, i32)>| Token {
+        what,
+        reference,
+        pixels,
+        exact: Vec::new(),
+        shape: None,
+    };
+    let units = |what, reference, exact: Vec<(i32, i32)>| Token {
+        what,
+        reference,
+        pixels: Vec::new(),
+        exact,
+        shape: None,
+    };
+
+    let table: Vec<Token> = vec![
+        // ---------------------------------------------------------------- 1. Панель группы
+        token("1. Панель · Радиус", "6 px макета", radius()),
+        token("1. Панель · Толщина рамки", "1 px макета", border()),
+        units(
+            "1. Панель · Отступ заголовка слева",
+            "7 DLU",
+            vec![(settings::PANEL_CAPTION_INSET_DLU, 7)],
         ),
-        ("размах шеврона", settings::COMBO_CHEVRON_WIDTH, 6),
-        (
-            "шеврон от правого края",
-            settings::COMBO_CHEVRON_INSET_X,
-            11,
+        token(
+            "1. Панель · Отступ заголовка сверху",
+            "5 px макета",
+            vec![(
+                px(settings::scaled(settings::PANEL_CAPTION_INSET_Y, 96)),
+                at_96(50),
+            )],
         ),
-        (
-            "зазор шеврона и текста",
-            settings::COMBO_CHEVRON_TEXT_GAP,
-            3,
+        token(
+            "1. Панель · Разрядка заголовка",
+            "1,1 px макета",
+            // The tracking is carried in tenths of a *screen* pixel: ten hundredths each.
+            vec![(
+                settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96) * 10,
+                at_96(11),
+            )],
+        ),
+        units(
+            "1. Панель · Кегль заголовка",
+            "7,6 pt против 9 pt = 0,844 основного, в промилле",
+            vec![(
+                settings::PANEL_CAPTION_POINTS_TENTHS * 1000 / settings::DIALOG_FONT_POINTS_TENTHS,
+                76 * 1000 / 90,
+            )],
+        ),
+        // ------------------------------------------------- 2. Флажок и переключатель
+        token(
+            "2. Глиф · Сторона квадрата / диаметр круга",
+            "17 px макета",
+            vec![(px(glyph_side), at_96(170))],
+        ),
+        token(
+            "2. Глиф · Радиус скругления квадрата",
+            "3 px макета",
+            vec![(
+                px(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96)),
+                at_96(30),
+            )],
+        ),
+        token(
+            "2. Глиф · Толщина пера галочки",
+            "2,1 px макета",
+            vec![(
+                px(settings::scaled_tenths(
+                    settings::GLYPH_CHECK_MARK.pen_tenths,
+                    96,
+                )),
+                at_96(21),
+            )],
+        ),
+        token(
+            "2. Глиф · Точки галочки от угла квадрата",
+            "(4,5; 8,6) (7,3; 11,8) (12,5; 5,2)",
+            vec![
+                (px(glyph_mark[0].0), at_96(45)),
+                (px(glyph_mark[0].1), at_96(86)),
+                (px(glyph_mark[1].0), at_96(73)),
+                (px(glyph_mark[1].1), at_96(118)),
+                (px(glyph_mark[2].0), at_96(125)),
+                (px(glyph_mark[2].1), at_96(52)),
+            ],
+        ),
+        token(
+            "2. Глиф · Втяжка точки переключателя и диаметр точки",
+            "4,6 / 7,8 px макета",
+            vec![
+                (px(dot_inset), at_96(46)),
+                // The diameter is not a number of its own — it falls out of the circle and the
+                // inset, exactly as `($bs-9.2)` falls out of them in the generator.
+                (px(glyph_side - 2 * dot_inset), at_96(78)),
+            ],
+        ),
+        units(
+            "2. Глиф · Текст от левого края элемента",
+            "12 DLU",
+            vec![(settings::GLYPH_TEXT_INSET_DLU, 12)],
+        ),
+        // ---------------------------------------------------------------- 3. Поле ввода
+        token("3. Поле · Радиус", "6 px макета", radius()),
+        token("3. Поле · Толщина рамки", "1 px макета", border()),
+        units(
+            "3. Поле · Втяжка текста",
+            "3 DLU",
+            vec![(settings::FIELD_TEXT_INSET_DLU, 3)],
+        ),
+        // ----------------------------------------------------------------- 4. Комбобокс
+        token(
+            "4. Комбобокс · Радиус, рамка",
+            "6 / 1 px макета",
+            vec![radius()[0], border()[0]],
+        ),
+        units(
+            "4. Комбобокс · Втяжка текста",
+            "3 DLU",
+            vec![(settings::FIELD_TEXT_INSET_DLU, 3)],
+        ),
+        token(
+            "4. Комбобокс · Центр шеврона от правого края",
+            "14 px макета",
+            vec![(
+                px(settings::scaled(settings::COMBO_CHEVRON_INSET_X, 96)),
+                at_96(140),
+            )],
+        ),
+        token(
+            "4. Комбобокс · Толщина пера шеврона",
+            "1,5 px макета",
+            vec![(
+                px(settings::scaled_tenths(
+                    settings::COMBO_CHEVRON_PEN_TENTHS,
+                    96,
+                )),
+                at_96(15),
+            )],
+        ),
+        token(
+            "4. Комбобокс · Плечо шеврона",
+            "±4 по x, ∓2 по y px макета",
+            vec![
+                (
+                    px(settings::scaled(settings::COMBO_CHEVRON_ARM_X, 96)),
+                    at_96(40),
+                ),
+                (
+                    px(settings::scaled(settings::COMBO_CHEVRON_ARM_Y, 96)),
+                    at_96(20),
+                ),
+            ],
+        ),
+        // ------------------------------------------------------------------- 5. Кнопка
+        token("5. Кнопка · Радиус", "6 px макета", radius()),
+        token("5. Кнопка · Толщина рамки", "1 px макета", border()),
+        Token {
+            what: "5. Кнопка · Текст",
+            reference: "по центру",
+            pixels: Vec::new(),
+            exact: Vec::new(),
+            shape: Some("DT_CENTER | DT_VCENTER | DT_SINGLELINE"),
+        },
+        // ------------------------------------------------------ 6. Список исключений
+        token(
+            "6. Список исключений · Радиус рамки списка",
+            "6 px макета",
+            radius(),
+        ),
+        units(
+            "6. Список исключений · Высота строки",
+            "11 DLU",
+            vec![(settings::EXCLUSION_ROW_HEIGHT_DLU, 11)],
+        ),
+        token(
+            "6. Список исключений · Первая строка от верха рамки",
+            "3 px макета",
+            vec![(
+                px(settings::scaled(settings::LIST_FIRST_ROW_TOP, 96)),
+                at_96(30),
+            )],
+        ),
+        token(
+            "6. Список исключений · Втяжка прямоугольника выделения и его радиус",
+            "2 / 3 px макета",
+            vec![
+                (
+                    px(settings::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    at_96(20),
+                ),
+                (
+                    px(settings::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    at_96(30),
+                ),
+            ],
+        ),
+        token(
+            "6. Список исключений · Втяжка текста от левого края списка",
+            "7 px макета",
+            vec![(
+                px(settings::scaled(settings::LIST_TEXT_INSET, 96)),
+                at_96(70),
+            )],
+        ),
+        token(
+            "6. Список исключений · Текст ниже верха строки",
+            "2 px макета",
+            vec![(px(settings::scaled(settings::LIST_TEXT_TOP, 96)), at_96(20))],
+        ),
+        // -------------------------------------------------------- 7. Список раскладок
+        token(
+            "7. Список раскладок · Радиус рамки",
+            "6 px макета",
+            radius(),
+        ),
+        units(
+            "7. Список раскладок · Высота строки",
+            "12 DLU",
+            vec![(settings::LAYOUT_ROW_HEIGHT_DLU, 12)],
+        ),
+        token(
+            "7. Список раскладок · Сторона галочки",
+            "13 px макета",
+            vec![(px(cell.glyph_side), at_96(130))],
+        ),
+        token(
+            "7. Список раскладок · Галочка от левого края списка",
+            "7 px макета",
+            vec![(px(cell.glyph_left), at_96(70))],
+        ),
+        token(
+            "7. Список раскладок · Радиус скругления галочки",
+            "2 px макета",
+            vec![(
+                px(settings::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)),
+                at_96(20),
+            )],
+        ),
+        token(
+            "7. Список раскладок · Толщина пера галочки",
+            "1,8 px макета",
+            vec![(
+                px(settings::scaled_tenths(
+                    settings::LIST_CHECK_MARK.pen_tenths,
+                    96,
+                )),
+                at_96(18),
+            )],
+        ),
+        token(
+            "7. Список раскладок · Текст после галочки",
+            "+7 px макета",
+            vec![(
+                px(cell.width - cell.glyph_left - cell.glyph_side),
+                at_96(70),
+            )],
+        ),
+        token(
+            "7. Список раскладок · Втяжка выделения и её радиус",
+            "2 / 3 px макета",
+            vec![
+                (
+                    px(settings::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    at_96(20),
+                ),
+                (
+                    px(settings::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    at_96(30),
+                ),
+            ],
         ),
     ];
 
-    for (name, mockup, at_96) in table {
-        let scaled = settings::scaled(mockup, 96);
-
-        println!("{name}: {mockup} px макета → {scaled} px при 96 DPI");
-
-        assert_eq!(
-            scaled, at_96,
-            "{name}: {mockup} px of a 140 % picture must be {at_96} px at 96 DPI, not {scaled}"
-        );
-    }
-
-    // The two lengths written in tenths of a mock-up pixel, in the same shape: 1,5 px of the
-    // picture is one pixel of pen at 100 %, and the 1,1 px of letter spacing is 0,8 px —
-    // eight tenths, the unit the caption drawing carries its pen position in.
-    println!(
-        "толщина шеврона: 1,5 px макета → {} px при 96 DPI",
-        settings::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96)
-    );
+    // Криterion 9, the count: 6 + 6 + 3 + 5 + 3 + 6 + 8 rows of the seven tables of
+    // `scratchpad\design-tokens.md`, and not one of them dropped on the way here.
     assert_eq!(
-        settings::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96),
-        1
+        table.len(),
+        6 + 6 + 3 + 5 + 3 + 6 + 8,
+        "the table must hold one row per row of scratchpad\\design-tokens.md"
     );
 
-    println!(
-        "разрядка заголовка: 1,1 px макета → 0,{} px при 96 DPI",
-        settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96)
-    );
-    assert_eq!(
-        settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96),
-        8
-    );
+    // Half a pixel at 96 DPI — the tolerance the task names, in the hundredths this table
+    // counts in.
+    const TOLERANCE: i32 = 50;
 
-    // And the state image cell of the layout list, whose width *is* the inset of that row's
-    // text: the air of the mock-ups plus the 13-pixel square of the tick.
-    assert_eq!(
-        settings::check_cell_width(96),
-        settings::scaled(settings::TEXT_INSET_X, 96) + settings::CHECK_FRAME_SIZE
-    );
-    assert_eq!(settings::check_cell_width(96), 9 + 13);
-}
-
-/// **Criteria 9 and 12 of T-11-15** — the corrected scale names where its number comes from,
-/// and the text inset of the mock-ups reaches all five places through it.
-///
-/// Read out of the module's own source, in the manner of the sweeps of `tests\guard.rs`: what
-/// is asserted here is not a value but a shape — that no call site went back to a bare number.
-#[test]
-fn the_text_inset_reaches_all_five_places_through_the_scale() {
     let source = settings_module_source();
 
-    // Criterion 9: the source of the number is named where the number is.
+    for row in &table {
+        assert!(
+            !row.pixels.is_empty() || !row.exact.is_empty() || row.shape.is_some(),
+            "{}: a row of the reference must be answered by something",
+            row.what
+        );
+
+        for (product, reference) in &row.pixels {
+            let off = (product - reference).abs();
+
+            println!(
+                "{}: эталон {} = {},{:02} px при 96 DPI · продукт {},{:02} px · расхождение \
+                 {},{:02}",
+                row.what,
+                row.reference,
+                reference / 100,
+                reference % 100,
+                product / 100,
+                product % 100,
+                off / 100,
+                off % 100
+            );
+
+            assert!(
+                off <= TOLERANCE,
+                "{}: эталон {},{:02} px при 96 DPI, продукт {},{:02} px — расхождение \
+                 {},{:02} px больше половины пикселя",
+                row.what,
+                reference / 100,
+                reference % 100,
+                product / 100,
+                product % 100,
+                off / 100,
+                off % 100
+            );
+        }
+
+        for (product, reference) in &row.exact {
+            println!(
+                "{}: эталон {} = {reference} · продукт {product}",
+                row.what, row.reference
+            );
+
+            assert_eq!(
+                product, reference,
+                "{}: величина не зависит от DPI и обязана совпадать точно",
+                row.what
+            );
+        }
+
+        if let Some(shape) = row.shape {
+            println!("{}: эталон {} · продукт `{shape}`", row.what, row.reference);
+
+            assert!(
+                source.contains(shape),
+                "{}: the module must still draw it as `{shape}`",
+                row.what
+            );
+        }
+    }
+}
+
+/// **Criterion 11 of T-11-16** — each inset is expressed in the unit the generator states it
+/// in, and reaches every place that needs it in that unit.
+///
+/// Read out of the module's own source, in the manner of the sweeps of `tests\guard.rs`: what
+/// is asserted here is not a value but a shape — that no call site went back to a bare number,
+/// and that nobody turned a dialog unit into a mock-up pixel on the way.
+#[test]
+fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
+    let source = settings_module_source();
+
+    // Criterion 9 of T-11-15, carried forward: the source of the scale is named where it is.
     let scale = source
         .split_once("pub const MOCKUP_SCALE_TENTHS")
         .expect("the module must still declare the mock-up scale")
@@ -2488,33 +2876,149 @@ fn the_text_inset_reaches_all_five_places_through_the_scale() {
         );
     }
 
-    // Criterion 12: the five places, each by the function that owns it.
-    let places = [
-        ("fn set_field_margins(", "EM_SETMARGINS"),
-        ("unsafe fn draw_list_item(", "text_rect"),
-        ("pub fn check_cell_width(", "CHECK_FRAME_SIZE"),
-        ("unsafe fn draw_combo_closed_part(", "text_rect"),
-        ("unsafe fn draw_combo_item(", "text_rect"),
+    // Dialog units — `($c.x + 3)` of the `'edit'` and `'combo'` arms, and `($c.x + 12)` of the
+    // `'check'` and `'radio'` arms. Each goes through `dialog_units`, never through `scaled`.
+    let in_units = [
+        ("fn set_field_margins(", "FIELD_TEXT_INSET_DLU"),
+        ("unsafe fn draw_combo_closed_part(", "FIELD_TEXT_INSET_DLU"),
+        ("unsafe fn draw_combo_item(", "FIELD_TEXT_INSET_DLU"),
+        ("unsafe fn draw_glyph_element(", "GLYPH_TEXT_INSET_DLU"),
+        ("unsafe fn draw_panel_caption(", "PANEL_CAPTION_INSET_DLU"),
     ];
 
-    for (signature, marker) in places {
+    for (signature, constant) in in_units {
         let body = function_body(&source, signature);
 
         assert!(
-            body.contains(marker),
-            "`{signature}` must still be the place that draws or sets `{marker}`"
+            body.contains("dialog_units("),
+            "`{signature}` must map its inset with MapDialogRect and not with the mock-up scale"
         );
         assert!(
-            body.contains("scaled(TEXT_INSET_X"),
-            "`{signature}` must take the inset of the mock-ups through the scale"
+            body.contains(constant),
+            "`{signature}` must take its inset from `{constant}`"
+        );
+        assert!(
+            !body.contains(&format!("scaled({constant}")),
+            "`{constant}` is a dialog unit — putting it through the mock-up scale would be a \
+             second conversion of an already-scaled length"
         );
     }
 
-    // And nowhere is the old bare inset left: the constant it lived in is gone by name.
+    // Mock-up pixels — `($px + 7)` and `($ry + 2)` of the `'lbox'` arm, `$bx = $px + 7` and
+    // `($bx + $bs + 7)` of the `'lview'` arm. Each goes through `scaled`, never through
+    // `dialog_units`.
+    let in_pixels = [
+        ("unsafe fn draw_list_item(", "scaled(LIST_TEXT_INSET"),
+        ("unsafe fn draw_list_item(", "scaled(LIST_TEXT_TOP"),
+        ("pub fn check_cell(", "scaled(LIST_TEXT_INSET"),
+        ("pub fn check_cell(", "scaled(LIST_CHECK_TEXT_GAP"),
+        (
+            "unsafe fn on_erase_background(",
+            "scaled(LIST_FIRST_ROW_TOP",
+        ),
+    ];
+
+    for (signature, call) in in_pixels {
+        let body = function_body(&source, signature);
+
+        assert!(
+            body.contains(call),
+            "`{signature}` must take its inset as a mock-up pixel through `{call}…`"
+        );
+    }
+
+    // And the two names the old, measured-off-the-picture inset lived in are gone — a second
+    // inset could only come back as a second constant.
+    for gone in ["TEXT_INSET_X", "COMBO_TEXT_INSET_X"] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` must be gone: the mock-ups state the inset of a field in dialog units \
+             and the inset of a list row in their own pixels, and neither is 12 px"
+        );
+    }
+}
+
+/// **Criterion 12 of T-11-16, carried from T-11-15** — no drawing carries a bare pixel number.
+///
+/// The specific offenders this task removed, named one by one so that none of them can come
+/// back by accident: the pen and the three points of the check mark, the side of a glyph, the
+/// gap after it, the inset of a radio dot, and the side of a layout-list tick.
+#[test]
+fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
+    let source = settings_module_source();
+
+    for gone in [
+        // the 2-pixel pen and the 13×13 coordinates of T-11-5b
+        "CreatePen(PS_SOLID, 2, ink)",
+        "glyph.left + 3",
+        "glyph.left + 5",
+        "glyph.left + 10",
+        // the bare screen-pixel glyph of T-11-5b and the gap beside it
+        "const GLYPH_SIZE: i32 = 13",
+        "GLYPH_TEXT_GAP",
+        "GLYPH_DOT_INSET:",
+        // the bare screen-pixel tick of T-11-7
+        "CHECK_FRAME_SIZE",
+    ] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` must be gone — a length of the mock-ups written as a bare screen pixel"
+        );
+    }
+
+    // Every pen of the dialog is now a length of the mock-ups in tenths, through the scale.
+    for pen in [
+        "CreatePen(PS_SOLID, scaled_tenths(mark.pen_tenths, dpi), ink)",
+        "CreatePen(PS_SOLID, scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi), ink)",
+    ] {
+        assert!(source.contains(pen), "the pen `{pen}` must be the one made");
+    }
+
+    // The three points of a check mark are a table of the module and not coordinates written
+    // where they are drawn.
+    let body = function_body(&source, "fn draw_check_mark(");
+
     assert!(
-        !source.contains("COMBO_TEXT_INSET_X"),
-        "the 4-pixel inset of T-11-14 must be gone, not renamed around"
+        body.contains("check_mark_points((glyph.left, glyph.top), mark, dpi)"),
+        "the strokes must come from the pure `check_mark_points`, not from literals"
     );
+
+    // The two marks the dialog draws, each with the literals its own arm of the generator has.
+    // The dialog glyph is the row of the reference; the tick of the layout list is the same
+    // figure one size down, and the reference gives its pen but not its points — so the points
+    // are held here, against the `(PtF ($bx+3.4) ($by+6.6)) …` of the `'lview'` arm.
+    assert_eq!(
+        settings::GLYPH_CHECK_MARK,
+        settings::CheckMark {
+            points_tenths: [(45, 86), (73, 118), (125, 52)],
+            pen_tenths: 21,
+        }
+    );
+    assert_eq!(
+        settings::LIST_CHECK_MARK,
+        settings::CheckMark {
+            points_tenths: [(34, 66), (56, 90), (96, 40)],
+            pen_tenths: 18,
+        }
+    );
+
+    // Both land inside the square they belong to, at 96 DPI and at 200 %: a check mark that
+    // walked out of its own glyph would be a defect no table of constants would catch.
+    for (mark, side) in [
+        (settings::GLYPH_CHECK_MARK, settings::GLYPH_SIZE),
+        (settings::LIST_CHECK_MARK, settings::LIST_CHECK_SIZE),
+    ] {
+        for dpi in [96, 120, 144, 192] {
+            let square = settings::scaled(side, dpi);
+
+            for (x, y) in settings::check_mark_points((0, 0), mark, dpi) {
+                assert!(
+                    (0..=square).contains(&x) && (0..=square).contains(&y),
+                    "at {dpi} DPI the point ({x}, {y}) is outside the {square}-pixel square"
+                );
+            }
+        }
+    }
 }
 
 /// **Criterion 12 of T-11-15, the fifth place** — the air beside the tick of the layout list is
@@ -2769,12 +3273,14 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
     }
 }
 
-/// **Criterion 10 of T-11-14, the geometry half** — the chevron stands where the mock-up was
-/// measured to put it, and grows with the DPI of the window.
+/// **Criterion 10 of T-11-14, the geometry half; п. 8 of T-11-16** — the chevron stands where
+/// the *generator* puts it, and grows with the DPI of the window.
 ///
-/// The numbers come from `ui-03-fog.png`, read pixel by pixel: the two arms at `x` = 352 and
-/// 360 (a span of 8), the apex 4 pixels below them at `y` = 199, the whole figure centred on
-/// the middle of a field whose top and bottom edges are at `y` = 181 and 213.
+/// The numbers are no longer read off `ui-03-fog.png` with the eye: `scratchpad\ui.ps1`, the
+/// `'combo'` arm, draws the figure through `(PtF ($cx-4) ($cy-2)), (PtF $cx ($cy+2)), (PtF
+/// ($cx+4) ($cy-2))` around a centre at `$cx = $px + $pw - 14`. So the span is 8 mock-up
+/// pixels and the drop **4**, both measured from the centre — not a span halved twice, which
+/// is what put the apex a whole pixel low at 96 DPI.
 #[test]
 fn the_chevron_stands_where_the_mock_up_measured_it() {
     // A closed part 140 × 33 at 100 %, the proportions of the measured picture.
@@ -2794,10 +3300,15 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
         "the apex must lie below the arms — «галочка вниз»"
     );
 
-    // The span of the mock-up, and the drop of half of it. 8 pixels *of the picture*, which
-    // since T-11-15 is 6 pixels of a 100 % screen — the picture is drawn at 140 %.
-    assert_eq!(right - left, 6, "8 px of the mock-up are 6 px at 100 %");
-    assert_eq!(apex_y - top, 3, "the drop is half the span");
+    // The two half-lengths of the generator: ±4 by `x` and ∓2 by `y` of the picture, which
+    // since T-11-15 are 3 px and 1 px of a 100 % screen — the picture is drawn at 140 %.
+    assert_eq!(apex_x - left, 3, "4 px of the mock-up are 3 px at 100 %");
+    assert_eq!(right - apex_x, 3, "and the same on the other side");
+    assert_eq!(
+        apex_y - top,
+        2,
+        "±2 by y of the picture, twice, is 2 px at 100 %"
+    );
     assert_eq!(apex_x - left, right - apex_x, "the apex is in the middle");
 
     // Vertically centred in the field it is given.
@@ -2821,8 +3332,8 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
     let wide = settings::combo_chevron_points(&rect(0, 0, 280, 66), 192);
 
     println!("chevron at 192 dpi: {wide:?}");
-    assert_eq!(wide[2].0 - wide[0].0, 11, "the span doubles at 200 %");
-    assert_eq!(wide[1].1 - wide[0].1, 5, "the drop doubles with it");
+    assert_eq!(wide[2].0 - wide[0].0, 12, "the span doubles at 200 %");
+    assert_eq!(wide[1].1 - wide[0].1, 6, "the drop doubles with it");
 
     // The stroke is the one length of the mock-ups written in tenths of a pixel: 1,5 px of the
     // picture, which is 1,07 px of a 100 % screen — one pixel, and two at 200 % (T-11-15).
