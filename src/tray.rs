@@ -17,7 +17,10 @@
 //! on `MF_OWNERDRAW` and paints them in the palette of FR-92а; T-11-21 (done) brought the
 //! smoothing wave of tasks T-11-13…T-11-20 to this file — the check mark and the highlight
 //! under the cursor are the smoothed figures of [`crate::settings`] and the entries are set
-//! in its grey-antialiased face, so that one product no longer has two qualities of drawing.
+//! in its grey-antialiased face, so that one product no longer has two qualities of drawing;
+//! T-11-22 (done) took the rest of the menu off the system — the two rules of FR-91 are drawn
+//! by this file as well, the ground the entries stand on is the palette's rather than the
+//! shell's ([`set_menu_background`]), and an entry is the height the mock-up gives it.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -64,9 +67,10 @@
 //! holds `Some` exactly while our menu is on the screen — set immediately before
 //! `TrackPopupMenuEx`, cleared immediately after it returns — and outside that window both
 //! messages are [`Reaction::Ignored`] like everything else foreign. The `itemData` of every
-//! entry is the command number and never a pointer, so nothing a forged message carries is
-//! dereferenced beyond the identifier check and the drawing rectangle — the SEC-05 wording
-//! verbatim.
+//! entry is a number and never a pointer — the command number for the five commands of FR-91,
+//! the one reserved [`MENU_SEPARATOR_DATA`] for the two rules task T-11-22 also draws — so
+//! nothing a forged message carries is dereferenced beyond the identifier check and the drawing
+//! rectangle — the SEC-05 wording verbatim.
 //!
 //! # SEC-01, SEC-07
 //!
@@ -95,13 +99,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyIcon, DestroyMenu, GetSystemMetrics, HICON, HMENU,
-    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED,
-    NONCLIENTMETRICSW, PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK,
-    SM_CXSMICON, SM_CYMENU, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SystemParametersInfoW, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM,
-    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
-    WM_THEMECHANGED, WM_USER,
+    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MENUINFO, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR,
+    MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
+    RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
+    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
+    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP,
+    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -184,8 +188,56 @@ pub const MENU_H_PAD: i32 = 6;
 /// Gap between the check column and the text of an owner-drawn menu item.
 pub const MENU_CHECK_GAP: i32 = 4;
 
-/// Vertical padding above and below the text of an owner-drawn menu item.
-const MENU_V_PAD: i32 = 5;
+/// Vertical padding above and below the text of an owner-drawn menu entry, in **tenths of a
+/// pixel of the mock-up** — FR-92а, task T-11-22.
+///
+/// ⚠ The number is the mock-up's own air and not one this file chose. The generator gives an
+/// entry `$itemH = 38` of its pixels and sets it in `Segoe UI` 12,6 pt — which at the 140 % the
+/// generator draws at is the 9 pt of the system menu face, the very face [`menu_item_logfont`]
+/// asks for. `GetTextExtentPoint32W` measures that face 15 screen pixels tall at 96 DPI, and 15
+/// screen pixels are 21 of the mock-up's; what is left of the entry is the air above and below
+/// the line: (38 − 21) / 2 = **8,5 mock-up pixels**.
+///
+/// So the reference height enters as **padding** and does not replace the measurement:
+/// [`menu_item_height`] still adds this to the text it measured, and a larger interface face
+/// still makes a taller row — which a fixed 38 would not.
+///
+/// ⚠ Until this task the constant was `5` **screen** pixels, written by task T-11-10 before the
+/// project had the discipline of mock-up lengths, and the entry came out 25 px against the
+/// mock-up's 27,1.
+pub const MENU_V_PAD_TENTHS: i32 = 85;
+
+/// Height of the stripe one rule of FR-91 takes, in the pixels of the mock-up — the `$sepH = 11`
+/// of the generator, task T-11-22.
+pub const MENU_SEP_H: i32 = 11;
+
+/// Inset of the line of a rule from the left and the right edge of the menu, in the pixels of
+/// the mock-up — the `($mX+12)` and `($mX+$mW-12)` of
+/// `$g.DrawLine($pen, ($mX+12), ($iy + $sepH/2), ($mX+$mW-12), ($iy + $sepH/2))`.
+pub const MENU_SEP_INSET: i32 = 12;
+
+/// Thickness of that line, in **screen** pixels — the one length of this menu that is not
+/// stated in the pixels of the mock-up.
+///
+/// The generator strokes the line with `New-Object System.Drawing.Pen($T.Sep,[single]1)`, and a
+/// pen of GDI+ straddles the path it follows: one pen pixel covers two rows of the picture and
+/// measures as two — the reasoning [`crate::settings::BORDER_THICKNESS`] carries for the frames
+/// of the dialog. One screen pixel is what that comes to at every scale these two windows live
+/// at, and it is what the mock-up shows.
+const MENU_SEP_THICKNESS: i32 = 1;
+
+/// The `itemData` both rules of FR-91 carry — FR-92а, task T-11-22.
+///
+/// A number, exactly like the `itemData` of a command entry, and one no command of this file
+/// equals: those are `0x1001`…`0x1005`. SEC-05 is untouched by it — the handler looks the
+/// number up in what it already holds and dereferences nothing.
+///
+/// ⚠ A rule is appended with a command identifier of **zero** and carries this only as its
+/// `itemData`, so `TrackPopupMenuEx` can never return it as a choice; the identifier and the
+/// data are two different arguments of `AppendMenuW` and only the second one reaches the
+/// drawing. Measured on this machine: the `WM_MEASUREITEM` and `WM_DRAWITEM` of a rule arrive
+/// with `itemID` = 0 and `itemData` = this number.
+pub const MENU_SEPARATOR_DATA: u32 = 0x10FF;
 
 /// The check mark of FR-93 as the mock-up draws it — FR-92а, task T-11-21.
 ///
@@ -1077,11 +1129,44 @@ impl Menu {
         Ok(())
     }
 
-    /// Appends one of the two rules of FR-91.
+    /// Appends one of the two rules of FR-91, drawn by this program — task T-11-22.
+    ///
+    /// `MF_SEPARATOR | MF_OWNERDRAW`, and **both** flags are the point:
+    ///
+    /// * `MF_OWNERDRAW` is what brings `WM_MEASUREITEM` and `WM_DRAWITEM` for the rule, so the
+    ///   stripe is the palette's and not the shell's engraved groove of FR-92а's «цена»;
+    /// * `MF_SEPARATOR` is what keeps the entry a **rule** for everybody outside this program —
+    ///   `GetMenuState` still answers `MF_SEPARATOR`, accessibility still reads a separator, and
+    ///   the keyboard still steps over it.
+    ///
+    /// ⚠ That the pair works together at all is a measurement of task T-11-22 and not a reading
+    /// of the documentation. On this machine both messages arrive for such an entry, the height
+    /// the measurement returns is the height the system lays out, and `↓` walks the entries
+    /// **round** it — 0 → 2 → 3 → 4. The alternative the task weighed,
+    /// `MF_OWNERDRAW | MF_DISABLED | MF_GRAYED` without `MF_SEPARATOR`, was measured on the same
+    /// menu in the same run and rejected: the keyboard **stops** on it, which would leave the
+    /// cursor standing on an empty stripe.
+    ///
+    /// The identifier is zero — a rule is not a command and `TrackPopupMenuEx` must never
+    /// return one — and the `itemData` is [`MENU_SEPARATOR_DATA`], which is what the drawing
+    /// recognises the entry by.
     fn append_separator(&self) -> WinResult<()> {
-        // SAFETY: as above. A separator takes neither an identifier nor a string, which is
-        // what the zero and the null pointer say; `MF_SEPARATOR` makes the call ignore both.
-        unsafe { AppendMenuW(self.handle, MF_SEPARATOR, 0, PCWSTR::null()) }
+        // SAFETY: as above. `self.handle` is a live menu owned by this value. Under
+        // `MF_OWNERDRAW` the last argument is not read as a string: it is carried verbatim as
+        // the entry's `itemData`, and what is placed there is a number with no allocation
+        // behind it — `without_provenance` says so in as many words — which nothing ever
+        // dereferences (SEC-05). The crate turns the `BOOL` into a `Result`, so NFR-13 is
+        // satisfied by the return.
+        unsafe {
+            AppendMenuW(
+                self.handle,
+                MF_SEPARATOR | MF_OWNERDRAW,
+                0,
+                PCWSTR(std::ptr::without_provenance(
+                    usize::try_from(MENU_SEPARATOR_DATA).unwrap_or(0),
+                )),
+            )
+        }
     }
 }
 
@@ -1108,9 +1193,14 @@ impl Drop for Menu {
 ///
 /// Built by [`show_menu`] immediately before `TrackPopupMenuEx` and dropped immediately
 /// after it returns. The palette is resolved exactly once per showing — the setting out of
-/// the configuration, the system switch read once — and the two brushes and the font live
+/// the configuration, the system switch read once — and the three brushes and the font live
 /// exactly that long. `theme::Brushes` is deliberately not used: that set belongs
 /// to the long-lived dialog of FR-92, while these die with the menu.
+///
+/// ⚠ Since task T-11-22 one of those brushes is handed to Windows as well — `SetMenuInfo`
+/// takes [`MenuPaint::window_bg`] as the ground of the menu, and Windows paints with it until
+/// the menu goes away. That is the same «exactly that long», which is why the brush is this
+/// one and not a second one made for the purpose.
 ///
 /// # Why a thread-local of its own — the rule of the module header
 ///
@@ -1128,11 +1218,16 @@ struct MenuPaint {
     palette: &'static theme::Palette,
     /// The menu face of [`menu_item_logfont`], created for this showing.
     font: HFONT,
-    /// Brush of [`theme::Palette::window_bg`] — the background of an entry at rest.
+    /// Brush of [`theme::Palette::window_bg`] — the background of an entry at rest, and,
+    /// since task T-11-22, the ground of the whole menu: it is this brush that
+    /// [`set_menu_background`] hands to `SetMenuInfo`, so the ground under the entries and
+    /// the ground between them are one brush and not two.
     window_bg: HBRUSH,
     /// Brush of [`theme::Palette::hover_bg`] — the fill of the rounded stripe under the
     /// entry the cursor is on (`ODS_SELECTED`).
     hover_bg: HBRUSH,
+    /// Brush of [`theme::Palette::panel_border`] — the line of a rule, task T-11-22.
+    panel_border: HBRUSH,
 }
 
 thread_local! {
@@ -1163,22 +1258,28 @@ impl MenuPaint {
         // destroyed exactly once — in `Drop`, or right here on the partially failed branch.
         let font = unsafe { CreateFontIndirectW(&raw const face) };
 
-        // SAFETY: both calls take a colour by value, read no memory of ours and return a
-        // handle; every handle is examined below, and the valid ones are owned exactly as
+        // SAFETY: all three calls take a colour by value, read no memory of ours and return
+        // a handle; every handle is examined below, and the valid ones are owned exactly as
         // the font is.
         //
         // ⚠ There is no pen here since task T-11-21. The check mark is drawn by
         // [`crate::settings::draw_check_mark`], which owns a pen for exactly the one call —
         // a smoothed stroke is drawn twice, once enlarged and once not, with two different
         // thicknesses, so a pen made once for the showing could not have served it.
-        let (window_bg, hover_bg) = unsafe {
+        let (window_bg, hover_bg, panel_border) = unsafe {
             (
                 CreateSolidBrush(palette.window_bg),
                 CreateSolidBrush(palette.hover_bg),
+                CreateSolidBrush(palette.panel_border),
             )
         };
 
-        let handles: [HGDIOBJ; 3] = [font.into(), window_bg.into(), hover_bg.into()];
+        let handles: [HGDIOBJ; 4] = [
+            font.into(),
+            window_bg.into(),
+            hover_bg.into(),
+            panel_border.into(),
+        ];
 
         // NFR-13: every handle is examined before anybody paints with it.
         if handles.iter().any(HGDIOBJ::is_invalid) {
@@ -1205,6 +1306,7 @@ impl MenuPaint {
             font,
             window_bg,
             hover_bg,
+            panel_border,
         })
     }
 
@@ -1219,19 +1321,25 @@ impl MenuPaint {
     /// Measures one label with the menu font — the arithmetic of `WM_MEASUREITEM`.
     ///
     /// Width is the text plus the check column on the left and the paddings around both;
-    /// height is the text plus the vertical paddings. The width includes the check column
-    /// on purpose, even though some Windows versions add room of their own around
-    /// owner-drawn entries: a menu a few pixels wider than the minimum reads fine, a
-    /// clipped label does not.
+    /// height is [`menu_item_height`] — the text as measured plus the air the mock-up leaves
+    /// above and below it (task T-11-22). The width includes the check column on purpose,
+    /// even though some Windows versions add room of their own around owner-drawn entries: a
+    /// menu a few pixels wider than the minimum reads fine, a clipped label does not.
     fn measure(&self, label: &str) -> (u32, u32) {
         let units: Vec<u16> = label.encode_utf16().collect();
         let mut extent = SIZE::default();
+        let mut dpi = settings::SCREEN_DPI;
 
         // SAFETY: `None` asks for a DC of the screen, which needs no window of ours; a
         // valid handle is released below, on this same thread, as `ReleaseDC` requires.
         let dc = unsafe { GetDC(None) };
 
         if !dc.is_invalid() {
+            // The message carries no device context — an entry is measured before there is
+            // a menu window to measure it on — so the DPI comes off the same screen DC the
+            // text is measured with, which is the one [`measure_dpi`] would open anyway.
+            dpi = settings::dc_dpi(dc);
+
             // SAFETY: `dc` is the live DC just obtained and `self.font` is the live font
             // this value owns; the previous selection is restored below, before the DC is
             // released.
@@ -1258,7 +1366,7 @@ impl MenuPaint {
         }
 
         let height = if extent.cy > 0 {
-            extent.cy + 2 * MENU_V_PAD
+            menu_item_height(extent.cy, dpi)
         } else {
             // The screen DC or the measurement was refused. `SM_CYMENU` is the system's
             // own row height; nineteen is that metric at 100% scale.
@@ -1278,6 +1386,65 @@ impl MenuPaint {
             u32::try_from(width).unwrap_or(0),
             u32::try_from(height).unwrap_or(0),
         )
+    }
+
+    /// Measures one rule of FR-91 — the `WM_MEASUREITEM` of an entry that carries no text,
+    /// task T-11-22.
+    ///
+    /// Height is [`MENU_SEP_H`] of the mock-up's pixels through the display scale. Width is
+    /// the least the line itself needs — its two insets — and deliberately not the width of
+    /// the menu: the width of a menu is the width of its widest entry, and a rule that
+    /// claimed the labels' width would be measuring the menu by its rules.
+    ///
+    /// ⚠ The rule is nevertheless *drawn* across the whole menu, because Windows lays every
+    /// entry of a menu out at the width of the widest. Measured on this machine at 96 DPI: the
+    /// two rules asked for 18 pixels and came back to `WM_DRAWITEM` as rectangles 214 wide,
+    /// the width of the labels — which is why [`menu_separator_line`] takes its insets from
+    /// the rectangle it is given and not from anything this function returns.
+    fn measure_rule(&self) -> (u32, u32) {
+        let dpi = measure_dpi();
+        let inset = settings::scaled(MENU_SEP_INSET, dpi);
+        let height = settings::scaled(MENU_SEP_H, dpi);
+
+        // As above: zero on the impossible branch rather than a panic on the UI thread.
+        (
+            u32::try_from(2 * inset).unwrap_or(0),
+            u32::try_from(height).unwrap_or(0),
+        )
+    }
+
+    /// Paints one rule of FR-91 — the drawing half of a `MF_SEPARATOR | MF_OWNERDRAW` entry,
+    /// task T-11-22.
+    ///
+    /// The stripe is the ground `window_bg`, and across its vertical middle lies the line of
+    /// [`menu_separator_line`] in `panel_border` — `$T.Bg` and `$T.Sep` of the generator. A
+    /// rule is never `ODS_SELECTED`, which is measured and not assumed: the keyboard steps
+    /// over it and the pointer cannot highlight it, so there is no second state to paint.
+    ///
+    /// Reads of `structure` are limited to `hDC` and `rcItem` — the SEC-05 list.
+    fn draw_rule(&self, structure: &DRAWITEMSTRUCT) {
+        let dc = structure.hDC;
+        let rect = structure.rcItem;
+        let dpi = settings::dc_dpi(dc);
+
+        // SAFETY: `dc` and `rect` came with the message; while the gate is up they describe
+        // an entry of our menu being painted, and the call only writes pixels into that DC.
+        // `self.window_bg` is a live brush this value owns.
+        let filled = unsafe { FillRect(dc, &rect, self.window_bg) };
+
+        // NFR-13: examined in the only way available — a refused fill leaves the stripe
+        // unpainted for one frame and nothing here can repair it. The reasoning of task
+        // T-11-1: a refused GDI call is a `debug_assert!` and not an event of SEC-07.
+        debug_assert!(filled != 0, "FillRect refused a live brush");
+
+        let line = menu_separator_line(&rect, dpi);
+
+        // SAFETY: as above — the message's DC and a rectangle computed from its own
+        // `rcItem`; `self.panel_border` is a live brush this value owns.
+        let drawn = unsafe { FillRect(dc, &line, self.panel_border) };
+
+        // NFR-13: examined, as above.
+        debug_assert!(drawn != 0, "FillRect refused a live brush");
     }
 
     /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: the ground is
@@ -1392,10 +1559,11 @@ impl MenuPaint {
 
 impl Drop for MenuPaint {
     fn drop(&mut self) {
-        let handles: [HGDIOBJ; 3] = [
+        let handles: [HGDIOBJ; 4] = [
             self.font.into(),
             self.window_bg.into(),
             self.hover_bg.into(),
+            self.panel_border.into(),
         ];
 
         for handle in handles {
@@ -1441,6 +1609,64 @@ pub fn menu_hover_rect(item: &RECT, dpi: i32) -> RECT {
         right: item.right - inset,
         bottom: item.bottom,
     }
+}
+
+/// Height of one entry of FR-91 whose text measures `text_height` pixels, at `dpi` — FR-92а,
+/// task T-11-22.
+///
+/// The measurement of the text plus the mock-up's own air on both sides of it,
+/// [`MENU_V_PAD_TENTHS`]. Two properties at once, and the task asked for both: the row lands on
+/// the mock-up's `$itemH = 38` for the face the mock-up is drawn in — 15 + 2 × 6 = **27** screen
+/// pixels at 96 DPI, which is `settings::scaled(38, 96)` to the pixel — and it still **grows
+/// with the face**, because what the padding is added to is a measurement and not a constant.
+///
+/// Pure, for the reason [`menu_hover_rect`] is: a test reads it without a menu on the screen.
+pub fn menu_item_height(text_height: i32, dpi: i32) -> i32 {
+    text_height + 2 * settings::scaled_tenths(MENU_V_PAD_TENTHS, dpi)
+}
+
+/// The line of one rule of FR-91, inside the stripe whose rectangle is `item` — FR-92а, task
+/// T-11-22.
+///
+/// [`MENU_SEP_INSET`] of the mock-up off the left and the right edge, [`MENU_SEP_THICKNESS`]
+/// thick, lying on the vertical middle of the stripe — the `($iy + $sepH/2)` of the generator.
+/// Pure, like [`menu_hover_rect`], and for the same reason: the geometry of a rule is a table a
+/// test reads without a menu on the screen.
+pub fn menu_separator_line(item: &RECT, dpi: i32) -> RECT {
+    let inset = settings::scaled(MENU_SEP_INSET, dpi);
+    let middle = (item.top + item.bottom) / 2;
+
+    RECT {
+        left: item.left + inset,
+        top: middle,
+        right: item.right - inset,
+        bottom: middle + MENU_SEP_THICKNESS,
+    }
+}
+
+/// The DPI the entries of FR-91 are measured at — task T-11-22.
+///
+/// `WM_MEASUREITEM` carries no device context: an entry is measured before there is a menu
+/// window to measure it against. A DC of the screen answers instead, exactly as the text
+/// measurement of [`MenuPaint::measure`] uses one, and a refused DC is the 100 % look
+/// (NFR-13, the fallback [`crate::settings::dc_dpi`] itself names).
+fn measure_dpi() -> i32 {
+    // SAFETY: `None` asks for a DC of the screen, which needs no window of ours; a valid
+    // handle is released below, on this same thread, as `ReleaseDC` requires.
+    let dc = unsafe { GetDC(None) };
+
+    if dc.is_invalid() {
+        return settings::SCREEN_DPI;
+    }
+
+    let dpi = settings::dc_dpi(dc);
+
+    // SAFETY: the DC came from the `GetDC` above, on this same thread. NFR-13: nothing useful
+    // can be done about a refused release, and it is not made fatal — the DC was ours for one
+    // reading.
+    let _ = unsafe { ReleaseDC(None, dc) };
+
+    dpi
 }
 
 /// The square the check mark of FR-93 is drawn in, for an entry whose rectangle is `item` and
@@ -1540,15 +1766,21 @@ fn measure_menu_item(lparam: LPARAM) -> Reaction {
         }
 
         // `itemData` is used as a number and nothing else — SEC-05.
-        let Ok(command) = u32::try_from(structure.itemData) else {
+        let Ok(data) = u32::try_from(structure.itemData) else {
             return Reaction::Ignored;
         };
 
-        let Some(item) = paint.item(command) else {
-            return Reaction::Ignored;
+        // The rules of FR-91 carry one reserved number and no label — task T-11-22.
+        let (width, height) = if data == MENU_SEPARATOR_DATA {
+            paint.measure_rule()
+        } else {
+            let Some(item) = paint.item(data) else {
+                return Reaction::Ignored;
+            };
+
+            paint.measure(&item.label)
         };
 
-        let (width, height) = paint.measure(&item.label);
         structure.itemWidth = width;
         structure.itemHeight = height;
 
@@ -1584,11 +1816,18 @@ fn draw_menu_item(lparam: LPARAM) -> Reaction {
         }
 
         // `itemData` is used as a number and nothing else — SEC-05.
-        let Ok(command) = u32::try_from(structure.itemData) else {
+        let Ok(data) = u32::try_from(structure.itemData) else {
             return Reaction::Ignored;
         };
 
-        let Some(item) = paint.item(command) else {
+        // The rules of FR-91 carry one reserved number and no label — task T-11-22.
+        if data == MENU_SEPARATOR_DATA {
+            paint.draw_rule(structure);
+
+            return Reaction::Handled(LRESULT(1));
+        }
+
+        let Some(item) = paint.item(data) else {
             return Reaction::Ignored;
         };
 
@@ -1650,6 +1889,13 @@ fn show_menu(x: i32, y: i32) {
     // documentation) leaves the gate down and the menu is shown anyway: the rows come up
     // unpainted, but every command of FR-91 still works and `Esc` still dismisses.
     if let Some(paint) = MenuPaint::new(menu.items().to_vec(), palette) {
+        // FR-92а, task T-11-22: the ground **between** the entries — the padding the menu
+        // keeps around them — is the palette's from here on. The brush is the one
+        // [`MenuPaint`] already owns and lives exactly as long as the showing does, which is
+        // the whole of what `SetMenuInfo` requires: it is set before `TrackPopupMenuEx` and
+        // the brush is freed after it returns, when the value below is taken out and dropped.
+        set_menu_background(menu.handle(), paint.window_bg);
+
         MENU_PAINT.with(|slot| slot.replace(Some(paint)));
     }
 
@@ -1675,8 +1921,9 @@ fn show_menu(x: i32, y: i32) {
     // The gate comes down here, immediately after the return: from this line on the two
     // messages are foreign again (SEC-05) — in particular before `dispatch_command` below
     // opens anything modal. Taken out of the `RefCell` before being dropped, like
-    // [`detach`] and for the same reason; the drop frees the two brushes and the menu face,
-    // whose whole life is the one showing (FR-92а).
+    // [`detach`] and for the same reason; the drop frees the three brushes and the menu face,
+    // whose whole life is the one showing (FR-92а) — the ground brush `SetMenuInfo` was given
+    // among them, and the menu it was given to is gone by this line.
     let paint = MENU_PAINT.with(|slot| slot.borrow_mut().take());
     drop(paint);
 
@@ -1696,6 +1943,46 @@ fn show_menu(x: i32, y: i32) {
     if let Ok(command) = u32::try_from(chosen.0) {
         dispatch_command(hwnd, command);
     }
+}
+
+/// Gives the menu the ground of the palette instead of the shell's — FR-92а, task T-11-22.
+///
+/// `SetMenuInfo` with `MIM_BACKGROUND` is the documented way to say what a menu's own
+/// background is painted with, and the background is the part of a menu that is not any of its
+/// entries: the padding the menu keeps above the first entry, below the last and along both
+/// sides. Until this task that padding was `COLOR_MENU` — light grey on both palettes, which
+/// went unnoticed on «Туман» (237,239,242 against the system's 240,240,240) and was plain on
+/// «Графит» (32,35,41 against the same 240,240,240).
+///
+/// ⚠ `brush` must outlive the showing: Windows keeps the handle in the menu and paints with it
+/// until the menu goes away. The one brush that lives exactly that long is
+/// [`MenuPaint::window_bg`], and this is called with that one and no other — a second brush of
+/// the same colour would be a second thing to free at the right moment.
+///
+/// The frame around the menu and the shape of its corners are **not** this call's to give: they
+/// are the non-client area of a window of class `#32768`, which this program does not own. What
+/// remains of them after this call is the honest remainder of task T-11-22 and is written down
+/// in the report of that task.
+///
+/// NFR-13: the result is examined. A refusal is not fatal and is not journalled — the menu
+/// simply comes up on the system's ground, and by the precedent of task T-11-1 a refused
+/// drawing call is a `debug_assert!` rather than an event of SEC-07.
+fn set_menu_background(menu: HMENU, brush: HBRUSH) {
+    let info = MENUINFO {
+        // The structure is versioned by its own size, exactly like `NOTIFYICONDATAW`: a wrong
+        // `cbSize` is rejected wholesale rather than misread.
+        cbSize: u32::try_from(size_of::<MENUINFO>()).unwrap_or(0),
+        fMask: MIM_BACKGROUND,
+        hbrBack: brush,
+        ..Default::default()
+    };
+
+    // SAFETY: `menu` is the live popup this frame owns and `info` is a live local of this
+    // frame whose `cbSize` describes it; the call reads it and does not keep the pointer. The
+    // brush it does keep is `MenuPaint::window_bg`, which outlives the showing — see above.
+    let set = unsafe { SetMenuInfo(menu, &info) };
+
+    debug_assert!(set.is_ok(), "SetMenuInfo refused a live menu and brush");
 }
 
 /// Carries out one menu command.

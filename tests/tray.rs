@@ -106,16 +106,30 @@ fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
 ///
 /// Since task T-11-10 the entries are `MF_OWNERDRAW`, so the check is in two halves. Out
 /// of Windows, as an outside observer would read them: the entry count, which positions
-/// are rules, that every command entry carries the owner-draw flag, and that its
-/// `itemData` is exactly its command identifier (SEC-05 — a number, not a pointer). Out of
-/// the builder's record, because Windows no longer holds a string for an owner-drawn
-/// entry: the labels, in order, against the literals of the block.
+/// are rules, that every entry — rules included since task T-11-22 — carries the owner-draw
+/// flag, and what its `itemData` is (SEC-05 — a number, not a pointer): its own command
+/// identifier for a command, and for a rule one number that is none of the commands, the same
+/// for both rules, over a command identifier of zero. Out of the builder's record, because
+/// Windows no longer holds a string for an owner-drawn entry: the labels, in order, against the
+/// literals of the block.
 fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
     assert_eq!(
-        item_count(menu.handle()),
-        7,
+        block.len(),
+        usize::try_from(tray::MENU_ENTRY_COUNT).expect("the count fits in a usize"),
         "FR-91 lists five commands and two rules, which is seven entries"
     );
+    assert_eq!(
+        item_count(menu.handle()),
+        tray::MENU_ENTRY_COUNT,
+        "and the menu Windows holds has exactly those seven"
+    );
+
+    let commands: Vec<usize> = menu
+        .items()
+        .iter()
+        .map(|item| usize::try_from(item.command).expect("a command fits in a usize"))
+        .collect();
+    let mut rules: Vec<usize> = Vec::new();
 
     let mut items = menu.items().iter();
 
@@ -154,13 +168,37 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
                 );
             }
             None => {
-                println!("{position}: separator={separator}");
+                let data = item_data_at(menu.handle(), index);
+                let identifier = command_at(menu.handle(), index);
+
+                println!("{position}: separator={separator} itemData={data:#x} id={identifier:#x}");
 
                 assert!(separator, "entry {position} of FR-91 is a rule");
+
+                // **Task T-11-22 rewrote the two assertions below.** Until it, a rule was a
+                // plain `MF_SEPARATOR` and this said «a rule stays system-drawn — the accepted
+                // cost of section 10»; that cost is paid off, and the rule is now drawn by the
+                // program like every other entry. It stays a rule for everybody outside it:
+                // `MF_SEPARATOR` is still set, which is what the line above reads.
                 assert!(
-                    !is_owner_drawn(menu.handle(), index),
-                    "a rule stays system-drawn — the accepted cost of section 10"
+                    is_owner_drawn(menu.handle(), index),
+                    "entry {position} is a rule this program draws itself — FR-92а"
                 );
+                assert_eq!(
+                    identifier, 0,
+                    "a rule carries no command identifier: `TrackPopupMenuEx` must never \
+                     be able to return one"
+                );
+                assert_ne!(
+                    data, 0,
+                    "and it does carry an `itemData` — the drawing finds it by"
+                );
+                assert!(
+                    !commands.contains(&data),
+                    "SEC-05: the number a rule carries is none of the five commands"
+                );
+
+                rules.push(data);
             }
         }
     }
@@ -168,6 +206,12 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
     assert!(
         items.next().is_none(),
         "the builder recorded exactly the five commands of FR-91"
+    );
+
+    assert_eq!(rules.len(), 2, "FR-91 has two rules");
+    assert_eq!(
+        rules[0], rules[1],
+        "both rules carry the same number: they are the same kind of entry"
     );
 }
 
@@ -320,6 +364,36 @@ fn measure_and_draw_are_ignored_while_no_menu_of_ours_is_on_the_screen() {
         (forged.itemWidth, forged.itemHeight),
         (0xDEAD, 0xBEEF),
         "and nothing was written into the forgery"
+    );
+
+    // The same forgery naming a **rule** — the second kind of entry the drawing knows since
+    // task T-11-22, and the second thing that must be behind the very same gate.
+    let mut forged_rule = MEASUREITEMSTRUCT {
+        CtlType: ODT_MENU,
+        CtlID: 0,
+        itemID: 0,
+        itemWidth: 0xDEAD,
+        itemHeight: 0xBEEF,
+        itemData: usize::try_from(tray::MENU_SEPARATOR_DATA).expect("a number fits in a usize"),
+    };
+
+    let reaction = tray.handle_message(
+        WM_MEASUREITEM,
+        WPARAM(0),
+        LPARAM((&raw mut forged_rule) as isize),
+    );
+
+    println!("forged WM_MEASUREITEM naming a rule -> {reaction:?}");
+
+    assert_eq!(
+        reaction,
+        Reaction::Ignored,
+        "the gate is down for rules too"
+    );
+    assert_eq!(
+        (forged_rule.itemWidth, forged_rule.itemHeight),
+        (0xDEAD, 0xBEEF),
+        "and nothing was written into that forgery either"
     );
 }
 
@@ -515,6 +589,152 @@ fn the_check_mark_stands_inside_the_check_column_of_the_entry() {
         cell.left >= item.left && cell.right <= text_left,
         "and stands between the edge of the entry and its text"
     );
+}
+
+/// Height of one entry as `scratchpad\chrome.ps1` lays it out, in mock-up pixels — `$itemH = 38`.
+const CHROME_ITEM_H: i32 = 38;
+
+/// Height of the stripe of one rule, in mock-up pixels — the `$sepH = 11` of the same line.
+const CHROME_SEP_H: i32 = 11;
+
+/// Inset of the line of a rule from the edge of the menu, in mock-up pixels — the `($mX+12)`
+/// and `($mX+$mW-12)` of
+/// `$g.DrawLine($pen, ($mX+12), ($iy + $sepH/2), ($mX+$mW-12), ($iy + $sepH/2))`.
+const CHROME_SEP_INSET: i32 = 12;
+
+/// The height the system menu face measures at 96 DPI, in screen pixels.
+///
+/// Measured, not chosen: `GetTextExtentPoint32W` with `lfMenuFont` answers 15 on this machine,
+/// and the entry of task T-11-10 — text plus five screen pixels above and below — came out the
+/// 25 px the controller measured off the live menu, which is the same 15 read backwards. The
+/// mock-up draws that face at 140 %, so it is 21 of the mock-up's own pixels there.
+const MENU_FACE_HEIGHT: i32 = 15;
+
+#[test]
+fn an_entry_is_as_tall_as_the_mock_up_draws_it_and_still_grows_with_the_face() {
+    // **Point 5 of T-11-22.** The entry was 25 px against the mock-up's 38 mock-up pixels —
+    // 27,1 screen pixels — because the padding of task T-11-10 was five *screen* pixels.
+    // The mock-up number now enters as padding and not as a replacement for the measurement:
+    // what is padded is still what `GetTextExtentPoint32W` said.
+    let reference = settings::scaled(CHROME_ITEM_H, SCREEN_DPI);
+    let ours = tray::menu_item_height(MENU_FACE_HEIGHT, SCREEN_DPI);
+
+    println!(
+        "chrome.ps1 $itemH = {CHROME_ITEM_H} px макета -> {reference} px at 96 DPI; \
+         face {MENU_FACE_HEIGHT} + air -> {ours}"
+    );
+
+    assert_eq!(
+        reference, 27,
+        "38 mock-up pixels are 27,1 screen pixels at 96 DPI"
+    );
+    assert_eq!(
+        ours, reference,
+        "the entry of the mock-up's own face lands on the mock-up's own height"
+    );
+
+    // The measurement is still a measurement: a face two pixels taller makes a row two
+    // pixels taller, which is what «высота по-прежнему растёт вместе с начертанием» means.
+    for taller in [1, 2, 7, 40] {
+        assert_eq!(
+            tray::menu_item_height(MENU_FACE_HEIGHT + taller, SCREEN_DPI),
+            ours + taller,
+            "the air is added to the measurement, not substituted for it"
+        );
+    }
+
+    // And the air itself scales with the display, or the row would be squat at 150 %.
+    let mut previous = 0;
+
+    for dpi in [SCREEN_DPI, 120, 144, 192] {
+        let height = tray::menu_item_height(MENU_FACE_HEIGHT, dpi);
+
+        println!("  {dpi} DPI: {height} px for a {MENU_FACE_HEIGHT} px face");
+
+        assert!(
+            height > previous,
+            "the air of the entry must grow with the display scale"
+        );
+
+        previous = height;
+    }
+}
+
+#[test]
+fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
+    // **Point 2 of T-11-22.** The rule used to be the system's engraved groove — two lines,
+    // 160,160,160 and 255,255,255, on a 9 px band of 240,240,240. The mock-up draws a band of
+    // the ground with one line of `$T.Sep` across its middle, held off both edges.
+    let item = windows::Win32::Foundation::RECT {
+        left: 0,
+        top: 40,
+        right: 214,
+        bottom: 48,
+    };
+
+    let inset = settings::scaled(CHROME_SEP_INSET, SCREEN_DPI);
+    let line = tray::menu_separator_line(&item, SCREEN_DPI);
+
+    println!(
+        "inset {CHROME_SEP_INSET} px макета -> {inset} px at 96 DPI; band \
+         {CHROME_SEP_H} px макета -> {} px; line {}..{} x {}..{}",
+        settings::scaled(CHROME_SEP_H, SCREEN_DPI),
+        line.left,
+        line.right,
+        line.top,
+        line.bottom
+    );
+
+    assert_eq!(
+        settings::scaled(CHROME_SEP_H, SCREEN_DPI),
+        8,
+        "eleven mock-up pixels are 7,9 screen pixels at 96 DPI"
+    );
+    assert_eq!(
+        inset, 9,
+        "twelve mock-up pixels are 8,6 screen pixels at 96 DPI"
+    );
+    assert_eq!(
+        (line.left, line.right),
+        (item.left + inset, item.right - inset),
+        "the line is held off both edges of the entry"
+    );
+    assert_eq!(
+        line.bottom - line.top,
+        1,
+        "and is one screen pixel thick, at this scale and at every other"
+    );
+
+    // On the vertical middle of the band — `($iy + $sepH/2)`.
+    for dpi in [SCREEN_DPI, 120, 144, 192] {
+        let band = settings::scaled(CHROME_SEP_H, dpi);
+        let stripe = windows::Win32::Foundation::RECT {
+            left: 0,
+            top: 40,
+            right: 214,
+            bottom: 40 + band,
+        };
+        let line = tray::menu_separator_line(&stripe, dpi);
+
+        println!(
+            "  {dpi} DPI: band {band} px, line y {}..{} x {}..{}",
+            line.top, line.bottom, line.left, line.right
+        );
+
+        assert_eq!(
+            line.top,
+            (stripe.top + stripe.bottom) / 2,
+            "the line lies on the middle of the band at {dpi} DPI"
+        );
+        assert!(
+            line.top >= stripe.top && line.bottom <= stripe.bottom,
+            "and inside it at {dpi} DPI"
+        );
+        assert!(
+            line.left > stripe.left && line.right < stripe.right,
+            "held off both edges at {dpi} DPI"
+        );
+    }
 }
 
 #[test]
