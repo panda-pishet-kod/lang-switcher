@@ -96,12 +96,12 @@ use windows::Win32::UI::Controls::{
     ImageList_SetBkColor, InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW,
     LVIF_STATE, LVIF_TEXT, LVIR_BOUNDS, LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW,
     LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMRECT, LVM_GETITEMSTATE, LVM_GETNEXTITEM,
-    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE,
-    LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVN_ITEMCHANGING,
-    LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, LVSIL_STATE, MEASUREITEMSTRUCT,
-    NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT,
-    ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
-    ODT_STATIC,
+    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
+    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
+    LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
+    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
+    NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
+    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, VIRTUAL_KEY, VK_APPS,
@@ -6284,6 +6284,60 @@ pub const LIST_CHECK_SIZE: i32 = 13;
 /// `($bx + $bs + 7)` the generator places the label at.
 pub const LIST_CHECK_TEXT_GAP: i32 = 7;
 
+/// What `SysListView32` puts between the **end of the state image cell** and the first ink of
+/// the label it draws there, in screen pixels — measured on the live control, task T-12-7.
+///
+/// # Not a length of the mock-ups, and therefore not [`scaled`]
+///
+/// Every other number of this list is a literal of `scratchpad-Э11\ui.ps1` put through
+/// [`scaled`] or through [`dialog_units`]. This one is neither: it is a property of the
+/// control, it appears in no message and in no documented constant, and the generator of the
+/// mock-ups knows nothing about it. What it *is* is the reason the row of the live list stood
+/// four pixels right of the row of the mock-ups (finding **F4**/**BLIND-5** of the E12
+/// protocol, with the correction **VCORR**), and this constant is what takes those four
+/// pixels back out — by making the cell of the state image list exactly this much narrower
+/// than the row the mock-ups lay out ([`CheckCell::image_width`]).
+///
+/// # The measurement, in two halves, each named by its instrument
+///
+/// Stand `dlgstand dark cycle`, the dialog of this module, the layout list holding this
+/// module's own 19 × 23 cell, 96 DPI:
+///
+/// * **2 px — the label rectangle.** `LVM_GETITEMRECT` answers `LVIR_BOUNDS` = `0,2,229,26`
+///   and `LVIR_LABEL` = `21,2,229,26` for the same row. The cell is 19 wide
+///   (`ImageList_GetIconSize` of the list the control holds), so the control starts the label
+///   rectangle **2 px** after the cell ends.
+/// * **2 px — the pen inside that rectangle.** The label rectangle begins at client x = 21,
+///   which is screen x = 54 on the shot (`stand\t127-before-cycle-dark-plain.png`, list
+///   interior from x = 33); the first ink of the row is at screen x = 56 — «А» of «Английская»,
+///   two smoothing pixels before the stem, probed column by column. The control lays the pen
+///   down **2 px** inside the rectangle it just reported.
+///
+/// Both halves are arithmetic on numbers an instrument answered — none is read off a picture.
+///
+/// ⚠ Measured at **96 DPI**, which is the DPI of every machine this program has been measured
+/// on. Whether the control scales either half with the DPI of the window is not documented and
+/// was not measurable here; on a machine at another scale this number is to be measured again
+/// the same way. It is a screen-pixel number for exactly that reason: pretending it is a
+/// mock-up length and putting it through [`scaled`] would claim a proportion nobody measured.
+pub const LVIEW_LABEL_INDENT: i32 = 4;
+
+/// What `SysListView32` adds to the height of the cell of its state image list to arrive at
+/// the height of a row, in screen pixels — measured on the live control, task T-12-7.
+///
+/// The same kind of number as [`LVIEW_LABEL_INDENT`] and named for the same reason: the row
+/// height of a report list view is the cell height and nothing a message can reach
+/// ([`install_check_images`]), but it is not *equal* to it. Measured on the stand at 96 DPI:
+/// the cell is 23 px tall (`ImageList_GetIconSize` — `dialog_units` of
+/// [`LAYOUT_ROW_HEIGHT_DLU`], `MulDiv(12, 15, 8)`), and `LVM_GETITEMRECT` with `LVIR_BOUNDS`
+/// answers `0,2,229,26` and `0,26,229,50` — rows **24** px tall, pitch 24. One pixel more than
+/// the cell, on every row, which is finding **F5**/**BLIND-6**: 24 px against the 22,5 px of
+/// the mock-ups.
+///
+/// So the cell is handed the row of the mock-ups **less this**, and the control's own pixel
+/// puts it back — [`install_check_images`] is the one place that arithmetic lives.
+pub const LVIEW_ROW_OVERHEAD: i32 = 1;
+
 /// Thickness of the pen of the tick of the layout list, in **tenths** of a mock-up pixel —
 /// the `[single]1.8` of the `'lview'` arm.
 pub const LIST_CHECK_PEN_TENTHS: i32 = 18;
@@ -10288,8 +10342,26 @@ fn ensure_list_view_class() -> windows::core::Result<()> {
 /// generator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckCell {
-    /// Width of the whole cell — air, tick, air.
+    /// Width of the left edge of the row **as the mock-ups lay it out** — air, tick, air.
+    ///
+    /// This is where the label of the mock-ups begins, and it is the number the design-token
+    /// table of task T-11-16 reads. It is **not** the width the state image list is built at
+    /// any more — see [`CheckCell::image_width`].
     pub width: i32,
+    /// Width the cell of the state image list is actually made — [`CheckCell::width`] less
+    /// [`LVIEW_LABEL_INDENT`], task T-12-7.
+    ///
+    /// The control puts the label a fixed distance after the cell, not at the cell's own right
+    /// edge, so a cell as wide as the mock-up's left edge lands the label that distance too far
+    /// right. Taking the distance out of the **cell** is what puts the label back where the
+    /// generator draws it, and it moves nothing else: the tick is painted on the row by
+    /// [`draw_cycle_row`] at [`CheckCell::glyph_left`], which this does not touch, and the tick
+    /// still ends inside the narrowed cell — 5 + 9 = 14 against 15 at 96 DPI — so the square is
+    /// still the click target `LVS_EX_CHECKBOXES` toggles the row by.
+    ///
+    /// Never below one: `ImageList_Create` of a zero-width cell would answer nothing, and the
+    /// control would fall back to the system's own 16 × 16 pair (NFR-13).
+    pub image_width: i32,
     /// Height of the whole cell, which is the height of the row.
     pub height: i32,
     /// Left edge of the tick inside the cell.
@@ -10308,9 +10380,11 @@ pub fn check_cell(dpi: i32, row_height: i32) -> CheckCell {
     let glyph_side = scaled(LIST_CHECK_SIZE, dpi);
     let glyph_left = scaled(LIST_TEXT_INSET, dpi);
     let height = row_height.max(glyph_side);
+    let width = glyph_left + glyph_side + scaled(LIST_CHECK_TEXT_GAP, dpi);
 
     CheckCell {
-        width: glyph_left + glyph_side + scaled(LIST_CHECK_TEXT_GAP, dpi),
+        width,
+        image_width: (width - LVIEW_LABEL_INDENT).max(1),
         height,
         glyph_left,
         glyph_top: (height - glyph_side) / 2,
@@ -10554,8 +10628,14 @@ fn install_check_images(hwnd: HWND) {
     // list is what a report list view takes its row height from; a refused `MapDialogRect`
     // leaves the cell as tall as the tick, which is the height the control had before this task
     // (NFR-13).
+    //
+    // Less [`LVIEW_ROW_OVERHEAD`] since task T-12-7: the control does not make the row *equal*
+    // to the cell, it makes it one pixel taller — so the twelve dialog units of the mock-ups
+    // come out of the control as twelve dialog units only if the cell is handed one less. Never
+    // negative: a refused `MapDialogRect` answers zero above, and zero less one would be an
+    // `ImageList_Create` of a negative height (NFR-13).
     let row_height = dialog_units(hwnd, 0, LAYOUT_ROW_HEIGHT_DLU)
-        .map(|(_, vertical)| vertical)
+        .map(|(_, vertical)| (vertical - LVIEW_ROW_OVERHEAD).max(0))
         .unwrap_or(0);
 
     let Some(list) = build_check_image_list(row_height) else {
@@ -10680,7 +10760,11 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGE
     // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
     // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — every pixel of the
     // cell is a hole, which is what [`CHECK_CELL_KEY`] is for.
-    let list = unsafe { ImageList_Create(cell.width, cell.height, ILC_COLOR32 | ILC_MASK, 2, 0) };
+    //
+    // `image_width` and not `width`: the control adds [`LVIEW_LABEL_INDENT`] of its own after
+    // the cell before it starts the label, task T-12-7.
+    let list =
+        unsafe { ImageList_Create(cell.image_width, cell.height, ILC_COLOR32 | ILC_MASK, 2, 0) };
 
     if list.is_invalid() {
         // NFR-13: examined — as in the callers.
@@ -10690,7 +10774,7 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGE
     for _ in CHECK_FRAME_ORDER {
         // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
         // frame until the `DeleteObject` below.
-        let bitmap = unsafe { CreateCompatibleBitmap(screen, cell.width, cell.height) };
+        let bitmap = unsafe { CreateCompatibleBitmap(screen, cell.image_width, cell.height) };
 
         if bitmap.is_invalid() {
             // SAFETY: the half-built list is ours until handed out; freed exactly once.
@@ -10738,7 +10822,7 @@ fn fill_check_cell(dc: HDC, cell: CheckCell) {
     let whole = RECT {
         left: 0,
         top: 0,
-        right: cell.width,
+        right: cell.image_width,
         bottom: cell.height,
     };
 
@@ -10930,13 +11014,9 @@ fn prepare_cycle_list(hwnd: HWND) {
 
     // A report-mode list view shows nothing at all without a column, however many items it
     // holds. The width is taken from the control so that the single column fills it.
-    let width = client_width(hwnd, IDC_CYCLE_LIST).unwrap_or(200);
-
     let column = LVCOLUMNW {
         mask: LVCF_WIDTH,
-        // Room for the vertical scroll bar, which appears as soon as the session has more
-        // layouts than the control can show.
-        cx: (width - 20).max(40),
+        cx: cycle_column_width(hwnd),
         ..Default::default()
     };
 
@@ -10949,6 +11029,63 @@ fn prepare_cycle_list(hwnd: HWND) {
         LVM_INSERTCOLUMNW,
         0,
         std::ptr::from_ref(&column) as isize,
+    );
+}
+
+/// The width the single column of the layout list is to have **right now** — the client width
+/// of the control, and nothing taken off it, task T-12-7 (backlog item T-11-26).
+///
+/// # The twenty pixels that were taken off here, and why they were a second helping
+///
+/// Until this task the column was created `client_width − 20`, with «room for the vertical
+/// scroll bar» for the reason. Measured on the stand, `dlgstand dark cycle`, the layout list of
+/// this dialog:
+///
+/// | state | `GetClientRect` | `GetWindowRect` | `WS_VSCROLL` |
+/// |---|---|---|---|
+/// | two rows | 249 | 249 | no |
+/// | twelve rows | **232** | 249 | yes |
+///
+/// `GetClientRect` **already** takes the scroll bar off — 17 px of it — because a scroll bar of
+/// a control is non-client area. Subtracting a second twenty left the selection stripe ending
+/// 21 px short of the frame with no scroll bar there to fill the gap, which is finding
+/// **BLIND-3** of the E12 protocol; the mock-ups pull the stripe in by 2 mock-up pixels
+/// ([`LIST_SELECTION_INSET`]) and by nothing else.
+///
+/// So the honest width is the client width itself, and the whole of the scroll-bar question is
+/// already answered by the number the control hands over. Measured the same way, with twelve
+/// rows and the column set to the client 232: `WS_HSCROLL` stays **off** — a column exactly as
+/// wide as the client scrolls nowhere — while a column of 400 puts a horizontal bar up at once
+/// and eats 17 px of the client height with it.
+///
+/// ⚠ **Order.** The client width is not a constant of the dialog: it changes the moment the
+/// vertical scroll bar appears, and that happens when the list is **filled**, long after the
+/// column was created. That is why [`fill_cycle_list`] asks again — see [`fit_cycle_column`].
+///
+/// A refused `GetClientRect` answers the 200 px the column was created with before this task
+/// (NFR-13), and the floor of 40 stays: a column narrower than that would hide the tick itself.
+fn cycle_column_width(hwnd: HWND) -> i32 {
+    client_width(hwnd, IDC_CYCLE_LIST).unwrap_or(200).max(40)
+}
+
+/// Puts the single column of the layout list back on the client width the control answers
+/// **now** — task T-12-7, the trap named in [`cycle_column_width`].
+///
+/// Called from [`fill_cycle_list`] and therefore after every change of the number of rows: the
+/// vertical scroll bar comes and goes with that number, and with it 17 px of client width. Both
+/// directions matter — a list that has just lost its scroll bar has 17 px of dead field on the
+/// right until the column is widened again, which is the same defect the other way round.
+fn fit_cycle_column(hwnd: HWND) {
+    // NFR-13: the answer is the flag `LVM_SETCOLUMNWIDTH` returns, examined in words and
+    // dropped — a refused width leaves the column as it was, which is a stripe that stops
+    // short rather than a list that does not work. No journal row for cosmetics
+    // (reviews\T-11-1.md).
+    send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_SETCOLUMNWIDTH,
+        0,
+        isize::try_from(cycle_column_width(hwnd)).unwrap_or(0),
     );
 }
 
@@ -10978,6 +11115,10 @@ fn fill_cycle_list(hwnd: HWND, rows: &[LayoutRow], focus: usize) {
 
         set_row_check(hwnd, index, row.checked);
     }
+
+    // After the rows and not before them: the vertical scroll bar appears with the row that
+    // overflows the control, and it is the client width the column has to match — task T-12-7.
+    fit_cycle_column(hwnd);
 
     if focus < rows.len() {
         select_row(hwnd, focus);

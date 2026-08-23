@@ -3563,6 +3563,167 @@ fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
     );
 }
 
+/// **Хвост 1 задачи T-12-7** — ячейка списка изображений уже левого края строки ровно на тот
+/// отступ, который `SysListView32` кладёт после неё сам, и галочка от этого не двигается.
+///
+/// Числа, из которых собрана правка, — замер живого контрола стендом `dlgstand dark cycle`
+/// (док-комментарий `LVIEW_LABEL_INDENT`): `LVM_GETITEMRECT` даёт `LVIR_BOUNDS` = `0,2,229,26`
+/// и `LVIR_LABEL` = `21,2,229,26` при ячейке 19 px — то есть 2 px до прямоугольника ярлыка, и
+/// ещё 2 px до пера внутри него. Здесь держится следствие: ширина **картинки** равна ширине
+/// строки минус эти четыре, а `glyph_left` и `glyph_side` не трогаются вовсе — иначе галочка
+/// уехала бы вместе с текстом, и хвост 1 сломал бы T-11-25-2.
+#[test]
+fn the_state_image_cell_gives_back_the_indent_the_list_view_adds_after_it() {
+    // Клик по квадрату переключает участие (`LVS_EX_CHECKBOXES`), а областью клика служит
+    // ячейка state-образа: сузив её, нельзя выронить из неё саму галочку.
+    for dpi in [96, 120, 144, 192] {
+        let cell = settings::check_cell(dpi, 22);
+
+        assert_eq!(
+            cell.image_width,
+            (cell.width - settings::LVIEW_LABEL_INDENT).max(1),
+            "at {dpi} DPI the cell must be the mock-up's left edge less the control's own indent"
+        );
+
+        assert!(
+            cell.glyph_left + cell.glyph_side <= cell.image_width,
+            "at {dpi} DPI the tick ({}..{}) must still end inside the {}-pixel cell, or the \
+             click that toggles the row would land outside it",
+            cell.glyph_left,
+            cell.glyph_left + cell.glyph_side,
+            cell.image_width
+        );
+    }
+
+    // 96 DPI, где замер и сделан: 5 + 9 + 5 = 19 макетных пикселей строки, 15 — ячейки.
+    let cell = settings::check_cell(96, 22);
+
+    assert_eq!(
+        (
+            cell.width,
+            cell.image_width,
+            cell.glyph_left,
+            cell.glyph_side
+        ),
+        (19, 15, 5, 9),
+        "the measured cell of the stand: a 19-pixel row edge, a 15-pixel state image, the tick \
+         5 px in and 9 px across"
+    );
+
+    // И лист, который модуль действительно строит, — той же ширины: это то, что видит контрол.
+    let cell_height = 22;
+    let list =
+        settings::build_check_image_list(cell_height).expect("the state image list must build");
+    let (mut cx, mut cy) = (0i32, 0i32);
+
+    // SAFETY: `list` is the live list just built and owned by this frame; both pointers are to
+    // live locals the call fills.
+    let asked = unsafe {
+        windows::Win32::UI::Controls::ImageList_GetIconSize(
+            list,
+            Some(std::ptr::from_mut(&mut cx)),
+            Some(std::ptr::from_mut(&mut cy)),
+        )
+    };
+
+    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
+    let _ = unsafe { windows::Win32::UI::Controls::ImageList_Destroy(Some(list)) };
+
+    assert!(asked.as_bool(), "the list must answer its own cell size");
+    assert_eq!(
+        (cx, cy),
+        (cell.image_width, cell_height),
+        "the built list must carry the narrowed cell, because that is the number the control \
+         lays the row out around"
+    );
+}
+
+/// **Хвост 2 задачи T-12-7** — ячейке отдаётся высота строки макета **минус** тот пиксель,
+/// который контрол добавляет сам, и арифметика эта живёт ровно в одном месте.
+///
+/// Замер стенда (док-комментарий `LVIEW_ROW_OVERHEAD`): ячейка 23 px → `LVIR_BOUNDS`
+/// `0,2,229,26` и `0,26,229,50`, то есть строка 24 px. Отдать ячейке 22 — получить 23, что и
+/// есть `dialog_units(LAYOUT_ROW_HEIGHT_DLU)`. Здесь держится **источник** числа: высота
+/// по-прежнему идёт из диалоговых единиц, а не из пикселя, подобранного с картинки.
+#[test]
+fn the_row_of_the_layout_list_is_asked_in_dialog_units_less_the_pixel_the_control_adds() {
+    let source = settings_module_source();
+    let body = function_body(&source, "fn install_check_images(");
+
+    assert!(
+        body.contains("dialog_units(hwnd, 0, LAYOUT_ROW_HEIGHT_DLU)"),
+        "the height of a row must still come from the dialog's own units"
+    );
+
+    assert!(
+        body.contains("vertical - LVIEW_ROW_OVERHEAD"),
+        "the cell must be handed the row of the mock-ups less `LVIEW_ROW_OVERHEAD` — the pixel \
+         the control puts back"
+    );
+
+    assert!(
+        body.contains(".max(0)"),
+        "a refused `MapDialogRect` answers zero, and zero less one is a negative cell height"
+    );
+
+    assert_eq!(
+        settings::LVIEW_ROW_OVERHEAD,
+        1,
+        "the measurement of the stand: cell 23 → row 24"
+    );
+}
+
+/// **Хвост 3 задачи T-12-7 (бэклог T-11-26)** — единственная колонка списка раскладок берёт
+/// **всю** клиентскую ширину контрола, и запас под полосу прокрутки из неё не вычитается
+/// второй раз.
+///
+/// Замер стенда (док-комментарий `cycle_column_width`): `GetClientRect` контрола отвечает 249
+/// без прокрутки и **232** с нею при неизменных 249 наружных — полосу он уже вычел сам.
+/// Прежние `client_width − 20` были вторым вычитанием, и справа оставалась мёртвая полоса
+/// 21 px (находка **BLIND-3**).
+#[test]
+fn the_single_column_of_the_layout_list_takes_the_whole_client_width() {
+    let source = settings_module_source();
+    let width = function_body(&source, "fn cycle_column_width(");
+
+    assert!(
+        width.contains("client_width(hwnd, IDC_CYCLE_LIST)"),
+        "the width must be the one the control answers"
+    );
+
+    assert!(
+        !width.contains("- 20"),
+        "nothing is taken off the client width any more: `GetClientRect` has already taken the \
+         scroll bar off it"
+    );
+
+    // Ширина не константа окна: полоса прокрутки появляется вместе с переполняющей строкой,
+    // то есть **после** заполнения, — поэтому колонку пересчитывают там, где строки меняются.
+    let fill = function_body(&source, "fn fill_cycle_list(");
+
+    assert!(
+        fill.contains("fit_cycle_column(hwnd)"),
+        "every change of the number of rows must refit the column — the scroll bar comes and \
+         goes with that number"
+    );
+
+    let fit = function_body(&source, "fn fit_cycle_column(");
+
+    assert!(
+        fit.contains("LVM_SETCOLUMNWIDTH") && fit.contains("cycle_column_width(hwnd)"),
+        "the refit must be the documented message, and it must ask the same arithmetic the \
+         column was created with"
+    );
+
+    // И создаётся колонка тем же выражением, а не своей копией числа.
+    let prepare = function_body(&source, "fn prepare_cycle_list(");
+
+    assert!(
+        prepare.contains("cx: cycle_column_width(hwnd)"),
+        "the column must be created from the one function that answers its width"
+    );
+}
+
 /// **Criterion 10 of T-11-13** — the panels and their captions are drawn by the background,
 /// and the branch that used to draw them from `WM_DRAWITEM` is gone.
 ///
