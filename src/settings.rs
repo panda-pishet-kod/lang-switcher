@@ -79,8 +79,8 @@ use windows::Win32::Graphics::Gdi::{
     GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect, InvalidateRect,
     LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN,
     RDW_ERASE, RDW_INVALIDATE, RGN_ERROR, RedrawWindow, ReleaseDC, RestoreDC, RoundRect, SRCCOPY,
-    SaveDC, SelectObject, SetBkColor, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt,
-    TRANSPARENT, TextOutW,
+    SaveDC, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetStretchBltMode, SetTextColor,
+    StretchBlt, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -2674,6 +2674,9 @@ unsafe extern "system" fn dialog_proc(
         // installed at all, and `RemoveWindowSubclass` simply answers FALSE for the latter.
         WM_DESTROY => {
             unsubclass_combo_boxes(hwnd);
+            // Task T-12-5: the far half of the second subclass pair, on the same terms and for
+            // the same reason — the two lists are still live windows here.
+            unsubclass_lists(hwnd);
 
             // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
             0
@@ -6375,6 +6378,44 @@ pub const FRAMED_FIELDS: [i32; 7] = [
 /// and a test holds the containment.
 pub const FRAMED_LISTS: [i32; 2] = [IDC_EXCLUSIONS, IDC_CYCLE_LIST];
 
+/// The two distances the frame of a list stands off the rectangle of its control, in pixels of
+/// a window at `dpi`: the air **above** it and the thickness at the other three sides.
+///
+/// Pure, and the one place either number is worked out — [`paint_background`] draws that frame
+/// from the outside and [`list_frame_box`] names the very same figure from inside the control,
+/// so the two could disagree by a pixel and put a corner arc where the interior does not end.
+/// They cannot now: both ask this.
+///
+/// ⚠ The air is [`LIST_FIRST_ROW_TOP`] **through [`scaled`]**, which is 2 px at 96 DPI and not
+/// the 3 of the mock-ups — the number this file has always drawn with, written down here where
+/// it can be read. `max(border)` because a frame thinner than its own thickness is not a frame.
+pub fn list_frame_air(dpi: i32) -> (i32, i32) {
+    let border = scaled(BORDER_THICKNESS, dpi).max(1);
+
+    (scaled(LIST_FIRST_ROW_TOP, dpi).max(border), border)
+}
+
+/// The frame of a list in the **control's own client coordinates** — the same figure
+/// [`paint_background`] paints in the coordinates of the dialog, seen from inside the window it
+/// surrounds — task T-12-5.
+///
+/// `client` is what `GetClientRect` answers for the list, so the rectangle this returns starts
+/// at negative numbers: the frame stands outside the control on all four sides, and only the
+/// four corner arcs of it reach back in over the interior. That is the whole point — the arc
+/// has to be drawn by whoever owns those pixels, and inside the control that is the control.
+///
+/// Pure, so the geometry is a table a test can read without a window.
+pub fn list_frame_box(client: &RECT, dpi: i32) -> RECT {
+    let (top, border) = list_frame_air(dpi);
+
+    RECT {
+        left: client.left - border,
+        top: client.top - top,
+        right: client.right + border,
+        bottom: client.bottom + border,
+    }
+}
+
 /// The height of the box the mock-ups draw around an input field, in vertical **dialog
 /// units** — the `h = 12` of every `'edit'` row of the generator.
 ///
@@ -6632,14 +6673,18 @@ unsafe fn paint_background(
     // of T-11-13; the thickness is [`BORDER_THICKNESS`] through the scale since task
     // T-11-15, so the frame stands outside the control at every DPI and not only at 96,
     // where it is the single pixel it always was).
-    let border = scaled(BORDER_THICKNESS, dpi).max(1);
-
+    //
     // …except above a list, where the mock-ups leave [`LIST_FIRST_ROW_TOP`] of their own
     // pixels between the frame and the first row (`$ry = $py + 3 + …` in both list arms of the
     // generator). A list box lays its rows out from the top of its client area and no message
     // moves them, so the air of the picture is made by lifting the frame instead — task
     // T-11-16, п. 5.
-    let list_top = scaled(LIST_FIRST_ROW_TOP, dpi).max(border);
+    //
+    // Both numbers come from [`list_frame_air`] since task T-12-5, and not from two `scaled`
+    // calls written out here: the same frame is now named a second time from inside each list
+    // ([`list_frame_box`]), and a copy of this arithmetic there is exactly how the arc and the
+    // end of the interior would drift apart.
+    let (list_top, border) = list_frame_air(dpi);
 
     // …and except for a field, whose frame is not hung on the control at all: the box of the
     // mock-ups is [`FIELD_BOX_DLU`] tall and the template gives the control one font height,
@@ -7927,16 +7972,45 @@ pub fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill:
         let _ = unsafe { RestoreDC(dc, saved) };
     }
 
-    // The four corners, each drawn at `SUPERSAMPLE` times its size and averaged back down. One
-    // surface for the four: the tiles are the same size, and a figure that made four would pay
-    // four `CreateDIBSection`s for nothing.
-    //
-    // A refused surface is `None` here and is *not* a reason to leave: it refuses each of the
-    // four tiles below, and the loop closes all four the same way it closes one — task T-11-24,
-    // whose whole subject is that leaving early left the figure with four holes in it.
-    let surface = Supersample::for_tile(side, side);
+    paint_corner_tiles(dc, area, &tiles, radius, thickness, outline, fill);
+}
 
-    for tile in &tiles {
+/// The four smoothed corners of the figure `area` names, and nothing between them — the tail
+/// [`paint_rounded`] has always ended in, lifted out by task T-12-5 so that
+/// [`paint_rounded_corners`] can name **the same body** instead of a copy of it (§6.2).
+///
+/// `tiles` are the corner squares, [`corner_tiles`] of a `radius + thickness` side; every one of
+/// them is expected to have been held out of the clip (or freshly grounded) by the caller, since
+/// what lands here is blended into whatever the DC already carries there.
+///
+/// Each corner is drawn at [`SUPERSAMPLE`] times its size and averaged back down. One surface for
+/// the four: the tiles are the same size, and a figure that made four would pay four
+/// `CreateDIBSection`s for nothing.
+///
+/// A refused surface is `None` here and is *not* a reason to leave: it refuses each of the four
+/// tiles below, and the loop closes all four the same way it closes one — task T-11-24, whose
+/// whole subject is that leaving early left the figure with four holes in it.
+fn paint_corner_tiles(
+    dc: HDC,
+    area: &RECT,
+    tiles: &[RECT; 4],
+    radius: i32,
+    thickness: i32,
+    outline: COLORREF,
+    fill: HBRUSH,
+) {
+    let surface = Supersample::for_tile(radius + thickness, radius + thickness);
+
+    for tile in tiles {
+        // An empty tile is a corner [`paint_rounded_corners`] clamped away entirely — it lies
+        // outside what the caller may write — and there is nothing to paint and no hole to leave.
+        // Skipped rather than sent down the aliased road, where an inverted rectangle would be
+        // normalised by `IntersectClipRect` into a clip that is *not* the corner (T-12-5).
+        // [`paint_rounded`]'s own tiles are never empty and never reach this line.
+        if tile.right <= tile.left || tile.bottom <= tile.top {
+            continue;
+        }
+
         // The **whole** figure is named inside the tile and GDI clips it: a corner drawn by the
         // same `RoundRect` as the figure it belongs to cannot disagree with it by a pixel.
         let painted = surface.as_ref().is_some_and(|surface| {
@@ -7953,11 +8027,141 @@ pub fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill:
         });
 
         // NFR-13: the answer is examined and this is what it decides. The tile was held out of
-        // the clip a few lines above, so an unpainted tile is a hole in the figure and not a
-        // rougher corner; the staircase is what it falls back to.
+        // the clip by the caller, so an unpainted tile is a hole in the figure and not a rougher
+        // corner; the staircase is what it falls back to.
         if !painted {
             stroke_corner_aliased(dc, area, tile, radius, thickness, outline, fill);
         }
+    }
+}
+
+/// The three colours one corner patch of [`paint_rounded_corners`] is cut out of — task T-12-5.
+///
+/// A struct and not three parameters because the function would otherwise carry eight of them,
+/// which is one past what this crate's lint settings allow.
+#[derive(Clone, Copy)]
+pub struct CornerColors {
+    /// The ground the corner the rounding cuts away stands on — what the *outside* of the arc
+    /// is filled with before the figure goes over it, and therefore what the smoothing blends
+    /// the curve into. For a list this is the panel the control lies on.
+    pub ground: HBRUSH,
+    /// The ink of the single-pixel frame around the figure — `field_border`.
+    pub outline: COLORREF,
+    /// The interior of the figure — `field_bg`.
+    pub fill: HBRUSH,
+}
+
+/// The four rounded corners of `area`, laid **over** a drawing that is already there —
+/// FR-92а, task T-12-5, finding R-06.
+///
+/// # What this is for, and why it is not [`paint_rounded`]
+///
+/// A list control paints its own interior, and it paints it as a rectangle: the ground below the
+/// rows (`WM_CTLCOLORLISTBOX` for the exclusion list, `LVM_SETBKCOLOR` for the layout list) and
+/// the ground of every row ([`draw_list_item`], [`draw_cycle_row`]) are flat fills edge to edge.
+/// The frame around the list is [`CORNER_RADIUS`] rounded and is drawn by the dialog's own
+/// background one thickness outside the control ([`paint_background`]), so three of the four
+/// pixels each corner arc is made of fall **inside** the control, where that flat fill lands on
+/// top of them. Painting the whole figure again would not help: the rows are painted after the
+/// erase, so whatever an erase draws in a corner a row can still square off. This is therefore
+/// the *last* thing painted, after the control has finished — the four corner squares, and not
+/// one pixel more, so nothing the control drew between them is touched.
+///
+/// `bounds` is the rectangle the patch may write in — the client area of the control. The tiles
+/// are held inside it before anything is drawn, which is not decoration: [`Supersample::render`]
+/// reads its ground back out of `dc`, and a tile hanging off the edge of the surface would have
+/// it blending the curve into whatever a clipped `StretchBlt` left behind.
+///
+/// `radius` is in pixels of the window, as [`paint_rounded`] takes it; `dpi` is the DPI of the
+/// **window** and not of the DC, for the reason that function states.
+///
+/// # Every refusal still paints — T-11-24
+///
+/// A figure too small to hold four corner squares is drawn by [`stroke_corner_aliased`] in each
+/// of them — the staircase, never a hole — and so is any tile the smoothing surface refuses,
+/// inside [`paint_corner_tiles`]. A radius of zero is the one case that draws nothing at all,
+/// and there is nothing to draw: a square figure has no arc to put back.
+pub fn paint_rounded_corners(
+    dc: HDC,
+    area: &RECT,
+    bounds: &RECT,
+    radius: i32,
+    colors: CornerColors,
+    dpi: i32,
+) {
+    if radius <= 0 {
+        return;
+    }
+
+    // The same pen the figure this is a piece of was stroked with — see [`paint_rounded`].
+    let thickness = scaled(BORDER_THICKNESS, dpi).max(1);
+    let side = radius + thickness;
+
+    // The same test [`paint_rounded`] makes, on the same figure: two overlapping smoothing tiles
+    // would blend one corner into another.
+    let smoothed = side * 2 <= (area.right - area.left).min(area.bottom - area.top);
+
+    let mut tiles = corner_tiles(area, side);
+
+    for tile in &mut tiles {
+        // Held inside what may be written. See the doc comment: this is what keeps the smoothing
+        // from reading its ground off the edge of the surface.
+        *tile = clamped_to(tile, bounds);
+
+        // ⚠ **The emptiness is examined here and not left to GDI.** `clamped_to` of a corner that
+        // lies wholly outside `bounds` answers an *inverted* rectangle — right below left — and
+        // `FillRect` **normalises** what it is given rather than refusing it, so an inverted tile
+        // is not «nothing» but a filled band somewhere else entirely. Measured on the stand: with
+        // nine exclusions the list puts up a non-client scroll bar, the right-hand tiles clamp to
+        // an inverted rectangle, and 13 px of the scroll bar came out `panel_bg`. Nor does the DC
+        // save it — a `GetDC` DC of a list writes into that strip, which was measured too.
+        if tile.right <= tile.left || tile.bottom <= tile.top {
+            continue;
+        }
+
+        // The ground the arc is cut from. Laid first and over the whole tile, exactly as
+        // [`draw_combo_closed_part`] lays it before its own rounded figure: the interior of the
+        // tile is painted back by the figure a moment later, and what has to be left standing
+        // outside the arc is the panel and not the control's flat fill.
+        //
+        // SAFETY: `dc` is painted into for the length of the call this is inside of, `tile` is a
+        // live local of this frame, and `colors.ground` is a live brush of the dialog's state.
+        // NFR-13: the answer is dropped for the reason the paint calls of this file drop theirs.
+        unsafe { FillRect(dc, tile, colors.ground) };
+    }
+
+    if smoothed {
+        // The smoothed road, through the very body [`paint_rounded`] uses — not a copy of it.
+        // A clamped tile is only ever *smaller* than the surface `for_tile` makes, and `render`
+        // refuses a tile larger than that alone.
+        paint_corner_tiles(
+            dc,
+            area,
+            &tiles,
+            radius,
+            thickness,
+            colors.outline,
+            colors.fill,
+        );
+        return;
+    }
+
+    // T-11-24: the refusal is a staircase and never a hole.
+    for tile in &tiles {
+        // Empty — clamped away entirely; see the same guard in [`paint_corner_tiles`].
+        if tile.right <= tile.left || tile.bottom <= tile.top {
+            continue;
+        }
+
+        stroke_corner_aliased(
+            dc,
+            area,
+            tile,
+            radius,
+            thickness,
+            colors.outline,
+            colors.fill,
+        );
     }
 }
 
@@ -8513,6 +8717,313 @@ fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
     buffer
 }
 
+// =========================================================================================
+// Интерьер списка кончается скруглённой заливкой, а не прямым срезом — FR-92а, находка R-06
+// протокола Э12, task T-12-5
+// =========================================================================================
+//
+// ⚠ What was wrong, in numbers. The frame of a list is [`CORNER_RADIUS`] rounded and is drawn
+// by the dialog's own background *outside* the control ([`paint_background`]); at 96 DPI that
+// radius is 4 px and the frame stands 1 px off the control at the sides and the bottom and
+// [`LIST_FIRST_ROW_TOP`] — 2 px through [`scaled`] — above it. So three of the four pixels each
+// corner arc is made of fall inside the control, and the control fills its client area with a
+// flat rectangle: measured on the stand before this task, the bottom-left corner of the
+// exclusion list ran `392 = panel, 393 = field_bg` for three rows in a row — a square cut, no
+// halftone anywhere. The five input fields do not have the fault: task T-12-3 gave their box
+// 4 px of air above and below the control, which is the whole radius, so their arcs never reach
+// the control at all. Measured, both halves, and written in the report of this task.
+//
+// ⚠ Why the repair is painted **last** and not at the erase. Because an erase is not the last
+// thing a list paints: the rows come after it, and a row's ground is a flat `FillRect` across
+// the full width of the control ([`draw_list_item`], [`draw_cycle_row`]). A list with enough
+// rows to reach its own bottom edge would square the two bottom corners off again, which is
+// exactly the state the scrolling check of this task puts it in. So the four corner squares go
+// down after the control has finished drawing — and only those four squares, so that nothing
+// the control drew between them is touched.
+
+/// The **window** rectangle of a control, in that control's own **client** coordinates — task
+/// T-12-5.
+///
+/// The two rectangles are not the same one, and the difference is exactly the non-client
+/// furniture: a list showing a vertical scroll bar has a client area 17 px narrower than its
+/// window, and a control with a border would have its client origin at a positive offset from
+/// the window's. `GetClientRect` answers the first from zero and says nothing about either.
+///
+/// Worked out the documented way — `GetWindowRect` speaks screen coordinates, `ScreenToClient`
+/// carries a screen point into the client coordinates of a named window — rather than assumed to
+/// be `(0, 0, client_width, client_height)`, which is what it happens to be for a control with no
+/// border and no scroll bar and is what made the scroll-bar case wrong.
+///
+/// `None` on a refused call (NFR-13): the caller then paints nothing, which leaves the corners as
+/// the control drew them rather than putting a figure at a guessed place.
+fn window_rect_in_client(control: HWND) -> Option<RECT> {
+    let mut window = RECT::default();
+
+    // SAFETY: `control` is the live control and `window` is a live local the call fills.
+    unsafe { GetWindowRect(control, &mut window) }.ok()?;
+
+    let mut origin = POINT {
+        x: window.left,
+        y: window.top,
+    };
+
+    // SAFETY: `control` is the live control and `origin` is a live local of this frame that the
+    // call rewrites in place.
+    if !unsafe { ScreenToClient(control, &mut origin) }.as_bool() {
+        return None;
+    }
+
+    Some(RECT {
+        left: origin.x,
+        top: origin.y,
+        right: origin.x + (window.right - window.left),
+        bottom: origin.y + (window.bottom - window.top),
+    })
+}
+
+/// Identifier of the subclass this section puts on the two lists — the pair (procedure,
+/// identifier) that names it, exactly as [`COMBO_SUBCLASS_ID`] names the combo boxes'.
+///
+/// A number of its own and not the combos' 1: the key is per window and no window carries both,
+/// but two subclasses of one file sharing an identifier is a trap for whoever adds the third.
+const LIST_SUBCLASS_ID: usize = 2;
+
+/// Puts [`list_proc`] in front of both lists — FR-92а, task T-12-5.
+///
+/// **The pair.** Called exactly once, from [`fill_dialog`] on `WM_INITDIALOG`; the other half is
+/// [`unsubclass_lists`], called exactly once, from the `WM_DESTROY` branch of [`dialog_proc`],
+/// while the children are still alive. Both walk the same [`FRAMED_LISTS`] list with the same
+/// procedure and the same [`LIST_SUBCLASS_ID`], so every install has its removal by construction
+/// rather than by discipline; [`list_proc`] additionally removes itself on `WM_NCDESTROY`, the
+/// belt to that pair's braces. The two removals cannot double-free anything —
+/// `RemoveWindowSubclass` on a window that no longer carries the subclass answers `FALSE` and
+/// does nothing. Every sentence of this paragraph is [`subclass_combo_boxes`]'s, because this is
+/// deliberately the same shape: one more procedure of the same kind, and not a second way of
+/// doing it.
+///
+/// A refused install is survived (NFR-13): that list then keeps the square corners it has had
+/// since T-11-13 — visibly imperfect rather than silently broken — and the dialog still opens.
+/// Not journaled, for the reason [`subclass_combo_boxes`] writes down at its own dropped answer.
+fn subclass_lists(hwnd: HWND) {
+    for control in FRAMED_LISTS {
+        // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
+        let Ok(list) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+            continue;
+        };
+
+        // SAFETY: `list` is a live control of this dialog, created by the dialog manager on this
+        // thread, and `list_proc` is a function of exactly the signature `SUBCLASSPROC` names.
+        // The reference data is zero — this subclass keeps no state of its own; everything it
+        // needs it reads off the dialog through `with_state`.
+        let _ = unsafe { SetWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID, 0) };
+    }
+}
+
+/// Takes [`list_proc`] back off both lists — the far half of the pair [`subclass_lists`]
+/// describes.
+///
+/// The refusal is deliberately **not** journaled: this runs on `WM_DESTROY`, where a `FALSE`
+/// means the subclass was already gone (never installed, or removed by the `WM_NCDESTROY` arm of
+/// the procedure), and neither is a fault worth a journal row.
+fn unsubclass_lists(hwnd: HWND) {
+    for control in FRAMED_LISTS {
+        // SAFETY: `hwnd` is the live dialog — `WM_DESTROY` reaches it before its children are
+        // destroyed — and the crate turns a missing control into an error.
+        let Ok(list) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            continue;
+        };
+
+        // SAFETY: `list` is the live control the subclass was installed on, and the procedure
+        // and identifier are the very pair `SetWindowSubclass` was given.
+        let _ = unsafe { RemoveWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID) };
+    }
+}
+
+/// The procedure that stands in front of each of the two lists while this dialog is up —
+/// FR-92а, task T-12-5.
+///
+/// ⚠ **Nothing is intercepted.** Every message, `WM_PAINT` included, reaches the control's own
+/// procedure first and unchanged, and its answer is the answer this procedure gives back. The
+/// control still erases its ground, lays out its rows, draws its selection, moves its scroll bar
+/// and answers every `LB_*`, `LVM_*` and keyboard message exactly as it did before the subclass —
+/// which is what keeps the ⛔ list of this task (the selection stripe of T-11-25, the ticks of
+/// T-11-25-2, the scrolling, the row insets and the row height) untouched by construction rather
+/// than by inspection. The one thing added is four corner squares painted *after* the control
+/// has finished a `WM_PAINT`.
+///
+/// `WM_NCDESTROY` is answered before the forwarding and forwarded on afterwards: the message
+/// must reach every procedure of the chain.
+///
+/// # Safety
+///
+/// Called by the window manager with the arguments of a window message, on one of the two
+/// controls [`subclass_lists`] installed it on.
+unsafe extern "system" fn list_proc(
+    list: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    _reference_data: usize,
+) -> LRESULT {
+    if message == WM_NCDESTROY {
+        // The belt to the braces of the pair — see `subclass_lists`.
+        //
+        // SAFETY: `list` is that control, and the procedure and identifier are the pair the
+        // subclass was installed with.
+        let _ = unsafe { RemoveWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID) };
+    }
+
+    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
+    // unchanged; this is what `DefSubclassProc` exists for.
+    let answer = unsafe { DefSubclassProc(list, message, wparam, lparam) };
+
+    if message == WM_PAINT {
+        // SAFETY: `list` is the control this procedure is installed on, and its own `WM_PAINT`
+        // has just returned — the update region is validated and the drawing is finished, which
+        // is the moment the patch is for.
+        unsafe { patch_list_corners(list) };
+    }
+
+    answer
+}
+
+/// Lays the four rounded corners of the list's frame over the interior the control has just
+/// painted flat — the whole of what [`list_proc`] adds, and the whole of task T-12-5.
+///
+/// # The DC
+///
+/// `GetDC` and not `BeginPaint`: the control's own `WM_PAINT` has already run and validated the
+/// window, and a second `BeginPaint` on a window with nothing left to update hands back an empty
+/// clip — the corners would simply not be painted.
+///
+/// ⚠ Everything that can refuse is settled **before** the DC is taken — the parent, the
+/// identifier, the client rectangle, the window rectangle, the colours — so that between `GetDC`
+/// and `ReleaseDC` there is exactly one path and no way off it. The one `return` inside that
+/// stretch is the refusal of `GetDC` itself, where no DC was taken and there is nothing to
+/// release. A leaked DC gives neither an error nor a red test, so the shape is held by a test
+/// that reads it out of this source rather than by care.
+///
+/// # The figure
+///
+/// [`list_frame_box`] in the control's own client coordinates — the very frame
+/// [`paint_background`] draws around this control from the other side, named through the same
+/// [`list_frame_air`] — and [`CORNER_RADIUS`] through [`scaled`], the radius every panel, button
+/// and field of this dialog wears. Not one number of the figure is invented here.
+///
+/// Nothing is drawn at all when the state is unreachable or `theme::Brushes::new` was refused at
+/// initialisation — the reason [`draw_combo_closed_part`] gives for its own silence (NFR-13).
+///
+/// # Safety
+///
+/// Called from [`list_proc`] alone, on one of the two controls [`subclass_lists`] installed it on.
+unsafe fn patch_list_corners(list: HWND) {
+    // The dialog is the parent of its own control; the colours are read through it, by
+    // identifier, exactly as every other drawing of this file reads what it draws.
+    //
+    // SAFETY: `list` is the live control; a window with no parent answers an error.
+    let Ok(dialog) = (unsafe { GetParent(list) }) else {
+        return;
+    };
+
+    // SAFETY: reading a window's identifier reads a field of that window and no memory of ours.
+    let control = unsafe { GetDlgCtrlID(list) };
+
+    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
+    // be reached on a window it was installed on: one list of two, checked before any work.
+    if !FRAMED_LISTS.contains(&control) {
+        return;
+    }
+
+    let mut client = RECT::default();
+
+    // SAFETY: `list` is the live control and `client` is a live local the call fills.
+    if unsafe { GetClientRect(list, &mut client) }.is_err() {
+        return;
+    }
+
+    // ⚠ And the **window** rectangle as well, which is not the same rectangle and was measured
+    // not to be: a list that grows more rows than it can show puts up a vertical scroll bar, the
+    // scroll bar is non-client, and the client area then ends 17 px short of the window's right
+    // edge. The frame [`paint_background`] draws is hung on the *window*, so basing the patch on
+    // the client alone drew a perfectly good rounded corner 17 px inside the list, hard against
+    // the scroll bar — measured on the stand with nine exclusions: an arc at columns 583, 584,
+    // 585 where the list is still list. The frame is asked for where it really is instead.
+    let Some(window) = window_rect_in_client(list) else {
+        return;
+    };
+
+    // The colour choice, split from the painting exactly as everywhere in this file: the borrow
+    // of the state ends before any DC is taken, and what leaves the closure is plain values —
+    // two brushes the state keeps alive until the dialog ends, and one ink.
+    //
+    // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the window
+    // `show_dialog` created — the contract of `with_state`.
+    let choice = unsafe {
+        with_state(dialog, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+            let brushes = state.brushes.as_ref()?;
+
+            Some(CornerColors {
+                // The ground the corners the rounding cuts away are left standing on — the very
+                // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with, and the one
+                // `draw_combo_closed_part` asks for its own corners. Both lists do lie on a
+                // panel, but the rule is asked and not assumed.
+                ground: if state.panel_children.contains(&control) {
+                    brushes.panel_bg()
+                } else {
+                    brushes.window_bg()
+                },
+                outline: state.palette.field_border,
+                fill: brushes.field_bg(),
+            })
+        })
+    };
+
+    let Some(Some(colors)) = choice else {
+        return;
+    };
+
+    // SAFETY: `list` is the live control; the call answers its DC or an invalid handle, and the
+    // DC is released below — the single road out of this function from here on.
+    let dc = unsafe { GetDC(Some(list)) };
+
+    // NFR-13: examined. Nothing of ours can be drawn without a DC, and there is nothing to
+    // release either — the list keeps the square corners of before this task for that repaint.
+    if dc.is_invalid() {
+        return;
+    }
+
+    let dpi = dc_dpi(dc);
+
+    // The figure is the frame of the **window**; `client` is only the licence — what of that
+    // figure this DC is allowed to write. A corner that falls wholly in the non-client scroll bar
+    // is clamped to nothing and left to the system, which is the honest answer: those pixels are
+    // not this program's to paint from a client DC.
+    paint_rounded_corners(
+        dc,
+        &list_frame_box(&window, dpi),
+        &client,
+        scaled(CORNER_RADIUS, dpi),
+        colors,
+        dpi,
+    );
+
+    // ⚠ The one `ReleaseDC` of this function, and it is reached from every path that took a DC:
+    // there is no `?`, no early `return` and no `panic!` between the two calls — only pure
+    // arithmetic and drawing that swallows its own refusals. A leaked DC gives neither an error
+    // nor a red test, which is why this is written down rather than assumed (NFR-13).
+    //
+    // SAFETY: releases exactly the DC taken above, once, for the window it was taken for.
+    let released = unsafe { ReleaseDC(Some(list), dc) };
+
+    debug_assert_eq!(
+        released, 1,
+        "ReleaseDC отказал на DC, взятом этой же функцией — это утечка"
+    );
+}
+
 /// Half-width of the chevron of a closed combo box, in mock-up pixels — the `±4` by `x` of
 /// `(PtF ($cx-4) …), (PtF $cx …), (PtF ($cx+4) …)` in the `'combo'` arm, п. 8 of T-11-16.
 ///
@@ -8732,6 +9243,10 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // `WM_DESTROY` branch of `dialog_proc`, and nothing else in the file installs or removes
     // this subclass. See `subclass_combo_boxes` for why the pairing is written that way.
     subclass_combo_boxes(hwnd);
+    // FR-92а, task T-12-5, finding R-06. The other half of this pair — `unsubclass_lists` — is
+    // the same `WM_DESTROY` branch of `dialog_proc` the combo boxes' removal stands in, and
+    // nothing else in the file installs or removes this subclass either.
+    subclass_lists(hwnd);
     // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
     // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
     set_field_margins(hwnd);

@@ -3327,9 +3327,13 @@ fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
         ("unsafe fn draw_list_item(", "scaled(LIST_TEXT_TOP"),
         ("pub fn check_cell(", "scaled(LIST_TEXT_INSET"),
         ("pub fn check_cell(", "scaled(LIST_CHECK_TEXT_GAP"),
-        // ⚠ `paint_background` и не `on_erase_background`: тело переехало задачей T-11-17,
-        // см. пояснение в `one_radius_rounds_…`. Проверяемое — то же.
-        ("unsafe fn paint_background(", "scaled(LIST_FIRST_ROW_TOP"),
+        // ⚠ `list_frame_air` и не `paint_background`: тело переехало задачей T-12-5, ровно как
+        // задачей T-11-17 оно переехало из `on_erase_background` в `paint_background`
+        // (см. пояснение в `one_radius_rounds_…`). Проверяемое — то же: втяжка идёт через
+        // `scaled`, а не литералом. Переехало потому, что с T-12-5 ту же рамку называет второй
+        // вызывающий — `list_frame_box`, изнутри самого списка, — и арифметика вынесена в одну
+        // чистую функцию, чтобы две копии не разошлись на пиксель.
+        ("pub fn list_frame_air(", "scaled(LIST_FIRST_ROW_TOP"),
     ];
 
     for (signature, call) in in_pixels {
@@ -3340,6 +3344,23 @@ fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
             "`{signature}` must take its inset as a mock-up pixel through `{call}…`"
         );
     }
+
+    // …и цепочка от той функции до фона не порвана: `paint_background` берёт обе величины
+    // оттуда и ниоткуда больше. Без этой проверки первая половина осталась бы верной, а фон
+    // мог бы вернуться к собственному литералу — то самое расхождение, ради которого
+    // арифметику и вынесли (T-12-5).
+    let background = function_body(&source, "unsafe fn paint_background(");
+
+    assert!(
+        background.contains("list_frame_air(dpi)"),
+        "`paint_background` must take the air above a list and the thickness around it from \
+         `list_frame_air` — the one place either number is worked out"
+    );
+    assert!(
+        !background.contains("scaled(LIST_FIRST_ROW_TOP"),
+        "and must not work the inset out a second time: a copy of that arithmetic is exactly \
+         how the frame and the arc the list paints from inside it would drift apart"
+    );
 
     // And the two names the old, measured-off-the-picture inset lived in are gone — a second
     // inset could only come back as a second constant.
@@ -7144,7 +7165,13 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
 #[test]
 fn both_refusals_of_the_smoothing_end_in_the_same_aliased_corner() {
     let source = settings_module_source();
-    let body = function_body(&source, "fn paint_rounded(");
+
+    // ⚠ `paint_corner_tiles` и не `paint_rounded`: тело переехало задачей T-12-5, которой
+    // понадобилось назвать те же четыре угла отдельно от прямой части фигуры
+    // (`paint_rounded_corners` — заплатка поверх плоской заливки списка). Проверяемое — то же,
+    // и ниже проверено, что `paint_rounded` по-прежнему этим телом и кончается: иначе
+    // утверждение стало бы верным о функции, до которой никто не доходит.
+    let body = function_body(&source, "fn paint_corner_tiles(");
 
     assert!(
         body.contains("let painted = surface"),
@@ -7160,11 +7187,417 @@ fn both_refusals_of_the_smoothing_end_in_the_same_aliased_corner() {
          four holes in it by then, and that `return` is what left all four showing"
     );
 
+    // Обе дороги к этому телу — и целая фигура, и заплатка из четырёх углов.
+    for (caller, why) in [
+        (
+            "pub fn paint_rounded(",
+            "the whole figure must still end in the four smoothed corners",
+        ),
+        (
+            "pub fn paint_rounded_corners(",
+            "and the corner patch of T-12-5 must reach them through the same body, not a copy",
+        ),
+    ] {
+        assert!(
+            function_body(&source, caller).contains("paint_corner_tiles("),
+            "{why}"
+        );
+    }
+
     // And the corner the fallback paints is the aliased core itself — the same figure the whole
     // rectangle is drawn from, named again inside the one tile.
     assert!(
         function_body(&source, "fn stroke_corner_aliased(").contains("stroke_rounded("),
         "the fallback must draw the figure `RoundRect` would have drawn there"
+    );
+}
+
+// -----------------------------------------------------------------------------------------
+// Скруглённая заливка интерьера списков — находка R-06, задача T-12-5
+// -----------------------------------------------------------------------------------------
+
+/// **T-12-5, геометрия** — рамка списка, названная изнутри контрола, это та же рамка, что
+/// `paint_background` рисует снаружи, и обе стоят на одной арифметике.
+#[test]
+fn the_frame_of_a_list_is_the_same_rectangle_from_either_side() {
+    // При 96 DPI: `scaled(BORDER_THICKNESS = 1)` = 1, `scaled(LIST_FIRST_ROW_TOP = 3)` = 2 —
+    // мок-ап даёт 3, но в окно тройка приходит через `scaled`, и это ровно те числа, которыми
+    // фон рисует рамку с задачи T-11-16.
+    assert_eq!(
+        settings::list_frame_air(96),
+        (2, 1),
+        "the air above a list and the thickness around it, at 96 DPI"
+    );
+
+    // И воздух никогда не тоньше рамки: `max(border)` в теле — не украшение.
+    for dpi in [96, 120, 144, 192] {
+        let (top, border) = settings::list_frame_air(dpi);
+
+        assert!(
+            top >= border && border >= 1,
+            "at {dpi} DPI the air {top} must be at least the thickness {border}, and the \
+             thickness at least one pixel"
+        );
+    }
+
+    // Коробка — клиентский прямоугольник, раздвинутый ровно на эти величины.
+    let client = RECT {
+        left: 0,
+        top: 0,
+        right: 210,
+        bottom: 81,
+    };
+    let box_at_96 = settings::list_frame_box(&client, 96);
+
+    assert_eq!(
+        (
+            box_at_96.left,
+            box_at_96.top,
+            box_at_96.right,
+            box_at_96.bottom
+        ),
+        (-1, -2, 211, 82),
+        "the frame of a list starts at negative coordinates of its own client area: it stands \
+         outside the control on all four sides, and only its corner arcs reach back in"
+    );
+
+    for dpi in [96, 120, 144, 192] {
+        let (top, border) = settings::list_frame_air(dpi);
+        let frame = settings::list_frame_box(&client, dpi);
+
+        assert_eq!(
+            (frame.left, frame.top, frame.right, frame.bottom),
+            (
+                client.left - border,
+                client.top - top,
+                client.right + border,
+                client.bottom + border
+            ),
+            "at {dpi} DPI"
+        );
+    }
+}
+
+/// **T-12-5, критерий 8** — заплатка скругляет интерьер, который контрол залил прямоугольником,
+/// и **между углами не трогает ничего**.
+#[test]
+fn the_corner_patch_rounds_a_flat_interior_and_leaves_the_middle_alone() {
+    let ground = COLORREF(0x0020_2020);
+    let fill_colour = COLORREF(0x0080_8080);
+    let ink = COLORREF(0x00FF_FFFF);
+
+    let sheet = Sheet::new(40);
+    sheet.clear(ground);
+
+    // SAFETY: brushes made here and freed below, live for every call that uses them.
+    let fill = unsafe { CreateSolidBrush(fill_colour) };
+    // SAFETY: as above.
+    let ground_brush = unsafe { CreateSolidBrush(ground) };
+
+    // The client area of a list, and the flat rectangle a list control fills it with — the
+    // square cut of R-06 in miniature.
+    let client = RECT {
+        left: 5,
+        top: 5,
+        right: 35,
+        bottom: 35,
+    };
+
+    // SAFETY: `sheet.dc` holds this test's bitmap and `client` lives on this frame.
+    unsafe { FillRect(sheet.dc, &client, fill) };
+
+    let corner = client.bottom - 1;
+
+    assert_eq!(
+        sheet.grey(client.left, corner),
+        0x80,
+        "the flat fill must reach the very corner before the patch — otherwise this test is \
+         proving nothing"
+    );
+
+    let area = settings::list_frame_box(&client, 96);
+
+    settings::paint_rounded_corners(
+        sheet.dc,
+        &area,
+        &client,
+        6,
+        settings::CornerColors {
+            ground: ground_brush,
+            outline: ink,
+            fill,
+        },
+        96,
+    );
+
+    // SAFETY: created above, handed to nobody, freed exactly once each.
+    let _ = unsafe { DeleteObject(fill.into()) };
+    // SAFETY: as above.
+    let _ = unsafe { DeleteObject(ground_brush.into()) };
+
+    // 1. The corner is cut away: the pixel that carried the square is no longer the fill.
+    assert_ne!(
+        sheet.grey(client.left, corner),
+        0x80,
+        "the bottom-left corner of the interior must not be square any more"
+    );
+
+    // 2. **Between** the corners nothing moved. The tiles are `radius + thickness` a side, so
+    // everything outside them along each edge is the straight run the control drew.
+    let side = 6 + 1;
+
+    for y in (client.top + side)..(client.bottom - side) {
+        assert_eq!(
+            sheet.grey(client.left, y),
+            0x80,
+            "the straight left edge of the interior at y = {y}"
+        );
+        assert_eq!(
+            sheet.grey(client.right - 1, y),
+            0x80,
+            "the straight right edge of the interior at y = {y}"
+        );
+    }
+
+    for x in (client.left + side)..(client.right - side) {
+        assert_eq!(
+            sheet.grey(x, client.top),
+            0x80,
+            "the straight top edge of the interior at x = {x}"
+        );
+        assert_eq!(
+            sheet.grey(x, client.bottom - 1),
+            0x80,
+            "the straight bottom edge of the interior at x = {x}"
+        );
+    }
+
+    // 3. Every one of the four corners carries at least two halftones — a colour that is
+    // neither the ground, nor the fill, nor the ink. That is the whole of criterion 8, and it
+    // is what tells a smoothed arc from a staircase.
+    for (name, x0, y0) in [
+        ("top-left", client.left, client.top),
+        ("top-right", client.right - side, client.top),
+        ("bottom-left", client.left, client.bottom - side),
+        ("bottom-right", client.right - side, client.bottom - side),
+    ] {
+        let mut halftones = 0;
+
+        for y in y0..(y0 + side) {
+            for x in x0..(x0 + side) {
+                let grey = sheet.grey(x, y);
+
+                if grey != 0x20 && grey != 0x80 && grey != 0xFF {
+                    halftones += 1;
+                }
+            }
+        }
+
+        println!("угол {name}: {halftones} полутонов");
+
+        assert!(
+            halftones >= 2,
+            "the {name} corner must be smoothed, not cut: {halftones} halftones"
+        );
+    }
+}
+
+/// **T-12-5, случай полосы прокрутки** — угол, целиком выпавший из `bounds`, не рисуется
+/// где-то ещё вместо этого.
+///
+/// Это регрессия, пойманная прибором на стенде и почти пропущенная: список с числом строк
+/// больше видимого поднимает **неклиентскую** полосу прокрутки, клиентская область делается
+/// на 17 px у́же окна, и заплатка, посчитанная от клиентской области, положила безупречно
+/// скруглённый угол на 17 px внутрь списка. `bounds` — это разрешение, а не фигура; а
+/// вывернутый прямоугольник, который даёт обрезка выпавшего угла, `FillRect` **нормализует**,
+/// а не отвергает — то есть «ничего» превращается в «полосу не там».
+#[test]
+fn a_corner_outside_the_bounds_paints_nothing_at_all() {
+    let ground = COLORREF(0x0020_2020);
+    let fill_colour = COLORREF(0x0080_8080);
+    let bar = COLORREF(0x00C0_C0C0);
+    let ink = COLORREF(0x00FF_FFFF);
+
+    let sheet = Sheet::new(40);
+    sheet.clear(ground);
+
+    // SAFETY: brushes made here and freed below.
+    let fill = unsafe { CreateSolidBrush(fill_colour) };
+    // SAFETY: as above.
+    let ground_brush = unsafe { CreateSolidBrush(ground) };
+    // SAFETY: as above.
+    let bar_brush = unsafe { CreateSolidBrush(bar) };
+
+    // The window of the control, and the client area a vertical scroll bar has left of it.
+    let window = RECT {
+        left: 5,
+        top: 5,
+        right: 35,
+        bottom: 35,
+    };
+    let client = RECT {
+        right: window.right - 12,
+        ..window
+    };
+    let strip = RECT {
+        left: client.right,
+        ..window
+    };
+
+    // SAFETY: `sheet.dc` holds this test's bitmap; both rectangles live on this frame.
+    unsafe { FillRect(sheet.dc, &client, fill) };
+    // SAFETY: as above.
+    unsafe { FillRect(sheet.dc, &strip, bar_brush) };
+
+    // The figure is the frame of the **window**, which is where `paint_background` hangs it —
+    // its right-hand corners therefore fall inside the strip the scroll bar owns.
+    let area = settings::list_frame_box(&window, 96);
+
+    settings::paint_rounded_corners(
+        sheet.dc,
+        &area,
+        &client,
+        6,
+        settings::CornerColors {
+            ground: ground_brush,
+            outline: ink,
+            fill,
+        },
+        96,
+    );
+
+    // SAFETY: created above, handed to nobody, freed exactly once each.
+    let _ = unsafe { DeleteObject(fill.into()) };
+    // SAFETY: as above.
+    let _ = unsafe { DeleteObject(ground_brush.into()) };
+    // SAFETY: as above.
+    let _ = unsafe { DeleteObject(bar_brush.into()) };
+
+    for y in window.top..window.bottom {
+        for x in strip.left..strip.right {
+            assert_eq!(
+                sheet.grey(x, y),
+                0xC0,
+                "the strip the scroll bar owns must come out of the patch untouched, and ({x}, \
+                 {y}) did not"
+            );
+        }
+    }
+
+    // And the left-hand corners, which are inside `bounds`, were still drawn: a patch that
+    // painted nothing anywhere would pass the loop above for the wrong reason.
+    assert_ne!(
+        sheet.grey(client.left, client.bottom - 1),
+        0x80,
+        "the corners that are inside the bounds must still be rounded"
+    );
+}
+
+/// **T-12-5, критерии «не сломать» и «подкласс снимается»** — подкласс списков это одна пара,
+/// и его процедура ничего не перехватывает.
+///
+/// Второе — половина доказательства того, что выделение (T-11-25), галочки (T-11-25-2),
+/// прокрутка, втяжки и высота строк не задеты: они не задеты **по построению**, раз каждое
+/// сообщение доходит до собственной процедуры контрола неизменным и её ответ и возвращается.
+#[test]
+fn the_list_subclass_is_one_pair_and_intercepts_nothing() {
+    let source = settings_module_source();
+
+    // The pair, by its call sites. The install is matched with its own indentation, because
+    // «unsubclass_lists» contains «subclass_lists» as a substring.
+    assert_eq!(
+        source.matches("\n    subclass_lists(hwnd);").count(),
+        1,
+        "the subclass must be installed in exactly one place"
+    );
+    assert_eq!(
+        source.matches("unsubclass_lists(hwnd);").count(),
+        1,
+        "the subclass must be removed in exactly one place"
+    );
+
+    // The same procedure and the same identifier on both sides — one install, two removals
+    // (the pair's own, and the `WM_NCDESTROY` safety net inside the procedure).
+    assert_eq!(
+        source
+            .matches("SetWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID, 0)")
+            .count(),
+        1,
+        "exactly one SetWindowSubclass, with the procedure and the identifier of the pair"
+    );
+    assert_eq!(
+        source
+            .matches("RemoveWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID)")
+            .count(),
+        2,
+        "the removal of the pair and the WM_NCDESTROY safety net, and nothing else"
+    );
+
+    // And the two subclasses of this file do not share an identifier.
+    assert!(
+        source.contains("const COMBO_SUBCLASS_ID: usize = 1;")
+            && source.contains("const LIST_SUBCLASS_ID: usize = 2;"),
+        "the combo boxes and the lists must be told apart by their subclass identifiers"
+    );
+
+    let body = function_body(&source, "unsafe extern \"system\" fn list_proc(");
+
+    assert!(
+        body.contains("let answer = unsafe { DefSubclassProc(list, message, wparam, lparam) };")
+            && body.trim_end().ends_with("answer"),
+        "every message must reach the control's own procedure unchanged, and its answer must be \
+         the answer given back — that is what leaves the selection, the ticks, the scrolling and \
+         the row metrics of the two lists untouched by construction"
+    );
+    assert!(
+        !body.contains("return "),
+        "and nothing may be answered before it: a `return` here would be an interception"
+    );
+
+    // NFR-13: the DC of the patch is released on every path out of the function that took one.
+    let patch = function_body(&source, "unsafe fn patch_list_corners(");
+
+    assert_eq!(
+        patch.matches("GetDC(Some(list))").count(),
+        1,
+        "exactly one DC is taken"
+    );
+    assert_eq!(
+        patch.matches("ReleaseDC(Some(list), dc)").count(),
+        1,
+        "and exactly one is released"
+    );
+
+    // Code only: the comments between the two calls talk *about* `return` and `?`, and a sweep
+    // that counted those would be reading the explanation instead of the program.
+    let held: String = patch
+        .split_once("GetDC(Some(list))")
+        .expect("the patch must take a DC")
+        .1
+        .split_once("ReleaseDC(Some(list), dc)")
+        .expect("and release it")
+        .0
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // The one `return` allowed between the two is the refusal of `GetDC` itself, where no DC
+    // was taken and there is nothing to release. Every other way out — a second `return`, a `?`
+    // — would leak, and a leaked DC gives neither an error nor a red test, which is why this is
+    // read out of the source and not hoped for.
+    assert!(
+        held.contains("if dc.is_invalid() {"),
+        "the refusal of `GetDC` must be examined (NFR-13)"
+    );
+    assert_eq!(
+        held.matches("return").count(),
+        1,
+        "and it must be the only way out of the function while a DC is in hand"
+    );
+    assert!(
+        !held.contains('?'),
+        "and no `?` either — the same leak wearing a shorter spelling"
     );
 }
 
