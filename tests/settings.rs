@@ -8604,3 +8604,467 @@ fn the_journal_path_stands_where_the_generator_puts_it() {
          at was two units low"
     );
 }
+
+// =========================================================================================
+// Э12 волна 2 — межстрочие многострочных подсказок. Task T-12-12, решение В-6.
+// =========================================================================================
+//
+// The pixels below are drawn on the memory sheet of [`Sheet`] with the settings template's own
+// face selected into it: no window is created, no message is pumped and **the product is not
+// started**. The face matters here in a way it did not for the T-11-18 tests — the whole
+// subject is the distance between two lines, and that distance is measured against the face's
+// own `tmHeight`.
+
+use windows::Win32::Graphics::Gdi::{DrawTextW, SetBkMode, SetTextColor, TRANSPARENT};
+use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
+
+/// The rows of `area` that carry ink, as bands of consecutive rows — the same reading the
+/// stand's `inkrows.ps1` makes of a screenshot, done here on the sheet.
+fn ink_bands(sheet: &Sheet, area: &RECT) -> Vec<(i32, i32)> {
+    let mut bands: Vec<(i32, i32)> = Vec::new();
+
+    for y in area.top..area.bottom {
+        let inked = (area.left..area.right).any(|x| sheet.grey(x, y) > INKED);
+
+        match (inked, bands.last_mut()) {
+            (true, Some(last)) if last.1 == y - 1 => last.1 = y,
+            (true, _) => bands.push((y, y)),
+            (false, _) => {}
+        }
+    }
+
+    bands
+}
+
+/// The sheet, the template's own face and the rectangle every test of this section paints in.
+///
+/// The face is created from the **built** template's `DS_SETFONT` declaration through
+/// [`manager_logfont`], so it is the face the dialog manager itself would make, not one the
+/// test invented.
+fn label_sheet() -> (Sheet, Face, TEXTMETRICW, i32) {
+    let (font, sheet) = template_font_and_sheet();
+    let face = Face::new(manager_logfont(sheet.dc, &font, DEFAULT_QUALITY));
+    let metrics = metrics_of(&sheet, &face);
+
+    // SAFETY: `sheet.dc` is the live memory DC of this frame.
+    let dpi = unsafe { GetDeviceCaps(Some(sheet.dc), LOGPIXELSY) };
+
+    (sheet, face, metrics, dpi)
+}
+
+/// Paints one caption through the product's own [`settings::paint_label`] with a given face.
+fn paint_label_in_face(sheet: &Sheet, area: RECT, caption: &str, face: &Face) -> isize {
+    let mut text: Vec<u16> = caption.encode_utf16().collect();
+
+    // SAFETY: the brush is made here, used only by the call below and freed here.
+    let ground = unsafe { CreateSolidBrush(LABEL_GROUND) };
+
+    // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
+    // frame, and both `ground` and the face outlive the call.
+    let answer = unsafe {
+        settings::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, Some(face.0))
+    };
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(ground.into()) };
+
+    answer
+}
+
+/// Paints one caption the way the module painted **every** label before task T-12-12: ground,
+/// then one `DrawTextW` with [`settings::LABEL_TEXT_FORMAT`]. The reference the separating
+/// probe below compares against.
+fn paint_label_the_old_way(sheet: &Sheet, area: RECT, caption: &str, face: &Face) {
+    let mut text: Vec<u16> = caption.encode_utf16().collect();
+    let mut text_rect = area;
+
+    // SAFETY: every handle is live and owned by the caller or made and freed right here; the
+    // format carries no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the caption is only read.
+    unsafe {
+        let ground = CreateSolidBrush(LABEL_GROUND);
+        FillRect(sheet.dc, &area, ground);
+        let _ = DeleteObject(ground.into());
+
+        SetBkMode(sheet.dc, TRANSPARENT);
+        SetTextColor(sheet.dc, LABEL_INK);
+        let previous = SelectObject(sheet.dc, face.0.into());
+        DrawTextW(
+            sheet.dc,
+            &mut text,
+            &raw mut text_rect,
+            settings::LABEL_TEXT_FORMAT,
+        );
+        SelectObject(sheet.dc, previous);
+    }
+}
+
+/// Every pixel of `area`, for comparing two drawings pixel for pixel.
+fn pixels_of(sheet: &Sheet, area: &RECT) -> Vec<i32> {
+    (area.top..area.bottom)
+        .flat_map(|y| (area.left..area.right).map(move |x| (x, y)))
+        .map(|(x, y)| sheet.grey(x, y))
+        .collect()
+}
+
+/// **Criterion 12 of T-12-12** — the 23 is the generator's arithmetic and not a count of
+/// pixels read off `ui-02-graphite.png`.
+///
+/// `design-tokens.md` §3 calls a number taken from a picture a forbidden class of error, and
+/// it is the class that produced T-11-15 and finding F3: the mock-ups are drawn at 140 %, so a
+/// number counted on them is 1,4 × too large as a screen length until [`settings::scaled`]
+/// divides it back. The chain that produces this one is written where the constant is, and
+/// this test holds the chain there.
+#[test]
+fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face() {
+    assert_eq!(
+        settings::LABEL_LINE_PITCH,
+        23,
+        "the pitch of the mock-ups is 1,33 em of the generator's own face — 22,345 mock-up \
+         pixels, whose whole steps are 22 and 23 and whose two lines of this label landed on 23"
+    );
+
+    let source = settings_module_source();
+    let derivation = source
+        .split_once("pub const LABEL_LINE_PITCH")
+        .expect("the module must declare LABEL_LINE_PITCH")
+        .0;
+
+    // Every link of the chain by name: the file it comes from, the two literals that fix the
+    // point size, the GDI+ call that does the laying out, and the two face metrics whose ratio
+    // is the line spacing. A doc comment that lost any one of them would be a number with a
+    // story instead of a derivation.
+    for phrase in [
+        "ui.ps1",
+        "$DPI = 1.4",
+        "$FS = 9 * $DPI",
+        "DrawString",
+        "GetLineSpacing",
+        "2724",
+        "2048",
+    ] {
+        assert!(
+            derivation.contains(phrase),
+            "the doc comment of LABEL_LINE_PITCH must carry «{phrase}» — the derivation from \
+             the generator's literals, not a count of pixels on a picture"
+        );
+    }
+
+    // 12,6 pt is 16,8 px to the em at 96 DPI, and 2724 / 2048 of that is 22,345 px to the
+    // line. The rounding of the mock-up literal does not reach the screen: both neighbours of
+    // the fraction come back as the same 16 px, which is what В-6 asked for and what the stand
+    // measured.
+    let em_tenths = 126 * 96 / 72;
+    let pitch_tenths = em_tenths * 2724 / 2048;
+
+    println!(
+        "12,6 pt = {} tenths of a mock-up pixel to the em; 2724/2048 of it = {} tenths to the \
+         line; scaled(22, 96) = {}, scaled(23, 96) = {}",
+        em_tenths,
+        pitch_tenths,
+        settings::scaled(22, 96),
+        settings::scaled(settings::LABEL_LINE_PITCH, 96)
+    );
+
+    assert!(
+        (223..=224).contains(&pitch_tenths),
+        "the generator's line spacing must come out at 22,3 mock-up pixels — it came out \
+         {pitch_tenths} tenths, so the chain in the doc comment no longer holds"
+    );
+    assert_eq!(
+        settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        16,
+        "решение В-6: 23 mock-up pixels are 16 pixels at 96 DPI, against the 15 `DrawTextW` \
+         advances a line by on its own"
+    );
+    assert_eq!(
+        settings::scaled(22, 96),
+        settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        "the whole-pixel rounding of the mock-up literal is not what decides the screen: 22 \
+         and 23 mock-up pixels are the same 16 screen pixels, and the fraction between them \
+         is the 15,96 the arithmetic asks for"
+    );
+
+    // And it scales with the DPI of the window, which is the second half of В-6.
+    assert!(
+        settings::scaled(settings::LABEL_LINE_PITCH, 144)
+            > settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        "the pitch has to grow with the DPI of the window — it goes through `scaled` for that"
+    );
+}
+
+/// **The separating question of T-12-12, as a table** — which labels take the model pitch and
+/// which are left exactly as they were drawn before the task.
+///
+/// [`settings::label_model_pitch`] is the whole of the decision and it is pure, so it can be
+/// closed here rather than photographed. Either «no» means the single plain `DrawTextW` of
+/// T-11-18, unchanged to the pixel.
+#[test]
+fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
+    // 96 DPI: `DrawTextW` advances a line by tmHeight = 15 and the model asks for 16.
+    assert_eq!(
+        settings::label_model_pitch(2, 15, 16),
+        Some(16),
+        "«вступит в силу после перезапуска» is the label this task exists for: two lines, and \
+         a model pitch a pixel wider than the natural one"
+    );
+
+    // The seventeen one-line labels. This is the row that keeps them still.
+    assert_eq!(
+        settings::label_model_pitch(1, 15, 16),
+        None,
+        "a label that did not wrap has no pitch to set, and seventeen of the eighteen \
+         OWNER_DRAWN_LABELS are one line — moving them would be «rewrote the label drawing», \
+         not «fixed the line pitch»"
+    );
+    assert_eq!(
+        settings::label_model_pitch(0, 15, 16),
+        None,
+        "no lines at all is no pitch either"
+    );
+
+    // Three lines take it as readily as two: nothing here counts to two.
+    assert_eq!(
+        settings::label_model_pitch(3, 15, 16),
+        Some(16),
+        "the rule is «it wrapped», not «it wrapped once»"
+    );
+
+    // A model pitch that is not wider has nothing to give: `DrawTextW` already advances by
+    // `natural`, and squeezing lines together is not what В-6 asked for.
+    assert_eq!(
+        settings::label_model_pitch(2, 16, 16),
+        None,
+        "a model pitch equal to the natural one is the drawing that already happens, and one \
+         plain call is both cheaper and exact"
+    );
+    assert_eq!(
+        settings::label_model_pitch(2, 17, 16),
+        None,
+        "a model pitch narrower than the natural one would squeeze the lines together"
+    );
+
+    // ⚠ The height of the control is deliberately **not** an input, and this is the row that
+    // says why. `IDC_LOG_DIR` is 16 dialog units — 30 px — and two lines at the model pitch
+    // reach 1 × 16 + 15 = 31, so a height question would refuse the model pitch to exactly the
+    // label the task names as having to get it. Containment is `paint_label_lines`'s job, and
+    // it does it by clamping the clip to the rectangle.
+    let (lines, natural, model) = (2, 15, 16);
+    let journal_path_height = 16 * 15 / 8;
+    let ink = (lines - 1) * model + natural;
+    println!(
+        "IDC_LOG_DIR: 16 dialog units = {journal_path_height} px, {lines} model lines = {ink} px"
+    );
+    assert!(
+        ink > journal_path_height,
+        "the arithmetic this row exists for has changed — check that dropping the height \
+         question is still the right call"
+    );
+    assert_eq!(
+        settings::label_model_pitch(2, 15, 16),
+        Some(16),
+        "a journal path that did wrap has to get the model pitch too, short control or not — \
+         the code leads both multi-line labels by one rule"
+    );
+}
+
+/// **Criterion 7 of T-12-12, on real pixels** — a wrapped label's lines stand
+/// `scaled(LABEL_LINE_PITCH, dpi)` apart, and not the face's own `tmHeight`.
+///
+/// The caption is painted through the product's own [`settings::paint_label`] with the
+/// template's own face, and the ink is read back band by band exactly as `inkrows.ps1` reads
+/// it off a screenshot of the stand.
+#[test]
+fn the_lines_of_a_wrapped_label_stand_the_model_pitch_apart() {
+    let (sheet, face, metrics, dpi) = label_sheet();
+    let pitch = settings::scaled(settings::LABEL_LINE_PITCH, dpi);
+
+    println!(
+        "sheet at {dpi} DPI: tmHeight = {}, model pitch = {pitch}",
+        metrics.tmHeight
+    );
+
+    // Nothing to prove on a machine whose face already advances by the model pitch — and the
+    // arithmetic says so rather than the test quietly passing.
+    if pitch <= metrics.tmHeight {
+        println!("the natural line height is already the model pitch — nothing to move");
+        return;
+    }
+
+    // Two lines' worth of room, and a caption that wraps into exactly two.
+    let area = RECT {
+        left: 2,
+        top: 2,
+        right: 46,
+        bottom: 2 + 2 * pitch + metrics.tmHeight,
+    };
+
+    sheet.clear(LABEL_OUTSIDE);
+    assert_eq!(
+        paint_label_in_face(&sheet, area, "wrap me now", &face),
+        1,
+        "a label with text answers «drawn»"
+    );
+
+    let bands = ink_bands(&sheet, &area);
+    println!("bands: {bands:?}");
+
+    assert_eq!(
+        bands.len(),
+        2,
+        "the caption has to come back as two bands of ink for the pitch between them to be \
+         readable at all — it came back as {bands:?}"
+    );
+
+    assert_eq!(
+        bands[1].0 - bands[0].0,
+        pitch,
+        "the tops of the two lines are {} px apart against the {pitch} px of решение В-6 — \
+         {} px is the natural tmHeight `DrawTextW` advances by on its own, which is the \
+         defect TYPO-2-muted-line-pitch",
+        bands[1].0 - bands[0].0,
+        metrics.tmHeight
+    );
+
+    // And the first line did not move: the shift is `index × (pitch − natural)`, which is
+    // zero for the first line, so a label's first row is where it always was.
+    sheet.clear(LABEL_OUTSIDE);
+    paint_label_the_old_way(&sheet, area, "wrap me now", &face);
+    let before = ink_bands(&sheet, &area);
+    println!("the same caption drawn the old way: {before:?}");
+
+    assert_eq!(
+        before.len(),
+        2,
+        "the reference drawing has to wrap the same caption into two lines too"
+    );
+    assert_eq!(
+        before[0].0, bands[0].0,
+        "the first line of a wrapped label must not move by a pixel — only the lines under it do"
+    );
+    assert_eq!(
+        before[1].0 - before[0].0,
+        metrics.tmHeight,
+        "the reference drawing is the one plain `DrawTextW`, which advances by tmHeight — if \
+         it did not, this test would be comparing the change against itself"
+    );
+}
+
+/// **Criterion 9 of T-12-12, as a test rather than a screenshot** — a label that fits on one
+/// line is drawn *pixel for pixel* the way it was drawn before the task.
+///
+/// The stand answers this with a diff of two screenshots; this answers it without a window, on
+/// every machine that runs the battery, and it is the probe that separates «fixed the line
+/// pitch» from «rewrote the label drawing». The same caption is painted twice into the same
+/// rectangle — once through [`settings::paint_label`] and once through the single plain
+/// `DrawTextW` the module used before — and the two bitmaps must be identical.
+#[test]
+fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
+    let (sheet, face, metrics, dpi) = label_sheet();
+
+    println!(
+        "sheet at {dpi} DPI: tmHeight = {}, model pitch = {}",
+        metrics.tmHeight,
+        settings::scaled(settings::LABEL_LINE_PITCH, dpi)
+    );
+
+    let area = RECT {
+        left: 2,
+        top: 2,
+        right: 60,
+        bottom: 2 + 4 * metrics.tmHeight,
+    };
+
+    // Short enough for one line in a rectangle four lines tall — the shape of every one of the
+    // seventeen labels the change must not touch.
+    sheet.clear(LABEL_OUTSIDE);
+    paint_label_in_face(&sheet, area, "Клавиша:", &face);
+    let now = pixels_of(&sheet, &area);
+
+    sheet.clear(LABEL_OUTSIDE);
+    paint_label_the_old_way(&sheet, area, "Клавиша:", &face);
+    let before = pixels_of(&sheet, &area);
+
+    let moved = now
+        .iter()
+        .zip(before.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+
+    println!("{} pixels compared, {moved} of them differ", now.len());
+
+    assert_eq!(
+        moved, 0,
+        "a one-line label came out different from the plain drawing in {moved} pixels — the \
+         change reached the seventeen labels it had no business reaching"
+    );
+
+    // And the sheet really carried ink, so the comparison was not two empty rectangles.
+    assert!(
+        !ink_bands(&sheet, &area).is_empty(),
+        "the caption has to leave ink for the comparison above to mean anything"
+    );
+}
+
+/// **Trap 6 of T-12-12, on the one instrument that can see it** — drawing a wrapped label over
+/// and over leaks no GDI object.
+///
+/// A leaked region gives no error, no wrong pixel and no red test; it shows on the process's
+/// object counter and nowhere else. The line by line drawing narrows a clip for every line of
+/// every repaint, so a region created and not deleted there would be a handle lost several
+/// times a second for as long as the window is open — until the 10 000-object quota takes the
+/// whole process down.
+///
+/// The counter is read before and after two thousand paints of a two-line label. It counts the
+/// **whole process**, and the tests of this binary run in parallel threads that hold sheets,
+/// faces and brushes of their own, so the bound below is deliberately loose — a few hundred
+/// rather than a few. It is still decisive: the smallest leak it has to catch is one object per
+/// paint, which is two thousand, and the one actually at stake is one per line per paint, which
+/// is four thousand. Ten times the bound either way.
+#[test]
+fn drawing_a_wrapped_label_over_and_over_leaks_no_gdi_object() {
+    let (sheet, face, metrics, dpi) = label_sheet();
+    let pitch = settings::scaled(settings::LABEL_LINE_PITCH, dpi);
+
+    let area = RECT {
+        left: 2,
+        top: 2,
+        right: 46,
+        bottom: 2 + 2 * pitch + metrics.tmHeight,
+    };
+
+    // Warm every allocation the first call makes — a face realised into the DC, a scratch of
+    // the text engine — so the reading below is of the loop and not of the first call.
+    for _ in 0..8 {
+        paint_label_in_face(&sheet, area, "wrap me now", &face);
+    }
+
+    let before = gdi_objects();
+
+    const PAINTS: i32 = 2_000;
+    for _ in 0..PAINTS {
+        paint_label_in_face(&sheet, area, "wrap me now", &face);
+    }
+
+    let after = gdi_objects();
+
+    println!(
+        "GDI objects: {before} before {PAINTS} paints, {after} after — growth {}",
+        after as i64 - before as i64
+    );
+
+    assert!(
+        after <= before + 200,
+        "the process held {before} GDI objects before {PAINTS} paints of a wrapped label and \
+         {after} after: the drawing is leaking an object per paint, which is what \
+         `SaveDC`/`RestoreDC` exists here to make impossible"
+    );
+}
+
+/// The count of GDI objects this process holds — the only instrument a leaked region shows on.
+fn gdi_objects() -> u32 {
+    // SAFETY: `GetCurrentProcess` answers a pseudo-handle that needs no closing, and the call
+    // reads a counter of this process and touches no memory of ours. NFR-13: a zero answer
+    // means the counter could not be read, and the caller's comparison survives it — zero
+    // before and zero after is «no growth», which is the honest reading of «cannot tell».
+    unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+}
