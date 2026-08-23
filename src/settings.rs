@@ -104,14 +104,14 @@ use windows::Win32::UI::Controls::{
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
     LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
     NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
-    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC,
+    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, WM_MOUSELEAVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, VIRTUAL_KEY, VK_APPS,
-    VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT,
-    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE,
-    VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
-    VK_SNAPSHOT, VK_UP,
+    EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
+    TrackMouseEvent, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
+    VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT,
+    VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_UP,
 };
 use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
@@ -129,8 +129,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
     WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
     WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT,
-    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    WM_KILLFOCUS, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2706,6 +2706,8 @@ unsafe extern "system" fn dialog_proc(
             // Task T-12-5: the far half of the second subclass pair, on the same terms and for
             // the same reason — the two lists are still live windows here.
             unsubclass_lists(hwnd);
+            // Task T-12-8: and the third pair, the nine push buttons, on the very same terms.
+            unsubclass_buttons(hwnd, &PUSH_BUTTONS);
 
             // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
             0
@@ -3024,6 +3026,15 @@ pub enum ButtonFaceRole {
     /// darker in the light palette and lighter in the dark one, with no new colour in the
     /// palette.
     SelBg,
+    /// [`theme::Palette::hover_bg`] — the face while the cursor stands on the button and
+    /// nothing is held down (task T-12-8).
+    ///
+    /// The one member of the palette this dialog had never used: until this task `hover_bg`
+    /// was drawn by the tray menu alone (`src\tray.rs`, task T-11-21), and the response of
+    /// the menu is the reference this face is copied from — the same field of the same two
+    /// palettes, «Графит» 52,58,67 and «Туман» 234,238,242, and no new colour invented for
+    /// it.
+    HoverBg,
 }
 
 /// The ink the button's caption is drawn with, named as the palette field.
@@ -3062,9 +3073,9 @@ pub struct ButtonColors {
     pub border: ButtonBorderRole,
 }
 
-/// The colour roles of one button in one state — FR-92а, task T-11-5a, the pure half of
-/// `WM_DRAWITEM`, closed by a table test: обычная/умолчательная × нормальная/нажатая/
-/// запрещённая.
+/// The colour roles of one button in one state — FR-92а, task T-11-5a, widened by the
+/// response of task T-12-8; the pure half of `WM_DRAWITEM`, closed by a table test:
+/// обычная/умолчательная × нормальная/**горячая**/нажатая/запрещённая.
 ///
 /// The default button is recognised by its identifier — `IDOK`, the one control
 /// `DM_SETDEFID` names on `WM_INITDIALOG` — not by `ODS_DEFAULT`, which the manager juggles
@@ -3073,15 +3084,30 @@ pub struct ButtonColors {
 /// The order of the arms is the precedence:
 /// - **запрещённость первой**: a disabled button takes no Enter and no click, so it must
 ///   not advertise itself — the accent face yields to the ordinary one and the ink goes
-///   muted, whichever button it is («Выше»/«Ниже» are the ones actually seen grey);
+///   muted, whichever button it is («Выше»/«Ниже» are the ones actually seen grey). A
+///   disabled button does **not** grow hot either: the cursor standing on it changes
+///   nothing, because nothing is there to be clicked;
 /// - **нажатие второй**: a held button shows the selection pair `sel_bg`/`sel_fg` of the
-///   palette, default and ordinary alike — the accent yields for the length of the press;
-/// - the accent itself is the *normal* state of «ОК» and nothing else.
+///   palette, default and ordinary alike — the accent yields for the length of the press,
+///   and so does the hot face, which is what «нажата > горячая» means: a pressed button is
+///   also hot (the cursor is on it while the button is held), and this arm standing above
+///   the hot one is the whole of that precedence;
+/// - the accent itself is the *normal* state of «ОК» and nothing else — **including while
+///   the cursor stands on it**. Task T-12-8 deliberately leaves «ОК» without a response:
+///   the palette has no second accent to light it up with, and inventing a colour is
+///   forbidden. The wiring is there all the same (the button is subclassed and its hot flag
+///   is kept like every other), so a wave that names the accent's hot face makes it visible
+///   by adding one arm here and nothing else;
+/// - **горячая** — the cursor stands on an ordinary, enabled, unpressed button: the face
+///   goes to `hover_bg` and **nothing else moves**. The frame stays `button_border` and the
+///   caption stays `text`, exactly as at rest — the response is a change of ground, the way
+///   the tray menu (task T-11-21) makes it.
 ///
 /// Focus is deliberately absent here: `ODS_FOCUS` changes no colour — it adds the dotted
 /// `DrawFocusRect` frame on top of whatever face this table chose, and that is the drawing
-/// half's business.
-pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> ButtonColors {
+/// half's business. `hot` is not focus and does not pretend to be: the two are independent,
+/// and a focused button under the cursor wears the hot face and the dotted frame at once.
+pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool) -> ButtonColors {
     let border = ButtonBorderRole::ButtonBorder;
 
     if disabled {
@@ -3108,6 +3134,14 @@ pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> Button
         };
     }
 
+    if hot {
+        return ButtonColors {
+            face: ButtonFaceRole::HoverBg,
+            text: ButtonTextRole::Text,
+            border,
+        };
+    }
+
     ButtonColors {
         face: ButtonFaceRole::ButtonBg,
         text: ButtonTextRole::Text,
@@ -3115,9 +3149,67 @@ pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> Button
     }
 }
 
+/// One solid brush of [`theme::Palette::hover_bg`], made for the length of a single drawing
+/// and freed with the value — FR-92а, task T-12-8.
+///
+/// # Why this is not a brush of [`theme::Brushes`]
+///
+/// That set owns the brushes a `WM_CTLCOLOR*` answer **hands to the window manager**, and a
+/// handed-out brush has to outlive every paint the manager may use it for — which is why the
+/// set is created whole, kept for as long as a palette is on screen and recreated rather than
+/// mutated. `hover_bg` is not handed to anybody: it is selected into the DC of one paint by
+/// [`paint_rounded`] and is gone before that paint returns. That is the shape the outline pen
+/// of [`stroke_rounded`] already has in this file — made, used inside one drawing, deleted —
+/// and it is the honest ownership for a colour that is on the screen only while the cursor
+/// stands still on one control.
+///
+/// The value is created inside the colour choice and travels with the resolved colours, so it
+/// is dropped exactly where the drawing that uses it ends.
+struct HotBrush(HBRUSH);
+
+impl HotBrush {
+    /// The brush of one colour, or `None` when GDI refused (NFR-13).
+    ///
+    /// A refusal is survived by the caller filling with the quiet face it already holds: the
+    /// button or the combo box then simply does not light up, which is the picture every task
+    /// before T-12-8 drew. Nothing is journaled, for the reason [`theme::Brushes::new`] gives
+    /// at its own refusal — `CreateSolidBrush` promises no last-error code, and the closed
+    /// operation vocabulary of `diag` has no row for GDI.
+    fn new(color: COLORREF) -> Option<Self> {
+        // SAFETY: takes one colour by value, reads no memory of ours and answers a handle
+        // which becomes the property of this value and is freed exactly once, in `Drop`.
+        let brush = unsafe { CreateSolidBrush(color) };
+
+        if brush.is_invalid() {
+            return None;
+        }
+
+        Some(Self(brush))
+    }
+
+    /// The handle, borrowed — this value frees it, nobody else.
+    fn brush(&self) -> HBRUSH {
+        self.0
+    }
+}
+
+impl Drop for HotBrush {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` came from the successful `CreateSolidBrush` of `new`, was selected
+        // out of every DC it was selected into by the drawing that used it, and is freed
+        // exactly once, here. The `BOOL` is dropped for the reason `stroke_rounded` drops its
+        // own: nothing can be done about a refused cleanup and the journal has no row for GDI.
+        let _ = unsafe { DeleteObject(self.0.into()) };
+    }
+}
+
 /// The colours of one owner-drawn push button, resolved out of the palette: the ground it
 /// stands on, the face brush, the caption ink and the frame brush. What
 /// [`resolve_button_colors`] answers and the whole of what [`paint_push_button`] needs.
+///
+/// ⚠ The `face` of the hot state is a brush **this value does not own** — it is the transient
+/// [`HotBrush`] the resolver answers beside these colours, and the caller holds that one alive
+/// for the length of the drawing. See [`resolve_button_colors`].
 #[derive(Clone, Copy)]
 struct ResolvedButtonColors {
     /// What the whole rectangle is erased with before the face goes on it — the brush
@@ -3137,16 +3229,34 @@ struct ResolvedButtonColors {
 /// The single place a button role becomes a brush or a colour of the resolved palette —
 /// the drawing never sees a role. One body shared by the settings dialog and the about
 /// dialog (§6.2, task T-11-11), moved out of `on_draw_item` rather than copied.
+///
+/// ⚠ **Two values leave here since task T-12-8**, and the second one is not decoration: the hot
+/// face is filled with a brush made for this one drawing (see [`HotBrush`]), and the colours
+/// only *name* it. The caller must keep the answered [`HotBrush`] alive until the painting is
+/// over — every caller binds it and lets it drop when its own frame ends, which is the length
+/// of the paint. `None` for every other face, and for a refused `CreateSolidBrush`.
 fn resolve_button_colors(
     colors: ButtonColors,
     ground: HBRUSH,
     brushes: &theme::Brushes,
     palette: &theme::Palette,
-) -> ResolvedButtonColors {
+) -> (ResolvedButtonColors, Option<HotBrush>) {
+    // The hot face is the one colour of this table the window's brush set does not hold —
+    // task T-12-8, see [`HotBrush`] for why it is made here instead of being owned there.
+    // A refused `CreateSolidBrush` leaves `None`, and the face below falls back to the quiet
+    // `button_bg`: the button then looks exactly as it did before this task (NFR-13).
+    let hot = match colors.face {
+        ButtonFaceRole::HoverBg => HotBrush::new(palette.hover_bg),
+        ButtonFaceRole::ButtonBg | ButtonFaceRole::AccentBg | ButtonFaceRole::SelBg => None,
+    };
+
     let face = match colors.face {
         ButtonFaceRole::ButtonBg => brushes.button_bg(),
         ButtonFaceRole::AccentBg => brushes.accent_bg(),
         ButtonFaceRole::SelBg => brushes.sel_bg(),
+        ButtonFaceRole::HoverBg => hot
+            .as_ref()
+            .map_or_else(|| brushes.button_bg(), HotBrush::brush),
     };
 
     let ink = match colors.text {
@@ -3160,12 +3270,15 @@ fn resolve_button_colors(
         ButtonBorderRole::ButtonBorder => palette.button_border,
     };
 
-    ResolvedButtonColors {
-        ground,
-        face,
-        ink,
-        border,
-    }
+    (
+        ResolvedButtonColors {
+            ground,
+            face,
+            ink,
+            border,
+        },
+        hot,
+    )
 }
 
 /// The two kinds of owner-drawn glyph element — FR-92а, task T-11-5b.
@@ -3485,6 +3598,11 @@ pub enum ComboFillRole {
     FieldBg,
     /// [`theme::Palette::sel_bg`] — the highlighted item of the dropped-down list.
     SelBg,
+    /// [`theme::Palette::hover_bg`] — the **closed part** while the cursor stands on it
+    /// (task T-12-8), and nothing else: an item of a dropped-down list is never answered
+    /// this role, because the list already answers the cursor with the selection pair the
+    /// keyboard moves through, and a second highlight over it would say two things at once.
+    HoverBg,
 }
 
 /// The ink the item's text is drawn with, named as the palette field.
@@ -3610,15 +3728,28 @@ pub struct ComboClosedColors {
 /// - **запрещённость гасит текст**, the precedent [`button_color_roles`] and
 ///   [`glyph_color_roles`] set: a combo the mode has switched off (the pair «Источник» and
 ///   «Цель» under «Несколько раскладок») shows its value in `text_muted`;
+/// - **запрещённая часть не «горячеет»** — the very precedence [`button_color_roles`] keeps:
+///   a combo box the mode has switched off takes no click, so the cursor standing on it
+///   changes nothing at all;
+/// - **горячая закрытая часть** — the cursor stands on an enabled closed face: the fill goes
+///   to `hover_bg` (task T-12-8) and **nothing else moves**. The frame stays `field_border`,
+///   the value keeps its ink and the chevron keeps its muted one, exactly as at rest: the
+///   response is a change of ground, the way the tray menu (task T-11-21) makes it. The
+///   dropped-down list is not concerned: it is another window with another paint, and the
+///   items of it go on answering [`combo_item_color_roles`];
 /// - the chevron and the frame do not move with the state: a muted hint stays muted, and a
 ///   field that lost its frame when disabled would stop reading as a field at all.
 ///
 /// Focus is deliberately absent here, exactly as it is in [`button_color_roles`]: `ODS_FOCUS`
 /// changes no colour — it adds the dotted `DrawFocusRect`, and that is the drawing half's
 /// business (the decision of task T-11-5a, kept uniform here).
-pub fn combo_closed_color_roles(disabled: bool) -> ComboClosedColors {
+pub fn combo_closed_color_roles(hot: bool, disabled: bool) -> ComboClosedColors {
     ComboClosedColors {
-        fill: ComboFillRole::FieldBg,
+        fill: if hot && !disabled {
+            ComboFillRole::HoverBg
+        } else {
+            ComboFillRole::FieldBg
+        },
         border: ComboBorderRole::FieldBorder,
         text: if disabled {
             ComboTextRole::TextMuted
@@ -4801,6 +4932,14 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     let disabled = item_state.0 & ODS_DISABLED.0 != 0;
     let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
 
+    // FR-92а, task T-12-8: the fourth state, and the one the message does not carry — Windows
+    // has no `ODS_HOTLIGHT` for an owner-drawn button. It is this program's own record, kept by
+    // [`button_proc`], and the window of the message is **compared** against it and never
+    // followed, exactly as the combo and list branches above compare theirs (SEC-05). A forged
+    // message naming the control the cursor really is on buys the sender the face that control
+    // is already wearing.
+    let hot = is_hot(item_window);
+
     // FR-92а, task T-11-5b: the check boxes and radio buttons, by identifier, ahead of the
     // push-button path. Everything they take out of the message is already on this frame —
     // the same seven fields, nothing else; the check state is deliberately *not* a field of
@@ -4844,19 +4983,24 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
                 brushes.window_bg()
             };
 
+            let (colors, hot_brush) = resolve_button_colors(
+                button_color_roles(control, hot, pressed, disabled),
+                ground,
+                brushes,
+                state.palette,
+            );
+
             Some((
-                resolve_button_colors(
-                    button_color_roles(control, pressed, disabled),
-                    ground,
-                    brushes,
-                    state.palette,
-                ),
+                colors,
+                hot_brush,
                 state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some((colors, face))) = choice else {
+    // `_hot_brush` is named and not discarded on purpose: it owns the transient brush the hot
+    // face is filled with, and a `_` would have freed it before the first pixel was drawn.
+    let Some(Some((colors, _hot_brush, face))) = choice else {
         return 0;
     };
 
@@ -5361,11 +5505,18 @@ unsafe fn paint_label_lines(
 }
 
 /// One [`ComboFillRole`] resolved against the brushes of the dialog — the single place these
-/// two roles become a brush, shared by the item drawing, the row drawing of the exclusion
+/// roles become a brush, shared by the item drawing, the row drawing of the exclusion
 /// list and the closed-face drawing of the subclass (§6.2: one body, not three copies).
+///
+/// ⚠ [`ComboFillRole::HoverBg`] answers the **quiet** `field_bg` here, and that is not a
+/// mistake: the window's brush set has no `hover_bg` brush to hand out (see [`HotBrush`] for
+/// why it is not one of the eight), and the one drawing that can be answered that role —
+/// [`draw_combo_closed_part`] — makes the transient brush itself and never reaches this line.
+/// A caller that did reach it fills with the ground the closed face wears at rest, which is
+/// the picture every task before T-12-8 drew (NFR-13).
 fn combo_fill_brush(role: ComboFillRole, brushes: &theme::Brushes) -> HBRUSH {
     match role {
-        ComboFillRole::FieldBg => brushes.field_bg(),
+        ComboFillRole::FieldBg | ComboFillRole::HoverBg => brushes.field_bg(),
         ComboFillRole::SelBg => brushes.sel_bg(),
     }
 }
@@ -5644,6 +5795,11 @@ unsafe fn draw_list_item(
                 match colors.fill {
                     ComboFillRole::FieldBg => state.palette.field_bg,
                     ComboFillRole::SelBg => state.palette.sel_bg,
+                    // Unreachable by construction — `list_item_color_roles` answers the two
+                    // above and nothing else — and written out rather than folded into the
+                    // first arm, so that the day a row does grow a hot state the compiler
+                    // has already named the colour it would take.
+                    ComboFillRole::HoverBg => state.palette.hover_bg,
                 },
                 combo_text_ink(colors.text, state.palette),
                 state.fonts.as_ref().map(DialogFonts::text),
@@ -8883,12 +9039,25 @@ unsafe extern "system" fn combo_box_proc(
         // above, and an erase before it is exactly the two-step repaint that flickers.
         WM_ERASEBKGND => return LRESULT(1),
 
+        // ⚠ Task T-12-8, the response of the cursor — the two arms the same procedure of the
+        // buttons has, and for the same reason. Neither *answers* the message: both fall
+        // through to `DefSubclassProc` below, so the control's own hot-tracking, its click and
+        // its keyboard are untouched — in particular **the list does not drop down**, which is
+        // what a swallowed `WM_MOUSEMOVE` would have been the shortest road to breaking. The
+        // repaint the flag asks for goes through `WM_PAINT` and the arm above it, and the
+        // colour is chosen by `combo_closed_color_roles`.
+        WM_MOUSEMOVE => enter_hot(combo),
+
+        WM_MOUSELEAVE => leave_hot(combo),
+
         // The belt to the braces of the pair — see `subclass_combo_boxes`. Forwarded on
         // afterwards: `WM_NCDESTROY` must reach every procedure of the chain.
         //
         // SAFETY: `combo` is that control, and the procedure and identifier are the pair the
         // subclass was installed with.
         WM_NCDESTROY => {
+            // Task T-12-8: the record cannot outlive the window it names — see `HOT_CONTROL`.
+            forget_hot(combo);
             let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
         }
 
@@ -9000,11 +9169,16 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         send_to(dialog, control, WM_QUERYUISTATE, 0, 0) & (UISF_HIDEFOCUS as isize) != 0;
     let focused = has_focus && !cues_hidden;
 
-    let roles = combo_closed_color_roles(disabled);
+    // Task T-12-8: the cursor standing on the closed part, out of this program's own record —
+    // the very question the push buttons ask, asked here about the control that is painting
+    // itself rather than about the window of a message.
+    let roles = combo_closed_color_roles(is_hot(combo), disabled);
 
     // The colour choice, split from the painting exactly as everywhere in this file: the
     // borrow of the state ends before the DC is touched, and what leaves the closure is plain
-    // values — a brush the state keeps alive until the dialog ends, and three inks.
+    // values — a brush the state keeps alive until the dialog ends, three inks, and (only while
+    // the closed part is hot) the transient brush of the response, which the binding below
+    // holds alive until this function returns.
     //
     // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
     // window `show_dialog` created — the contract of `with_state`.
@@ -9013,6 +9187,19 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
             // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
             let brushes = state.brushes.as_ref()?;
             let palette = state.palette;
+
+            // The hot fill is the one colour of the table the window's brush set does not hold
+            // — see [`HotBrush`]. `None` for every other role, and also for a refused
+            // `CreateSolidBrush`, in which case the fill below falls back to the quiet
+            // `field_bg` and the closed part simply does not light up (NFR-13).
+            let hot = match roles.fill {
+                ComboFillRole::HoverBg => HotBrush::new(palette.hover_bg),
+                ComboFillRole::FieldBg | ComboFillRole::SelBg => None,
+            };
+
+            let fill = hot
+                .as_ref()
+                .map_or_else(|| combo_fill_brush(roles.fill, brushes), HotBrush::brush);
 
             // The ground the corners the rounding cuts away are left standing on — the very
             // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with: the panel brush for a
@@ -9026,7 +9213,8 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
 
             Some((
                 ground,
-                combo_fill_brush(roles.fill, brushes),
+                fill,
+                hot,
                 match roles.border {
                     ComboBorderRole::FieldBorder => palette.field_border,
                 },
@@ -9039,7 +9227,9 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         })
     };
 
-    let Some(Some((ground, fill, border, ink, chevron_ink, face))) = choice else {
+    // `_hot` is named and not discarded on purpose: it owns the transient brush `fill` may name,
+    // and a `_` would have freed it before the first pixel was drawn.
+    let Some(Some((ground, fill, _hot, border, ink, chevron_ink, face))) = choice else {
         return;
     };
 
@@ -9175,6 +9365,280 @@ fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
 
     buffer.truncate(copied);
     buffer
+}
+
+// =========================================================================================
+// Отклик наведения: «когда наводишь — должно быть видно» — FR-92а, task T-12-8
+// =========================================================================================
+//
+// ⚠ **What this section is.** Not a repair of a disagreement with the mock-ups: the mock-up of
+// this dialog draws no hot state at all (`scratchpad-Э11\ui.ps1` has no 'Hover' in it, and the
+// 'btn' branch of `Draw-Control` knows one state), and the protocol of stage Э12 recorded the
+// absence as a *match*. It is a new requirement, arrived at in the user's own words while the
+// delivery was being looked over: «когда наводишь — должно быть видно, это общепринятая
+// практика». The reference for the look is therefore not the mock-up but this program's **own
+// tray menu**, where the response was made and accepted in task T-11-21: the entry under the
+// cursor carries `hover_bg`, and the same palette field is what lights a button here.
+//
+// **What the cursor costs.** Nothing but a flag. `WM_MOUSEMOVE` arrives by the dozen per
+// second, so the handler below allocates nothing, reads nothing, journals nothing and — the
+// point of the whole arrangement — asks for a repaint **only on the edge**: the very first move
+// onto a control arms the leave notification and lights it, every move after that finds the
+// flag already set and returns without touching the window. One repaint on the way in, one on
+// the way out, and not a single timer or thread anywhere near it (NFR-01…NFR-05 hold because
+// the keyboard hook is not on this road at all — everything here is the UI thread's).
+
+thread_local! {
+    /// The one control the cursor stands on, zero when it stands on none — task T-12-8.
+    ///
+    /// One place and not a field per window, because the cursor is one: at most one control of
+    /// this thread can be hot at any moment, and a second store would only be a way for the two
+    /// to disagree. Stored as the plain integer the handle is, exactly as [`DIALOG_WINDOW`]
+    /// beside it, and **compared and never followed** — nothing here dereferences a window
+    /// handle, so a stale value can at worst make one control paint itself the way it already
+    /// looks. It is cleared on `WM_NCDESTROY` all the same, so a handle the system later reuses
+    /// cannot inherit somebody else's highlight.
+    ///
+    /// A thread-local because the windows of this program live on the UI thread and on no other
+    /// (section 6.1).
+    static HOT_CONTROL: Cell<isize> = const { Cell::new(0) };
+}
+
+/// Whether the cursor stands on this control — the question the drawing halves ask.
+///
+/// The zero check is not redundant: an invalid handle must not match the «nothing is hot»
+/// record.
+fn is_hot(window: HWND) -> bool {
+    let hot = HOT_CONTROL.with(Cell::get);
+
+    hot != 0 && hot == window.0 as isize
+}
+
+/// The cursor has arrived on `window`: arm the leave notification, remember the control and ask
+/// for the one repaint — task T-12-8.
+///
+/// **Nothing happens on a move that changes nothing.** The flag is looked at first, and a
+/// control that is already the hot one leaves this function without a single call — which is
+/// what keeps a window that the cursor is resting on from repainting itself for ever.
+///
+/// The order is deliberate: the tracking is armed **before** the flag is set, so a refused
+/// `TrackMouseEvent` — the one call here that can leave the state stuck — leaves the control
+/// cold instead of leaving it lit with no way back. A control that never lights up is the
+/// picture every task before this one drew; a control that lights up and never goes out would
+/// be a new defect (NFR-13).
+fn enter_hot(window: HWND) {
+    if is_hot(window) {
+        return;
+    }
+
+    let mut tracking = TRACKMOUSEEVENT {
+        cbSize: u32::try_from(size_of::<TRACKMOUSEEVENT>()).unwrap_or(0),
+        dwFlags: TME_LEAVE,
+        hwndTrack: window,
+        dwHoverTime: 0,
+    };
+
+    // SAFETY: `tracking` is a live local of this frame, filled in whole above, and the call
+    // reads it and keeps no pointer to it; `window` is the control this procedure is installed
+    // on. NFR-13: the answer is examined right here — a refusal means no `WM_MOUSELEAVE` will
+    // ever come, so the flag is left alone and this control simply has no response. Nothing is
+    // journaled, for the reason `subclass_combo_boxes` writes down at its own dropped answer:
+    // the closed operation vocabulary of `diag` has no row for this call, the consequence is
+    // cosmetic, and the dialog works either way.
+    if unsafe { TrackMouseEvent(&mut tracking) }.is_err() {
+        return;
+    }
+
+    HOT_CONTROL.with(|hot| hot.set(window.0 as isize));
+
+    invalidate_hot(window);
+}
+
+/// The cursor has left `window`: forget it and ask for the repaint back to the quiet face.
+///
+/// The record is cleared **only when it still names this control**. The two messages are not
+/// ordered against each other by anything: a `WM_MOUSELEAVE` for the control the cursor came
+/// from can arrive after the `WM_MOUSEMOVE` of the one it went to, and a clear that did not
+/// look would then put out the light of the control the cursor is actually on. The repaint is
+/// asked for either way — this control has to stop showing the hot face whichever of the two
+/// orders happened.
+fn leave_hot(window: HWND) {
+    if is_hot(window) {
+        HOT_CONTROL.with(|hot| hot.set(0));
+    }
+
+    invalidate_hot(window);
+}
+
+/// The control is being destroyed: drop the record if it names it — task T-12-8.
+///
+/// Not a repaint and not a message: a window inside `WM_NCDESTROY` has nothing left to paint.
+/// This exists so that the record cannot outlive the window it names — see [`HOT_CONTROL`].
+fn forget_hot(window: HWND) {
+    if is_hot(window) {
+        HOT_CONTROL.with(|hot| hot.set(0));
+    }
+}
+
+/// The one repaint of the response — the whole rectangle of the control, without an erase.
+///
+/// `false` for the erase because every drawing this repaint reaches grounds its own rectangle
+/// before it draws: an owner-drawn push button since task T-12-6, the closed face of a combo
+/// box since T-11-14. An erase on top of that would be the two-step repaint that flickers.
+fn invalidate_hot(window: HWND) {
+    // SAFETY: `window` is the control this procedure is installed on; the call marks a
+    // rectangle of it and touches no memory of ours.
+    //
+    // NFR-13: examined in words and deliberately dropped. A refusal — a window already gone —
+    // means the control keeps the face it last drew until something else invalidates it, which
+    // is a cosmetic nothing on a window that is being taken down anyway; there is no journal
+    // row for it (reviews\T-11-1.md) and no `debug_assert`, because a window closing under the
+    // cursor is a legal state and not a violation of ownership.
+    let _ = unsafe { InvalidateRect(Some(window), None, false) };
+}
+
+/// The nine owner-drawn **push buttons** of the settings dialog — task T-12-8.
+///
+/// The single place they are listed, and the list [`subclass_buttons`] and
+/// [`unsubclass_buttons`] both walk, so every install has its removal by construction — the
+/// discipline [`subclass_combo_boxes`] set for the four combo boxes.
+///
+/// ⚠ **Push buttons and nothing else.** The check boxes, the radio buttons and the eight group
+/// panels are `BS_OWNERDRAW` too and are therefore «кнопки» to the window manager, but they are
+/// not what this response is about: the colours of a push button are the closed table of
+/// [`button_color_roles`], which task T-12-8 widened, while a glyph element answers
+/// [`glyph_color_roles`] — a table with no hot state and no palette field waiting to be its
+/// ground — and a panel is the *background* of its block since task T-11-13 and takes no
+/// clicks at all. Subclassing either would arm a notification for a repaint that changes
+/// nothing.
+const PUSH_BUTTONS: [i32; 9] = [
+    IDC_HOTKEY_CAPTURE,
+    IDC_CYCLE_UP,
+    IDC_CYCLE_DOWN,
+    IDC_EXCLUSION_REMOVE,
+    IDC_EXCLUSION_ADD,
+    IDC_LOG_OPEN,
+    OK_COMMAND,
+    CANCEL_COMMAND,
+    IDC_APPLY,
+];
+
+/// The one owner-drawn push button of the about window — task T-12-8.
+///
+/// It is «ОК», and [`button_color_roles`] answers the accent for it in every state but the
+/// pressed one, **including the hot one**: this wave deliberately leaves the accented button
+/// without a response, because the palette holds no second accent and inventing a colour is
+/// forbidden. It is subclassed all the same, and that is not waste but the point: the wiring is
+/// uniform, the flag is kept for it exactly as for the other nine, and the day the accent gets
+/// a hot face of its own it appears here by one arm of the colour table and by nothing else.
+/// The repaint the flag asks for costs nothing visible — a push button has drawn itself
+/// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
+/// that were there.
+const ABOUT_BUTTONS: [i32; 1] = [OK_COMMAND];
+
+/// The identifier of the button subclass — one number for all ten windows, because the key of
+/// the subclass API is the (window, procedure, identifier) triple and the window is what varies.
+/// Distinct from [`COMBO_SUBCLASS_ID`] and [`LIST_SUBCLASS_ID`] for readability alone; the pairs
+/// could not collide anyway, being installed on different windows with different procedures.
+const BUTTON_SUBCLASS_ID: usize = 3;
+
+/// Puts [`button_proc`] in front of each button of `buttons` — task T-12-8.
+///
+/// **The pair.** Called exactly once per window — from [`fill_dialog`] for the settings dialog
+/// and from the `WM_INITDIALOG` of [`about_proc`] for the about window — and the other half is
+/// [`unsubclass_buttons`], called exactly once from the `WM_DESTROY` of the same procedure,
+/// while the children are still alive. Both walk the same list with the same procedure and the
+/// same [`BUTTON_SUBCLASS_ID`]; [`button_proc`] additionally takes itself off on `WM_NCDESTROY`,
+/// which is the belt to that pair's braces. Every sentence of this paragraph is
+/// [`subclass_combo_boxes`]'s, because this is deliberately the same arrangement and not a
+/// second invention.
+///
+/// A refused install is survived (NFR-13): that button then behaves as it did before this task
+/// — no response to the cursor — and everything else about it is unchanged. Not journaled, for
+/// the reason [`subclass_combo_boxes`] writes down at its own dropped answer.
+fn subclass_buttons(hwnd: HWND, buttons: &[i32]) {
+    for &control in buttons {
+        // SAFETY: `hwnd` is the live window; the crate turns a missing control into an error.
+        let Ok(button) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+            continue;
+        };
+
+        // SAFETY: `button` is a live control of this window, created by the dialog manager on
+        // this thread, and `button_proc` is a function of exactly the signature `SUBCLASSPROC`
+        // names. The reference data is zero — this subclass keeps no state of its own; the one
+        // thing it remembers lives in `HOT_CONTROL`, which is a thread-local and not a per
+        // window field, for the reason written down there.
+        let _ = unsafe { SetWindowSubclass(button, Some(button_proc), BUTTON_SUBCLASS_ID, 0) };
+    }
+}
+
+/// Takes [`button_proc`] back off the buttons of `buttons` — the far half of the pair
+/// [`subclass_buttons`] describes.
+///
+/// The refusal is deliberately **not** journaled, for the reason [`unsubclass_combo_boxes`]
+/// gives: on `WM_DESTROY` a `FALSE` means the subclass was already gone — never installed, or
+/// removed by the `WM_NCDESTROY` arm of the procedure — and neither is a fault.
+fn unsubclass_buttons(hwnd: HWND, buttons: &[i32]) {
+    for &control in buttons {
+        // SAFETY: `hwnd` is the live window — `WM_DESTROY` reaches it before its children are
+        // destroyed — and the crate turns a missing control into an error.
+        let Ok(button) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+            continue;
+        };
+
+        // SAFETY: `button` is the live control the subclass was installed on, and the procedure
+        // and identifier are the very pair `SetWindowSubclass` was given.
+        let _ = unsafe { RemoveWindowSubclass(button, Some(button_proc), BUTTON_SUBCLASS_ID) };
+    }
+}
+
+/// The procedure that stands in front of every owner-drawn push button while its window is up —
+/// task T-12-8.
+///
+/// Three messages are its own and **not one of them is answered here**: each arm updates the
+/// flag and then falls through to [`DefSubclassProc`], so a button behaves in every other way
+/// exactly as it did before the subclass — it still tracks its own press, still answers the
+/// keyboard, still notifies its parent. Nothing about the *drawing* happens here either: the
+/// arms ask for a repaint, and the repaint goes the road it always went — the button's own
+/// `WM_PAINT` sends `WM_DRAWITEM` to the dialog, which chooses the colours by the table.
+///
+/// # Safety
+///
+/// Called by the window manager with the arguments of a window message, on one of the controls
+/// [`subclass_buttons`] installed it on.
+unsafe extern "system" fn button_proc(
+    button: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    _reference_data: usize,
+) -> LRESULT {
+    match message {
+        // ⚠ The message that arrives by the dozen per second: see `enter_hot` for what it costs
+        // when nothing has changed, which is the ordinary case.
+        WM_MOUSEMOVE => enter_hot(button),
+
+        // The far end of the notification `enter_hot` armed.
+        WM_MOUSELEAVE => leave_hot(button),
+
+        // The belt to the braces of the pair — see `subclass_buttons`. Forwarded on afterwards:
+        // `WM_NCDESTROY` must reach every procedure of the chain.
+        //
+        // SAFETY: `button` is that control, and the procedure and identifier are the pair the
+        // subclass was installed with.
+        WM_NCDESTROY => {
+            forget_hot(button);
+            let _ = unsafe { RemoveWindowSubclass(button, Some(button_proc), BUTTON_SUBCLASS_ID) };
+        }
+
+        _ => {}
+    }
+
+    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
+    // unchanged; this is what `DefSubclassProc` exists for.
+    unsafe { DefSubclassProc(button, message, wparam, lparam) }
 }
 
 // =========================================================================================
@@ -9707,6 +10171,10 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // the same `WM_DESTROY` branch of `dialog_proc` the combo boxes' removal stands in, and
     // nothing else in the file installs or removes this subclass either.
     subclass_lists(hwnd);
+    // Task T-12-8: the response of the cursor on the nine push buttons. The other half of this
+    // pair — `unsubclass_buttons` — stands in the same `WM_DESTROY` branch as the two above,
+    // walking the same `PUSH_BUTTONS` list.
+    subclass_buttons(hwnd, &PUSH_BUTTONS);
     // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
     // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
     set_field_margins(hwnd);
@@ -11986,6 +12454,12 @@ unsafe extern "system" fn about_proc(
             // only ever read back by `with_about_state`.
             unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
 
+            // Task T-12-8: the response of the cursor, wired on this window's one push button
+            // exactly as on the nine of the settings dialog. The other half of the pair is the
+            // `WM_DESTROY` branch below, walking the same `ABOUT_BUTTONS` list — see that
+            // constant for why «ОК» is subclassed although this wave paints it no differently.
+            subclass_buttons(hwnd, &ABOUT_BUTTONS);
+
             // SAFETY: the pointer has just been stored and names the `RefCell` on the
             // frame of `show_about_dialog`, which outlives this modal call.
             unsafe {
@@ -12083,6 +12557,17 @@ unsafe extern "system" fn about_proc(
                 end_dialog(hwnd, isize::try_from(control).unwrap_or(0));
             }
 
+            0
+        }
+
+        // Task T-12-8: the far half of the subclass pair, on the terms `dialog_proc` states at
+        // its own `WM_DESTROY` — this message reaches the window while its children are still
+        // live, so «ОК» is still there to be handed back its own procedure. The message carries
+        // nothing and is not dereferenced (SEC-05).
+        WM_DESTROY => {
+            unsubclass_buttons(hwnd, &ABOUT_BUTTONS);
+
+            // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
             0
         }
 
@@ -12336,12 +12821,13 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // SAFETY: see above — the dialog manager owns the struct for the length of the send,
     // and this procedure is inside that send.
     let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    let (ctl_type, ctl_id, item_state, dc, rect) = (
+    let (ctl_type, ctl_id, item_state, dc, rect, item_window) = (
         item.CtlType,
         item.CtlID,
         item.itemState,
         item.hDC,
         item.rcItem,
+        item.hwndItem,
     );
 
     let control = i32::try_from(ctl_id).unwrap_or(-1);
@@ -12368,6 +12854,13 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     let disabled = item_state.0 & ODS_DISABLED.0 != 0;
     let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
 
+    // Task T-12-8: the same fourth state as in the settings dialog, read the same way — this
+    // program's own record, compared against the window of the message and never followed. The
+    // colour table answers the accent for «ОК» whether it is hot or not, so this button paints
+    // itself the same either way in this wave; the flag is asked for all the same, because the
+    // table is the one place that decision lives.
+    let hot = is_hot(item_window);
+
     // The colour choice, split from the painting — the borrow ends before the DC is
     // touched, exactly as everywhere in this file.
     //
@@ -12377,22 +12870,26 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             // `None` — the brushes were refused at initialisation (NFR-13).
             let brushes = state.brushes.as_ref()?;
 
+            let (colors, hot_brush) = resolve_button_colors(
+                button_color_roles(control, hot, pressed, disabled),
+                // The ground of this window has no panels in it: `on_about_ctl_color`
+                // answers `WM_CTLCOLORBTN` with the window brush and nothing else
+                // (task T-12-6).
+                brushes.window_bg(),
+                brushes,
+                state.palette,
+            );
+
             Some((
-                resolve_button_colors(
-                    button_color_roles(control, pressed, disabled),
-                    // The ground of this window has no panels in it: `on_about_ctl_color`
-                    // answers `WM_CTLCOLORBTN` with the window brush and nothing else
-                    // (task T-12-6).
-                    brushes.window_bg(),
-                    brushes,
-                    state.palette,
-                ),
+                colors,
+                hot_brush,
                 state.fonts.as_ref().map(DialogFonts::text),
             ))
         })
     };
 
-    let Some(Some((colors, face))) = choice else {
+    // `_hot_brush` is named and not discarded for the reason `on_draw_item` gives at its own.
+    let Some(Some((colors, _hot_brush, face))) = choice else {
         return 0;
     };
 

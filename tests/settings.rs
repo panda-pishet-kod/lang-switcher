@@ -977,7 +977,9 @@ fn the_title_bar_is_dark_exactly_for_the_graphite_palette() {
 //
 // Criterion 9: the mapping «(identifier, state) → colour roles (face, text, frame)» is a
 // pure function, closed here by the full table — two kinds (ordinary, default «ОК») ×
-// three states (normal, pressed, disabled). The `WM_DRAWITEM` handler itself needs a live
+// the states of the button. Since task T-12-8 there are five of them rather than three:
+// наведение joined покой/нажатие/запрет, and «нажата под курсором» is the cell that shows
+// the precedence «нажата > горячая». The `WM_DRAWITEM` handler itself needs a live
 // dialog and is checked by the controller on the real window at acceptance, along with
 // Enter/Esc/Space. The identifiers are literals, not imports — the rule of the template
 // tests below: a test that imported the numbers would agree with any renumbering.
@@ -989,7 +991,7 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
 
     // Every ordinary button of the dialog by its actual identifier — including «Отмена»
     // (2, the manager's own IDCANCEL): the accent belongs to «ОК» alone, so each of these
-    // is driven through all three states and must never show it.
+    // is driven through every state and must never show it.
     let ordinary = [
         (1012, "Задать"),
         (1025, "Выше"),
@@ -1001,24 +1003,33 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
         (1080, "Применить"),
     ];
 
-    // (pressed, disabled) → the expected face and ink of an ordinary button. The frame is
+    // (hot, pressed, disabled) → the expected face and ink of an ordinary button. The frame is
     // `button_border` in every row of the table — asserted below with the whole struct.
     let ordinary_states = [
-        (false, false, Face::ButtonBg, Ink::Text),
-        (true, false, Face::SelBg, Ink::SelFg),
-        (false, true, Face::ButtonBg, Ink::TextMuted),
+        (false, false, false, Face::ButtonBg, Ink::Text),
+        // Task T-12-8: the cursor on the button moves the face to `hover_bg` and moves
+        // nothing else — the ink stays `text` and the frame stays `button_border`.
+        (true, false, false, Face::HoverBg, Ink::Text),
+        (false, true, false, Face::SelBg, Ink::SelFg),
+        // «Нажата > горячая»: a button held down is under the cursor by definition, and it
+        // shows the selection pair and not the hot face.
+        (true, true, false, Face::SelBg, Ink::SelFg),
+        (false, false, true, Face::ButtonBg, Ink::TextMuted),
+        // «Запрет > горячая»: a disabled button takes no click, so the cursor standing on
+        // it changes nothing at all — «Выше» and «Ниже» are the ones actually seen grey.
+        (true, false, true, Face::ButtonBg, Ink::TextMuted),
     ];
 
     for (control, name) in ordinary {
-        for (pressed, disabled, face, text) in ordinary_states {
+        for (hot, pressed, disabled, face, text) in ordinary_states {
             assert_eq!(
-                settings::button_color_roles(control, pressed, disabled),
+                settings::button_color_roles(control, hot, pressed, disabled),
                 ButtonColors {
                     face,
                     text,
                     border: ButtonBorderRole::ButtonBorder,
                 },
-                "«{name}» ({control}), pressed = {pressed}, disabled = {disabled}"
+                "«{name}» ({control}), hot = {hot}, pressed = {pressed}, disabled = {disabled}"
             );
         }
     }
@@ -1028,22 +1039,88 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
     // while pressed (the accent yields for the length of the press); muted ink on the
     // ordinary face when disabled — a disabled button takes no Enter and must not
     // advertise itself as the default.
+    //
+    // ⚠ And the accent **does not answer the cursor** in this wave (task T-12-8, п. 4): the
+    // palette holds no second accent to light «ОК» up with, inventing a colour is forbidden,
+    // and so the hot row of this half of the table is the row above it, character for
+    // character. The rows are here rather than absent on purpose — the day a wave gives the
+    // accent a hot face, this is the assertion that has to be edited for it.
     let default_states = [
-        (false, false, Face::AccentBg, Ink::AccentFg),
-        (true, false, Face::SelBg, Ink::SelFg),
-        (false, true, Face::ButtonBg, Ink::TextMuted),
+        (false, false, false, Face::AccentBg, Ink::AccentFg),
+        (true, false, false, Face::AccentBg, Ink::AccentFg),
+        (false, true, false, Face::SelBg, Ink::SelFg),
+        (true, true, false, Face::SelBg, Ink::SelFg),
+        (false, false, true, Face::ButtonBg, Ink::TextMuted),
+        (true, false, true, Face::ButtonBg, Ink::TextMuted),
     ];
 
-    for (pressed, disabled, face, text) in default_states {
+    for (hot, pressed, disabled, face, text) in default_states {
         assert_eq!(
-            settings::button_color_roles(1, pressed, disabled),
+            settings::button_color_roles(1, hot, pressed, disabled),
             ButtonColors {
                 face,
                 text,
                 border: ButtonBorderRole::ButtonBorder,
             },
-            "«ОК» (1), pressed = {pressed}, disabled = {disabled}"
+            "«ОК» (1), hot = {hot}, pressed = {pressed}, disabled = {disabled}"
         );
+    }
+}
+
+/// **Criterion 9 of T-12-8** — the response of the cursor is a member of the palette and not a
+/// colour of its own, in both palettes.
+///
+/// The role tables above say «`hover_bg`»; this says what that field *is*, and that it is a
+/// field of the palette rather than a number invented for this task. The two literals are the
+/// ones the mock-up generator carries (`scratchpad-Э11\ui.ps1`: `Hover=(Col 52 58 67)` for
+/// «Графит» and `Hover=(Col 234 238 242)` for «Туман»), and they are also the very numbers the
+/// tray menu has been drawing its own response with since task T-11-21 — the reference this
+/// wave copies.
+///
+/// The second half is the part that makes the measurement mean anything: `hover_bg` is
+/// **distinct from every other field of its palette**, so a shot of a hot button cannot be
+/// confused with a shot of a pressed one, a quiet one or a selected row.
+#[test]
+fn the_hot_face_is_the_palette_field_the_tray_menu_already_lights_with() {
+    for (palette, name, expected) in [
+        (&GRAPHITE, "Графит", (52u8, 58u8, 67u8)),
+        (&FOG, "Туман", (234, 238, 242)),
+    ] {
+        let (red, green, blue) = expected;
+        let colorref = u32::from(red) | (u32::from(green) << 8) | (u32::from(blue) << 16);
+
+        assert_eq!(
+            palette.hover_bg.0, colorref,
+            "«{name}» must light a hot element with {red},{green},{blue}"
+        );
+
+        // Every other ground and ink of the same palette — the whole struct but this one
+        // field. None of them may be equal to it: the response has to be *visible* as itself.
+        for (other, field) in [
+            (palette.window_bg, "window_bg"),
+            (palette.title_bg, "title_bg"),
+            (palette.title_fg, "title_fg"),
+            (palette.panel_bg, "panel_bg"),
+            (palette.panel_border, "panel_border"),
+            (palette.text, "text"),
+            (palette.text_muted, "text_muted"),
+            (palette.cap, "cap"),
+            (palette.field_bg, "field_bg"),
+            (palette.field_border, "field_border"),
+            (palette.button_bg, "button_bg"),
+            (palette.button_border, "button_border"),
+            (palette.accent_bg, "accent_bg"),
+            (palette.accent_fg, "accent_fg"),
+            (palette.box_border, "box_border"),
+            (palette.sel_bg, "sel_bg"),
+            (palette.sel_fg, "sel_fg"),
+        ] {
+            assert_ne!(
+                other.0, palette.hover_bg.0,
+                "«{name}»: `hover_bg` must not be the same number as `{field}` — \
+                 a response nobody can tell from another state is no response"
+            );
+        }
     }
 }
 
@@ -3936,14 +4013,19 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
         .0
 }
 
-/// **Criterion 10 of T-11-14** — the closed part of a combo box is drawn from a closed table
-/// of roles, and the table is a pure function.
+/// **Criterion 10 of T-11-14**, widened by **criterion 12 of T-12-8** — the closed part of a
+/// combo box is drawn from a closed table of roles, and the table is a pure function.
 ///
-/// Two rows, because the state that moves is one: разрешён / запрещён. The ground and the
-/// frame are the field pair whatever happens — a combo box is a field to the eye, exactly as
-/// the five input fields and the two lists of `FRAMED_FIELDS` are since T-11-13 — and the
-/// chevron is the muted hint in every cell. What the disabled state moves is the text, the
-/// precedent `button_color_roles` and `glyph_color_roles` set: запрещённость гасит.
+/// The full 2×2 now: наведение × разрешённость. The frame is the field frame whatever happens —
+/// a combo box is a field to the eye, exactly as the five input fields and the two lists of
+/// `FRAMED_FIELDS` are since T-11-13 — and the chevron is the muted hint in every cell. What
+/// the disabled state moves is the text, the precedent `button_color_roles` and
+/// `glyph_color_roles` set: запрещённость гасит. What the cursor moves is the fill, and only
+/// the fill: `hover_bg` while it stands on an enabled closed face, and nothing else in the row
+/// changes with it.
+///
+/// The bottom half of the table is the precedence «запрет выше наведения», the very one the
+/// buttons keep: a combo box the mode has switched off does not light up under the cursor.
 #[test]
 fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
     use lang_switcher::settings::{ComboBorderRole, ComboChevronRole, ComboClosedColors};
@@ -3951,11 +4033,22 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
     use ComboFillRole as Fill;
     use ComboTextRole as Ink;
 
-    let table: [(bool, Fill, ComboBorderRole, Ink, ComboChevronRole); 2] = [
-        // Разрешённый: the value in the ordinary ink.
+    let table: [(bool, bool, Fill, ComboBorderRole, Ink, ComboChevronRole); 4] = [
+        // Разрешённый, курсора нет: the value in the ordinary ink on the quiet field.
         (
             false,
+            false,
             Fill::FieldBg,
+            ComboBorderRole::FieldBorder,
+            Ink::Text,
+            ComboChevronRole::TextMuted,
+        ),
+        // Разрешённый, курсор на закрытой части — task T-12-8: the fill goes to `hover_bg`
+        // and not one other cell of the row moves.
+        (
+            true,
+            false,
+            Fill::HoverBg,
             ComboBorderRole::FieldBorder,
             Ink::Text,
             ComboChevronRole::TextMuted,
@@ -3963,6 +4056,17 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
         // Запрещённый — «Источник» and «Цель» under the «Несколько раскладок» mode: the same
         // field, the same chevron, the muted value.
         (
+            false,
+            true,
+            Fill::FieldBg,
+            ComboBorderRole::FieldBorder,
+            Ink::TextMuted,
+            ComboChevronRole::TextMuted,
+        ),
+        // Запрещённый под курсором: запрет выше наведения — the row is the one above,
+        // unchanged, because a combo box that takes no click must not advertise itself.
+        (
+            true,
             true,
             Fill::FieldBg,
             ComboBorderRole::FieldBorder,
@@ -3971,16 +4075,16 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
         ),
     ];
 
-    for (disabled, fill, border, text, chevron) in table {
+    for (hot, disabled, fill, border, text, chevron) in table {
         assert_eq!(
-            settings::combo_closed_color_roles(disabled),
+            settings::combo_closed_color_roles(hot, disabled),
             ComboClosedColors {
                 fill,
                 border,
                 text,
                 chevron
             },
-            "disabled = {disabled}"
+            "hot = {hot}, disabled = {disabled}"
         );
     }
 }
