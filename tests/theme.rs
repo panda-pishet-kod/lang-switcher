@@ -27,7 +27,12 @@ const fn expected_colorref(r: u32, g: u32, b: u32) -> u32 {
 }
 
 /// Every field of a palette by name, in the order of the task's table.
-fn fields_of(palette: &Palette) -> [(&'static str, u32); 16] {
+///
+/// Seventeen since task T-12-11: `cap` — the ink of a panel heading — joined the sixteen of
+/// T-11-1. It is written out for both palettes even though «Графит» spells the same number
+/// as `text_muted`, and that duplication is the point: the equality belongs to the dark
+/// palette alone, and the light one puts twelve levels between the two roles.
+fn fields_of(palette: &Palette) -> [(&'static str, u32); 17] {
     [
         ("window_bg", palette.window_bg.0),
         ("title_bg", palette.title_bg.0),
@@ -35,6 +40,7 @@ fn fields_of(palette: &Palette) -> [(&'static str, u32); 16] {
         ("panel_border", palette.panel_border.0),
         ("text", palette.text.0),
         ("text_muted", palette.text_muted.0),
+        ("cap", palette.cap.0),
         ("field_bg", palette.field_bg.0),
         ("field_border", palette.field_border.0),
         ("button_bg", palette.button_bg.0),
@@ -49,13 +55,15 @@ fn fields_of(palette: &Palette) -> [(&'static str, u32); 16] {
 }
 
 /// The R,G,B triples of the task's table, column «Графит», copied as written.
-const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 16] = [
+const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
     ("window_bg", (32, 35, 41)),
     ("title_bg", (26, 29, 34)),
     ("panel_bg", (39, 43, 50)),
     ("panel_border", (54, 59, 67)),
     ("text", (228, 231, 234)),
     ("text_muted", (152, 160, 168)),
+    // `ui.ps1:179` — `Cap=(Col 152 160 168)`, the same number as `Muted` on that line.
+    ("cap", (152, 160, 168)),
     ("field_bg", (25, 28, 33)),
     ("field_border", (58, 64, 72)),
     ("button_bg", (46, 51, 59)),
@@ -69,13 +77,16 @@ const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 16] = [
 ];
 
 /// The R,G,B triples of the task's table, column «Туман», copied as written.
-const FOG_TRIPLES: [(&str, (u32, u32, u32)); 16] = [
+const FOG_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
     ("window_bg", (237, 239, 242)),
     ("title_bg", (247, 248, 250)),
     ("panel_bg", (255, 255, 255)),
     ("panel_border", (225, 229, 234)),
     ("text", (35, 38, 43)),
     ("text_muted", (110, 118, 127)),
+    // `ui.ps1:190` — `Cap=(Col 122 130 139)` against `Muted=(Col 110 118 127)`: this is the
+    // palette where the two roles part company, twelve levels in every channel.
+    ("cap", (122, 130, 139)),
     ("field_bg", (255, 255, 255)),
     ("field_border", (207, 213, 220)),
     ("button_bg", (255, 255, 255)),
@@ -92,7 +103,7 @@ const FOG_TRIPLES: [(&str, (u32, u32, u32)); 16] = [
 fn assert_palette_matches(
     palette_name: &str,
     palette: &Palette,
-    triples: &[(&str, (u32, u32, u32)); 16],
+    triples: &[(&str, (u32, u32, u32)); 17],
 ) {
     for ((field, actual), (expected_field, (r, g, b))) in fields_of(palette).iter().zip(triples) {
         // The rows travel in the order of the task's table on both sides; a mismatch here

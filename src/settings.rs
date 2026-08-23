@@ -6704,7 +6704,7 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
                     field: brushes.field_bg(),
                     panel_border: palette.panel_border,
                     field_border: palette.field_border,
-                    caption: palette.text_muted,
+                    caption: palette.cap,
                 },
                 ready,
                 palette,

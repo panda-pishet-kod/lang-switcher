@@ -120,7 +120,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
 /// picked by [`resolve`].
 /// The fields are the roles the drawing tasks T-11-4…T-11-11 paint by; every one of them is
 /// `COLORREF` because that is the currency of `WM_CTLCOLOR*`, `SetTextColor` and
-/// `SetBkColor`, and converting at every use would be sixteen more places to reverse the
+/// `SetBkColor`, and converting at every use would be seventeen more places to reverse the
 /// bytes wrongly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
@@ -137,6 +137,35 @@ pub struct Palette {
     pub text: COLORREF,
     /// Explanatory captions beside the main text.
     pub text_muted: COLORREF,
+    /// The ink of a panel heading — «ОБЩИЕ», «ГОРЯЧАЯ КЛАВИША» and the six others.
+    ///
+    /// # Why this is not [`Palette::text_muted`]
+    ///
+    /// The two roles say different things and only *look* like one role in the dark. A
+    /// muted text is an explanation standing beside something else — the note «Цикл:
+    /// галочка — участие, кнопки — порядок», the path of the journal folder — and it is
+    /// quieter than the main text on purpose, because it is read second. A panel heading is
+    /// not read second: it is the name of a block, set in upper case, smaller, bolder and
+    /// letter-spaced, and what it needs from a colour is to be *distinguishable from the
+    /// block's own text* while still carrying the weight of a title. Those two demands land
+    /// on the same number in «Графите» and on different numbers in «Тумане», which is the
+    /// whole reason the role has to exist as a field instead of as a coincidence: on a white
+    /// panel a heading set in the muted ink reads as one more footnote, and the mock-ups
+    /// lift it back up by twelve levels.
+    ///
+    /// # Where the two literals come from
+    ///
+    /// Both are read off the mock-up generator `scratchpad-Э11\ui.ps1`, which is the source
+    /// the acceptance instrument compares the running program against — the same file the
+    /// rest of this palette was copied from:
+    ///
+    /// * «Графит» — `ui.ps1:179`, `Cap=(Col 152 160 168)`. Equal to `Muted` on that same
+    ///   line, and *deliberately written out anyway*: the equality is a property of one
+    ///   palette, not of the roles, and a field that borrowed the other's number would hide
+    ///   the very difference the light palette makes visible.
+    /// * «Туман» — `ui.ps1:190`, `Cap=(Col 122 130 139)`, against `Muted=(Col 110 118 127)`
+    ///   on the same line: twelve levels lighter in every channel.
+    pub cap: COLORREF,
     /// Background of input fields and lists.
     pub field_bg: COLORREF,
     /// Frame of an input field.
@@ -167,6 +196,7 @@ pub static GRAPHITE: Palette = Palette {
     panel_border: rgb(54, 59, 67),
     text: rgb(228, 231, 234),
     text_muted: rgb(152, 160, 168),
+    cap: rgb(152, 160, 168),
     field_bg: rgb(25, 28, 33),
     field_border: rgb(58, 64, 72),
     button_bg: rgb(46, 51, 59),
@@ -187,6 +217,7 @@ pub static FOG: Palette = Palette {
     panel_border: rgb(225, 229, 234),
     text: rgb(35, 38, 43),
     text_muted: rgb(110, 118, 127),
+    cap: rgb(122, 130, 139),
     field_bg: rgb(255, 255, 255),
     field_border: rgb(207, 213, 220),
     button_bg: rgb(255, 255, 255),

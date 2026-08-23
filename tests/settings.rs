@@ -3846,6 +3846,59 @@ fn the_panel_captions_are_read_off_the_controls_fr_94_writes() {
     );
 }
 
+/// **T-12-11** — the ink of a panel heading is `cap`, and only the heading is.
+///
+/// Decision В-5 (`DECISIONS.md`, question 56) gave the heading a palette role of its own. In
+/// «Графите» the new role spells the number `text_muted` already spelled, so nothing on a
+/// dark screen can tell the two apart — the *only* place the split is visible is the light
+/// palette, and the only thing that keeps it from being quietly undone is this pair of
+/// checks. They are two, deliberately:
+///
+/// * the heading takes `palette.cap` — the field it is now painted from;
+/// * `text_muted` is still the ink of the explanatory notes — no `caption:` row of the
+///   background's colour set may name it again.
+///
+/// Together they separate «the headings were repainted» from «everything quiet was
+/// repainted», which is the same separating probe the live measurement of this task takes on
+/// the screen: the note «Цикл: галочка — участие, кнопки — порядок», the note «Имя процесса,
+/// например game.exe» and the journal path must stay 110,118,127 in «Тумане» while the eight
+/// headings move to 122,130,139.
+#[test]
+fn the_panel_heading_takes_the_cap_role_and_leaves_the_muted_notes_alone() {
+    // The two roles, side by side: equal in the dark, twelve levels apart in the light. A
+    // palette that lost the split would make every other check of this test vacuous.
+    assert_eq!(
+        GRAPHITE.cap, GRAPHITE.text_muted,
+        "«Графит» spells one number for both roles (ui.ps1:179) — that is why the dark shot \
+         of this task must come out unchanged"
+    );
+    assert_ne!(
+        FOG.cap, FOG.text_muted,
+        "«Туман» is the palette that tells the two roles apart (ui.ps1:190) — with them \
+         equal there is no heading colour to check for"
+    );
+
+    let source = settings_module_source();
+
+    assert!(
+        source.contains("caption: palette.cap,"),
+        "the ink of a panel heading must be taken from `palette.cap`"
+    );
+    assert!(
+        !source.contains("caption: palette.text_muted"),
+        "no heading may be painted with the muted ink again — that is the mistake T-12-11 \
+         measured and В-5 answered"
+    );
+
+    // And the muted role is still in the file for the notes it was always for: a change that
+    // removed every mention of it would pass the two checks above and still be wrong.
+    assert!(
+        source.contains("palette.text_muted"),
+        "`text_muted` must stay the ink of the explanatory notes — T-12-11 added a role, it \
+         did not replace one"
+    );
+}
+
 // =========================================================================================
 // FR-92а — the closed part of the combo boxes, the rounded check-box glyph and the exclusion
 // list that paints its own selection. Task T-11-14.
