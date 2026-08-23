@@ -75,12 +75,11 @@ use windows::Win32::Graphics::Gdi::{
     CreateFontIndirectW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT,
     DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_EXPANDTABS, DT_LEFT, DT_SINGLELINE, DT_TOP,
     DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint,
-    ExcludeClipRect, FW_BOLD, FillRect, GetDC, GetDeviceCaps, GetObjectW, GetStockObject,
-    GetTextExtentPoint32W, HALFTONE, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
-    LOGFONTW, LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE,
-    RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect, SRCCOPY, STRETCH_BLT_MODE,
-    SaveDC, SelectObject, SetBkColor, SetBkMode, SetBrushOrgEx, SetStretchBltMode, SetTextColor,
-    StretchBlt, TRANSPARENT, TextOutW,
+    ExcludeClipRect, FW_BOLD, FillRect, GdiFlush, GetDC, GetDeviceCaps, GetObjectW, GetStockObject,
+    GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW,
+    LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE,
+    RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject,
+    SetBkColor, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -6619,15 +6618,29 @@ unsafe fn draw_panel_caption(
 //    off-screen surface — a plain replication, because enlarging blends nothing;
 // 2. the figure is drawn into that surface at [`SUPERSAMPLE`] times its size, so one pixel of
 //    the window is `SUPERSAMPLE × SUPERSAMPLE` pixels there;
-// 3. the surface goes back with `StretchBlt` in `HALFTONE` mode, which averages the block of
-//    source pixels behind every destination pixel. That average **is** the smoothing: a pixel
-//    the figure covers by a third comes back as a third of the figure's colour over two thirds
-//    of the ground.
+// 3. the surface is averaged back down **by arithmetic of ours** — [`Supersample::reduce`] adds
+//    the `SUPERSAMPLE × SUPERSAMPLE` samples behind every destination pixel and divides — and
+//    the reduced tile is handed to the caller's DC by a one-to-one `BitBlt`. That average **is**
+//    the smoothing: a pixel the figure covers by a third comes back as a third of the figure's
+//    colour over two thirds of the ground.
 //
-// ⚠ `SetStretchBltMode(HALFTONE)` is documented to require a `SetBrushOrgEx` after it — without
-// one, brushes can misalign and the reduction moirés on some machines. [`Supersample::render`]
-// makes that call, and puts the previous origin and the previous mode back afterwards: the
-// caller's DC leaves exactly as it came.
+// ⚠ Step 3 was a `StretchBlt` in `HALFTONE` mode until task T-11-23, on the belief that the mode
+// averages a block. **It does not, and the belief was measured false.** `HALFTONE` *halftones*:
+// MSDN words it as «the average color over the destination **block of pixels** approximates the
+// color of the source pixels», which is a dither — the area comes out right and the single pixel
+// does not. Measured on this machine, an arc reduced 4 : 1 from ground `32,35,41` to ink
+// `228,231,234` came back with **116 of 256 pixels outside the two colours it was made of**, the
+// darkest `2,5,12` and the brightest `255,255,255` — an overshoot of −30 and +27 past the ends.
+// The same bits averaged by hand gave **none**: a mean of numbers cannot leave the range of the
+// numbers it is a mean of, which is exactly why the arithmetic below is the fix and why the test
+// `the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes` states it. (Steps 1
+// and 2 were measured innocent in the same pass: `COLORONCOLOR` replicated a flat tile to the
+// pixel, and `HALFTONE` itself left a flat tile alone — only an *edge* rang.)
+//
+// ⚠ The documented, silent trap of reading a DIB section back: the pixels GDI drew are not
+// necessarily in memory yet — part of the drawing can still sit in the batch queue — until
+// `GdiFlush` has been called. Without it there is no error and no refusal, just an occasionally
+// stale picture. [`Supersample::reduce`] flushes before it reads the first sample.
 //
 // # Стоимость — что смягчается целиком и что только по углам
 //
@@ -6671,6 +6684,60 @@ pub const SUPERSAMPLE: i32 = 4;
 /// tallest glyph is under 24 px at 150 %), so the ceiling never bites in practice; it is there
 /// so that a future caller cannot quietly turn a smoothed detail into a smoothed panel.
 pub const SUPERSAMPLE_MAX_SIDE: i32 = 64;
+
+/// How many samples of the enlarged surface stand behind one pixel of the window — the block
+/// [`average_of_block`] averages, and the length of the array [`Supersample::reduce`] gathers
+/// each one into.
+pub const SUPERSAMPLE_BLOCK: usize = (SUPERSAMPLE * SUPERSAMPLE) as usize;
+
+/// The mean of one block of samples — the box filter that step 3 of the smoothing **is**, and
+/// the whole of task T-11-23.
+///
+/// Each sample is a whole 32-bit `BI_RGB` pixel of the enlarged surface, which stores blue,
+/// green and red in the low three bytes in that order; the answer is one pixel of the same
+/// shape. The three bytes are averaged where they lie, so this function needs no opinion about
+/// which channel is which, and the fourth byte — not a colour — comes back zero rather than
+/// averaged.
+///
+/// # The property this exists for
+///
+/// **A mean cannot leave the range of the numbers it is a mean of.** That is the one sentence
+/// task T-11-23 turns on: until it, step 3 was a `StretchBlt` in `HALFTONE` mode, which
+/// *dithers* — it makes the average over an area right by making the individual pixel wrong,
+/// and the wrong pixels were the halo the user saw. Measured, the same arc came back with 116
+/// of 256 pixels outside the two colours it was drawn from, overshooting by −30 and +27; this
+/// function cannot produce one, and
+/// `the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes` says so.
+///
+/// Rounding is to the nearest and not down: a box filter that truncated would darken every
+/// smoothed edge by half a level, which over a whole dialog is a visible tint.
+///
+/// Pure, and public for the reason [`corner_tiles`] and [`stroke_bounds`] are: a test hands it
+/// a block whose average is known on paper and compares, with no window and no DC in sight.
+/// An empty block has no mean and answers zero — the caller never passes one, and a division
+/// by zero is not a thing this file will risk on the paint path.
+pub fn average_of_block(samples: &[u32]) -> u32 {
+    let count = samples.len() as u64;
+
+    if count == 0 {
+        return 0;
+    }
+
+    // One accumulator per colour byte, low byte first. `u64` so that the sum of an arbitrarily
+    // long block cannot wrap — the product only ever hands over [`SUPERSAMPLE_BLOCK`] samples,
+    // but a public function may be handed anything.
+    let mut sums = [0u64; 3];
+
+    for pixel in samples {
+        for (channel, sum) in sums.iter_mut().enumerate() {
+            *sum += u64::from((pixel >> (8 * channel)) & 0xFF);
+        }
+    }
+
+    let mean = |sum: u64| ((sum + count / 2) / count) as u32;
+
+    mean(sums[0]) | (mean(sums[1]) << 8) | (mean(sums[2]) << 16)
+}
 
 /// How far the **path** of an enlarged stroke moves so that the stroke lands back on the pixels
 /// the unenlarged one would have covered — the half-pixel of an odd pen, in enlarged pixels.
@@ -6784,6 +6851,14 @@ struct Supersample {
     dc: HDC,
     /// The 32-bit top-down DIB section selected into `dc`.
     bitmap: HBITMAP,
+    /// The pixels of `bitmap`, as `CreateDIBSection` handed them over — the whole reason the
+    /// reduction of task T-11-23 can be arithmetic instead of a `HALFTONE` blit.
+    ///
+    /// One 32-bit pixel per element, `width` of them per row, `height` rows, top row first: a
+    /// 32-bit `BI_RGB` section has no padding to skip, because a row of it is a whole number of
+    /// `DWORD`s by construction. The memory belongs to the section and is freed with it in
+    /// `Drop`; nothing outside [`Supersample::reduce`] ever follows this pointer.
+    bits: *mut u32,
     /// The bitmap the fresh memory DC was born with — put back before `bitmap` is deleted,
     /// because a bitmap still selected into a DC cannot be freed.
     previous: HGDIOBJ,
@@ -6832,9 +6907,10 @@ impl Supersample {
                 // it means on the window and the figure is not drawn upside down.
                 biHeight: -height,
                 biPlanes: 1,
-                // Thirty-two bits, so the averaging of `HALFTONE` has full colour to average
-                // and the reduction cannot dither. ⚠ A bitmap compatible with a *memory* DC
-                // would be monochrome — the classic trap `build_check_frames` words as well.
+                // Thirty-two bits: full colour for the averaging to average, one pixel per
+                // `u32` for [`Supersample::reduce`] to read, and no row padding to skip.
+                // ⚠ A bitmap compatible with a *memory* DC would be monochrome — the classic
+                // trap `build_check_frames` words as well.
                 biBitCount: 32,
                 biCompression: BI_RGB.0,
                 ..Default::default()
@@ -6845,8 +6921,9 @@ impl Supersample {
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
 
         // SAFETY: `info` is a fully initialised header living on this frame and read by the
-        // call; `bits` receives the address of the pixels the section owns, and nothing here
-        // ever follows it — every drawing goes through the DC. `DIB_RGB_COLORS` needs no
+        // call; `bits` receives the address of the pixels the section owns, which stays valid
+        // for as long as the section does — that is, until the `DeleteObject` in `Drop` — and
+        // is followed by [`Supersample::reduce`] and by nothing else. `DIB_RGB_COLORS` needs no
         // palette, so no colour table is read past the header.
         let created = unsafe {
             CreateDIBSection(
@@ -6869,6 +6946,17 @@ impl Supersample {
 
         if bitmap.is_invalid() {
             // SAFETY: as above.
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // NFR-13: examined too. A section that answered a handle and no pixels is not one this
+        // type can reduce, and a null read a pixel at a time is the one failure that would not
+        // announce itself — better no smoothing at all (the caller's aliased fallback).
+        if bits.is_null() {
+            // SAFETY: the bitmap was selected into nothing, so it is free to delete; the DC is
+            // deleted after it, exactly once each.
+            let _ = unsafe { DeleteObject(bitmap.into()) };
             let _ = unsafe { DeleteDC(dc) };
             return None;
         }
@@ -6896,6 +6984,7 @@ impl Supersample {
         Some(Self {
             dc,
             bitmap,
+            bits: bits.cast::<u32>(),
             previous,
             width,
             height,
@@ -6963,24 +7052,23 @@ impl Supersample {
             shift: stroke_shift(thickness),
         });
 
-        // 3. Back down, averaging. ⚠ `HALFTONE` and the `SetBrushOrgEx` the documentation pairs
-        // with it — see the ⚠ of this section. Both the mode and the origin the caller had are
-        // restored below, so this function leaves no trace on the caller's DC.
+        // 3. Back down, averaging — arithmetic of ours over the section's own pixels, never a
+        // `HALFTONE` blit. See the two ⚠ of this section for what that mode actually did and
+        // for the `GdiFlush` this step cannot be read without. Nothing here touches an
+        // attribute of the caller's DC, so there is no state to put back either.
+        self.reduce(width, height);
+
+        // The reduced tile now sits in the top-left `width × height` corner of the surface and
+        // goes over one to one — a `BitBlt` and not a `StretchBlt`, because there is nothing
+        // left to scale and a one-to-one copy cannot invent a colour.
         //
-        // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC.
-        let previous_mode = unsafe { SetStretchBltMode(dc, HALFTONE) };
-
-        let mut previous_origin = POINT::default();
-
-        // SAFETY: `previous_origin` is a live local of this frame, written by the call and
-        // read by nobody else; the call keeps no pointer. NFR-13: the `BOOL` is examined in
-        // words and dropped — a refusal would mean a dead DC, which the send this paint is
-        // inside of makes unreachable.
-        let _ = unsafe { SetBrushOrgEx(dc, 0, 0, Some(&raw mut previous_origin)) };
-
-        // SAFETY: as for the enlargement above, with the two DCs the other way round.
-        let reduced = unsafe {
-            StretchBlt(
+        // SAFETY: both DCs are live — `dc` is the caller's, painted into for the length of the
+        // send it is inside of, and `self.dc` holds our own bitmap. Neither call touches memory
+        // of this process.
+        //
+        // NFR-13: examined — the caller repaints the tile the aliased way if this refused.
+        unsafe {
+            BitBlt(
                 dc,
                 tile.left,
                 tile.top,
@@ -6989,23 +7077,97 @@ impl Supersample {
                 Some(self.dc),
                 0,
                 0,
-                enlarged_width,
-                enlarged_height,
                 SRCCOPY,
             )
-        };
-
-        // SAFETY: puts back the origin read a few lines above; `None` asks for no read-back.
-        let _ = unsafe { SetBrushOrgEx(dc, previous_origin.x, previous_origin.y, None) };
-
-        // Zero is «the mode could not be read», and there is then nothing to put back.
-        if previous_mode != 0 {
-            // SAFETY: as for the call that changed it.
-            unsafe { SetStretchBltMode(dc, STRETCH_BLT_MODE(previous_mode)) };
         }
+        .is_ok()
+    }
 
-        // NFR-13: examined — the caller repaints the tile the aliased way if this refused.
-        reduced.as_bool()
+    /// Averages every `SUPERSAMPLE × SUPERSAMPLE` block of the enlarged surface into one pixel,
+    /// leaving the `width × height` result in the surface's own top-left corner — the reduction
+    /// of task T-11-23, and the whole of what step 3 is now.
+    ///
+    /// # Why the average is done here and not by GDI
+    ///
+    /// Because GDI has no call that does it. `HALFTONE` was believed to and was measured not to
+    /// — see the ⚠ of this section — and there is no other reducing mode: `COLORONCOLOR` and
+    /// `BLACKONWHITE` throw whole rows away. An average of sixteen numbers, on the other hand,
+    /// **cannot** leave the range of those sixteen by construction, which is the property the
+    /// halo of T-11-23 was the absence of.
+    ///
+    /// # Why in place, and why that is not an aliasing bug
+    ///
+    /// The result is written back into the same surface, which costs neither a second DIB
+    /// section nor a heap buffer. It is safe by the order of the walk, and the argument is
+    /// worth writing down because it is the one thing that could quietly rot here:
+    ///
+    /// * destination pixel `(x, y)` is written to row `y`, column `x`, and reads rows
+    ///   `SUPERSAMPLE·y … SUPERSAMPLE·y + SUPERSAMPLE − 1`;
+    /// * for `y ≥ 1` those rows are all past row `y`, and row `y` was consumed by block row
+    ///   `y / SUPERSAMPLE`, which is strictly earlier than `y` — so the write lands on a row
+    ///   already used up;
+    /// * for `y = 0` the write and the reads share the row, and there the columns separate them:
+    ///   `(x, 0)` writes column `x` and every read still to come in that row is at column
+    ///   `SUPERSAMPLE·(x + 1)` or further, which is past `x` for every `x ≥ 0`.
+    ///
+    /// # Cost
+    ///
+    /// `SUPERSAMPLE²` = 16 reads and three additions each per destination pixel. The ceiling is
+    /// [`SUPERSAMPLE_MAX_SIDE`]²·`SUPERSAMPLE`² = 65 536 samples for one tile, and the tiles
+    /// this dialog actually reduces are the four 5 × 5 corners of a rounded rectangle (400
+    /// samples each) and glyphs under 24 px a side (under 9 216). Measured against the
+    /// `HALFTONE` blit it replaces, in `tests\settings.rs`.
+    ///
+    /// Answers nothing: there is no way for arithmetic over memory the section owns to fail, and
+    /// the failure that *would* matter — a section that handed over no pixels — is refused in
+    /// [`Supersample::new`], so a live `Supersample` always has somewhere to read.
+    fn reduce(&self, width: i32, height: i32) {
+        // ⚠ The silent trap: the drawing above may still be in the batch queue, and reading the
+        // pixels before it has been flushed reads whatever was there before. No error, no
+        // refusal — just an occasionally stale tile.
+        //
+        // SAFETY: takes nothing and touches no memory of ours. NFR-13: the `BOOL` is examined
+        // in words and dropped — `GdiFlush` answers `FALSE` only for a batch it could not
+        // play back, and the next thing this function does is read what did get through; there
+        // is no better answer available than to average what is there.
+        let _ = unsafe { GdiFlush() };
+
+        let stride = self.width as usize;
+        let mut block = [0u32; SUPERSAMPLE_BLOCK];
+
+        for y in 0..height {
+            for x in 0..width {
+                for sample_y in 0..SUPERSAMPLE {
+                    let row = (y * SUPERSAMPLE + sample_y) as usize * stride;
+
+                    for sample_x in 0..SUPERSAMPLE {
+                        // SAFETY: `self.bits` is the non-null pointer `CreateDIBSection`
+                        // answered, valid until the `DeleteObject` of `Drop`, and it addresses
+                        // `self.width * self.height` pixels. The index is inside them:
+                        // `render` has already refused a tile whose enlargement is wider or
+                        // taller than the surface, so `y * SUPERSAMPLE + sample_y < self.height`
+                        // and `x * SUPERSAMPLE + sample_x < self.width`.
+                        block[(sample_y * SUPERSAMPLE + sample_x) as usize] = unsafe {
+                            self.bits
+                                .add(row + (x * SUPERSAMPLE + sample_x) as usize)
+                                .read()
+                        };
+                    }
+                }
+
+                let averaged = average_of_block(&block);
+
+                // SAFETY: as for the read above — the destination is row `y`, column `x`, and
+                // `y < height ≤ self.height` and `x < width ≤ self.width` hold for the same
+                // reason. Why writing into the surface being read is sound is argued in the
+                // doc comment of this function.
+                unsafe {
+                    self.bits
+                        .add(y as usize * stride + x as usize)
+                        .write(averaged)
+                };
+            }
+        }
     }
 }
 

@@ -5791,17 +5791,18 @@ fn the_system_theme_message_is_wm_app_plus_14_and_collides_with_nothing_public()
 // =========================================================================================
 //
 // What is measurable without a window: the pure halves — the two `LOGFONTW` builders, the four
-// corner tiles of a rounded rectangle, the bounding box of a stroke — and the shape of the
-// module's own source, where the supersampling factor, the `HALFTONE` reduction with the
-// `SetBrushOrgEx` the documentation pairs with it, the ownership of every GDI object and the
-// caching of the background live. The look on the screen is the controller's, on the real
-// window: the product is not started by any test.
+// corner tiles of a rounded rectangle, the bounding box of a stroke, the box filter the
+// reduction is since task T-11-23 — and the shape of the module's own source, where the
+// supersampling factor, the ownership of every GDI object and the caching of the background
+// live. The look on the screen is the controller's, on the real window: the product is not
+// started by any test.
 
 /// The lines of the module source that are **not** comments and hold `needle`.
 ///
 /// The sweeps below have to separate a call from a sentence about a call: the section of the
-/// module this task added explains `HALFTONE` and `SetBrushOrgEx` at length, and a count that
-/// swept the prose in with the code would prove nothing.
+/// module these tasks added explains at length what `HALFTONE` did and why it is gone, and a
+/// count that swept the prose in with the code would prove nothing — or, since task T-11-23,
+/// would prove the opposite of the truth.
 fn product_lines_with(needle: &str) -> Vec<String> {
     settings_module_source()
         .lines()
@@ -5891,10 +5892,20 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
     );
 }
 
-/// **Criterion 10 of T-11-17** — the supersampling factor is a constant, the reduction is
-/// `HALFTONE`, and the `SetBrushOrgEx` the documentation pairs with it is made right after it.
+/// **Criterion 10 of T-11-17, as task T-11-23 left it** — the supersampling factor is a
+/// constant, the reduction is an average of **ours**, and `HALFTONE` is gone from the module.
+///
+/// ⚠ This test used to demand the opposite, and was wrong to. Until T-11-23 step 3 of the
+/// smoothing was a `StretchBlt` in `HALFTONE` mode, on the belief that the mode averages the
+/// block of source pixels behind a destination pixel. It does not: `HALFTONE` *halftones* —
+/// MSDN says the average over the destination **block of pixels** approximates the source,
+/// which is a dither, right over an area and wrong at a pixel. Measured on this machine, an arc
+/// reduced 4 : 1 from `32,35,41` to `228,231,234` came back with 116 of 256 pixels outside the
+/// two colours it was made of, the darkest `2,5,12` and the brightest `255,255,255`; the same
+/// bits averaged by hand gave none. So the mode is not merely unnecessary here — every line
+/// that names it is a defect, which is what the sweeps below say.
 #[test]
-fn the_smoothing_is_a_named_factor_a_halftone_reduction_and_the_brush_origin_beside_it() {
+fn the_smoothing_is_a_named_factor_and_an_average_of_our_own_with_no_halftone_left() {
     // Four samples each way, sixteen per pixel — the factor `tools\make-icons.ps1` draws at.
     assert_eq!(settings::SUPERSAMPLE, 4);
 
@@ -5907,45 +5918,98 @@ fn the_smoothing_is_a_named_factor_a_halftone_reduction_and_the_brush_origin_bes
         "the widest enlarged surface the module can ask for"
     );
 
+    // The block one destination pixel is averaged from is the factor squared, and it is a
+    // constant rather than a number written at the loop.
+    assert_eq!(
+        settings::SUPERSAMPLE_BLOCK,
+        (settings::SUPERSAMPLE * settings::SUPERSAMPLE) as usize
+    );
+    assert_eq!(settings::SUPERSAMPLE_BLOCK, 16);
+
     let source = settings_module_source();
 
-    // The reduction, and only the reduction, is `HALFTONE`: the enlargement is
-    // `COLORONCOLOR`, because a ground that arrived already smeared would smear the tile.
-    let halftone = product_lines_with("SetStretchBltMode(dc, HALFTONE)");
-    assert_eq!(
-        halftone.len(),
-        1,
-        "the module sets HALFTONE in exactly one place: {halftone:?}"
+    // ⚠ Not one line of code may name the mode again — see the note above this test.
+    let halftone = product_lines_with("HALFTONE");
+    assert!(
+        halftone.is_empty(),
+        "HALFTONE dithers instead of averaging and has no place in the reduction: {halftone:?}"
     );
 
+    // And with the mode goes the `SetBrushOrgEx` the documentation paired with it: there is no
+    // dither pattern left to align.
+    let origin = product_lines_with("SetBrushOrgEx");
+    assert!(
+        origin.is_empty(),
+        "the brush origin was there for HALFTONE and goes with it: {origin:?}"
+    );
+
+    // The way **up** is still a blit, and still replicates rather than blends: a ground that
+    // arrived already smeared would smear the whole tile.
     let enlarging = product_lines_with("SetStretchBltMode(dc, COLORONCOLOR)");
     assert_eq!(
         enlarging.len(),
         1,
-        "and replicates, not blends, on the way up: {enlarging:?}"
+        "the enlargement must replicate, not blend: {enlarging:?}"
     );
 
-    // ⚠ The pairing the documentation demands: `SetBrushOrgEx` **after** the mode is set.
-    let mode_at = source
-        .find("let previous_mode = unsafe { SetStretchBltMode(dc, HALFTONE) };")
-        .expect("the reduction must set HALFTONE on the destination DC");
-    let origin_at = source
-        .find("SetBrushOrgEx(dc, 0, 0, Some(&raw mut previous_origin))")
-        .expect("HALFTONE must be followed by a SetBrushOrgEx — otherwise brushes misalign");
-
-    assert!(
-        origin_at > mode_at,
-        "the brush origin must be set *after* the stretch mode, as the documentation words it"
+    // …and it is the only scaling blit the module makes at all. The way down does not scale.
+    let stretches = product_lines_with("StretchBlt(");
+    assert_eq!(
+        stretches.len(),
+        1,
+        "the one StretchBlt of the module is the enlargement: {stretches:?}"
     );
 
-    // Both are put back, so the caller's DC leaves as it came.
+    // The way **down** is arithmetic, in one place, through the pure box filter.
+    let averaging = product_lines_with("average_of_block(&block)");
+    assert_eq!(
+        averaging.len(),
+        1,
+        "the reduction averages in exactly one place: {averaging:?}"
+    );
+
+    let reduction = function_body(
+        &source,
+        "fn render(&self, dc: HDC, tile: &RECT, thickness: i32, figure: impl FnOnce(Canvas)) \
+         -> bool {",
+    );
+
     assert!(
-        source.contains("SetBrushOrgEx(dc, previous_origin.x, previous_origin.y, None)"),
-        "the previous brush origin must be restored"
+        reduction.contains("self.reduce(width, height);"),
+        "step 3 must be the arithmetic reduction"
+    );
+    assert_eq!(
+        reduction.matches("StretchBlt(").count(),
+        1,
+        "the only stretching blit inside `render` is the enlargement of step 1"
     );
     assert!(
-        source.contains("SetStretchBltMode(dc, STRETCH_BLT_MODE(previous_mode))"),
-        "the previous stretch mode must be restored"
+        reduction.contains("BitBlt("),
+        "and the reduced tile goes over one to one, which cannot invent a colour"
+    );
+
+    // ⚠ The documented, silent trap: the pixels GDI drew may still be in the batch queue, and
+    // a read before `GdiFlush` reads what was there before — with no error and no refusal.
+    let flush_at = source
+        .find("let _ = unsafe { GdiFlush() };")
+        .expect("the reduction must flush the batch before it reads the section's pixels");
+    let read_at = source
+        .find(".read()")
+        .expect("the reduction must read the section's pixels");
+
+    assert!(
+        flush_at < read_at,
+        "the `GdiFlush` must stand *before* the first read of the DIB section's bits"
+    );
+
+    // The pixels are the section's own, kept from `CreateDIBSection` instead of being dropped.
+    assert!(
+        source.contains("bits: *mut u32,"),
+        "the surface must keep the pointer to its own pixels"
+    );
+    assert!(
+        source.contains("if bits.is_null() {"),
+        "and a section that answered no pixels must be refused (NFR-13)"
     );
 
     // No length of an enlarged figure is a multiplication written at the figure: the factor
@@ -5956,6 +6020,111 @@ fn the_smoothing_is_a_named_factor_a_halftone_reduction_and_the_brush_origin_bes
             "`{through_the_canvas}` — the factor must reach a drawing through `Canvas`"
         );
     }
+}
+
+/// **The assertion whose absence let the halo of T-11-23 live a whole stage** — the reduction
+/// of a block is the average of that block, and an average never leaves the extremes of what it
+/// averages.
+///
+/// The second half is the one that matters. Every colour this program paints is a palette
+/// member or a blend of two, so no pixel of a smoothed figure may be darker than the darkest
+/// thing behind it or brighter than the brightest thing on it. `HALFTONE` broke that and
+/// nothing said so; a mean cannot break it, and this says so.
+#[test]
+fn the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes() {
+    /// One 32-bit `BI_RGB` pixel out of three channels, in the order the section stores them.
+    fn pixel(red: u32, green: u32, blue: u32) -> u32 {
+        blue | (green << 8) | (red << 16)
+    }
+
+    /// The three channels of one pixel back out, red first.
+    fn channels(pixel: u32) -> (u32, u32, u32) {
+        ((pixel >> 16) & 0xFF, (pixel >> 8) & 0xFF, pixel & 0xFF)
+    }
+
+    // The two colours of the menu check mark: the ground it stands on and the ink it is drawn
+    // in — the pair whose blend produced `0,2,9` and `255,255,255` under `HALFTONE`.
+    let ground = pixel(32, 35, 41);
+    let ink = pixel(228, 231, 234);
+
+    // A block of nothing but ground comes back as ground, to the last bit: the flat interior of
+    // every figure must survive the reduction untouched.
+    let flat = [ground; 16];
+    assert_eq!(
+        settings::average_of_block(&flat),
+        ground,
+        "a block of one colour must reduce to that colour"
+    );
+    assert_eq!(settings::average_of_block(&[ink; 16]), ink);
+
+    // Every coverage from none to all, against the average computed here from the definition.
+    for covered in 0..=16u32 {
+        let mut block = [ground; 16];
+
+        for sample in block.iter_mut().take(covered as usize) {
+            *sample = ink;
+        }
+
+        let (red, green, blue) = channels(settings::average_of_block(&block));
+
+        for (name, got, low, high) in [
+            ("red", red, 32, 228),
+            ("green", green, 35, 231),
+            ("blue", blue, 41, 234),
+        ] {
+            // The average, from its definition, rounded to the nearest — the box filter.
+            let expected = (low * (16 - covered) + high * covered + 8) / 16;
+
+            assert_eq!(
+                got, expected,
+                "{covered}/16 covered: the {name} channel must be the mean of the block, \
+                 {expected}, and not {got}"
+            );
+
+            // ⚠ And the property the whole task turns on: the mean is inside its own terms.
+            assert!(
+                got >= low && got <= high,
+                "{covered}/16 covered: the {name} channel came back {got}, outside the \
+                 {low}…{high} the block was made of — that is the halo of T-11-23"
+            );
+        }
+    }
+
+    // The same, on the two extremes GDI can hand over at all: a block of black and white in any
+    // proportion must stay black-and-white grey, never overshoot into a colour.
+    for covered in 0..=16usize {
+        let mut block = [pixel(0, 0, 0); 16];
+
+        for sample in block.iter_mut().take(covered) {
+            *sample = pixel(255, 255, 255);
+        }
+
+        let (red, green, blue) = channels(settings::average_of_block(&block));
+        let expected = (255 * covered as u32 + 8) / 16;
+
+        assert_eq!((red, green, blue), (expected, expected, expected));
+        assert!(red <= 255, "no mean of bytes can exceed a byte");
+    }
+
+    // A block whose channels differ from each other, so that a filter which averaged the wrong
+    // bytes together could not agree with this by accident.
+    let mixed = [
+        pixel(10, 20, 30),
+        pixel(50, 60, 70),
+        pixel(90, 100, 110),
+        pixel(130, 140, 150),
+    ];
+
+    assert_eq!(
+        channels(settings::average_of_block(&mixed)),
+        (70, 80, 90),
+        "each channel is averaged with itself and with no other"
+    );
+
+    // An empty block has no mean and answers zero rather than dividing by nothing. The product
+    // never hands one over — the block is always [`settings::SUPERSAMPLE_BLOCK`] long — and the
+    // function is public, so the degenerate case is answered rather than left to chance.
+    assert_eq!(settings::average_of_block(&[]), 0);
 }
 
 /// **Criterion 11 of T-11-17** — every GDI object this task added is owned by a value with a
@@ -6275,6 +6444,19 @@ impl Sheet {
         // SAFETY: `self.dc` holds this sheet's bitmap; the coordinates are inside it.
         (unsafe { GetPixel(self.dc, x, y) }.0 & 0xFF) as i32
     }
+
+    /// All three channels of one pixel, red first — for the tests of task T-11-23, whose subject
+    /// is a real palette pair and not a grey, and where a defect in one channel is the point.
+    fn rgb(&self, x: i32, y: i32) -> (i32, i32, i32) {
+        // SAFETY: `self.dc` holds this sheet's bitmap; the coordinates are inside it.
+        let colour = unsafe { GetPixel(self.dc, x, y) }.0;
+
+        (
+            (colour & 0xFF) as i32,
+            ((colour >> 8) & 0xFF) as i32,
+            ((colour >> 16) & 0xFF) as i32,
+        )
+    }
 }
 
 impl Drop for Sheet {
@@ -6411,6 +6593,140 @@ fn only_an_odd_pen_takes_the_half_pixel_of_the_enlarged_path() {
 
     // Half of one pixel of the window, in the pixels of the enlarged surface.
     assert_eq!(settings::SUPERSAMPLE / 2, 2);
+}
+
+/// **The defect of T-11-23 on real product pixels** — nothing a smoothed figure paints is
+/// darker than the darkest colour it was drawn from or brighter than the brightest.
+///
+/// The pure half is
+/// `the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes`; this is the same
+/// sentence said about the two figures that actually go through [`settings::Supersample`] — a
+/// glyph enlarged whole (the check mark) and a rounded rectangle enlarged at its four corners
+/// (every panel, field, button and selection stripe of the dialog).
+///
+/// The numbers this replaces: with the `HALFTONE` reduction of T-11-17 the very same two
+/// drawings answered **39** impossible pixels of 576 for the mark, down to `9,12,18` and up to
+/// `255,255,255`, and **58** of 1 600 for the rectangle, down to `2,5,12` — which is the halo
+/// the user saw, measured without a window and without starting the product.
+#[test]
+fn no_smoothed_figure_paints_a_colour_it_was_not_drawn_from() {
+    // The three colours of «Графит» these two figures are made of, and the band they close.
+    let ground = COLORREF(0x0029_2320); // window_bg 32,35,41
+    let fill_colour = COLORREF(0x0032_2B27); // panel_bg  39,43,50
+    let ink = COLORREF(0x00EA_E7E4); // text      228,231,234
+
+    let darkest = (32, 35, 41);
+    let brightest = (228, 231, 234);
+
+    /// The pixels of `sheet` outside the band `darkest … brightest`, and how many inside it are
+    /// none of the `solid` colours the figure was painted from — that is, partially covered.
+    fn survey(
+        sheet: &Sheet,
+        side: i32,
+        darkest: (i32, i32, i32),
+        brightest: (i32, i32, i32),
+        solid: &[i32],
+    ) -> (Vec<String>, i32) {
+        let mut impossible = Vec::new();
+        let mut blended = 0;
+
+        for y in 0..side {
+            for x in 0..side {
+                let (red, green, blue) = sheet.rgb(x, y);
+
+                if red < darkest.0
+                    || red > brightest.0
+                    || green < darkest.1
+                    || green > brightest.1
+                    || blue < darkest.2
+                    || blue > brightest.2
+                {
+                    impossible.push(format!("({x},{y}) = {red},{green},{blue}"));
+                }
+
+                // Partial coverage — the thing the smoothing exists to produce, and the reason
+                // «ни одного невозможного пикселя» cannot be passed by not smoothing at all.
+                if !solid.contains(&red) {
+                    blended += 1;
+                }
+            }
+        }
+
+        (impossible, blended)
+    }
+
+    // 1. A glyph enlarged whole: the check mark of a check box, stroked at four times its size
+    //    and averaged back down in one piece.
+    {
+        let sheet = Sheet::new(24);
+        sheet.clear(ground);
+
+        let glyph = RECT {
+            left: 4,
+            top: 4,
+            right: 20,
+            bottom: 20,
+        };
+
+        settings::draw_check_mark(sheet.dc, &glyph, ink, settings::GLYPH_CHECK_MARK, 96);
+
+        let (impossible, blended) = survey(&sheet, 24, darkest, brightest, &[32, 228]);
+
+        println!(
+            "галочка: {blended} смешанных пикселей, {} невозможных",
+            impossible.len()
+        );
+
+        assert!(
+            impossible.is_empty(),
+            "a check mark drawn in {brightest:?} on {darkest:?} may paint nothing outside the \
+             two: {impossible:?}"
+        );
+        assert!(
+            blended >= 8,
+            "and it must still be smoothed — {blended} partially covered pixels is a staircase"
+        );
+    }
+
+    // 2. A rounded rectangle, smoothed at its four corners only — the panel of the dialog, and
+    //    the figure whose accent-button corners the controller measured at `255,255,255`.
+    {
+        let sheet = Sheet::new(40);
+        sheet.clear(ground);
+
+        let area = RECT {
+            left: 2,
+            top: 2,
+            right: 38,
+            bottom: 38,
+        };
+
+        // SAFETY: the brush is made here, used only by the call below and freed here.
+        let fill = unsafe { CreateSolidBrush(fill_colour) };
+
+        settings::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
+
+        // SAFETY: created above, handed to nobody, freed exactly once.
+        let _ = unsafe { DeleteObject(fill.into()) };
+
+        let (impossible, blended) = survey(&sheet, 40, darkest, brightest, &[32, 39, 228]);
+
+        println!(
+            "панель: {blended} смешанных пикселей, {} невозможных",
+            impossible.len()
+        );
+
+        assert!(
+            impossible.is_empty(),
+            "a rounded rectangle of {fill_colour:?} framed in {brightest:?} on {darkest:?} may \
+             paint nothing outside them: {impossible:?}"
+        );
+        assert!(
+            blended >= 8,
+            "and its corners must still be smoothed — {blended} partially covered pixels is a \
+             staircase"
+        );
+    }
 }
 
 // -----------------------------------------------------------------------------------------
