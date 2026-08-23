@@ -3440,48 +3440,98 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
     }
 }
 
-/// **Criterion 12 of T-11-15, the fifth place** — the air beside the tick of the layout list is
-/// a colour no palette owns, so the mask of the image list can never punch a hole in a tick.
+/// **Criterion 11 of T-11-25, the first half** — the cell of the state image list is the key
+/// colour and nothing else, so the whole of it is a hole and no pixel of it is ever seen.
+///
+/// # What this test used to say, and why it says something else now
+///
+/// Until T-11-25 the cell held the picture of the tick, drawn *over* the key colour, and this
+/// test held the key apart from every colour of both palettes — because a palette that grew a
+/// field equal to the key would have punched a hole in its own tick. That premise is gone: the
+/// cell carries no palette colour at all any more. The tick moved onto the row itself
+/// (`draw_cycle_row`), where the mask cannot reach it and the edge of the square can therefore
+/// be smoothed — the whole subject of T-11-25, measured in
+/// `the_square_of_the_tick_is_smoothed_and_carries_no_key_colour` below.
+///
+/// So the sentence this test holds is the new one, and it is held on **real pixels** rather
+/// than on the source: both cells of the list the module actually builds are drawn over a
+/// ground of their own and must leave every pixel of it exactly as it was.
 #[test]
-fn the_key_colour_of_the_check_cell_is_in_neither_palette() {
+fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
+    use windows::Win32::UI::Controls::{
+        ILD_NORMAL, ImageList_Destroy, ImageList_Draw, ImageList_GetImageCount,
+    };
+
     let source = settings_module_source();
 
+    // The cell is filled with the key and nothing is drawn into it afterwards: the whole
+    // picture of the tick lives in `draw_check_glyph`, which the row painter calls.
+    let body = function_body(&source, "fn fill_check_cell(");
+
+    assert!(
+        body.contains("FillRect(dc, &whole, key)"),
+        "the cell must be the key colour over the whole of itself"
+    );
+    assert!(
+        !body.contains("check_frame_colors") && !body.contains("draw_check_mark"),
+        "nothing of the tick may be drawn into the cell any more — the mask would make a hole \
+         of one exact colour and the square could not be smoothed"
+    );
     assert!(
         source.contains("ImageList_AddMasked(list, bitmap, CHECK_CELL_KEY)"),
-        "the state image list must build its mask from the key colour"
+        "the hole must still come from the documented masked add"
     );
 
-    // Magenta, the traditional key — against every colour of both palettes, from the module
-    // that owns them (§6.2: the numbers live in `theme` alone). The three the frames actually
-    // use — `field_bg`, `box_border`, `accent_bg`, `accent_fg` — are in the list, and so is
-    // everything a later palette could reach for.
-    let key = 0x00FF_00FF_u32;
+    // The row height of the layout list at 96 DPI, near enough: what the cell is measured
+    // for is the row, and the test only needs a cell big enough to see.
+    let list = settings::build_check_image_list(19).expect("the state image list must build");
 
-    for palette in [&GRAPHITE, &FOG] {
-        for (name, colour) in [
-            ("window_bg", palette.window_bg),
-            ("title_bg", palette.title_bg),
-            ("panel_bg", palette.panel_bg),
-            ("panel_border", palette.panel_border),
-            ("text", palette.text),
-            ("text_muted", palette.text_muted),
-            ("field_bg", palette.field_bg),
-            ("field_border", palette.field_border),
-            ("button_bg", palette.button_bg),
-            ("button_border", palette.button_border),
-            ("accent_bg", palette.accent_bg),
-            ("accent_fg", palette.accent_fg),
-            ("box_border", palette.box_border),
-            ("sel_bg", palette.sel_bg),
-            ("sel_fg", palette.sel_fg),
-            ("hover_bg", palette.hover_bg),
-        ] {
-            assert_ne!(
-                colour.0, key,
-                "{name} must not be the key colour of the check cell"
-            );
+    // SAFETY: `list` is the live list just built and owned by this frame.
+    assert_eq!(
+        unsafe { ImageList_GetImageCount(list) },
+        2,
+        "one cell per state image index, as `CHECK_FRAME_ORDER` counts them"
+    );
+
+    let ground = COLORREF(0x0040_3020);
+    let sheet = Sheet::new(96);
+    sheet.clear(ground);
+
+    for index in 0..2 {
+        // SAFETY: `list` is live and ours, `sheet.dc` holds the sheet's own bitmap, and the
+        // cell is far smaller than the sheet.
+        let drawn = unsafe { ImageList_Draw(list, index, sheet.dc, 4, 4, ILD_NORMAL) };
+
+        assert!(
+            drawn.as_bool(),
+            "cell {index} must draw — a refused blit would prove nothing"
+        );
+    }
+
+    let mut touched = Vec::new();
+
+    for y in 0..96 {
+        for x in 0..96 {
+            if sheet.rgb(x, y) != (0x20, 0x30, 0x40) {
+                touched.push((x, y, sheet.rgb(x, y)));
+            }
         }
     }
+
+    println!(
+        "оба кадра списка изображений: {} изменённых пикселей из {}",
+        touched.len(),
+        96 * 96
+    );
+
+    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
+    let _ = unsafe { ImageList_Destroy(Some(list)) };
+
+    assert!(
+        touched.is_empty(),
+        "a cell that is the key colour edge to edge must leave the ground untouched — {:?}",
+        &touched[..touched.len().min(8)]
+    );
 }
 
 /// **Criterion 10 of T-11-13** — the panels and their captions are drawn by the background,
@@ -6337,28 +6387,45 @@ fn the_tile_of_a_stroke_holds_the_pen_around_every_point() {
     );
 }
 
-/// **The one deliberate exception of T-11-17** — the rounded square of a layout-list tick keeps
-/// its aliased corner, because `ImageList_AddMasked` makes a hole only of a pixel that is
-/// *exactly* the key colour, and a smoothed corner is a blend of the key and the fill.
+/// **The exception of T-11-17 is over — T-11-25, the source half.** The rounded square of a
+/// layout-list tick is smoothed like every other figure of this dialog, because it is no longer
+/// drawn into a cell whose mask makes a hole of one exact colour: it is drawn on the row.
 ///
-/// The tick itself — the figure the eye reads — is smoothed like every other mark: it is
-/// stroked well inside the fill, where no mask can be harmed.
+/// What the deliberate exception was: `ImageList_AddMasked` makes a hole only of a pixel that
+/// is *exactly* the key colour, so a smoothed corner — a blend of the key and the fill — would
+/// have carried a coloured fringe onto every row, and the square had to keep the staircase
+/// `stroke_rounded` leaves. The documented replacement the task proposed, an `ILC_COLOR32` list
+/// without `ILC_MASK` carrying per-pixel alpha, was measured on this machine and does not blend
+/// at all (the numbers are in the report of T-11-25), so the picture left the image list
+/// altogether. The pixels are in
+/// `the_square_of_the_tick_is_smoothed_and_carries_no_key_colour`.
 #[test]
-fn the_tick_of_the_layout_list_keeps_its_square_aliased_and_smooths_its_mark() {
+fn the_tick_of_the_layout_list_is_drawn_on_the_row_and_its_square_is_smoothed() {
     let source = settings_module_source();
-    let body = function_body(&source, "fn draw_check_frame(");
+    let body = function_body(&source, "fn draw_check_glyph(");
 
     assert!(
-        body.contains("stroke_rounded("),
-        "the cell drawn over the mask key must take the aliased core"
+        body.contains("paint_rounded("),
+        "the square is smoothed now — it is drawn on the row, where no mask can be harmed"
     );
     assert!(
-        !body.contains("paint_rounded("),
-        "a smoothed corner over the key colour would carry a magenta fringe onto every row"
+        !body.contains("stroke_rounded("),
+        "the aliased core is the fallback of `paint_rounded` and no longer the drawing itself"
     );
     assert!(
-        body.contains("draw_check_mark(dc, &frame, ink, LIST_CHECK_MARK, dpi)"),
-        "the mark itself is smoothed — it is stroked inside the fill, not over the key"
+        body.contains("draw_check_mark(dc, glyph, ink, LIST_CHECK_MARK, dpi)"),
+        "the mark keeps its own smoothing, stroked inside the fill"
+    );
+
+    // And the road the tick takes to the window: the item prepaint of the list draws the row,
+    // and the row draws the tick. Nothing of the picture is left in the image list.
+    assert!(
+        function_body(&source, "unsafe fn on_notify(").contains("draw_cycle_row("),
+        "the item prepaint must draw the row itself — ground, selection and tick"
+    );
+    assert!(
+        function_body(&source, "pub fn draw_cycle_row(").contains("draw_check_glyph("),
+        "and the row is where the tick is painted"
     );
 }
 
@@ -7523,5 +7590,526 @@ fn real_strings_take_the_same_width_in_our_face_as_in_the_dialog_font() {
                 our_size.cy
             );
         }
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// Настоящие пиксели: строка списка раскладок — задача T-11-25, критерии 10, 11 и 12
+// -----------------------------------------------------------------------------------------
+//
+// `draw_cycle_row` needs a DC and nothing else, so the whole of this runs in a memory bitmap:
+// no window is created, no `SysListView32` is asked for anything, and the product is not
+// started. What the control still does with the row — the transparent text background of
+// `CLR_NONE`, the label over the drawing below — is the controller's half, on the real window.
+
+/// The colour of the sheet beyond the row: not a colour of either palette, so a drawing that
+/// escaped the rectangle it was given would show up as a changed marker pixel.
+const BEYOND_THE_ROW: COLORREF = COLORREF(0x0000_80FF);
+
+/// One row of the layout list, drawn into a memory bitmap the way the item prepaint draws it.
+struct Row {
+    sheet: Sheet,
+    area: RECT,
+}
+
+impl Row {
+    /// A row 112 × 20 pixels — the width of the single column of the list and the height of
+    /// `LAYOUT_ROW_HEIGHT_DLU` near enough — inset into a sheet larger than itself.
+    fn draw(mode: LayoutMode, selected: bool, checked: bool, palette: &Palette) -> Self {
+        let sheet = Sheet::new(128);
+        sheet.clear(BEYOND_THE_ROW);
+
+        let area = RECT {
+            left: 8,
+            top: 8,
+            right: 120,
+            bottom: 28,
+        };
+
+        settings::draw_cycle_row(sheet.dc, &area, mode, selected, checked, palette, 96);
+
+        Self { sheet, area }
+    }
+
+    fn rgb(&self, x: i32, y: i32) -> (i32, i32, i32) {
+        self.sheet.rgb(x, y)
+    }
+
+    /// Every pixel of the sheet, in reading order — for comparing two rows outright.
+    fn pixels(&self) -> Vec<(i32, i32, i32)> {
+        let mut all = Vec::new();
+
+        for y in 0..128 {
+            for x in 0..128 {
+                all.push(self.rgb(x, y));
+            }
+        }
+
+        all
+    }
+}
+
+/// The three channels of a palette colour, in the order [`Sheet::rgb`] answers them.
+fn channels(colour: COLORREF) -> (i32, i32, i32) {
+    (
+        (colour.0 & 0xFF) as i32,
+        ((colour.0 >> 8) & 0xFF) as i32,
+        ((colour.0 >> 16) & 0xFF) as i32,
+    )
+}
+
+/// **Criterion 10 of T-11-25, on real pixels** — the selection of the layout list is a rounded
+/// stripe inset into the row and not the row itself.
+///
+/// Three things at once, and each of them is what the mock-ups say: the band of the inset
+/// carries the ground and not the selection; the pixel next to it carries the selection; and
+/// each of the four corners of the stripe carries at least one partially covered pixel, which
+/// is what a rounded corner is and what a rectangle can never have.
+#[test]
+fn the_selection_of_the_layout_list_is_a_rounded_stripe_inset_into_the_row() {
+    let inset = settings::scaled(settings::LIST_SELECTION_INSET, 96);
+    let radius = settings::scaled(settings::LIST_SELECTION_RADIUS, 96);
+
+    // The corner tile of `paint_rounded`: the radius and the frame that runs around it.
+    let side = radius + settings::scaled(settings::BORDER_THICKNESS, 96).max(1);
+
+    for palette in [&GRAPHITE, &FOG] {
+        let row = Row::draw(LayoutMode::Cycle, true, false, palette);
+
+        let ground = channels(palette.field_bg);
+        let selection = channels(palette.sel_bg);
+        let middle = (row.area.top + row.area.bottom) / 2;
+
+        // The band of the inset, on both sides: the ground of the row, never the selection.
+        for offset in 0..inset {
+            for (name, x) in [
+                ("left", row.area.left + offset),
+                ("right", row.area.right - 1 - offset),
+            ] {
+                assert_eq!(
+                    row.rgb(x, middle),
+                    ground,
+                    "the {name} inset band must carry the ground at x = {x}, palette {:?}",
+                    palette.field_bg
+                );
+            }
+        }
+
+        // And the first pixel inside it, on both sides: the selection.
+        for (name, x) in [
+            ("left", row.area.left + inset),
+            ("right", row.area.right - 1 - inset),
+        ] {
+            assert_eq!(
+                row.rgb(x, middle),
+                selection,
+                "the selection must start the very next pixel on the {name}, at x = {x}"
+            );
+        }
+
+        // Nothing of the row reached outside the rectangle it was given.
+        for (x, y) in [
+            (row.area.left - 1, middle),
+            (row.area.right, middle),
+            (row.area.left + 20, row.area.top - 1),
+            (row.area.left + 20, row.area.bottom),
+        ] {
+            assert_eq!(
+                row.rgb(x, y),
+                channels(BEYOND_THE_ROW),
+                "the row must not paint outside itself — ({x}, {y})"
+            );
+        }
+
+        // The four corners of the stripe, each with at least one pixel that is neither the
+        // ground nor the selection: partial coverage, which is the curve itself.
+        let stripe = RECT {
+            left: row.area.left + inset,
+            top: row.area.top,
+            right: row.area.right - inset,
+            bottom: row.area.bottom,
+        };
+
+        let tiles = settings::corner_tiles(&stripe, side);
+        let mut blended = [0; 4];
+
+        for (corner, tile) in tiles.iter().enumerate() {
+            for y in tile.top..tile.bottom {
+                for x in tile.left..tile.right {
+                    let value = row.rgb(x, y);
+
+                    if value != ground && value != selection {
+                        blended[corner] += 1;
+                    }
+                }
+            }
+        }
+
+        println!(
+            "выделение, палитра {:?}: втяжка {inset} px, радиус {radius} px, полутонов по \
+             углам {blended:?} из {} на угол",
+            palette.sel_bg,
+            side * side
+        );
+
+        assert!(
+            blended.iter().all(|count| *count >= 1),
+            "every one of the four corners of the stripe must be rounded — {blended:?} \
+             partially covered pixels, and a corner with none of them is a right angle"
+        );
+    }
+}
+
+/// **Criterion 13 of T-11-25** — one figure, two lists, one pair of constants.
+///
+/// The exclusion list has drawn this stripe since T-11-16; the layout list draws the same one
+/// now. Held as one body called twice rather than as two bodies that agree today: a third pair
+/// of constants is exactly what a second copy would eventually grow.
+#[test]
+fn both_lists_of_the_dialog_draw_the_same_selection_stripe() {
+    let source = settings_module_source();
+    let body = function_body(&source, "fn paint_selection_stripe(");
+
+    for call in [
+        "scaled(LIST_SELECTION_INSET, dpi)",
+        "scaled(LIST_SELECTION_RADIUS, dpi)",
+        "paint_rounded(",
+    ] {
+        assert!(
+            body.contains(call),
+            "the stripe must take `{call}` — the втяжка and the радиус of the mock-ups \
+             through the one scale"
+        );
+    }
+
+    for (signature, list) in [
+        ("unsafe fn draw_list_item(", "the exclusion list"),
+        ("pub fn draw_cycle_row(", "the layout list"),
+    ] {
+        assert!(
+            function_body(&source, signature).contains("paint_selection_stripe("),
+            "{list} must draw its selection with the one shared figure"
+        );
+    }
+
+    // And neither list carries the lengths itself: a second `scaled(LIST_SELECTION_…` outside
+    // the shared body would be the third pair this criterion forbids.
+    for constant in ["LIST_SELECTION_INSET", "LIST_SELECTION_RADIUS"] {
+        let used = source.matches(&format!("scaled({constant}, dpi)")).count();
+
+        assert_eq!(
+            used, 1,
+            "`{constant}` must be scaled in exactly one place — the shared stripe — and it is \
+             scaled in {used}"
+        );
+    }
+}
+
+/// **Criterion 11 of T-11-25, on real pixels** — the square of the tick is smoothed against the
+/// ground the row actually wears, and carries no key colour nor any admixture of one.
+///
+/// # The two halves, and why the second one needs its own arithmetic
+///
+/// The first half is the smoothing: each of the four corners of the square must hold a pixel
+/// that is none of the colours the picture is drawn from — partial coverage. The controller
+/// measured the opposite on the stand before this task: `28 → 230` with nothing in between,
+/// «ни одного полутона по всему периметру».
+///
+/// The second half is the fringe. A pixel of pure magenta is easy to look for and would not
+/// have been the defect anyway: the defect this test rules out is a *blend* of the key with a
+/// paint of the palette, which is what a smoothed edge over `CHECK_CELL_KEY` would have
+/// produced. `(r + b) / 2 − g` is the measure of it — an affine function of the colour, so a
+/// blend of two colours takes the blend of their values, and it is at most 3 for every colour
+/// of either palette and 255 for the key itself. Anything above 8 is a magenta admixture of
+/// more than two per cent, and there is none.
+#[test]
+fn the_square_of_the_tick_is_smoothed_and_carries_no_key_colour() {
+    // The corner tile of `paint_rounded` at the radius of a layout-list tick.
+    let side = settings::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)
+        + settings::scaled(settings::BORDER_THICKNESS, 96).max(1);
+
+    for palette in [&GRAPHITE, &FOG] {
+        for selected in [false, true] {
+            for checked in [false, true] {
+                let row = Row::draw(LayoutMode::Cycle, selected, checked, palette);
+                let glyph = settings::check_glyph(&row.area, 96);
+
+                // Everything the picture is drawn from: the ground under the tick, its fill,
+                // its frame and its mark. A pixel that is none of these is a blend.
+                let colours = [
+                    channels(if selected {
+                        palette.sel_bg
+                    } else {
+                        palette.field_bg
+                    }),
+                    channels(palette.field_bg),
+                    channels(palette.accent_bg),
+                    channels(palette.accent_fg),
+                    channels(palette.box_border),
+                ];
+
+                let tiles = settings::corner_tiles(&glyph, side);
+                let mut blended = [0; 4];
+
+                for (corner, tile) in tiles.iter().enumerate() {
+                    for y in tile.top..tile.bottom {
+                        for x in tile.left..tile.right {
+                            if !colours.contains(&row.rgb(x, y)) {
+                                blended[corner] += 1;
+                            }
+                        }
+                    }
+                }
+
+                // The fringe, over the whole row and not only over the tick.
+                let mut worst = i32::MIN;
+                let mut worst_at = (0, 0);
+                let mut key = Vec::new();
+
+                for y in row.area.top..row.area.bottom {
+                    for x in row.area.left..row.area.right {
+                        let (red, green, blue) = row.rgb(x, y);
+                        let magenta = red + blue - 2 * green;
+
+                        if magenta > worst {
+                            worst = magenta;
+                            worst_at = (x, y);
+                        }
+
+                        if (red, green, blue) == (0xFF, 0x00, 0xFF) {
+                            key.push((x, y));
+                        }
+                    }
+                }
+
+                println!(
+                    "галочка, палитра {:?}, выделена {selected}, взведена {checked}: полутонов \
+                     по углам {blended:?} из {} на угол, пурпур не выше {},{} в ({}, {})",
+                    palette.field_bg,
+                    side * side,
+                    worst / 2,
+                    (worst % 2) * 5,
+                    worst_at.0,
+                    worst_at.1
+                );
+
+                assert!(
+                    blended.iter().all(|count| *count >= 1),
+                    "every one of the four corners of the square must carry partial coverage — \
+                     {blended:?}, and a corner with none of them is the hard step the stand \
+                     measured before this task"
+                );
+
+                assert!(
+                    key.is_empty(),
+                    "no pixel of the row may be the key colour — {:?}",
+                    &key[..key.len().min(8)]
+                );
+
+                assert!(
+                    worst <= 16,
+                    "no pixel of the row may carry an admixture of the key either — \
+                     (r + b) / 2 − g is {},{} at ({}, {}), and every colour of the palette is \
+                     at most 3",
+                    worst / 2,
+                    (worst % 2) * 5,
+                    worst_at.0,
+                    worst_at.1
+                );
+            }
+        }
+    }
+}
+
+/// **Criterion 12 of T-11-25, on real pixels** — the pair mode did not move.
+///
+/// The table test `the_row_paints_follow_the_mode_table_of_fr_92a` holds the colours; this
+/// holds the drawing they turn into. A pair-mode row is the same picture whether it carries
+/// `LVIS_SELECTED` or not, and it is the same picture an ordinary cycle-mode row is — the
+/// selection of FR-31 «в нём не появляется», said in pixels rather than in a second condition
+/// that could drift from the table. The cycle-mode selected row is compared too, so that a
+/// change which quietly stopped drawing the stripe at all could not pass this test.
+#[test]
+fn the_pair_mode_row_shows_no_selection_at_all() {
+    for palette in [&GRAPHITE, &FOG] {
+        for checked in [false, true] {
+            let ordinary = Row::draw(LayoutMode::Cycle, false, checked, palette).pixels();
+
+            for selected in [false, true] {
+                assert_eq!(
+                    Row::draw(LayoutMode::Pair, selected, checked, palette).pixels(),
+                    ordinary,
+                    "a pair-mode row with selected = {selected} must be the very picture an \
+                     ordinary row is — palette {:?}, checked {checked}",
+                    palette.field_bg
+                );
+            }
+
+            assert_ne!(
+                Row::draw(LayoutMode::Cycle, true, checked, palette).pixels(),
+                ordinary,
+                "and the cycle mode must still draw its selection — palette {:?}",
+                palette.sel_bg
+            );
+        }
+    }
+}
+
+/// **T-11-25-2, the first half of the repair** — the row painter takes the rectangle of the row
+/// from the control and never from the message.
+///
+/// # What this holds and why it is worth a test of its own
+///
+/// `NMCUSTOMDRAW` carries an `rc`, and for a list view it is **not filled** at the item prepaint
+/// stage: measured on the live control through the stand, every row arrives with
+/// `{0, 0, 0, 0}`. T-11-25 painted into that rectangle, which is why the shipped picture had no
+/// ground, no selection stripe and one tick for two rows, stacked at the top-left corner of the
+/// list nine scan lines above the first row. Nothing in memory could have caught it — the row
+/// painter is pure in its rectangle and was measured with a good one — so what is held here is
+/// the **road**: the rectangle comes out of `LVM_GETITEMRECT`, and `draw.nmcd.rc` is not read
+/// anywhere in the handler.
+#[test]
+fn the_row_painter_takes_its_rectangle_from_the_control_and_not_from_the_message() {
+    let source = settings_module_source();
+    let handler = function_body(&source, "unsafe fn on_notify(");
+
+    assert!(
+        handler.contains("row_bounds(hwnd, draw.nmcd.dwItemSpec)"),
+        "the item prepaint must ask the control where the row is"
+    );
+    // Comments are allowed to name it — that is where the measurement is written down; code is
+    // not.
+    let code: String = handler
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect();
+
+    assert!(
+        !code.contains("draw.nmcd.rc"),
+        "and it must not read the rectangle of the message at all — a list view never fills it"
+    );
+
+    let asked = function_body(&source, "fn row_bounds(");
+
+    for part in [
+        "LVM_GETITEMRECT",
+        "left: i32::try_from(LVIR_BOUNDS)",
+        "std::ptr::from_mut(&mut rect) as isize",
+    ] {
+        assert!(
+            asked.contains(part),
+            "the documented request needs `{part}` — the code travels in `left` and the whole \
+             rectangle comes back in the client pixels of the control's own paint"
+        );
+    }
+
+    // FALSE is an index the control does not place, and then there is nowhere honest to paint.
+    assert!(
+        asked.contains("(answered != 0).then_some(rect)"),
+        "a refused request must answer `None` rather than a rectangle of zeros — that is the \
+         very shape of the defect this task repairs"
+    );
+    assert!(
+        handler.contains("if let Some(row) = bounds"),
+        "and the handler must paint only when it was given somewhere to paint"
+    );
+}
+
+/// **T-11-25-2, the second half of the repair** — the cell of the state image list is a hole
+/// only while the list carries no ground of its own, and a list view gives it one.
+///
+/// # The measurement this test is made of
+///
+/// `the_cell_of_the_state_image_list_is_a_hole_edge_to_edge` above draws the two cells of a
+/// freshly built list and finds them harmless. That is true of a list nobody has touched —
+/// `ImageList_Draw` with `ILD_NORMAL` uses the mask when the list's background colour is
+/// `CLR_NONE`, which is what a new list carries — and it is **not** true of the list once a
+/// control is holding it. Measured on the live control through the stand:
+///
+/// * straight after `LVM_SETIMAGELIST` the cell colour reads `0x00211c19`, `field_bg` of the
+///   graphite palette — the value `LVM_SETBKCOLOR` had been given;
+/// * sent `LVM_SETBKCOLOR` again with `0x00112233`, the cell colour reads `0x00112233`.
+///
+/// With that colour in place every cell is an opaque rectangle of the control's own ground,
+/// painted **after** the item prepaint — it punched the tick and a bite of the selection stripe
+/// out of every row of the shipped T-11-25. Here the same thing is done deliberately and the
+/// pixels are counted: with a ground the cell covers, with `CLR_NONE` it covers nothing.
+#[test]
+fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
+    use windows::Win32::UI::Controls::{
+        CLR_NONE, ILD_NORMAL, ImageList_Destroy, ImageList_Draw, ImageList_SetBkColor,
+    };
+
+    let list = settings::build_check_image_list(19).expect("the state image list must build");
+    let ground = COLORREF(0x0040_3020);
+
+    let mut counts = Vec::new();
+
+    // First the colour a list view writes into the cells, then the one this module writes back.
+    for cell_ground in [GRAPHITE.field_bg, COLORREF(CLR_NONE as u32)] {
+        // SAFETY: `list` is the live list built above and owned by this frame; the call writes
+        // one field of it and follows no pointer of ours.
+        let _ = unsafe { ImageList_SetBkColor(list, cell_ground) };
+
+        let sheet = Sheet::new(96);
+        sheet.clear(ground);
+
+        for index in 0..2 {
+            // SAFETY: `list` is live and ours, `sheet.dc` holds the sheet's own bitmap, and the
+            // cell is far smaller than the sheet.
+            let drawn = unsafe { ImageList_Draw(list, index, sheet.dc, 4, 4, ILD_NORMAL) };
+
+            assert!(drawn.as_bool(), "cell {index} must draw");
+        }
+
+        let touched = (0..96)
+            .flat_map(|y| (0..96).map(move |x| (x, y)))
+            .filter(|(x, y)| sheet.rgb(*x, *y) != (0x20, 0x30, 0x40))
+            .count();
+
+        println!(
+            "ячейка на земле {cell_ground:?}: {touched} изменённых пикселей из {}",
+            96 * 96
+        );
+
+        counts.push(touched);
+    }
+
+    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
+    let _ = unsafe { ImageList_Destroy(Some(list)) };
+
+    assert!(
+        counts[0] > 0,
+        "with a ground of its own the cell must cover it — otherwise this test proves nothing \
+         about the colour the control writes in"
+    );
+    assert_eq!(
+        counts[1], 0,
+        "and with `CLR_NONE` the cell must be a hole again — {} pixels covered",
+        counts[1]
+    );
+
+    // The road: the ground is taken back out after both messages that write it in. The startup
+    // order is `paint_cycle_list` and then `install_check_images`; a palette change sends only
+    // the first, and a fresh image list is coloured by the second.
+    let source = settings_module_source();
+    let clearing = function_body(&source, "fn clear_state_image_ground(");
+
+    for part in ["LVM_GETIMAGELIST", "LVSIL_STATE", "ImageList_SetBkColor("] {
+        assert!(
+            clearing.contains(part),
+            "the clearing must ask the control for the list it holds and use `{part}`"
+        );
+    }
+    assert!(
+        clearing.contains("COLORREF(CLR_NONE as u32)"),
+        "and it must write the documented «no ground, use the mask» value"
+    );
+
+    for signature in ["fn paint_cycle_list(", "fn install_check_images("] {
+        assert!(
+            function_body(&source, signature).contains("clear_state_image_ground(hwnd)"),
+            "`{signature}` writes the ground into the cells and must take it out again"
+        );
     }
 }

@@ -89,17 +89,18 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::Win32::UI::Controls::{
-    CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW,
+    CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW, CLR_NONE,
     DRAWITEMSTRUCT, EM_LIMITTEXT, EM_SETMARGINS, HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32,
     ILC_MASK, INITCOMMONCONTROLSEX, ImageList_AddMasked, ImageList_Create, ImageList_Destroy,
-    InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW, LVIF_STATE, LVIF_TEXT,
-    LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW, LVM_DELETEALLITEMS,
-    LVM_GETITEMSTATE, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR,
-    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
-    LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
-    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
-    NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
-    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC,
+    ImageList_SetBkColor, InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW,
+    LVIF_STATE, LVIF_TEXT, LVIR_BOUNDS, LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW,
+    LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMRECT, LVM_GETITEMSTATE, LVM_GETNEXTITEM,
+    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE,
+    LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVN_ITEMCHANGING,
+    LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT, LVSIL_STATE, MEASUREITEMSTRUCT,
+    NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT,
+    ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
+    ODT_STATIC,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, VIRTUAL_KEY, VK_APPS,
@@ -3933,12 +3934,15 @@ pub fn cycle_list_change_is_refused(mode: Option<LayoutMode>) -> bool {
 /// that passes every one goes any further. `LVN_ITEMCHANGING` is then decided on the header
 /// alone: not a byte of its payload is read. Only `NM_CUSTOMDRAW` reads on, as the
 /// `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
-/// Out of that structure exactly three fields are read — `dwDrawStage`, `dwItemSpec`,
-/// `uItemState` — and three written — `clrText`, `clrTextBk`, `uItemState` — the documented
-/// answer protocol of item prepaint; the `hdc` and the rectangle of the message are not
-/// touched, and no pointer of the message is followed. Whether the row is selected is not
-/// taken from the message either: it is the list's own `LVM_GETITEMSTATE` answer, asked by
-/// identifier through [`send_to`] — the reading [`read_cycle_checks`] already does for the
+/// Out of that structure exactly four fields are read — `dwDrawStage`, `dwItemSpec`,
+/// `uItemState`, `hdc` — and three written — `clrText`, `clrTextBk`, `uItemState` — the
+/// documented answer protocol of item prepaint; the `hdc` is the DC of the paint the
+/// notification is inside of and is painted into, **the rectangle of the message is not read
+/// at all** (a list view never fills it — see below), and no pointer of the message is
+/// followed. Neither is anything else taken from the message: whether the row is selected,
+/// whether its tick is set and where the row lies are all the list's own answers —
+/// `LVM_GETITEMSTATE` twice and `LVM_GETITEMRECT` through [`row_bounds`], asked by identifier
+/// through [`send_to`], the reading [`read_cycle_checks`] already does for the
 /// ticks. A forged message can therefore recolour one repaint of its own list, or refuse
 /// one change of it, and nothing else — no privileged action starts here, and the window of
 /// time is the same gate as for `WM_DRAWITEM`: outside the modal call there is no procedure
@@ -3967,14 +3971,48 @@ pub fn cycle_list_change_is_refused(mode: Option<LayoutMode>) -> bool {
 /// T-11-7-2, a selected row wearing the same muted paints as the rest. Wherever the table
 /// says so, the `CDIS_SELECTED` bit is *removed* from `uItemState`: while that bit stands
 /// the control paints the selection ground itself (the system highlight, or the theme's),
-/// and the two colour fields lose to it. Clearing the bit in the item-prepaint answer is
+/// and the paints of this handler lose to it. Clearing the bit in the item-prepaint answer is
 /// the documented custom-draw lever for exactly this — the control then draws the row as an
-/// ordinary one, with the colours just set; the row still *is* selected (`LVIS_SELECTED` is
-/// untouched, `LVS_SHOWSELALWAYS` stays a style of the template). The answer is
+/// ordinary one; the row still *is* selected (`LVIS_SELECTED` is untouched,
+/// `LVS_SHOWSELALWAYS` stays a style of the template). The answer is
 /// `CDRF_DODEFAULT` — «draw it yourself, with the fields I set»; `CDRF_NEWFONT` is the
 /// answer of a handler that swapped a font into the `hdc`, which this one never does.
 /// Chosen by the documentation — the product is not launched by the executor; the eye check
 /// is the controller's, at the final acceptance.
+///
+/// # Why the ground stopped being a colour field — task T-11-25
+///
+/// Only the **ink** of the table reaches the message now (`clrText`). The ground reaches the
+/// window instead, through [`draw_cycle_row`], because the mock-ups do not fill the row: they
+/// inset a rounded stripe into it, and a rectangle of `clrTextBk` cannot have a corner radius
+/// any more than the `FrameRect` of a check-box glyph could. The lever that lets a handler paint
+/// under a control's own drawing is the documented transparent text background — `CLR_NONE`,
+/// sent to the whole control by [`paint_cycle_list`] and written into `clrTextBk` here as well:
+/// with it the control fills no rectangle at all and only lays the letters down, over whatever
+/// this handler has painted a moment before.
+///
+/// The tick travels the same road and for a measured reason. It used to be a picture in the
+/// state image list, and the edge of that picture could not be smoothed: `ImageList_AddMasked`
+/// makes a hole of a pixel that is **exactly** the key colour, so a half-covered edge pixel — a
+/// blend of the key and the fill — would have shown as a coloured fringe on every row. The
+/// documented replacement the task proposed, an `ILC_COLOR32` list without `ILC_MASK` carrying
+/// per-pixel alpha, was measured on this machine and **does not blend**: the comctl32 this
+/// program runs on is 5.82 (no `Microsoft.Windows.Common-Controls` v6 assembly in either
+/// manifest), its `ImageList_Draw` copies the image opaquely and the alpha byte is ignored — the
+/// air came out black rather than transparent. So the cell of the image list is now nothing but
+/// the key colour — a hole edge to edge, kept for the row height and the state-icon column it
+/// still measures — and the tick itself is drawn on the row by [`draw_cycle_row`], smoothed like
+/// every other figure of this dialog and blended into whichever ground the row actually wears.
+///
+/// # Where the row is — task T-11-25-2
+///
+/// Both of those paints need a rectangle, and the rectangle the message appears to offer —
+/// `NMCUSTOMDRAW::rc` — is the one thing a list view does **not** fill at item prepaint. It
+/// arrives `{0, 0, 0, 0}`, measured on the live control; T-11-25 painted into it and so painted
+/// into nothing: no ground, no stripe, and every row's tick on the same nine scan lines at the
+/// top-left corner of the list, one glyph over the other. The rectangle is therefore asked of
+/// the control, by [`row_bounds`], exactly as the two state readings above are — and for the
+/// same reason.
 ///
 /// Answers through [`answer_notify`] — a dialog procedure hands a `WM_NOTIFY` result back
 /// in two moves, not by return value. 0 — «not handled» — for every stage this handler has
@@ -4051,6 +4089,27 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
         & LVIS_SELECTED.0
         != 0;
 
+    // And whether its tick is set — the state image index of FR-31, read exactly the way
+    // [`read_cycle_checks`] reads it. The tick is drawn by this handler since task T-11-25, so
+    // the bits that used to pick a picture out of the image list now pick a picture to paint.
+    let checked = u32::try_from(send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_GETITEMSTATE,
+        draw.nmcd.dwItemSpec,
+        isize::try_from(LVIS_STATEIMAGEMASK.0).unwrap_or(0),
+    ))
+    .unwrap_or(0)
+        == CHECKED_IMAGE;
+
+    // And **where** the row is — asked of the list, never taken from the message. See the
+    // doc comment: a list view leaves `NMCUSTOMDRAW::rc` empty at item prepaint, so the
+    // documented request is [`row_bounds`]. FALSE means the control does not place the row it
+    // is asking about, and then there is nowhere honest to paint (NFR-13): the row keeps the
+    // `LVM_SETBKCOLOR` erase and the ink of the table, and loses its stripe and its tick for
+    // that repaint rather than taking them somewhere invented.
+    let bounds = row_bounds(hwnd, draw.nmcd.dwItemSpec);
+
     // The choice, split from the write-back as everywhere in this file: the borrow of the
     // state ends before the message structure is touched. The palette is a `&'static`, so
     // copying the reference out of the borrow is sound.
@@ -4066,14 +4125,42 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
 
     let paint = cycle_row_paint(mode, selected, palette);
 
-    if let Some((ground, ink)) = paint.colours {
-        draw.clrTextBk = ground;
+    if let Some((_, ink)) = paint.colours {
         draw.clrText = ink;
     }
 
+    // The ground of the row is **not** written into the structure any more (task T-11-25): the
+    // one value that goes there is `CLR_NONE`, the documented transparent text background, and
+    // the ground itself is the figure [`draw_cycle_row`] paints below. Written here as well as
+    // sent to the whole control by [`paint_cycle_list`], because the structure arrives carrying
+    // the control's own colours and this handler is the one place that could put an opaque one
+    // back by accident.
+    draw.clrTextBk = COLORREF(CLR_NONE as u32);
+
+    // The ground, the selection figure on it and the tick — everything the control no longer
+    // draws for itself. Here and not after the answer, so that what the control still draws
+    // (the label, and a state image that is now a hole edge to edge) lands on top of it.
+    //
+    // `draw.nmcd.hdc` is the DC of the paint this notification is inside of; it belongs to the
+    // sender for the length of the send, and this procedure is inside that send. The rectangle
+    // is `bounds`, the control's own answer — **not** `draw.nmcd.rc`, which a list view never
+    // fills. SEC-05: the DC is painted into and no pointer of the message is followed.
+    if let Some(row) = bounds {
+        draw_cycle_row(
+            draw.nmcd.hdc,
+            &row,
+            mode,
+            selected,
+            checked,
+            palette,
+            dc_dpi(draw.nmcd.hdc),
+        );
+    }
+
     if paint.strip_selected {
-        // The lever of the doc comment: without `CDIS_SELECTED` the control paints the row
-        // as ordinary — with the pair just set instead of the system highlight.
+        // The lever of the doc comment: without `CDIS_SELECTED` the control paints the row as
+        // ordinary — no system highlight over the selection figure just drawn, and the ink of
+        // the table instead of the system's.
         draw.nmcd.uItemState =
             NMCUSTOMDRAW_DRAW_STATE_FLAGS(draw.nmcd.uItemState.0 & !CDIS_SELECTED.0);
     }
@@ -4102,6 +4189,48 @@ fn answer_notify(hwnd: HWND, result: isize) -> isize {
 
     // TRUE — handled; the manager reads the answer back from the field.
     1
+}
+
+/// The rectangle of one row of the layout list, in the client pixels its own paint DC is in —
+/// task T-11-25-2.
+///
+/// # Why this is asked and not taken from the message
+///
+/// Because the message does not carry it. `NMCUSTOMDRAW` has an `rc` field, and for a list
+/// view it is **not** filled at the item prepaint stage: measured on the live control through
+/// the stand, every row of the layout list arrives with `rc` = `{0, 0, 0, 0}`. Painting into
+/// that rectangle is painting into nothing at the top-left corner of the list — an empty
+/// `FillRect`, an empty selection stripe, and every row's tick stacked on the same nine
+/// scan lines above the first row, which is exactly the regression this task repairs.
+///
+/// The documented request for the geometry is `LVM_GETITEMRECT`: the **left** field of the
+/// rectangle carries the code on the way in, the whole rectangle comes back in client
+/// coordinates on the way out, and `LVIR_BOUNDS` is the code for «the entire item» — in a
+/// report list view, the row across every column, from the state image to the end of the
+/// last one. Client coordinates are the coordinates of the DC the control hands this
+/// handler, so the answer needs no mapping.
+///
+/// `None` is FALSE from the control — an index it does not place. The callers' answer to it
+/// is NFR-13 degradation, stated where they use it.
+fn row_bounds(hwnd: HWND, item: usize) -> Option<RECT> {
+    let mut rect = RECT {
+        // The one field that is an argument rather than an answer.
+        left: i32::try_from(LVIR_BOUNDS).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: `rect` is a fully initialised `RECT` owned by this frame; the message writes
+    // through the pointer for the length of the send and keeps nothing. `LVM_GETITEMRECT`
+    // takes the item index in `wParam` and the rectangle in `lParam`, which is what is passed.
+    let answered = send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_GETITEMRECT,
+        item,
+        std::ptr::from_mut(&mut rect) as isize,
+    );
+
+    (answered != 0).then_some(rect)
 }
 
 /// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a; since task T-11-5b
@@ -4841,30 +4970,10 @@ unsafe fn draw_list_item(
     // length of this send; `ground` is a live brush of the dialog's state.
     unsafe { FillRect(dc, &rect, ground) };
 
-    // The selection stripe of the mock-ups: not the whole row, but a rounded rectangle
-    // [`LIST_SELECTION_INSET`] mock-up pixels in from each side of it —
-    // `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3` of the `'lbox'` arm, task T-11-16.
-    // Left and right only, exactly as there: the stripe keeps the full height of the row.
-    // Outlined in its own fill, because `paint_rounded` draws frame and interior in one figure
-    // and this one has no frame.
+    // The selection stripe of the mock-ups — the one figure both lists of the dialog wear
+    // since task T-11-25, drawn by [`paint_selection_stripe`].
     if selected {
-        let inset = scaled(LIST_SELECTION_INSET, dpi);
-
-        let stripe = RECT {
-            left: rect.left + inset,
-            top: rect.top,
-            right: rect.right - inset,
-            bottom: rect.bottom,
-        };
-
-        paint_rounded(
-            dc,
-            &stripe,
-            scaled(LIST_SELECTION_RADIUS, dpi),
-            fill_ink,
-            fill,
-            dpi,
-        );
+        paint_selection_stripe(dc, &rect, fill_ink, fill, dpi);
     }
 
     // −1 — an empty list asking for the focus cue with no row to name.
@@ -4938,6 +5047,40 @@ unsafe fn draw_list_item(
 
     // TRUE — the row is drawn.
     1
+}
+
+/// The selection figure of the mock-ups on one row of a list — not the whole row, but a rounded
+/// rectangle [`LIST_SELECTION_INSET`] mock-up pixels in from each side of it, corner radius
+/// [`LIST_SELECTION_RADIUS`]: `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3` of the
+/// `'lbox'` arm and «втяжка выделения 2, радиус 3» of the `'lview'` one — task T-11-16 for the
+/// figure, task T-11-25 for the second list that wears it.
+///
+/// Left and right only, exactly as the generator does it: the stripe keeps the full height of
+/// the row. `ink` is the outline, and both callers hand it the fill's own colour, because
+/// [`paint_rounded`] draws frame and interior in one figure and this one has no frame.
+///
+/// One body and not two copies (§6.2): the exclusion list ([`draw_list_item`], owner-drawn) and
+/// the layout list ([`draw_cycle_row`], custom-drawn) draw the same figure from the same two
+/// constants, and a stripe that drifted between the two lists of one dialog is exactly what a
+/// second copy would eventually produce.
+fn paint_selection_stripe(dc: HDC, row: &RECT, ink: COLORREF, fill: HBRUSH, dpi: i32) {
+    let inset = scaled(LIST_SELECTION_INSET, dpi);
+
+    let stripe = RECT {
+        left: row.left + inset,
+        top: row.top,
+        right: row.right - inset,
+        bottom: row.bottom,
+    };
+
+    paint_rounded(
+        dc,
+        &stripe,
+        scaled(LIST_SELECTION_RADIUS, dpi),
+        ink,
+        fill,
+        dpi,
+    );
 }
 
 /// One check mark of the mock-ups: the three points of its polyline and the pen it is drawn
@@ -5269,9 +5412,9 @@ unsafe fn draw_glyph_element(
 /// the mark and nothing else (NFR-13: examined; the glyph stays a filled square, the state
 /// remains readable by the fill alone until the next repaint).
 ///
-/// `dpi` is passed in rather than read off `dc`: one of the two callers paints into a memory
-/// DC of the state image list, whose own answer to `GetDeviceCaps` is not the DPI the frames
-/// are being built for.
+/// `dpi` is passed in rather than read off `dc` for the reason [`paint_rounded`] states: the
+/// background of the dialog is built in a memory DC, whose own answer to `GetDeviceCaps` is not
+/// the DPI the figure is being drawn for.
 pub fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
     // The two strokes of the generator: down into the corner, long up and out. The three
     // points are `mark`'s own, measured from the corner of the square through the scale.
@@ -8308,12 +8451,13 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
 
     prepare_cycle_list(hwnd);
 
-    // FR-92а, task T-11-7: the list carries palette state of its own — the three colours
-    // and the state image list of the ticks — set here for the first showing and again by
-    // `apply_now` on every palette change. After `prepare_cycle_list`: the extended style
-    // must exist before the system pair it creates can be replaced.
+    // FR-92а, task T-11-7: the list carries palette state of its own — the three colours,
+    // set here for the first showing and again by `apply_now` on every palette change — and a
+    // state image list, which since task T-11-25 carries no colour at all and is therefore
+    // built once, here. After `prepare_cycle_list`: the extended style must exist before the
+    // system pair it creates can be replaced.
     paint_cycle_list(hwnd, state.palette);
-    install_check_images(hwnd, state.palette);
+    install_check_images(hwnd);
 
     fill_cycle_list(hwnd, &state.rows, 0);
     enable_by_mode(hwnd, state.working.layouts.mode);
@@ -8604,11 +8748,13 @@ fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
         apply_title_bar_theme(hwnd, fresh);
 
         // FR-92а, task T-11-7: the list view holds palette state of its own —
-        // the three `LVM_SET*COLOR` colours and the state image list of the
-        // ticks — which no brush recreation reaches; both are handed the fresh
-        // palette here, so the repaint below shows one whole dialog.
+        // the three `LVM_SET*COLOR` colours — which no brush recreation reaches,
+        // and it is handed the fresh palette here, so the repaint below shows one
+        // whole dialog. The state image list is *not* rebuilt with it since task
+        // T-11-25: its cells carry no colour any more, only the size of the row,
+        // and the tick they used to hold is painted from the palette on every
+        // repaint by `draw_cycle_row`.
         paint_cycle_list(hwnd, fresh);
-        install_check_images(hwnd, fresh);
 
         repaint_after_palette_change(hwnd);
     }
@@ -9077,7 +9223,7 @@ fn ensure_list_view_class() -> windows::core::Result<()> {
 }
 
 /// The whole geometry of one cell of the state image list of the layout list, in the pixels
-/// of the window it is built for — task T-11-16, the pure half of [`draw_check_frame`].
+/// of the window it is built for — task T-11-16, the pure half of [`check_glyph`].
 ///
 /// The cell is what the row is laid out around: the control draws the state image at the left
 /// edge of the row and the label immediately after it, so the cell carries the air before the
@@ -9119,7 +9265,7 @@ pub fn check_cell(dpi: i32, row_height: i32) -> CheckCell {
     }
 }
 
-/// The order the two frames enter the state image list of [`build_check_image_list`]:
+/// The order the two frames of the state image list of [`build_check_image_list`] stand in:
 /// frame 0 — снята, frame 1 — взведена.
 ///
 /// This array is what couples the drawing to the participation bits of FR-31: a state image
@@ -9129,10 +9275,15 @@ pub fn check_cell(dpi: i32, row_height: i32) -> CheckCell {
 /// [`read_cycle_checks`] reads. The system pair of `LVS_EX_CHECKBOXES` sits in the same
 /// order, which is why replacing the image list moves not a single state bit. A test holds
 /// the coupling.
+///
+/// Since task T-11-25 the two cells hold no picture — both are a hole edge to edge, and what
+/// the order names is the *meaning* of the two indices rather than two drawings. It is still
+/// this coupling the tick hangs from: [`on_notify`] reads the same bits and hands
+/// [`draw_cycle_row`] the `checked` the picture is chosen by.
 pub const CHECK_FRAME_ORDER: [bool; 2] = [false, true];
 
-/// Fill, frame and mark of one check frame of the layout list — what [`check_frame_colors`]
-/// answers and the whole of what [`draw_check_frame`] needs.
+/// Fill, frame and mark of one tick of the layout list — what [`check_frame_colors`]
+/// answers and the whole of what [`draw_check_glyph`] needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckFrameColors {
     /// What the whole 13×13 square is filled with.
@@ -9143,14 +9294,15 @@ pub struct CheckFrameColors {
     pub mark: Option<COLORREF>,
 }
 
-/// The colours of one check frame in one palette — FR-92а, task T-11-7: the pure half of the
-/// custom state image list, closed by a table test over both states and both palettes.
+/// The colours of one tick of the layout list in one palette — FR-92а, task T-11-7: the pure
+/// half of the tick, closed by a table test over both states and both palettes.
 ///
 /// Colours of the given palette rather than roles, unlike [`glyph_color_roles`] and its kin:
-/// the frames are painted into memory bitmaps outside any `WM_*` answer, so what the drawing
-/// needs is the palette's own values — and the task words the function as «(взведена,
-/// палитра) → краски кадра». The table stays closed all the same: every answer is a field of
-/// `palette` and nothing else, so not a single colour number enters this module (§6.2).
+/// the drawing this feeds answers no `WM_CTLCOLOR*` and asks for no brush of the dialog's own,
+/// so what it needs is the palette's own values — and the task words the function as
+/// «(взведена, палитра) → краски кадра». The table stays closed all the same: every answer is a
+/// field of `palette` and nothing else, so not a single colour number enters this module
+/// (§6.2).
 ///
 /// The two rows quote the check-box cells of the glyph table of T-11-5b, so the ticks of the
 /// list match the ticks of the dialog:
@@ -9233,36 +9385,117 @@ pub fn cycle_row_paint(
 /// родственные»). They exist because a `SysListView32` asks its parent no `WM_CTLCOLOR*`
 /// question: the brushes of T-11-4 cannot reach it. Sent with [`send_to`] — the way this file
 /// already talks to its own list — on initialisation and again on every palette change.
+///
+/// # ⚠ The third colour is `CLR_NONE` since task T-11-25
+///
+/// «To make the text background transparent» is what the documentation of `LVM_SETTEXTBKCOLOR`
+/// says `CLR_NONE` is for, and transparency is exactly what this list now needs: the ground of a
+/// row is no longer a rectangle the control fills, it is the figure [`draw_cycle_row`] paints in
+/// the item prepaint — a rounded stripe inset into the row, which any opaque fill of the control
+/// would erase the moment the label went down over it. With `CLR_NONE` the control fills nothing
+/// and only writes the letters, so what stays behind them is the drawing this module made.
+///
+/// The ground *of the control* — `LVM_SETBKCOLOR`, the first row above — is untouched and stays
+/// `field_bg`: it is what the list wears below and around the rows, and it is also the erase
+/// every repaint starts from, which is the honest ground the stripe is inset into.
 fn paint_cycle_list(hwnd: HWND, palette: &theme::Palette) {
     // NFR-13: each message answers a success flag, examined in words and dropped: a refused
     // colour leaves the system one on exactly that surface — the dialog lives degraded, the
     // precedent of the refused brushes of T-11-4 — and the journal has no row for cosmetics
     // (reviews\T-11-1.md).
-    for (message, color) in [
-        (LVM_SETBKCOLOR, palette.field_bg),
-        (LVM_SETTEXTCOLOR, palette.text),
-        (LVM_SETTEXTBKCOLOR, palette.field_bg),
+    for (message, value) in [
+        (
+            LVM_SETBKCOLOR,
+            isize::try_from(palette.field_bg.0).unwrap_or(0),
+        ),
+        (
+            LVM_SETTEXTCOLOR,
+            isize::try_from(palette.text.0).unwrap_or(0),
+        ),
+        (LVM_SETTEXTBKCOLOR, isize::try_from(CLR_NONE).unwrap_or(0)),
     ] {
-        send_to(
-            hwnd,
-            IDC_CYCLE_LIST,
-            message,
-            0,
-            isize::try_from(color.0).unwrap_or(0),
-        );
+        send_to(hwnd, IDC_CYCLE_LIST, message, 0, value);
     }
+
+    // `LVM_SETBKCOLOR` above just wrote `field_bg` into the cells of the state image list as
+    // well — measured, see [`clear_state_image_ground`] — so the ground comes out again here,
+    // and it has to come out **here** and not only where the list is installed: this is the
+    // whole of what a palette change sends the list, and after it the cells would otherwise be
+    // opaque again.
+    clear_state_image_ground(hwnd);
 }
 
-/// Replaces the state image list of the layout list with the two palette frames — FR-92а,
-/// task T-11-7: `LVS_EX_CHECKBOXES` draws its ticks with the system pair, which stays light
-/// in the dark palette (§10 п.9 called that the accepted price; the documented state image
-/// list is what lifts it).
+/// Takes the ground out of the cells of the state image list of the layout list — FR-92а,
+/// task T-11-25-2.
+///
+/// # What is measured here, and why the tick needs it
+///
+/// Since task T-11-25 the two cells of that list hold no picture at all: every pixel of both
+/// is the key colour, so the mask makes each cell a hole edge to edge and the tick is painted
+/// on the row instead ([`draw_cycle_row`]). A hole draws nothing — **provided the image list
+/// has no background colour of its own.** `ImageList_Draw` with `ILD_NORMAL` fills the whole
+/// cell rectangle with that colour first and blits the picture over it; only `CLR_NONE` means
+/// «no fill, use the mask», which is what a freshly created list carries.
+///
+/// A list view does not leave it that way. Measured on the live control through the stand,
+/// with the layout list holding this module's own two cells:
+///
+/// * straight after `LVM_SETIMAGELIST` the cell colour is `0x00211c19` — `field_bg` of the
+///   graphite palette, the very value `LVM_SETBKCOLOR` was given;
+/// * sent `LVM_SETBKCOLOR` again with `0x00112233`, the cell colour becomes `0x00112233`.
+///
+/// So the control writes its own erase colour into the cells of whatever state image list it
+/// is holding, on both messages. With it there, the state image is a 19 × 23 opaque rectangle
+/// of `field_bg` painted **after** the item prepaint of [`on_notify`] — it punched the tick and
+/// a bite of the selection stripe out of every row, which is half of what task T-11-25-2
+/// repairs. `CLR_NONE` is the documented way back and the only one this needs.
+///
+/// The handle is asked of the control (`LVM_GETIMAGELIST`, `LVSIL_STATE`) rather than
+/// remembered, so this works the same for the pair `LVS_EX_CHECKBOXES` made and for the pair
+/// [`install_check_images`] put in its place, and answers zero when there is no list at all.
+fn clear_state_image_ground(hwnd: HWND) {
+    let list = send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_GETIMAGELIST,
+        usize::try_from(LVSIL_STATE).unwrap_or(0),
+        0,
+    );
+
+    if list == 0 {
+        // No state image list to clear — nothing to do, and nothing degraded either: without
+        // one there is no cell to paint over the row (NFR-13).
+        return;
+    }
+
+    // SAFETY: `list` is the handle the control just answered for its own state image list; the
+    // call writes one field of it and follows no pointer of ours. The previous colour is
+    // dropped — it is the value measured above, and nothing needs it back.
+    let _ = unsafe { ImageList_SetBkColor(HIMAGELIST(list), COLORREF(CLR_NONE as u32)) };
+}
+
+/// Replaces the state image list of the layout list with two empty cells — FR-92а, task
+/// T-11-7 for the replacement, task T-11-25 for the cells being empty.
+///
+/// `LVS_EX_CHECKBOXES` draws its ticks with the system pair, which stays light in the dark
+/// palette (§10 п.9 called that the accepted price). Task T-11-7 lifted that by painting the
+/// two palette frames into the cells; task T-11-25 took the picture out of them again and
+/// moved it onto the row itself ([`draw_cycle_row`]), because the edge of a picture inside a
+/// masked image list cannot be smoothed and the alpha route that would have smoothed it is not
+/// available on the comctl32 this program runs on — the measurement is in the doc comment of
+/// [`on_notify`].
+///
+/// So what the list installed here still does is **measure**, and that is not a leftover: a
+/// report list view takes its row height from the cell of its state image list and from nowhere
+/// a message can reach, and the width of the cell is the column the label starts after. Both are
+/// [`check_cell`], and both would go back to the system's 16 × 16 if this list were dropped.
 ///
 /// Everything else about the check boxes is untouched: the extended style stays on the
 /// control, so clicking a square still flips the item between state images 1 and 2, and
 /// [`set_row_check`]/[`read_cycle_checks`] keep speaking `LVIS_STATEIMAGEMASK` — the
-/// participation mechanism of FR-31 is the same mechanism with different pictures.
-fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
+/// participation mechanism of FR-31 is the same mechanism, and it now picks a picture for
+/// [`draw_cycle_row`] to paint instead of a picture for the control to blit.
+fn install_check_images(hwnd: HWND) {
     // The height of a row of the layout list — [`LAYOUT_ROW_HEIGHT_DLU`] dialog units of this
     // window (task T-11-16). It travels down the build because the **cell** of the state image
     // list is what a report list view takes its row height from; a refused `MapDialogRect`
@@ -9272,10 +9505,10 @@ fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
         .map(|(_, vertical)| vertical)
         .unwrap_or(0);
 
-    let Some(list) = build_check_image_list(palette, row_height) else {
-        // NFR-13, examined in words: with no frames of our own the system pair simply
-        // stays — light squares in the dark palette, exactly the price §10 п.9 already
-        // words — which is better than ticks nobody can see at all. No journal row for
+    let Some(list) = build_check_image_list(row_height) else {
+        // NFR-13, examined in words: with no cells of our own the system pair simply stays —
+        // its own row height, its own column, and its light squares drawn over the tick this
+        // dialog paints — which is a coarser list rather than no list. No journal row for
         // cosmetics (reviews\T-11-1.md).
         return;
     };
@@ -9291,12 +9524,17 @@ fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
         list.0,
     );
 
-    // The first swap answers the pair `LVS_EX_CHECKBOXES` created, every later one — the
-    // frames of the previous palette; both are equally ours to free once the control has
-    // let go. The list *currently* installed is deliberately never destroyed here: the
+    // The first swap answers the pair `LVS_EX_CHECKBOXES` created, and it is ours to free
+    // once the control has let go. The list *currently* installed is deliberately never
+    // destroyed here: the
     // control destroys the image lists it holds when it is itself destroyed — the template
     // carries no `LVS_SHAREIMAGELISTS`, which is the one style that would keep it from
     // doing so.
+    // The control has just painted its own ground into the cells: `LVM_SETIMAGELIST` hands the
+    // list the colour the control erases with. Taken straight back out — see
+    // [`clear_state_image_ground`], and the measurement in its doc comment.
+    clear_state_image_ground(hwnd);
+
     if previous != 0 {
         // SAFETY: `previous` is the handle the control just answered and no longer holds;
         // it is freed exactly once, here. The `BOOL` is examined in words and dropped —
@@ -9306,19 +9544,26 @@ fn install_check_images(hwnd: HWND, palette: &theme::Palette) {
     }
 }
 
-/// Builds the two-frame state image list of [`install_check_images`] — the outer layer of
-/// three: takes and releases the screen DC, which is where the colour depth of the frames
+/// Builds the two-cell state image list of [`install_check_images`] — the outer layer of
+/// three: takes and releases the screen DC, which is where the colour depth of the cells
 /// comes from.
-fn build_check_image_list(palette: &theme::Palette, row_height: i32) -> Option<HIMAGELIST> {
+///
+/// Public since task T-11-25 for the reason [`paint_rounded`] is: a test builds the list, draws
+/// both cells over a ground of its own in a memory bitmap and reads the pixels back, which is
+/// how «весь кадр — дыра» is held closed without a window and without starting the product.
+///
+/// ⚠ The answer is owned by the caller: it is either handed to a control with `LVM_SETIMAGELIST`
+/// — which takes it over, see [`install_check_images`] — or destroyed with `ImageList_Destroy`.
+pub fn build_check_image_list(row_height: i32) -> Option<HIMAGELIST> {
     // SAFETY: the screen DC of this process; released below, on every path.
     let screen = unsafe { GetDC(None) };
 
     if screen.is_invalid() {
-        // NFR-13: examined — no DC, no frames; the caller words the degradation.
+        // NFR-13: examined — no DC, no cells; the caller words the degradation.
         return None;
     }
 
-    let list = build_check_frames(screen, palette, row_height);
+    let list = build_check_frames(screen, row_height);
 
     // SAFETY: releases exactly the DC taken above, once.
     unsafe { ReleaseDC(None, screen) };
@@ -9326,15 +9571,11 @@ fn build_check_image_list(palette: &theme::Palette, row_height: i32) -> Option<H
     list
 }
 
-/// The middle layer of [`build_check_image_list`]: owns the memory DC the frames are drawn
+/// The middle layer of [`build_check_image_list`]: owns the memory DC the cells are filled
 /// through. ⚠ The bitmaps are compatible with the **screen**, not with this DC: a memory DC
 /// is born with a monochrome bitmap selected, and a bitmap compatible with *it* would carry
 /// one bit per pixel — the classic trap the task's «в память» route walks past.
-fn build_check_frames(
-    screen: HDC,
-    palette: &theme::Palette,
-    row_height: i32,
-) -> Option<HIMAGELIST> {
+fn build_check_frames(screen: HDC, row_height: i32) -> Option<HIMAGELIST> {
     // SAFETY: a memory DC over the live screen DC; deleted below, on every path.
     let dc = unsafe { CreateCompatibleDC(Some(screen)) };
 
@@ -9343,44 +9584,49 @@ fn build_check_frames(
         return None;
     }
 
-    let list = draw_frames_into_list(screen, dc, palette, row_height);
+    let list = draw_frames_into_list(screen, dc, row_height);
 
-    // SAFETY: deletes exactly the DC created above, once; the frame bitmaps were deselected
+    // SAFETY: deletes exactly the DC created above, once; the cell bitmaps were deselected
     // before their own deletion, so nothing of ours is still selected into it.
     let _ = unsafe { DeleteDC(dc) };
 
     list
 }
 
-/// The colour of the air beside the tick, made transparent by the mask of the image list —
-/// task T-11-15.
+/// The colour the whole cell of the state image list is filled with — task T-11-15 for the
+/// mechanism, task T-11-25 for the cell being nothing else.
 ///
 /// `ImageList_AddMasked` is the documented way to a mask: it builds one from the bitmap
-/// itself, turning every pixel of this colour into a hole the row shows through. The colour
-/// is therefore never seen — it only has to be a colour the frames themselves never use, and
-/// magenta is the traditional key for exactly that reason. A test holds it apart from every
-/// colour of both palettes, so a palette can never grow a field that would punch a hole in
-/// its own tick.
+/// itself, turning every pixel of this colour into a hole the row shows through. Until task
+/// T-11-25 the tick was painted over this colour and only the air around it was a hole, which
+/// is why the square could not be smoothed: a half-covered edge pixel is a blend of the key and
+/// the fill, no longer *exactly* the key, so no longer a hole — a magenta fringe on every row.
+/// Now the cell carries this colour and nothing else, the whole of it is a hole, and the tick is
+/// painted onto the row by [`draw_cycle_row`], where nothing has to match a colour exactly and
+/// the edge blends into the ground the row actually wears.
+///
+/// The colour is therefore never seen. Magenta is the traditional key, and it stays that:
+/// `ImageList_AddMasked` needs *some* colour to build a mask from, and one that no palette owns
+/// keeps the cell readable as «пусто» rather than as a colour someone might mistake for a paint.
 const CHECK_CELL_KEY: COLORREF = COLORREF(0x00FF_00FF);
 
-/// The inner layer of [`build_check_image_list`]: the image list itself and the two frames,
-/// in the order of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
-/// answers `None` — a one-frame list would silently shift the meaning of state image 2.
-fn draw_frames_into_list(
-    screen: HDC,
-    dc: HDC,
-    palette: &theme::Palette,
-    row_height: i32,
-) -> Option<HIMAGELIST> {
-    // The whole cell, in the pixels of the screen the frames are made for — the DPI of the
+/// The inner layer of [`build_check_image_list`]: the image list itself and the two cells,
+/// one per entry of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
+/// answers `None` — a one-cell list would silently shift the meaning of state image 2.
+///
+/// The two cells are identical and empty; the order constant is still what counts them, because
+/// what it says — one cell per state image index, «снята» first — is exactly what has to stay
+/// true for the participation bits of FR-31 to keep landing on a cell that exists.
+fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGELIST> {
+    // The whole cell, in the pixels of the screen it is made for — the DPI of the
     // screen DC this whole build hangs from (NFR-13: a DC that will not say is answered as 96
     // by `dc_dpi`, which is the 100 % cell).
     let dpi = dc_dpi(screen);
     let cell = check_cell(dpi, row_height);
 
     // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
-    // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — the tick is opaque
-    // and the air beside it is a hole, which is what [`CHECK_CELL_KEY`] is for.
+    // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — every pixel of the
+    // cell is a hole, which is what [`CHECK_CELL_KEY`] is for.
     let list = unsafe { ImageList_Create(cell.width, cell.height, ILC_COLOR32 | ILC_MASK, 2, 0) };
 
     if list.is_invalid() {
@@ -9388,7 +9634,7 @@ fn draw_frames_into_list(
         return None;
     }
 
-    for checked in CHECK_FRAME_ORDER {
+    for _ in CHECK_FRAME_ORDER {
         // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
         // frame until the `DeleteObject` below.
         let bitmap = unsafe { CreateCompatibleBitmap(screen, cell.width, cell.height) };
@@ -9404,7 +9650,7 @@ fn draw_frames_into_list(
         // into a DC is not readable.
         let previous = unsafe { SelectObject(dc, bitmap.into()) };
 
-        draw_check_frame(dc, checked, palette, cell, dpi);
+        fill_check_cell(dc, cell);
 
         // SAFETY: restores the bitmap that was in the DC a moment ago.
         unsafe { SelectObject(dc, previous) };
@@ -9429,20 +9675,13 @@ fn draw_frames_into_list(
     Some(list)
 }
 
-/// Paints one cell of the state image list into the bitmap currently selected into `dc`:
-/// [`CHECK_CELL_KEY`] air over the whole of `cell`, then the square of the tick where
-/// [`check_cell`] puts it, in the colours of [`check_frame_colors`] — task T-11-16 for the
-/// geometry, task T-11-7 for the colours.
+/// Fills one cell of the state image list, in the bitmap currently selected into `dc`, with
+/// [`CHECK_CELL_KEY`] and nothing else — the whole of what a cell carries since task T-11-25.
 ///
-/// The brushes are transient, exactly as the pens of [`draw_check_mark`]: nothing here
-/// outlives the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is
-/// answers that must outlive it. The square is rounded by [`LIST_CHECK_CORNER_RADIUS`] and the
-/// mark is [`draw_check_mark`] with [`LIST_CHECK_MARK`] — the tick of the list has its own
-/// figure in the mock-ups, one size smaller than the tick of a dialog check box.
-///
-/// `dpi` is the DPI the frames are being built for and is passed in rather than read off `dc`:
-/// this is a memory DC, whose own answer is not it.
-fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: CheckCell, dpi: i32) {
+/// The brush is transient, exactly as the pens of [`draw_check_mark`]: nothing here outlives
+/// the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is answers that
+/// must outlive it.
+fn fill_check_cell(dc: HDC, cell: CheckCell) {
     let whole = RECT {
         left: 0,
         top: 0,
@@ -9450,24 +9689,15 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: Chec
         bottom: cell.height,
     };
 
-    let frame = RECT {
-        left: cell.glyph_left,
-        top: cell.glyph_top,
-        right: cell.glyph_left + cell.glyph_side,
-        bottom: cell.glyph_top + cell.glyph_side,
-    };
-
-    // The air first, over the whole cell: the tick is painted on top of it, and what stays
-    // uncovered becomes the hole of the mask.
-    //
     // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
     // below.
     let key = unsafe { CreateSolidBrush(CHECK_CELL_KEY) };
 
     if key.is_invalid() {
-        // NFR-13: examined — no brush, no air; without a key colour the mask would come out
-        // of whatever the fresh bitmap held, so the honest answer is to leave the cell alone
-        // and let the callers' degradation words cover it.
+        // NFR-13: examined — no brush, no fill; the mask would then come out of whatever the
+        // fresh bitmap held, and the cell would blit that over the row instead of being a hole.
+        // The honest answer is to leave the cell alone and let the callers' degradation words
+        // cover it: a coarse cell over the tick, not a lost tick.
         return;
     }
 
@@ -9477,7 +9707,132 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: Chec
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(key.into()) };
+}
 
+/// Everything one row of the layout list wears that the control does not draw itself — the
+/// ground, the selection figure on it and the tick — FR-92а, task T-11-25.
+///
+/// # The three layers, in the order they go down
+///
+/// 1. **The ground** — the pair an *ordinary* row of this mode wears, out of the very same
+///    [`cycle_row_paint`] table the ink comes from: `field_bg` in both modes, and the fallback
+///    for a table row that answers nothing is `field_bg` too, because that is what
+///    `LVM_SETBKCOLOR` already erased the control with.
+/// 2. **The selection** — exactly what the table answers *differently* for a selected row, and
+///    nothing where it answers the same. That is the whole rule, and it is the table's own
+///    sentence rather than a second copy of it: in the cycle mode a selected row takes `sel_bg`
+///    where an ordinary one takes nothing, so the stripe is drawn; in the pair mode a selected
+///    row takes precisely what every other row takes — the logical «выключенность» of task
+///    T-11-7-2 — so there is no stripe at all, and FR-31's «выделение в нём не появляется»
+///    holds by construction instead of by a second condition that could drift from the table.
+///    The figure is [`paint_selection_stripe`], the one both lists of this dialog share.
+/// 3. **The tick** — [`check_glyph`] for where it goes, [`draw_check_glyph`] for what it is.
+///
+/// # Why the tick is here and not in the image list any more
+///
+/// Because the edge of a picture inside a masked image list cannot be smoothed, and the alpha
+/// route that would have replaced the mask was measured on this machine and does not work: see
+/// [`CHECK_CELL_KEY`] for the first half and the doc comment of [`on_notify`] for the second.
+/// Drawn here the square blends into the ground the row actually wears — `field_bg` under an
+/// ordinary row, `sel_bg` under the selection — which no baked-in ground could have done either.
+///
+/// Public for the reason [`paint_rounded`] is: a test draws a row into a memory bitmap and reads
+/// the pixels back, which is how both halves of this task are held closed without a window and
+/// without starting the product.
+pub fn draw_cycle_row(
+    dc: HDC,
+    row: &RECT,
+    mode: LayoutMode,
+    selected: bool,
+    checked: bool,
+    palette: &theme::Palette,
+    dpi: i32,
+) {
+    let plain = cycle_row_paint(mode, false, palette);
+    let paint = cycle_row_paint(mode, selected, palette);
+
+    let ground = plain.colours.map_or(palette.field_bg, |(ground, _)| ground);
+
+    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
+    // below.
+    let brush = unsafe { CreateSolidBrush(ground) };
+
+    if brush.is_invalid() {
+        // NFR-13: examined — no brush, no ground, and nothing on top of a ground that was not
+        // laid is honest either: the row keeps the `LVM_SETBKCOLOR` erase, which is `field_bg`,
+        // and loses its selection and its tick for one repaint.
+        return;
+    }
+
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of, and `row`
+    // is a live rectangle of the caller's frame; `brush` is the live brush just made. The answer
+    // is dropped for the NFR-13 reason `draw_list_item` states for all its paint calls.
+    unsafe { FillRect(dc, row, brush) };
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(brush.into()) };
+
+    if paint.colours != plain.colours
+        && let Some((selection, _)) = paint.colours
+    {
+        // SAFETY: as for the ground brush above.
+        let fill = unsafe { CreateSolidBrush(selection) };
+
+        if !fill.is_invalid() {
+            // NFR-13: a refused brush leaves the ground of the row and no stripe — the row is
+            // still readable, and the ink of the selection pair is already on it.
+            paint_selection_stripe(dc, row, selection, fill, dpi);
+
+            // SAFETY: created above, handed to nobody, freed exactly once.
+            let _ = unsafe { DeleteObject(fill.into()) };
+        }
+    }
+
+    draw_check_glyph(dc, &check_glyph(row, dpi), checked, palette, dpi);
+}
+
+/// The square of the tick inside one row of the layout list — task T-11-25.
+///
+/// The control draws the state image at the left edge of the row, so the cell of
+/// [`check_cell`] *is* the left edge of the row: the air before the tick, the tick, the air
+/// after it. Taking the geometry from the same pure function the image list is built from is
+/// what keeps the tick this module paints on top of the column the control lays out around —
+/// the click that toggles a check box lands anywhere in that cell, and the label starts after
+/// it.
+///
+/// The row's own height is what the tick is centred in, which is the same number
+/// [`install_check_images`] hands the cell: a report list view takes its row height from the
+/// cell and from nowhere else. Pure.
+pub fn check_glyph(row: &RECT, dpi: i32) -> RECT {
+    let cell = check_cell(dpi, row.bottom - row.top);
+
+    RECT {
+        left: row.left + cell.glyph_left,
+        top: row.top + cell.glyph_top,
+        right: row.left + cell.glyph_left + cell.glyph_side,
+        bottom: row.top + cell.glyph_top + cell.glyph_side,
+    }
+}
+
+/// One tick of the layout list, in the colours of [`check_frame_colors`] — task T-11-16 for
+/// the figure, task T-11-7 for the colours, task T-11-25 for the ground it is drawn on.
+///
+/// The brush is transient, exactly as the pens of [`draw_check_mark`]: nothing here outlives
+/// the paint, so nothing belongs in `theme::Brushes`, whose reason to exist is answers that
+/// must outlive it. The square is rounded by [`LIST_CHECK_CORNER_RADIUS`] and the mark is
+/// [`draw_check_mark`] with [`LIST_CHECK_MARK`] — the tick of the list has its own figure in
+/// the mock-ups, one size smaller than the tick of a dialog check box.
+///
+/// [`paint_rounded`] and no longer [`stroke_rounded`]: the square is smoothed like every other
+/// figure of this dialog now that it is painted on the row and not into a cell whose mask makes
+/// a hole of one exact colour. `FillRectPx … 2` and `StrokeRectPx … 2 1` of the `'lview'` arm
+/// are one `RoundRect` inside it, exactly as the glyph of a dialog check box is drawn: a square
+/// `FillRect` under a square `FrameRect` cannot have a corner radius at all, and the frameless
+/// picture — the checked one, whose accent fill covers it whole — is outlined in its own fill.
+///
+/// `dpi` is the DPI of the window, passed in rather than read off `dc` for the reason
+/// [`paint_rounded`] states.
+fn draw_check_glyph(dc: HDC, glyph: &RECT, checked: bool, palette: &theme::Palette, dpi: i32) {
     let colors = check_frame_colors(checked, palette);
 
     // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
@@ -9485,32 +9840,18 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: Chec
     let fill = unsafe { CreateSolidBrush(colors.fill) };
 
     if fill.is_invalid() {
-        // NFR-13: examined — no brush, no fill; the frame stays whatever the fresh bitmap
-        // held, and the callers' degradation words cover it.
+        // NFR-13: examined — no brush, no square; the row keeps its ground and loses its tick
+        // for one repaint, and the callers' degradation words cover it.
         return;
     }
 
-    // The square, rounded by [`LIST_CHECK_CORNER_RADIUS`] — `FillRectPx … 2` and
-    // `StrokeRectPx … 2 1` of the `'lview'` arm (task T-11-16). One `RoundRect` for fill and
-    // frame, exactly as the glyph of a dialog check box is drawn: a square `FillRect` under a
-    // square `FrameRect` cannot have a corner radius at all, and the frameless cell — the
-    // checked one, whose accent fill covers it whole — is outlined in its own fill.
-    //
-    // ⚠ [`stroke_rounded`] and **not** [`paint_rounded`]: this cell is drawn over
-    // [`CHECK_CELL_KEY`], and `ImageList_AddMasked` makes a hole of every pixel that is
-    // *exactly* that colour. A smoothed corner is a blend of the key and the fill — no longer
-    // the key, so no longer a hole — and the tick would carry a magenta fringe on every row.
-    // The corner it costs is [`LIST_CHECK_CORNER_RADIUS`] — one pixel at 96 DPI, two at 140 % —
-    // while the figure the eye actually reads here, the tick itself, **is** smoothed below by
-    // [`draw_check_mark`], which strokes it well inside the fill where no mask can be harmed.
-    // Written down in the report of task T-11-17 as the one deliberate exception.
-    stroke_rounded(
+    paint_rounded(
         dc,
-        &frame,
+        glyph,
         scaled(LIST_CHECK_CORNER_RADIUS, dpi),
-        scaled(BORDER_THICKNESS, dpi).max(1),
         colors.frame.unwrap_or(colors.fill),
         fill,
+        dpi,
     );
 
     // SAFETY: created above, handed to nobody, freed exactly once — see `draw_check_mark`
@@ -9518,7 +9859,7 @@ fn draw_check_frame(dc: HDC, checked: bool, palette: &theme::Palette, cell: Chec
     let _ = unsafe { DeleteObject(fill.into()) };
 
     if let Some(ink) = colors.mark {
-        draw_check_mark(dc, &frame, ink, LIST_CHECK_MARK, dpi);
+        draw_check_mark(dc, glyph, ink, LIST_CHECK_MARK, dpi);
     }
 }
 
