@@ -4191,6 +4191,199 @@ fn the_four_combo_boxes_are_owner_drawn_and_keep_their_old_styles() {
     }
 }
 
+/// **Criteria 17 and 18 of T-12-2** — the air of the **closed** part of a combo box, its
+/// derivation, and the wall between it and the items of the dropped-down list.
+///
+/// Findings F3 and R-04 of the Э12 protocol: the closed part stood 30 px against the mock-up's
+/// 22,5, because `COMBO_ITEM_EXTRA = 12` had been derived by *measuring the picture* — its doc
+/// comment claimed the mock-ups draw the closed part «33 of their own pixels high». The
+/// generator has no such literal: `scratchpad\ui.ps1` states every combo box as `h = 12`
+/// dialog units (lines 103, 116, 118), and that is the whole closed part.
+///
+/// This test holds the corrected number **and its derivation**, so that the next task cannot
+/// re-derive the old one from a picture in silence — the arithmetic below is written out in
+/// hundredths of a pixel and does not go anywhere near the module's own formula.
+#[test]
+fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() {
+    // ---- the derivation, in hundredths of a pixel at 96 DPI ------------------------------
+    //
+    // 1. The generator's literal: `h = 12` vertical dialog units, and one vertical unit is an
+    //    eighth of the dialog font's height — 15 px at 96 DPI, so 15/8 = 1,875 px.
+    let model_box = 12 * 1500 / settings::DIALOG_FONT_HEIGHT_DLU; // 22,50 px
+    assert_eq!(model_box, 2250, "12 DLU must be 22,5 px at 96 DPI");
+
+    // 2. Six pixels of that box are not the item's: four of the system's own edges around the
+    //    selection field and two of the frame this dialog draws at the edge of the client
+    //    area. Measured on the stand, task T-12-2: window 30 px = CB_GETITEMHEIGHT(-1) 24 + 6.
+    const SYSTEM_SPEND: i32 = 600;
+
+    // 3. What is left is the selection field, and the dialog font fills 15 px of it.
+    let field = model_box - SYSTEM_SPEND; // 16,50 px
+    let air_at_96 = field - 1500; // 1,50 px
+
+    assert_eq!(field, 1650);
+    assert_eq!(air_at_96, 150);
+
+    // 4. The mock-ups are drawn at 140 %, so the air as a length of *theirs* is 1,4 × that —
+    //    2,1 mock-up pixels, which is 2 written whole.
+    let air_in_mockup_pixels = air_at_96 * settings::MOCKUP_SCALE_TENTHS / 10; // 2,10 px
+    assert_eq!(air_in_mockup_pixels, 210);
+    assert_eq!(
+        (air_in_mockup_pixels + 50) / 100,
+        settings::COMBO_CLOSED_ITEM_EXTRA,
+        "the air of the closed part must be the 12 DLU of the generator minus the six pixels \
+         the system spends minus the font — 2,1 mock-up pixels — and not a number read off a \
+         picture"
+    );
+
+    // ---- and what that number puts on the screen ----------------------------------------
+    //
+    // Through `scaled` — the one road a mock-up length takes into the module — 2 comes back
+    // as 1 px at 96 DPI, so the field stands 16 px and the closed part 16 + 6 = 22 against the
+    // mock-up's 22,5. The controller's acceptance window is 22..23 px.
+    let field_at_96 = 15 + settings::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96);
+
+    assert_eq!(
+        field_at_96, 16,
+        "the selection field must stand 16 px at 96 DPI"
+    );
+
+    let closed_part = field_at_96 + 6;
+
+    assert!(
+        (22..=23).contains(&closed_part),
+        "the closed part must measure 22..23 px at 96 DPI against the model's 22,5 — it is \
+         {closed_part}"
+    );
+
+    // The defect this task was raised on: 30 px, which is what the list air still makes.
+    assert_eq!(
+        15 + settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96) + 6,
+        30,
+        "the number that made the 30-pixel closed part must be identified, not forgotten"
+    );
+
+    // ---- the wall: the dropped-down list keeps the height it had -------------------------
+    //
+    // One `WM_MEASUREITEM` reaches a `CBS_OWNERDRAWFIXED` combo box and its answer is worn by
+    // the closed part and by every item of the list alike — measured, not assumed: before this
+    // task `CB_GETITEMHEIGHT(-1)` and `CB_GETITEMHEIGHT(0)` both answered 24 on all four combo
+    // boxes, and after it 16 and 24. The height of the list items was never measured against
+    // the mock-ups and T-12-2 was told not to move it, so this number must not drift.
+    assert_eq!(
+        settings::COMBO_LIST_ITEM_EXTRA,
+        12,
+        "the air of a dropped-down list item is the number T-11-15 left; T-12-2 does not move it"
+    );
+    assert_eq!(
+        15 + settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
+        24,
+        "a list item must still be the 24 px `CB_GETITEMHEIGHT(0)` answered before T-12-2"
+    );
+
+    assert!(
+        settings::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96)
+            < settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
+        "the closed part is the shorter of the two on the screen — that is the whole of F3"
+    );
+
+    // ---- and the source: which number goes where, and by which lever ---------------------
+    let source = settings_module_source();
+
+    // The lie is gone with the name that carried it. «33 mock-up pixels» was never a length of
+    // the generator, and the old single name is what the next task would have re-used.
+    for gone in [
+        "COMBO_ITEM_EXTRA:",
+        "scaled(COMBO_ITEM_EXTRA",
+        "33 of their own pixels high",
+        "33 ÷ 1,4",
+    ] {
+        assert!(
+            !source.contains(gone),
+            "`{gone}` must be gone from src\\settings.rs — the closed part is 12 DLU of the \
+             generator, and the 33 px it used to be derived from were read off a picture"
+        );
+    }
+
+    // The derivation lives where the number lives.
+    for literal in ["`h = 12` dialog units", "22,5 px at 96 DPI"] {
+        assert!(
+            source.contains(literal),
+            "the doc comment of the closed-part air must derive it from the generator's \
+             literal — `{literal}` is missing"
+        );
+    }
+
+    // `WM_MEASUREITEM` measures the list, and only the list.
+    let measured = function_body(&source, "unsafe fn on_measure_item(");
+
+    assert!(
+        measured.contains("combo_row_height(hwnd, COMBO_LIST_ITEM_EXTRA)"),
+        "`on_measure_item` must answer the height of a *list item*"
+    );
+    assert!(
+        !measured.contains("COMBO_CLOSED_ITEM_EXTRA"),
+        "the closed part must not be measured by `WM_MEASUREITEM` — one answer there would \
+         shrink the rows of the dropped-down list with it"
+    );
+
+    // SEC-05: the gate is still the first thing that message does, before any work.
+    let gate = measured
+        .find("if !owner_drawn_item(")
+        .expect("`on_measure_item` must still gate on type and identifier — SEC-05");
+    let work = measured
+        .find("combo_row_height(")
+        .expect("`on_measure_item` must still measure something");
+
+    assert!(
+        gate < work,
+        "SEC-05: the type and the identifier are checked before any work is done"
+    );
+
+    // The closed part is set apart by the documented lever, on all four combo boxes, and the
+    // refusal of the send is examined (NFR-13) rather than dropped.
+    let closed = function_body(&source, "fn set_combo_closed_height(");
+
+    for shape in [
+        "combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA)",
+        "for control in COMBO_BOXES",
+        "CB_SETITEMHEIGHT",
+        "CB_SELECTION_FIELD",
+        "if answer == CB_ERR as isize",
+    ] {
+        assert!(
+            closed.contains(shape),
+            "`set_combo_closed_height` must carry `{shape}`"
+        );
+    }
+
+    // −1 is the documented `wParam` for the selection field, and it is a name here.
+    assert!(
+        source.contains("const CB_SELECTION_FIELD: usize = usize::MAX;"),
+        "the −1 of CB_SETITEMHEIGHT must be a named constant and not a bare cast"
+    );
+
+    // And it is sent once, from `WM_INITDIALOG`, where the four controls exist.
+    let filled = function_body(&source, "fn fill_dialog(");
+
+    assert!(
+        filled.contains("set_combo_closed_height(hwnd)"),
+        "`fill_dialog` must set the closed-part height once, on WM_INITDIALOG"
+    );
+    assert_eq!(
+        source.matches("set_combo_closed_height(hwnd)").count(),
+        1,
+        "the height must be set from exactly one place"
+    );
+
+    // The exclusion list is untouched by all of this — it has had its own dialog units since
+    // task T-11-16, and T-12-2 was told to leave that branch alone.
+    assert!(
+        measured.contains("dialog_units(hwnd, 0, EXCLUSION_ROW_HEIGHT_DLU)"),
+        "the row of the exclusion list must still be its own 11 dialog units"
+    );
+}
+
 // -----------------------------------------------------------------------------------------
 // The about dialog — FR-92а, task T-11-11, read out of the built binary like everything else
 // -----------------------------------------------------------------------------------------

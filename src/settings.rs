@@ -113,19 +113,19 @@ use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
-    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT,
-    DefWindowProcW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
-    GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
-    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, IDCANCEL, IDOK,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL, SendDlgItemMessageW,
-    SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
-    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
-    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
-    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY,
-    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WNDPROC,
+    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
+    CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
+    DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DialogBoxParamW, EC_LEFTMARGIN,
+    EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
+    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
+    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL,
+    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
+    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -3765,20 +3765,56 @@ fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
     brush.0 as isize
 }
 
-/// Air added to the dialog font's height to make one owner-drawn item's height, in the pixels
-/// of the mock-ups — п. 4 of task T-11-15, in place of the bare «+ 4» of task T-11-6.
+/// Air added to the dialog font's height to make one item of a **dropped-down list**, in the
+/// pixels of the mock-ups — the number task T-11-15 wrote, kept here for the list alone.
 ///
-/// The mock-ups draw the closed part of a combo box **33 of their own pixels high**, and the
-/// dialog font is 21 of their pixels tall there (15 px at 96 DPI × 1,4) — so the air of the
-/// picture is 33 − 21 = **12 mock-up pixels**, six above the text and six below. Through
-/// [`scaled`] that is 9 px at 96 DPI, and the item stands 15 + 9 = **24 px** against the
-/// picture's 33 ÷ 1,4 = 23,6. The bare 4 it replaces made a 19-pixel item — a fifth shorter
-/// than the mock-up, which is the «расходится существенно» п. 4 asks to be brought in line.
+/// ⚠ **This number is not a length of the mock-ups and never was.** It was derived by measuring
+/// the picture — the closed part of a combo was read off `ui-02-graphite.png` as a box of its
+/// own pixels and the font subtracted from it — and the measurement was wrong: the generator
+/// states the whole box as `h = 12` dialog units (`scratchpad\ui.ps1`, lines 103, 116 and 118),
+/// which is 22,5 px at 96 DPI, and carries no literal for «air» at all. Task T-12-2 corrected
+/// the closed part to that literal in [`COMBO_CLOSED_ITEM_EXTRA`]; the height of the **items of
+/// the dropped-down list** was never measured against the mock-ups by anyone, and T-12-2 is
+/// forbidden to move what it has not measured — so the list keeps exactly the height it has
+/// had since T-11-15, and this constant is what keeps it: 15 + [`scaled`]`(12)` = 15 + 9 =
+/// **24 px** at 96 DPI, the very number `CB_GETITEMHEIGHT(0)` answered before that task.
 ///
-/// One number for three controls, as since task T-11-14: the rows of the exclusion list and
-/// the items of a dropped-down list are measured by the same message, so a row of a list and
-/// an item of a combo stay the same height to the eye.
-pub const COMBO_ITEM_EXTRA: i32 = 12;
+/// The rows of the exclusion list are **not** measured by it — they have had
+/// [`EXCLUSION_ROW_HEIGHT_DLU`] of their own since task T-11-16.
+pub const COMBO_LIST_ITEM_EXTRA: i32 = 12;
+
+/// Air added to the dialog font's height to make the **closed part** of a combo box — the
+/// selection field — in the pixels of the mock-ups; task T-12-2, finding F3/R-04 of the
+/// Э12 protocol.
+///
+/// # Where the 2 comes from — the literal of the generator, not the picture
+///
+/// `scratchpad\ui.ps1` gives every combo box `h = 12` dialog units (lines 103, 116, 118) and
+/// its `'combo'` arm draws the box exactly that tall. Twelve vertical dialog units are
+/// 12 × 1,875 = **22,5 px at 96 DPI** — the whole closed part of the mock-up, frame included.
+///
+/// Six of those pixels are not ours to spend. The system lays the selection field inside the
+/// control with two pixels of its own edge above and below it (4 px), and the frame this
+/// dialog draws takes the top and the bottom row of the client area (2 px) — measured on the
+/// stand and not assumed: window 30 px = `CB_GETITEMHEIGHT(-1)` 24 + 6, with 28 px of fill.
+/// So the selection field itself must stand 22,5 − 6 = **16,5 px**, and the dialog font is
+/// 15 px there: the air is **1,5 px at 96 DPI**, which is 1,5 × 1,4 = **2,1 pixels of the
+/// mock-ups**, and 2 is that number written whole.
+///
+/// Through [`scaled`] the 2 comes back as 1 px at 96 DPI (2 × 5/7 = 1,43 → 1), so the field
+/// stands 15 + 1 = 16 px and the closed part 16 + 6 = **22 px** against the mock-up's 22,5 —
+/// half a pixel below it, where the whole number above would have put it half a pixel above.
+/// The air travels with the DPI of the window because it goes through [`scaled`], which is the
+/// only road a mock-up length takes into this file.
+///
+/// **Why a second constant and not a smaller [`COMBO_LIST_ITEM_EXTRA`].** `WM_MEASUREITEM`
+/// arrives **once** for a `CBS_OWNERDRAWFIXED` combo and sets one height for both the closed
+/// part and the items of the dropped-down list — measured, not read: before this task
+/// `CB_GETITEMHEIGHT(-1)` and `CB_GETITEMHEIGHT(0)` both answered 24 on all four combo boxes.
+/// The height of the list items is not the subject of T-12-2, so the two are set apart by the
+/// documented lever instead — [`set_combo_closed_height`] sends `CB_SETITEMHEIGHT` with
+/// `wParam = -1`, which names the selection field alone.
+pub const COMBO_CLOSED_ITEM_EXTRA: i32 = 2;
 
 /// Whether this `CtlType`/`CtlID` pair is one of the dialog's own owner-drawn item holders —
 /// the identifier gate SEC-05 asks for, written down once and shared by `WM_MEASUREITEM` and
@@ -3816,10 +3852,9 @@ pub fn owner_drawn_item(ctl_type: u32, control: i32) -> bool {
 ///
 /// # The height
 ///
-/// The item height is the dialog font's height plus [`COMBO_ITEM_EXTRA`] **mock-up** pixels
-/// of air, taken through [`scaled`] at the DPI of the dialog's own DC (task T-11-15: the air
-/// is a length of the picture like every other, and until this task it was a bare 4 that
-/// neither followed the picture nor the DPI). The message arrives while the combo is being
+/// The item height is [`combo_row_height`] with [`COMBO_LIST_ITEM_EXTRA`] mock-up pixels of
+/// air — the dialog font's height plus that air through [`scaled`] at the DPI of the dialog's
+/// own DC. The message arrives while the combo is being
 /// created — *before* `WM_INITDIALOG`, so
 /// before the dialog's state exists — but after the dialog has taken its `DS_SETFONT`
 /// font, which the dialog manager passes to the dialog before creating any control. The
@@ -3827,6 +3862,15 @@ pub fn owner_drawn_item(ctl_type: u32, control: i32) -> bool {
 /// unit is defined as the height of the dialog font and one vertical dialog unit as one
 /// eighth of it, so a rectangle 8 units tall maps to exactly one font height in pixels —
 /// no font handle changes hands and no message is sent.
+///
+/// ⚠ **What this height is, since task T-12-2, and what it is not.** One `WM_MEASUREITEM`
+/// reaches a `CBS_OWNERDRAWFIXED` combo box, and the height it answers is worn by both the
+/// closed part and every item of the dropped-down list. T-12-2 brought the *closed* part to
+/// the 12 dialog units of the mock-ups and left the *list* where it was, so what is answered
+/// here is the height of a **list item**, and [`set_combo_closed_height`] overrides the closed
+/// part afterwards with `CB_SETITEMHEIGHT`. Answering the closed part's smaller height here
+/// instead would shrink the rows of the dropped-down list with it — the thing that task was
+/// told not to touch.
 ///
 /// Answers 1 — «measured» — for one of the four combos. 0 — «not handled», the dialog
 /// manager's default path — for a missing struct, a foreign `CtlType` or a foreign
@@ -3856,31 +3900,16 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     }
 
     // The exclusion list has a row height of its own since task T-11-16: the generator gives
-    // its `'lbox'` rows `Y 11` — [`EXCLUSION_ROW_HEIGHT_DLU`] vertical dialog units — where a
-    // combo box has no height in the mock-ups at all and keeps the font-plus-air of T-11-15.
+    // its `'lbox'` rows `Y 11` — [`EXCLUSION_ROW_HEIGHT_DLU`] vertical dialog units. The
+    // generator states a combo box as `h = 12` units, and that is the CLOSED part, which
+    // [`set_combo_closed_height`] takes care of since task T-12-2; the dropped-down list it
+    // says nothing about, so its items keep the font-plus-air of T-11-15.
     let measured = if item.CtlType.0 == ODT_LISTBOX.0 {
         dialog_units(hwnd, 0, EXCLUSION_ROW_HEIGHT_DLU).map(|(_, row)| row)
     } else {
-        // Eight vertical dialog units are one dialog-font height by the definition of the
-        // base units — see the doc comment above.
-        dialog_units(hwnd, 0, DIALOG_FONT_HEIGHT_DLU).map(|(_, font_height)| {
-            // The air of the mock-ups, in this window's pixels — п. 4 of task T-11-15.
-            //
-            // SAFETY: `hwnd` is the window being built; the call answers its DC or an invalid
-            // handle, and the DC is released below on both paths.
-            let dc = unsafe { GetDC(Some(hwnd)) };
-
-            // NFR-13: examined — `dc_dpi` answers 96 for a DC that will not say, which is the
-            // 100 % air and a legal item height.
-            let extra = scaled(COMBO_ITEM_EXTRA, dc_dpi(dc));
-
-            if !dc.is_invalid() {
-                // SAFETY: releases exactly the DC taken above, once.
-                unsafe { ReleaseDC(Some(hwnd), dc) };
-            }
-
-            font_height + extra
-        })
+        // The rows of the dropped-down list, and only they, since task T-12-2 — see the ⚠ of
+        // the doc comment above.
+        combo_row_height(hwnd, COMBO_LIST_ITEM_EXTRA)
     };
 
     let Some(measured) = measured else {
@@ -3897,6 +3926,110 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     // TRUE — measured.
     1
+}
+
+/// One row of a combo box: the dialog font's height plus `air` **mock-up** pixels of it, in the
+/// pixels of `hwnd`'s own monitor — the arithmetic [`on_measure_item`] and
+/// [`set_combo_closed_height`] share, written once (§6.2) rather than twice.
+///
+/// The font height comes through the documented `MapDialogRect`: eight vertical dialog units
+/// are one dialog-font height by the definition of the base units, so a rectangle
+/// [`DIALOG_FONT_HEIGHT_DLU`] units tall maps to exactly that height in pixels — no font handle
+/// changes hands and no message is sent. The air is a length of the mock-ups and travels
+/// through [`scaled`], as every length of the mock-ups in this file does.
+///
+/// `None` for a refused `MapDialogRect` (NFR-13: examined; both callers then keep the height
+/// the control had). A refused `GetDC` is survived one level down: [`dc_dpi`] answers 96 for a
+/// DC that will not say, which is the 100 % air and a legal height.
+fn combo_row_height(hwnd: HWND, air: i32) -> Option<i32> {
+    let (_, font_height) = dialog_units(hwnd, 0, DIALOG_FONT_HEIGHT_DLU)?;
+
+    // SAFETY: `hwnd` is the dialog — a live window either being built (`WM_MEASUREITEM`) or
+    // filled in (`WM_INITDIALOG`); the call answers its DC or an invalid handle, and the DC is
+    // released below on both paths.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    // NFR-13: examined — see the doc comment above.
+    let extra = scaled(air, dc_dpi(dc));
+
+    if !dc.is_invalid() {
+        // SAFETY: releases exactly the DC taken above, once.
+        unsafe { ReleaseDC(Some(hwnd), dc) };
+    }
+
+    Some(font_height + extra)
+}
+
+/// The `wParam` of `CB_SETITEMHEIGHT` and `CB_GETITEMHEIGHT` that names the **selection
+/// field** — the closed part — instead of an item of the list: the documented −1, spelled as
+/// the unsigned word a message parameter is, the way `CB_SETCURSEL` is already handed its
+/// «nothing chosen» in [`select_layout`].
+const CB_SELECTION_FIELD: usize = usize::MAX;
+
+/// Brings the closed part of the four combo boxes to the 12 dialog units of the mock-ups —
+/// FR-92, FR-92а, task T-12-2 (findings F3 and R-04 of the Э12 protocol).
+///
+/// # Why this and not a smaller item height
+///
+/// `WM_MEASUREITEM` reaches a `CBS_OWNERDRAWFIXED` combo box **once**, and the height it
+/// answers is worn by the closed part and by every item of the dropped-down list alike — read
+/// off the live stand rather than out of the documentation: before this task
+/// `CB_GETITEMHEIGHT(-1)` (the selection field) and `CB_GETITEMHEIGHT(0)` (one list item) both
+/// answered **24** on all four combo boxes, and the closed part measured 30 px on the screen,
+/// which is that 24 plus the six pixels the system and our own frame take. Shrinking the
+/// answer of [`on_measure_item`] would therefore have shrunk the rows of the dropped-down list
+/// by the same amount — and their height is not what task T-12-2 measured or was told to
+/// change. `CB_SETITEMHEIGHT` with `wParam = -1` is the documented lever that moves the
+/// selection field alone, so the two heights are set apart here and the list keeps its own.
+///
+/// # The height
+///
+/// [`combo_row_height`] with [`COMBO_CLOSED_ITEM_EXTRA`] — the font plus the air the generator's
+/// `h = 12` dialog units leave once the six pixels the system spends are taken off; the
+/// derivation is written out at that constant. At 96 DPI: 15 + 1 = 16, and the closed part
+/// stands 16 + 6 = 22 px against the mock-up's 22,5.
+///
+/// # NFR-13
+///
+/// Two refusals are possible and both are examined here. A refused `MapDialogRect` gives no
+/// height at all — nothing is sent, and the four combo boxes keep the height
+/// [`on_measure_item`] gave them, which is the look this dialog had before this task: taller
+/// than the mock-up, and alive. `CB_SETITEMHEIGHT` answers `CB_ERR` (−1) for a height it will
+/// not take; the answer is looked at for every combo box and counted, and a combo box that
+/// refused simply keeps its previous, taller closed part — the other three still take theirs.
+/// The refusal is deliberately **not** journaled, for the reason [`subclass_combo_boxes`]
+/// gives at its own dropped `BOOL`: the operation vocabulary of `diag` is closed
+/// (reviews\T-11-1.md), `src\diag.rs` is outside this task, and a combo box that stayed
+/// 30 px tall is a visible degradation rather than a silent one.
+///
+/// Answers how many of the four took the height — for the tests, and for the sentence above to
+/// be a measurement and not a hope.
+fn set_combo_closed_height(hwnd: HWND) -> usize {
+    let Some(height) = combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA) else {
+        return 0;
+    };
+
+    let mut taken = 0;
+
+    for control in COMBO_BOXES {
+        // `wParam` names the selection field; `lParam` is the height it is to stand.
+        let answer = send_to(
+            hwnd,
+            control,
+            CB_SETITEMHEIGHT,
+            CB_SELECTION_FIELD,
+            isize::try_from(height).unwrap_or(0),
+        );
+
+        // NFR-13: examined right here — see the doc comment above.
+        if answer == CB_ERR as isize {
+            continue;
+        }
+
+        taken += 1;
+    }
+
+    taken
 }
 
 /// Whether one item change of the layout list is refused — FR-31, task T-11-7-2: the pure
@@ -8299,6 +8432,20 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
     // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
     set_field_margins(hwnd);
+    // Task T-12-2: the closed part of the four combo boxes, brought to the 12 dialog units of
+    // the mock-ups apart from the items of their dropped-down lists. Once, here — a height is
+    // a property of the control like the margin above, and this is the first moment all four
+    // controls exist: `WM_MEASUREITEM` arrived before this window had a `WM_INITDIALOG` at
+    // all. Before anything is put into any of them, so no combo box is ever holding a list at
+    // one height and about to be measured at another.
+    //
+    // ⚠ NFR-13: the answer of every send is examined inside the function — a `CB_ERR` there
+    // leaves that one combo box at the taller closed part it already had, and the other three
+    // still take theirs. The count comes back so that the examination is a number rather than
+    // a promise; nothing in this window depends on it, and no `debug_assert` stands on it
+    // either, for the reason `subclass_combo_boxes` writes down at its own dropped answer: a
+    // machine that refused is a legal, degraded state and not a broken invariant.
+    let _taken = set_combo_closed_height(hwnd);
 
     // FR-92а, task T-11-20: the six controls that draw their own text get the face this
     // window draws all its other text in, so the whole window is on one smoothing. Once,
