@@ -1067,6 +1067,53 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
     }
 }
 
+/// **Criterion 13 of T-12-4 — finding A-13**: the «ОК» of the about window is drawn with a
+/// fill and **no frame**, and nothing else about it moves.
+///
+/// The mock-up's generator draws the buttons of the settings dialog framed (`FillR` then
+/// `StrokeR`) and the button of the about window filled only (`chrome.ps1:200-202` — one
+/// `FillR` and no stroke). The difference belongs to the window, so it lives in a wrapper over
+/// the table above and not in a seventh column of it: this test says the wrapper changes the
+/// frame **and only** the frame, in every state of the table, which is what «заливка и чернила
+/// прежние» means where a table can say it.
+#[test]
+fn the_about_button_is_the_same_table_without_a_frame() {
+    // The whole table of the wrapped function, on both the ordinary identifier and «ОК» —
+    // there is only one button in that window, but the wrapper is not told so, and a wrapper
+    // that quietly answered something else for a foreign identifier would be a trap.
+    for control in [1, 1012] {
+        for hot in [false, true] {
+            for pressed in [false, true] {
+                for disabled in [false, true] {
+                    let framed = settings::button_color_roles(control, hot, pressed, disabled);
+                    let plain = settings::about_button_colors(control, hot, pressed, disabled);
+
+                    assert_eq!(
+                        framed.face, plain.face,
+                        "the face must not move ({control}, hot = {hot}, pressed = {pressed}, \
+                         disabled = {disabled})"
+                    );
+                    assert_eq!(
+                        framed.text, plain.text,
+                        "the ink must not move ({control}, hot = {hot}, pressed = {pressed}, \
+                         disabled = {disabled})"
+                    );
+                    assert_eq!(
+                        framed.border,
+                        ButtonBorderRole::ButtonBorder,
+                        "the settings dialog keeps its frame ({control})"
+                    );
+                    assert_eq!(
+                        plain.border,
+                        ButtonBorderRole::FaceItself,
+                        "the about window's button has no frame in any state ({control})"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// **Criterion 9 of T-12-8** — the response of the cursor is a member of the palette and not a
 /// colour of its own, in both palettes.
 ///
@@ -4809,8 +4856,11 @@ fn the_about_dialog_template_carries_its_elements() {
         println!("  {text}");
     }
 
+    // Task T-12-4, решение В-2: «О программе» and not «О программе Lang Switcher» — the name of
+    // the product stands in the window itself, on the row beside the logo, and the caption of
+    // the mock-up carries the two words alone (`chrome.ps1:186`).
     assert_eq!(
-        template.caption, "О программе Lang Switcher",
+        template.caption, "О программе",
         "the caption came out of rc.exe wrong — check #pragma code_page(65001)"
     );
 
@@ -4947,18 +4997,30 @@ fn the_about_version_line_substitutes_the_number_the_resource_gave() {
     settings::set_ui_language(settings::Language::Ru);
     let russian = settings::about_version_line(Some((0, 1, 0, 0)));
     let russian_missing = settings::about_version_line(None);
+    // The fourth part is deliberately not zero here: a revision of 7 must change nothing in
+    // the line — see the ⚠ below.
+    let russian_revised = settings::about_version_line(Some((0, 1, 0, 7)));
 
     settings::set_ui_language(settings::Language::En);
     let english = settings::about_version_line(Some((0, 1, 0, 0)));
 
-    println!("ru: {russian} / {russian_missing}");
+    println!("ru: {russian} / {russian_missing} / {russian_revised}");
     println!("en: {english}");
 
-    assert_eq!(russian, "Версия 0.1.0.0");
+    // ⚠ **Three parts and a lower-case letter since task T-12-4** — finding A-12 and решение
+    // В-2: the mock-up's line is «версия 0.1.0» (`chrome.ps1:195`), and the fourth part is what
+    // made the live line longer than the model's at the same point size. The revision is still
+    // *read* — the caller hands over whatever the resource holds — and only the sentence a
+    // person reads leaves it out.
+    assert_eq!(russian, "версия 0.1.0");
+    assert_eq!(
+        russian_revised, "версия 0.1.0",
+        "the revision is dropped from the line, whatever it is"
+    );
     // A binary without the resource shows a dash rather than failing — the reading the old
     // box gave the same case.
-    assert_eq!(russian_missing, "Версия —");
-    assert_eq!(english, "Version 0.1.0.0");
+    assert_eq!(russian_missing, "версия —");
+    assert_eq!(english, "version 0.1.0");
 
     settings::set_ui_language(settings::Language::Ru);
 }
@@ -4966,14 +5028,20 @@ fn the_about_version_line_substitutes_the_number_the_resource_gave() {
 #[test]
 fn the_about_static_colour_roles_follow_their_table() {
     // The role function the about dialog's `WM_CTLCOLORSTATIC` answers with — the closed
-    // vocabulary of the settings dialog, reused: the version line is muted, every other
-    // static is an ordinary caption, and nothing in that window is a field.
+    // vocabulary of the settings dialog, reused: the version line **and the two description
+    // lines** are muted, the icon and the name are ordinary captions, and nothing in that
+    // window is a field.
+    //
+    // ⚠ The two description lines moved from `Label` to `Muted` in task T-12-4 — finding A-06:
+    // the mock-up paints the paragraph under the name with the muted brush (`chrome.ps1:196`
+    // draws it with `$brMu`, while line 194 draws the name with `$brFg`), and решение В-2 says
+    // in as many words that the description stays «в колонке имени и приглушённым цветом».
     let cases = [
         (1120, settings::StaticColorRole::Label, "иконка"),
         (1121, settings::StaticColorRole::Label, "имя"),
         (1122, settings::StaticColorRole::Muted, "строка версии"),
-        (1123, settings::StaticColorRole::Label, "описание, строка 1"),
-        (1124, settings::StaticColorRole::Label, "описание, строка 2"),
+        (1123, settings::StaticColorRole::Muted, "описание, строка 1"),
+        (1124, settings::StaticColorRole::Muted, "описание, строка 2"),
     ];
 
     for (control, expected, what) in cases {
@@ -5855,12 +5923,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 72] = [
     (settings::IDS_THEME_SYSTEM, "Как в системе", "Match system"),
     (settings::IDS_THEME_LIGHT, "Светлое", "Light"),
     (settings::IDS_THEME_DARK, "Тёмное", "Dark"),
-    (
-        settings::IDS_ABOUT_CAPTION,
-        "О программе Lang Switcher",
-        "About Lang Switcher",
-    ),
-    (settings::IDS_ABOUT_VERSION, "Версия {0}", "Version {0}"),
+    // Task T-12-4, решение В-2: the caption of the window is «О программе» and nothing more —
+    // the product's name is already on the row under the logo — and the version line opens with
+    // a lower-case letter, as the mock-up writes it (`chrome.ps1:195` — «версия 0.1.0»). Both
+    // locales, which is what FR-94 means by a table per locale.
+    (settings::IDS_ABOUT_CAPTION, "О программе", "About"),
+    (settings::IDS_ABOUT_VERSION, "версия {0}", "version {0}"),
     (
         settings::IDS_ABOUT_LINE_1,
         "Исправляет текст, набранный в неверной раскладке.",
@@ -8466,8 +8534,14 @@ fn the_face_is_handed_over_by_the_one_send_this_module_uses_for_its_own_controls
 /// The face handed to the six controls is [`settings::CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`]'s
 /// share of the one the window already owned: `DialogFonts::text`, made once on
 /// `WM_INITDIALOG` and freed in `Drop`. The sweep says so of the source — every face of this
-/// module is made by the single `create_font`, which is called exactly twice, both times by the
-/// constructor of `DialogFonts`, and there is no `CreateFontIndirectW` anywhere else.
+/// module is made by the single `create_font`, which is called by the constructor of
+/// `DialogFonts` and by nothing else, and there is no `CreateFontIndirectW` anywhere else.
+///
+/// ⚠ **Three calls since task T-12-4 and not two**: that task gave the about window's name row
+/// a face of its own — `about_name_logfont`, 10,7 pt bold, finding A-05 — and put it in the
+/// same set, made by the same function on the same `WM_INITDIALOG` and freed by the same
+/// `Drop`. The number below is the count of *faces of the set*, and the point of the assertion
+/// is unchanged: nothing outside that constructor asks GDI for a font.
 #[test]
 fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     let made = product_lines_with("CreateFontIndirectW(");
@@ -8486,9 +8560,9 @@ fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     }
     assert_eq!(
         created.len(),
-        3,
-        "the declaration and the two faces of `DialogFonts::new` — and nothing else asks for a \
-         face: {created:?}"
+        4,
+        "the declaration and the three faces of `DialogFonts::new` — and nothing else asks for \
+         a face: {created:?}"
     );
 
     // The hand-over takes a face it was given, and takes it from the owner.

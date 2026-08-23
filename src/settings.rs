@@ -125,12 +125,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
     LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
     LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect, PostMessageW,
-    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
-    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
-    WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    STM_SETICON, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW,
+    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
+    WM_QUERYUISTATE, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -3051,14 +3051,25 @@ pub enum ButtonTextRole {
     TextMuted,
 }
 
-/// The frame of the button. One variant on purpose: the closed table of
-/// [`button_color_roles`] frames every kind in every state with the same single-pixel
-/// [`theme::Palette::button_border`], and a one-variant type is that fact written down —
-/// a second border colour cannot appear without widening this enum first.
+/// The frame of the button — two variants since task T-12-4, and the second one is «none».
+///
+/// The closed table of [`button_color_roles`] frames every kind in every state with the same
+/// single-pixel [`theme::Palette::button_border`], and this type is that fact written down: a
+/// second border **colour** still cannot appear without widening it first. What T-12-4 added is
+/// not a colour but its absence — finding **A-13**: the mock-up draws the «ОК» of the about
+/// window with a fill and no outline at all (`scratchpad-Э11\chrome.ps1:200-202` — `FillR`,
+/// no `StrokeR`), while every button of the settings dialog keeps its frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonBorderRole {
     /// [`theme::Palette::button_border`].
     ButtonBorder,
+    /// **No frame**: the ink of the outline is the colour the face is filled with, so the one
+    /// `RoundRect` of [`paint_rounded`] draws a fill and nothing else — the mock-up's button.
+    ///
+    /// Deliberately not a colour of its own and not a new palette field: the pen simply takes
+    /// whichever colour [`ButtonFaceRole`] already chose, which is why «no frame» invents
+    /// nothing. [`resolve_button_colors`] is where the two meet.
+    FaceItself,
 }
 
 /// Face, caption ink and frame of one owner-drawn button — what [`button_color_roles`]
@@ -3146,6 +3157,25 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
         face: ButtonFaceRole::ButtonBg,
         text: ButtonTextRole::Text,
         border,
+    }
+}
+
+/// The colour roles of the one button of the **about** window — finding **A-13**, task T-12-4.
+///
+/// The table above and one difference: the frame. The mock-up's about window draws its «ОК»
+/// with a fill and no outline (`chrome.ps1:200-202` fills a rounded rectangle and never
+/// strokes it), while the settings dialog's buttons are drawn framed a few lines earlier in
+/// the same generator — so the difference belongs to the *window*, not to the state of the
+/// button, and this is a wrapper over [`button_color_roles`] rather than a seventh column in
+/// it. Face and ink come from there unchanged, which is what keeps «заливка и чернила кнопки
+/// прежние» true by construction: there is one table of them and this function does not touch
+/// it.
+///
+/// Pure, so the table test can close it the way it closes the one it wraps.
+pub fn about_button_colors(control: i32, hot: bool, pressed: bool, disabled: bool) -> ButtonColors {
+    ButtonColors {
+        border: ButtonBorderRole::FaceItself,
+        ..button_color_roles(control, hot, pressed, disabled)
     }
 }
 
@@ -3266,8 +3296,17 @@ fn resolve_button_colors(
         ButtonTextRole::TextMuted => palette.text_muted,
     };
 
+    // Task T-12-4: «no frame» is the pen taking the colour of the fill, so the single
+    // `RoundRect` of the drawing leaves a face and no outline. The face's own colour and not a
+    // new one — the whole point of [`ButtonBorderRole::FaceItself`].
     let border = match colors.border {
         ButtonBorderRole::ButtonBorder => palette.button_border,
+        ButtonBorderRole::FaceItself => match colors.face {
+            ButtonFaceRole::ButtonBg => palette.button_bg,
+            ButtonFaceRole::AccentBg => palette.accent_bg,
+            ButtonFaceRole::SelBg => palette.sel_bg,
+            ButtonFaceRole::HoverBg => palette.hover_bg,
+        },
     };
 
     (
@@ -6810,6 +6849,21 @@ pub const PANEL_CAPTION_INSET_Y: i32 = 5;
 /// the ratio as a rounded «85 %», which is a number the pictures do not have.
 pub const PANEL_CAPTION_POINTS_TENTHS: i32 = 76;
 
+/// Point size of the name row of the about window, in **tenths of a point** — finding
+/// **A-05**, task T-12-4.
+///
+/// The generator draws that one row in a face of its own: `$FBold = Font('Segoe UI', 15,
+/// Bold)` (`scratchpad-Э11\chrome.ps1:109`, used at line 194) against the `$FS = 9 * $DPI`
+/// = 12,6 pt of everything else in that window. Both are stated at the mock-ups' 140 %, so
+/// the ratio is what carries over — 15 / 12,6 of the dialog font, which at the 9 pt of the
+/// template is **10,7 pt**.
+///
+/// Tenths of a point and a ratio for the same reason [`PANEL_CAPTION_POINTS_TENTHS`] is: the
+/// face is never *made* from this number, it is made from the window's own `lfHeight` scaled
+/// by it, so the row grows with the DPI of the window like everything else and no point size
+/// is written down by hand.
+pub const ABOUT_NAME_POINTS_TENTHS: i32 = 107;
+
 /// Point size of the dialog font itself, in **tenths of a point** — the `$FS = 9 * $DPI` of
 /// the generator, and the denominator [`PANEL_CAPTION_POINTS_TENTHS`] is a numerator of.
 ///
@@ -7595,6 +7649,30 @@ pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
     logical
 }
 
+/// The `LOGFONTW` of the name row of the about window — finding **A-05**, task T-12-4.
+///
+/// [`caption_logfont`] with one number changed: [`ABOUT_NAME_POINTS_TENTHS`] over
+/// [`DIALOG_FONT_POINTS_TENTHS`] instead of the caption's ratio, so the row comes out *larger*
+/// than the dialog font where the panel caption comes out smaller. Bold in both cases, and
+/// both go through [`antialiased_logfont`], so the quality is named in exactly one place.
+///
+/// ⚠ **The size travels through the window's own `lfHeight` and never through «10,7 pt»**: the
+/// dialog font is what the template asks for and what the manager already created at the DPI
+/// of the window, so a face derived from it is right at every scale, and a face created from a
+/// point size by hand would be right at 96 DPI only.
+///
+/// Measured at 96 DPI, where the manager's face is `lfHeight` −12: this answers −14, and the
+/// «L» of «Lang Switcher» comes out **10 px tall on a two-pixel stem** — the mock-up's numbers
+/// (A-05: 14 mock-up px = 10 screen px, stem 2). Pure, like the two above it.
+pub fn about_name_logfont(base: LOGFONTW) -> LOGFONTW {
+    let mut logical = antialiased_logfont(base);
+
+    logical.lfHeight = (base.lfHeight * ABOUT_NAME_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
+    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(base.lfWeight);
+
+    logical
+}
+
 /// The `LOGFONTW` of the font the dialog manager gave one of the window's own controls.
 ///
 /// The font is asked of a control (`WM_GETFONT` through `SendDlgItemMessageW`, the one way
@@ -7645,8 +7723,17 @@ fn create_font(logical: LOGFONTW) -> Option<HFONT> {
     Some(created)
 }
 
-/// The two faces one window sets **its own** text in, owned: created together, freed together
-/// in `Drop` — FR-92а, task T-11-17.
+/// The **three** faces one window sets **its own** text in, owned: created together, freed
+/// together in `Drop` — FR-92а, task T-11-17, widened by task T-12-4.
+///
+/// # Why one type serves both windows although neither uses all three
+///
+/// The settings dialog draws with `text` and `caption` and has no name row; the about window
+/// draws with `text` and `name` and has no panel to caption. That is not new with the third
+/// face — the about window has been carrying an unused `caption` since task T-11-11 — and it
+/// is the cheaper half of the trade: one unused `CreateFontIndirectW` per window against a
+/// second owner with a second `Drop` to keep the discipline of. The set is «the faces a window
+/// of this file may set its own text in», and each window uses the ones it has text for.
 ///
 /// Owned rather than made per paint for the reason `theme::Brushes` gives for the brushes: a
 /// face selected into a DC has to outlive the drawing, and a paint that makes and deletes a
@@ -7666,15 +7753,22 @@ struct DialogFonts {
     text: HFONT,
     /// The same face smaller and bolder, for the eight panel captions.
     caption: HFONT,
+    /// The same face **larger** and bolder, for the one row it belongs to: «Lang Switcher» in
+    /// the about window — [`about_name_logfont`], finding A-05, task T-12-4.
+    name: HFONT,
 }
 
 impl DialogFonts {
-    /// Both faces out of the font `control` was given, every handle examined.
+    /// All three faces out of the font `control` was given, every handle examined.
     ///
-    /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, either
+    /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, any
     /// `CreateFontIndirectW` declining. The window then draws in the manager's own face, which
     /// is what it drew in before this task: degraded-but-alive, and the whole loss is the
     /// smoothing (NFR-13).
+    ///
+    /// ⚠ A half-built set is unwound here and not leaked: the handles already created are
+    /// freed on the failing path, because a constructor that answers `None` leaves no value
+    /// for `Drop` to run on — the same discipline [`CaptionIcons::load`] keeps.
     fn new(hwnd: HWND, control: i32) -> Option<Self> {
         let base = dialog_logfont(hwnd, control)?;
 
@@ -7687,7 +7781,21 @@ impl DialogFonts {
             return None;
         };
 
-        Some(Self { text, caption })
+        let Some(name) = create_font(about_name_logfont(base)) else {
+            for face in [text, caption] {
+                // SAFETY: both were created above, handed to nobody, and are freed exactly
+                // once here — the failed constructor answers `None` and no `Drop` will run.
+                let _ = unsafe { DeleteObject(face.into()) };
+            }
+
+            return None;
+        };
+
+        Some(Self {
+            text,
+            caption,
+            name,
+        })
     }
 
     /// The face of the window's own text, borrowed — the owner frees it, nobody else.
@@ -7699,11 +7807,16 @@ impl DialogFonts {
     fn caption(&self) -> HFONT {
         self.caption
     }
+
+    /// The face of the about window's name row, borrowed — the owner frees it, nobody else.
+    fn name(&self) -> HFONT {
+        self.name
+    }
 }
 
 impl Drop for DialogFonts {
     fn drop(&mut self) {
-        for face in [self.text, self.caption] {
+        for face in [self.text, self.caption, self.name] {
             // SAFETY: each came from a successful `CreateFontIndirectW` in `new` and is freed
             // exactly once: the type is neither `Copy` nor `Clone`, its fields are private and
             // never reassigned, and `drop` runs once. Every drawing that selected a face put
@@ -12376,6 +12489,133 @@ struct AboutState {
     /// The icon the caption is shown by `WM_SETICON` — task T-12-1: the settings dialog's
     /// field, its type and its ownership, in the window that shares its paths (§6.2).
     icon: Option<CaptionIcons>,
+    /// The logo the window shows beside its name — finding **A-08**, task T-12-4.
+    ///
+    /// `None` until `WM_INITDIALOG`, exactly as `fonts` is and for the same kind of reason:
+    /// the size is asked of the window, and there is no window when this value is built. See
+    /// [`AboutLogo`].
+    logo: Option<AboutLogo>,
+}
+
+/// The size of the about window's logo in **mock-up pixels** — finding A-08, task T-12-4.
+///
+/// The generator's literal: `Draw-AppIcon $g ($aX + 28) ($aY + 76) 56` —
+/// `scratchpad-Э11\chrome.ps1:193`. Through [`scaled`] that is **40 px** at 96 DPI, which is
+/// the number the protocol measured the mock-up at and the number the window used to miss by
+/// eight: an `SS_ICON` static loads the 32 px frame of the `.ico` and ignores the units its
+/// statement declares, so the template could not ask for 40 however it was written.
+pub const ABOUT_LOGO_SIZE: i32 = 56;
+
+/// The logo of the about window, loaded at the size the mock-up draws it and owned until the
+/// window is gone — finding **A-08**, task T-12-4.
+///
+/// # Why a handle of our own and not a bigger rectangle in the template
+///
+/// Measured, and the measurement is what settled it: an `SS_ICON` static sizes *itself* to the
+/// icon it holds and pays no attention to the width and height of its statement — the comment
+/// in `app.rc` said so before this task and the protocol confirmed it (a 21 × 20 unit
+/// statement showing a 32 × 32 picture). The documented lever is the other way round: hand the
+/// control an icon of the size wanted (`STM_SETICON`) and it resizes itself around it. Owner
+/// drawing was the alternative and is refused by a test of `tests\settings.rs` — «the about
+/// icon must stay `SS_ICON`» — so this is the one road left, and it is a documented one.
+///
+/// # Who owns the handle
+///
+/// **This value, and nothing else** — the ownership [`CaptionIcons`] spells out at length, for
+/// the same documented reason: `LR_SHARED` may only be used for an image asked for at the size
+/// the resource already holds, and 40 px is not a frame of `res\langswitcher-active.ico` (it
+/// carries 16, 20, 24, 32, 48, 64 and 256), so the loader scales one and the result belongs to
+/// the caller. Without `LR_SHARED` the handle **must** be destroyed, and `Drop` is where.
+///
+/// `STM_SETICON` does not transfer ownership either: the control is handed a handle to
+/// *display*. Its answer — the icon the control held before — is the 32 px frame the dialog
+/// manager loaded out of the resource by itself; that one is shared, was never ours, and is
+/// deliberately not touched.
+///
+/// # When it is freed
+///
+/// After the window is destroyed and not before, exactly as [`CaptionIcons`]: the value lives
+/// in the state on the frame of [`show_about_dialog`], and `DialogBoxParamW` is modal — it
+/// returns only once the window is gone, and the state is dropped after it returns.
+struct AboutLogo {
+    /// The frame, scaled to [`ABOUT_LOGO_SIZE`] mock-up pixels of the window's own DPI.
+    icon: HICON,
+}
+
+impl AboutLogo {
+    /// Loads the frame at the size `hwnd`'s DPI makes of [`ABOUT_LOGO_SIZE`].
+    ///
+    /// ⚠ **The size travels through the DPI of the window**, like every length of the mock-ups
+    /// in this file: [`scaled`] over the DPI of the window's own DC. A 40 written down by hand
+    /// would be a 40 px logo on a 200 % screen too, beside a name row and a template that had
+    /// both doubled.
+    ///
+    /// `None` for a refused `LoadImageW` (NFR-13): the control then keeps the 32 px frame it
+    /// loaded for itself, which is the picture this window had before this task — degraded and
+    /// alive. The refusal is deliberately **not** journaled, for the reason
+    /// [`CaptionIcons::load`] gives for its own: the `OPERATIONS` vocabulary of module `diag`
+    /// is closed and has no row for loading a picture.
+    fn load(hwnd: HWND) -> Option<Self> {
+        let module = resource_module();
+        let instance = HINSTANCE(module.0);
+
+        // SAFETY: `hwnd` is the live dialog, and the call answers its DC or an invalid handle;
+        // the DC is released below on both paths — the shape [`combo_row_height`] already uses.
+        let dc = unsafe { GetDC(Some(hwnd)) };
+
+        // NFR-13 is one level down: `dc_dpi` answers 96 for a DC that will not say, which is
+        // the 100 % size and a legal one.
+        let size = scaled(ABOUT_LOGO_SIZE, dc_dpi(dc));
+
+        if !dc.is_invalid() {
+            // SAFETY: releases exactly the DC taken above, once.
+            unsafe { ReleaseDC(Some(hwnd), dc) };
+        }
+
+        // SAFETY: `instance` is the module handle whose resources carry `IDI_APP_ACTIVE` — the
+        // very module the interface strings are read from — and the "name" is an integer
+        // identifier in the `MAKEINTRESOURCE` form, so nothing is dereferenced as a string.
+        // Without `LR_SHARED` the call makes a handle this value owns; the crate turns a null
+        // result into an error, so NFR-13 is satisfied by the `ok()?`.
+        let icon = HICON(
+            unsafe {
+                LoadImageW(
+                    Some(instance),
+                    resource_id(IDI_APP_ACTIVE),
+                    IMAGE_ICON,
+                    size,
+                    size,
+                    LR_DEFAULTCOLOR,
+                )
+            }
+            .ok()?
+            .0,
+        );
+
+        Some(Self { icon })
+    }
+
+    /// The frame as a plain value — what the handler takes out of the state before it lets the
+    /// borrow go, the split every handler of this file makes.
+    fn handle(&self) -> HICON {
+        self.icon
+    }
+}
+
+impl Drop for AboutLogo {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from a successful `LoadImageW` without `LR_SHARED`, so it is
+        // ours to destroy, and it is destroyed exactly once — the type is neither `Copy` nor
+        // `Clone`, its field is private and never reassigned, and `drop` runs once. The window
+        // that displayed it is already destroyed: this value lives in the state on the frame of
+        // the modal call and is dropped after it returns.
+        if let Err(error) = unsafe { DestroyIcon(self.icon) } {
+            // NFR-13. Not fatal, and named in the journal exactly as `CaptionIcons` names its
+            // own: a handle that would not be destroyed is a leak of one icon for the life of
+            // the process, and the program has no better answer than to say so.
+            crate::app::report_non_critical("DestroyIcon", &error);
+        }
+    }
 }
 
 /// Shows the modal «О программе» window of FR-92а — what `tray` calls in place of the
@@ -12404,6 +12644,9 @@ pub fn show_about_dialog(
         fonts: None,
         // FR-92а, task T-12-1: loaded before the window exists — see [`CaptionIcons`].
         icon: CaptionIcons::load(),
+        // `None` until `WM_INITDIALOG` — see the field and [`AboutLogo::load`]: the size is
+        // asked of the window, so this one cannot be loaded before there is one.
+        logo: None,
     });
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`, and the
@@ -12468,8 +12711,13 @@ unsafe extern "system" fn about_proc(
 
                     // FR-92а, task T-11-17: the face the caption of «ОК» is set in, made out
                     // of the font the manager gave the window — the same call, and the same
-                    // ownership, as in the settings dialog.
+                    // ownership, as in the settings dialog. Task T-12-4 added a third face to
+                    // the set, and the name row of this very window is what it is for.
                     state.fonts = DialogFonts::new(hwnd, OK_COMMAND);
+
+                    // FR-92а, task T-12-4: the 40 px logo, at the size this window's DPI makes
+                    // of the mock-up's — see [`AboutLogo`] for the ownership.
+                    state.logo = AboutLogo::load(hwnd);
 
                     // The non-client title bar follows the resolved palette from the
                     // first showing — the same call the settings dialog makes.
@@ -12490,6 +12738,28 @@ unsafe extern "system" fn about_proc(
                 // SAFETY: `hwnd` is the live window, and the handles belong to the value the
                 // state keeps, which is dropped only after this modal call returns.
                 unsafe { CaptionIcons::show_on(hwnd, frames) };
+            }
+
+            // FR-92а, task T-12-4: the logo of the window's own body, on the same discipline —
+            // the handle leaves the borrow before any message is sent.
+            //
+            // SAFETY: as above — the pointer was stored just now and the value it names is
+            // alive for the whole of this modal call.
+            let logo = unsafe {
+                with_about_state(hwnd, |state| state.logo.as_ref().map(AboutLogo::handle))
+            };
+
+            if let Some(Some(logo)) = logo {
+                // `STM_SETICON`, the documented way to give an `SS_ICON` static a picture: the
+                // control resizes itself around the handle, which is how a 40 px logo reaches a
+                // window whose template can only ask for one and be ignored (see [`AboutLogo`]).
+                //
+                // ⚠ **Sent and not posted, and that is not the `SendMessage` FR-72 forbids**:
+                // this is `SendDlgItemMessageW` through `send_to`, the one road this file
+                // already sends its own controls anything by (`WM_GETFONT` in
+                // `dialog_logfont`). The answer — the shared 32 px frame the dialog manager
+                // loaded for itself — is deliberately dropped: it was never ours to free.
+                let _ = send_to(hwnd, IDC_ABOUT_ICON, STM_SETICON, logo.0 as usize, 0);
             }
 
             // «ОК» is BS_OWNERDRAW, so the default identifier is handed to the dialog
@@ -12596,10 +12866,17 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
     set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
 }
 
-/// The version line of the about window: [`IDS_ABOUT_VERSION`] with the four-part number
+/// The version line of the about window: [`IDS_ABOUT_VERSION`] with the version number
 /// substituted — FR-94. The number comes out of the `VERSIONINFO` resource of the running
 /// executable, read by the caller of [`show_about_dialog`] the same way the old box read
 /// it, and is never spelled in the source.
+///
+/// # Three parts and not four — решение В-2, finding A-12
+///
+/// The mock-up's line is «версия 0.1.0» (`chrome.ps1:195`), and the fourth part is what made
+/// the live line longer than the model's at the same point size. The revision is *read* all the
+/// same — the caller hands over whatever the resource holds — and only the last part is left
+/// out of the sentence a person reads. Nothing else in the program loses it.
 ///
 /// `None` — a binary without the resource — shows a dash: not a failure, and next to
 /// impossible for this window, because the template it was created from lives in the same
@@ -12609,7 +12886,8 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
 pub fn about_version_line(version: Option<(u16, u16, u16, u16)>) -> String {
     let number = version.map_or_else(
         || "—".to_owned(),
-        |(major, minor, build, revision)| format!("{major}.{minor}.{build}.{revision}"),
+        // The revision is deliberately dropped here and nowhere else — see the doc comment.
+        |(major, minor, build, _revision)| format!("{major}.{minor}.{build}"),
     );
 
     format_text(IDS_ABOUT_VERSION, &[&number])
@@ -12673,21 +12951,28 @@ unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
 }
 
 /// The colour role of one static of the about window — the closed vocabulary
-/// [`static_color_role`] already answers with, reused rather than widened (§6.2): the
-/// version line is the quiet one, everything else — the icon, the name and the two
-/// description lines — is an ordinary caption. Nothing in this window is a field, so
-/// [`StaticColorRole::Field`] never comes out of it.
+/// [`static_color_role`] already answers with, reused rather than widened (§6.2): the version
+/// line **and the two description lines** are the quiet ones, the icon and the name are
+/// ordinary captions. Nothing in this window is a field, so [`StaticColorRole::Field`] never
+/// comes out of it.
+///
+/// # The description went quiet in task T-12-4 — finding A-06
+///
+/// The mock-up paints the paragraph under the name with `$brMu` — the muted brush — and the
+/// name itself with `$brFg` (`chrome.ps1:194,196`), so only two things in that window are
+/// drawn in the full-strength ink: the name and the icon. Решение В-2 keeps the live two
+/// sentences where the model has one, and says in as many words that they stay «в колонке
+/// имени и приглушённым цветом». Until this task both lines answered [`StaticColorRole::Label`]
+/// and came out `text`.
 ///
 /// Public for the same reason as [`static_color_role`]: the table test calls the function
 /// the dialog calls.
 pub fn about_static_color_role(control: i32) -> StaticColorRole {
     match control {
-        IDC_ABOUT_VERSION => StaticColorRole::Muted,
+        IDC_ABOUT_VERSION | IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => StaticColorRole::Muted,
         // Spelled out rather than swallowed by the catch-all, so the mirrored identifiers
         // of the template stay load-bearing in exactly one function.
-        IDC_ABOUT_ICON | IDC_ABOUT_NAME | IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => {
-            StaticColorRole::Label
-        }
+        IDC_ABOUT_ICON | IDC_ABOUT_NAME => StaticColorRole::Label,
         _ => StaticColorRole::Label,
     }
 }
@@ -12779,7 +13064,18 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
             Some((
                 brushes.window_bg(),
                 label_ink(about_static_color_role(control), state.palette),
-                state.fonts.as_ref().map(DialogFonts::text),
+                // Finding A-05, task T-12-4: **one** row of this window is set in the second
+                // face — the name. Everything else here (the version line and the two
+                // description lines) keeps the dialog font, exactly as the mock-up draws them:
+                // the generator gives `$FBold` to `'Lang Switcher'` and `$F` to the rest of the
+                // window (`chrome.ps1:194-196`).
+                state.fonts.as_ref().map(|fonts| {
+                    if control == IDC_ABOUT_NAME {
+                        fonts.name()
+                    } else {
+                        fonts.text()
+                    }
+                }),
             ))
         })
     };
@@ -12871,7 +13167,10 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             let brushes = state.brushes.as_ref()?;
 
             let (colors, hot_brush) = resolve_button_colors(
-                button_color_roles(control, hot, pressed, disabled),
+                // Task T-12-4, finding A-13: the same face and the same ink as everywhere —
+                // and no frame, which is the one thing this window's button does differently
+                // from the nine of the settings dialog.
+                about_button_colors(control, hot, pressed, disabled),
                 // The ground of this window has no panels in it: `on_about_ctl_color`
                 // answers `WM_CTLCOLORBTN` with the window brush and nothing else
                 // (task T-12-6).

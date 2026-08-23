@@ -472,22 +472,43 @@ END
 // row: «Lang Switcher» is not translated — decision on question 7 — and the about box
 // carries it unchanged.
 //
-// The icon control shows IDI_APP_ACTIVE at the large size: an SS_ICON static loads the
-// 32 px frame of the .ico, and the statement's width and height are ignored by the dialog
-// manager. «ОК» is BS_OWNERDRAW like the nine buttons above — the type displaces
-// BS_DEFPUSHBUTTON, so the default comes from DM_SETDEFID on WM_INITDIALOG, which keeps
-// Enter landing on it; Esc is IDCANCEL, which a dialog answers with or without a button.
-IDD_ABOUT DIALOGEX 0, 0, 240, 110
+// The icon control shows IDI_APP_ACTIVE. ⚠ **The statement's width and height are ignored by
+// the dialog manager** — an SS_ICON static sizes itself to the icon it holds, which is why the
+// template used to show a 32 px frame however many units it declared (finding A-08). Task
+// T-12-4 stopped fighting that and used it: src\settings.rs loads the frame at 40 × 40 with
+// LoadImageW and hands it to this control with STM_SETICON, and the control resizes itself to
+// exactly the 40 px of the mock-up. The units below are kept honest all the same — they say
+// where the icon's top left corner is, which the manager does obey.
+//
+// «ОК» is BS_OWNERDRAW like the nine buttons above — the type displaces BS_DEFPUSHBUTTON, so
+// the default comes from DM_SETDEFID on WM_INITDIALOG, which keeps Enter landing on it; Esc is
+// IDCANCEL, which a dialog answers with or without a button.
+//
+// ⚠ **Every rectangle below is disjoint from every other, and that is load-bearing** — task
+// T-12-4. An owner-drawn static answers for the whole of its rectangle and fills it before it
+// writes a word (`paint_label`), so two overlapping children would erase one another on every
+// repaint. The two description lines are therefore 176 px wide and stop 2 px short of «ОК»
+// instead of running the mock-up's full 241 px into the button's rows: решение В-2 keeps two
+// live sentences where the mock-up has one, and two sentences take four wrapped lines, which
+// reach down beside the button. The narrower column has a second virtue — at 176 px the first
+// sentence wraps to two lines in **both** locales, so the fixed 32 px step to the second
+// static is right in both; at 241 px the English one would fit on a single line and leave a
+// hole between the sentences.
+//
+// The units are the mock-up's numbers through MulDiv(dlu, 7|15, 4|8) with the rounding the
+// dialog manager does: 191 × 79 DLU is 334 × 148 client px — 336 × 180 with the frame, against
+// the 335,7 × 178,6 of scratchpad-Э11\chrome.ps1 (A-01).
+IDD_ABOUT DIALOGEX 0, 0, 191, 79
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "О программе Lang Switcher"
+CAPTION "О программе"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 14, 14, 21, 20
-    LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 48, 16, 178, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_VERSION, 48, 30, 178, 9, SS_OWNERDRAW
-    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 14, 50, 212, 9, SS_OWNERDRAW
-    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 14, 61, 212, 9, SS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 95, 88, 50, 14, BS_OWNERDRAW
+    ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 12, 13, 23, 22
+    LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 42, 12, 141, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_VERSION, 42, 24, 141, 8, SS_OWNERDRAW
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 32, 101, 17, SS_OWNERDRAW
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 49, 101, 24, SS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 144, 58, 39, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -693,8 +714,8 @@ BEGIN
     IDS_THEME_SYSTEM        "Как в системе"
     IDS_THEME_LIGHT         "Светлое"
     IDS_THEME_DARK          "Тёмное"
-    IDS_ABOUT_CAPTION       "О программе Lang Switcher"
-    IDS_ABOUT_VERSION       "Версия {0}"
+    IDS_ABOUT_CAPTION       "О программе"
+    IDS_ABOUT_VERSION       "версия {0}"
     IDS_ABOUT_LINE_1        "Исправляет текст, набранный в неверной раскладке."
     IDS_ABOUT_LINE_2        "Перекодировка — по нажатию одной клавиши."
     IDS_ABOUT_OK            "ОК"
@@ -775,8 +796,8 @@ BEGIN
     IDS_THEME_SYSTEM        "Match system"
     IDS_THEME_LIGHT         "Light"
     IDS_THEME_DARK          "Dark"
-    IDS_ABOUT_CAPTION       "About Lang Switcher"
-    IDS_ABOUT_VERSION       "Version {0}"
+    IDS_ABOUT_CAPTION       "About"
+    IDS_ABOUT_VERSION       "version {0}"
     IDS_ABOUT_LINE_1        "Fixes text typed in the wrong keyboard layout."
     IDS_ABOUT_LINE_2        "Conversion takes a single key press."
     IDS_ABOUT_OK            "OK"
