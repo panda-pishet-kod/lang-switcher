@@ -76,8 +76,8 @@ use windows::Win32::Graphics::Gdi::{
     DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_EXPANDTABS, DT_LEFT, DT_SINGLELINE, DT_TOP,
     DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW, Ellipse, EndPaint,
     ExcludeClipRect, FW_BOLD, FillRect, GdiFlush, GetDC, GetDeviceCaps, GetObjectW, GetStockObject,
-    GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW,
-    LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE,
+    GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect, InvalidateRect,
+    LOGFONTW, LOGPIXELSY, NULL_PEN, PAINTSTRUCT, PS_SOLID, Polyline, RDW_ALLCHILDREN, RDW_ERASE,
     RDW_INVALIDATE, RedrawWindow, ReleaseDC, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject,
     SetBkColor, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT, TextOutW,
 };
@@ -7284,9 +7284,18 @@ fn clamped_to(area: &RECT, bounds: &RECT) -> RECT {
 /// The four corners only — the cost rule of this section. The straight edges have no staircase
 /// to remove and keep the one `RoundRect` they always had; the corner squares are held out of
 /// its clip while it runs, so each smoothed corner is blended into the true ground under the
-/// figure and not into an aliased corner drawn a moment before. Every refusal on the smoothing
-/// path — a refused surface, a refused blit, a rectangle too small to hold four corner squares —
-/// leaves the figure exactly as this function drew it before task T-11-17 (NFR-13).
+/// figure and not into an aliased corner drawn a moment before. A rectangle too small to hold
+/// four corner squares is drawn whole and aliased before any of that begins.
+///
+/// # What a refusal leaves behind — task T-11-24
+///
+/// ⚠ Holding the corners out of the clip is what makes a refusal *cost* something: the corner
+/// the smoothing declines to paint is not a rougher corner, it is bare **ground** — a hole,
+/// four of them when it is the surface that was refused rather than one tile. So every refusal
+/// on the smoothing path — a refused surface (a tile past [`SUPERSAMPLE_MAX_SIDE`], or GDI out
+/// of what a surface takes) and a refused tile alike — ends in [`stroke_corner_aliased`], which
+/// fills that corner with the staircase `RoundRect` would have put there. The picture of a
+/// refusal is the picture this function drew before task T-11-17, and never a hole (NFR-13).
 ///
 /// Public for the reason [`check_cell`] and [`combo_chevron_points`] are: a test draws it into
 /// a memory bitmap and reads the pixels back, which is how «шов между сглаженным углом и прямой
@@ -7342,23 +7351,87 @@ pub fn paint_rounded(dc: HDC, area: &RECT, radius: i32, outline: COLORREF, fill:
     // The four corners, each drawn at `SUPERSAMPLE` times its size and averaged back down. One
     // surface for the four: the tiles are the same size, and a figure that made four would pay
     // four `CreateDIBSection`s for nothing.
-    let Some(surface) = Supersample::for_tile(side, side) else {
-        return;
-    };
+    //
+    // A refused surface is `None` here and is *not* a reason to leave: it refuses each of the
+    // four tiles below, and the loop closes all four the same way it closes one — task T-11-24,
+    // whose whole subject is that leaving early left the figure with four holes in it.
+    let surface = Supersample::for_tile(side, side);
 
     for tile in &tiles {
         // The **whole** figure is named inside the tile and GDI clips it: a corner drawn by the
         // same `RoundRect` as the figure it belongs to cannot disagree with it by a pixel.
-        surface.render(dc, tile, thickness, |canvas| {
-            stroke_rounded(
-                canvas.dc,
-                &canvas.outline(area),
-                canvas.length(radius),
-                canvas.length(thickness),
-                outline,
-                fill,
-            );
+        let painted = surface.as_ref().is_some_and(|surface| {
+            surface.render(dc, tile, thickness, |canvas| {
+                stroke_rounded(
+                    canvas.dc,
+                    &canvas.outline(area),
+                    canvas.length(radius),
+                    canvas.length(thickness),
+                    outline,
+                    fill,
+                );
+            })
         });
+
+        // NFR-13: the answer is examined and this is what it decides. The tile was held out of
+        // the clip a few lines above, so an unpainted tile is a hole in the figure and not a
+        // rougher corner; the staircase is what it falls back to.
+        if !painted {
+            stroke_corner_aliased(dc, area, tile, radius, thickness, outline, fill);
+        }
+    }
+}
+
+/// One corner of `area` drawn the way it would have been drawn before task T-11-17 — the
+/// fallback of every refusal on the smoothing path, and the whole of task T-11-24.
+///
+/// The clip is narrowed to the one `tile` and the **whole** figure is named again, exactly as
+/// [`Supersample::render`] names it on the enlarged surface: what reaches the DC is then the
+/// pixels one plain `RoundRect` over the whole figure would have put inside that tile — a
+/// staircase, but painted. Nothing else of the figure is touched, so the corners the smoothing
+/// did manage keep their curve.
+///
+/// # Every refusal of the repair still paints
+///
+/// `SaveDC` answering zero means the clip could not be put back afterwards, so it is not
+/// narrowed at all; `IntersectClipRect` answering `RGN_ERROR` means it was not narrowed either.
+/// Both leave the caller's own clip in force, under which the very same call paints the figure
+/// **whole** — the picture of before T-11-17 entire, at the price of aliasing whatever corners
+/// were smoothed already. That is why there is one `stroke_rounded` here and not one per branch:
+/// no path through this function ends without the corner painted, which is the one thing it
+/// promises (NFR-13).
+fn stroke_corner_aliased(
+    dc: HDC,
+    area: &RECT,
+    tile: &RECT,
+    radius: i32,
+    thickness: i32,
+    outline: COLORREF,
+    fill: HBRUSH,
+) {
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of; the call
+    // takes no memory of ours.
+    let saved = unsafe { SaveDC(dc) };
+
+    // NFR-13: examined — zero is «the state could not be saved», and a clip narrowed with no way
+    // to widen it again would truncate every drawing the caller has left to do.
+    if saved != 0 {
+        // SAFETY: `dc` is the live DC and the four numbers are plain values.
+        //
+        // NFR-13: the region type is answered and deliberately dropped, and here the reason is
+        // that no answer asks for a different drawing — see the doc comment. `RGN_ERROR` leaves
+        // the clip as it was, and the figure named next paints this corner along with the rest
+        // of itself; an empty region means the tile is outside what the caller is painting at
+        // all, where there is no corner to draw and no hole to leave.
+        let _ = unsafe { IntersectClipRect(dc, tile.left, tile.top, tile.right, tile.bottom) };
+    }
+
+    stroke_rounded(dc, area, radius, thickness, outline, fill);
+
+    if saved != 0 {
+        // SAFETY: `saved` is the state this function pushed a few lines above, and nothing
+        // between the two calls pushed another.
+        let _ = unsafe { RestoreDC(dc, saved) };
     }
 }
 

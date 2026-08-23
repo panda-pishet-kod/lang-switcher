@@ -6730,6 +6730,177 @@ fn no_smoothed_figure_paints_a_colour_it_was_not_drawn_from() {
 }
 
 // -----------------------------------------------------------------------------------------
+// Настоящие пиксели: отказ сглаживания не оставляет угол незакрашенным — задача T-11-24
+// -----------------------------------------------------------------------------------------
+
+/// **Criterion 10 of T-11-24, on real pixels** — a rounded rectangle whose smoothing is refused
+/// comes out with four aliased corners and not with four holes.
+///
+/// # The lever
+///
+/// Nothing here exhausts GDI, waits for anything or depends on the state of the machine. A
+/// corner tile is `radius + thickness` a side, so a radius of [`settings::SUPERSAMPLE_MAX_SIDE`]
+/// with the one-pixel frame of 96 DPI asks for a tile of 65 — one past the ceiling
+/// `Supersample::for_tile` holds — and the surface is refused before a single call to GDI is
+/// made. The figure is large enough that `paint_rounded` offers it the smoothing first: the
+/// refusal is of the surface and not of the whole technique.
+///
+/// # What it holds
+///
+/// The four corner tiles are held **out of the clip** while the straight part is drawn — that
+/// is what lets a smoothed corner blend into the true ground instead of into an aliased corner —
+/// so a corner the smoothing does not paint is not a rougher corner, it is bare window
+/// background. Until this task the refusal was dropped and the figure came out with the ground
+/// showing through all four of them.
+#[test]
+fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
+    let ground = COLORREF(0x0020_2020);
+    let fill_colour = COLORREF(0x0080_8080);
+    let ink = COLORREF(0x00FF_FFFF);
+
+    // The frame `paint_rounded` makes at 96 DPI, and the corner tile that follows from it.
+    let thickness = 1;
+    let radius = settings::SUPERSAMPLE_MAX_SIDE;
+    let side = radius + thickness;
+
+    let sheet = Sheet::new(200);
+    sheet.clear(ground);
+
+    let area = RECT {
+        left: 4,
+        top: 4,
+        right: 196,
+        bottom: 196,
+    };
+
+    // Both halves of the premise, so that a future ceiling cannot quietly turn this test into a
+    // test of the ordinary path: the tile is past the ceiling, and the figure is wide enough to
+    // be offered the smoothing that is then refused.
+    assert!(
+        side > settings::SUPERSAMPLE_MAX_SIDE,
+        "the lever of this test is a corner tile past the ceiling — {side} against {}",
+        settings::SUPERSAMPLE_MAX_SIDE
+    );
+    assert!(
+        side * 2 <= (area.right - area.left).min(area.bottom - area.top),
+        "and the figure must be big enough to hold four tiles, or it is drawn aliased whole"
+    );
+
+    // SAFETY: the brush is made here, used only by the call below and freed here.
+    let fill = unsafe { CreateSolidBrush(fill_colour) };
+
+    settings::paint_rounded(sheet.dc, &area, radius, ink, fill, 96);
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(fill.into()) };
+
+    // The centre of each corner's arc, in the order `corner_tiles` answers them: top-left,
+    // top-right, bottom-left, bottom-right. The figure spans `left … right - 1`, which is why
+    // the two far centres are counted off `right - 1` and `bottom - 1`.
+    let tiles = settings::corner_tiles(&area, side);
+    let centres = [
+        (area.left + radius, area.top + radius),
+        (area.right - 1 - radius, area.top + radius),
+        (area.left + radius, area.bottom - 1 - radius),
+        (area.right - 1 - radius, area.bottom - 1 - radius),
+    ];
+
+    // Three pixels inside the arc, so that no rounding of the ellipse GDI actually walks can put
+    // one of these pixels outside the figure: what is measured here is the hole, not the
+    // rasteriser.
+    let inside = (radius - 3) * (radius - 3);
+
+    let mut holes = 0;
+    let mut first_hole = None;
+    let mut blended = 0;
+    let mut framed = [0; 4];
+
+    for (corner, (tile, (centre_x, centre_y))) in tiles.iter().zip(centres).enumerate() {
+        for y in tile.top..tile.bottom {
+            for x in tile.left..tile.right {
+                let value = sheet.grey(x, y);
+
+                // An aliased corner is made of the three colours the figure is drawn from and of
+                // nothing in between: a partially covered pixel here would mean the tile was
+                // smoothed after all, and the refusal this test is about never happened.
+                if value != 0x20 && value != 0x80 && value != 0xFF {
+                    blended += 1;
+                }
+
+                // The arc of the frame, which is as much of the corner as the fill is.
+                if value == 0xFF {
+                    framed[corner] += 1;
+                }
+
+                let (from_x, from_y) = (x - centre_x, y - centre_y);
+
+                // Well inside the arc — the fill of the figure, whatever the smoothing did.
+                if from_x * from_x + from_y * from_y <= inside && value == 0x20 {
+                    holes += 1;
+                    first_hole.get_or_insert((x, y));
+                }
+            }
+        }
+    }
+
+    println!(
+        "отказ сглаживания: {holes} пикселей земли внутри фигуры, {blended} смешанных, \
+         чернил по углам {framed:?}"
+    );
+
+    assert_eq!(
+        holes, 0,
+        "a refused smoothing must leave the aliased corner `RoundRect` would have drawn and not \
+         the ground — the first hole of the four corners is at {first_hole:?}"
+    );
+    assert_eq!(
+        blended, 0,
+        "and what it leaves must be exactly that staircase — a partially covered pixel means \
+         the tile went through the smoothing this test asked to be refused"
+    );
+    assert!(
+        framed.iter().all(|count| *count >= radius),
+        "and the arc must run through every one of the four tiles — the frame is as much of the \
+         corner as the fill is: {framed:?} pixels of ink against a quarter circle of {radius}"
+    );
+}
+
+/// **The second path of T-11-24** — the answer of `Supersample::render` decides something, and
+/// the two refusals of the smoothing meet in one branch.
+///
+/// The test above drives the refusal of the **surface**, which is deterministic: a tile past the
+/// ceiling. The refusal of a single **tile** is a refused `StretchBlt` or a refused `BitBlt` —
+/// GDI out of what a blit takes — and that cannot be arranged without exhausting the machine.
+/// So what is held here is that it cannot end anywhere else: the answer is bound to a name, the
+/// name decides, and the fallback both refusals reach is the one aliased corner.
+#[test]
+fn both_refusals_of_the_smoothing_end_in_the_same_aliased_corner() {
+    let source = settings_module_source();
+    let body = function_body(&source, "fn paint_rounded(");
+
+    assert!(
+        body.contains("let painted = surface"),
+        "NFR-13: the answer of `Supersample::render` must be bound and not dropped"
+    );
+    assert!(
+        body.contains("if !painted {") && body.contains("stroke_corner_aliased("),
+        "and a tile that was not painted must fall back to the aliased corner"
+    );
+    assert!(
+        !body.contains("let Some(surface) = Supersample::for_tile"),
+        "a refused surface may no longer leave before the loop: the figure has been drawn with \
+         four holes in it by then, and that `return` is what left all four showing"
+    );
+
+    // And the corner the fallback paints is the aliased core itself — the same figure the whole
+    // rectangle is drawn from, named again inside the one tile.
+    assert!(
+        function_body(&source, "fn stroke_corner_aliased(").contains("stroke_rounded("),
+        "the fallback must draw the figure `RoundRect` would have drawn there"
+    );
+}
+
+// -----------------------------------------------------------------------------------------
 // Настоящие пиксели: подпись собственной отрисовкой — задача T-11-18, критерии 11 и 12
 // -----------------------------------------------------------------------------------------
 //
