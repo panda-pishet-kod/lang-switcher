@@ -3086,11 +3086,15 @@ pub fn button_color_roles(control: i32, pressed: bool, disabled: bool) -> Button
     }
 }
 
-/// The colours of one owner-drawn push button, resolved out of the palette: the face brush,
-/// the caption ink and the frame brush. What [`resolve_button_colors`] answers and the
-/// whole of what [`paint_push_button`] needs.
+/// The colours of one owner-drawn push button, resolved out of the palette: the ground it
+/// stands on, the face brush, the caption ink and the frame brush. What
+/// [`resolve_button_colors`] answers and the whole of what [`paint_push_button`] needs.
 #[derive(Clone, Copy)]
 struct ResolvedButtonColors {
+    /// What the whole rectangle is erased with before the face goes on it — the brush
+    /// `WM_CTLCOLORBTN` answers for this control. Not a role but a fact of geometry: the
+    /// caller reads it off the panel map, exactly as `on_ctl_color` does (task T-12-6).
+    ground: HBRUSH,
     /// What the button face is filled with.
     face: HBRUSH,
     /// What the caption is drawn with.
@@ -3106,6 +3110,7 @@ struct ResolvedButtonColors {
 /// dialog (§6.2, task T-11-11), moved out of `on_draw_item` rather than copied.
 fn resolve_button_colors(
     colors: ButtonColors,
+    ground: HBRUSH,
     brushes: &theme::Brushes,
     palette: &theme::Palette,
 ) -> ResolvedButtonColors {
@@ -3126,7 +3131,12 @@ fn resolve_button_colors(
         ButtonBorderRole::ButtonBorder => palette.button_border,
     };
 
-    ResolvedButtonColors { face, ink, border }
+    ResolvedButtonColors {
+        ground,
+        face,
+        ink,
+        border,
+    }
 }
 
 /// The two kinds of owner-drawn glyph element — FR-92а, task T-11-5b.
@@ -4556,9 +4566,21 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
             let brushes = state.brushes.as_ref()?;
 
+            // The ground the button stands on, and what the corners the rounding cuts away
+            // are erased with — the very rule this dialog answers `WM_CTLCOLORBTN` with
+            // (task T-12-6; `draw_combo_closed_part` asks the same question for its own
+            // corners). «Задать», «Удалить», «Добавить», «Выше», «Ниже» and «Открыть папку
+            // журнала» lie on a panel; the three buttons of the bottom row do not.
+            let ground = if state.panel_children.contains(&control) {
+                brushes.panel_bg()
+            } else {
+                brushes.window_bg()
+            };
+
             Some((
                 resolve_button_colors(
                     button_color_roles(control, pressed, disabled),
+                    ground,
                     brushes,
                     state.palette,
                 ),
@@ -4576,8 +4598,12 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
 
-/// Paints one owner-drawn push button: the rounded face under its single-pixel frame, the
-/// caption and the focus cue. The drawing half [`on_draw_item`] and [`on_about_draw_item`]
+/// Paints one owner-drawn push button: the ground of the whole rectangle, the rounded face
+/// under its single-pixel frame, the caption and the focus cue. The ground is erased first
+/// because an owner-drawn control is responsible for the whole of its rectangle and a repaint
+/// has to be idempotent — task T-12-6, and see the fill itself for the measurement.
+///
+/// The drawing half [`on_draw_item`] and [`on_about_draw_item`]
 /// share — one body, moved out of `on_draw_item` by task T-11-11 rather than copied
 /// (§6.2). Sharing it is why the «ОК» of the about window rounds off with the rest.
 ///
@@ -4607,13 +4633,30 @@ unsafe fn paint_push_button(
     // `debug_assert` handing the forger a crash of a debug build, and no journal row for
     // GDI refusals (reviews\T-11-1.md).
 
+    let dpi = dc_dpi(dc);
+
+    // ⚠ **The ground, before the face — task T-12-6.** The corners the rounding cuts away used
+    // to be left standing on whatever `WM_CTLCOLORBTN` had erased with, and the measured answer
+    // is that the system erases nothing before it hands an owner-drawn button its drawing: a
+    // button repainted **over itself** — the focus arriving on a click is the ordinary case —
+    // laid a second antialiased arc over the first and its corners darkened towards the frame
+    // ink (12 px of the stand's «Задать», 62,67,76 → 63,69,78) with no state of the button
+    // having changed. One `FillRect` of the very brush that message answers makes the drawing
+    // idempotent, which is what a repaint has to be; it is the same erase
+    // [`draw_combo_closed_part`] does for the closed part of a combo box.
+    //
+    // NFR-13: the answer is dropped with the rest of the paint calls, for the reason the block
+    // comment above gives.
+    //
+    // SAFETY: `dc` and `rect` are the values of the message the caller is inside of, and
+    // `colors.ground` is a live brush the window's state owns for longer than this call.
+    unsafe { FillRect(dc, &rect, colors.ground) };
+
     // The face and the single-pixel frame in one figure — п. 2.2 of task T-11-13: the
     // buttons of the mock-ups have [`CORNER_RADIUS`] corners — the same radius as everything
     // else the dialog rounds off, since task T-11-16 — and a square `FillRect` under a square
-    // `FrameRect` cannot have any. The corners the rounding cuts away keep the erase of
-    // `WM_CTLCOLORBTN`, which is the ground the button stands on.
-    let dpi = dc_dpi(dc);
-
+    // `FrameRect` cannot have any. The corners the rounding cuts away show the erase above,
+    // which is the ground the button stands on.
     paint_rounded(
         dc,
         &rect,
@@ -5543,6 +5586,10 @@ enum GlyphMarkPaint {
 ///
 /// # What is drawn
 ///
+/// The ground of the whole rectangle first — the brush `WM_CTLCOLORBTN` answers for this
+/// control — because an owner-drawn control is responsible for the whole of its rectangle and
+/// a repaint has to be idempotent (task T-12-6; see the fill itself for the measurement).
+///
 /// The glyph is a [`GLYPH_SIZE`]-sided square (check box) or circle (radio button) at the
 /// left edge of the rectangle, centred vertically; the colour choice is the closed table
 /// of [`glyph_color_roles`]. A checked box is filled whole with the accent and crossed by
@@ -5591,6 +5638,17 @@ unsafe fn draw_glyph_element(
             let brushes = state.brushes.as_ref()?;
             let palette = state.palette;
 
+            // The ground this element stands on — the very rule `on_ctl_color` answers
+            // `WM_CTLCOLORBTN` with: the panel brush for a control lying on one of the eight
+            // group panels, the window brush elsewhere. All eight glyph elements do lie on a
+            // panel, but the rule is asked and not assumed, exactly as `draw_combo_closed_part`
+            // asks it. See the fill below for why it is needed at all (task T-12-6).
+            let ground = if state.panel_children.contains(&control) {
+                brushes.panel_bg()
+            } else {
+                brushes.window_bg()
+            };
+
             let colors = glyph_color_roles(kind, checked, disabled);
 
             // The single place the glyph roles become brushes and colours of the resolved
@@ -5637,6 +5695,7 @@ unsafe fn draw_glyph_element(
             };
 
             Some((
+                ground,
                 fill,
                 fill_ink,
                 frame,
@@ -5647,11 +5706,40 @@ unsafe fn draw_glyph_element(
         })
     };
 
-    let Some(Some((fill, fill_ink, frame, mark, ink, face))) = choice else {
+    let Some(Some((ground, fill, fill_ink, frame, mark, ink, face))) = choice else {
         return 0;
     };
 
     let dpi = dc_dpi(dc);
+
+    // ⚠ **The ground, before anything is drawn on it — task T-12-6.**
+    //
+    // An owner-drawn button is responsible for the whole of its rectangle, exactly as the
+    // owner-drawn static of [`paint_label`] is: `WM_CTLCOLORBTN` names the brush, but nothing
+    // promises that the system lays it down before handing the drawing over — and the measured
+    // answer is that it does not. A check box that is repainted **over itself** without this
+    // fill draws its caption a second time on top of the first, and since `SetBkMode` is
+    // `TRANSPARENT`, the half-tone pixels of the antialiasing blend with what is already there
+    // instead of replacing it: an edge pixel of the caption's halo went 179,182,186 →
+    // 225,228,231 on the stand, ≈74 % → ≈98 % of the ink, and the text visibly thickened. The
+    // cores never moved, which is what said it was a second pass and not a different drawing.
+    //
+    // The repaint that does it is an ordinary one: the element loses the focus to whatever the
+    // person clicked — pressing «Задать» is the case the defect was found in — and the system
+    // button invalidates itself **without** erasing (`bErase = FALSE`), because an owner-drawn
+    // control has no background of its own to erase.
+    //
+    // Filling here is right under either behaviour — a second fill over the same colour is
+    // invisible and costs one `FillRect` — and skipping it is right under only one. It is the
+    // same erase `draw_combo_closed_part` does for the closed part of a combo box and
+    // `paint_label` for a caption.
+    //
+    // NFR-13: the answer is examined in words and deliberately dropped, for the reason the
+    // block comment below the glyph rectangle gives for every other paint call here.
+    //
+    // SAFETY: `dc` and `rect` are the values of the message this call is inside of; `ground` is
+    // a live brush the dialog's state owns for longer than this call.
+    unsafe { FillRect(dc, &rect, ground) };
 
     // The glyph: at the left edge, centred vertically, [`GLYPH_SIZE`] mock-up pixels a side
     // through the scale — the `$bs = 17` of the generator, and `$by = $py + [int](($ph -
@@ -11746,6 +11834,10 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             Some((
                 resolve_button_colors(
                     button_color_roles(control, pressed, disabled),
+                    // The ground of this window has no panels in it: `on_about_ctl_color`
+                    // answers `WM_CTLCOLORBTN` with the window brush and nothing else
+                    // (task T-12-6).
+                    brushes.window_bg(),
                     brushes,
                     state.palette,
                 ),

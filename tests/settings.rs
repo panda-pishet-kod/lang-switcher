@@ -3987,6 +3987,67 @@ fn the_check_box_glyph_is_rounded_by_the_three_pixels_of_the_mock_ups() {
     );
 }
 
+/// **Критерий 2 T-12-6** — каждое тело, рисующее элемент целиком, **стирает фон своего
+/// прямоугольника до того, как что-нибудь на нём нарисует**.
+///
+/// Owner-draw контрол отвечает за весь свой прямоугольник. `WM_CTLCOLORBTN` называет кисть,
+/// но никто не обещает, что система положит её сама перед тем, как отдать рисование, — и
+/// замер говорит, что не кладёт: флажок «Запускать при входе в систему», перерисованный
+/// **поверх себя** при уходе фокуса (нажатие «Задать» — тот случай, на котором дефект нашли),
+/// клал подпись вторым проходом по `SetBkMode(TRANSPARENT)`, и полутона сглаживания
+/// складывались — краевой пиксель ореола 179,182,186 → 225,228,231 при **неизменных** ядрах
+/// 228,231,234. Перерисовка обязана быть идемпотентной, и заливка — то, что её такой делает.
+///
+/// Читается из исходника, в манере остальных проверок формы этого файла: утверждается не
+/// значение, а **порядок** — заливка стоит раньше первой фигуры и раньше текста. Строка,
+/// которой не хватало, была именно отсутствием, и поймать её можно только так.
+#[test]
+fn every_owner_drawn_element_erases_its_ground_before_it_draws() {
+    let source = settings_module_source();
+
+    // Пять тел `WM_DRAWITEM` и шестое — закрытая часть комбобокса, которая рисует себя по
+    // `WM_PAINT` подкласса и потому тем более отвечает за весь свой прямоугольник.
+    for signature in [
+        "unsafe fn paint_push_button(",
+        "pub unsafe fn paint_label(",
+        "unsafe fn draw_glyph_element(",
+        "unsafe fn draw_combo_item(",
+        "unsafe fn draw_list_item(",
+        "unsafe fn draw_combo_closed_part(",
+    ] {
+        let body = function_body(&source, signature);
+
+        let fill = body.find("FillRect(").unwrap_or_else(|| {
+            panic!("`{signature}` must erase the ground of its rectangle with `FillRect`")
+        });
+
+        for later in ["paint_rounded(", "paint_ellipse(", "DrawTextW("] {
+            let Some(at) = body.find(later) else {
+                continue;
+            };
+
+            assert!(
+                fill < at,
+                "`{signature}`: the ground must be erased before `{later}` draws on it — \
+                 otherwise a repaint lays the new drawing on top of the old one"
+            );
+        }
+    }
+
+    // И заливается тем же, чем этот диалог отвечает на `WM_CTLCOLORBTN`: панельной кистью для
+    // контрола на одной из восьми панелей, оконной вне их. Два места спрашивают карту панелей,
+    // а не назначают кисть от себя — иначе фон элемента и фон под ним могли бы разойтись.
+    for signature in ["unsafe fn on_draw_item(", "unsafe fn draw_glyph_element("] {
+        let body = function_body(&source, signature);
+
+        assert!(
+            body.contains("state.panel_children.contains(&control)"),
+            "`{signature}` must read the ground off the panel map, exactly as `on_ctl_color` \
+             does when it answers WM_CTLCOLORBTN"
+        );
+    }
+}
+
 /// **Criterion 13 of T-11-14** — the exclusion list paints its own rows, so the selected one
 /// wears `sel_bg`/`sel_fg` instead of the system's `COLOR_HIGHLIGHT` blue; and everything the
 /// population and the reading of FR-84 stand on survived the new style.
