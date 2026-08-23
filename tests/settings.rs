@@ -2408,13 +2408,21 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
         );
     }
 
-    // The children of «Диагностика» did **not** move: the panel grew downwards. Their own
-    // rectangles are the witness — the growth is at the bottom edge or it is not this task.
+    // The children of «Диагностика» did **not** move by the 16 units: the panel grew
+    // downwards. Their own rectangles are the witness — the growth is at the bottom edge or it
+    // is not this task.
+    //
+    // ⚠ «путь к папке журнала» is 289 and not the 291 this test held until task T-12-3. It
+    // moved, and *upwards by two units*, which is the opposite direction from the sixteen this
+    // test is about: `IDC_LOG_DIR` stood at y = 275 where the generator of the mock-ups writes
+    // 273 (defect Д-4 of the Э12 comparison), and T-12-3 gave it the generator's number back.
+    // The statement of T-11-19 is untouched by that — the number is asserted, not relaxed, and
+    // the three rows beside it are the ones that prove the 16 units went on below.
     for (id, what, bottom) in [
         (1060u32, "Вести журнал", 258i32),
         (1061, "Открыть папку журнала", 260),
         (1107, "Папка журнала:", 273),
-        (1062, "путь к папке журнала", 291),
+        (1062, "путь к папке журнала", 289),
     ] {
         let (_, _, _, measured) = template.rect_of(id);
 
@@ -8305,4 +8313,294 @@ fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
             "`{signature}` writes the ground into the cells and must take it out again"
         );
     }
+}
+
+// -----------------------------------------------------------------------------------------
+// Геометрия диалога: коробка поля, разведённые прямоугольники, список вровень с кнопкой —
+// задача T-12-3
+// -----------------------------------------------------------------------------------------
+//
+// Four defects of the Э12 comparison, and every one of them is arithmetic on the template and
+// on one pure function — no window is created and the product is not started. What the pixels
+// then do is the controller's half, on the stand.
+
+/// The five input fields of `IDD_SETTINGS`, by identifier.
+///
+/// The same five `EDITTEXT` rows `settings::FRAMED_FIELDS` names minus the two lists — the
+/// controls a `12`-unit box is drawn round and whose own rectangle is one font height.
+const INPUT_FIELDS: [(u32, &str); 5] = [
+    (1010, "Горячая клавиша: поле клавиши"),
+    (1032, "Замена: задержка между событиями"),
+    (1041, "Выделение: таймаут буфера обмена"),
+    (1042, "Выделение: задержка восстановления"),
+    (1051, "Исключения: имя процесса"),
+];
+
+/// `MulDiv(units, base, 8)` — what the dialog manager does to a **vertical** number of a
+/// template, with the round-to-nearest `MulDiv` is documented to do.
+///
+/// `base` is the vertical dialog base unit: the height of the dialog's own font, which is what
+/// `MapDialogRect` divides by eight. Measured, never assumed — see the caller.
+fn vertical_units(units: i32, base: i32) -> i32 {
+    (units * base + 4) / 8
+}
+
+/// The vertical dialog base unit of `IDD_SETTINGS` on this machine — the height of the face
+/// its `DS_SETFONT` declares, measured on a memory DC.
+fn vertical_base_unit() -> i32 {
+    let (font, sheet) = template_font_and_sheet();
+    let face = Face::new(manager_logfont(sheet.dc, &font, DEFAULT_QUALITY));
+
+    metrics_of(&sheet, &face).tmHeight
+}
+
+/// **Defect Г-3 of the Э12 comparison** — the box the mock-ups draw round an input field is
+/// twelve dialog units, the control inside it is one font height, and the difference falls
+/// above and below the text in equal halves.
+///
+/// The whole of the cure in one place: the number comes from the generator (`'edit'` rows of
+/// `ui.ps1`, `h = 12`), the control comes from the definition of the vertical dialog unit
+/// (`DIALOG_FONT_HEIGHT_DLU` = 8 of them are one font height), and the frame is drawn by
+/// [`settings::field_frame_air`] round the middle of the control. Read out of the **built**
+/// `LangSwitcher.exe`, like every other statement this suite makes about the template.
+#[test]
+fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
+    assert_eq!(
+        settings::FIELD_BOX_DLU,
+        12,
+        "the box of the mock-ups is the `h = 12` of every `'edit'` row of the generator"
+    );
+
+    // The derivation is written down where the number is, and not as a count of pixels read
+    // off a picture — `design-tokens.md` §3, the error class that produced T-11-15 and F3.
+    let source = settings_module_source();
+    let derivation = source
+        .split_once("pub const FIELD_BOX_DLU")
+        .expect("the module must declare FIELD_BOX_DLU")
+        .0;
+
+    for phrase in ["ui.ps1", "h = 12", "MulDiv(12, 15, 8)"] {
+        assert!(
+            derivation.contains(phrase),
+            "the doc comment of FIELD_BOX_DLU must carry «{phrase}» — the derivation, not a \
+             pixel count"
+        );
+    }
+
+    // Every one of the five fields is one font height tall in the template, and not the box.
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    for (id, what) in INPUT_FIELDS {
+        let (_, top, _, bottom) = template.rect_of(id);
+
+        println!("«{what}» ({id}): {} dialog units tall", bottom - top);
+
+        assert_eq!(
+            bottom - top,
+            settings::DIALOG_FONT_HEIGHT_DLU,
+            "«{what}» ({id}) has to be one dialog font height — a taller control puts the \
+             whole surplus under the text, which is defect Г-3"
+        );
+    }
+
+    // The arithmetic of the frame, in pixels, at the base unit of this machine.
+    let base = vertical_base_unit();
+    let field_box = vertical_units(settings::FIELD_BOX_DLU, base);
+    let control = vertical_units(settings::DIALOG_FONT_HEIGHT_DLU, base);
+    let air = settings::field_frame_air(Some(field_box), control, 1);
+    let outer = control + 2 * air;
+
+    println!(
+        "base unit {base}: box {field_box} px, control {control} px, air {air} px, outer \
+         {outer} px"
+    );
+
+    assert_eq!(
+        air,
+        (field_box - control) / 2,
+        "the air is half of what the box has left over"
+    );
+    assert!(
+        outer <= field_box && outer >= field_box - 1,
+        "the box round the control is {outer} px against the {field_box} px of the mock-ups — \
+         centring may lose the odd pixel of an odd remainder and nothing more"
+    );
+
+    // The same table with the numbers of 96 DPI written out, so the derivation is held even on
+    // a machine that measures something else: box 23, control 15, air 4, outer 23.
+    assert_eq!(settings::field_frame_air(Some(23), 15, 1), 4);
+    assert_eq!(15 + 2 * 4, 23);
+
+    // **The rule degenerates into the old one.** A control already as tall as the box, one
+    // taller than it, and a refused `MapDialogRect` all keep the one-thickness frame every
+    // field wore before this task (NFR-13).
+    for (name, box_height, control_height) in [
+        ("as tall as the box", Some(23), 23),
+        ("taller than the box", Some(23), 30),
+        ("MapDialogRect refused", None, 15),
+    ] {
+        assert_eq!(
+            settings::field_frame_air(box_height, control_height, 1),
+            1,
+            "«{name}» must fall back to one border thickness"
+        );
+    }
+
+    // A thicker border at a higher DPI is the floor, not the answer.
+    assert_eq!(settings::field_frame_air(Some(23), 23, 2), 2);
+
+    // The pass draws it: the same number above and below a field, and the list branch keeps
+    // the air of the mock-ups above its first row.
+    let pass = function_body(&source, "unsafe fn paint_background(");
+
+    for part in [
+        "field_frame_air(field_box, rect.bottom - rect.top, border)",
+        "(air, air)",
+        "(list_top, border)",
+        "FRAMED_LISTS.contains(control)",
+        "dialog_units(hwnd, 0, FIELD_BOX_DLU)",
+    ] {
+        assert!(
+            pass.contains(part),
+            "the field pass of the background must carry `{part}`"
+        );
+    }
+}
+
+/// **Defect Г-1 of the Э12 comparison, «критично»** — the hint of the language row and the
+/// «Оформление» combo box are disjoint rectangles.
+///
+/// An `SS_OWNERDRAW` static fills its own rectangle with `panel_bg` before it writes a word,
+/// so a static overlapping a combo box does not sit on top of it — it **erases** the top of
+/// the frame the background drew. The template is where the overlap was and the template is
+/// where it is answered: two rectangles, disjoint by arithmetic, with air between the rows.
+#[test]
+fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let (hint_left, hint_top, hint_right, hint_bottom) = template.rect_of(1092);
+    let (combo_left, combo_top, combo_right, _) = template.rect_of(1003);
+
+    println!(
+        "хинт (1092): {hint_left},{hint_top}..{hint_right},{hint_bottom}; \
+         «Оформление» (1003): {combo_left},{combo_top}..{combo_right},…"
+    );
+
+    // Where the generator puts the hint: beside the language row it belongs to.
+    assert_eq!(
+        (hint_left, hint_top),
+        (132, 32),
+        "the hint stands at the generator's own place — ui.ps1: x = 132, y = 32"
+    );
+
+    // Disjoint, and by the vertical: the two share the whole of their width.
+    assert!(
+        hint_left < combo_right && combo_left < hint_right,
+        "the two rectangles overlap horizontally, which is why the vertical is what has to \
+         part them"
+    );
+    assert!(
+        hint_bottom <= combo_top,
+        "the hint ends at {hint_bottom} and «Оформление» starts at {combo_top} — the static \
+         erases the top of the combo box's frame, which is defect Г-1"
+    );
+    assert!(
+        combo_top - hint_bottom >= 2,
+        "there has to be air between the two rows: {} units",
+        combo_top - hint_bottom
+    );
+
+    // And the row still fits the panel «Общие», whose 66 units are a decision of the user
+    // (В-1) and not a number this task may move.
+    let (_, panel_top, _, panel_bottom) = template.rect_of(1090);
+
+    assert_eq!(
+        (panel_top, panel_bottom),
+        (7, 73),
+        "«Общие» is 7..73 dialog units — decision В-1, canon"
+    );
+
+    let base = vertical_base_unit();
+
+    // The closed part of a combo box is the twelve units of task T-12-2 at most — 22 px of the
+    // 22,5 the mock-ups draw — whatever the template declares for the dropped-down list below
+    // it. That upper bound is the height that has to fit inside the panel.
+    let closed_at_most = vertical_units(settings::FIELD_BOX_DLU, base);
+    let row_bottom = vertical_units(combo_top, base) + closed_at_most;
+
+    println!(
+        "«Оформление»: {}..{row_bottom} px, панель до {} px",
+        vertical_units(combo_top, base),
+        vertical_units(panel_bottom, base)
+    );
+
+    assert!(
+        row_bottom <= vertical_units(panel_bottom, base),
+        "the appearance row has to fit inside the panel it lives in"
+    );
+}
+
+/// **Defect Д-3 of the Э12 comparison** — the frame of the exclusion list and the frame of the
+/// «Удалить» button beside it land on the same row of pixels.
+///
+/// Declared level in the mock-ups (`ui.ps1`: both at y = 160) they came out two pixels apart,
+/// because the frame of a list is drawn [`settings::LIST_FIRST_ROW_TOP`] mock-up pixels above
+/// the control — the air of the picture before its first row, task T-11-16 — where a button
+/// frames its own rectangle. The list is what moves: one unit down, one unit shorter, so the
+/// bottom of the box stays on the row it was on.
+#[test]
+fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let (_, list_top, _, list_bottom) = template.rect_of(1050);
+    let (_, button_top, _, _) = template.rect_of(1053);
+
+    let base = vertical_base_unit();
+
+    // `scaled(LIST_FIRST_ROW_TOP, 96)` — the mock-up pixels of T-11-16 in the pixels of a
+    // 96 DPI window, which is what the stand measures on.
+    let lifted = settings::scaled(settings::LIST_FIRST_ROW_TOP, 96).max(1);
+
+    let list_frame = vertical_units(list_top, base) - lifted;
+    let button_frame = vertical_units(button_top, base);
+
+    println!(
+        "список (1050) y={list_top} → рамка {list_frame} px; кнопка (1053) y={button_top} → \
+         рамка {button_frame} px; поднятие {lifted} px"
+    );
+
+    assert_eq!(
+        list_frame, button_frame,
+        "the frame of the list is drawn {lifted} px above the control and the button frames \
+         its own rectangle — declared level they come out apart, which is defect Д-3"
+    );
+
+    // And the bottom of the list did not move: 44 units at y = 160 and 43 at y = 161 end on
+    // the same row.
+    assert_eq!(
+        vertical_units(list_top, base) + vertical_units(list_bottom - list_top, base),
+        vertical_units(160, base) + vertical_units(44, base),
+        "the bottom of the list has to stay where it was — only its top moved"
+    );
+}
+
+/// **Defect Д-4 of the Э12 comparison** — the journal path stands at the generator's own y.
+#[test]
+fn the_journal_path_stands_where_the_generator_puts_it() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let (left, top, right, bottom) = template.rect_of(1062);
+
+    println!("путь журнала (1062): {left},{top}..{right},{bottom}");
+
+    assert_eq!(
+        (left, top, right - left, bottom - top),
+        (220, 273, 186, 16),
+        "ui.ps1 writes the journal path at x = 220, y = 273, w = 186, h = 16; the 275 it stood \
+         at was two units low"
+    );
 }

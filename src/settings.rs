@@ -6076,9 +6076,10 @@ pub enum BackgroundFigure {
     /// caption of the (invisible) control at its top edge.
     Panel,
     /// An input field or a list: the rounded [`theme::Palette::field_bg`] fill under a
-    /// single-pixel [`theme::Palette::field_border`] frame, one pixel outside the control's
-    /// rectangle on every side — so the corners the rounding cuts away are the field's own
-    /// colour and not the panel's.
+    /// single-pixel [`theme::Palette::field_border`] frame, drawn outside the control's
+    /// rectangle — so the corners the rounding cuts away are the field's own colour and not
+    /// the panel's. How far outside is [`field_frame_air`]'s answer for a field and
+    /// [`LIST_FIRST_ROW_TOP`] above a list.
     Field,
 }
 
@@ -6121,10 +6122,52 @@ pub const FRAMED_FIELDS: [i32; 7] = [
 ///
 /// Named apart because the mock-ups treat them apart in one respect: the frame of a list
 /// stands [`LIST_FIRST_ROW_TOP`] mock-up pixels above its first row, where the frame of a
-/// field stands one [`BORDER_THICKNESS`] above its text. Both lists are in
-/// [`FRAMED_FIELDS`] as well — this is a subset of it and not a second list of controls, and
-/// a test holds the containment.
+/// field is the [`FIELD_BOX_DLU`] box of the generator centred on the control. Both lists are
+/// in [`FRAMED_FIELDS`] as well — this is a subset of it and not a second list of controls,
+/// and a test holds the containment.
 pub const FRAMED_LISTS: [i32; 2] = [IDC_EXCLUSIONS, IDC_CYCLE_LIST];
+
+/// The height of the box the mock-ups draw around an input field, in vertical **dialog
+/// units** — the `h = 12` of every `'edit'` row of the generator.
+///
+/// Read straight off `scratchpad\ui.ps1`: the five fields of the pictures are
+/// `@{t='edit'; …; h=12}` (lines 108, 130, 135, 137 and 142), and the `'edit'` arm strokes
+/// its frame **inside** that rectangle. Twelve of these units are `MulDiv(12, 15, 8)` = 23
+/// pixels of the window at 96 DPI, and grow with the font at every other DPI because
+/// `MapDialogRect` is what maps them ([`dialog_units`]) — the number is never a pixel count
+/// written down by hand.
+///
+/// # Why the box is not simply the control's own rectangle
+///
+/// A single-line `EDIT` lays its text along the **top** of its client area and no documented
+/// message moves it down: `EM_SETMARGINS` ([`set_field_margins`]) moves the two sides only,
+/// and `EM_SETRECT` is documented for multiline controls. So a control as tall as the box
+/// leaves the whole surplus underneath the text — the 3 above and 11 below that task T-12-3
+/// was given to close. The lever this file holds is the same one task T-11-16 used for the
+/// two lists: **where the frame is drawn**. The template gives the control exactly one
+/// [`DIALOG_FONT_HEIGHT_DLU`] — one em box, nothing to spare — and the background draws this
+/// box around it, centred, so the air of the picture is above and below the text in equal
+/// halves.
+pub const FIELD_BOX_DLU: i32 = 12;
+
+/// Half of what the [`FIELD_BOX_DLU`] box has left over after the control inside it — the
+/// distance the frame of a field is drawn above its rectangle, and the same below it.
+///
+/// `box_height` is that box in the pixels of the window (`None` when `MapDialogRect` was
+/// refused — NFR-13), `control_height` the height the dialog manager gave the control, and
+/// `border` the thickness of the frame itself, which is the floor: a control already as tall
+/// as the box, or taller, keeps exactly the one-thickness-outside frame it wore before task
+/// T-12-3, and so does a refused measurement. That is what makes the rule **degenerate into
+/// the old one** rather than replace it.
+///
+/// Pure, so the arithmetic is a table in `tests\settings.rs` and not a picture to be read.
+pub fn field_frame_air(box_height: Option<i32>, control_height: i32, border: i32) -> i32 {
+    let Some(box_height) = box_height else {
+        return border;
+    };
+
+    ((box_height - control_height) / 2).max(border)
+}
 
 /// The colours one whole background pass needs, taken out of the state in one borrow.
 ///
@@ -6169,8 +6212,9 @@ struct BackgroundColors {
 ///    than the dialog font, letter-spaced, in `text_muted` — read off that same hidden
 ///    control with `GetDlgItemTextW`, which is what keeps FR-94 working with no second
 ///    source of truth for the eight strings;
-/// 3. every field and list, one pixel outside its own rectangle: the rounded fill and frame
-///    of [`BackgroundFigure::Field`].
+/// 3. every field and list, outside its own rectangle: the rounded fill and frame of
+///    [`BackgroundFigure::Field`] — one thickness around a list, and the centred
+///    [`FIELD_BOX_DLU`] box of the generator around a field (task T-12-3).
 ///
 /// Panels before fields, in two passes over one walk of the children: a field can lie on a
 /// panel and a panel never lies on a field, so the order is the answer whatever the Z order
@@ -6349,22 +6393,33 @@ unsafe fn paint_background(
     // T-11-16, п. 5.
     let list_top = scaled(LIST_FIRST_ROW_TOP, dpi).max(border);
 
+    // …and except for a field, whose frame is not hung on the control at all: the box of the
+    // mock-ups is [`FIELD_BOX_DLU`] tall and the template gives the control one font height,
+    // so the frame is drawn round the control **centred** and the leftover air falls above and
+    // below the text in equal halves — task T-12-3. `None` is a refused `MapDialogRect`, and
+    // [`field_frame_air`] answers the old one-thickness frame to it (NFR-13).
+    let field_box = dialog_units(hwnd, 0, FIELD_BOX_DLU).map(|(_, height)| height);
+
     for (control, rect) in &children {
         if background_figure(*control) != Some(BackgroundFigure::Field) {
             continue;
         }
 
-        let top = if FRAMED_LISTS.contains(control) {
-            list_top
+        // A list keeps its own two distances — the air of the picture above, one thickness
+        // below — because its rows are laid out by the control from the top of its client
+        // area and centring the frame would move the frame away from the first row.
+        let (top, bottom) = if FRAMED_LISTS.contains(control) {
+            (list_top, border)
         } else {
-            border
+            let air = field_frame_air(field_box, rect.bottom - rect.top, border);
+            (air, air)
         };
 
         let frame = RECT {
             left: rect.left - border,
             top: rect.top - top,
             right: rect.right + border,
-            bottom: rect.bottom + border,
+            bottom: rect.bottom + bottom,
         };
 
         paint_rounded(

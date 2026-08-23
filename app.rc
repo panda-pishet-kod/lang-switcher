@@ -338,12 +338,20 @@ BEGIN
     CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9, SS_OWNERDRAW
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 48, 58, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_THEME, 74, 46, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    // ⚠ The «Оформление» row sits two units below the bottom of the hint beside the language
+    // row (32 + 18 = 50), and not at the 46 it had until task T-12-3. An SS_OWNERDRAW static
+    // fills its own rectangle with panel_bg before it writes a word, so a rectangle that
+    // overlaps a combo box does not merely sit on top of it: it *erases* the top of the frame
+    // the background drew, which is what defect Г-1 was. The two rectangles are now disjoint
+    // by arithmetic: hint y 32..50, combo y 52..132.
+    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 58, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_THEME, 74, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     // ⚠ Two lines high (18 units against the 9 of a one-line label) and the text does not fit
     // on one: the drawing of task T-11-18 keeps DT_WORDBREAK, which is what an SS_LEFT static
     // wrapped with. IDC_LOG_DIR below is the other one of these.
-    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 34, 70, 18, SS_OWNERDRAW
+    // y = 32 is where the generator of the mock-ups puts it (ui.ps1: x=132, y=32, w=70, h=18),
+    // level with the language row it belongs to.
+    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 32, 70, 18, SS_OWNERDRAW
 
     // -- Горячая клавиша -----------------------------------------------------------------
     //
@@ -352,8 +360,18 @@ BEGIN
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
     CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 77, 200, 48
+    // ⚠ The five EDITTEXT of this template are 8 units tall since task T-12-3, and not the 12
+    // of the box the mock-ups draw round them. Eight vertical units are one height of the
+    // dialog font by the definition of the unit, so the control is exactly the em box of its
+    // own text: a single-line EDIT lays that text along the top of its client area and no
+    // documented message moves it, so any surplus inside the control would all fall below the
+    // glyphs (the 3 above / 11 below of defect Г-3). The 12-unit box of the generator is drawn
+    // round the control by the dialog's own background, centred on it (FIELD_BOX_DLU in
+    // src\settings.rs), which puts the surplus above and below the text in equal halves. Each
+    // y is therefore two units lower than the box it stands in: the box, not the control, is
+    // what the eye sees and what the mock-up places.
     LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 92, 32, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_HOTKEY, 48, 90, 64, 12, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    EDITTEXT        IDC_HOTKEY, 48, 92, 64, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
     PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 89, 46, 14, BS_OWNERDRAW
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 106, 186, 16, SS_OWNERDRAW
 
@@ -385,21 +403,26 @@ BEGIN
     CONTROL         "Backspace", IDC_METHOD_BACKSPACE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 32, 180, 10
     CONTROL         "Выделение (совместимость)", IDC_METHOD_SELECTION, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 45, 180, 10
     LTEXT           "Задержка между событиями, мс:", IDC_DELAY_LABEL, 220, 61, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_DELAY, 334, 59, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
+    EDITTEXT        IDC_DELAY, 334, 61, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
 
     // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
     CONTROL         "Выделение", IDC_GROUP_SELECTION, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 82, 200, 62
     CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 94, 186, 10
     LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 110, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 108, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
+    EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 110, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
     LTEXT           "Задержка восстановления, мс:", IDC_CLIP_RESTORE_LABEL, 220, 126, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 124, 40, 12, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
+    EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 126, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
 
     // -- Исключения: FR-84 ---------------------------------------------------------------
     CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 148, 200, 84
-    LISTBOX         IDC_EXCLUSIONS, 220, 160, 120, 44, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    // ⚠ The list stands one unit below the button beside it, and its own frame then lands on
+    // the same row as the button's: the frame of a list is drawn LIST_FIRST_ROW_TOP above the
+    // control (2 px at 96 DPI, the air of the mock-ups before the first row, task T-11-16),
+    // where a button frames its own rectangle. Declared level, they came out 2 px apart, which
+    // was defect Д-3; the height goes 44 to 43 so that the bottom of the box does not move.
+    LISTBOX         IDC_EXCLUSIONS, 220, 161, 120, 43, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
-    EDITTEXT        IDC_EXCLUSION_NAME, 220, 207, 120, 12, ES_AUTOHSCROLL | NOT WS_BORDER
+    EDITTEXT        IDC_EXCLUSION_NAME, 220, 209, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14, BS_OWNERDRAW
     LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9, SS_OWNERDRAW
 
@@ -410,7 +433,9 @@ BEGIN
     LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9, SS_OWNERDRAW
     // ⚠ The second two-line label — 16 units for a path that does not fit on one line. Its
     // DT_WORDBREAK is load-bearing exactly as IDC_LANGUAGE_RESTART's is; task T-11-18.
-    LTEXT           "", IDC_LOG_DIR, 220, 275, 186, 16, SS_OWNERDRAW
+    // y = 273 is the generator's own number (ui.ps1: x=220, y=273, w=186, h=16); the 275 it
+    // carried until task T-12-3 put the path two units low.
+    LTEXT           "", IDC_LOG_DIR, 220, 273, 186, 16, SS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 314, 406, 44
