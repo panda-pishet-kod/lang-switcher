@@ -119,16 +119,37 @@ const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
 /// something. There is no third palette: a `Palette` is not built at run time, it is
 /// picked by [`resolve`].
 /// The fields are the roles the drawing tasks T-11-4…T-11-11 paint by; every one of them is
-/// `COLORREF` because that is the currency of `WM_CTLCOLOR*`, `SetTextColor` and
-/// `SetBkColor`, and converting at every use would be seventeen more places to reverse the
-/// bytes wrongly.
+/// `COLORREF` because that is the currency of `WM_CTLCOLOR*`, `SetTextColor`, `SetBkColor`
+/// and the four bytes of a DWM colour attribute, and converting at every use would be
+/// eighteen more places to reverse the bytes wrongly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     /// Background of a dialog.
     pub window_bg: COLORREF,
-    /// Background of a title bar. DWM paints the real caption itself; this field is for
-    /// the caption-like strip of the «О программе» window (task T-11-11).
+    /// Background of a title bar — the fill DWM is asked for by `DWMWA_CAPTION_COLOR`
+    /// (task T-12-1), in both windows of the program.
     pub title_bg: COLORREF,
+    /// The ink of the caption text — the colour DWM is asked for by `DWMWA_TEXT_COLOR`
+    /// (task T-12-1), in both windows of the program.
+    ///
+    /// # Why this is not [`Palette::text`]
+    ///
+    /// The two are near neighbours in «Графите» — 232,234,236 against 228,231,234 — and
+    /// far apart in nothing at all in «Тумане», where both are 35,38,43. It would be
+    /// tempting to call that one role. It is not one role: `text` is the ink of the client
+    /// area, chosen against [`Palette::window_bg`] and [`Palette::panel_bg`], while this
+    /// one is chosen against [`Palette::title_bg`] and is handed to a part of the window
+    /// this program does not paint — the non-client caption, drawn by DWM out of the four
+    /// bytes the attribute carries. A field of its own is what lets the caption move
+    /// without dragging every label of the dialog with it.
+    ///
+    /// # Where the two literals come from
+    ///
+    /// The mock-up generator `scratchpad-Э11\ui.ps1`, the same source the rest of this
+    /// palette was copied from and the one the acceptance instrument compares the running
+    /// program against: «Графит» — `ui.ps1:177`, `TitleFg=(Col 232 234 236)`; «Туман» —
+    /// `ui.ps1:188`, `TitleFg=(Col 35 38 43)`.
+    pub title_fg: COLORREF,
     /// Fill of a group box.
     pub panel_bg: COLORREF,
     /// Frame of a group box, and separators.
@@ -192,6 +213,7 @@ pub struct Palette {
 pub static GRAPHITE: Palette = Palette {
     window_bg: rgb(32, 35, 41),
     title_bg: rgb(26, 29, 34),
+    title_fg: rgb(232, 234, 236),
     panel_bg: rgb(39, 43, 50),
     panel_border: rgb(54, 59, 67),
     text: rgb(228, 231, 234),
@@ -213,6 +235,7 @@ pub static GRAPHITE: Palette = Palette {
 pub static FOG: Palette = Palette {
     window_bg: rgb(237, 239, 242),
     title_bg: rgb(247, 248, 250),
+    title_fg: rgb(35, 38, 43),
     panel_bg: rgb(255, 255, 255),
     panel_border: rgb(225, 229, 234),
     text: rgb(35, 38, 43),

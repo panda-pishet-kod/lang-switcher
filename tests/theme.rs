@@ -28,14 +28,16 @@ const fn expected_colorref(r: u32, g: u32, b: u32) -> u32 {
 
 /// Every field of a palette by name, in the order of the task's table.
 ///
-/// Seventeen since task T-12-11: `cap` — the ink of a panel heading — joined the sixteen of
-/// T-11-1. It is written out for both palettes even though «Графит» spells the same number
-/// as `text_muted`, and that duplication is the point: the equality belongs to the dark
-/// palette alone, and the light one puts twelve levels between the two roles.
-fn fields_of(palette: &Palette) -> [(&'static str, u32); 17] {
+/// Eighteen since task T-12-1: `title_fg` — the ink DWM is handed for the caption text —
+/// joined the seventeen the T-12-11 role `cap` had made of the sixteen of T-11-1. `cap` is
+/// written out for both palettes even though «Графит» spells the same number as
+/// `text_muted`, and that duplication is the point: the equality belongs to the dark palette
+/// alone, and the light one puts twelve levels between the two roles.
+fn fields_of(palette: &Palette) -> [(&'static str, u32); 18] {
     [
         ("window_bg", palette.window_bg.0),
         ("title_bg", palette.title_bg.0),
+        ("title_fg", palette.title_fg.0),
         ("panel_bg", palette.panel_bg.0),
         ("panel_border", palette.panel_border.0),
         ("text", palette.text.0),
@@ -55,9 +57,12 @@ fn fields_of(palette: &Palette) -> [(&'static str, u32); 17] {
 }
 
 /// The R,G,B triples of the task's table, column «Графит», copied as written.
-const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
+const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
     ("window_bg", (32, 35, 41)),
     ("title_bg", (26, 29, 34)),
+    // `ui.ps1:177` — `TitleFg=(Col 232 234 236)`, four levels above `text` on that same
+    // line and read against `title_bg` and not against the ground of the client area.
+    ("title_fg", (232, 234, 236)),
     ("panel_bg", (39, 43, 50)),
     ("panel_border", (54, 59, 67)),
     ("text", (228, 231, 234)),
@@ -77,9 +82,12 @@ const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
 ];
 
 /// The R,G,B triples of the task's table, column «Туман», copied as written.
-const FOG_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
+const FOG_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
     ("window_bg", (237, 239, 242)),
     ("title_bg", (247, 248, 250)),
+    // `ui.ps1:188` — `TitleFg=(Col 35 38 43)`. The number `text` also carries in this
+    // palette, written out all the same: the equality belongs to «Туману», not to the roles.
+    ("title_fg", (35, 38, 43)),
     ("panel_bg", (255, 255, 255)),
     ("panel_border", (225, 229, 234)),
     ("text", (35, 38, 43)),
@@ -103,7 +111,7 @@ const FOG_TRIPLES: [(&str, (u32, u32, u32)); 17] = [
 fn assert_palette_matches(
     palette_name: &str,
     palette: &Palette,
-    triples: &[(&str, (u32, u32, u32)); 17],
+    triples: &[(&str, (u32, u32, u32)); 18],
 ) {
     for ((field, actual), (expected_field, (r, g, b))) in fields_of(palette).iter().zip(triples) {
         // The rows travel in the order of the task's table on both sides; a mismatch here

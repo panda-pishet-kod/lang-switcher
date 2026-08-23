@@ -68,7 +68,10 @@ use windows::Win32::Foundation::{
     COLORREF, ERROR_FILE_NOT_FOUND, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE,
     WPARAM,
 };
-use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE,
+    DwmSetWindowAttribute,
+};
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, COLORONCOLOR,
     ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection,
@@ -116,17 +119,18 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
     CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
-    DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DialogBoxParamW, EC_LEFTMARGIN,
-    EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, IDCANCEL, IDOK, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
-    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, MapDialogRect, PostMessageW, SW_SHOWNORMAL,
-    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM,
-    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT, WM_SYSCHAR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WNDPROC,
+    DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxParamW,
+    EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC,
+    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
+    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+    LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect, PostMessageW,
+    SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW,
+    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_MEASUREITEM, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_SETFONT,
+    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2196,6 +2200,9 @@ pub fn show_dialog(
             fonts: None,
             // `None` until the first `WM_ERASEBKGND`, which is where the picture is built.
             background: None,
+            // FR-92а, task T-12-1: loaded before the window exists, because a resource does
+            // not need one; shown on `WM_INITDIALOG`, which is where a window does.
+            icon: CaptionIcons::load(),
         }),
     };
 
@@ -2509,6 +2516,13 @@ struct DialogState<'a> {
     /// build, which [`on_erase_background`] answers by painting straight into the message's
     /// DC as it did before this task.
     background: Option<BackgroundCache>,
+    /// The icon the caption is shown by `WM_SETICON` — task T-12-1.
+    ///
+    /// Owned here for exactly the reason [`CaptionIcons`] gives: the handles must outlive the
+    /// window that displays them, and this value is dropped only after the modal call has
+    /// returned. `None` — a refused `LoadImageW` — leaves the caption without an icon, which
+    /// is the caption every task before this one had (NFR-13).
+    icon: Option<CaptionIcons>,
 }
 
 /// The dialog procedure of FR-92.
@@ -2570,6 +2584,21 @@ unsafe extern "system" fn dialog_proc(
                     apply_title_bar_theme(hwnd, state.palette);
                 })
             };
+
+            // FR-92а, task T-12-1: the icon of the caption, taken out of the state as two
+            // plain handles and posted only after the borrow has ended — the discipline every
+            // handler of this file keeps, whatever the message costs.
+            //
+            // SAFETY: as above — the pointer was stored just now and the value it names is
+            // alive for the whole of this modal call.
+            let frames =
+                unsafe { with_state(hwnd, |state| state.icon.as_ref().map(CaptionIcons::frames)) };
+
+            if let Some(Some(frames)) = frames {
+                // SAFETY: `hwnd` is the live dialog, and the handles belong to the value the
+                // state keeps, which is dropped only after this modal call returns.
+                unsafe { CaptionIcons::show_on(hwnd, frames) };
+            }
 
             // FR-92а, task T-11-5a: «ОК» lost `BS_DEFPUSHBUTTON` to owner drawing — a
             // button *type* occupies the low nibble the default style lived in — so the
@@ -2820,7 +2849,7 @@ unsafe fn with_window_state<S, R>(hwnd: HWND, f: impl FnOnce(&mut S) -> R) -> Op
 /// The colour role a control plays when `WM_CTLCOLORSTATIC` asks about it — FR-92а,
 /// task T-11-4.
 ///
-/// Three roles and not sixteen colours: the handler below turns a role into palette fields
+/// Three roles and not eighteen colours: the handler below turns a role into palette fields
 /// in one place, and the mapping «identifier → role» stays a pure function a table test can
 /// close (criterion 10 of T-11-4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3611,19 +3640,43 @@ pub fn title_bar_is_dark(palette: &theme::Palette) -> bool {
     std::ptr::eq(palette, &theme::GRAPHITE)
 }
 
-/// Asks DWM to colour the non-client title bar after the palette — FR-92а, task T-11-4.
+/// Asks DWM to colour the non-client title bar after the palette — FR-92а, tasks T-11-4 and
+/// T-12-1.
 ///
-/// `DWMWA_USE_IMMERSIVE_DARK_MODE` is the one documented way to a dark caption, named by
-/// FR-92а in so many words; the attribute is four bytes of `BOOL`, true exactly when the
-/// resolved palette is the dark one.
+/// Three attributes, all documented, all four bytes, all set through the one entry point
+/// `DwmSetWindowAttribute` this file has always had:
 ///
-/// A refusal is survived and left alone on purpose (NFR-13: the result is examined right
-/// here and deliberately dropped). The attribute took its public number only in Windows 10
-/// 20H1, and on older builds the call answers an error for a perfectly live window — a
-/// legal state of the machine, not a violation of ownership, which is why there is no
-/// `debug_assert` on this path. It is not journaled either: the closed `OPERATIONS`
-/// vocabulary of `diag` has no row for it (decision of `reviews\T-11-1.md`), and the only
-/// consequence is a system-coloured title bar over a correctly painted client area.
+/// * `DWMWA_USE_IMMERSIVE_DARK_MODE` — the `BOOL` of task T-11-4, true exactly when the
+///   resolved palette is the dark one. It is what makes the *caption buttons* — the cross,
+///   the minimise and the maximise — legible, and it is kept for that alone: the two
+///   colours below leave those buttons to the system;
+/// * `DWMWA_CAPTION_COLOR` := [`theme::Palette::title_bg`] — task T-12-1. Until this task
+///   the fill was DWM's own, mixed from the user's accent colour: measured 34,29,40 in one
+///   window of this program and 40,26,45 in the other, against the 26,29,34 of the palette;
+/// * `DWMWA_TEXT_COLOR` := [`theme::Palette::title_fg`] — task T-12-1. Without it the
+///   caption text stays the system's pure white (measured 255,255,255) or pure black over
+///   a fill that is now ours, and the mock-ups' 232,234,236 / 35,38,43 never appears.
+///
+/// Both colours are `COLORREF` — `0x00BBGGRR`, the same byte order `theme` packs — and the
+/// documented way back to the system's own choice is the value `DWMWA_COLOR_DEFAULT`
+/// (`0xFFFFFFFF`), which this program never has cause to send: every window it opens is
+/// opened in a palette.
+///
+/// ⚠ **Called at every palette change, not only at creation.** The three call sites are
+/// `WM_INITDIALOG` of the settings dialog, `WM_INITDIALOG` of the about window, and
+/// [`refresh_palette`] — the common tail of a pressed «Применить» and of
+/// `WM_SETTINGCHANGE`. The attributes are properties of the window and survive nothing but
+/// another call, so a palette change that skipped this would leave yesterday's caption over
+/// today's client area.
+///
+/// A refusal is survived and left alone on purpose (NFR-13: every result is examined right
+/// here and deliberately dropped). `DWMWA_USE_IMMERSIVE_DARK_MODE` took its public number
+/// only in Windows 10 20H1 and the two colours only in Windows 11 build 22000, so on an
+/// older build the call answers an error for a perfectly live window — a legal state of the
+/// machine, not a violation of ownership, which is why there is no `debug_assert` on this
+/// path. It is not journaled either: the closed `OPERATIONS` vocabulary of `diag` has no row
+/// for it (decision of `reviews\T-11-1.md`), and the only consequence is a system-coloured
+/// title bar over a correctly painted client area.
 fn apply_title_bar_theme(hwnd: HWND, palette: &theme::Palette) {
     let dark = windows::core::BOOL::from(title_bar_is_dark(palette));
 
@@ -3638,6 +3691,220 @@ fn apply_title_bar_theme(hwnd: HWND, palette: &theme::Palette) {
             size_of::<windows::core::BOOL>() as u32,
         )
     };
+
+    set_caption_colour(hwnd, DWMWA_CAPTION_COLOR, palette.title_bg);
+    set_caption_colour(hwnd, DWMWA_TEXT_COLOR, palette.title_fg);
+}
+
+/// Hands DWM one `COLORREF` attribute of the caption — task T-12-1, the body the two colour
+/// lines of [`apply_title_bar_theme`] share.
+///
+/// The four bytes are passed as a plain `u32` and not as the `COLORREF` newtype: the
+/// attribute is documented as «a `COLORREF` value», the size is the four bytes of the
+/// number, and taking the number out of the wrapper here means the call cannot depend on
+/// how the crate happens to lay that wrapper out.
+fn set_caption_colour(hwnd: HWND, attribute: DWMWINDOWATTRIBUTE, colour: COLORREF) {
+    let value: u32 = colour.0;
+
+    // NFR-13: the result is examined here and deliberately dropped — see the caller for why
+    // a refusal is a legal state of the machine and not a failure of this program.
+    //
+    // SAFETY: `hwnd` is the live window. The attribute pointer names `value`, a live local
+    // of this frame, and the size passed is exactly its four bytes; the call copies the
+    // value and keeps no pointer once it returns.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            attribute,
+            (&raw const value).cast(),
+            size_of::<u32>() as u32,
+        )
+    };
+}
+
+// =========================================================================================
+// FR-92а, task T-12-1 — the icon of the caption
+// =========================================================================================
+
+/// The identifier of the program's icon in `app.rc` — line 221, `IDI_APP_ACTIVE ICON`.
+///
+/// ⚠ Kept equal to the `.rc` by hand, exactly as [`IDD_SETTINGS`] is: a `.rc` file and a
+/// Rust file have no vocabulary in common. It is deliberately the same number the private
+/// constant of the same name in `crate::tray` carries — one resource, loaded by the
+/// notification area for its icon and by this file for the caption of two windows — and
+/// `app.rc` is not this task's to change.
+const IDI_APP_ACTIVE: u16 = 101;
+
+/// The two icons one window's caption is shown by `WM_SETICON`, owned by this value and
+/// destroyed when the window that was shown them is gone — task T-12-1.
+///
+/// # Who owns the handles
+///
+/// **This value, and nothing else.** `WM_SETICON` does not transfer ownership: it hands the
+/// window a handle to *display*, and Learn is explicit that the caller is the one who
+/// destroys it. Neither icon is loaded with `LR_SHARED`, so each is a fresh handle this
+/// process owns and has to free — the same choice, and for the same documented reason, that
+/// `crate::tray::Icon` makes for the notification-area icon: `LR_SHARED` may only be used
+/// for an image loaded at the size the resource already holds, and both sizes here are asked
+/// for by number, so the loader scales a frame and the result belongs to the caller.
+///
+/// # When they are freed
+///
+/// After the window is destroyed and not before: the value lives in the state on the frame
+/// of [`show_dialog`] / [`show_about_dialog`], and `DialogBoxParamW` is modal — it returns
+/// only once the window is gone, and the state is dropped after it returns. Destroying an
+/// icon a live caption is still displaying is exactly the bug this ordering rules out.
+struct CaptionIcons {
+    /// The frame the caption itself shows — `ICON_SMALL`, asked for at the system's
+    /// small-icon metric.
+    small: HICON,
+    /// The frame Alt+Tab and the task bar show — `ICON_BIG`, asked for at the system's
+    /// ordinary icon metric.
+    big: HICON,
+}
+
+impl CaptionIcons {
+    /// Loads both frames out of the resources the interface strings come from.
+    ///
+    /// `None` on a refusal of either `LoadImageW` (NFR-13): a window without an icon is the
+    /// window this program had before this task, which is a smaller loss than a half-loaded
+    /// pair — and the first handle of a half-loaded pair is freed right here rather than
+    /// leaked, because nothing else would ever come to own it.
+    ///
+    /// A refusal is deliberately **not** journaled, for the reason [`theme::Brushes::new`]
+    /// gives for its own: the `OPERATIONS` vocabulary of module `diag` is closed
+    /// (`reviews\T-11-1.md`), it has no row for loading a picture, and adding one belongs to
+    /// the module that owns the table and not to this one. NFR-13 is satisfied where it asks
+    /// to be — the answer is examined, the half-built pair is unwound, and the caller sees
+    /// `None`.
+    fn load() -> Option<Self> {
+        let module = resource_module();
+        let instance = HINSTANCE(module.0);
+
+        // The caption shows the small frame, and «small» is a system metric, not sixteen:
+        // the answer follows the display scale. `crate::tray` asks the same question for the
+        // notification area and its function is the one asked here, rather than a second
+        // copy of the same `GetSystemMetrics` pair (§6.2).
+        let (small_cx, small_cy) = crate::tray::small_icon_size();
+
+        // SAFETY: `instance` is the module handle whose resources carry `IDI_APP_ACTIVE`
+        // — the very module the interface strings are read from — and the "name" is an
+        // integer identifier in the `MAKEINTRESOURCE` form, so nothing is dereferenced as a
+        // string. Without `LR_SHARED` the call makes a handle this value owns; the crate
+        // turns a null result into an error, so NFR-13 is satisfied by the `ok()?`.
+        let small = HICON(
+            unsafe {
+                LoadImageW(
+                    Some(instance),
+                    resource_id(IDI_APP_ACTIVE),
+                    IMAGE_ICON,
+                    small_cx,
+                    small_cy,
+                    LR_DEFAULTCOLOR,
+                )
+            }
+            .ok()?
+            .0,
+        );
+
+        // `LR_DEFAULTSIZE` with a zero width and height is the documented way to ask for the
+        // system's icon metric — the same question `SM_CXICON`/`SM_CYICON` answer, asked of
+        // the loader instead of being fetched and passed back in.
+        //
+        // SAFETY: as above.
+        let big = unsafe {
+            LoadImageW(
+                Some(instance),
+                resource_id(IDI_APP_ACTIVE),
+                IMAGE_ICON,
+                0,
+                0,
+                LR_DEFAULTCOLOR | LR_DEFAULTSIZE,
+            )
+        };
+
+        // NFR-13: examined. The frame already loaded is freed right here — a half-built pair
+        // is nobody's property, so nothing else would ever come to free it.
+        let Ok(big) = big else {
+            // SAFETY: `small` came from the successful call above, was handed to nobody, and
+            // this is the one place that frees it — no `Drop` of `CaptionIcons` will ever run
+            // for a value that is never built.
+            if let Err(error) = unsafe { DestroyIcon(small) } {
+                crate::app::report_non_critical("DestroyIcon", &error);
+            }
+
+            return None;
+        };
+
+        Some(Self {
+            small,
+            big: HICON(big.0),
+        })
+    }
+
+    /// The two frames as plain values — what a handler takes out of the state before it lets
+    /// the borrow go.
+    ///
+    /// The split every handler of this file makes: the borrow of the state ends before any
+    /// message is put anywhere, so no message can find the state busy underneath. The handles
+    /// outlive the borrow — they belong to the value the state keeps, which is dropped only
+    /// after the modal call returns.
+    fn frames(&self) -> [(u32, HICON); 2] {
+        [(ICON_SMALL, self.small), (ICON_BIG, self.big)]
+    }
+
+    /// Shows both frames on `hwnd` — the two `WM_SETICON` messages of task T-12-1.
+    ///
+    /// ⚠ **Posted, not sent** — FR-72, the same choice and the same reason as the `DM_SETDEFID`
+    /// of `WM_INITDIALOG` a few lines above each call site: this program uses no bare
+    /// `SendMessage` anywhere, and there is nothing here to wait for. The window picks the two
+    /// messages up in the modal loop it is about to enter, `DefDlgProc` hands them on to
+    /// `DefWindowProc`, and the caption is drawn with the icon from its first paint on.
+    ///
+    /// The answer of `WM_SETICON` — the handle the window displayed *before* — is therefore
+    /// not seen at all, and nothing is lost by that: it is null in both windows, because
+    /// neither template declares an icon and this is the first and only sender. A value that
+    /// was never ours to free would not become ours by arriving in a return value.
+    ///
+    /// # Safety
+    ///
+    /// `hwnd` is a live window of this thread, and `frames` came from a [`CaptionIcons`]
+    /// somebody keeps alive for longer than that window.
+    unsafe fn show_on(hwnd: HWND, frames: [(u32, HICON); 2]) {
+        for (which, icon) in frames {
+            // SAFETY: see the contract above. `wparam` is a plain number and `lparam` carries
+            // an icon handle by value — `PostMessageW` queues the two words and returns, and
+            // no memory of ours is dereferenced by either end.
+            if let Err(error) = unsafe {
+                PostMessageW(
+                    Some(hwnd),
+                    WM_SETICON,
+                    WPARAM(which as usize),
+                    LPARAM(icon.0 as isize),
+                )
+            } {
+                // NFR-13. Not fatal: the caption keeps the icon it had, which is none, and
+                // the journal is told — the same name, and the same handling, the refused
+                // `DM_SETDEFID` of this file already carries.
+                crate::app::report_non_critical("PostMessageW", &error);
+            }
+        }
+    }
+}
+
+impl Drop for CaptionIcons {
+    fn drop(&mut self) {
+        for icon in [self.small, self.big] {
+            // SAFETY: each handle came from a successful `LoadImageW` without `LR_SHARED`,
+            // so it is ours to destroy, and it is destroyed exactly once — the type is
+            // neither `Copy` nor `Clone`, its fields are private and never reassigned, and
+            // `drop` runs once. The window that displayed them is already destroyed: this
+            // value lives on the frame of the modal call and is dropped after it returns.
+            if let Err(error) = unsafe { DestroyIcon(icon) } {
+                crate::app::report_non_critical("DestroyIcon", &error);
+            }
+        }
+    }
 }
 
 /// Repaints the dialog and every child in it — the visible half of a palette change.
@@ -6617,7 +6884,7 @@ struct BackgroundColors {
     panel_border: COLORREF,
     /// [`theme::Palette::field_border`] — the single-pixel frame of a field.
     field_border: COLORREF,
-    /// [`theme::Palette::text_muted`] — the ink of a panel caption.
+    /// [`theme::Palette::cap`] — the ink of a panel caption since task T-12-11.
     caption: COLORREF,
 }
 
@@ -6640,9 +6907,9 @@ struct BackgroundColors {
 /// 1. the whole client area in `window_bg` — the ground the dialog stands on;
 /// 2. every panel, in the rectangle of its own hidden control: the rounded fill and frame
 ///    of [`BackgroundFigure::Panel`], then the caption — upper case, smaller and bolder
-///    than the dialog font, letter-spaced, in `text_muted` — read off that same hidden
-///    control with `GetDlgItemTextW`, which is what keeps FR-94 working with no second
-///    source of truth for the eight strings;
+///    than the dialog font, letter-spaced, in `cap` since task T-12-11 — read off that same
+///    hidden control with `GetDlgItemTextW`, which is what keeps FR-94 working with no
+///    second source of truth for the eight strings;
 /// 3. every field and list, outside its own rectangle: the rounded fill and frame of
 ///    [`BackgroundFigure::Field`] — one thickness around a list, and the centred
 ///    [`FIELD_BOX_DLU`] box of the generator around a field (task T-12-3).
@@ -6786,6 +7053,13 @@ unsafe fn paint_background(
     // brush of the dialog's state.
     unsafe { FillRect(dc, area, colors.window) };
 
+    // Task T-12-1, п. 4: the line the mock-ups draw under the title bar. Laid straight after
+    // the ground and before every figure, so that a panel or a field which ever reached the
+    // top of the client area would paint over it rather than lose its own first row. None
+    // does today — the topmost figure of this template starts well below — and the
+    // acceptance probe of the row says so in numbers.
+    paint_caption_underline(dc, area, colors.field_border);
+
     let children = child_rects_in_client(hwnd);
 
     // Pass one — the panels. See the doc comment of `on_erase_background` for why they go
@@ -6872,6 +7146,50 @@ unsafe fn paint_background(
 // Стоимость фона: одна готовая картинка вместо восьми панелей на каждую перерисовку —
 // FR-92а, task T-11-17, criterion 12
 // =========================================================================================
+
+/// Lays the one-pixel line the mock-ups draw under the title bar along the top row of
+/// `area` — FR-92а, task T-12-1, п. 4.
+///
+/// # Why it is drawn here at all
+///
+/// The line belongs to the non-client frame: `ui.ps1:431-433` draws it with a `WinBorder`
+/// pen along the bottom edge of the caption, and `chrome.ps1` does the same for the about
+/// window. This program does not paint its non-client area and — by the verdict of goal 4 of
+/// the E12 reconnaissance — is not going to: DWM owns those thirty-one rows, and there is no
+/// documented attribute that puts a line under them. So the line is imitated by the first
+/// row of the *client* area, which is ours, touches the caption with no gap, and costs one
+/// `FillRect`.
+///
+/// The colour is [`theme::Palette::field_border`] — 58,64,72 against the mock-ups' `WinBorder`
+/// 58,63,71, one level apart in two channels, a tolerance the stage's ТЗ accepted rather than
+/// let an eighteenth palette field be invented for a difference nobody can see.
+fn paint_caption_underline(dc: HDC, area: &RECT, colour: COLORREF) {
+    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
+    // below.
+    let brush = unsafe { CreateSolidBrush(colour) };
+
+    // NFR-13: examined — no brush, no line, and the window is short of one row of colour
+    // rather than short of a background.
+    if brush.is_invalid() {
+        return;
+    }
+
+    let line = RECT {
+        left: area.left,
+        top: area.top,
+        right: area.right,
+        bottom: area.top + 1,
+    };
+
+    // SAFETY: `dc` is painted into for the length of the call this is inside of, `line` is a
+    // live rectangle of this frame, and `brush` is the live brush just made. The answer is
+    // dropped for the NFR-13 reason the drawing paths of this file all state: a refused fill
+    // costs one row of colour and nothing else.
+    unsafe { FillRect(dc, &line, brush) };
+
+    // SAFETY: created above, handed to nobody, freed exactly once.
+    let _ = unsafe { DeleteObject(brush.into()) };
+}
 
 /// The background of the dialog as a finished picture, owned: memory DC and bitmap created
 /// together, freed together in `Drop` — NFR-13.
@@ -11587,6 +11905,9 @@ struct AboutState {
     /// the face is made out of the font the manager gives the window, and there is no window
     /// when this value is built.
     fonts: Option<DialogFonts>,
+    /// The icon the caption is shown by `WM_SETICON` — task T-12-1: the settings dialog's
+    /// field, its type and its ownership, in the window that shares its paths (§6.2).
+    icon: Option<CaptionIcons>,
 }
 
 /// Shows the modal «О программе» window of FR-92а — what `tray` calls in place of the
@@ -11613,6 +11934,8 @@ pub fn show_about_dialog(
         version,
         // `None` until `WM_INITDIALOG` — see the field.
         fonts: None,
+        // FR-92а, task T-12-1: loaded before the window exists — see [`CaptionIcons`].
+        icon: CaptionIcons::load(),
     });
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`, and the
@@ -11680,6 +12003,21 @@ unsafe extern "system" fn about_proc(
                 })
             };
 
+            // FR-92а, task T-12-1: the icon of the caption — the settings dialog's path, and
+            // its discipline: the handles leave the borrow before the messages are posted.
+            //
+            // SAFETY: as above — the pointer was stored just now and the value it names is
+            // alive for the whole of this modal call.
+            let frames = unsafe {
+                with_about_state(hwnd, |state| state.icon.as_ref().map(CaptionIcons::frames))
+            };
+
+            if let Some(Some(frames)) = frames {
+                // SAFETY: `hwnd` is the live window, and the handles belong to the value the
+                // state keeps, which is dropped only after this modal call returns.
+                unsafe { CaptionIcons::show_on(hwnd, frames) };
+            }
+
             // «ОК» is BS_OWNERDRAW, so the default identifier is handed to the dialog
             // manager by the documented replacement, `DM_SETDEFID` — *posted*, not sent,
             // for the reasons written down at the same message of `dialog_proc` (FR-72).
@@ -11702,6 +12040,16 @@ unsafe extern "system" fn about_proc(
 
             // TRUE: let the dialog manager choose the focus — «ОК» is the one tab stop.
             1
+        }
+
+        // FR-92а, task T-12-1, п. 4: the ground of this window and the one-pixel line under
+        // its title bar. Until this task the window had no erase handler at all — the dialog
+        // manager erased it with the brush `WM_CTLCOLORDLG` answers, which is the very same
+        // `window_bg` — so the ground is unchanged and the line is the whole difference.
+        WM_ERASEBKGND => {
+            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
+            // alive for the whole of this modal call.
+            unsafe { on_about_erase_background(hwnd, wparam) }
         }
 
         // The colour questions of this window, answered from its own palette; the applying
@@ -11780,6 +12128,63 @@ pub fn about_version_line(version: Option<(u16, u16, u16, u16)>) -> String {
     );
 
     format_text(IDS_ABOUT_VERSION, &[&number])
+}
+
+/// The whole background of the about window — FR-92а, task T-12-1, п. 4.
+///
+/// Two `FillRect`s and no picture: this window has no panels, no field frames and no
+/// letter-spaced captions, so there is nothing here worth the [`BackgroundCache`] the
+/// settings dialog needs — the ground and the line are the whole of it.
+///
+/// Answers 1 — «erased» — when the ground was laid, and 0 when the state is unreachable (a
+/// re-entrant message) or [`theme::Brushes::new`] was refused at initialisation: the dialog
+/// manager then erases with the answer of `WM_CTLCOLORDLG`, exactly as it did before this
+/// task, and the window is short of its line and of nothing else (NFR-13).
+///
+/// # Safety
+///
+/// Called from [`about_proc`] only, with the `wparam` of the message — the DC the manager
+/// owns for the length of the send.
+unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
+    // The one thing taken out of the message (SEC-05): the DC to paint into. It is written
+    // to and never read from, and no pointer of the message is followed.
+    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
+
+    let mut client = RECT::default();
+
+    // NFR-13: examined — no rectangle, no paint, and the manager's own erase is the
+    // degraded-but-alive answer.
+    //
+    // SAFETY: `hwnd` is the live window and `client` is a live local the call fills.
+    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
+        return 0;
+    }
+
+    // The colour choice, split from the painting exactly as everywhere in this file: the
+    // borrow of the state ends before the DC is touched.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+
+            Some((brushes.window_bg(), state.palette.field_border))
+        })
+    };
+
+    let Some(Some((ground, line))) = choice else {
+        return 0;
+    };
+
+    // SAFETY: `dc` is the DC of the message, painted into for the length of this send;
+    // `ground` is a live brush this window's state owns for longer than the call.
+    unsafe { FillRect(dc, &client, ground) };
+
+    paint_caption_underline(dc, &client, line);
+
+    // TRUE — the background is drawn; the manager must not erase over it.
+    1
 }
 
 /// The colour role of one static of the about window — the closed vocabulary
