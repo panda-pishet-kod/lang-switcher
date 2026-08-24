@@ -25,8 +25,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use lang_switcher::diag;
 use lang_switcher::hook;
-use lang_switcher::settings::{self, CONFIG_FILE_NAME};
-use lang_switcher::tray::{self, Menu, Reaction, Tray};
+use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
+use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
 
 use windows::Win32::Foundation::{FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{ANTIALIASED_QUALITY, LOGFONTW};
@@ -60,6 +60,17 @@ const NOT_FAIL_SAFE: bool = false;
 /// The same argument in the state FR-99 leaves behind — the fourth consecutive panic inside
 /// the hook callback has disarmed buffering and the flag is up for the rest of the process.
 const FAIL_SAFE: bool = true;
+
+/// The fourth argument of [`Menu::build`] in the ordinary state of the program — task T-13-14.
+///
+/// `settings::dialog_is_open()`, which is what the product hands in from `tray::show_menu`.
+/// False in every test but the ones about the modal dialog of FR-92, and a name rather than a
+/// bare `false` for the same reason its neighbour above is one — four booleans in a row is
+/// three too many to tell apart by position.
+const NO_DIALOG: bool = false;
+
+/// The same argument while the modal settings dialog of FR-92 is on the screen.
+const DIALOG_UP: bool = true;
 
 /// The menu of FR-91 as its block prints, top to bottom. `None` is one of the two rules.
 ///
@@ -244,7 +255,8 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
 #[test]
 fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG)
+        .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91);
 }
@@ -255,12 +267,14 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
     // *is*, and the second must survive the first — same seven entries, same two rules,
     // same places.
     let _locale = product_strings(settings::Language::En);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG)
+        .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91_ENGLISH);
 
     // The suspended state moves the same entry in this locale as in the other one.
-    let suspended = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let suspended =
+        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
     assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
@@ -269,8 +283,10 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
 #[test]
 fn the_first_entry_follows_the_state() {
     let _locale = product_strings(settings::Language::Ru);
-    let active = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
-    let suspended = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let active =
+        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let suspended =
+        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     assert_eq!(active.items()[0].label, "Приостановить");
     assert_eq!(suspended.items()[0].label, "Возобновить");
@@ -479,7 +495,7 @@ fn the_guard_of_fr99_stands_at_the_top_of_the_method_that_moves_the_state() {
 #[test]
 fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(false, true, FAIL_SAFE).expect("the menu must be creatable");
+    let menu = Menu::build(false, true, FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     println!(
         "entry 0: label={:?} enabled={} grayed={} disabled={}",
@@ -529,7 +545,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
     let _locale = product_strings(settings::Language::Ru);
 
     // The ordinary suspended program: «Возобновить» is the user's to choose.
-    let ordinary = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let ordinary =
+        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     assert_eq!(ordinary.items()[0].label, "Возобновить");
     assert!(ordinary.items()[0].enabled);
@@ -538,7 +555,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     // FR-99 has just disarmed an armed program. The move it is about to make is the
     // suspension, and that one must stay available or the icon never becomes honest.
-    let suspending = Menu::build(true, true, FAIL_SAFE).expect("the menu must be creatable");
+    let suspending =
+        Menu::build(true, true, FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     assert_eq!(suspending.items()[0].label, "Приостановить");
     assert!(suspending.items()[0].enabled);
@@ -546,11 +564,564 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
     assert!(!is_disabled(suspending.handle(), 0));
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-13-14 — the tray against the open dialog
+//
+// The audit of 2026-08-24 found the menu of FR-91 fully alive while the modal dialog of
+// FR-92 is on the screen: `settings::show_dialog` guards only against a second copy of the
+// window, so «Приостановить» and «Запускать при входе в систему» went on editing the live
+// configuration while the dialog was editing a copy of it — and «Применить» put the copy
+// back whole, silently undoing them. Section 6.3 gives the configuration one owner.
+//
+// The answer has two halves and both are measured here: `Menu::build` greys the two entries
+// (read back out of Windows with `GetMenuState`, not out of the builder's record), and
+// `tray::dispatch_command` refuses the two commands (measured by the value in memory and by
+// the bytes in the folder, not by an intention read out of the source).
+//
+// ⚠ **The `%APPDATA%` rule of this file holds here too, and one more beside it.** Every tray
+// below is attached with `tray::attach_at` on a `TestDir` under `%TEMP%`. And **no test here
+// ever dispatches `CMD_AUTOSTART` with the gate down**: that command reaches
+// `settings::set_autostart`, which writes — or deletes — the real
+// `HKCU\…\CurrentVersion\Run` value of whoever is running the tests (FR-93). The refused
+// direction is safe by construction, because the whole point is that nothing happens; the
+// allowed direction is checked on the entry and on the rule, never by firing it.
+// ---------------------------------------------------------------------------------------
+
+/// The menu positions of the two entries the open dialog takes away, and of the three it
+/// leaves alone — the FR-91 block read top to bottom, rules included.
+const LOCKED_POSITIONS: [u32; 2] = [0, 3];
+
+/// «Настройки…», «О программе», «Выход».
+const LIVE_POSITIONS: [u32; 3] = [2, 5, 6];
+
+/// **Criterion 6 of task T-13-14 — the view.** Built with the dialog up, the menu carries
+/// `MF_GRAYED` on exactly two entries and on no other.
+///
+/// Read with `GetMenuState`, which is what Windows itself holds and what accessibility reads,
+/// rather than trusting the code that built the menu. The builder's own record is checked
+/// beside it and not instead of it: the drawing of task T-11-10 picks its ink by that field,
+/// so a greyed entry that the record called available would come up in the wrong colour.
+#[test]
+fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
+    let _locale = product_strings(settings::Language::Ru);
+    let menu =
+        Menu::build(true, true, NOT_FAIL_SAFE, DIALOG_UP).expect("the menu must be creatable");
+
+    for position in LOCKED_POSITIONS {
+        println!(
+            "entry {position}: grayed={} disabled={}",
+            is_grayed(menu.handle(), position),
+            is_disabled(menu.handle(), position)
+        );
+
+        assert!(
+            is_grayed(menu.handle(), position),
+            "entry {position} of FR-91 edits the configuration and must be drawn unavailable \
+             while the dialog of FR-92 is editing it too"
+        );
+        assert!(
+            is_disabled(menu.handle(), position),
+            "and `TrackPopupMenuEx` must never return its command"
+        );
+    }
+
+    for position in LIVE_POSITIONS {
+        println!(
+            "entry {position}: grayed={} disabled={}",
+            is_grayed(menu.handle(), position),
+            is_disabled(menu.handle(), position)
+        );
+
+        assert!(
+            !is_grayed(menu.handle(), position) && !is_disabled(menu.handle(), position),
+            "entry {position} of FR-91 changes no configuration and must stay available — \
+             «Настройки…» leads into the window that is already open, and a program that \
+             could not be closed while a window is up would be worse than the finding"
+        );
+    }
+
+    // The builder's record, which is what the drawing picks its ink by. The five commands in
+    // menu order: toggle, settings, autostart, about, exit.
+    let record: Vec<bool> = menu.items().iter().map(|item| item.enabled).collect();
+
+    println!("builder's record of availability: {record:?}");
+
+    assert_eq!(
+        record,
+        vec![false, true, false, true, true],
+        "the record and Windows must say the same thing about every entry"
+    );
+
+    // And the block of FR-91 is still the block of FR-91. Greying is not a second menu — the
+    // same seven entries, the same five commands, the same two rules, the same words.
+    assert_menu_is(&menu, &FR_91);
+}
+
+/// The other side of the same coin, and the two rules composing rather than arguing.
+///
+/// With the dialog closed nothing this task added is greyed at all, and the entry FR-99 takes
+/// away is still taken away — task T-13-9's rule and this one are read with an `&&`, so the
+/// first entry needs **both** to be silent to be available.
+#[test]
+fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
+    let _locale = product_strings(settings::Language::Ru);
+
+    let ordinary =
+        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+
+    for position in LOCKED_POSITIONS.iter().chain(LIVE_POSITIONS.iter()) {
+        assert!(
+            !is_grayed(ordinary.handle(), *position) && !is_disabled(ordinary.handle(), *position),
+            "with no dialog on the screen every entry of FR-91 is the user's to choose"
+        );
+    }
+
+    // Both rules at once: FR-99 has disarmed a suspended program **and** the dialog is up.
+    let both = Menu::build(false, true, FAIL_SAFE, DIALOG_UP).expect("the menu must be creatable");
+
+    println!(
+        "fail-safe and dialog together: entry 0 grayed={} entry 3 grayed={}",
+        is_grayed(both.handle(), 0),
+        is_grayed(both.handle(), 3)
+    );
+
+    for position in LOCKED_POSITIONS {
+        assert!(
+            is_grayed(both.handle(), position) && is_disabled(both.handle(), position),
+            "two reasons to take an entry away are not two answers: entry {position} is gone"
+        );
+    }
+
+    // The rule itself, driven directly on all four rows of its table.
+    for (command, dialog_open, expected) in [
+        (tray::CMD_TOGGLE, true, true),
+        (tray::CMD_AUTOSTART, true, true),
+        (tray::CMD_SETTINGS, true, false),
+        (tray::CMD_ABOUT, true, false),
+        (tray::CMD_EXIT, true, false),
+        (tray::CMD_TOGGLE, false, false),
+        (tray::CMD_AUTOSTART, false, false),
+    ] {
+        let locked = tray::dialog_locks_command(command, dialog_open);
+
+        println!("dialog_locks_command({command:#06x}, {dialog_open}) -> {locked}");
+
+        assert_eq!(
+            locked, expected,
+            "dialog_locks_command({command:#06x}, {dialog_open})"
+        );
+    }
+}
+
+/// **Criterion 5 of task T-13-14 — the ban.** With the flag up, the two commands change
+/// nothing in memory and write nothing to the disk.
+///
+/// Measured the way the finding was: the value the tray holds, the names in the folder, and —
+/// for the autostart half — the `Run` value the registry holds. `Tray::install_at` reads and
+/// never writes, so `config.toml` does not exist when the commands arrive and a save of any
+/// kind would make it appear. The `dispatch_command` at the end is the positive control: it
+/// shows that a write really would have been seen.
+#[test]
+fn an_open_dialog_takes_the_two_configuration_commands_away_from_the_handler() {
+    let window = TestWindow::new();
+    let home = TestDir::new("dialog-gate");
+    let _attached = attach_ui(&window, &home);
+
+    let enabled_before = live(Tray::enabled);
+    let autostart_before = live(Tray::autostart);
+    // Read, never written — FR-93. This is the third place a `CMD_AUTOSTART` would land, and
+    // it is the one that does not belong to this test suite at all.
+    let registry_before = settings::autostart_value();
+
+    assert!(
+        enabled_before,
+        "section 7 has `general.enabled` default to true"
+    );
+    assert_eq!(
+        home.entries(),
+        Vec::<String>::new(),
+        "attaching the tray reads the configuration and writes nothing"
+    );
+    assert!(
+        !settings::dialog_is_open(),
+        "and this thread has no settings dialog yet"
+    );
+
+    let dialog = DialogSession::open();
+
+    assert!(
+        settings::dialog_is_open(),
+        "the guard `show_dialog` has always used is what raises the flag"
+    );
+
+    for _ in 0..50 {
+        tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+        tray::dispatch_command(window.handle, tray::CMD_AUTOSTART);
+    }
+
+    println!(
+        "after 50 of each command with the dialog up: entries={:?} enabled={} autostart={} \
+         registry={:?}",
+        home.entries(),
+        live(Tray::enabled),
+        live(Tray::autostart),
+        settings::autostart_value()
+    );
+
+    assert_eq!(
+        home.entries(),
+        Vec::<String>::new(),
+        "a refused command writes no file — not the configuration, not a quarantine copy, \
+         not a temporary of an unfinished write"
+    );
+    assert_eq!(
+        live(Tray::enabled),
+        enabled_before,
+        "and moves nothing in memory: `general.enabled` is where it was"
+    );
+    assert_eq!(
+        live(Tray::autostart),
+        autostart_before,
+        "nor `general.autostart`"
+    );
+    assert_eq!(
+        settings::autostart_value(),
+        registry_before,
+        "FR-93: and the `Run` key of the person running this test is untouched"
+    );
+
+    // The positive control, on the one command that is safe to fire: the same folder, watched
+    // the same way, does see a write once the dialog is gone.
+    drop(dialog);
+
+    tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+
+    println!(
+        "after one command with the dialog closed: entries={:?} enabled={}",
+        home.entries(),
+        live(Tray::enabled)
+    );
+
+    assert_eq!(home.entries(), vec![CONFIG_FILE_NAME.to_owned()]);
+    assert!(!live(Tray::enabled));
+    assert!(
+        fs::read_to_string(home.config())
+            .expect("the file must be readable")
+            .contains("enabled = false")
+    );
+}
+
+/// **Criterion 7 of task T-13-14 — the return.** Closing the dialog gives back both the view
+/// and the ban.
+///
+/// The guard is the one `show_dialog` itself uses, so this measures the very mechanism the
+/// product leaves the dialog by — including the way out through a panic, which is what the
+/// `Drop` is for.
+///
+/// ⚠ **Why `CMD_AUTOSTART` is not fired here.** The entry and the rule are checked; the
+/// command is not. Firing it with the gate open would reach `settings::set_autostart`, which
+/// writes the running executable's path into `HKCU\…\CurrentVersion\Run` — or deletes the
+/// value that is there — and that value belongs to whoever is running the tests, not to this
+/// suite. The two commands share one door and one rule (`dialog_locks_command`, one `if` in
+/// front of the whole table), so the door opening for `CMD_TOGGLE` is the door opening.
+#[test]
+fn closing_the_dialog_gives_both_entries_back() {
+    let _locale = product_strings(settings::Language::Ru);
+    let window = TestWindow::new();
+    let home = TestDir::new("dialog-return");
+    let _attached = attach_ui(&window, &home);
+
+    let dialog = DialogSession::open();
+
+    let while_up = Menu::build(true, true, NOT_FAIL_SAFE, settings::dialog_is_open())
+        .expect("the menu must be creatable");
+
+    for position in LOCKED_POSITIONS {
+        assert!(
+            is_grayed(while_up.handle(), position) && is_disabled(while_up.handle(), position),
+            "entry {position} is greyed while the dialog is up"
+        );
+    }
+
+    tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+
+    assert!(live(Tray::enabled), "and the command is refused");
+    assert_eq!(home.entries(), Vec::<String>::new(), "and writes nothing");
+
+    drop(dialog);
+
+    assert!(
+        !settings::dialog_is_open(),
+        "the guard lowers the flag on the way out, whatever the way is"
+    );
+
+    let after = Menu::build(true, true, NOT_FAIL_SAFE, settings::dialog_is_open())
+        .expect("the menu must be creatable");
+
+    for position in LOCKED_POSITIONS {
+        println!(
+            "entry {position} after the dialog closed: grayed={} disabled={}",
+            is_grayed(after.handle(), position),
+            is_disabled(after.handle(), position)
+        );
+
+        assert!(
+            !is_grayed(after.handle(), position) && !is_disabled(after.handle(), position),
+            "entry {position} is the user's again"
+        );
+    }
+
+    assert!(
+        after.items().iter().all(|item| item.enabled),
+        "and the builder's record agrees, entry for entry"
+    );
+
+    // The ban is gone with the greying, and this is the fact rather than the intention: the
+    // same call that did nothing above now moves the state and writes the file.
+    tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+
+    println!(
+        "after the same command with the dialog closed: enabled={} entries={:?}",
+        live(Tray::enabled),
+        home.entries()
+    );
+
+    assert!(!live(Tray::enabled), "«Приостановить» works again");
+    assert_eq!(home.entries(), vec![CONFIG_FILE_NAME.to_owned()]);
+    assert!(
+        fs::read_to_string(home.config())
+            .expect("the file must be readable")
+            .contains("enabled = false")
+    );
+
+    // The autostart half of the same door, checked on the rule and on the entry rather than
+    // by firing it — see the note above this test.
+    assert!(!tray::dialog_locks_command(
+        tray::CMD_AUTOSTART,
+        settings::dialog_is_open()
+    ));
+}
+
+/// **Criterion 8 of task T-13-14 — the scenario of the finding.** The same three steps, walked
+/// twice: once the way the code walked them before this task, and once through the door the
+/// user actually walks through.
+///
+/// Act I is the audit's scenario reproduced exactly. Step 2 of it is written as
+/// `with_tray(Tray::toggle_state)` because that single statement **was** the whole of the
+/// `CMD_TOGGLE` arm of `dispatch_command` before this task: nothing stood in front of it. The
+/// numbers it prints are the finding — `enabled` goes to `false` and the file says so, and
+/// «Применить» puts it back to `true` from a copy taken before the user ever touched the tray.
+///
+/// Act II is the same three steps through `dispatch_command`. The divergence never opens: what
+/// the tray holds equals what the dialog will apply, at every point, however many times the
+/// command arrives.
+///
+/// Act III is the one the requirement is really about — a suspension the user *did* make, made
+/// while no dialog was open, surviving «Применить» intact.
+#[test]
+fn the_lost_update_of_the_audit_is_not_reproducible_any_more() {
+    let window = TestWindow::new();
+    let home = TestDir::new("lost-update");
+    let _attached = attach_ui(&window, &home);
+
+    // ----- Act I: the finding, as the code performed it -----
+
+    // «Настройки…»: `open_settings` copies the configuration out of the tray and
+    // `show_dialog` raises the flag. Both, in that order, as the product does it.
+    let dialog = DialogSession::open();
+    let snapshot = live(|tray| tray.config().clone());
+
+    assert!(snapshot.general.enabled, "the copy the dialog will edit");
+
+    // The `CMD_TOGGLE` arm of `dispatch_command` as it read before this task.
+    let _ = tray::with_tray(Tray::toggle_state);
+
+    let after_old_toggle = live(Tray::enabled);
+    let file_after_old_toggle =
+        fs::read_to_string(home.config()).expect("the old road wrote the file");
+
+    // «Применить»: `apply_settings` hands the snapshot back and `replace_config` puts it in
+    // whole — the line the audit quoted.
+    live_mut(|tray| tray.replace_config(snapshot.clone()));
+
+    let after_old_apply = live(Tray::enabled);
+    let file_after_old_apply = fs::read_to_string(home.config()).expect("and rewrote it");
+
+    println!(
+        "act I — snapshot.enabled={} | after the toggle: enabled={} file has «enabled = false»={} \
+         | after «Применить»: enabled={} file has «enabled = true»={}",
+        snapshot.general.enabled,
+        after_old_toggle,
+        file_after_old_toggle.contains("enabled = false"),
+        after_old_apply,
+        file_after_old_apply.contains("enabled = true")
+    );
+
+    assert!(!after_old_toggle, "the user's suspension took effect…");
+    assert!(file_after_old_toggle.contains("enabled = false"));
+    assert!(
+        after_old_apply,
+        "…and «Применить» undid it from a copy taken before it happened — the finding"
+    );
+    assert!(file_after_old_apply.contains("enabled = true"));
+
+    // ----- Act II: the same three steps through the handler -----
+
+    assert!(
+        settings::dialog_is_open(),
+        "the dialog of act I is still on the screen"
+    );
+
+    for _ in 0..10 {
+        tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+
+        assert_eq!(
+            live(Tray::enabled),
+            snapshot.general.enabled,
+            "what the tray holds never parts from what the dialog will apply"
+        );
+    }
+
+    live_mut(|tray| tray.replace_config(snapshot.clone()));
+
+    let after_new_apply = live(Tray::enabled);
+
+    println!(
+        "act II — after 10 commands and «Применить»: enabled={after_new_apply} (snapshot said {})",
+        snapshot.general.enabled
+    );
+
+    assert_eq!(
+        after_new_apply, snapshot.general.enabled,
+        "nothing was lost because nothing diverged"
+    );
+
+    // ----- Act III: a suspension that was really made, and survives -----
+
+    drop(dialog);
+
+    tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+
+    assert!(!live(Tray::enabled), "the user suspends, with no dialog up");
+
+    // Now the dialog opens on the suspended program, the user clicks the tray a few times —
+    // and «Применить».
+    let dialog = DialogSession::open();
+    let snapshot = live(|tray| tray.config().clone());
+
+    assert!(!snapshot.general.enabled, "the copy carries the suspension");
+
+    for _ in 0..10 {
+        tray::dispatch_command(window.handle, tray::CMD_TOGGLE);
+        tray::dispatch_command(window.handle, tray::CMD_AUTOSTART);
+    }
+
+    live_mut(|tray| tray.replace_config(snapshot.clone()));
+
+    let file = fs::read_to_string(home.config()).expect("the file must be readable");
+
+    println!(
+        "act III — after «Применить»: enabled={} file has «enabled = false»={}",
+        live(Tray::enabled),
+        file.contains("enabled = false")
+    );
+
+    assert!(
+        !live(Tray::enabled),
+        "the suspension is still there — this is the line that would have read `true` before"
+    );
+    assert!(file.contains("enabled = false"), "and the file agrees");
+
+    drop(dialog);
+}
+
+/// **The gate is one door in front of the whole table, and it reads the shared rule.**
+///
+/// Swept over the source for the reason the neighbouring sweeps state: what a test can drive
+/// is the behaviour, and what it cannot drive is the *shape*. The behaviour above proves the
+/// two commands are refused; this proves they are refused by one `if` standing before the
+/// `match` rather than by two checks inside two arms, which is what keeps an arm added later
+/// from walking round the lock.
+///
+/// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
+/// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF, and a
+/// needle written with `\n` has to be matched against a text normalised to `\n`.
+#[test]
+fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    assert_eq!(
+        source.matches("pub fn dialog_locks_command(").count(),
+        1,
+        "one rule, one definition — a second copy is how two answers to one question start \
+         to differ"
+    );
+    assert!(
+        source.contains("dialog_open && matches!(command, CMD_TOGGLE | CMD_AUTOSTART)"),
+        "and the rule names the two commands of FR-91 that edit the configuration, and only \
+         those two"
+    );
+
+    let at = source
+        .find("pub fn dispatch_command(hwnd: HWND, command: u32) {")
+        .expect("dispatch_command must be in this file");
+    let body = &source[at..];
+    let end = body.find("\n}").expect("a function closes with its brace");
+    let body = &body[..end];
+
+    println!("--- dispatch_command ---\n{body}");
+
+    let gate = body
+        .find("dialog_locks_command(command, settings::dialog_is_open())")
+        .expect("the handler must consult the rule of task T-13-14");
+    let table = body
+        .find("match command {")
+        .expect("the handler dispatches on the command");
+
+    assert!(
+        gate < table,
+        "the lock stands in front of the whole table, not inside two of its arms"
+    );
+    assert_eq!(
+        body.matches("dialog_locks_command").count(),
+        1,
+        "and it is asked exactly once — one door"
+    );
+
+    // The other half of the same rule: the menu asks it for both entries, and asks this very
+    // function rather than a condition of its own.
+    let at = source
+        .find("    pub fn build(")
+        .expect("Menu::build must be in this file");
+    let build = &source[at..];
+    let end = build
+        .find("\n    }")
+        .expect("a method closes with its brace");
+    let build = &build[..end];
+
+    assert!(
+        build.contains("dialog_locks_command(CMD_TOGGLE, dialog_open)")
+            && build.contains("dialog_locks_command(CMD_AUTOSTART, dialog_open)"),
+        "the greying is the same rule asked for the same two entries"
+    );
+    assert!(
+        build.contains("!resume_is_refused(enabled, fail_safe)"),
+        "and it composes with task T-13-9's rule instead of replacing it"
+    );
+}
+
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let on = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
-    let off = Menu::build(true, false, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let on = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let off =
+        Menu::build(true, false, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     assert!(
         is_checked(on.handle(), 3),
@@ -580,7 +1151,8 @@ fn the_item_data_of_every_command_entry_is_its_command_number() {
     // Windows: the `itemData` of every command entry equals the command identifier of the
     // same entry, and both equal what the builder recorded.
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let menu =
+        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
 
     // The five command positions of the FR-91 block — everything but the two rules.
     let command_positions = [0u32, 2, 3, 5, 6];
@@ -1904,6 +2476,35 @@ fn install(window: &TestWindow, home: &TestDir) -> Tray {
         .expect("the tray must install: the icons are in the product binary's resources")
 }
 
+/// The same, put where [`tray::with_tray`] can find it — task T-13-14.
+///
+/// [`install`] hands back a `Tray` the test owns, which is enough for everything that drives
+/// the type directly, and not enough for `tray::dispatch_command`: that function reaches the
+/// tray of the calling thread through the module's own thread-local and through nothing else,
+/// so a test that means to measure the handler has to put a tray in that slot. The
+/// configuration still lives under `%TEMP%`, exactly as everywhere else in this file.
+///
+/// The returned [`Attachment`] takes the tray back out on drop, running the cleanup of FR-83 —
+/// which is also the last write into `home`, so it must be dropped before the directory is.
+/// Declaring `window`, then `home`, then this, in that order, is what arranges it.
+fn attach_ui(window: &TestWindow, home: &TestDir) -> Attachment {
+    let product = ProductImage::open();
+
+    tray::attach_at(window.handle, product.instance(), Some(home.config()))
+        .expect("the tray must attach: the icons are in the product binary's resources")
+}
+
+/// Reads something off the tray this thread has attached.
+fn live<R>(f: impl FnOnce(&Tray) -> R) -> R {
+    tray::with_tray(|tray| f(tray)).expect("this thread has a tray attached by `attach_ui`")
+}
+
+/// Changes something on it — «Применить» is the only caller, and it is the one step of the
+/// audit's scenario that has no menu command behind it.
+fn live_mut<R>(f: impl FnOnce(&mut Tray) -> R) -> R {
+    tray::with_tray(f).expect("this thread has a tray attached by `attach_ui`")
+}
+
 /// A directory under `%TEMP%` that removes itself, panic or no panic.
 ///
 /// Same shape as the one in `tests\settings.rs`, and written out for the same reason: there
@@ -1999,9 +2600,21 @@ fn command_at(menu: HMENU, position: u32) -> u32 {
 /// The `MF_*` flags of one entry, by position.
 fn flags_at(menu: HMENU, position: u32) -> MENU_ITEM_FLAGS {
     // SAFETY: `menu` is a live menu owned by the calling frame; the call reads no memory of
-    // ours and returns `0xFFFFFFFF` for an entry that does not exist, which cannot be
-    // mistaken for either flag tested below.
-    MENU_ITEM_FLAGS(unsafe { GetMenuState(menu, position, MF_BYPOSITION) })
+    // ours and returns `0xFFFFFFFF` for an entry that does not exist.
+    let flags = unsafe { GetMenuState(menu, position, MF_BYPOSITION) };
+
+    // NFR-13, and since task T-13-14 it earns its keep. `0xFFFFFFFF` is not a set of flags but
+    // a refusal, and it has every bit in it — read as flags it would prove an entry greyed,
+    // disabled, checked and a separator all at once. The tests of the greying read the
+    // **presence** of `MF_GRAYED`, so a refusal that went unexamined would make them pass for
+    // an entry the call never looked at.
+    assert_ne!(
+        flags,
+        u32::MAX,
+        "GetMenuState refused entry {position} of this menu"
+    );
+
+    MENU_ITEM_FLAGS(flags)
 }
 
 /// Whether the entry at `position` is one of the two rules of FR-91.

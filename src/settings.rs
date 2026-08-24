@@ -2269,7 +2269,7 @@ pub fn show_dialog(
     // and would otherwise open a second copy of it on top of the first — two windows editing
     // two copies of one configuration, of which the last one applied would win. The guard is a
     // thread-local because the dialog belongs to the UI thread and to no other (section 6.1).
-    if DIALOG_OPEN.with(Cell::get) {
+    if dialog_is_open() {
         return Ok(());
     }
 
@@ -2278,24 +2278,9 @@ pub fn show_dialog(
     // template with it — so the result is examined (NFR-13) before anything is shown.
     ensure_list_view_class()?;
 
-    DIALOG_OPEN.with(|open| open.set(true));
-
-    // Cleared however this function leaves, including on a panic on the way through — the
-    // program stays up after one (FR-98, FR-99), and a flag left set would mean the settings
-    // window could never be opened again.
-    struct OpenGuard;
-
-    impl Drop for OpenGuard {
-        fn drop(&mut self) {
-            DIALOG_OPEN.with(|open| open.set(false));
-            // FR-92а, task T-11-9: the record must not outlive the dialog it names — see
-            // `DIALOG_WINDOW`. Cleared on the same guard so that no exit path, panic
-            // included, can leave a stale window behind.
-            DIALOG_WINDOW.with(|window| window.set(0));
-        }
-    }
-
-    let _open = OpenGuard;
+    // Raised here and lowered however this function leaves, panic on the way through
+    // included — see [`DialogSession`].
+    let _open = DialogSession::open();
 
     let session = layouts::enumerate().unwrap_or_default();
 
@@ -2365,8 +2350,62 @@ pub fn show_dialog(
     Ok(())
 }
 
+/// Whether a settings dialog of FR-92 is on the screen of **this** thread — task T-13-14.
+///
+/// The published half of [`DIALOG_OPEN`], and the whole of what leaves this module about it:
+/// one `bool`, read, never written. [`show_dialog`] uses it to refuse a second copy of the
+/// window, and [`crate::tray`] uses it to refuse the two menu commands that edit the same
+/// configuration the open dialog is editing — section 6.3 has one owner of the configuration,
+/// and «Применить» replaces it wholesale from the copy the dialog was opened with, so a
+/// suspension made from the tray meanwhile would be silently undone.
+///
+/// **SEC-05, R-20.** Nothing outside this process can move this: the flag is a thread-local of
+/// the UI thread raised by [`DialogSession::open`] and by nothing else, so the decision the tray
+/// takes is a decision by *published value* and not by anything a message carries. There is no
+/// window message, no `wParam` and no pointer anywhere on this road.
+pub fn dialog_is_open() -> bool {
+    DIALOG_OPEN.with(Cell::get)
+}
+
+/// The open dialog of this thread, for as long as this value lives — task T-11-9, T-13-14.
+///
+/// The guard [`show_dialog`] has always had, lifted out of that function and given a name so
+/// that it can also be the *only* way [`DIALOG_OPEN`] is ever raised. There is exactly one such
+/// guard in the program and this is it: a second one would be a second answer to «идёт ли
+/// правка настроек», and two answers to one question are how they start to differ.
+///
+/// Both thread-locals are cleared on the way out, however that way is taken — a normal return,
+/// an early `?`, or a panic unwinding through the modal call. The program stays up after a
+/// panic (FR-98, FR-99), and a flag left raised would mean the settings window could never be
+/// opened again *and* that the two tray commands stayed dead for the rest of the session.
+///
+/// ⚠ Not re-entrant, and does not have to be: [`show_dialog`] refuses to open a second dialog
+/// while [`dialog_is_open`] answers true, so at most one of these exists per thread at a time.
+pub struct DialogSession;
+
+impl DialogSession {
+    /// Raises the flag and hands back the value whose [`Drop`] lowers it.
+    pub fn open() -> Self {
+        DIALOG_OPEN.with(|open| open.set(true));
+        Self
+    }
+}
+
+impl Drop for DialogSession {
+    fn drop(&mut self) {
+        DIALOG_OPEN.with(|open| open.set(false));
+        // FR-92а, task T-11-9: the record must not outlive the dialog it names — see
+        // `DIALOG_WINDOW`. Cleared on the same guard so that no exit path, panic included,
+        // can leave a stale window behind.
+        DIALOG_WINDOW.with(|window| window.set(0));
+    }
+}
+
 thread_local! {
     /// Whether this thread already has a settings dialog on the screen — see [`show_dialog`].
+    ///
+    /// Raised by [`DialogSession::open`] and lowered by that value's [`Drop`], and by nothing
+    /// else in the program; read through [`dialog_is_open`].
     static DIALOG_OPEN: Cell<bool> = const { Cell::new(false) };
 
     /// The window of that dialog while it is up, zero otherwise — FR-92а, task T-11-9.

@@ -33,6 +33,12 @@
 //! program disarmed the resumption of FR-90 is refused rather than performed, so the icon can
 //! no longer say "активна" over dead processing — [`resume_is_refused`], [`Tray::toggle_state`]
 //! and the greyed first entry of [`Menu::build`].
+//! T-13-14 (done) closed a third, the middle one: the menu of FR-91 was fully alive while the
+//! modal dialog of FR-92 was on the screen, so a suspension or an autostart made from the tray
+//! was silently undone by the next «Применить» — two editors of one configuration, which
+//! section 6.3 does not allow. While the dialog is up the two entries that edit the
+//! configuration are greyed ([`Menu::build`]) **and** refused ([`dispatch_command`]) — one
+//! rule, [`dialog_locks_command`], read in both places.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -409,6 +415,59 @@ pub fn resume_is_refused(enabled: bool, fail_safe: bool) -> bool {
     fail_safe && !enabled
 }
 
+/// Whether the open settings dialog takes `command` away from the menu — task T-13-14.
+///
+/// # The finding
+///
+/// The audit of 2026-08-24 found the tray fully alive while the modal dialog of FR-92 is on
+/// the screen: [`settings::show_dialog`] guards only against a *second copy of the window*, so
+/// the icon can still be clicked, the menu still comes up, and «Приостановить» and «Запускать
+/// при входе в систему» still change the live configuration and write the file and the
+/// registry. The dialog meanwhile edits a **copy** taken when it was opened, and «Применить»
+/// hands that copy back through [`apply_settings`], which replaces the configuration whole
+/// ([`Tray::replace_config`]). Whatever the tray changed in between is gone — silently, with
+/// the file and the `Run` key rewritten from the stale copy.
+///
+/// Section 6.3 gives the configuration one owner, and two editors of it at one time is what
+/// this refuses. The answer is the simple and honest one the task asks for: while the dialog
+/// is up, the two entries that edit the configuration are not the user's to choose.
+///
+/// # Which two, and why not the other three
+///
+/// [`CMD_TOGGLE`] and [`CMD_AUTOSTART`] and no others, because those are exactly the two menu
+/// commands that write into the configuration:
+///
+/// * [`CMD_SETTINGS`] leads into the dialog that is already open, and [`settings::show_dialog`]
+///   answers `Ok(())` to it without opening anything — behaviour that already exists and is
+///   deliberately left alone;
+/// * [`CMD_ABOUT`] shows a window and changes nothing;
+/// * [`CMD_EXIT`] must stay alive under every circumstance — a program that cannot be closed
+///   because a window is open is worse than the finding.
+///
+/// # Two halves of one rule, and this is the rule
+///
+/// [`Menu::build`] appends the two entries `MF_GRAYED | MF_DISABLED` — that is the half the
+/// user sees and the half that keeps `TrackPopupMenuEx` from returning either command at all.
+/// [`dispatch_command`] asks the same question again before it does anything — that is the
+/// half that decides. The greying is the *view* of this rule; the gate in the command handler
+/// is the rule. Both read this one function, so there is nothing for the two to disagree
+/// about.
+///
+/// # Why an argument rather than a read inside
+///
+/// The same shape and the same reason as [`resume_is_refused`] one function up: the decision
+/// belongs to one place, the reading of the flag to the caller, and a rule that reached for a
+/// thread-local of its own would be a rule the menu tests could not drive — they build menus
+/// on a test thread that has no dialog and never will. [`show_menu`] and [`dispatch_command`]
+/// read [`settings::dialog_is_open`] and hand the answer in.
+///
+/// **SEC-05.** The flag is a thread-local raised only by the guard of the open dialog; it is
+/// not derived from any message, and no `wParam`, `lParam` or pointer takes part in this
+/// decision (R-20). See [`settings::dialog_is_open`].
+pub fn dialog_locks_command(command: u32, dialog_open: bool) -> bool {
+    dialog_open && matches!(command, CMD_TOGGLE | CMD_AUTOSTART)
+}
+
 /// The tray of one thread: the icon, its state, and the configuration behind it.
 ///
 /// A type of its own rather than something hidden inside the thread-local, so that the
@@ -761,6 +820,35 @@ impl Tray {
     /// the suspension FR-99 itself performs — the icon changes and `save_config` then decides
     /// the file's fate on its own terms, so a configuration from a newer schema is still left
     /// alone and the icon still tells the truth. Neither outcome depends on the other.
+    ///
+    /// # The three refusals on this road, in order — task T-13-14
+    ///
+    /// Since this task there are **three** places on the way from a click on «Приостановить» to
+    /// a byte on the disk where the program can say no, and they stand one inside another,
+    /// widest question first:
+    ///
+    /// 1. [`dispatch_command`] — [`dialog_locks_command`]: **may this editor edit at all?**
+    ///    Asked before the tray is so much as borrowed, because it is about *who* is holding
+    ///    the configuration and not about what is being asked of it (section 6.3). It is the
+    ///    only one of the three that can refuse a move that is in every other way legal, so it
+    ///    has to be outermost: put it any deeper and a second editor would already have started
+    ///    work.
+    /// 2. This method — [`resume_is_refused`]: **may the state move?** A property of the
+    ///    transition and of FR-99, asked once the caller has been admitted. It cannot be moved
+    ///    outward, because the same road is walked by `hook::handle_input_message` on
+    ///    [`crate::hook::WM_APP_FAIL_SAFE`], which never passes through `dispatch_command` at
+    ///    all — a gate that lived only in the menu handler would leave that road open.
+    /// 3. [`Tray::save_config`] — [`Tray::save_policy`] of task T-13-6: **may the file be
+    ///    written?** Innermost, because it is only reached when the state really has moved, and
+    ///    because it must also stand in front of the three other savers
+    ///    ([`Tray::set_autostart`], [`Tray::replace_config`], [`Tray::shut_down`]) that this
+    ///    method knows nothing about.
+    ///
+    /// None of the three can shadow another: 1 and 2 return before anything changes, and 3
+    /// decides only the fate of the file, after memory and the icon are already right. Each is
+    /// asked of a different fact — a thread-local of the UI thread, an atomic FR-99 raises, and
+    /// the outcome of the one read at start-up — and each is enforced at the one place that all
+    /// of its roads pass through.
     pub fn toggle_state(&mut self) {
         if resume_is_refused(self.enabled(), crate::hook::fail_safe()) {
             // One event, and it is worth having precisely because it should be rare: the entry
@@ -1156,7 +1244,27 @@ thread_local! {
 /// menu the window manager refused to create. A shell that is not up yet is **not** one of
 /// them — that is FR-81's business, and it is reported rather than raised.
 pub fn attach(hwnd: HWND, instance: HINSTANCE) -> WinResult<Attachment> {
-    let tray = Tray::install(hwnd, instance)?;
+    attach_at(hwnd, instance, settings::default_config_path())
+}
+
+/// The same, with the configuration read from `config_path` — task T-13-14.
+///
+/// Separate from [`attach`] for exactly the reason [`Tray::install_at`] is separate from
+/// [`Tray::install`], and it is the missing other half of that pair: a test could already
+/// build a tray of its own on a file under `%TEMP%`, but not one that [`with_tray`] can find,
+/// and [`dispatch_command`] reaches the tray through [`with_tray`] and through nothing else.
+/// Without this the gate of task T-13-14 could only be checked by reading the source, and its
+/// acceptance asks for the value in memory and the bytes on the disk.
+///
+/// ⚠ `None`, or a path under `%APPDATA%`, is the product's business and not a test's: section
+/// 7 puts the real file in `%APPDATA%\Lang_Switcher\config.toml`, and that file belongs to
+/// whoever is running the tests.
+pub fn attach_at(
+    hwnd: HWND,
+    instance: HINSTANCE,
+    config_path: Option<PathBuf>,
+) -> WinResult<Attachment> {
+    let tray = Tray::install_at(hwnd, instance, config_path)?;
 
     UI_TRAY.with(|slot| slot.replace(Some(tray)));
 
@@ -1315,7 +1423,29 @@ impl Menu {
     /// entry stays in the menu, greyed rather than removed, because a user looking for the way
     /// back has to see that there is one and that it is not available — a menu that quietly
     /// lost a line would say nothing at all.
-    pub fn build(enabled: bool, autostart: bool, fail_safe: bool) -> WinResult<Self> {
+    ///
+    /// # `dialog_open` — task T-13-14
+    ///
+    /// The fourth argument is [`settings::dialog_is_open`], handed in by [`show_menu`] for the
+    /// same reason the third one is. It greys **two** entries and only while the modal dialog
+    /// of FR-92 is on the screen: «Приостановить/Возобновить» and «Запускать при входе в
+    /// систему», the two commands of FR-91 that edit the configuration the dialog is editing.
+    /// The rule is [`dialog_locks_command`], where the finding and the reasoning live; this is
+    /// its visible half, and [`dispatch_command`] is the half that decides.
+    ///
+    /// The **composition** of FR-91 does not move here either: seven entries,
+    /// [`MENU_ENTRY_COUNT`], the same five commands, the same two rules, the same labels.
+    /// «Настройки…» stays available and still leads into the window that is already up,
+    /// «О программе» and «Выход» stay available because they change no configuration.
+    ///
+    /// The two greyings compose rather than argue: the first entry is available only when
+    /// neither FR-99 nor the open dialog takes it away, which is what the `&&` below says.
+    pub fn build(
+        enabled: bool,
+        autostart: bool,
+        fail_safe: bool,
+        dialog_open: bool,
+    ) -> WinResult<Self> {
         // SAFETY: takes no arguments and touches no memory of ours. The handle it returns is
         // owned by this value from here on and is destroyed exactly once, in `Drop`. The
         // crate turns a null handle into an error, so NFR-13 is satisfied by the `?`.
@@ -1335,8 +1465,12 @@ impl Menu {
             settings::IDS_MENU_RESUME
         });
 
-        // Task T-13-9: the one entry of FR-91 whose availability is not constant.
-        let toggle_available = !resume_is_refused(enabled, fail_safe);
+        // Tasks T-13-9 and T-13-14: the two entries of FR-91 whose availability is not
+        // constant. The first is taken away by either of two rules and needs both to be
+        // silent; the second by one.
+        let toggle_available = !resume_is_refused(enabled, fail_safe)
+            && !dialog_locks_command(CMD_TOGGLE, dialog_open);
+        let autostart_available = !dialog_locks_command(CMD_AUTOSTART, dialog_open);
 
         menu.append_command(CMD_TOGGLE, &first, false, toggle_available)?;
         menu.append_separator()?;
@@ -1350,7 +1484,7 @@ impl Menu {
             CMD_AUTOSTART,
             &settings::text(settings::IDS_MENU_AUTOSTART),
             autostart,
-            true,
+            autostart_available,
         )?;
         menu.append_separator()?;
         menu.append_command(
@@ -2384,9 +2518,20 @@ fn show_menu(x: i32, y: i32) {
         return;
     };
 
-    // Task T-13-9: read once, here, and handed to the builder — the same direction the two
-    // states above travel, and the reason [`resume_is_refused`] takes arguments at all.
-    let menu = match Menu::build(enabled, autostart, crate::hook::fail_safe()) {
+    // Tasks T-13-9 and T-13-14: both read once, here, and handed to the builder — the same
+    // direction the two states above travel, and the reason [`resume_is_refused`] and
+    // [`dialog_locks_command`] take arguments at all.
+    //
+    // ⚠ That the second of the two can be true at all is the finding this menu is built
+    // against: `TrackPopupMenuEx` and `DialogBoxParamW` both run message loops of their own,
+    // so the modal settings dialog does not stop the icon being clicked and does not stop this
+    // function running underneath it.
+    let menu = match Menu::build(
+        enabled,
+        autostart,
+        crate::hook::fail_safe(),
+        settings::dialog_is_open(),
+    ) {
         Ok(menu) => menu,
         Err(error) => {
             app::report_non_critical("Menu::build", &error);
@@ -2533,7 +2678,40 @@ fn set_menu_background(menu: HMENU, brush: HBRUSH) {
 ///
 /// Reached only from [`show_menu`], that is, only from a menu the user opened. Nothing here
 /// is reachable by sending this process a message — see SEC-05 in the module documentation.
-fn dispatch_command(hwnd: HWND, command: u32) {
+///
+/// # The gate of task T-13-14 — and why it is here as well as in the menu
+///
+/// While the modal dialog of FR-92 is on the screen, [`CMD_TOGGLE`] and [`CMD_AUTOSTART`] are
+/// refused and **nothing at all happens**: no change in memory, no icon, no file, no registry.
+/// [`Menu::build`] greys the same two entries, and that is not a duplicate of this line but its
+/// other half — greying is what the user sees and what keeps `TrackPopupMenuEx` from returning
+/// the command, and *this* is what decides. A menu is user interface; a command handler is the
+/// door, and the door is where a lock belongs. The two read one rule,
+/// [`dialog_locks_command`], so they cannot come apart.
+///
+/// **Public for the tests of task T-13-14**, which measure the refusal the way its acceptance
+/// asks for — by the value in memory and by the bytes on the disk, not by an intention read out
+/// of the source. That widens no attack surface: SEC-05 is about messages another process can
+/// forge, and this is a Rust function of our own library that no message reaches.
+///
+/// # Nothing is journalled here, deliberately
+///
+/// Unlike the refusal of task T-13-9 one door further in, which records
+/// [`RESUME_REFUSED_IN_FAIL_SAFE`]. The vocabulary of `src\diag.rs` is closed and this task
+/// does not open it: a name that is not a row of that table comes back
+/// [`diag::Operation::UNLISTED`] and carries nothing, so an event invented here would be an
+/// event that says nothing. The refusal is also not an anomaly worth a dump — it is the
+/// ordinary answer to a click on an entry that is greyed on the screen at that very moment.
+pub fn dispatch_command(hwnd: HWND, command: u32) {
+    // Task T-13-14. One door in front of the whole table rather than a check inside two of
+    // the arms: a gate at the top cannot be walked round by an arm added later, and it is the
+    // shape that makes «which commands are locked» a property of the rule and of nothing else.
+    // The three commands the rule does not name — «Настройки…», «О программе», «Выход» — reach
+    // their arms exactly as before.
+    if dialog_locks_command(command, settings::dialog_is_open()) {
+        return;
+    }
+
     match command {
         // FR-90. Task T-13-9: while FR-99 holds, this arm is unreachable — the entry was
         // appended `MF_GRAYED | MF_DISABLED`, so `TrackPopupMenuEx` answered zero rather than
