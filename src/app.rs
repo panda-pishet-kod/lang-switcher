@@ -2244,11 +2244,32 @@ unsafe extern "system" fn window_proc(
             // only thread allowed to own the hook. Everything else answers `None` and falls
             // through unchanged.
             //
-            // SEC-05: a process at the same integrity level can post any of the four. What that
-            // buys is one reinstallation of this program's own hook — an operation it performs
-            // on itself every thirty seconds anyway, over state of its own, granting nothing.
-            // The rehook message carries nothing: the reason travels in an atomic of this
-            // process, and a forged message that finds it empty does nothing at all.
+            // ⭐ **A fifth message since task Т-13-7, and it is FR-10 rather than FR-80.**
+            // `watchdog::WM_APP_WIPE` is the far end of rows 8 and 9 of the flush table — the
+            // session lock and the user's pause from the tray, both of which say «полный сброс +
+            // обнуление памяти». **This is the whole of the route through this procedure**, and
+            // it is a route between two of the three threads:
+            //
+            //   `WM_WTSSESSION_CHANGE` at the **UI** window   ─┐
+            //   `Tray::toggle_state` on the **UI** thread ─────┴─► `watchdog::request_wipe`
+            //                                                     └─ PostMessageW ─┐
+            //                                                                       ▼
+            //                             `WM_APP_WIPE` at the **input** window ─► `buffer::reset`
+            //
+            // Nothing had to be added here for it: this line already offers every message of
+            // every window to `handle_watchdog_message`, and the arm binds itself to the input
+            // window exactly as the other four bind themselves. The buffer it resets is the
+            // thread-local of this very thread (section 6.3), which is why the arm can do the
+            // work rather than pass it on again.
+            //
+            // SEC-05: a process at the same integrity level can post any of the five. What the
+            // first four buy is one reinstallation of this program's own hook — an operation it
+            // performs on itself every thirty seconds anyway, over state of its own, granting
+            // nothing. The rehook message carries nothing: the reason travels in an atomic of
+            // this process, and a forged message that finds it empty does nothing at all. What a
+            // forged `WM_APP_WIPE` buys is one reset of our own typing buffer, which is what
+            // every `Space` the user types already does; it is refused outright at the UI and
+            // watcher windows, where a ring does not exist in the first place.
             if let Some(result) = crate::watchdog::handle_watchdog_message(hwnd, message, wparam) {
                 return result;
             }

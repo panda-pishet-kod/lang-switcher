@@ -219,6 +219,14 @@
 //!   to a top-level window. Not a choice: that thread owns the only top-level window in the
 //!   process, and no other window can be given these messages.
 //!
+//! ⭐ **Task Т-13-7 adds one route between the first and the third, and it is FR-10 and not
+//! FR-80.** Rows 8 and 9 of the flush table — «Блокировка сессии, смена пользователя» and
+//! «Приостановка программы пользователем» — are both observed on the **UI** thread and both have
+//! to act on a ring that lives on the **input** thread (section 6.3). So they travel exactly the
+//! way the rehook does: [`request_wipe`] posts [`WM_APP_WIPE`], and the [`WM_APP_WIPE`] arm of
+//! [`handle_watchdog_message`] calls [`crate::buffer::reset`] on the far side. Nothing of it is
+//! on the hook callback's path — see the budget below.
+//!
 //! # NFR-01 to NFR-05, NFR-10 — what the callbacks are allowed to do
 //!
 //! A `WinEvent` callback is called by the system, synchronously, from inside the event source's
@@ -277,7 +285,13 @@
 //!   The two system messages are answered on the UI window and on no other, so a copy aimed at
 //!   either message-only window is ignored where the real one could never have arrived;
 //! * `WM_TIMER` is answered only for [`LIVENESS_TIMER_ID`] and only on the thread that owns the
-//!   buffer, so a forged one aimed at another window of ours falls through to `DefWindowProcW`.
+//!   buffer, so a forged one aimed at another window of ours falls through to `DefWindowProcW`;
+//! * a forged [`WM_APP_WIPE`] (task Т-13-7) buys the sender one reset of **our own** typing
+//!   buffer — the operation every `Space` the user types already performs, over memory of this
+//!   process that the sender cannot read either before or after. There is nothing in it to
+//!   forge: it carries no timestamp, no reason and no cell to consume, so unlike the two above
+//!   it needs no emptiness to find. It is answered on the input window and on no other, which
+//!   is what keeps a copy aimed at the UI or the watcher window from reaching a `reset` at all.
 //!
 //! # SEC-01, SEC-07
 //!
@@ -311,6 +325,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RI_MOUSE_BUTTON_5_DOWN, RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification,
     WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT,
     WM_INPUT_DEVICE_CHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
+    WTS_CONSOLE_DISCONNECT, WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK,
 };
 use windows::core::{Error as WinError, GUID, PCWSTR, Result as WinResult};
 
@@ -372,6 +387,85 @@ pub const WM_APP_LAYOUT: u32 = WM_APP + 7;
 /// process no sender can reach, and the handler does nothing whatsoever when that atomic is
 /// empty.
 pub const WM_APP_REHOOK: u32 = WM_APP + 9;
+
+/// The private message that asks the input thread to **wipe** the typing buffer — the two rows
+/// of the FR-10 table that say «полный сброс + обнуление памяти», task **Т-13-7**.
+///
+/// `WM_APP + 16`, the first free number: `+ 1` is the wake-up of [`crate::app`], `+ 2` the tray
+/// callback, `+ 3` and `+ 4` belong to [`crate::hook`], `+ 5` is the configuration nudge,
+/// `+ 6` and `+ 7` are [`WM_APP_FLUSH`] and [`WM_APP_LAYOUT`], `+ 8` is
+/// [`crate::switch::WM_APP_SWITCH`], `+ 9` is [`WM_APP_REHOOK`], `+ 10` and `+ 11` belong to
+/// [`crate::guard`], `+ 12` and `+ 13` to [`crate::selection`], `+ 14` is the system-theme
+/// message of `crate::settings` and `+ 15` is [`crate::hook::WM_APP_SEED_CAPS`]. A test asserts
+/// the set is distinct, because two private messages that share a number collide silently.
+///
+/// # Why it is a message and not a call — decision R-20
+///
+/// **Both senders are on the wrong thread, and there is no other way across.** The typing buffer
+/// is a thread-local of the **input** thread (section 6.3), while row 8 of the table arrives as
+/// `WM_WTSSESSION_CHANGE` at the **UI** window — the registration of FR-80 is made there and
+/// nowhere else, see [`register_session_notice`] and [`is_ui_window`] — and row 9 is
+/// `tray::Tray::toggle_state`, which is the UI thread by section 6.1. So each of them does what
+/// [`request_rehook`] already does for FR-80: it posts this and returns. One relaxed increment
+/// and one `PostMessageW`, which queues and returns without blocking (NFR-04).
+///
+/// # Why it carries no timestamp, and therefore no FR-12
+///
+/// [`WM_APP_FLUSH`] carries one because its rows race the hook: a click or a focus change is
+/// delivered asynchronously and may be processed after a keystroke that came later in real time,
+/// which is the whole of FR-12. These two rows race nothing — they say «полный сброс + обнуление
+/// памяти» without qualification, and no stroke made after a lock deserves to survive it. So the
+/// receiving arm calls [`crate::buffer::reset`] and not [`crate::buffer::reset_up_to`], which is
+/// also what keeps SEC-02 a property of one function rather than of each caller.
+///
+/// # SEC-05
+///
+/// It carries nothing at all — no timestamp, no reason and no cell to consume — so unlike
+/// [`WM_APP_FLUSH`] and [`WM_APP_REHOOK`] there is no emptiness for a forgery to find, and none
+/// is needed: what a forged one buys is one reset of this process's **own** ring, which is the
+/// operation every `Space` the user types already performs. The gate is therefore the role of
+/// the window alone — [`is_input_window`] — and a copy aimed at the UI or the watcher window
+/// falls through to `DefWindowProcW` and does nothing at all.
+pub const WM_APP_WIPE: u32 = WM_APP + 16;
+
+/// The `WM_WTSSESSION_CHANGE` subtypes that wipe the buffer — row 8 of the FR-10 table,
+/// «Блокировка сессии, смена пользователя», task **Т-13-7**.
+///
+/// Named as data rather than written into a condition so that a test can assert the list itself,
+/// the same shape [`FLUSH_EVENTS`] uses for the `WinEvent` rows.
+///
+/// # Why these three and not every subtype
+///
+/// [`handle_watchdog_message`] deliberately does **not** tell the subtypes apart for the rehook
+/// of FR-80 — "the hook has to go back either way" — and that argument does not carry over here:
+/// a reset throws away what the user has typed, so here the distinction is one with a
+/// difference. The rule is «the user's desktop has gone away from this session», which is what
+/// row 8 names in its two halves:
+///
+/// * `WTS_SESSION_LOCK` — «блокировка сессии», the audit's own case. The word typed before
+///   `Win+L` or `Ctrl+Alt+Del` used to lie in the ring for the whole of the lock.
+/// * `WTS_CONSOLE_DISCONNECT` — «смена пользователя» in its local form: another user took the
+///   console and this session went on running behind them.
+/// * `WTS_REMOTE_DISCONNECT` — the same fact over a remote session: the client detached and the
+///   session is running with nobody in front of it. FR-82 makes this program one per session and
+///   [`register_session_notice`] asks for `NOTIFY_FOR_THIS_SESSION`, so this subtype is about
+///   **our** session and not about somebody else's.
+///
+/// # And why the others are not on it
+///
+/// * `WTS_SESSION_UNLOCK`, `WTS_CONSOLE_CONNECT`, `WTS_REMOTE_CONNECT`, `WTS_SESSION_LOGON` are
+///   arrivals: the user is coming back to a ring the departure already emptied, and a reset here
+///   would be a rule with nothing to do.
+/// * `WTS_SESSION_LOGOFF`, `WTS_SESSION_TERMINATE` are the session ending, which is **FR-83** and
+///   not FR-10: «обнуление буфера» on `WM_QUERYENDSESSION`/`WM_ENDSESSION` is that requirement's
+///   own line and is wired in `crate::app`'s window procedure.
+/// * `WTS_SESSION_REMOTE_CONTROL` is a shadow session starting or stopping, and
+///   `WTS_SESSION_CREATE` a session appearing. Neither is the user leaving this desktop.
+pub const WIPING_SESSION_EVENTS: [u32; 3] = [
+    WTS_SESSION_LOCK,
+    WTS_CONSOLE_DISCONNECT,
+    WTS_REMOTE_DISCONNECT,
+];
 
 /// The `WinEvent` events the flush table of FR-10 lists — "смена активного окна" and "смена
 /// фокуса внутри окна".
@@ -671,6 +765,22 @@ static KEPT_EVENTS: AtomicU32 = AtomicU32::new(0);
 /// Strokes removed by all flushes together.
 static STROKES_REMOVED: AtomicU32 = AtomicU32::new(0);
 
+/// Wipes of rows 8 and 9 of the FR-10 table asked of the input thread — task **Т-13-7**.
+///
+/// Counted where the wipe is **sent** and not where it is applied, which is the standing
+/// [`RECOVERY_PROBES`] already has and for exactly the same reason: [`request_wipe`] is called
+/// from the UI thread and the work happens on the input thread, so a counter kept on the far
+/// side would be flat in any process that has no input thread — and a test reading it would be
+/// green because nothing was delivered rather than because the wiring is right. Growth here is
+/// the positive control that the lock, or the pause, really did reach the arm.
+///
+/// Deliberately **not** one of the flush counters: this path does not go through
+/// [`apply_flush`], carries no timestamp and resolves no FR-12, so it has no `Cleared`,
+/// `Partial` or `Kept` to report and moves none of the four numbers
+/// [`note_flush_outcome`] owns (task Т-13-23). SEC-07: a count of events, and there is nothing
+/// else it could ever hold.
+static WIPE_REQUESTS: AtomicU32 = AtomicU32::new(0);
+
 /// Device changes the input thread answered — the `WM_DEVICECHANGE` half of the FR-21 delivery.
 ///
 /// Since task T-08-4 that means the real `WM_DEVICECHANGE` of FR-21, counted by
@@ -752,6 +862,9 @@ pub struct Counters {
     /// Layout probes posted after an absence — task T-10-13. See [`RECOVERY_PROBES`]: this is
     /// the send side of the probe, where `layout_probes` is the answer side.
     pub recovery_probes: u32,
+    /// Wipes of rows 8 and 9 of the FR-10 table asked of the input thread — task Т-13-7. See
+    /// [`WIPE_REQUESTS`]: this is the send side, and it is the side a test can read.
+    pub wipe_requests: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -771,6 +884,7 @@ pub fn counters() -> Counters {
         background_skips: BACKGROUND_SKIPS.load(Ordering::Relaxed),
         focus_repeats: FOCUS_REPEATS.load(Ordering::Relaxed),
         recovery_probes: RECOVERY_PROBES.load(Ordering::Relaxed),
+        wipe_requests: WIPE_REQUESTS.load(Ordering::Relaxed),
     }
 }
 
@@ -1280,6 +1394,63 @@ fn take_pending_flush() -> Option<u32> {
     WINDOW_FLUSHES_TAKEN.fetch_add(1, Ordering::Relaxed);
 
     Some(taken)
+}
+
+// ---------------------------------------------------------------------------------------
+// The wipe path — FR-10 rows 8 and 9, task Т-13-7
+// ---------------------------------------------------------------------------------------
+
+/// Whether the `WM_WTSSESSION_CHANGE` subtype `code` is one row 8 of the FR-10 table wipes on.
+///
+/// The list itself is [`WIPING_SESSION_EVENTS`], and the argument for each member and each
+/// non-member is written out there. Total by construction: the value arrives as the `wparam` of
+/// a message any process at the same integrity level can post, so a subtype nobody has heard of
+/// has to mean "not one of ours" rather than anything else (SEC-05).
+///
+/// Public so that a test can drive the classification without a session, a lock screen or a
+/// second user — the shape [`parks_the_buffer`] already has for the flush table.
+pub fn session_event_wipes(code: u32) -> bool {
+    WIPING_SESSION_EVENTS.contains(&code)
+}
+
+/// Asks the input thread to throw away the typing buffer and overwrite it — the near half of
+/// rows 8 and 9 of the FR-10 table, task **Т-13-7**.
+///
+/// **The whole of what the UI thread is allowed to do about them**: one relaxed increment and
+/// one `PostMessageW`, which queues and returns. No allocation (NFR-03), no lock (NFR-04), no
+/// I/O (NFR-05), and nothing that can panic — the same shape and the same reasons as
+/// [`request_rehook`], which is the FR-80 message this one is modelled on (decision R-20).
+///
+/// # The two callers, and why neither of them can do the work itself
+///
+/// 1. [`handle_watchdog_message`], on the `WM_WTSSESSION_CHANGE` arm, for the subtypes
+///    [`session_event_wipes`] names. That arm runs on the **UI** window: FR-80's registration is
+///    made there and `WM_WTSSESSION_CHANGE` reaches no other window of this process.
+/// 2. `tray::Tray::toggle_state`, when the user suspends the program (FR-90). The tray is the UI
+///    thread by section 6.1.
+///
+/// The buffer is a thread-local of the **input** thread (section 6.3), so neither caller can
+/// touch it: `buffer::with` on the UI thread answers `None`, and a wipe written as a direct call
+/// would be a no-op that looked like a repair. The far half is the [`WM_APP_WIPE`] arm of
+/// [`handle_watchdog_message`].
+///
+/// # What is deliberately not here
+///
+/// No coalescing cell and no pending reason, unlike [`request_flush`] and [`request_rehook`].
+/// Two wipes in flight at once are two resets of an already empty ring, which is the cheapest
+/// idempotent operation this program has; a cell to collapse them into would be state to get
+/// wrong for no gain. That is also why [`WM_APP_WIPE`] needs no emptiness for a forged copy to
+/// find — see the constant.
+///
+/// # NFR-01, NFR-02
+///
+/// The hook callback does not reach this function and never will: both call sites are on the UI
+/// thread's message loop, which is the far side of two `PostMessageW` boundaries from
+/// `hook::callback`. Nothing of task Т-13-7 is on the callback path — see the module
+/// documentation.
+pub fn request_wipe() {
+    WIPE_REQUESTS.fetch_add(1, Ordering::Relaxed);
+    crate::app::post_to_input_thread(WM_APP_WIPE);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2094,6 +2265,13 @@ pub fn reinstall_hook(notify: HWND, reason: Reason) -> bool {
 /// arrive at; the timer and the rehook request are answered on the input window, which is the
 /// only thread allowed to own the hook. SEC-05: a copy of any of them aimed at the wrong window
 /// of ours falls through to `DefWindowProcW` and does nothing.
+///
+/// ⭐ **Not every arm is FR-80's, since task Т-13-7.** [`WM_APP_WIPE`] below is **FR-10**, rows 8
+/// and 9 of the flush table, and it is answered on the input window for the reason the buffer
+/// lives there (section 6.3) rather than for the reason the hook does. It shares this procedure
+/// because the message it answers is raised by the `WM_WTSSESSION_CHANGE` arm two arms above —
+/// the whole route is UI window to input window, and putting the two ends in one place is what
+/// lets a reader see it is a route at all.
 pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Option<LRESULT> {
     match message {
         // **FR-80, third mechanism.** `PBT_APMRESUMEAUTOMATIC` is delivered on every resume,
@@ -2124,10 +2302,17 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
             Some(LRESULT(1))
         }
 
-        // **FR-80, second mechanism.** Every subtype is treated alike — lock, unlock, console
-        // connect and disconnect, logon and logoff. Telling them apart would be a distinction
-        // without a difference: the hook has to go back either way, and reinstalling it when it
-        // did not need it costs the microseconds `reinstall_hook` documents.
+        // **FR-80, second mechanism.** For the *rehook* every subtype is treated alike — lock,
+        // unlock, console connect and disconnect, logon and logoff. Telling them apart would be a
+        // distinction without a difference: the hook has to go back either way, and reinstalling
+        // it when it did not need it costs the microseconds `reinstall_hook` documents.
+        //
+        // ⭐ **For the wipe of FR-10 the subtypes are told apart, and they have to be** — task
+        // Т-13-7. A rehook is an operation on this program's own hook and costs nothing when it
+        // was not needed; a wipe throws away what the user has typed, so «сбросить на
+        // `WTS_SESSION_UNLOCK`» would be a rule that erased a word for no reason. The three
+        // subtypes that do wipe are [`WIPING_SESSION_EVENTS`], and the argument for each of them
+        // and against each of the others is written out there.
         WM_WTSSESSION_CHANGE if is_ui_window(window) => {
             SESSION_CHANGES.fetch_add(1, Ordering::Relaxed);
             request_rehook(Reason::SessionChange);
@@ -2139,6 +2324,22 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
             // by itself. A session that unlocks without a password, or with one typed on the
             // secure desktop where no hook of ours sees it, has no such luck.
             probe_layout_after_absence();
+
+            // ⭐ **Row 8 of the FR-10 table, task Т-13-7 — the wire the audit of 2026-08-24
+            // found missing.** «Блокировка сессии, смена пользователя … полный сброс + обнуление
+            // памяти» had no implementation at all: this arm did the rehook and the probe and
+            // nothing else, and a grep for `WTS_SESSION_LOCK` over the whole repository returned
+            // nothing. What that cost is precise rather than theoretical — a lock through
+            // `Ctrl+Alt+Del` is invisible to the hook (the secure desktop) and
+            // `EVENT_SYSTEM_DESKTOPSWITCH` is deliberately not a flush (see [`FLUSH_EVENTS`]), so
+            // the half-typed word stayed in the ring for the whole of the lock, unwiped, against
+            // SEC-02's «явно перезаписывается нулями».
+            //
+            // This is the **UI** thread and the ring is the input thread's (section 6.3), so what
+            // happens here is a post and nothing more — see [`request_wipe`] and [`WM_APP_WIPE`].
+            if session_event_wipes(wparam.0 as u32) {
+                request_wipe();
+            }
 
             Some(LRESULT(0))
         }
@@ -2164,6 +2365,32 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
                     reinstall_hook(window, reason);
                 }
             }
+
+            Some(LRESULT(0))
+        }
+
+        // ⭐ **The far end of [`request_wipe`] — FR-10 rows 8 and 9, task Т-13-7.** The session
+        // lock arrived at the UI window and the tray's pause happened on the UI thread; the ring
+        // is here, and this is where «полный сброс + обнуление памяти» is actually performed.
+        //
+        // **SEC-02 goes through the one door and no second one is opened.** `buffer::reset` is
+        // the function that overwrites the ring with zeroes — `write_volatile` and a
+        // `compiler_fence` per slot, live window and free slots alike — and this task's whole job
+        // was to run a wire to it, not to build a second wipe beside it.
+        //
+        // The answer is dropped on purpose. `false` means this thread has no buffer to reset,
+        // which happens in exactly two ways and neither is a failure: the message reached the
+        // input window before `app::install_buffer` ran, or FR-70 has the buffer **parked** (a
+        // password field, or an excluded process of FR-84). In the parked case there is nothing
+        // to do — `app::park_buffer` calls this very `reset` *before* it takes the recorder off
+        // the thread, so what is parked is already empty and already zeroed, and a wipe that
+        // reached into `PARKED_BUFFER` would be a second path to a state that is already held.
+        //
+        // FR-11 is untouched by this arm: it answers one number, [`WM_APP_WIPE`], which nothing
+        // about a layout change ever posts. `Alt+Shift` and `Win+Space` reach the buffer through
+        // `WM_APP_LAYOUT`, which this procedure does not claim at all.
+        WM_APP_WIPE if is_input_window(window) => {
+            let _ = crate::buffer::reset();
 
             Some(LRESULT(0))
         }

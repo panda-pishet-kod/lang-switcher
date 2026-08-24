@@ -894,6 +894,40 @@ impl Tray {
         }
 
         self.config.general.enabled = !self.config.general.enabled;
+
+        // ⭐ **Row 9 of the FR-10 table, task Т-13-7** — «Приостановка программы пользователем …
+        // полный сброс + обнуление памяти». Before this task the row had no implementation: this
+        // method changed the icon and the configuration and nothing else, `hook::set_active` was
+        // one atomic store, and the audit of 2026-08-24 found the whole row wired to nothing.
+        //
+        // ⚠ **Honestly: this is a belt beside a brace, not the only thing holding the trousers
+        // up.** Every real road to the menu entry runs over the ring on its way here — a click on
+        // the tray icon is a mouse button (Raw Input → `watchdog::apply_flush`), and the keyboard
+        // road is `Win+B`, arrows and `Enter`, every one of them a flush key of the LL-hook rows
+        // — so in practice the buffer is already empty a moment before the state moves, and while
+        // the program is suspended `hook::classify` answers `PASS` before `buffer::record` is
+        // reached, so nothing is written into it either. The verdict of the audit finding says as
+        // much and narrows its own consequence for this row. It is wired all the same, because
+        // FR-10 states the rule directly and a requirement met only as a side effect of somebody
+        // else's mechanism is a requirement that is one refactor away from not being met at all.
+        // For row 8 — the session lock — the consequence was **not** covered by anything, and
+        // there this is the repair rather than the insurance; see `watchdog::WIPING_SESSION_EVENTS`.
+        //
+        // **Only the "off" edge.** Resuming is not a flush row: FR-10 names «приостановка» and
+        // not its undoing, and the ring the pause emptied is still empty. This is deliberately
+        // the mirror of `hook::set_active`, which asks for a fresh `CapsLock` on the `false →
+        // true` edge alone (task T-13-4): that one exists because a press may have been *missed*
+        // during the pause, this one because a word may still be *held* going into it. They act
+        // on opposite edges, they touch different state, and neither can undo the other.
+        //
+        // This is the UI thread and the ring is the input thread's (section 6.3), so what happens
+        // here is one relaxed increment and one `PostMessageW` — see `watchdog::request_wipe`.
+        // Placed before `save_config`, which writes a file: the wipe should not queue behind
+        // disk I/O.
+        if !self.config.general.enabled {
+            crate::watchdog::request_wipe();
+        }
+
         self.refresh_icon();
         self.save_config();
     }

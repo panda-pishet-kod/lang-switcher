@@ -43,7 +43,10 @@ use lang_switcher::buffer::{self, Recorder, ResetOutcome, Stroke};
 use lang_switcher::guard::{self, Field};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
-use lang_switcher::watchdog::{self, Counters, FLUSH_EVENTS, Rebuild, WM_APP_FLUSH, WM_APP_LAYOUT};
+use lang_switcher::watchdog::{
+    self, Counters, FLUSH_EVENTS, Rebuild, WIPING_SESSION_EVENTS, WM_APP_FLUSH, WM_APP_LAYOUT,
+    WM_APP_WIPE,
+};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::{GetRegisteredRawInputDevices, RAWINPUTDEVICE};
@@ -56,7 +59,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN,
     RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, WINDOW_STYLE, WM_DEVICECHANGE, WM_INPUT,
     WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
-    WTS_SESSION_UNLOCK,
+    WTS_CONSOLE_CONNECT, WTS_CONSOLE_DISCONNECT, WTS_REMOTE_CONNECT, WTS_REMOTE_DISCONNECT,
+    WTS_SESSION_CREATE, WTS_SESSION_LOCK, WTS_SESSION_LOGOFF, WTS_SESSION_LOGON,
+    WTS_SESSION_REMOTE_CONTROL, WTS_SESSION_TERMINATE, WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
 
@@ -533,6 +538,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         background_skips: after.background_skips - before.background_skips,
         focus_repeats: after.focus_repeats - before.focus_repeats,
         recovery_probes: after.recovery_probes - before.recovery_probes,
+        wipe_requests: after.wipe_requests - before.wipe_requests,
     }
 }
 
@@ -760,9 +766,22 @@ fn only_the_window_flush_is_parked_behind_the_gate() {
         "FR-13: nothing parks the buffer behind a mouse click"
     );
 
-    // Neither is anything else a flush that parks: the classification is closed, and the two
+    // Neither is anything else a flush that parks: the classification is closed, and the three
     // messages this module posts at the input thread for other errands are not flushes at all.
-    for message in [WM_APP_LAYOUT, watchdog::WM_APP_REHOOK, WM_TIMER, 0x0401] {
+    //
+    // ⭐ **`WM_APP_WIPE` is on this list deliberately — task Т-13-7.** Rows 8 and 9 of the FR-10
+    // table do empty the ring, but they do not travel through `apply_flush` at all: the message
+    // carries no timestamp, `flush_time` answers `None` for it, and `note_flush_outcome` is
+    // therefore never reached on that path. So it moves none of the four counters task Т-13-23
+    // separated, and it must answer `false` here — a `true` would be a claim that
+    // `app::park_buffer` runs behind it, which nothing does.
+    for message in [
+        WM_APP_LAYOUT,
+        watchdog::WM_APP_REHOOK,
+        WM_APP_WIPE,
+        WM_TIMER,
+        0x0401,
+    ] {
         assert!(
             !watchdog::parks_the_buffer(message),
             "only WM_APP_FLUSH is answered by a park"
@@ -839,6 +858,11 @@ fn all_three_subscriptions_install_and_come_off() {
 /// `start_liveness_timer` fills and `Liveness::drop` empties, and which is now what answers
 /// `is_input_window`. `PENDING_REASON` belongs to the same turn — it is process-wide, the two
 /// system arms arm it, and the rehook arm is what empties it.
+///
+/// ⚠ Task **Т-13-7** puts one more counter under it: `WIPE_REQUESTS`, read through
+/// [`Counters::wipe_requests`]. It is process-wide like the three above, it is moved by the
+/// session arm and by the tray, and `the_session_lock_wipes_the_ring_and_the_unlock_does_not`
+/// asserts both that it grew and that it stood still.
 static NOTICE_TURN: Mutex<()> = Mutex::new(());
 
 /// Takes the turn, ignoring poisoning — see [`raw_input_turn`] for why.
@@ -901,6 +925,14 @@ fn the_liveness_timer_is_the_thirty_seconds_of_fr80_and_comes_off() {
 /// Not a formality: `WM_APP_REHOOK` was written as `WM_APP + 8` first, which is
 /// `switch::WM_APP_SWITCH`. Two private messages sharing a number collide silently — nothing but
 /// the number tells them apart, and the window procedure would run the wrong arm.
+///
+/// ⚠ **The list is every one this crate makes public, and task Т-13-7 lengthened it** — the new
+/// `WM_APP_WIPE` is `WM_APP + 16`, one past `hook::WM_APP_SEED_CAPS`, so a list that stopped at
+/// `WM_APP_REHOOK` would have compared the new number against nothing near it. Three numbers
+/// cannot be reached from an integration test at all, because their modules keep them private:
+/// `app`'s wake-up (`WM_APP + 1`) and configuration nudge (`WM_APP + 5`), and the tray callback
+/// (`WM_APP + 2`). They are named in the doc comment of every constant here, which is the only
+/// place the whole map is written down.
 #[test]
 fn the_private_messages_of_this_process_are_all_distinct() {
     let messages = [
@@ -910,6 +942,13 @@ fn the_private_messages_of_this_process_are_all_distinct() {
         WM_APP_LAYOUT,
         lang_switcher::switch::WM_APP_SWITCH,
         watchdog::WM_APP_REHOOK,
+        guard::WM_APP_PROBE,
+        guard::WM_APP_FIELD,
+        lang_switcher::selection::WM_APP_SELECTION,
+        lang_switcher::selection::WM_APP_BUFFER_PATH,
+        lang_switcher::settings::WM_APP_SYSTEM_THEME,
+        lang_switcher::hook::WM_APP_SEED_CAPS,
+        WM_APP_WIPE,
     ];
 
     for (index, message) in messages.iter().enumerate() {
@@ -938,12 +977,17 @@ fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
 
     let window = TestWindow::new();
     let before = watchdog::health();
+    let counted_before = watchdog::counters();
 
     for (message, wparam) in [
         (WM_POWERBROADCAST, WPARAM(PBT_APMRESUMEAUTOMATIC as usize)),
         (WM_WTSSESSION_CHANGE, WPARAM(WTS_SESSION_UNLOCK as usize)),
+        // Task Т-13-7: the subtype that **does** wipe, aimed at a window that is not the UI one.
+        // SEC-05 — the arm is not entered, so nothing is asked of the input thread either.
+        (WM_WTSSESSION_CHANGE, WPARAM(WTS_SESSION_LOCK as usize)),
         (WM_TIMER, WPARAM(watchdog::LIVENESS_TIMER_ID)),
         (watchdog::WM_APP_REHOOK, WPARAM(0)),
+        (WM_APP_WIPE, WPARAM(0)),
     ] {
         assert!(
             watchdog::handle_watchdog_message(window.handle, message, wparam).is_none(),
@@ -960,6 +1004,11 @@ fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
     assert_eq!(after.power_resumes, before.power_resumes);
     assert_eq!(after.session_changes, before.session_changes);
     assert_eq!(after.liveness_ticks, before.liveness_ticks);
+    assert_eq!(
+        delta(counted_before, watchdog::counters()).wipe_requests,
+        0,
+        "SEC-05, task Т-13-7: a lock aimed at a window that is not the UI one asks for no wipe"
+    );
 
     // The one that matters: no keyboard hook exists in this process, and the keyboard of
     // whoever is running `cargo test` is untouched.
@@ -1224,6 +1273,262 @@ fn coming_back_from_an_absence_asks_for_a_fresh_layout_stamp() {
     assert_eq!(whole.strokes_removed, 0);
     assert!(!lang_switcher::hook::is_installed());
 
+    drop(notice);
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-10 rows 8 and 9 — the session lock and the tray's pause, task Т-13-7
+// ---------------------------------------------------------------------------------------
+//
+// ⭐ **What the audit of 2026-08-24 found here, and what these two tests are.** Direction
+// *tests*, finding «Два правила сброса FR-10 … не покрыты ни одним тестом, а тест-комментарий
+// заявляет их покрытие; проводка в продукте отсутствует»: `tests\buffer.rs` claimed rows 8 and 9
+// in a comment and called `recorder.reset()` by hand, while in the product nothing called it for
+// either row — `grep WTS_SESSION_LOCK` over the whole repository returned nothing at all. The
+// comment is corrected where it stood; the wire is these two tests' subject.
+//
+// They are split the way the code is: the classification of the subtypes is a function of one
+// number and needs nothing at all, while the route needs both of this process's windows and moves
+// process-wide counters, so it takes the turn its neighbours take.
+
+/// **Which `WM_WTSSESSION_CHANGE` subtypes are row 8 of the FR-10 table — and which are not.**
+///
+/// Row 8 reads «Блокировка сессии, смена пользователя», not «любое сообщение о сессии», and the
+/// rehook of FR-80 in the same arm deliberately does *not* tell the subtypes apart. So the list
+/// is written as data (`WIPING_SESSION_EVENTS`) and checked here against every subtype Windows
+/// defines, both directions: a member missed and a member added are both defects, and the second
+/// one throws away a word the user is still typing.
+#[test]
+fn the_wiping_session_subtypes_are_the_two_halves_of_row_eight_and_nothing_else() {
+    assert_eq!(
+        WIPING_SESSION_EVENTS,
+        [
+            WTS_SESSION_LOCK,
+            WTS_CONSOLE_DISCONNECT,
+            WTS_REMOTE_DISCONNECT
+        ],
+        "FR-10 row 8: the lock, and the two shapes of «смена пользователя»"
+    );
+
+    for code in WIPING_SESSION_EVENTS {
+        assert!(
+            watchdog::session_event_wipes(code),
+            "the list and the predicate must be the same rule: {code}"
+        );
+    }
+
+    // Every other subtype Windows defines, one by one and by name. `WTS_SESSION_UNLOCK` is the
+    // one the task specification calls out — the user is coming back to a ring the lock already
+    // emptied — and `WTS_SESSION_LOGOFF`/`WTS_SESSION_TERMINATE` are FR-83's «обнуление буфера»
+    // rather than FR-10's.
+    for code in [
+        WTS_CONSOLE_CONNECT,
+        WTS_REMOTE_CONNECT,
+        WTS_SESSION_LOGON,
+        WTS_SESSION_LOGOFF,
+        WTS_SESSION_UNLOCK,
+        WTS_SESSION_REMOTE_CONTROL,
+        WTS_SESSION_CREATE,
+        WTS_SESSION_TERMINATE,
+    ] {
+        assert!(
+            !watchdog::session_event_wipes(code),
+            "subtype {code} must not throw away what the user has typed"
+        );
+    }
+
+    // SEC-05: the subtype arrives as the `wparam` of a message any process at the same integrity
+    // level can post, so a number nobody has heard of has to mean "not one of ours".
+    for code in [0, 12, 0xFFFF_FFFF] {
+        assert!(!watchdog::session_event_wipes(code));
+    }
+}
+
+/// ⭐ **The wire of task Т-13-7, end to end — FR-10 rows 8 and 9, SEC-02, SEC-05, FR-11.**
+///
+/// # Why the route is driven in two legs
+///
+/// It is a route between two threads, and this process has neither of them. `request_wipe` posts
+/// through `app::post_to_input_thread`, whose register of windows is filled by `app::serve_window`
+/// — a function no test can call — so in a test binary the post is dropped on the floor. That is
+/// exactly the trap `coming_back_from_an_absence_asks_for_a_fresh_layout_stamp` was written
+/// around, and the cure is the same one: the **send** side is counted where it is sent
+/// (`Counters::wipe_requests`), so the first leg is read as a number, and the **receive** side is
+/// then driven directly at the input window. A test that only did the second leg would be green
+/// over an unwired product — which is precisely the defect the audit found.
+///
+/// # Why one window wears both roles
+///
+/// In the product the notice window belongs to the UI thread and the input window to the input
+/// thread, and `is_ui_window`/`is_input_window` read two different cells. Here one handle is
+/// published into both cells, because what is under test is the pair of arms and not the pair of
+/// threads; `foreign` below is the window that is in neither cell, and it is what SEC-05 is
+/// checked against.
+#[test]
+fn the_session_lock_wipes_the_ring_and_the_unlock_does_not() {
+    let _turn = notice_turn();
+
+    assert!(
+        !lang_switcher::hook::is_installed(),
+        "no test in this binary may install a keyboard hook"
+    );
+
+    let window = TestWindow::new();
+    let foreign = TestWindow::new();
+
+    // `NOTICE_WINDOW` — without it `is_ui_window` is false and the session arm is never entered.
+    let notice = watchdog::register_session_notice(window.handle)
+        .expect("WTSRegisterSessionNotification must be accepted");
+
+    // `INPUT_WINDOW` — task Т-13-3 made this the cell `is_input_window` reads, and it is what
+    // binds the `WM_APP_WIPE` arm. ⚠ No `WM_TIMER` and no `WM_APP_REHOOK` is driven while it is
+    // published: either would reach `reinstall_hook` and put a `WH_KEYBOARD_LL` hook into a
+    // process that pumps no messages.
+    let liveness =
+        watchdog::start_liveness_timer(window.handle).expect("the liveness timer must start");
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    for time in [10_000, 10_001, 10_002] {
+        press_at(time);
+    }
+
+    assert_eq!(buffer::len(), 3, "a half-typed word is in the ring");
+    assert_eq!(
+        non_zero_slots(),
+        Some(3),
+        "the positive control of SEC-02: the slots really do hold something now"
+    );
+
+    // ---- Leg 1: the lock reaches the UI window and asks the input thread ----------------
+    let before = watchdog::counters();
+
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_WTSSESSION_CHANGE,
+            WPARAM(WTS_SESSION_LOCK as usize)
+        ),
+        Some(LRESULT(0)),
+        "a session change at the UI window is answered"
+    );
+
+    assert_eq!(
+        delta(before, watchdog::counters()).wipe_requests,
+        1,
+        "FR-10 row 8: «блокировка сессии … полный сброс + обнуление памяти» was asked for"
+    );
+
+    // The ring is untouched *so far*, and that is the point of the two legs: the UI thread cannot
+    // reach a thread-local of the input thread, so the work is still in the post.
+    assert_eq!(buffer::len(), 3, "the UI thread emptied nothing itself");
+
+    // ---- Leg 2: the input window answers -----------------------------------------------
+    assert_eq!(
+        watchdog::handle_watchdog_message(window.handle, WM_APP_WIPE, WPARAM(0)),
+        Some(LRESULT(0)),
+        "the wipe is answered on the input window"
+    );
+
+    assert_eq!(buffer::len(), 0, "FR-10: полный сброс");
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "SEC-02: обнуление памяти — the backing array itself, live window and free slots alike"
+    );
+
+    // ---- The unlock is not a wipe -------------------------------------------------------
+    for time in [11_000, 11_001] {
+        press_at(time);
+    }
+
+    let before_unlock = watchdog::counters();
+
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_WTSSESSION_CHANGE,
+            WPARAM(WTS_SESSION_UNLOCK as usize)
+        ),
+        Some(LRESULT(0)),
+        "the unlock still reaches the arm — the rehook of FR-80 wants every subtype"
+    );
+
+    assert_eq!(
+        delta(before_unlock, watchdog::counters()).wipe_requests,
+        0,
+        "coming back is not going away: `WTS_SESSION_UNLOCK` asks for no wipe"
+    );
+    assert_eq!(
+        buffer::len(),
+        2,
+        "and what the user typed after the unlock is still theirs"
+    );
+
+    // ---- FR-11 is not what this arm answers ---------------------------------------------
+    //
+    // The one thing easiest to break here. FR-11 says a layout change of the user's own —
+    // `Alt+Shift`, `Win+Space` — must **not** flush, and the messages that carry a layout
+    // question travel to this very window. None of them is claimed by this procedure at all, and
+    // none of them asks for a wipe.
+    let before_layout = watchdog::counters();
+
+    for message in [WM_APP_LAYOUT, WM_INPUTLANGCHANGE, WM_DEVICECHANGE] {
+        assert!(
+            watchdog::handle_watchdog_message(window.handle, message, WPARAM(0)).is_none(),
+            "message {message:#x} is not the watchdog's to answer"
+        );
+    }
+
+    assert_eq!(
+        delta(before_layout, watchdog::counters()).wipe_requests,
+        0,
+        "FR-11: a layout question is never a reset"
+    );
+    assert_eq!(buffer::len(), 2, "FR-11: and the strokes are still there");
+
+    // ---- SEC-05: the same messages on a window that is neither of ours -------------------
+    let before_forgery = watchdog::counters();
+
+    for (message, wparam) in [
+        (WM_APP_WIPE, WPARAM(0)),
+        (WM_WTSSESSION_CHANGE, WPARAM(WTS_SESSION_LOCK as usize)),
+    ] {
+        assert!(
+            watchdog::handle_watchdog_message(foreign.handle, message, wparam).is_none(),
+            "SEC-05: message {message:#x} must fall through on a window of neither role"
+        );
+    }
+
+    let forged = delta(before_forgery, watchdog::counters());
+
+    assert_eq!(forged.wipe_requests, 0, "a forged lock asks for nothing");
+    assert_eq!(forged.window_flushes, 0);
+    assert_eq!(forged.window_flushes_taken, 0);
+    assert_eq!(forged.strokes_removed, 0);
+    assert_eq!(
+        buffer::len(),
+        2,
+        "SEC-05: a forged wipe finds a window that owns no ring"
+    );
+    assert_eq!(
+        non_zero_slots(),
+        Some(2),
+        "and the ring it could not reach still holds what it held"
+    );
+
+    // Nothing above installed a hook, which is the standing rule of this file.
+    assert!(!lang_switcher::hook::is_installed());
+
+    buffer::uninstall();
+
+    // ⚠ Left as the neighbours expect to find it. The session arm arms `PENDING_REASON`, which is
+    // process-wide; `a_parked_buffer_no_longer_shuts_the_gates_of_fr80` publishes `Reason::None`
+    // for exactly this reason, and disarming it here as well is what keeps `INPUT_WINDOW` and an
+    // armed reason from ever being published at the same time.
+    watchdog::request_rehook(watchdog::Reason::None);
+
+    drop(liveness);
     drop(notice);
 }
 

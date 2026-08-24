@@ -24,11 +24,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use lang_switcher::buffer::{self, Recorder, Stroke};
 use lang_switcher::diag;
-use lang_switcher::hook;
+use lang_switcher::hook::{self, Edge, KeyEvent};
 use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
 use lang_switcher::theme::ThemeSetting;
 use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
+use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
@@ -120,6 +122,27 @@ const FR_91_ENGLISH: [Option<&str>; 7] = [
 /// Serialises the tests that publish an interface locale — it is process-wide, and the tests of
 /// one binary run on parallel threads.
 static LOCALE: Mutex<()> = Mutex::new(());
+
+/// Serialises every test that moves the state through [`Tray::toggle_state`] — task **Т-13-7**.
+///
+/// ⚠ **Since that task the method has a process-wide side effect**: suspending the program asks
+/// the input thread for the wipe of row 9 of the FR-10 table, and the ask is counted in
+/// `watchdog::counters().wipe_requests`. `the_pause_from_the_tray_asks_for_the_wipe_of_row_nine`
+/// reads that counter as a delta, and the tests of one binary run on parallel threads — so a
+/// neighbour toggling at the same moment would be adding to the number this one is measuring.
+/// The same medicine `LOCALE` above already is, for the same disease.
+///
+/// Held by every test that calls `toggle_state`, whether or not it cares about the counter: a
+/// lock only one side takes is not a lock.
+static TOGGLE: Mutex<()> = Mutex::new(());
+
+/// Takes the turn of [`TOGGLE`], ignoring poisoning: a panic in one test must fail that test and
+/// not turn its neighbour into a second failure with an unrelated message.
+fn toggle_turn() -> MutexGuard<'static, ()> {
+    TOGGLE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// The mapping [`product_strings`] hands out, loaded once and never unmapped.
 static SHARED_IMAGE: OnceLock<usize> = OnceLock::new();
@@ -924,6 +947,8 @@ fn closing_the_dialog_gives_both_entries_back() {
 /// while no dialog was open, surviving «Применить» intact.
 #[test]
 fn the_lost_update_of_the_audit_is_not_reproducible_any_more() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("lost-update");
     let _attached = attach_ui(&window, &home);
@@ -2238,6 +2263,8 @@ fn taskbar_created_adds_the_icon_a_second_time() {
 
 #[test]
 fn switching_the_state_reaches_the_icon_and_the_file() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("toggle");
     let mut tray = install(&window, &home);
@@ -2266,6 +2293,155 @@ fn switching_the_state_reaches_the_icon_and_the_file() {
     assert!(config.general.enabled);
 }
 
+/// ⭐ **Row 9 of the FR-10 table — «Приостановка программы пользователем … полный сброс +
+/// обнуление памяти», task Т-13-7.**
+///
+/// # What was wrong
+///
+/// The row had no implementation. `Tray::toggle_state` changed the icon and the configuration,
+/// `hook::set_active` was a single atomic store, and `buffer::reset` was called from
+/// `app::park_buffer` and from nowhere else in the whole product — the audit of 2026-08-24,
+/// direction *tests*. The coverage hole hid it: `tests\buffer.rs` claimed this row in a comment
+/// and drove `recorder.reset()` by hand.
+///
+/// ⚠ **What the verdict of that finding narrows, and this test says out loud.** For this row the
+/// wire is a **second** guarantee and not the only one: every real road to the menu entry crosses
+/// a flush of its own — the tray icon is clicked with a mouse button (Raw Input, FR-13) or
+/// reached with `Win+B`, the arrows and `Enter` (boundary keys of rows 1 and 3) — so the ring is
+/// in practice already empty when the state moves, and a suspended program records nothing into
+/// it either. For row 8, the session lock, nothing of the sort covers it and the wire is the
+/// whole of the repair; that half is `tests\watchdog.rs`. This test is about the letter of FR-10
+/// being met on purpose rather than by the side effect of somebody else's mechanism.
+///
+/// # Why the route is driven in two legs
+///
+/// The reason `the_session_lock_wipes_the_ring_and_the_unlock_does_not` gives at length: the ask
+/// travels to the input thread by `PostMessageW`, and a test binary has no input window for it to
+/// land at, so the send side is read as a count (`Counters::wipe_requests`) and the receive side
+/// is then driven directly at the input window. Both halves of criterion 6 are here — the ring is
+/// empty **and** the backing array is zeroed.
+#[test]
+fn the_pause_from_the_tray_asks_for_the_wipe_of_row_nine() {
+    let _turn = toggle_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("pause-wipe");
+    let mut tray = install(&window, &home);
+
+    // `INPUT_WINDOW` — the cell `watchdog::is_input_window` reads, so that the far leg can be
+    // driven. ⚠ No `WM_TIMER` and no `WM_APP_REHOOK` is sent while it is published: either would
+    // reach `reinstall_hook` and install a live `WH_KEYBOARD_LL` hook in this process.
+    let liveness =
+        watchdog::start_liveness_timer(window.handle).expect("the liveness timer must start");
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    for time in [20_000, 20_001, 20_002] {
+        press_into_the_buffer(time);
+    }
+
+    assert_eq!(buffer::len(), 3, "a half-typed word is in the ring");
+    assert_eq!(
+        non_zero_slots(),
+        Some(3),
+        "the positive control of SEC-02: the slots really do hold something now"
+    );
+
+    assert!(
+        tray.enabled(),
+        "section 7 has `general.enabled` default to true"
+    );
+
+    // ----- The user suspends the program -----
+    let before_pause = watchdog::counters().wipe_requests;
+
+    tray.toggle_state();
+
+    assert!(!tray.enabled(), "FR-90: the program is suspended");
+    assert_eq!(
+        watchdog::counters().wipe_requests - before_pause,
+        1,
+        "FR-10 row 9: the pause asks the input thread for the wipe"
+    );
+    assert_eq!(
+        buffer::len(),
+        3,
+        "the UI thread emptied nothing itself — the ring belongs to another thread"
+    );
+
+    // ----- The input thread answers -----
+    assert_eq!(
+        watchdog::handle_watchdog_message(window.handle, WM_APP_WIPE, WPARAM(0)),
+        Some(LRESULT(0))
+    );
+
+    assert_eq!(buffer::len(), 0, "полный сброс");
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "обнуление памяти — SEC-02, read off the backing array and not off the length"
+    );
+
+    // ----- Resuming is not a row of the table -----
+    //
+    // The mirror of `hook::set_active`, which asks for a fresh `CapsLock` on the opposite edge
+    // (task T-13-4). FR-10 names «приостановка» and not its undoing, and there is nothing left in
+    // the ring for a resumption to protect anyway.
+    for time in [21_000, 21_001] {
+        press_into_the_buffer(time);
+    }
+
+    let before_resume = watchdog::counters().wipe_requests;
+
+    tray.toggle_state();
+
+    assert!(tray.enabled(), "FR-90: the program is armed again");
+    assert_eq!(
+        watchdog::counters().wipe_requests - before_resume,
+        0,
+        "the resumption is not a flush rule and must not throw a word away"
+    );
+    assert_eq!(
+        buffer::len(),
+        2,
+        "and what was typed while it was suspended is still there"
+    );
+
+    assert!(!hook::is_installed(), "no test here installs a hook");
+
+    buffer::uninstall();
+    drop(liveness);
+}
+
+/// One keystroke stamped `time` into the typing buffer of this thread — task Т-13-7.
+///
+/// The shape `tests\watchdog.rs` and `tests\buffer.rs` already use; `0x41` is `A`, an ordinary
+/// character key, so the stroke is stored rather than treated as a flush of rows 1, 3 or 4.
+fn press_into_the_buffer(time: u32) {
+    buffer::record(KeyEvent {
+        vk: 0x41,
+        edge: Edge::Down,
+        extra_info: 0,
+        scan: 0x1E,
+        flags: 0,
+        time,
+    });
+}
+
+/// How many slots of the backing array of this thread's buffer are not zero — task Т-13-7.
+///
+/// The SEC-02 reading of `tests\buffer.rs`, «явно перезаписывается нулями, а не просто помечается
+/// пустым»: the whole array is examined, the free slots outside the live window included, so a
+/// ring that was merely marked empty would fail here.
+fn non_zero_slots() -> Option<usize> {
+    buffer::with(|recorder| {
+        recorder
+            .slots()
+            .iter()
+            .filter(|slot| **slot != Stroke::ZEROED)
+            .count()
+    })
+}
+
 /// **Criterion 5 of task T-13-9, the half that is about the file.** A forged
 /// `WM_APP_FAIL_SAFE` creates no configuration.
 ///
@@ -2285,6 +2461,8 @@ fn switching_the_state_reaches_the_icon_and_the_file() {
 /// positive control — it shows that a write really would have been seen.
 #[test]
 fn a_forged_fail_safe_message_leaves_no_configuration_behind() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("forged-fail-safe");
     let mut tray = install(&window, &home);
@@ -2369,6 +2547,8 @@ fn a_forged_fail_safe_message_leaves_no_configuration_behind() {
 /// answers: the sections below the stray bracket are exactly the ones the parser never reached.
 #[test]
 fn a_malformed_configuration_is_kept_before_anything_is_written_over_it() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("malformed");
 
@@ -2437,6 +2617,8 @@ fn a_malformed_configuration_is_kept_before_anything_is_written_over_it() {
 /// looks like from the inside.
 #[test]
 fn a_configuration_from_a_newer_build_is_not_written_to_once() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("from_future");
 
@@ -2516,6 +2698,8 @@ fn a_configuration_from_a_newer_build_is_not_written_to_once() {
 /// on a toggle, keeps the fields the dialog never touches, and no copy is made of anything.
 #[test]
 fn a_readable_configuration_is_written_back_exactly_as_before() {
+    // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("readable");
 

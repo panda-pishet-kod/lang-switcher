@@ -1686,14 +1686,31 @@ impl Recorder {
 
     /// Flushes the buffer and overwrites it with zeroes — FR-10, SEC-02.
     ///
-    /// **This is the entry point the other flush sources of the FR-10 table attach to** and
-    /// the reason it is public: the `WM_WTSSESSION_CHANGE` subscription (task T-06-2) and the
-    /// "приостановка пользователем" of the tray, both of which flush unconditionally, and the
-    /// full-clearance arm of [`Recorder::reset_up_to`], which is where the three asynchronous
-    /// sources of the table — the mouse click of FR-13 and the two `WinEvent` subscriptions —
-    /// end up whenever FR-12 says the event is newer than everything in the buffer. Having one
-    /// flush for all of them to call, which zeroes the memory exactly once and in one place, is
-    /// what keeps SEC-02 a property of the module rather than of each caller.
+    /// **This is the entry point the other flush sources of the FR-10 table attach to** and the
+    /// reason it is public. Three of them attach here, and they are named as they are actually
+    /// wired rather than as the table lists them:
+    ///
+    /// 1. the full-clearance arm of [`Recorder::reset_up_to`], which is where the three
+    ///    asynchronous sources — the mouse click of FR-13 and the two `WinEvent` subscriptions —
+    ///    end up whenever FR-12 says the event is newer than everything in the buffer;
+    /// 2. rows 8 and 9 — «Блокировка сессии, смена пользователя» and «Приостановка программы
+    ///    пользователем», both of which flush unconditionally and both of which are observed on
+    ///    the **UI** thread. They reach this function through `watchdog::WM_APP_WIPE`, posted by
+    ///    `watchdog::request_wipe` and answered by the input thread. Row 8 fires for the three
+    ///    subtypes `watchdog::WIPING_SESSION_EVENTS` names and not for every
+    ///    `WM_WTSSESSION_CHANGE`; row 9 fires on the "off" edge of `tray::Tray::toggle_state`
+    ///    and not on the resumption;
+    /// 3. `app::park_buffer`, the wipe FR-70 asks for when the focus enters a password field.
+    ///
+    /// ⚠ **Point 2 was a claim before task Т-13-7 and is a fact after it.** This comment used to
+    /// state the two rows as wired, and the audit of 2026-08-24 (direction *tests*) found that
+    /// nothing in the product called this function for either of them — a grep for
+    /// `WTS_SESSION_LOCK` over the whole repository returned nothing at all. The wire, not the
+    /// wording, was what had to change; the wording is corrected here to say which subtypes and
+    /// which edge, because "every session change" and "the tray" were both wider than the truth.
+    ///
+    /// Having one flush for all of them to call, which zeroes the memory exactly once and in one
+    /// place, is what keeps SEC-02 a property of the module rather than of each caller.
     ///
     /// The conversion session ends with it, and so does the position counter of FR-32 — which is
     /// FR-34, and which is why the flush is one function and not one per caller.
@@ -1708,8 +1725,12 @@ impl Recorder {
     /// Every rule of the FR-10 table that says "полный сброс" arrives here: the boundary keys
     /// and the editing keys of [`Recorder::record`], the command combinations of the same
     /// function, the last row — any key after a conversion — and, through [`Recorder::reset`],
-    /// the mouse click of FR-13, the two `WinEvent` subscriptions, `WM_WTSSESSION_CHANGE` and
-    /// the user's own pause from the tray.
+    /// the mouse click of FR-13, the two `WinEvent` subscriptions, and — since task **Т-13-7**,
+    /// which built the wire this sentence used to describe before it existed — the session lock
+    /// and the user's own pause from the tray, both of them over `watchdog::WM_APP_WIPE`. The
+    /// exact subtypes of the session message and the exact edge of the pause are named at
+    /// [`Recorder::reset`], because "every session change" and "the tray" are both wider than
+    /// what is actually wired.
     ///
     /// It is one function precisely because FR-34 says "**вместе с** буфером": a counter zeroed
     /// at each call site would be a rule that holds until somebody adds the eleventh call site

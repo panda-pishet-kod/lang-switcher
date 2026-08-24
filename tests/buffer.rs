@@ -1498,8 +1498,11 @@ fn a_thread_without_a_buffer_records_nothing_and_does_not_fail() {
 #[test]
 fn the_public_flush_is_reachable_from_the_thread_local_layer() {
     // The rows of the FR-10 table this task does not own — the mouse over Raw Input, the two
-    // `WinEvent` subscriptions, the session change (tasks T-03-3 and T-06-2) and the "приостановка
-    // пользователем" of the tray — all need one flush to call. This is it.
+    // `WinEvent` subscriptions, the session lock (tasks T-03-3, T-06-2 and Т-13-7) and the
+    // "приостановка пользователем" of the tray (task Т-13-7) — all need one flush to call. This
+    // is it. ⚠ That the last two really do call it is task Т-13-7's own claim and is checked in
+    // `tests\watchdog.rs` and `tests\tray.rs`; what is checked here is only that the door exists
+    // and opens from the thread-local layer.
     buffer::install_recorder(fresh());
 
     buffer::record(KeyEvent {
@@ -1942,6 +1945,33 @@ fn the_position_counter_walks_the_cycle_and_stays_inside_it() {
 /// documents them: the mouse click of FR-13 over Raw Input, `EVENT_SYSTEM_FOREGROUND`,
 /// `EVENT_OBJECT_FOCUS`, `WM_WTSSESSION_CHANGE` and the user's own pause from the tray.
 ///
+/// # ⚠ What this test is, and what it is **not** — the finding of 2026-08-24
+///
+/// It is about **FR-34**: whichever rule empties the ring, the position counter goes with it.
+/// That is the whole of point 16, and every assertion below is of that shape.
+///
+/// It is **not** a test of the wiring, and this comment used to read as though it were. The audit
+/// of 2026-08-24 (direction *tests*) put it plainly: rows 8 and 9 — «Блокировка сессии, смена
+/// пользователя» and «Приостановка программы пользователем» — were "covered" here by a sentence,
+/// while the call below is `recorder.reset()` made by this file's own hand. Behind it, in the
+/// product, there was nothing at all: `grep WTS_SESSION_LOCK` over the whole repository returned
+/// nothing, and `buffer::reset` was called from `app::park_buffer` and from no other place. The
+/// coverage hole hid a defect of the product, which is worse than either on its own.
+///
+/// **Since task Т-13-7 the wire exists and is tested where a wire can be tested** — in the two
+/// files that can reach a window and a message:
+///
+/// * row 8 — `tests\watchdog.rs::the_session_lock_wipes_the_ring_and_the_unlock_does_not`, which
+///   drives `WM_WTSSESSION_CHANGE` at the notice window, reads the ask on
+///   `Counters::wipe_requests`, and then answers `watchdog::WM_APP_WIPE` at the input window;
+/// * row 9 — `tests\tray.rs::the_pause_from_the_tray_asks_for_the_wipe_of_row_nine`, the same two
+///   legs starting from `Tray::toggle_state`.
+///
+/// Both also read the backing array afterwards, which is the «обнуление памяти» half of those two
+/// rows (SEC-02) and is a claim this test never made. What is left here is the claim this file
+/// can honestly make: the entry point those rows arrive at zeroes the counter of FR-34 with the
+/// ring.
+///
 /// `Backspace` is in the table and is **not** a flush — it takes one element out — so the
 /// counter stays where it is, and that is asserted too.
 #[test]
@@ -2000,10 +2030,16 @@ fn every_flush_rule_of_fr10_zeroes_the_position_counter() {
     );
     assert_eq!(recorder.cycle_position(), 0);
 
-    // Rows 5 to 9 — the mouse click of FR-13, the two `WinEvent` subscriptions, the session
-    // change and the tray's pause. All five are `reset`, which is the entry point module
-    // `buffer` gives them, and one of them is enough to show the reset because there is one
-    // function underneath.
+    // Rows 5 to 9 — the mouse click of FR-13, the two `WinEvent` subscriptions, the session lock
+    // and the tray's pause. All five reach `reset`, which is the entry point module `buffer`
+    // gives them, and one call is enough for **FR-34** because there is one function underneath:
+    // what is being shown is that emptying the ring zeroes the counter, whichever row asked.
+    //
+    // ⚠ **This call is not evidence that any of the five is connected to anything.** It is made
+    // by this file, on a `Recorder` this file owns; the audit of 2026-08-24 found rows 8 and 9
+    // wired to nothing while a comment here said otherwise. The wire is task Т-13-7's and is
+    // driven in `tests\watchdog.rs` and `tests\tray.rs` — see the doc comment above for which
+    // test covers which row.
     let mut recorder = fresh();
     fill(&mut recorder, 3);
     counter_at_three(&mut recorder);
