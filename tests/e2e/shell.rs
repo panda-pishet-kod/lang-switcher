@@ -238,7 +238,37 @@ use windows::Win32::System::Threading::{
 const STILL_ACTIVE: u32 = 259;
 
 /// Whether a process with this id is still running.
+///
+/// ⛔ **The instant this answers «no» is the instant the registry record has to go — task
+/// T-13-27.** A dead process gives its id back to Windows, which hands it out again; a record
+/// that outlived the process would let the next holder of the number through gates D and E, which
+/// is the audit finding of 2026-08-24 in its plainest form.
+///
+/// This is where `scenarios::App::close` learns that a position's application has gone, and it
+/// learns it the same way for all three ways it closes them — COM `Quit(0)`, `WM_CLOSE` and
+/// terminate alike — so striking the record here covers the close of **every** position without a
+/// line of `scenarios.rs`, which task T-13-27 is forbidden to edit.
+///
+/// ⚠ The strike only ever **removes**, so it can only narrow what the bench is willing to touch.
+/// A process wrongly reported dead — the handle could not be opened for a moment — is a process
+/// the bench then refuses; that is the safe direction, and it is the same one
+/// [`own::creation_time`](crate::own) documents.
 pub fn process_is_alive(pid: u32) -> bool {
+    let alive = still_running(pid);
+
+    if !alive {
+        crate::own::forget_process(pid);
+    }
+
+    alive
+}
+
+/// The question itself, apart from what [`process_is_alive`] does with the answer.
+///
+/// A separate function because the answer «gone» arrives by two roads — the handle would not open
+/// at all, or it opened and the exit code is not `STILL_ACTIVE` — and the record has to be struck
+/// on both.
+fn still_running(pid: u32) -> bool {
     // SAFETY: `OpenProcess` takes an access mask, an inheritance flag and an id, and returns a
     // handle or an error. The minimum access that answers the question is asked for. NFR-13:
     // an error means the process is gone or unreachable, and is answered with `false`.
@@ -271,6 +301,19 @@ pub fn process_is_alive(pid: u32) -> bool {
 /// ⚠ **Never used for Word** — rake 5 of §2 of `TOOLCHAIN.md`: a killed Word poisons the next
 /// launch with a safe-mode prompt and a `Resiliency\DisabledItems` entry. Word leaves through
 /// COM `Quit(0)` in `word::quit` and through nothing else.
+///
+/// # ⛔ The record goes with the process — task T-13-27
+///
+/// A successful `TerminateProcess` dooms the process, and its id is then Windows's to hand out
+/// again. `own::forget_process` on the last line is what stops the registry from carrying the
+/// number into the next position. It matters most for the launches the bench keeps **no handle
+/// of** — `conhost.exe` through `ShellExecuteEx` — which is the exposure the audit of 2026-08-24
+/// named: an open `Child` handle blocks reuse, and those launches have none.
+///
+/// ⚠ The consequence, stated so that nobody reads it as a bug: a **second** `terminate` of the
+/// same id, after the first succeeded, is now refused by `own::may_touch` rather than performed.
+/// That is the safe direction — the bench declines to end a process it can no longer prove is
+/// its own — and it is the direction task T-13-27 requires of every change it makes.
 pub fn terminate(pid: u32) -> Result<(), String> {
     // ⛔ Requirement D. Nothing below runs for a process the bench did not start.
     crate::own::may_touch(pid)?;
@@ -287,7 +330,14 @@ pub fn terminate(pid: u32) -> Result<(), String> {
     // SAFETY: the handle opened above, closed exactly once.
     let _ = unsafe { CloseHandle(handle) };
 
-    ended.map_err(|error| format!("TerminateProcess({pid}): {error}"))
+    ended.map_err(|error| format!("TerminateProcess({pid}): {error}"))?;
+
+    // ⛔ Task T-13-27, see the note above: the id is now free for Windows to reissue, so the
+    // registry stops vouching for it here. A failed terminate does **not** reach this line — the
+    // process is still alive and still the bench's own.
+    crate::own::forget_process(pid);
+
+    Ok(())
 }
 
 // The "is the foreground window ours" question deliberately has **no** helper here. It is
