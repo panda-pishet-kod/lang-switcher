@@ -899,6 +899,15 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
 
     let mut report = Report::default();
 
+    // The positions §11.6 hands to a live person. They have no arm in the `match` below either,
+    // and they are **not** a miss: `pending_positions` puts them in the report of every run with
+    // the verdict Р-30 gives them. Read from the same list that writes them, so the two cannot
+    // drift apart — task T-13-19, addition ordered by the controller.
+    let handed_to_a_person: Vec<u8> = scenarios::pending_positions()
+        .iter()
+        .map(|row| row.position)
+        .collect();
+
     for position in &wanted {
         println!("\n--- позиция {position} ---");
         own::forget_refusals();
@@ -909,16 +918,35 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
         // half-way through, with the remaining positions then testing nothing. Restarting per
         // position keeps the cap, keeps the hook alive for the whole of each scenario, and has
         // the side benefit that every position starts against an empty buffer.
+        //
+        // ⛔ **Both failures of this launch are rows, not only stderr — task T-13-19.** A position
+        // that was asked for and could not be run leaves `Row::infrastructure_failure` in the
+        // report, so requirement 6 of §11.5 keeps its four fields and the `fail` counter moves.
+        // Before that, an `eprintln!` and a bare `continue` left the position **absent** from the
+        // machine-readable block: a consumer checking `fail == 0` — the ordinary CI gate — read
+        // the run as a success while the position had never been checked. A position nobody asked
+        // for is the other case and stays absent, because it genuinely did not run.
         let mut product = match sut::Sut::launch() {
             Ok(product) => product,
             Err(error) => {
                 eprintln!("  продукт не запустился: {error}");
+                report.push(report::Row::infrastructure_failure(
+                    *position,
+                    format!("продукт не запустился: {error}"),
+                ));
                 continue;
             }
         };
 
         let Some(ready) = product.await_ready(Duration::from_secs(30)) else {
             eprintln!("  продукт не сообщил о готовности через канал SEC-04a за 30 с");
+            report.push(report::Row::infrastructure_failure(
+                *position,
+                "канал молчит: продукт не сообщил о готовности через SEC-04a за 30 с",
+            ));
+            // The product itself is not leaked by the `continue`: `Sut` takes itself down in
+            // `Drop` — requirement 5 of §11.5 — and nothing of the position ran, so the ambient
+            // layout the loop restores at its end was never touched.
             continue;
         };
         println!(
@@ -934,6 +962,12 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
             }
         }
 
+        // ⛔ **`None` is the position the bench has no arm for — task T-13-19, addition ordered by
+        // the controller.** It used to be an empty `Vec`, which lost the position from the report
+        // exactly as the two `continue`s above did: `langsw-e2e --positions 99` printed a line to
+        // stdout and left the machine-readable block without a trace of it. `selected_positions`
+        // does not check the number against `RUNNABLE`, so the arm is reachable from the command
+        // line and not only in theory.
         let rows = match position {
             // ⚠ Position 17 rewrites `config.toml` and needs the product to have **read** it, and
             // §7 says the file is read at start-up. So the copy this loop just launched goes
@@ -947,34 +981,38 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
                     }
                     Err(error) => println!("  ⚠ {error}"),
                 }
-                scenarios::position_17(&context)
+                Some(scenarios::position_17(&context))
             }
-            1 => scenarios::position_1(&context),
+            1 => Some(scenarios::position_1(&context)),
             2 => {
                 let (rows, protocol) = scenarios::position_2(&context);
                 write_word_protocol(&protocol, &rows);
-                rows
+                Some(rows)
             }
-            3 => scenarios::position_3(&context),
-            4 => scenarios::position_4(&context),
-            5 => scenarios::position_5(&context),
-            6 => scenarios::position_6(&context),
-            7 => scenarios::position_7(&context),
-            8 => scenarios::position_8(&context),
-            10 => scenarios::position_10(&context),
-            11 => scenarios::position_11(&context),
-            12 => scenarios::position_12(&context),
-            15 => scenarios::position_15(&context),
-            16 => scenarios::position_16(&context),
-            14 => scenarios::position_14(&context),
-            22 => scenarios::position_22(&context),
-            23 => scenarios::position_23(&context),
-            24 => scenarios::position_24(&context),
+            3 => Some(scenarios::position_3(&context)),
+            4 => Some(scenarios::position_4(&context)),
+            5 => Some(scenarios::position_5(&context)),
+            6 => Some(scenarios::position_6(&context)),
+            7 => Some(scenarios::position_7(&context)),
+            8 => Some(scenarios::position_8(&context)),
+            10 => Some(scenarios::position_10(&context)),
+            11 => Some(scenarios::position_11(&context)),
+            12 => Some(scenarios::position_12(&context)),
+            15 => Some(scenarios::position_15(&context)),
+            16 => Some(scenarios::position_16(&context)),
+            14 => Some(scenarios::position_14(&context)),
+            22 => Some(scenarios::position_22(&context)),
+            23 => Some(scenarios::position_23(&context)),
+            24 => Some(scenarios::position_24(&context)),
             other => {
+                // The line stays: a person at the console reads it, and the report row below is
+                // for the consumer of the block. One does not replace the other.
                 println!("  позиция {other} не выполняется стендом");
-                Vec::new()
+                None
             }
         };
+
+        let rows = rows_of_a_position(rows, *position, &handed_to_a_person);
 
         for row in &rows {
             println!(
@@ -1064,27 +1102,54 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
     println!("  процессы LangSwitcher после: {stray_after:?}");
     println!("  Word Resiliency: {}", word::resiliency_disabled_items());
 
-    // Р-30: a non-zero `pending` is not a success, and neither is a `fail`.
-    if report.count(report::Verdict::Fail) == 0 && report.count(report::Verdict::Pending) == 0 {
-        std::process::ExitCode::SUCCESS
-    } else {
-        std::process::ExitCode::from(1)
-    }
+    // Р-30: a non-zero `pending` is not a success, and neither is a `fail`. The rule itself sits
+    // in `Report::exit_code` beside the counters, where a unit test can reach it — task T-13-19.
+    std::process::ExitCode::from(report.exit_code())
 }
 
-/// Which positions to run: everything the task lists, or what `--positions` names.
-fn selected_positions(arguments: &[String]) -> Vec<u8> {
-    // The task, section 4: the positions runnable after T-04-1 and T-03-4, plus 16 and 17 —
-    // task T-04-3-3, decision Р-52. Position 17 is deliberately **last**: it is the only one
-    // that rewrites the user's `config.toml`, and the shorter that file spends replaced the
-    // fewer ways a run can end with it still replaced.
-    // Position 23 arrived with task T-10-1 and stands between 22 and 24: it is a Notepad
-    // position like its neighbours, and it stays ahead of 17 for the same reason everything
-    // does — 17 rewrites the user's `config.toml` and goes last.
-    const DEFAULT: [u8; 18] = [
-        1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 23, 24, 17,
-    ];
+/// The rows of one position of the loop: what its scenario produced, or — when the `match` of
+/// [`full_run`] has no arm for the position — the single `fail` row that keeps it in the report.
+/// Task T-13-19, addition ordered by the controller.
+///
+/// The one exception is a position §11.6 hands to a live person. Those have no arm either, and
+/// they are **not** a miss: `scenarios::pending_positions` puts them in the block of every run as
+/// `pending` with owner `П`. A `fail` beside that `pending` would be a false finding about the
+/// bench — the position is in the report, not missing from it — so they leave no row here.
+fn rows_of_a_position(
+    produced: Option<Vec<report::Row>>,
+    position: u8,
+    handed_to_a_person: &[u8],
+) -> Vec<report::Row> {
+    if let Some(rows) = produced {
+        return rows;
+    }
+    if handed_to_a_person.contains(&position) {
+        return Vec::new();
+    }
+    vec![report::Row::position_without_a_scenario(position)]
+}
 
+/// The positions the `match` of [`full_run`] answers, and what a run with no `--positions` asks
+/// for. Every other number reaches the `other` arm above.
+///
+/// The task, section 4: the positions runnable after T-04-1 and T-03-4, plus 16 and 17 —
+/// task T-04-3-3, decision Р-52. Position 17 is deliberately **last**: it is the only one
+/// that rewrites the user's `config.toml`, and the shorter that file spends replaced the
+/// fewer ways a run can end with it still replaced.
+/// Position 23 arrived with task T-10-1 and stands between 22 and 24: it is a Notepad
+/// position like its neighbours, and it stays ahead of 17 for the same reason everything
+/// does — 17 rewrites the user's `config.toml` and goes last.
+const RUNNABLE: [u8; 18] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15, 16, 22, 23, 24, 17,
+];
+
+/// Which positions to run: everything the task lists, or what `--positions` names.
+///
+/// ⚠ **The list from the command line is not checked against [`RUNNABLE`]** — a number outside it
+/// is passed through, reaches the `other` arm of [`full_run`] and comes back as a
+/// `Row::position_without_a_scenario`. Filtering it here instead would put the miss back where the
+/// audit found it: outside the report.
+fn selected_positions(arguments: &[String]) -> Vec<u8> {
     let mut iterator = arguments.iter();
     while let Some(argument) = iterator.next() {
         if argument == "--positions"
@@ -1097,7 +1162,7 @@ fn selected_positions(arguments: &[String]) -> Vec<u8> {
         }
     }
 
-    DEFAULT.to_vec()
+    RUNNABLE.to_vec()
 }
 
 /// The hotkey the running product answers to — read from its own configuration, not assumed.
@@ -1136,5 +1201,222 @@ fn write_word_protocol(protocol: &str, rows: &[report::Row]) {
         eprintln!("не удалось записать протокол позиции 2: {error}");
     } else {
         println!("  протокол позиции 2 записан в {WORD_PROTOCOL}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use report::{Assertion, Report, Row, Verdict};
+
+    /// What `full_run` does to the report for one position of `--positions` — the two lines the
+    /// loop above runs before anything of the scenario does, and nothing else. Keeping them in a
+    /// function is what lets criterion 7 of task T-13-19 be a unit test instead of a live run of
+    /// the bench, which this task is forbidden to make.
+    fn record(report: &mut Report, wanted: &[u8], position: u8, failure: &str) {
+        if !wanted.contains(&position) {
+            return; // never asked for: no launch, no row — it did not run
+        }
+        report.push(Row::infrastructure_failure(position, failure.to_owned()));
+    }
+
+    #[test]
+    fn positions_come_from_the_switch_and_default_to_the_whole_list() {
+        let arguments = ["--positions".to_owned(), "3, 8 ,14".to_owned()];
+        assert_eq!(selected_positions(&arguments), vec![3, 8, 14]);
+        assert_eq!(selected_positions(&[]).len(), 18);
+    }
+
+    /// **Task T-13-19, criterion 7.** Ask for position 3 only, and let the product fail to start.
+    /// Position 3 is a `fail` row of the block; position 8, which nobody asked for, has no row.
+    /// Neither the line nor the counter of the two coincides.
+    #[test]
+    fn an_unrequested_position_is_not_the_same_as_one_that_could_not_run() {
+        let wanted = selected_positions(&["--positions".to_owned(), "3".to_owned()]);
+        assert_eq!(wanted, vec![3]);
+
+        let mut report = Report::default();
+        record(&mut report, &wanted, 3, "продукт не запустился: os error 2");
+        record(&mut report, &wanted, 8, "продукт не запустился: os error 2");
+
+        let rendered = report.render();
+        let block: Vec<&str> = rendered
+            .lines()
+            .skip(2)
+            .take_while(|line| !line.is_empty())
+            .collect();
+
+        assert_eq!(block.len(), 1, "одна строка на одну запрошенную позицию");
+        assert!(
+            block[0].starts_with("3\t"),
+            "строка позиции 3: {:?}",
+            block[0]
+        );
+        assert!(
+            block[0].contains("\tfail\t"),
+            "вердикт fail: {:?}",
+            block[0]
+        );
+        assert!(
+            !rendered.lines().any(|line| line.starts_with("8\t")),
+            "незапрошенная позиция 8 в отчёте отсутствует"
+        );
+
+        assert_eq!(
+            report.count(Verdict::Fail),
+            1,
+            "считается только запрошенная"
+        );
+        assert_eq!(report.count(Verdict::Pending), 0);
+        assert_ne!(report.exit_code(), 0);
+    }
+
+    /// The same selection, with the product starting fine, leaves the block empty: the rows of a
+    /// position that ran come from `scenarios`, and an empty block is what "nothing failed on the
+    /// way in" looks like. Without this the test above would pass on a bench that wrote a row for
+    /// every position it was asked for, failed or not.
+    #[test]
+    fn a_position_that_started_leaves_no_infrastructure_row() {
+        let wanted = selected_positions(&["--positions".to_owned(), "3,8".to_owned()]);
+        let report = Report::default();
+
+        assert_eq!(wanted, vec![3, 8]);
+        assert_eq!(report.count(Verdict::Fail), 0);
+        assert_eq!(report.exit_code(), 0);
+    }
+
+    /// The list the loop reads to tell a position of §11.6 from one the bench simply does not
+    /// know — the same list `pending_positions` writes, so the test states what it is rather than
+    /// repeating it.
+    fn handed_to_a_person() -> Vec<u8> {
+        scenarios::pending_positions()
+            .iter()
+            .map(|row| row.position)
+            .collect()
+    }
+
+    /// **Task T-13-19, addition ordered by the controller.** `--positions 99` names a number the
+    /// `match` of `full_run` has no arm for. It has to come back as exactly one `fail` row of the
+    /// block, move the counter, and make the process return non-zero.
+    #[test]
+    fn a_position_the_bench_does_not_know_is_a_fail_row_and_a_non_zero_exit_code() {
+        let wanted = selected_positions(&["--positions".to_owned(), "99".to_owned()]);
+        assert_eq!(wanted, vec![99]);
+        assert!(
+            !RUNNABLE.contains(&99),
+            "99 не входит в перечень выполняемых позиций"
+        );
+
+        let mut report = Report::default();
+        for position in &wanted {
+            report.extend(rows_of_a_position(None, *position, &handed_to_a_person()));
+        }
+
+        let rendered = report.render();
+        let block: Vec<&str> = rendered
+            .lines()
+            .skip(2)
+            .take_while(|line| !line.is_empty())
+            .collect();
+
+        assert_eq!(block.len(), 1, "ровно одна строка");
+        let fields: Vec<&str> = block[0].split('\t').collect();
+        assert_eq!(fields[0], "99", "позиция");
+        assert_eq!(fields[1], "вне перечня стенда", "приложение");
+        assert_eq!(fields[2], "сценарий позиции", "утверждение");
+        assert_eq!(fields[3], "fail", "вердикт");
+        assert_eq!(
+            fields[4], "стенд не выполняет эту позицию: сценария для неё нет",
+            "фактическое"
+        );
+        assert_eq!(fields[5], "позиция выполняется стендом", "ожидаемое");
+        assert_eq!(fields[6], "", "владелец — как у прочих не-pending строк");
+        assert!(
+            fields[7].contains("запрошена"),
+            "примечание: {:?}",
+            fields[7]
+        );
+
+        assert_eq!(report.count(Verdict::Fail), 1, "счётчик fail вырос");
+        assert_eq!(report.exit_code(), 1, "код возврата 1");
+    }
+
+    /// The safety net: **no** position of the default run produces that row. Every number of
+    /// `RUNNABLE` has an arm of the `match`, so the fallback is never consulted for it — and were
+    /// it consulted by mistake, none of them is a position of §11.6 either, so the row would
+    /// appear and this test would say so.
+    #[test]
+    fn no_position_of_the_default_run_produces_a_row_of_its_own() {
+        let handed = handed_to_a_person();
+
+        for position in selected_positions(&[]) {
+            assert!(
+                RUNNABLE.contains(&position),
+                "позиция {position} по умолчанию обязана быть в перечне выполняемых"
+            );
+            assert!(
+                !handed.contains(&position),
+                "позиция {position} не может быть одновременно выполняемой и отданной человеку"
+            );
+        }
+
+        // And the ordinary path — a scenario answered — never reaches the fallback at all: the
+        // rows of the position are the scenario's own, untouched.
+        let scenario = vec![Row::new(
+            3,
+            "Блокнот",
+            Assertion::Text,
+            Verdict::Pass,
+            "привет",
+            "привет",
+        )];
+        let rows = rows_of_a_position(Some(scenario), 3, &handed);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].verdict, Verdict::Pass);
+        assert_ne!(rows[0].application, "вне перечня стенда");
+    }
+
+    /// A position §11.6 hands to a live person has no arm either, and it is **not** a miss:
+    /// `pending_positions` already carries it. A `fail` beside that `pending` would be a false
+    /// finding about the bench.
+    #[test]
+    fn a_position_of_the_acceptance_session_gets_no_fail_beside_its_pending() {
+        let handed = handed_to_a_person();
+        assert_eq!(handed, vec![9, 13, 18, 19, 20, 21], "перечень §11.6");
+
+        for position in &handed {
+            assert!(
+                rows_of_a_position(None, *position, &handed).is_empty(),
+                "позиция {position} уже в отчёте как pending"
+            );
+        }
+
+        // What such a run really produces: the pending row, and Р-30's refusal to call it a
+        // success — the position is in the block, not missing from it.
+        let mut report = Report::default();
+        report.extend(rows_of_a_position(None, 9, &handed));
+        report.extend(scenarios::pending_positions());
+        assert_eq!(report.count(Verdict::Fail), 0);
+        assert!(report.count(Verdict::Pending) > 0);
+        assert_eq!(report.exit_code(), 1);
+        assert!(report.render().lines().any(|line| line.starts_with("9\t")));
+    }
+
+    /// The three rows the bench can leave for a position it did not check must not read alike.
+    #[test]
+    fn the_two_causes_of_an_unchecked_position_are_not_the_same_row() {
+        let infrastructure = Row::infrastructure_failure(99, "продукт не запустился: os error 2");
+        let unknown = Row::position_without_a_scenario(99);
+
+        assert_eq!(infrastructure.verdict, unknown.verdict, "оба — fail");
+        assert_ne!(infrastructure.application, unknown.application);
+        assert_ne!(
+            infrastructure.assertion.as_str(),
+            unknown.assertion.as_str()
+        );
+        assert_ne!(infrastructure.actual, unknown.actual);
+        assert_ne!(infrastructure.expected, unknown.expected);
+        assert_ne!(infrastructure.note, unknown.note);
     }
 }
