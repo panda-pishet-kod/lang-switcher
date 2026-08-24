@@ -1894,6 +1894,99 @@ mod resolver_live {
 }
 
 // ---------------------------------------------------------------------------------------
+// SEC-01, SEC-02 — how the working buffers are released. Task T-13-15.
+// ---------------------------------------------------------------------------------------
+
+/// The text of a module under `src\`.
+fn source_of(module: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join(module);
+
+    std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("src\\{module} must be readable"))
+}
+
+/// Lines of `text` that contain `needle` and are not comment lines.
+///
+/// The module documents its own zeroing at length, and a sweep that counted prose would be a
+/// sweep nobody could keep green. The same helper, for the same reason, as the one in
+/// `tests\selection.rs`.
+fn code_lines_with<'a>(text: &'a str, needle: &str) -> Vec<(usize, &'a str)> {
+    text.lines()
+        .enumerate()
+        .map(|(index, line)| (index + 1, line.trim()))
+        .filter(|(_, line)| !line.starts_with("//"))
+        .filter(|(_, line)| line.contains(needle))
+        .collect()
+}
+
+/// **The audit of 2026-08-24: the module documentation promised a write the code did not make.**
+///
+/// The header of `src\inject.rs` says the working buffers are overwritten before they are
+/// released, "which is the rule module `buffer` lives by (SEC-02)". Module `buffer` zeroes with
+/// `ptr::write_volatile` and a `compiler_fence`, and says in its own documentation why anything
+/// weaker is deletable; this module used `slice.fill(...)` in front of three deallocations. The
+/// three go through `buffer::zero_slice` now, and no `fill` is left on any release path.
+///
+/// This is a check on the source and not on a value, because the property is exactly that the
+/// write **cannot be optimised away** — a plain `fill` would pass every behavioural test in this
+/// file and still leave the user's last word in the freed block under the Release profile of
+/// section 3.2.
+#[test]
+fn the_working_buffers_are_released_through_the_volatile_zeroing() {
+    let source = source_of("inject.rs");
+
+    let fills = code_lines_with(&source, ".fill(");
+
+    assert!(
+        fills.is_empty(),
+        "nothing in this module zeroes with `fill` any more: {fills:?}"
+    );
+
+    // Three buffers hold the user's text here and all three are zeroed through the helper: the
+    // converted text and the `INPUT` packet of `replace_in_with`, and the copy of the strokes
+    // `on_hotkey` takes out of the recorder.
+    let zeroed = code_lines_with(&source, "buffer::zero_slice(");
+
+    assert_eq!(
+        zeroed.len(),
+        3,
+        "every working buffer is zeroed through the helper: {zeroed:?}"
+    );
+
+    for signature in ["pub fn replace_in_with", "pub fn on_hotkey"] {
+        let body = source
+            .split(signature)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{signature} exists in the module"))
+            .split("\n}\n")
+            .next()
+            .unwrap_or_else(|| panic!("{signature} closes in the first column"));
+
+        assert!(
+            body.contains("buffer::zero_slice("),
+            "{signature} zeroes what it releases"
+        );
+    }
+}
+
+/// **NFR-01…NFR-05: nothing of this was added to the hook callback.**
+///
+/// The zeroing runs on the input thread *after* the handoff — `on_hotkey` is called from the
+/// message loop, not from the callback — and in `replace_in_with`, which is further down the
+/// same path. The callback of `WH_KEYBOARD_LL` lives in module `hook` and calls nothing of this
+/// module; the check that it stays that way is that `hook.rs` never names the helper.
+#[test]
+fn the_zeroing_is_nowhere_near_the_hook_callback() {
+    let hook = source_of("hook.rs");
+
+    assert!(
+        code_lines_with(&hook, "zero_slice").is_empty(),
+        "the hook callback path does not zero buffers — it does not own any"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
 // Points 22 and 23 — the end-to-end path, into a window this file owns
 // ---------------------------------------------------------------------------------------
 

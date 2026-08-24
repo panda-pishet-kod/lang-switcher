@@ -94,6 +94,18 @@
 //! anything that holds text, and the working buffers of [`replace`] are overwritten with zeroes
 //! before they are released, which is the rule module `buffer` lives by (SEC-02) applied to the
 //! one other place a keystroke exists in memory.
+//!
+//! **How** they are overwritten is part of that promise and not an implementation detail. Three
+//! buffers are zeroed on the way out — the converted text and the `INPUT` packet of [`replace`],
+//! and the copy of the strokes [`on_hotkey`] takes out of the recorder — and all three go
+//! through `crate::buffer::zero_slice`, the volatile write module `buffer` uses on the ring:
+//! `write_volatile` plus a `compiler_fence`. Until the audit of 2026-08-24 (task **T-13-15**)
+//! they were zeroed with `slice.fill(...)` instead, which is the store that module's own
+//! documentation calls deletable — «a plain assignment into a slot that is about to be
+//! overwritten or dropped is a dead store the compiler is allowed to delete» — and under the
+//! Release profile of section 3.2, `opt-level 3` with fat LTO, a memset in front of a `Vec`
+//! being freed is exactly what dead-store elimination is for. The promise now says what the
+//! code does.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
@@ -1549,8 +1561,12 @@ pub fn replace_in_with(
     // releases them — SEC-01, SEC-02.
     let outcome = built.map(|len| run_steps(env, &events[..len], erased, typed, delay_ms));
 
-    text.fill(0);
-    events.fill(INPUT::default());
+    // The write is `crate::buffer::zero_slice` and not `fill`, because a `fill` immediately in
+    // front of the deallocation these two vectors are about to have is a dead store the
+    // optimiser may delete — the very reason module `buffer` zeroes the ring volatile. Task
+    // T-13-15, audit of 2026-08-24.
+    crate::buffer::zero_slice(&mut text);
+    crate::buffer::zero_slice(&mut events);
 
     outcome
 }
@@ -1675,8 +1691,10 @@ pub fn on_hotkey() -> Option<Replaced> {
 
     let outcome = replace_with(&strokes, &target, inter_event_delay_ms(), method).ok();
 
-    // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02.
-    strokes.fill(Keystroke::default());
+    // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02, with
+    // the volatile write of `crate::buffer::zero_slice` so that the store in front of the `drop`
+    // below cannot be optimised away (task T-13-15).
+    crate::buffer::zero_slice(&mut strokes);
     drop(strokes);
 
     if outcome.is_some() {

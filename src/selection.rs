@@ -88,11 +88,33 @@
 //!   *which* format numbers and *how many* bytes, and format numbers are constants of the
 //!   operating system, not user data;
 //! * `Drop` overwrites every captured block with zeroes before it is freed, the same treatment
-//!   [`crate::buffer`] gives the typing buffer for SEC-02;
+//!   [`crate::buffer`] gives the typing buffer for SEC-02 — literally the same write, since task
+//!   **T-13-15**: `crate::buffer::zero_slice`, which is `write_volatile` plus a
+//!   `compiler_fence`, and not the `fill(0)` it used to be;
 //! * nothing in this module panics with a payload built from clipboard data — nothing in this
 //!   module panics at all, which the source sweep in `tests\selection.rs` checks;
 //! * the journal is reached with [`crate::diag::Operation`] values and `HRESULT`s only, never
 //!   with text.
+//!
+//! # Which buffers are zeroed, and with what — SEC-01, SEC-02, task T-13-15
+//!
+//! The audit of 2026-08-24 found this module promising more than it did, in two ways, and both
+//! are settled here rather than softened.
+//!
+//! **The form of the write.** [`Snapshot`], [`Recoded`] and [`recode`] zeroed their buffers with
+//! `slice.fill(0)` immediately before releasing them. That is the store module `buffer` calls
+//! deletable in its own documentation — «a plain assignment into a slot that is about to be
+//! overwritten or dropped is a dead store the compiler is allowed to delete» — and under the
+//! Release profile of section 3.2 (`opt-level 3`, fat LTO, `codegen-units 1`) a memset in front
+//! of a free is what dead-store elimination exists to remove. All three now use
+//! `crate::buffer::zero_slice`, the ring's own volatile write.
+//!
+//! **The buffers that were missed.** Three transit copies of the user's text were released
+//! untouched: the block [`read_unicode_text`] takes off the clipboard, the `Vec<u16>` inside
+//! `decode_utf16`, and the encoded block [`write_unicode_text`] puts on. All three are zeroed
+//! now, the last of them on the failure paths as well. Note what this is and is not: SEC-02 of
+//! SPEC is a rule about the **typing buffer**, and none of this was a breach of it. It is the
+//! rule this module wrote for itself in the list above, kept in the places it was not being kept.
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -964,12 +986,17 @@ impl Drop for Snapshot {
     ///
     /// The same treatment [`crate::buffer`] gives the typing buffer for SEC-02, and for the same
     /// reason: a freed heap block is readable by whatever allocates next, and the content of
-    /// somebody's clipboard is precisely what SEC-07 names. `fill` writes through the slice, so
-    /// the compiler cannot drop the stores as dead: the vector is read by nobody afterwards, but
-    /// it is not a local whose address never escaped.
+    /// somebody's clipboard is precisely what SEC-07 names.
+    ///
+    /// The write is `crate::buffer::zero_slice` — `write_volatile` and a `compiler_fence`, the
+    /// ring's own write. It used to be `fill(0)`, argued for on the grounds that a store through
+    /// a slice cannot be dead; the audit of 2026-08-24 refused that argument, and task
+    /// **T-13-15** replaced it. The vector is freed the moment this function returns, the
+    /// optimiser can see that as clearly as any other dead store, and `buffer.rs` says so in as
+    /// many words about its own ring.
     fn drop(&mut self) {
         for entry in &mut self.captured {
-            entry.bytes.fill(0);
+            crate::buffer::zero_slice(&mut entry.bytes);
         }
     }
 }
@@ -1312,6 +1339,11 @@ fn note_restore_skipped() {
 ///
 /// SEC-01, SEC-07: the answer is returned to the caller and is not logged, formatted or
 /// journalled anywhere on the way.
+///
+/// The copy `read_block` makes is the user's clipboard in plain form, and it is zeroed before
+/// this frame releases it — SEC-01, SEC-02, task **T-13-15**. Until the audit of 2026-08-24 it
+/// was not zeroed at all, which made it one of the three holes in a rule the rest of this module
+/// keeps.
 pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> {
     let clipboard = Clipboard::open(owner)?;
 
@@ -1322,11 +1354,15 @@ pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> 
     // SAFETY: `handle` is a live block borrowed from the open clipboard.
     let size = unsafe { GlobalSize(handle) };
 
-    let Some(bytes) = read_block(handle, size) else {
+    let Some(mut bytes) = read_block(handle, size) else {
         return Ok(None);
     };
 
-    Ok(Some(decode_utf16(&bytes)))
+    let text = decode_utf16(&bytes);
+
+    crate::buffer::zero_slice(&mut bytes);
+
+    Ok(Some(text))
 }
 
 /// Turns the bytes of a `CF_UNICODETEXT` block into a string.
@@ -1335,14 +1371,22 @@ pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> 
 /// unpaired surrogate — are driven by unit tests rather than by whatever happens to be on the
 /// clipboard. Lossy on purpose: a lone surrogate is somebody else's malformed data, and refusing
 /// the whole clipboard over it would be the wrong trade.
+///
+/// `units` is a second copy of the same text, and it is zeroed before it is released — SEC-01,
+/// SEC-02, task **T-13-15**. The string that comes out is the caller's to look after, and
+/// [`Recoded`] is what looks after it further down the path.
 fn decode_utf16(bytes: &[u8]) -> String {
-    let units: Vec<u16> = bytes
+    let mut units: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .take_while(|&unit| unit != 0)
         .collect();
 
-    String::from_utf16_lossy(&units)
+    let text = String::from_utf16_lossy(&units);
+
+    crate::buffer::zero_slice(&mut units);
+
+    text
 }
 
 /// Turns a string into the bytes of a `CF_UNICODETEXT` block, terminator included.
@@ -1365,15 +1409,29 @@ fn encode_utf16(text: &str) -> Vec<u8> {
 /// cannot enforce that; the report of T-07-1 says it in words and T-07-2 is the single caller.
 ///
 /// The write is marked as ours — FR-63, see [`note_own_write`].
+///
+/// The block `encode_utf16` builds carries the user's text — the recoded selection of step 6 —
+/// and it is zeroed before this frame releases it on **every** path, the failures included
+/// (SEC-01, SEC-02, task **T-13-15**). That is why the three fallible steps are inside a closure
+/// rather than behind a `?` of this function: a `?` here would carry the vector out unzeroed,
+/// which is exactly what it did until the audit of 2026-08-24.
 pub fn write_unicode_text(owner: HWND, text: &str) -> Result<(), ClipboardError> {
-    let bytes = encode_utf16(text);
+    let mut bytes = encode_utf16(text);
 
-    let clipboard = Clipboard::open(owner)?;
+    let outcome = Clipboard::open(owner).and_then(|clipboard| {
+        clipboard.empty()?;
+        clipboard.put(CF_UNICODETEXT, &bytes)?;
 
-    clipboard.empty()?;
-    clipboard.put(CF_UNICODETEXT, &bytes)?;
+        // Closed before the write is announced, as it always was: the listener of FR-63 can see
+        // the change the moment the clipboard is released.
+        drop(clipboard);
 
-    drop(clipboard);
+        Ok(())
+    });
+
+    crate::buffer::zero_slice(&mut bytes);
+
+    outcome?;
 
     note_own_write();
 
@@ -1834,9 +1892,14 @@ impl fmt::Debug for Recoded {
 
 impl Drop for Recoded {
     fn drop(&mut self) {
-        // SAFETY: every byte is overwritten with `0x00`, and a run of NUL bytes is valid UTF-8,
-        // so the invariant `String` carries is preserved. The length is not changed.
-        unsafe { self.text.as_mut_vec() }.fill(0);
+        // SAFETY: every byte of the string is overwritten with `0x00`, and a run of NUL bytes is
+        // valid UTF-8, so the invariant `String` carries is preserved for the rest of its life —
+        // which is the few instructions between this line and the deallocation. The length is not
+        // changed, no byte is added or removed, and the vector is not reallocated;
+        // `crate::buffer::zero_slice` writes into the elements of the slice it is handed and does
+        // nothing else. Task T-13-15 made that write volatile: a `fill(0)` in a destructor, in
+        // front of the free that follows it, is the dead store `buffer.rs` warns about.
+        crate::buffer::zero_slice(unsafe { self.text.as_mut_vec() }.as_mut_slice());
     }
 }
 
@@ -1964,8 +2027,9 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
 
     let recoded = String::from_utf16_lossy(&units);
 
-    // The working buffer held the user's text — SEC-01, SEC-02.
-    units.fill(0);
+    // The working buffer held the user's text — SEC-01, SEC-02. Volatile since task T-13-15:
+    // `units` is dropped two lines below, and a plain `fill` in front of that is a dead store.
+    crate::buffer::zero_slice(&mut units);
 
     Recoded {
         text: recoded,

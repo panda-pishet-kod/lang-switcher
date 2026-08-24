@@ -2648,3 +2648,65 @@ fn user_press(vk: u16, scan: u16) -> lang_switcher::hook::KeyEvent {
         time: SOME_TIME,
     }
 }
+
+// -------------------------------------------------------------------------------------
+// SEC-02 outside the ring — the form of `buffer::zero_slice`. Task T-13-15.
+// -------------------------------------------------------------------------------------
+
+/// The helper the buffers of `inject` and `selection` are zeroed with is a **volatile** write.
+///
+/// The value checks of that helper — put text in, call it, read the slots back — live next to it
+/// in `src\buffer.rs`, because `zero_slice` is `pub(crate)` and an integration test is a separate
+/// crate that cannot call it. What no value check can show is the property the audit of
+/// 2026-08-24 was about: that the zeroes are written with `ptr::write_volatile` and fenced, so
+/// that an optimiser looking at a buffer nobody reads again may not delete them. A plain
+/// `slice.fill(0)` would pass every value check and fail the requirement, so this reads the
+/// source, the way the SEC-02 tests of the ring read the backing array.
+#[test]
+fn the_zeroing_helper_outside_the_ring_is_a_volatile_fenced_write() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("buffer.rs"),
+    )
+    .expect("src\\buffer.rs must be readable");
+
+    let helper = source
+        .split("pub(crate) fn zero_slice")
+        .nth(1)
+        .expect("the helper of task T-13-15 exists");
+    let body = helper
+        .split("\n}\n")
+        .next()
+        .expect("a top-level function closes in the first column");
+
+    assert!(
+        helper.starts_with("<T: Copy + Default>(slice: &mut [T])"),
+        "the bound is what makes the write sound for `INPUT` and `Keystroke` as well as for \
+         numbers, and `Copy` is what says no destructor is being skipped"
+    );
+    assert!(
+        body.contains("ptr::write_volatile(slot, T::default())"),
+        "the zeroes are written volatile, exactly as `Ring::zero_slot` writes its own"
+    );
+    assert!(
+        body.contains("compiler_fence(Ordering::SeqCst)"),
+        "and fenced, so they cannot be sunk past what the caller does next"
+    );
+    assert!(
+        !body.contains(".fill("),
+        "the helper is not a `fill` behind a new name"
+    );
+
+    // And the sample it stands next to is untouched: the ring still zeroes its own slots the
+    // same way, which is what the audit named a strength of this module.
+    let ring = source
+        .split("fn zero_slot(&mut self, index: usize)")
+        .nth(1)
+        .expect("the ring still zeroes its slots");
+
+    assert!(
+        ring.contains("ptr::write_volatile(slot, Stroke::ZEROED)"),
+        "the ring path of SEC-02 is unchanged"
+    );
+}

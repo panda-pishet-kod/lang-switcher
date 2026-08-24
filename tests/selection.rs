@@ -2907,3 +2907,102 @@ fn nothing_of_the_selection_can_reach_the_journal_or_a_panic() {
     let printed = format!("{outcome:?}");
     assert!(!printed.contains("привет") && !printed.contains("ghbdtn"));
 }
+
+// ---------------------------------------------------------------------------------------
+// SEC-01, SEC-02 — how the working copies of the user's text are released. Task T-13-15.
+// ---------------------------------------------------------------------------------------
+
+/// The body of the top-level item `signature` opens, up to the brace in the first column.
+///
+/// The same reading `tests\hook.rs` uses for the callback: a top-level function closes with `}`
+/// at column zero, and everything before that belongs to it.
+fn body_after(source: &str, signature: &str) -> String {
+    source
+        .split(signature)
+        .nth(1)
+        .unwrap_or_else(|| panic!("{signature} exists in the module"))
+        .split("\n}\n")
+        .next()
+        .unwrap_or_else(|| panic!("{signature} closes in the first column"))
+        .to_string()
+}
+
+/// **The audit of 2026-08-24, the middle finding: `fill` is not a zeroing that survives.**
+///
+/// Every place in the module that overwrites a copy of the user's text before releasing it goes
+/// through `buffer::zero_slice` — the `write_volatile` plus `compiler_fence` the ring is zeroed
+/// with — and no place does it with `slice.fill(0)`, which the documentation of module `buffer`
+/// calls a dead store the compiler may delete.
+///
+/// The one `.fill(` left in the module is `Block::fill`, and it is not a zeroing at all: it
+/// copies the caller's bytes **into** a freshly allocated clipboard block. The name collides and
+/// nothing else does, so it is named here rather than being allowed to fail the sweep later.
+#[test]
+fn every_working_copy_of_the_text_is_released_through_the_volatile_zeroing() {
+    let source = source_of("selection.rs");
+
+    let fills = code_lines_with(&source, ".fill(");
+
+    assert_eq!(
+        fills.len(),
+        1,
+        "the only `.fill(` left is the one that fills a clipboard block with data: {fills:?}"
+    );
+    assert!(
+        fills[0].1.contains("block.fill(bytes)"),
+        "and that one is Block::fill: {:?}",
+        fills[0]
+    );
+
+    // Six buffers, six calls: the three the finding named and the three that were not zeroed at
+    // all. The count is asserted so that a seventh copy of the user's text added later cannot
+    // quietly arrive without one.
+    let zeroed = code_lines_with(&source, "buffer::zero_slice(");
+
+    assert_eq!(
+        zeroed.len(),
+        6,
+        "every working copy is zeroed through the helper: {zeroed:?}"
+    );
+}
+
+/// **The audit of 2026-08-24, the low finding: three transit buffers were not zeroed at all.**
+///
+/// `read_unicode_text` released the block it read off the clipboard, `decode_utf16` released the
+/// code units it decoded out of that block, and `write_unicode_text` released the encoded block
+/// it had just put on the clipboard — three copies of the user's text handed back to the
+/// allocator as they were, in a module whose own header promises the opposite. Each of the three
+/// now zeroes its buffer, and the third does it on the failure paths as well, which is what the
+/// closure inside it is for.
+#[test]
+fn the_three_transit_buffers_of_the_clipboard_path_are_zeroed_as_well() {
+    let source = source_of("selection.rs");
+
+    for (signature, what) in [
+        (
+            "pub fn read_unicode_text",
+            "the block read off the clipboard",
+        ),
+        ("fn decode_utf16", "the code units decoded out of it"),
+        ("pub fn write_unicode_text", "the block written back to it"),
+    ] {
+        let body = body_after(&source, signature);
+
+        assert!(
+            body.contains("buffer::zero_slice("),
+            "{signature} zeroes {what}"
+        );
+    }
+
+    // The write is the one with paths that used to leave through a `?`. The zeroing stands
+    // **after** the fallible work and **before** the result is unwrapped, so no early return can
+    // step over it.
+    let body = body_after(&source, "pub fn write_unicode_text");
+    let zeroing = body.find("buffer::zero_slice(").expect("the zeroing");
+    let unwrap = body.find("outcome?").expect("the result is unwrapped");
+
+    assert!(
+        zeroing < unwrap,
+        "the block is zeroed before the failure is propagated"
+    );
+}

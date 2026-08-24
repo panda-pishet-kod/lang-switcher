@@ -704,6 +704,74 @@ impl Drop for Ring {
 }
 
 // ---------------------------------------------------------------------------------------
+// The same write, for the working buffers outside the ring — SEC-01, SEC-02
+// ---------------------------------------------------------------------------------------
+
+/// Writes zeroes over every element of `slice` so that no optimiser may remove the writes.
+///
+/// [`Ring::zero_slot`] above is this write for one slot of the typing buffer; this is the same
+/// write for a slice somebody else owns, and it exists because the typing buffer is not the only
+/// place the user's text lives. Module `inject` holds the converted text, the `INPUT` packet and
+/// the copy of the strokes; module `selection` holds the clipboard snapshot, the decoded text,
+/// the recoded text and the blocks on the way in and out of the clipboard. Both modules promise
+/// in their own documentation that those buffers get the treatment SEC-02 prescribes here — and
+/// until task **T-13-15** (audit of 2026-08-24) both kept that promise with `slice.fill(0)`.
+///
+/// A `fill` immediately before the vector is released is precisely the store the module
+/// documentation above calls deletable: **a plain assignment into a slot that is about to be
+/// overwritten or dropped is a dead store the compiler is allowed to delete**, and the Release
+/// profile of section 3.2 — `opt-level 3`, fat LTO, `codegen-units 1` — is the configuration in
+/// which it is most likely to be noticed and deleted, because LLVM knows what the deallocator
+/// that follows does. [`core::ptr::write_volatile`] is the one write whose presence in the object
+/// code the language guarantees, and [`core::sync::atomic::compiler_fence`] keeps the zeroes from
+/// being sunk past whatever the caller does next. One implementation rather than six copies, so
+/// that the promise and the code cannot drift apart again.
+///
+/// This is a *strengthening of a write that was already there* and not a new behaviour: nothing
+/// observable changes, no text reaches a log or a panic message (SEC-01, SEC-07), and nothing
+/// here is reachable from the hook callback — every caller is on the input thread after the
+/// handoff or on the UI thread (NFR-01…NFR-05).
+///
+/// # Why `Copy + Default` and not a byte fill
+///
+/// The elements to be zeroed are of four types, and only two of them are numbers: `u8` and `u16`
+/// of the text buffers, `INPUT` of the injected packet and [`crate::convert::Keystroke`] of the
+/// stroke copy. `Default::default()` is the zero of all four — `0` for the integers,
+/// `core::mem::zeroed()` for `INPUT`, the derived all-zero value for `Keystroke` — so one
+/// function covers them without a byte-level write that would have to argue about padding and
+/// about which byte patterns are valid values of the type. The bound is what makes the volatile
+/// write sound in both directions:
+///
+/// * `Default` gives a **value of the type** to write, not a byte pattern assumed to be one;
+/// * `Copy` means the element being overwritten has no destructor, so writing over it without
+///   running one leaks nothing. A `T` that owned a heap block would need its `Drop` instead, and
+///   the bound keeps such a type from ever reaching this function.
+pub(crate) fn zero_slice<T: Copy + Default>(slice: &mut [T]) {
+    for element in slice {
+        // Taken from the exclusive borrow the iterator hands out, in safe code, so that the raw
+        // write below cannot be the place an indexing mistake turns into memory corruption.
+        let slot: *mut T = element;
+
+        // SAFETY: `slot` is the address of an element of `slice`, obtained from the mutable
+        // borrow the iterator yields one line above. It is therefore non-null, in bounds, and
+        // aligned for `T` — the elements of a slice are laid out at `align_of::<T>()` by the
+        // language, and the slice reference itself is required to be aligned — and it is valid
+        // for a write of one `T` for the whole of this call, because the borrow is exclusive and
+        // nothing else can be reading or writing it. `T::default()` is an ordinary value of the
+        // type, and `T: Copy` means the value it replaces has no destructor being skipped.
+        // Volatile is the requirement and not a flourish: the write has to survive an optimiser
+        // that can see the buffer is never read again.
+        unsafe { ptr::write_volatile(slot, T::default()) };
+
+        // Volatile accesses may not be reordered against each other, but they may be against
+        // ordinary memory operations; the fence keeps the zeroes from being sunk past whatever
+        // the caller does next. It is a compile-time barrier only and costs no instruction —
+        // the same construction, per element, that `zero_slot` uses per slot.
+        compiler_fence(Ordering::SeqCst);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Modifier tracking
 // ---------------------------------------------------------------------------------------
 
@@ -2162,5 +2230,124 @@ mod tests {
         assert_eq!(Recorder::with_capacity(0).capacity(), DEFAULT_CAPACITY);
         assert_eq!(Recorder::with_capacity(1).capacity(), 1);
         assert_eq!(Recorder::with_capacity(usize::MAX).capacity(), MAX_CAPACITY);
+    }
+
+    // -----------------------------------------------------------------------------------
+    // `zero_slice` — the SEC-02 write for the buffers outside the ring. Task T-13-15.
+    // -----------------------------------------------------------------------------------
+    //
+    // These live here rather than in `tests\buffer.rs` for the reason the function signature
+    // gives: [`zero_slice`] is `pub(crate)`, and an integration test is a separate crate that
+    // cannot see it. The tests of the ring itself stay where they are.
+
+    /// The two integer element types the text buffers are made of are left holding zeroes.
+    ///
+    /// Same shape as the SEC-02 tests of the ring in `tests\buffer.rs`: put something in, call
+    /// the zeroing, and read the memory back — the check is on the slot, not on a length.
+    #[test]
+    fn zero_slice_leaves_the_text_buffers_holding_zeroes() {
+        // The code units of a converted word, in the type `convert` and `selection` carry.
+        let mut units: Vec<u16> = "привет".encode_utf16().collect();
+        assert!(
+            units.iter().any(|unit| *unit != 0),
+            "there is text to erase"
+        );
+
+        zero_slice(&mut units);
+
+        assert!(units.iter().all(|unit| *unit == 0), "SEC-02: every unit");
+        assert_eq!(units.len(), 6, "the length is not what was changed");
+
+        // The bytes of a `CF_UNICODETEXT` block, the type the clipboard path carries.
+        let mut bytes: Vec<u8> = vec![1, 2, 3, 0xFF];
+
+        zero_slice(&mut bytes);
+
+        assert!(bytes.iter().all(|byte| *byte == 0), "SEC-02: every byte");
+    }
+
+    /// The two structure element types are zeroed as whole values, not as bytes.
+    ///
+    /// `INPUT` and [`Keystroke`] are what the injection path releases, and neither is a number.
+    /// The zero written into them is `Default::default()`, which is `mem::zeroed()` for `INPUT`
+    /// and the derived all-zero value for `Keystroke`.
+    #[test]
+    fn zero_slice_leaves_the_injection_buffers_holding_default_values() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, VIRTUAL_KEY,
+        };
+
+        let mut events = vec![
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0x41),
+                        wScan: 0x1E,
+                        dwExtraInfo: 0xABCD,
+                        ..Default::default()
+                    },
+                },
+            };
+            3
+        ];
+
+        assert!(
+            events.iter().any(|event| event.r#type.0 != 0),
+            "there is a packet to erase"
+        );
+
+        zero_slice(&mut events);
+
+        for event in &events {
+            assert_eq!(event.r#type.0, 0, "SEC-02: the discriminant is zeroed");
+
+            // SAFETY: `INPUT_0` is a union of plain-data structures of the same C layout, and
+            // every one of them is valid for any bit pattern; the keyboard arm is the largest
+            // this program ever writes and is read here only to prove that its bytes are zero.
+            let keyboard = unsafe { event.Anonymous.ki };
+
+            assert_eq!(keyboard.wVk.0, 0, "SEC-02: the virtual key is zeroed");
+            assert_eq!(keyboard.wScan, 0, "SEC-02: the scan code is zeroed");
+            assert_eq!(keyboard.dwExtraInfo, 0, "SEC-02: the signature is zeroed");
+        }
+
+        // The copy of the strokes `on_hotkey` releases, built the way `Stroke::keystroke`
+        // builds one.
+        let mut strokes = vec![
+            Keystroke::new(
+                LayoutId::from_raw(0x0409),
+                0x1E,
+                false,
+                Mods::new(true, false, false),
+                KeyMapping::EMPTY,
+            );
+            4
+        ];
+
+        assert!(
+            strokes.iter().all(|stroke| *stroke != Keystroke::default()),
+            "there are strokes to erase"
+        );
+
+        zero_slice(&mut strokes);
+
+        assert!(
+            strokes.iter().all(|stroke| *stroke == Keystroke::default()),
+            "SEC-02: every stroke of the copy"
+        );
+    }
+
+    /// An empty slice is an ordinary argument, not a special case.
+    ///
+    /// It happens for real: a press with nothing to erase gives `replace` a zero-length text,
+    /// and a clipboard block of a single terminator decodes to nothing at all.
+    #[test]
+    fn zero_slice_of_an_empty_slice_writes_nothing_and_returns() {
+        let mut nothing: Vec<u16> = Vec::new();
+
+        zero_slice(&mut nothing);
+
+        assert!(nothing.is_empty());
     }
 }
