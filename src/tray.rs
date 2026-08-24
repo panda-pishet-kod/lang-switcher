@@ -2963,15 +2963,96 @@ fn open_settings(hwnd: HWND) {
 /// effect without a restart (rule R-52); and the registry is made to agree with
 /// `general.autostart`, which is FR-93 and is the one part of the configuration that lives
 /// outside the file.
+///
+/// The registry is the one destination of the three that can answer no, and what is done with
+/// that answer is [`apply_settings_via`], one function down.
 fn apply_settings(config: &Config) {
+    apply_settings_via(config, settings::set_autostart);
+}
+
+/// The same, with the registry half of FR-93 handed in — task T-13-24.
+///
+/// # The finding
+///
+/// The audit of 2026-08-24 read the comment in the body below — «FR-93 first: if the registry
+/// refuses, the file is not made to claim otherwise» — and then the line under it. There was
+/// no early return and nothing else in its place, so [`Tray::replace_config`] went on to save
+/// the very `general.autostart` the registry had just refused. From that moment the file, the
+/// check mark of FR-91 and the dialog of FR-92 all claimed an autostart the system does not
+/// have, and at the next logon nothing started. The invariant is this module's own and is
+/// written out at [`Tray::set_autostart`]: a file that claims the program starts with the
+/// session while the registry says otherwise is the one outcome worth avoiding.
+///
+/// # One field steps back — the operation does not
+///
+/// A bare `return` is the obvious repair and the wrong one. «Применить» carries *everything*
+/// the user changed in the dialog — the hotkey, the layouts, the exclusions, the language, the
+/// theme, the timings — and a refusal from the `Run` key of FR-93 says nothing whatever about
+/// any of them. Abandoning the whole operation because one destination of three answered no
+/// would trade a small lie for a large silent loss, and the user would have no way to tell
+/// that the rest of the dialog had been thrown away.
+///
+/// So exactly one field steps back. `general.autostart` returns to the value the program is
+/// living by, read out of the tray **before** anything is written, because
+/// [`Tray::replace_config`] is what overwrites it; every other field is stored and published
+/// exactly as the user left it. Both halves of what the file then says are true: the autostart
+/// the registry really holds, and every other setting that was asked for.
+///
+/// The twin [`toggle_autostart`] does return on the same refusal, and the two do not disagree:
+/// that path carries *only* the autostart, so skipping its one field and giving up its whole
+/// operation are the same act.
+///
+/// # The disagreement is still shown
+///
+/// Nothing here hides anything. The refusal goes into the journal through
+/// [`crate::app::report_non_critical`] — the one event that was already there, not a second
+/// one — and the dialog goes on showing the registry's own answer, [`settings::autostart_registered`],
+/// beside the state of the file: the two are read separately on purpose, so that a
+/// disagreement is visible rather than hidden. What changes is only that the **file** stops
+/// claiming what is not so.
+///
+/// # And the save policy of task T-13-6
+///
+/// The two mechanisms never meet. This one decides **what** is stored; [`Tray::save_config`]
+/// decides **whether** the file may be written at all, on its own facts — the outcome of the
+/// one read this program performs — and it decides that afterwards and underneath
+/// [`Tray::replace_config`]. A session running under [`SavePolicy::Forbidden`] writes no file
+/// either way, and the corrected value is still the one the tray holds in memory and the one
+/// the check mark of FR-91 shows. Neither can shadow the other, and neither has to know the
+/// other exists.
+///
+/// # Why the registry write is an argument
+///
+/// The same shape and the same reason as [`resume_is_refused`] and [`dialog_locks_command`]:
+/// the refusing branch is the whole point of this function, and no test may drive it by making
+/// the real `HKCU\…\CurrentVersion\Run` refuse — that key belongs to whoever is running the
+/// tests, and FR-93 gives this program exactly one value in it. `tests\tray.rs` hands in a
+/// closure that answers `Err`; the product hands in [`settings::set_autostart`] and nothing
+/// else does.
+pub fn apply_settings_via(config: &Config, write_run_key: impl FnOnce(bool) -> WinResult<()>) {
+    // Read before anything moves, because `replace_config` at the foot of this function is what
+    // overwrites it: `general.autostart` as the program is living by it right now — the value
+    // the file already carries and the value the `Run` key was last made to agree with. `None`
+    // is a thread with no tray of its own, and then there is nothing to store and nothing to
+    // keep.
+    let in_force = with_tray(|tray| tray.autostart());
+
+    let mut stored = config.clone();
+
     // FR-93 first: if the registry refuses, the file is not made to claim otherwise.
-    if let Err(error) = settings::set_autostart(config.general.autostart) {
+    if let Err(error) = write_run_key(config.general.autostart) {
+        // NFR-13: the refusal is used, not swallowed. It is reported, and it is the reason the
+        // one field below steps back to what is true.
         app::report_non_critical("RegSetValueExW", &error);
+
+        if let Some(in_force) = in_force {
+            stored.general.autostart = in_force;
+        }
     }
 
-    with_tray(|tray| tray.replace_config(config.clone()));
+    with_tray(|tray| tray.replace_config(stored.clone()));
 
-    app::publish_configuration(config);
+    app::publish_configuration(&stored);
 }
 
 /// The check mark of FR-91, made to do what FR-93 says.

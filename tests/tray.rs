@@ -17,6 +17,7 @@
 //! Nothing here writes into the real `%APPDATA%\Lang_Switcher`: every tray is installed
 //! with [`Tray::install_at`] pointing at a directory under `%TEMP%` that removes itself.
 
+use std::cell::Cell;
 use std::fs;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -28,7 +29,9 @@ use lang_switcher::hook;
 use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
 use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
 
-use windows::Win32::Foundation::{FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
+};
 use windows::Win32::Graphics::Gdi::{ANTIALIASED_QUALITY, LOGFONTW};
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
@@ -43,7 +46,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_DRAWITEM, WM_ENDSESSION,
     WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::{PCWSTR, w};
+use windows::core::{Error as WinError, PCWSTR, w};
 
 // ---------------------------------------------------------------------------------------
 // FR-91, read back from Windows
@@ -2293,6 +2296,469 @@ fn a_readable_configuration_is_written_back_exactly_as_before() {
         home.entries(),
         [CONFIG_FILE_NAME],
         "a readable file is not copied anywhere"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-13-24 — «Применить» does not write an autostart the registry refused
+//
+// The audit of 2026-08-24 read the comment standing over the FR-93 half of `apply_settings`
+// — «FR-93 first: if the registry refuses, the file is not made to claim otherwise» — and
+// then the line under it: there was no early return and nothing in its place, so
+// `Tray::replace_config` saved the very `general.autostart` the `Run` key had just refused.
+// The file, the check mark of FR-91 and the dialog of FR-92 then all claimed an autostart the
+// system does not have.
+//
+// The repair is **one field stepping back, not the operation being given up**: «Применить»
+// carries everything the user changed in the dialog, and a refusal from the registry says
+// nothing about the hotkey, the layouts or the exclusions. Both halves of that sentence are
+// measured below, in one test, by the bytes in the folder.
+//
+// ⚠ **The registry is a seam here and never the real key.** `settings::set_autostart` writes —
+// or deletes — the `HKCU\…\CurrentVersion\Run` value of whoever is running the tests (FR-93),
+// which is why `tests\tray.rs` has never fired `CMD_AUTOSTART` with the gate open (task
+// T-13-14 says so in its own block above). The refusing branch is nevertheless the whole
+// point of this task, so `tray::apply_settings_via` takes the registry write as an argument
+// and these tests hand in a closure. Every one of them reads `settings::autostart_value()`
+// before and after and asserts the machine's own value never moved.
+//
+// The `%APPDATA%` rule of this file holds as everywhere: every tray is attached with
+// `tray::attach_at` on a `TestDir` under `%TEMP%`.
+//
+// ⚠ `general.enabled` is deliberately left alone by all four tests. `app::publish_configuration`
+// hands it to `hook::set_active`, which is process-wide, and the tests of this binary run on
+// parallel threads — `a_forged_fail_safe_message_leaves_no_configuration_behind` reads
+// `hook::is_active()` before and after its own work. Changing anything else is free; changing
+// that one field would be reaching across into another test.
+// ---------------------------------------------------------------------------------------
+
+/// The configuration the user is supposed to have produced in the dialog: the autostart turned
+/// the other way round, and four unrelated settings changed with it.
+///
+/// The four are chosen to land in four different sections of section 7 and to be visible in the
+/// file as text, so that "everything else survived" is read out of the bytes rather than
+/// inferred.
+fn dialog_produced(from: &settings::Config, autostart: bool) -> settings::Config {
+    let mut asked = from.clone();
+
+    asked.general.autostart = autostart;
+    asked.general.language = settings::Language::En;
+    asked.hotkey.key = "F9".to_owned();
+    asked.replacement.inter_event_delay_ms = 7;
+    asked.exclusions.processes = vec!["мой-редактор.exe".to_owned()];
+
+    asked
+}
+
+/// Asserts that the four unrelated changes of [`dialog_produced`] are all in `text`.
+fn assert_the_other_changes_are_in(text: &str) {
+    for needle in [
+        "language = \"en\"",
+        "key = \"F9\"",
+        "inter_event_delay_ms = 7",
+        "мой-редактор.exe",
+    ] {
+        assert!(
+            text.contains(needle),
+            "a refusal from the registry says nothing about the rest of the dialog: `{needle}` \
+             must be in the file"
+        );
+    }
+}
+
+/// **Criterion 5 of task T-13-24, and both of its facts in one test.** The registry refuses,
+/// and the file that is written carries the **previous** `general.autostart` together with
+/// **every other** change the user made.
+///
+/// Measured by the content of `config.toml` — the text, and then the same text read back
+/// through the product's own reader — because the finding was about what the file claims and
+/// an intention read out of the source would not have caught it.
+#[test]
+fn a_refused_run_key_keeps_the_autostart_of_the_file_and_stores_every_other_change() {
+    let window = TestWindow::new();
+    let home = TestDir::new("registry-refused");
+    let _attached = attach_ui(&window, &home);
+
+    // The `Run` value of whoever is running this, read and never written — FR-93.
+    let registry_before = settings::autostart_value();
+
+    let in_force = live(Tray::autostart);
+
+    assert!(
+        in_force,
+        "section 7 has `general.autostart` default to true, and no file was read"
+    );
+    assert_eq!(
+        home.entries(),
+        Vec::<String>::new(),
+        "attaching the tray reads the configuration and writes nothing"
+    );
+
+    // The user turned the autostart off and changed four other things beside it.
+    let asked = dialog_produced(&live(|tray| tray.config().clone()), !in_force);
+
+    assert!(
+        asked.general.enabled,
+        "`general.enabled` stays where it is — see the note at the head of this block"
+    );
+
+    let handed = Cell::new(None);
+
+    tray::apply_settings_via(&asked, |wanted| {
+        handed.set(Some(wanted));
+        Err(WinError::from(ERROR_ACCESS_DENIED))
+    });
+
+    assert_eq!(
+        handed.get(),
+        Some(!in_force),
+        "FR-93 is attempted first and with the value the user asked for — the file steps back \
+         only because the registry said no, not instead of asking it"
+    );
+
+    let text = fs::read_to_string(home.config()).expect("the configuration must have been saved");
+
+    println!("--- config.toml after a refused Run key ---\n{text}");
+
+    // Fact one: the refused field did not reach the file.
+    assert!(
+        text.contains("autostart = true"),
+        "the file must carry the autostart that is really in force"
+    );
+    assert!(
+        !text.contains("autostart = false"),
+        "and must not carry the one the registry refused — this is the finding"
+    );
+
+    // Fact two: everything else did.
+    assert_the_other_changes_are_in(&text);
+
+    // The same two facts through the product's own reader, so that they are facts about the
+    // configuration and not about a substring.
+    let (stored, outcome) = settings::read_or_default(&home.config());
+
+    assert!(outcome.is_ok(), "the file must parse: {:?}", outcome.err());
+    assert_eq!(
+        stored.general.autostart, in_force,
+        "the refused field is the one the file already had"
+    );
+    assert_eq!(stored.general.language, settings::Language::En);
+    assert_eq!(stored.hotkey.key, "F9");
+    assert_eq!(stored.replacement.inter_event_delay_ms, 7);
+    assert_eq!(stored.exclusions.processes, vec!["мой-редактор.exe"]);
+
+    // Memory agrees with the file, so the check mark of FR-91 shows what is true.
+    assert_eq!(
+        live(Tray::autostart),
+        in_force,
+        "the tray holds the value the file holds"
+    );
+    assert_eq!(live(|tray| tray.config().hotkey.key.clone()), "F9");
+
+    // No litter, and the real registry was never asked anything.
+    assert_eq!(home.entries(), vec![CONFIG_FILE_NAME.to_owned()]);
+    assert_eq!(
+        settings::autostart_value(),
+        registry_before,
+        "FR-93: the `Run` key of the person running this test is untouched"
+    );
+}
+
+/// **Criterion 6 of task T-13-24.** The registry accepts, and everything is saved exactly as it
+/// was before this task — the autostart included.
+///
+/// The positive control of the test above: it shows that the file really does follow the check
+/// box when there is nothing to step back from, so the assertion up there is about the refusal
+/// and not about a value that could never have been written anyway.
+#[test]
+fn an_accepted_run_key_stores_the_autostart_the_user_asked_for() {
+    let window = TestWindow::new();
+    let home = TestDir::new("registry-accepted");
+    let _attached = attach_ui(&window, &home);
+
+    let registry_before = settings::autostart_value();
+    let in_force = live(Tray::autostart);
+
+    assert!(in_force);
+
+    let asked = dialog_produced(&live(|tray| tray.config().clone()), !in_force);
+    let handed = Cell::new(None);
+
+    tray::apply_settings_via(&asked, |wanted| {
+        handed.set(Some(wanted));
+        Ok(())
+    });
+
+    assert_eq!(handed.get(), Some(!in_force));
+
+    let text = fs::read_to_string(home.config()).expect("the configuration must have been saved");
+
+    println!("--- config.toml after an accepted Run key ---\n{text}");
+
+    assert!(
+        text.contains("autostart = false"),
+        "an accepted write is the ordinary road, and the file follows the check box down it"
+    );
+    assert_the_other_changes_are_in(&text);
+
+    assert_eq!(
+        live(Tray::autostart),
+        !in_force,
+        "and the check mark of FR-91 follows it too"
+    );
+
+    assert_eq!(home.entries(), vec![CONFIG_FILE_NAME.to_owned()]);
+    assert_eq!(
+        settings::autostart_value(),
+        registry_before,
+        "FR-93: still nothing of the real `Run` key was touched — the seam is the whole of it"
+    );
+}
+
+/// **Criterion 7 of task T-13-24.** The disagreement stays visible: the dialog goes on reading
+/// the registry for itself.
+///
+/// The audit's own caveat, and it is existing behaviour this task must not break. The state
+/// line of the dialog is formatted from [`settings::autostart_value`] — the registry — while
+/// the check box is drawn from `general.autostart` — the file. They are read from two places on
+/// purpose, so that a value somebody removed by hand is visible rather than merely wrong. After
+/// a refused apply the two are exactly as independent as they were: the file was corrected, and
+/// the registry answer the dialog prints is the machine's own and did not move.
+#[test]
+fn a_refused_apply_leaves_the_two_readings_of_fr93_independent() {
+    let window = TestWindow::new();
+    let home = TestDir::new("registry-disagreement");
+    let _attached = attach_ui(&window, &home);
+
+    let registry_before = settings::autostart_value();
+    let registered_before = settings::autostart_registered();
+    let in_force = live(Tray::autostart);
+
+    let asked = dialog_produced(&live(|tray| tray.config().clone()), !in_force);
+
+    tray::apply_settings_via(&asked, |_| Err(WinError::from(ERROR_ACCESS_DENIED)));
+
+    println!(
+        "after a refused apply: file/check-box autostart={} registry={:?} registered={}",
+        live(Tray::autostart),
+        settings::autostart_value(),
+        settings::autostart_registered()
+    );
+
+    assert_eq!(
+        settings::autostart_value(),
+        registry_before,
+        "the source the dialog's state line is formatted from is the registry, and this task \
+         does not write to it"
+    );
+    assert_eq!(
+        settings::autostart_registered(),
+        registered_before,
+        "nor does it change the answer that line prints"
+    );
+
+    // Two readings, two sources. The check box of the dialog and the check mark of FR-91 are
+    // drawn from the configuration; the state line is formatted from the registry. This apply
+    // corrected the first and asked nothing of the second, and the file the user is left with
+    // says what the system says rather than what the check box was clicked to.
+    assert_eq!(live(Tray::autostart), in_force);
+    assert_eq!(
+        fs::read_to_string(home.config())
+            .expect("the configuration must have been saved")
+            .contains("autostart = true"),
+        in_force,
+        "the file follows what is in force, and the dialog goes on showing the registry beside \
+         it — the disagreement is visible rather than hidden"
+    );
+}
+
+/// **The two mechanisms decide different questions — task T-13-24 against task T-13-6.**
+///
+/// This task decides **what** is stored; [`Tray::save_config`] decides **whether** the file may
+/// be written at all. Driven together on the one configuration where the second says no: a file
+/// from a newer schema, which puts the session into `SavePolicy::Forbidden` for good.
+///
+/// Neither shadows the other. The file is not touched — that is T-13-6's answer and it is
+/// unchanged — and the configuration in memory carries the previous autostart with every other
+/// change of the dialog, which is this task's answer and it is reached all the same.
+#[test]
+fn the_step_back_and_the_save_policy_of_t_13_6_answer_different_questions() {
+    let window = TestWindow::new();
+    let home = TestDir::new("refused-and-forbidden");
+
+    // Schema 99: `read_or_default` answers `FromNewerSchema`, and nothing may be written this
+    // session — not by a toggle, not by an apply, not by the shutdown of FR-83.
+    let original = "schema_version = 99\r\n\
+                    \r\n\
+                    [general]\r\n\
+                    enabled = true\r\n\
+                    autostart = true\r\n\
+                    \r\n\
+                    [something_added_in_schema_99]\r\n\
+                    setting = \"kept\"\r\n";
+    fs::write(home.config(), original).expect("the newer file must be writable");
+
+    let before = fs::read(home.config()).expect("the newer file must be readable");
+    let attached = attach_ui(&window, &home);
+
+    let registry_before = settings::autostart_value();
+    let in_force = live(Tray::autostart);
+
+    assert!(
+        in_force,
+        "the file was read: `autostart = true` came out of it"
+    );
+
+    let asked = dialog_produced(&live(|tray| tray.config().clone()), !in_force);
+
+    tray::apply_settings_via(&asked, |_| Err(WinError::from(ERROR_ACCESS_DENIED)));
+
+    println!(
+        "under SavePolicy::Forbidden: entries={:?} autostart={} hotkey={}",
+        home.entries(),
+        live(Tray::autostart),
+        live(|tray| tray.config().hotkey.key.clone())
+    );
+
+    // T-13-6's answer, unchanged.
+    assert_eq!(
+        fs::read(home.config()).expect("the file must still be there"),
+        before,
+        "«Применить» wrote to a file this build was told not to write to"
+    );
+    assert_eq!(
+        home.entries(),
+        vec![CONFIG_FILE_NAME.to_owned()],
+        "and left no `.bad` and no temporary of a half-finished write beside it"
+    );
+
+    // This task's answer, reached all the same — in memory, which is where a session on a file
+    // this build must not damage keeps its state.
+    assert_eq!(
+        live(Tray::autostart),
+        in_force,
+        "the refused field stepped back in memory too — the check mark of FR-91 does not lie \
+         merely because the file is off limits"
+    );
+    assert_eq!(live(|tray| tray.config().hotkey.key.clone()), "F9");
+    assert_eq!(
+        live(|tray| tray.config().general.language),
+        settings::Language::En
+    );
+
+    assert_eq!(settings::autostart_value(), registry_before);
+
+    // The shutdown of FR-83 is still forbidden to write, and the tray is taken out here rather
+    // than at the end of the scope so that the assertion below is about that and not about the
+    // order the locals are dropped in.
+    drop(attached);
+
+    assert_eq!(
+        fs::read(home.config()).expect("the file must still be there"),
+        before,
+        "FR-83 saved the configuration over a file it was required not to damage"
+    );
+}
+
+/// **Criterion 8 of task T-13-24 — the comment and the code say the same thing.**
+///
+/// Swept over the source for the reason the two neighbouring sweeps of this file state: what a
+/// test can drive is the behaviour, and what it cannot drive is the *shape*. The behaviour is
+/// measured three tests up; this is the statement that the promise is still written where the
+/// code keeps it, that the read of the value that steps back happens before the write that
+/// would destroy it, and that exactly one field steps back.
+///
+/// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
+/// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF.
+#[test]
+fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("pub fn apply_settings_via(")
+        .expect("apply_settings_via must be in this file");
+    let body = &source[at..];
+    let end = body.find("\n}").expect("a function closes with its brace");
+    let body = &body[..end];
+
+    println!("--- apply_settings_via ---\n{body}");
+
+    // The promise, word for word as the audit quoted it.
+    let promise = body
+        .find("// FR-93 first: if the registry refuses, the file is not made to claim otherwise.")
+        .expect("the promise of FR-93 must still stand over the registry write");
+    let read = body
+        .find("let in_force = with_tray(")
+        .expect("the value that steps back must be read out of the tray");
+    let refusal = body
+        .find("if let Err(error) = write_run_key(")
+        .expect("the registry answer must be examined — NFR-13");
+    let step_back = body
+        .find("stored.general.autostart = in_force;")
+        .expect("and a refusal must put the previous value back");
+    let save = body
+        .find("tray.replace_config(stored")
+        .expect("what is saved must be the corrected configuration and not the argument");
+
+    assert!(
+        read < refusal,
+        "the previous value is read before anything is written, because `replace_config` is \
+         what overwrites it"
+    );
+    assert!(
+        promise < refusal && refusal < step_back && step_back < save,
+        "the promise stands over the refusal, the step back is inside it, and the save comes \
+         after both"
+    );
+
+    // One field, and the operation is not abandoned. This is what the repair is.
+    assert_eq!(
+        body.matches("stored.general.").count(),
+        1,
+        "exactly one field of the configuration steps back"
+    );
+    assert!(
+        !body.contains("return"),
+        "and the rest of the dialog is not thrown away with it — a bare `return` here would \
+         lose the hotkey, the layouts and the exclusions the same «Применить» carries"
+    );
+
+    // The twin does return, and that is not a contradiction: its whole operation is the one
+    // field, so skipping the field and giving up the operation are the same act.
+    let at = source
+        .find("fn toggle_autostart() {")
+        .expect("toggle_autostart must be in this file");
+    let twin = &source[at..];
+    let end = twin.find("\n}").expect("a function closes with its brace");
+    let twin = &twin[..end];
+
+    assert!(
+        twin.contains("app::report_non_critical(\"RegSetValueExW\", &error);")
+            && twin.contains("return;"),
+        "the twin of FR-93 keeps the rule the way it always has"
+    );
+
+    // And the product itself goes through the seam with the real registry write in its hand —
+    // the seam is a way in for the tests, never a way round FR-93 for «Применить».
+    let at = source
+        .find("fn apply_settings(config: &Config) {")
+        .expect("apply_settings must be in this file");
+    let entry = &source[at..];
+    let end = entry.find("\n}").expect("a function closes with its brace");
+    let entry = &entry[..end];
+
+    println!("--- apply_settings ---\n{entry}");
+
+    assert!(
+        entry.contains("apply_settings_via(config, settings::set_autostart)"),
+        "«Применить» must hand in `settings::set_autostart`, which is the one function that \
+         writes the `Run` key of FR-93"
     );
 }
 
