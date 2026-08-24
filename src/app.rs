@@ -1568,7 +1568,64 @@ fn publish_configuration_to_input_thread() {
 /// state that crosses a thread boundary, and none of them is a lock (NFR-04). Nothing is applied
 /// to anything already built except `[buffer] capacity`, which is a live allocation and is
 /// therefore the one value that needs the message at the end.
+///
+/// ⭐ **Task T-13-13: this is also where the three millisecond fields of section 7 meet their
+/// ceilings** — see [`effective_ms`] and the block at the top of the body.
 pub fn publish_configuration(config: &settings::Config) {
+    // ⭐ **The ceilings of the three millisecond fields of section 7 — task T-13-13.**
+    //
+    // Computed first, before a single store, and computed **here** rather than where the values
+    // are slept on. Three reasons, and they are the whole of the decision:
+    //
+    // * a publication happens once — at start-up and on every «Применить» — while a press happens
+    //   as often as the user presses. A check at `inject::sleep_ms` or at
+    //   `selection::wait_for_change` would be paid for by every press for ever, and NFR-01 to
+    //   NFR-05 are about not adding work to that path;
+    // * the published value must not lie. `inject::inter_event_delay_ms`,
+    //   `selection::published_timeout` and `selection::published_restore_delay` are read by
+    //   `control` for the dump and by the tests, and a clamp applied only at the point of sleeping
+    //   would leave all three of them answering a number nothing acts on;
+    // * one place for all three. The two `[selection]` fields hang the UI thread and the
+    //   `[replacement]` one freezes the input thread, but they are the same defect of the same
+    //   kind of field, and a repair split across two modules is a repair that drifts apart.
+    //
+    // The file is **not** rewritten and must not be: the number in it stays the author's, and only
+    // the published effect is bounded. Silently correcting somebody's file is the very fault task
+    // T-13-6 was raised to repair, and doing it here would trade one for the other.
+    let inter_event_delay_ms = effective_ms(
+        config.replacement.inter_event_delay_ms,
+        crate::inject::MAX_INTER_EVENT_DELAY_MS,
+    );
+    let clipboard_timeout_ms = effective_ms(
+        config.selection.clipboard_timeout_ms,
+        crate::selection::MAX_CLIPBOARD_TIMEOUT_MS,
+    );
+    let clipboard_restore_delay_ms = effective_ms(
+        config.selection.clipboard_restore_delay_ms,
+        crate::selection::MAX_CLIPBOARD_RESTORE_DELAY_MS,
+    );
+
+    // The **clamped** value compared against the raw one, which is the comparison this function
+    // already makes for `[buffer] capacity` — see `apply_capacity`, where the effective capacity
+    // and not the requested one is what the buffer is measured against.
+    //
+    // ⚠ **Once per publication, and that is what this position buys.** There is no latch and there
+    // must not be one: a `static` flag would give one entry for the whole session, and this file
+    // can be applied again with a different value five minutes later. There is equally no check on
+    // the press path, which would give one entry per press — the audit's own arithmetic is
+    // twenty-three pauses for a six-letter word. The state that makes it "once" is the call
+    // itself: `publish_configuration` runs exactly once per publication (start-up through
+    // `publish_configuration_to_input_thread`, and once per «Применить» through
+    // `tray::apply_settings`), so an entry raised in its body is one entry per publication in
+    // which something was above its ceiling — and none at all in a publication in which nothing
+    // was.
+    if inter_event_delay_ms != config.replacement.inter_event_delay_ms
+        || clipboard_timeout_ms != config.selection.clipboard_timeout_ms
+        || clipboard_restore_delay_ms != config.selection.clipboard_restore_delay_ms
+    {
+        note_field_clamped();
+    }
+
     crate::hook::set_active(config.general.enabled);
 
     // A name this program does not know leaves the default of section 7 in place — `Pause`.
@@ -1588,7 +1645,7 @@ pub fn publish_configuration(config: &settings::Config) {
     // *applied* to anything the input thread has already built — the next hotkey press reads
     // whatever stands here at that moment.
     crate::inject::set_replacement_method(config.replacement.method);
-    crate::inject::set_inter_event_delay_ms(config.replacement.inter_event_delay_ms);
+    crate::inject::set_inter_event_delay_ms(inter_event_delay_ms);
 
     // Section `[layouts]` of section 7 — FR-30, FR-31, task T-05-2. Published for the same
     // reason and by the same rule as `[replacement]` above: the configuration belongs to the UI
@@ -1608,7 +1665,15 @@ pub fn publish_configuration(config: &settings::Config) {
     // milliseconds for the whole of itself. So the switch and the two timings of FR-61 steps 3
     // and 8 go into atomics module `selection` owns, exactly as `[replacement]` and `[layouts]`
     // do one and two lines above.
-    crate::selection::publish(&config.selection);
+    //
+    // Task T-13-13: what goes down is the configuration's `[selection]` with the two millisecond
+    // fields at their ceilings — `enabled` and everything else travel untouched, and the file
+    // itself is not written to. The copy is three scalars wide and is made once per publication.
+    crate::selection::publish(&settings::Selection {
+        clipboard_timeout_ms,
+        clipboard_restore_delay_ms,
+        ..config.selection.clone()
+    });
 
     // **Section `[exclusions]` of section 7 — FR-84, task T-06-3.** Published for the reason
     // everything above it is: the list is the UI thread's to read out of the file and the watcher
@@ -1623,6 +1688,60 @@ pub fn publish_configuration(config: &settings::Config) {
     crate::guard::publish_exclusions(&config.exclusions.processes);
 
     publish_buffer_capacity(config.buffer.capacity);
+}
+
+// ---------------------------------------------------------------------------------------
+// T-13-13 — the ceilings of the three millisecond fields of section 7
+// ---------------------------------------------------------------------------------------
+
+/// A millisecond field of section 7 as it is **published**: what the file asked for, or the
+/// ceiling when the file asked for more.
+///
+/// [`crate::buffer::effective_capacity`] written for the millisecond fields, and written once
+/// rather than three times: `[replacement] inter_event_delay_ms`, `[selection]
+/// clipboard_timeout_ms` and `[selection] clipboard_restore_delay_ms` differ in which thread they
+/// hang and in nothing else, so they get one rule and one call site each. The ceilings themselves
+/// are **not** here — each lives in the module that owns the field and states the section 7
+/// default beside it: [`crate::inject::MAX_INTER_EVENT_DELAY_MS`],
+/// [`crate::selection::MAX_CLIPBOARD_TIMEOUT_MS`] and
+/// [`crate::selection::MAX_CLIPBOARD_RESTORE_DELAY_MS`], each with the reason its number is that
+/// number.
+///
+/// No zero case, unlike `effective_capacity`: zero is a **documented value** of all three fields
+/// (section 7 gives `inter_event_delay_ms` exactly that default) and means "do not wait", which is
+/// a request and not a mistake.
+const fn effective_ms(requested: u32, ceiling: u32) -> u32 {
+    match requested {
+        requested if requested > ceiling => ceiling,
+        requested => requested,
+    }
+}
+
+/// Puts the one journal entry a publication that had to clamp leaves behind — task T-13-13.
+///
+/// # SEC-01, SEC-07 — what this entry can and cannot say
+///
+/// «configuration field clamped to its ceiling» is a fact about **a decision of this program**: a
+/// publication found a millisecond field of section 7 above its bound and published the bound. The
+/// string is chosen at compile time and is a row of the closed table of module `diag`; the call
+/// carries **no number at all**, so neither the value in the file, nor the value published, nor
+/// which of the three fields it was, nor how many of them there were can be recovered from the
+/// ring. A configuration file is hand-edited and may hold anything, which is the same reasoning
+/// the five «configuration file …» rows of task T-13-6 rest on. [`crate::diag::OsCode::NONE`] goes
+/// with it because no Win32 call failed here.
+///
+/// # Where this runs — NFR-01…NFR-05
+///
+/// On the UI thread, inside [`publish_configuration`], which section 6.1 already lets read a file.
+/// The hook callback cannot reach it and neither can the replacement path: nothing below
+/// `crate::inject::on_hotkey` calls anything in this section, and the hot path gained no branch at
+/// all from this task. `diag::record` is in any case allocation-free, lock-free and free of
+/// input-output, which is why it is callable from anywhere in section 6.1.
+fn note_field_clamped() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("configuration field clamped to its ceiling"),
+        crate::diag::OsCode::NONE,
+    );
 }
 
 /// Publishes `[buffer] capacity` to the input thread and nudges it into applying it — FR-07.

@@ -239,6 +239,46 @@ fn the_device_notification_withdrawal_reports_under_its_own_name() {
     assert!(dump.contains(name), "the dump does not print {name}");
 }
 
+/// **The row task T-13-13 added** — the clamp of the three millisecond fields of section 7.
+///
+/// A publication that finds `[replacement] inter_event_delay_ms`, `[selection]
+/// clipboard_timeout_ms` or `[selection] clipboard_restore_delay_ms` above its ceiling publishes
+/// the ceiling and records «configuration field clamped to its ceiling». Without a row of its own
+/// that fact would arrive as `Operation::UNLISTED` — a code with nothing beside it — which is
+/// precisely the silent failure task T-08-2 was raised to repair, so the seam is worth a test of
+/// its own even though the path itself is exercised in `tests\settings.rs`.
+///
+/// The name is a **fact and no value**: it does not say which field, what the file asked for, what
+/// was published or what the ceiling is, and there is no argument through which any of those could
+/// travel — the recording side passes `OsCode::NONE` and nothing else (SEC-01, SEC-07). The dump
+/// is checked too: a row that exists in the table but prints as «(unlisted)» would be the same
+/// defect one step further along.
+#[test]
+fn the_clamped_configuration_field_reports_under_its_own_name() {
+    let name = "configuration field clamped to its ceiling";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "{name} has no row in the table — the clamp would reach the ring nameless"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "the value came out of the configuration file, which is state of the process"
+    );
+
+    let _guard = ring();
+
+    diag::record(operation, OsCode::NONE);
+
+    let dump = diag::render();
+
+    assert!(dump.contains(name), "the dump does not print {name}");
+}
+
 /// The names the settings dialog, autostart and the string tables report under — the rows task
 /// T-08-2 added, each in the group it belongs to.
 #[test]

@@ -398,6 +398,26 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // to the tray whole: it is raised in `crate::tray::Tray::toggle_state`, it is about the
     // icon and the menu of FR-90 and FR-91, and the kind already exists.
     ("resume refused in fail-safe", Kind::Tray),
+    // A millisecond field of section 7 taken down to its ceiling — task T-13-13, the finding
+    // «`inter_event_delay_ms` не ограничен сверху: значение из файла способно усыпить поток
+    // ввода». `app::publish_configuration` puts the three millisecond fields through their
+    // ceilings on the way to the atomics the input and the UI thread read, and a publication that
+    // had to take any of them down says so here. One row, appended at the end so that no index
+    // above it moves: a slot already written carries a number, and renumbering the table would
+    // change what a dump of an earlier run means.
+    //
+    // ⚠ **A fact and no value at all (SEC-01, SEC-07).** It says that a publication found a field
+    // above its ceiling and published the ceiling instead. It does not say **which** field, what
+    // the file asked for, what was published, or what the ceiling is — and there is no branch
+    // through which any of those could reach the ring, because the caller passes no number at all.
+    // The name is singular and field-less for exactly that reason: one entry per publication that
+    // clamped anything, not one per field and not one per press. The code beside it is always
+    // [`OsCode::NONE`] — this is a decision of the program, not the failure of a Win32 call.
+    //
+    // `Kind::Process` and **no new `Kind`**, the rule every note above follows: the value came out
+    // of the configuration file, which is state of the process, and this is the kind the five
+    // configuration rows of task T-13-6 already take.
+    ("configuration field clamped to its ceiling", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

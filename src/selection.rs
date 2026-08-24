@@ -1559,6 +1559,56 @@ pub fn restore_delay_of(selection: &Selection) -> Duration {
     Duration::from_millis(u64::from(selection.clipboard_restore_delay_ms))
 }
 
+/// ⭐ **The ceiling of `[selection] clipboard_timeout_ms` — task T-13-13.**
+///
+/// The *default* is the three hundred milliseconds [`timeout_of`] names one line above, and it
+/// lives in `src\settings.rs`; the ceiling is the other end of the same field and lives here,
+/// beside the function that states the default. The pair is the shape [`crate::buffer`] already
+/// has for `[buffer] capacity` — `DEFAULT_CAPACITY` and `MAX_CAPACITY` side by side, with
+/// `effective_capacity` between them.
+///
+/// ⚠ **Nothing in this module enforces it.** The clamp stands on the one publication, in
+/// `crate::app::publish_configuration`, so [`published_timeout`] already answers a value inside
+/// this bound; see [`crate::inject::MAX_INTER_EVENT_DELAY_MS`] for why the check belongs to the
+/// publication and not to the place that waits.
+///
+/// # Why five thousand
+///
+/// Step 3 of FR-61 is a **wait**, and [`wait_for_change`] runs it on the thread [`listen`] claimed
+/// — the UI thread of section 6.1, the thread that owns the tray icon, the menu and the settings
+/// dialog. So this field is not the freeze of `[replacement] inter_event_delay_ms`: the hook and
+/// the watchdog are on the input thread and keep running, and FR-65's own promise holds — with the
+/// selection path off, the hotkey never comes here at all. What an unbounded value costs instead
+/// is the interface: a `u32::MAX` in the file is about forty-nine days in which the tray does not
+/// answer a click and the dialog does not repaint, and the user's only remaining move is to kill
+/// the process.
+///
+/// Five seconds is the same order as the default `LowLevelHooksTimeout` of FR-80 — the budget the
+/// neighbouring ceiling of [`crate::inject::MAX_INTER_EVENT_DELAY_MS`] is cut against, so that the
+/// three numbers of this repair are read against one measure rather than three — and it is longer
+/// than any application takes to answer a `Ctrl+C` while still being a wait a person recognises as
+/// a wait. NFR-09's thirty milliseconds are the *typing-buffer* path and do not reach here; this
+/// path is the one that waits for another process by design.
+///
+/// The number is not derived here: it is the one `reports\ТЗ-Э13-ремонт.md` fixes for task
+/// T-13-13, so that its origin does not get lost.
+pub const MAX_CLIPBOARD_TIMEOUT_MS: u32 = 5_000;
+
+/// ⭐ **The ceiling of `[selection] clipboard_restore_delay_ms` — task T-13-13.**
+///
+/// The default is the two hundred milliseconds of section 7, which [`restore_delay_of`] reads out
+/// of the configuration; this is the other end of the same field. Everything
+/// [`MAX_CLIPBOARD_TIMEOUT_MS`] says about the thread, about the ceiling being enforced at the
+/// publication rather than here, and about where the number comes from holds word for word, and
+/// the two are equal for that reason.
+///
+/// One thing is this field's own: the delay of step 8 is time in which **the user's own clipboard
+/// is still overwritten by this program's text**. A file that set it to days would not merely hang
+/// the interface, it would leave somebody else's copy standing in place of the user's for as long;
+/// decision П-5 already refuses to put the snapshot back over a copy made inside that window, and
+/// a bounded window is what keeps that refusal a rare case rather than the normal one.
+pub const MAX_CLIPBOARD_RESTORE_DELAY_MS: u32 = 5_000;
+
 /// `[selection] enabled` — FR-65, so that T-07-2 reads the flag through the module that owns it.
 pub fn is_enabled(selection: &Selection) -> bool {
     selection.enabled

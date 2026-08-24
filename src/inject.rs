@@ -1095,11 +1095,58 @@ pub fn send_mismatches() -> (u32, u32) {
     )
 }
 
+/// ⭐ **The ceiling of `[replacement] inter_event_delay_ms` — task T-13-13.**
+///
+/// The *default* of section 7 is zero and is stated two functions below, in
+/// [`inter_event_delay_ms`]; this is the other end of the same field, and the pair is the shape
+/// [`crate::buffer`] already has for `[buffer] capacity`, where `DEFAULT_CAPACITY` — «the default
+/// of `[buffer] capacity` in section 7» — and `MAX_CAPACITY` stand side by side with
+/// `effective_capacity` between them.
+///
+/// ⚠ **Nothing in this module enforces it, and that is deliberate.** The clamp stands on the one
+/// publication, in `crate::app::publish_configuration`, and the atomic below therefore already
+/// holds a value that is inside this bound. Enforcing it *here*, in `set_inter_event_delay_ms` or
+/// in `inter_event_delay_ms`, would be either a second truth (the atomic saying one thing and the
+/// readers another) or a comparison paid for on every press — and there are many presses per
+/// publication. The constant lives here because the field lives here; the decision lives where
+/// the file crosses into the program.
+///
+/// # Why a thousand and not the `u32` a hand-edited file can hold
+///
+/// The pause of FR-44 becomes `sleep_ms` — `thread::sleep` — on the **input thread**, which is the
+/// thread section 6.1 puts the `WH_KEYBOARD_LL` hook and the watchdog timer on. A sleeping thread
+/// pumps no messages and answers no callback, so every millisecond of this field is a millisecond
+/// in which the hook callback of every keystroke **of the whole machine** goes unanswered. FR-80
+/// names the consequence: the system removes a hook that overruns `LowLevelHooksTimeout`
+/// (`HKCU\Control Panel\Desktop`, about five seconds by default) and it removes it **silently** —
+/// the watchdog that would put it back is on the same sleeping thread, and the fail-safe of FR-96
+/// lives inside the callback of a hook that is no longer installed. So the field a file can set to
+/// `u32::MAX` (4 294 967 295 ms, about forty-nine days) is a field one slipped zero can use to
+/// freeze the keyboard of the session on the first press of the hotkey. That is the finding of the
+/// audit of 2026-08-24 this constant answers.
+///
+/// A thousand milliseconds keeps a **single** gap inside that `LowLevelHooksTimeout` budget with
+/// room to spare, and turns the worst case of a whole replacement from tens of days into tens of
+/// seconds: six characters replaced by the `backspace` path are twenty-four events and therefore
+/// twenty-three pauses — twenty-three seconds, something a person waits out rather than a machine
+/// they restart. It is still far outside the thirty milliseconds NFR-09 gives the whole path, and
+/// deliberately so: a pause above zero **is** the explicit trade of that budget for compatibility,
+/// which is the only reason FR-44 exists, and this bounds the trade instead of forbidding it.
+///
+/// The number is not derived here. It is the one the stage-13 repair specification fixes
+/// (`reports\ТЗ-Э13-ремонт.md`, task T-13-13), together with the two of [`crate::selection`], so
+/// that its origin does not get lost the next time somebody asks where a thousand came from.
+pub const MAX_INTER_EVENT_DELAY_MS: u32 = 1_000;
+
 /// Publishes `[replacement] inter_event_delay_ms` — FR-44.
 ///
 /// Section 6.3 fixes the direction: the configuration is published by the UI thread, which is
 /// the only thread allowed to read the file, and the input thread reads the atomic. Nothing
 /// here reads a file, which is what NFR-09 requires of everything on the replacement path.
+///
+/// What arrives here is the value `crate::app::publish_configuration` has already put through
+/// [`MAX_INTER_EVENT_DELAY_MS`] — see there and see the constant. This function stores what it is
+/// given and asks no questions, exactly as it did before task T-13-13.
 pub fn set_inter_event_delay_ms(delay_ms: u32) {
     INTER_EVENT_DELAY_MS.store(delay_ms, Ordering::Relaxed);
 }

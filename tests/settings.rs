@@ -5348,8 +5348,50 @@ fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
 // Criterion 13 — a changed setting reaches the running modules without a restart
 // -----------------------------------------------------------------------------------------
 
+/// Serialises the tests that publish a configuration into the process-wide atomics.
+///
+/// `app::publish_configuration` writes into atomics of `hook`, `inject`, `layouts`, `selection`
+/// and `guard` — one program, one configuration, as it has to be — and `cargo test` runs the tests
+/// of one binary on parallel threads. Every test that publishes takes this first, so that one
+/// test's publication cannot be read by another test's assertions. The same shape, and for the
+/// same reason, as [`LOCALE`] further down this file.
+///
+/// Added by task T-13-13, which is what made the gate necessary: until then the tests that publish
+/// asserted about fields no other publishing test touched, and they now share three.
+///
+/// ⚠ **Scope: the publication atomics and nothing else.** The tests task T-13-17 added at the end
+/// of this file work on the About-window record — `settings::about_is_open`, `AboutSession`,
+/// `settings::on_system_theme_message` — and touch no published field, so they neither take this
+/// gate nor need it. Checked call by call when the two tasks were brought together on slice
+/// `a17beaf`; a future test that publishes must take it.
+static PUBLICATION: Mutex<()> = Mutex::new(());
+
+/// Takes that gate.
+fn publishing() -> MutexGuard<'static, ()> {
+    PUBLICATION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// How many entries of the journal carry `name` right now — task T-13-13.
+///
+/// By name and not by ordinal, because that is all a reader of the ring is given: the entry is a
+/// row of the closed vocabulary of module `diag` and carries no value of its own (SEC-01, SEC-07),
+/// so counting the rows is the whole of what can be asked.
+fn journal_entries_named(name: &str) -> usize {
+    lang_switcher::diag::snapshot()
+        .iter()
+        .filter(|event| event.operation.name() == name)
+        .count()
+}
+
+/// The name task T-13-13 added to the closed vocabulary of module `diag`.
+const CLAMPED: &str = "configuration field clamped to its ceiling";
+
 #[test]
 fn what_the_dialog_applies_reaches_the_modules_that_act_on_it() {
+    let _publishing = publishing();
+
     // This is the second half of «Применить»: `tray::apply_settings` writes the file and then
     // calls exactly this, which is the only route by which a setting becomes behaviour.
     // Nothing here is a restart, and nothing here reads a file.
@@ -5414,6 +5456,255 @@ fn what_the_dialog_applies_reaches_the_modules_that_act_on_it() {
     assert_eq!(layouts::published().mode(), LayoutMode::Pair);
     assert_eq!(guard::counters().exclusions, 0);
     assert!(hook::is_active());
+}
+
+// -----------------------------------------------------------------------------------------
+// Task T-13-13 — the ceilings of the three millisecond fields of section 7
+//
+// The audit of 2026-08-24: «`inter_event_delay_ms` не ограничен сверху: значение из файла
+// способно усыпить поток ввода — тот самый, где живут LL-хук и сторож». The repair is a clamp on
+// the **publication** — `app::publish_configuration` — and the three tests below are its three
+// halves: a file that asks for too much, a dialog value that asks for too much, and a value that
+// asks for something reasonable and must go through untouched.
+//
+// ⚠ Not one of them goes near `%APPDATA%`. The file is built by `TestDir` under `%TEMP%` and
+// handed to `settings::read_or_default` explicitly, exactly as every test above this line does it.
+// -----------------------------------------------------------------------------------------
+
+/// **Criterion 5 of task T-13-13, both halves.** A file with `u32::MAX` in all three millisecond
+/// fields publishes the ceilings — and the file is byte-for-byte what it was.
+///
+/// The second half is the point of the design and is easy to lose: the number in the file stays
+/// the author's. Silently correcting somebody's hand-edited configuration is the very fault task
+/// T-13-6 was raised to repair — «неизвестные поля уничтожаются при первом сохранении» — and a
+/// repair that fixed one by committing the other would be no repair. What is bounded is the
+/// **published effect**, and nothing else.
+#[test]
+fn a_file_asking_for_u32_max_publishes_the_ceilings_and_is_left_byte_for_byte() {
+    let _publishing = publishing();
+
+    let dir = TestDir::new("ms_ceilings");
+    let path = write_file(
+        &dir,
+        &format!(
+            "schema_version = 2\n\n\
+             [replacement]\n\
+             inter_event_delay_ms = {max}\n\n\
+             [selection]\n\
+             clipboard_timeout_ms = {max}\n\
+             clipboard_restore_delay_ms = {max}\n",
+            max = u32::MAX
+        ),
+    );
+    let before = fs::read(&path).expect("the file just written must be readable");
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::Current),
+        "the file is well-formed: an out-of-range value is not a parse error"
+    );
+
+    // Nothing is clamped on the way **in**: the schema of section 7 is untouched by this task,
+    // and what the file says is what the configuration in memory says.
+    assert_eq!(config.replacement.inter_event_delay_ms, u32::MAX);
+    assert_eq!(config.selection.clipboard_timeout_ms, u32::MAX);
+    assert_eq!(config.selection.clipboard_restore_delay_ms, u32::MAX);
+
+    app::publish_configuration(&config);
+
+    println!(
+        "published: delay={} timeout={:?} restore={:?}",
+        inject::inter_event_delay_ms(),
+        selection::published_timeout(),
+        selection::published_restore_delay()
+    );
+
+    // The ceilings, as numbers — the ones `reports\ТЗ-Э13-ремонт.md` fixes for this task.
+    assert_eq!(inject::MAX_INTER_EVENT_DELAY_MS, 1_000);
+    assert_eq!(selection::MAX_CLIPBOARD_TIMEOUT_MS, 5_000);
+    assert_eq!(selection::MAX_CLIPBOARD_RESTORE_DELAY_MS, 5_000);
+
+    // ...and as what the three modules now answer.
+    assert_eq!(
+        inject::inter_event_delay_ms(),
+        inject::MAX_INTER_EVENT_DELAY_MS
+    );
+    assert_eq!(
+        selection::published_timeout(),
+        std::time::Duration::from_millis(u64::from(selection::MAX_CLIPBOARD_TIMEOUT_MS))
+    );
+    assert_eq!(
+        selection::published_restore_delay(),
+        std::time::Duration::from_millis(u64::from(selection::MAX_CLIPBOARD_RESTORE_DELAY_MS))
+    );
+
+    // The other half, by bytes and not by fields: nothing on the publication path opened this
+    // file for writing, and a comparison of the parsed configuration would not have caught one
+    // that had.
+    let after = fs::read(&path).expect("the file must still be readable");
+    assert_eq!(
+        after, before,
+        "the publication must not touch the configuration file"
+    );
+    assert_eq!(
+        dir.entries(),
+        vec![CONFIG_FILE_NAME.to_owned()],
+        "and it must leave nothing beside it either"
+    );
+
+    // The defaults back, so that this test leaves the process as it found it.
+    app::publish_configuration(&Config::default());
+}
+
+/// **Criterion 6 of task T-13-13.** A value above the ceiling is clamped, and the journal says so
+/// **once per publication** — not once per session and not once per press.
+///
+/// Nine digits is what the dialog of FR-92 can produce: `parse_ms` bounds the field by its length
+/// and by nothing else, so 999 999 999 ms — about eleven and a half days — is reachable without
+/// ever opening the file by hand.
+#[test]
+fn a_value_above_the_ceiling_is_clamped_and_journalled_once_for_each_publication() {
+    let _publishing = publishing();
+
+    // SEC-07: the entry has a row of its own in the closed vocabulary of module `diag`. Without
+    // it the fact would reach the ring as `UNLISTED` — a code with nothing beside it — which is
+    // exactly the defect task T-08-2 was raised to repair.
+    assert_ne!(
+        lang_switcher::diag::Operation::from_name(CLAMPED),
+        lang_switcher::diag::Operation::UNLISTED,
+        "«{CLAMPED}» must be a row of the table, or the entry carries no name"
+    );
+
+    let mut config = Config::default();
+    config.replacement.inter_event_delay_ms = 999_999_999;
+    config.selection.clipboard_timeout_ms = 999_999_999;
+    config.selection.clipboard_restore_delay_ms = 999_999_999;
+
+    let before = journal_entries_named(CLAMPED);
+
+    app::publish_configuration(&config);
+
+    let after_one = journal_entries_named(CLAMPED);
+    println!("entries «{CLAMPED}»: {before} -> {after_one}");
+
+    assert_eq!(
+        after_one,
+        before + 1,
+        "one entry for the publication, whichever of the three fields were above their ceilings"
+    );
+
+    assert_eq!(
+        inject::inter_event_delay_ms(),
+        inject::MAX_INTER_EVENT_DELAY_MS
+    );
+    assert_eq!(
+        selection::published_timeout(),
+        std::time::Duration::from_millis(u64::from(selection::MAX_CLIPBOARD_TIMEOUT_MS))
+    );
+    assert_eq!(
+        selection::published_restore_delay(),
+        std::time::Duration::from_millis(u64::from(selection::MAX_CLIPBOARD_RESTORE_DELAY_MS))
+    );
+
+    // **«Once per publication» and not «once per session».** The same configuration applied again
+    // is another «Применить», and it says so again — a latch would have gone quiet here, and the
+    // second application of a bad value would then be invisible in a dump.
+    app::publish_configuration(&config);
+
+    assert_eq!(
+        journal_entries_named(CLAMPED),
+        before + 2,
+        "a second publication is a second entry"
+    );
+
+    // And a publication in which nothing is above its ceiling adds nothing at all.
+    app::publish_configuration(&Config::default());
+
+    assert_eq!(
+        journal_entries_named(CLAMPED),
+        before + 2,
+        "the defaults of section 7 are inside every ceiling"
+    );
+}
+
+/// **Criterion 7 of task T-13-13 — the half that is easiest to break.** A value below the ceiling
+/// is published as it stands, the ceiling does not touch it, and no entry is made.
+///
+/// The edge is checked as well, in both directions: a value *equal* to the ceiling is not above
+/// it, and zero — the documented default of `inter_event_delay_ms` in section 7 — is a request for
+/// no pause and not a mistake to be corrected, which is where this clamp deliberately differs from
+/// `buffer::effective_capacity`.
+#[test]
+fn a_value_below_the_ceiling_is_published_as_it_stands_and_raises_nothing() {
+    let _publishing = publishing();
+
+    let before = journal_entries_named(CLAMPED);
+
+    let mut config = Config::default();
+    config.replacement.inter_event_delay_ms = 7;
+    config.selection.clipboard_timeout_ms = 450;
+    config.selection.clipboard_restore_delay_ms = 120;
+
+    app::publish_configuration(&config);
+
+    println!(
+        "below the ceilings: delay={} timeout={:?} restore={:?}",
+        inject::inter_event_delay_ms(),
+        selection::published_timeout(),
+        selection::published_restore_delay()
+    );
+
+    assert_eq!(inject::inter_event_delay_ms(), 7);
+    assert_eq!(
+        selection::published_timeout(),
+        std::time::Duration::from_millis(450)
+    );
+    assert_eq!(
+        selection::published_restore_delay(),
+        std::time::Duration::from_millis(120)
+    );
+    assert_eq!(
+        journal_entries_named(CLAMPED),
+        before,
+        "nothing was above its ceiling, so nothing may be journalled"
+    );
+
+    // The edge: exactly the ceiling is not above the ceiling.
+    config.replacement.inter_event_delay_ms = inject::MAX_INTER_EVENT_DELAY_MS;
+    config.selection.clipboard_timeout_ms = selection::MAX_CLIPBOARD_TIMEOUT_MS;
+    config.selection.clipboard_restore_delay_ms = selection::MAX_CLIPBOARD_RESTORE_DELAY_MS;
+
+    app::publish_configuration(&config);
+
+    assert_eq!(
+        inject::inter_event_delay_ms(),
+        inject::MAX_INTER_EVENT_DELAY_MS
+    );
+    assert_eq!(
+        journal_entries_named(CLAMPED),
+        before,
+        "the ceiling itself passes through, and passing through is not clamping"
+    );
+
+    // And zero, which section 7 documents as the default of the delay and FR-41 describes as the
+    // ordinary case: a floor would have turned it into something else.
+    config.replacement.inter_event_delay_ms = 0;
+    config.selection.clipboard_timeout_ms = 0;
+    config.selection.clipboard_restore_delay_ms = 0;
+
+    app::publish_configuration(&config);
+
+    assert_eq!(inject::inter_event_delay_ms(), 0);
+    assert_eq!(
+        selection::published_timeout(),
+        std::time::Duration::ZERO,
+        "zero is a value of the field and not an absence of one"
+    );
+    assert_eq!(journal_entries_named(CLAMPED), before);
+
+    app::publish_configuration(&Config::default());
 }
 
 // -----------------------------------------------------------------------------------------
@@ -6561,6 +6852,7 @@ fn the_captured_key_reaches_the_hook_through_publish_configuration() {
     // `app::publish_configuration`, which is the one caller of `hook::set_hotkey_vk` there has
     // ever been. `src\hook.rs` is not touched by this task.
     let _guard = with_product_strings();
+    let _publishing = publishing();
 
     let mut config = Config::default();
 

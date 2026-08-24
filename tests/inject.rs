@@ -2248,6 +2248,165 @@ fn the_zeroing_is_nowhere_near_the_hook_callback() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Task T-13-13 — the ceiling of `[replacement] inter_event_delay_ms`, measured on the packet
+// ---------------------------------------------------------------------------------------
+
+/// An [`Environment`] whose `pause` is the real `thread::sleep`, and which does nothing else.
+///
+/// [`Bench`] writes the pause down instead of taking it, which is what makes the *count* and the
+/// *order* of FR-44 observable; this takes it, which is what makes the count worth anything. One
+/// is the model and the other is the calibration of it — see
+/// [`a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks`].
+struct SleepingBench {
+    /// Pauses actually slept through.
+    pauses: usize,
+}
+
+impl Environment for SleepingBench {
+    fn held(&mut self) -> Modifiers {
+        Modifiers::NONE
+    }
+
+    fn send(&mut self, events: &[INPUT]) -> u32 {
+        u32::try_from(events.len()).unwrap_or(u32::MAX)
+    }
+
+    fn pause(&mut self, delay_ms: u32) {
+        self.pauses += 1;
+        std::thread::sleep(std::time::Duration::from_millis(u64::from(delay_ms)));
+    }
+
+    fn switch_layout(&mut self) {}
+}
+
+/// The pauses of `log`, checked to be `delay_ms` every one of them, as one total.
+fn total_pause(log: &[Step], delay_ms: u32) -> std::time::Duration {
+    let millis: u64 = log
+        .iter()
+        .map(|step| match step {
+            Step::Pause(asked) => {
+                assert_eq!(*asked, delay_ms, "every pause is the configured one");
+                u64::from(*asked)
+            }
+            _ => 0,
+        })
+        .sum();
+
+    std::time::Duration::from_millis(millis)
+}
+
+/// ⭐ **Task T-13-13.** A six-letter word replaced at the ceiling of FR-44 costs **seconds**; the
+/// same word at the value a hand-edited file could carry before this repair cost **weeks**.
+///
+/// # What the number is, and why it is measured here
+///
+/// The audit of 2026-08-24 put the arithmetic in one line — «замена слова из шести букв методом
+/// backspace — это ~23 паузы» — and the whole finding rests on it: the pause of FR-44 is taken on
+/// the input thread, the thread the `WH_KEYBOARD_LL` hook and the watchdog live on, so the total
+/// is the length of time the keyboard of the machine is unattended. This asserts the count against
+/// the packet the requirement actually builds rather than against that sentence.
+///
+/// `backspace` (FR-41): six characters are six `Backspace` down+up pairs and six code units as
+/// down+up pairs — twenty-four events, one portion each, and a pause **between** portions, so
+/// twenty-three of them. At [`inject::MAX_INTER_EVENT_DELAY_MS`] that is twenty-three seconds.
+/// `selection` (FR-42) adds the two `Shift` events of the bracket: twenty-six events, twenty-five
+/// pauses, twenty-five seconds.
+///
+/// # Why the total is modelled and one run is real
+///
+/// A test that really slept twenty-three seconds would prove twenty-three seconds and cost every
+/// future run of the battery twenty-three seconds to re-prove arithmetic. So the count and the
+/// value of every pause come off the log of [`Bench`] — the seam FR-44 was built against — and a
+/// second run of the very same packet through [`SleepingBench`], at a fraction of the ceiling,
+/// pays the pauses for real and shows that the model and the machine agree about how many there
+/// are. The ceiling figure is that same count at the ceiling.
+#[test]
+fn a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks() {
+    let ceiling = inject::MAX_INTER_EVENT_DELAY_MS;
+
+    assert_eq!(
+        ceiling, 1_000,
+        "ТЗ-Э13 fixes the ceiling of inter_event_delay_ms at a thousand milliseconds"
+    );
+
+    // FR-41, the `backspace` packet.
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), ceiling).expect("sized");
+
+    assert_eq!(outcome.erased, 6, "six characters on the screen");
+    assert_eq!(outcome.typed, 6, "six code units back");
+    assert_eq!(outcome.replacement.requested, 24, "twenty-four events");
+    assert_eq!(outcome.replacement.calls, 24, "one portion per event");
+
+    let backspace = total_pause(&bench.log, ceiling);
+    let backspace_pauses = bench
+        .log
+        .iter()
+        .filter(|step| matches!(step, Step::Pause(_)))
+        .count();
+
+    assert_eq!(backspace_pauses, 23, "between twenty-four portions");
+    println!("backspace, six letters at the ceiling: {backspace:?}");
+
+    // FR-42, the compatibility packet — the same six letters through the other mode.
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in_with(
+        &mut bench,
+        &ghbdtn(),
+        &russian(),
+        ceiling,
+        ReplacementMethod::Selection,
+    )
+    .expect("sized");
+
+    assert_eq!(outcome.replacement.requested, 26, "two Shift events more");
+
+    let selection = total_pause(&bench.log, ceiling);
+    println!("selection, six letters at the ceiling: {selection:?}");
+
+    // **Seconds.** Not thirty milliseconds — a pause above zero is the explicit trade of NFR-09
+    // that FR-44 exists to offer — but a wait a person sits through rather than a machine they
+    // restart, which is the whole of what the ceiling buys.
+    assert!(
+        backspace <= std::time::Duration::from_secs(30)
+            && selection <= std::time::Duration::from_secs(30),
+        "the ceiling must keep a six-letter word inside seconds: {backspace:?} / {selection:?}"
+    );
+
+    // And what the same packet cost before the ceiling existed, from the value a `u32` field in a
+    // hand-edited file can hold. Days, not seconds — this is the defect, in the same unit.
+    let unbounded = std::time::Duration::from_millis(23 * u64::from(u32::MAX));
+    println!(
+        "backspace, six letters at u32::MAX: {} days",
+        unbounded.as_secs() / 86_400
+    );
+    assert!(
+        unbounded > std::time::Duration::from_secs(1_000 * 86_400),
+        "the value the file could carry is over a thousand days of frozen keyboard"
+    );
+
+    // The calibration: the same packet, the same count of pauses, actually slept through — at a
+    // two-hundredth of the ceiling, so that the battery pays milliseconds to check a model that
+    // answers in seconds.
+    let sampled = ceiling / 200;
+    let mut sleeper = SleepingBench { pauses: 0 };
+    let started = std::time::Instant::now();
+    inject::replace_in(&mut sleeper, &ghbdtn(), &russian(), sampled).expect("sized");
+    let elapsed = started.elapsed();
+
+    println!("the same packet at {sampled} ms, really slept: {elapsed:?}");
+
+    assert_eq!(
+        sleeper.pauses, backspace_pauses,
+        "the model and the machine count the same pauses"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(23 * u64::from(sampled)),
+        "every pause was really taken: {elapsed:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
 // Points 22 and 23 — the end-to-end path, into a window this file owns
 // ---------------------------------------------------------------------------------------
 

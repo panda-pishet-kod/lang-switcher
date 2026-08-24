@@ -1368,6 +1368,13 @@ fn the_module_header_names_the_requirements_of_the_backlog() {
 /// allowed «ветвление источника данных на пути горячей клавиши И передача работы потоку UI», and
 /// that is the other four: the branch of FR-60, the message it hands back, the far end of the
 /// handoff and the publication of `[selection]` the branch reads.
+///
+/// ⚠ **Task T-13-13 widened the border by two lines, and this census names them rather than
+/// loosening.** The two ceilings of the millisecond fields of `[selection]` are read in `app.rs`
+/// because that is where the clamp of that task stands — on the one publication, not at the place
+/// that waits — so the constants cross this border by design and are counted here like everything
+/// else. The point of the census is unchanged: nothing of module `selection` reaches `app.rs`
+/// without a line in this table.
 #[test]
 fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
     let source = source_of("app.rs");
@@ -1383,6 +1390,9 @@ fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
         ("selection::WM_APP_BUFFER_PATH", 2),
         // T-07-2: the far end of the handoff.
         ("selection::handle_selection_message", 1),
+        // T-13-13: the two ceilings, read where the publication clamps.
+        ("selection::MAX_CLIPBOARD_TIMEOUT_MS", 1),
+        ("selection::MAX_CLIPBOARD_RESTORE_DELAY_MS", 1),
     ] {
         let hits = code_lines_with(&source, needle);
 
@@ -1393,11 +1403,11 @@ fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
         );
     }
 
-    // And nothing else of module `selection` reaches `app.rs`: seven lines, all named above.
+    // And nothing else of module `selection` reaches `app.rs`: nine lines, all named above.
     let everything = code_lines_with(&source, "selection::");
     assert_eq!(
         everything.len(),
-        7,
+        9,
         "nothing else of module selection reaches app.rs: {everything:?}"
     );
 }
