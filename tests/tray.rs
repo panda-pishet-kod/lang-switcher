@@ -27,6 +27,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use lang_switcher::diag;
 use lang_switcher::hook;
 use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
+use lang_switcher::theme::ThemeSetting;
 use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
 
 use windows::Win32::Foundation::{
@@ -44,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
     RT_DIALOG, RT_VERSION, SM_CXMENUCHECK, SM_CXSMICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_DRAWITEM, WM_ENDSESSION,
-    WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
+    WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -1405,6 +1406,257 @@ fn measure_and_draw_are_ignored_while_no_menu_of_ours_is_on_the_screen() {
         (0xDEAD, 0xBEEF),
         "and nothing was written into that forgery either"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-13-20 — `WM_SETTINGCHANGE` does not dereference a pointer nobody needs
+//
+// The audit of 2026-08-24 found the arm calling the reader on **every** such message: up to
+// 64 UTF-16 units read from the address in `lParam` after one null check. `WM_SETTINGCHANGE`
+// is posted and is therefore not marshalled, so that address is whatever the sender wrote —
+// a forgery from a process of our own integrity level, or the merely wrong number a
+// third-party program is known to broadcast — and reading it is a read of an arbitrary
+// address. Meanwhile the only consumer of the answer left on its first line whenever no
+// window of FR-92а was up, so the read was usually for nothing.
+//
+// ⚠ **What is measured where.** The counter that says «читателя не звали» lives beside the
+// reader in `src\tray.rs`, and so do the four tests that read it: publishing a function that
+// dereferences a pointer out of a window message, so that an integration test could reach it,
+// would widen exactly the surface SEC-05 narrows. What is measured here is the published
+// half — the rule as a function of its arguments, the real `Tray::handle_message` fed a
+// pointer to nothing, and the shape of the arm in the source.
+// ---------------------------------------------------------------------------------------
+
+/// **The rule itself, all twelve rows.** Two windows and three themes, and the string is
+/// worth reading in exactly two of the twelve states.
+#[test]
+fn the_setting_change_string_is_wanted_in_exactly_two_of_the_twelve_states() {
+    for (dialog_open, about_open, setting, expected) in [
+        // Nobody on the screen. Whatever the theme says, there is no window to repaint —
+        // this is the row the audit found the program reading a foreign pointer in.
+        (false, false, ThemeSetting::System, false),
+        (false, false, ThemeSetting::Light, false),
+        (false, false, ThemeSetting::Dark, false),
+        // The settings dialog of FR-92 is up. Only `system` gives the system a say: under
+        // the two fixed themes FR-92а pins the palette and a broadcast changes nothing.
+        (true, false, ThemeSetting::System, true),
+        (true, false, ThemeSetting::Light, false),
+        (true, false, ThemeSetting::Dark, false),
+        // The «О программе» window of task T-13-17, alone. This disjunct has to carry the
+        // gate by itself, or that task's repair is undone.
+        (false, true, ThemeSetting::System, true),
+        (false, true, ThemeSetting::Light, false),
+        (false, true, ThemeSetting::Dark, false),
+        // Both records set. Not a state the program reaches — «О программе» is modal — and
+        // the rule answers it all the same, because a rule with a hole in it is a rule that
+        // depends on somebody keeping the hole unreachable.
+        (true, true, ThemeSetting::System, true),
+        (true, true, ThemeSetting::Light, false),
+        (true, true, ThemeSetting::Dark, false),
+    ] {
+        let wanted = tray::setting_name_is_wanted(dialog_open, about_open, setting);
+
+        println!("dialog={dialog_open} about={about_open} {setting:?} -> wanted={wanted}");
+
+        assert_eq!(
+            wanted, expected,
+            "setting_name_is_wanted({dialog_open}, {about_open}, {setting:?})"
+        );
+    }
+}
+
+/// **Criterion 5 of task T-13-20, on the product's own road.** A real tray, a real
+/// `Tray::handle_message`, a real `WM_SETTINGCHANGE` — and an `lParam` that is a pointer to
+/// nothing.
+///
+/// The number is in the null partition: Windows reserves the first 64 KiB of every process's
+/// address space and maps nothing there ever, so it cannot alias a page of this test or of
+/// anybody, and a read of it is an access violation and nothing subtler. **That this test
+/// finishes at all is the assertion.** A build that let execution through to the reader would
+/// not fail a line below — it would take the whole test executable down, and `cargo test`
+/// would report the target as failed rather than this one case.
+///
+/// Both halves of the gate are exercised: nobody on the screen first, then a window up with
+/// the theme fixed by hand — the second is the state criterion 7 names, and it has to refuse
+/// before the dereference too and not merely afterwards.
+#[test]
+fn a_setting_change_naming_a_pointer_to_nothing_is_survived() {
+    let window = TestWindow::new();
+    let home = TestDir::new("settingchange_gate");
+    let mut tray = install(&window, &home);
+
+    // Deliberately unreadable, deliberately harmless: see the doc comment above.
+    let nowhere = LPARAM(0x2A2A);
+
+    assert!(
+        !settings::dialog_is_open(),
+        "no settings dialog on this thread"
+    );
+    assert!(
+        !settings::about_is_open(),
+        "and no «О программе» window either"
+    );
+    assert_eq!(
+        tray.config().general.theme,
+        ThemeSetting::System,
+        "section 7 has `[general].theme` default to `system` — so it is the *other* half of \
+         the gate that must refuse this first message"
+    );
+
+    let reaction = tray.handle_message(WM_SETTINGCHANGE, WPARAM(0), nowhere);
+
+    println!("WM_SETTINGCHANGE with nobody to tell -> {reaction:?}");
+
+    assert_eq!(
+        reaction,
+        Reaction::Ignored,
+        "the broadcast goes on to DefWindowProcW exactly as it did before this task"
+    );
+
+    // And now the other half. A window *is* up, but the theme is fixed by hand, so the
+    // system's switch has no say and the string is still not worth its risk.
+    let mut fixed = tray.config().clone();
+    fixed.general.theme = ThemeSetting::Dark;
+    tray.replace_config(fixed);
+
+    let dialog = DialogSession::open();
+
+    assert!(settings::dialog_is_open(), "a window is up for this half");
+
+    let reaction = tray.handle_message(WM_SETTINGCHANGE, WPARAM(0), nowhere);
+
+    println!("WM_SETTINGCHANGE under a hand-fixed theme -> {reaction:?}");
+
+    assert_eq!(reaction, Reaction::Ignored, "and this one is ignored too");
+
+    drop(dialog);
+}
+
+/// **The order of the checks is the repair — swept over the source, because no test can drive
+/// an order.**
+///
+/// Three claims, and each of them is the task's own terms of reference:
+///
+/// * the arm hands the reading to one function, [`on_setting_change`], with the theme copied
+///   out of the tray on the way in — so the decision has one home and not two;
+/// * inside it the gate stands **before** `setting_change_name`, and the gate names *both*
+///   windows of FR-92а. Written the other way round — read the string, then decide — the
+///   function would be the finding again with a comment on top;
+/// * `setting_change_name` has exactly that one caller in the whole module.
+///
+/// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
+/// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF, and a
+/// needle written with `\n` has to be matched against a text normalised to `\n`.
+#[test]
+fn the_cheap_checks_stand_in_front_of_the_pointer_and_name_both_windows() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    // The product half of the file. The module's own unit tests reach the reader too — that
+    // is what closes criteria 5 to 7 — and counting their calls beside the product's would
+    // measure the suite instead of the program.
+    let at = source
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("the unit-test module must be at the foot of this file");
+    let source = &source[..at];
+
+    assert_eq!(
+        source.matches("pub fn setting_name_is_wanted(").count(),
+        1,
+        "one rule, one definition"
+    );
+    assert!(
+        source.contains("(dialog_open || about_open) && setting == theme::ThemeSetting::System"),
+        "and the rule is «есть кому отдать» — either window — **and** the theme that lets the \
+         system have a say"
+    );
+
+    // The arm of `handle_message`: one call, and the theme travels in as an argument.
+    assert!(
+        source.contains("on_setting_change(lparam, self.config().general.theme)"),
+        "the arm hands the reading to one function, with the cheap local fact already in hand"
+    );
+    assert_eq!(
+        source.matches("unsafe { setting_change_name(").count(),
+        1,
+        "and the product half of the module has exactly one call site for the reader"
+    );
+
+    let at = source
+        .find("fn on_setting_change(lparam: LPARAM, setting: theme::ThemeSetting) {")
+        .expect("on_setting_change must be in this file");
+    let body = &source[at..];
+    let end = body.find("\n}").expect("a function closes with its brace");
+    let body = &body[..end];
+
+    println!("--- on_setting_change ---\n{body}");
+
+    let gate = body
+        .find("if !setting_name_is_wanted(")
+        .expect("the gate of task T-13-20 must be in the body");
+    let read = body
+        .find("setting_change_name(lparam)")
+        .expect("and so must the reading it guards");
+
+    assert!(
+        gate < read,
+        "the cheap local checks stand **before** any use of `lparam` — after it, the repair \
+         does nothing at all"
+    );
+    assert!(
+        body.contains("settings::dialog_is_open()") && body.contains("settings::about_is_open()"),
+        "and «кому отдать» is both windows of FR-92а: task T-13-17 made the about window a \
+         listener, and a gate asking only the dialog would silently undo it"
+    );
+
+    // The contract of the reader names the preconditions — criterion 8.
+    let at = source
+        .find("/// The string a `WM_SETTINGCHANGE` names, read within the bounds of SEC-05")
+        .expect("the reader's doc comment must be in this file");
+    let contract = &source[at..];
+    let end = contract
+        .find("\nunsafe fn setting_change_name(")
+        .expect("the doc comment sits on the function");
+    let contract = &contract[..end];
+
+    println!("--- the contract of setting_change_name ---\n{contract}");
+
+    // Flattened to one line so that the claims below are about the *words* of the contract
+    // and not about where its author happened to wrap them.
+    let contract: String = contract
+        .lines()
+        .map(|line| line.trim().trim_start_matches("///").trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(
+        contract.contains("dereferences a pointer that arrived on a window message"),
+        "the contract says in as many words what the function does with a foreign pointer"
+    );
+    assert!(
+        contract.contains("necessary and not sufficient"),
+        "and that the null check is not the whole of the protection — ловушка 2"
+    );
+    assert!(
+        contract.contains("# Safety"),
+        "and it states the preconditions under NFR-14's own heading"
+    );
+    for precondition in [
+        "delivered to this thread",
+        "hidden window",
+        "setting_name_is_wanted",
+    ] {
+        assert!(
+            contract.contains(precondition),
+            "the preconditions must name «{precondition}» — that is what makes the pointer \
+             fit to read"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------
