@@ -20,7 +20,11 @@
 //! in its grey-antialiased face, so that one product no longer has two qualities of drawing;
 //! T-11-22 (done) took the rest of the menu off the system — the two rules of FR-91 are drawn
 //! by this file as well, the ground the entries stand on is the palette's rather than the
-//! shell's ([`set_menu_background`]), and an entry is the height the mock-up gives it.
+//! shell's ([`set_menu_background`]), and an entry is the height the mock-up gives it;
+//! T-11-22 left one piece of the shell standing and T-12-9 (done) took that — the **frame**
+//! of the popup window itself, square and grey `160,160,160` until then, is now the rounded
+//! frame of the palette ([`install_menu_frame_hook`]), and the entry under the cursor is
+//! written in the same ink as every other, as the mock-up writes it.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -79,11 +83,15 @@
 //! word, the about box from that name and the version resource, and the menu from fixed
 //! strings.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Dwm::{
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_ROUNDSMALL, DwmSetWindowAttribute,
+};
 use windows::Win32::Graphics::Gdi::{
     CreateFontIndirectW, CreateSolidBrush, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, DeleteObject,
     DrawTextW, FillRect, GetDC, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ, LOGFONTW,
@@ -92,20 +100,23 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
 };
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, ODT_MENU};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyIcon, DestroyMenu, GetSystemMetrics, HICON, HMENU,
-    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, MENUINFO, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR,
-    MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
-    RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
-    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
-    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP,
-    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NULL,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
+    AppendMenuW, CWPSTRUCT, CallNextHookEx, CreatePopupMenu, DestroyIcon, DestroyMenu,
+    GetClassNameW, GetSystemMetrics, HHOOK, HICON, HMENU, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
+    MENUINFO, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED, MIM_BACKGROUND,
+    NONCLIENTMETRICSW, PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK,
+    SM_CXSMICON, SM_CYMENU, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo, SetWindowsHookExW,
+    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx,
+    UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION,
+    WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -1449,9 +1460,10 @@ impl MenuPaint {
 
     /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: the ground is
     /// `window_bg`, and the entry under the cursor carries the rounded `hover_bg` stripe of
-    /// [`menu_hover_rect`] over it; text `text`, under the cursor `sel_fg`; the check mark
-    /// is [`MenuPaint::draw_check_mark`]. There are no disabled entries in the menu of
-    /// FR-91, so no third state is painted.
+    /// [`menu_hover_rect`] over it; the text is `text` **whether the cursor is on the entry
+    /// or not** (task T-12-9 — the stripe is the whole of what marks a hot row, as it is in
+    /// the mock-up); the check mark is [`MenuPaint::draw_check_mark`]. There are no disabled
+    /// entries in the menu of FR-91, so no third state is painted.
     ///
     /// Reads of `structure` are limited to `hDC`, `rcItem` and `itemState` — the SEC-05
     /// list; the entry itself was already found by [`MenuPaint::item`].
@@ -1499,14 +1511,16 @@ impl MenuPaint {
         // SAFETY: a state call on the message's DC — a mode by value, no memory of ours.
         let _ = unsafe { SetBkMode(dc, TRANSPARENT) };
 
-        let colour = if selected {
-            self.palette.sel_fg
-        } else {
-            self.palette.text
-        };
-
+        // FR-92а, task T-12-9: **one ink for every entry, hot or not.** The mock-up hands
+        // `$brFg` to every row it draws — `chrome.ps1:167` — and does not brighten the row
+        // under the cursor; the highlight is the whole of what marks it. Until this task the
+        // hot row was written in `sel_fg` instead, which on «Графите» is 240,242,244 against
+        // the 228,231,234 of `text` — twelve levels of a difference the mock-up does not
+        // have. («Туман» hid it: there `sel_fg` *is* `text`.) The ink of an entry is
+        // therefore no longer a function of `selected` at all.
+        //
         // SAFETY: as above — a colour by value.
-        let _ = unsafe { SetTextColor(dc, colour) };
+        let _ = unsafe { SetTextColor(dc, self.palette.text) };
 
         let mut text_rect = RECT {
             left: rect.left + MENU_H_PAD + check_column() + MENU_CHECK_GAP,
@@ -1837,6 +1851,204 @@ fn draw_menu_item(lparam: LPARAM) -> Reaction {
     })
 }
 
+// =========================================================================================
+// FR-92а, task T-12-9 — the frame of the popup window the menu lives in
+// =========================================================================================
+
+/// The class every popup menu of Windows is a window of — `#32768`, the reserved atom.
+///
+/// ⚠ The number in that name is a coincidence and not a connection: `EVENT_OBJECT_CREATE` is
+/// 32768 as well, and the two have nothing to do with each other.
+const MENU_WINDOW_CLASS: [u16; 6] = [
+    b'#' as u16,
+    b'3' as u16,
+    b'2' as u16,
+    b'7' as u16,
+    b'6' as u16,
+    b'8' as u16,
+];
+
+thread_local! {
+    /// The frame colour the hook below hands the menu window, as the four bytes of a
+    /// `COLORREF` — written just before the hook goes in and read only by the hook.
+    ///
+    /// A `Cell<u32>` and not a `RefCell`: the hook callback runs at a moment the system
+    /// chooses, and a `RefCell` there could meet a borrow of its own and panic. A `Cell` of a
+    /// number can neither block nor allocate nor fail.
+    static MENU_FRAME_COLOUR: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Asks DWM to round the corners of the popup the menu lives in and to draw its frame in the
+/// palette — FR-92а, task T-12-9.
+///
+/// # Why a hook, and why this one
+///
+/// A popup menu is a **window** of the reserved class [`MENU_WINDOW_CLASS`], and until this
+/// task it was the last piece of this program still wearing the shell's chrome: a square
+/// 1 px frame of `160,160,160`, a colour belonging to no palette of this program and to no
+/// literal of the mock-ups. The mock-up draws that frame rounded and in `Border`.
+///
+/// The two attributes that change it are documented and take an `HWND`, and there is no
+/// documented way to *ask* for the popup's `HWND`: `WM_INITMENUPOPUP` carries an `HMENU`, and
+/// nothing documented leads back from one to the other. A hook on **this thread** is what
+/// gives it, and the thread id is passed for exactly that reason — with `hMod` `None`, the
+/// pairing the documentation requires when the thread belongs to the calling process.
+///
+/// ⚠ **This is not a search for somebody else's window and must never become one.** The hook
+/// sees the windows of this one thread and no others.
+///
+/// # Why `WH_CALLWNDPROC` and not `WH_CBT`
+///
+/// Measured, in that order, and written down because the answer is not the obvious one.
+/// `WH_CBT` is the hook that exists to announce a window being created, and its
+/// `HCBT_CREATEWND` does carry the popup's handle — but it arrives **before `WM_NCCREATE`**,
+/// and at that moment DWM does not yet know the window: both attribute calls answer
+/// `0x80070006` (`ERROR_INVALID_HANDLE`). Nor does `WH_CBT` offer a later moment to move them
+/// to: over a whole showing it delivered codes 3, 4 and 7 only — create, **destroy**, and a
+/// skipped key — with no `HCBT_ACTIVATE` and no `HCBT_SETFOCUS` for that window at all.
+///
+/// `WH_CALLWNDPROC` gives the first live moment there is: `WM_NCCREATE` itself, where both
+/// calls answer `S_OK` — before the popup is shown, so nothing is ever seen unrounded.
+///
+/// A refused hook is survived — NFR-13, and the menu comes up in the shell's chrome rather
+/// than not at all.
+fn install_menu_frame_hook(palette: &'static theme::Palette) -> MenuFrameHook {
+    MENU_FRAME_COLOUR.with(|slot| slot.set(palette.field_border.0));
+
+    // SAFETY: the procedure is a `'static` function of this module and outlives the hook,
+    // which is removed by [`remove_menu_frame_hook`] before `show_menu` returns. `None` for
+    // the module handle is what the documentation requires when the thread id names a thread
+    // of the current process, and the thread named is this one.
+    let hook = unsafe {
+        SetWindowsHookExW(
+            WH_CALLWNDPROC,
+            Some(menu_frame_hook_proc),
+            None,
+            GetCurrentThreadId(),
+        )
+    };
+
+    // NFR-13: the result is examined right here and the failure is survived. There is nothing
+    // to journal — the closed vocabulary of `diag` has no row for this call, and the only
+    // consequence of a refusal is the system's own frame around a correctly painted menu.
+    MenuFrameHook(hook.ok())
+}
+
+/// The hook of [`install_menu_frame_hook`] for exactly as long as it is wanted — task T-12-9.
+///
+/// ⚠ **The removal is a `Drop` and not a call, so that no path out of the showing can miss
+/// it** — not the ordinary one, not the one where `TrackPopupMenuEx` failed, and not an
+/// unwind. A hook left in place would go on being called for every message sent on this
+/// thread for the rest of the run, long after there is any menu to decorate.
+///
+/// `None` inside means the system refused the hook; there is then nothing to take out.
+struct MenuFrameHook(Option<HHOOK>);
+
+impl Drop for MenuFrameHook {
+    fn drop(&mut self) {
+        let Some(hook) = self.0.take() else {
+            return;
+        };
+
+        // NFR-13: examined here and deliberately dropped. A refused removal cannot be
+        // repaired by a second attempt with the same handle, and `take` above means no second
+        // attempt is reachable.
+        //
+        // SAFETY: `hook` came from the successful `SetWindowsHookExW` of
+        // [`install_menu_frame_hook`], is taken out of the field so it cannot be removed
+        // twice, and the procedure it names is still in this module's image.
+        let _ = unsafe { UnhookWindowsHookEx(hook) };
+    }
+}
+
+/// The `WH_CALLWNDPROC` callback — task T-12-9.
+///
+/// ⚠ **This runs at a moment the system chooses, inside somebody else's call, for every
+/// message *sent* on this thread while the menu is up.** It allocates nothing, takes no lock,
+/// touches no file and journals nothing. The whole of its work on the overwhelming majority
+/// of calls is one integer comparison: everything below `WM_NCCREATE` is skipped before any
+/// pointer of ours is read, and a window is created far more rarely than a message is sent.
+unsafe extern "system" fn menu_frame_hook_proc(
+    code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if code >= 0 {
+        // SAFETY: at a non-negative code `lParam` names a `CWPSTRUCT` the system owns for the
+        // length of this call — the documented shape of this hook's parameter, and the
+        // negative codes, which carry no structure, are excluded above.
+        let sent = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+
+        // The first moment the window exists as far as DWM is concerned; see
+        // [`install_menu_frame_hook`] for the measurement that says so.
+        if sent.message == WM_NCCREATE {
+            // Seven cells for six characters and the terminator the call writes; the buffer
+            // is this frame's and nothing outlives the call.
+            let mut class = [0u16; 7];
+
+            // SAFETY: `sent.hwnd` is the window the system is delivering a message to, and
+            // `class` is a live local of this frame; the call writes at most its own length
+            // and returns how much it wrote.
+            let length = unsafe { GetClassNameW(sent.hwnd, &mut class) };
+
+            if length == MENU_WINDOW_CLASS.len() as i32
+                && class[..MENU_WINDOW_CLASS.len()] == MENU_WINDOW_CLASS
+            {
+                apply_menu_frame(sent.hwnd);
+            }
+        }
+    }
+
+    // SAFETY: the chain must be continued whatever this callback did — the documented
+    // obligation of every hook procedure. `None` asks the system for the next hook itself.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+/// Hands the popup the two attributes of task T-12-9 — the rounded corner and the frame of
+/// the palette.
+///
+/// * `DWMWA_WINDOW_CORNER_PREFERENCE` (33) := `DWMWCP_ROUNDSMALL` (3) — the small radius, the
+///   one the documentation reserves for «auxiliary UI» such as a menu. ⚠ The documentation is
+///   honest that this is a *hint* that «does not guarantee rounding», and that popup menus are
+///   not rounded by default; that it does round *this* popup is measured, not assumed —
+///   task T-12-9 took the corner apart pixel by pixel to say so.
+/// * `DWMWA_BORDER_COLOR` (34) := [`theme::Palette::field_border`] — 58,64,72 on «Графит»
+///   against the mock-up's `Border` 58,63,71, and 207,213,220 on «Туман» against 209,214,220:
+///   inside the Δ ≤ 2 the stage's terms of reference accepted. Asking for it replaces the
+///   whole classic frame, `160,160,160` and all.
+fn apply_menu_frame(hwnd: HWND) {
+    let preference = DWMWCP_ROUNDSMALL;
+
+    // NFR-13: both results are examined right here and the failure survived — the attributes
+    // are a request and nothing else of this program depends on the answer. Nothing is
+    // journaled: this is called from a callback, and a menu wearing the shell's frame is a
+    // menu that works.
+    //
+    // SAFETY: `hwnd` is the live popup. Each attribute pointer names a live local of this
+    // frame and the size passed is exactly that local's; the call copies the value and keeps
+    // no pointer once it returns.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&raw const preference).cast(),
+            size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        )
+    };
+
+    let colour = MENU_FRAME_COLOUR.with(Cell::get);
+
+    // SAFETY: as above — four bytes of a `COLORREF` by value.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            (&raw const colour).cast(),
+            size_of::<u32>() as u32,
+        )
+    };
+}
+
 /// Shows the menu of FR-91 at a point on the screen and carries out what was chosen.
 ///
 /// Called with no borrow of the tray held: `TrackPopupMenuEx` runs a modal message loop that
@@ -1899,6 +2111,11 @@ fn show_menu(x: i32, y: i32) {
         MENU_PAINT.with(|slot| slot.replace(Some(paint)));
     }
 
+    // Task T-12-9: the frame of the popup **window** the menu will live in, asked for just
+    // before the window exists and given up the moment it stops existing. See
+    // [`install_menu_frame_hook`] for why this needs a hook at all.
+    let frame_hook = install_menu_frame_hook(palette);
+
     // SAFETY: `menu.handle()` is a live popup menu owned by `menu` for the whole call — the
     // value is dropped at the end of this function, after `TrackPopupMenuEx` has returned,
     // and the call does not take ownership of it. `hwnd` is our live window, which is what
@@ -1917,6 +2134,12 @@ fn show_menu(x: i32, y: i32) {
             None,
         )
     };
+
+    // Task T-12-9: out on **every** path, including the one where the call above failed —
+    // `TrackPopupMenuEx` has returned by this line however it returned, and the popup window
+    // it created, if it created one, is gone. Dropped here by name rather than left to the
+    // end of the function so that the hook's life is visibly the modal call's and no longer.
+    drop(frame_hook);
 
     // The gate comes down here, immediately after the return: from this line on the two
     // messages are foreign again (SEC-05) — in particular before `dispatch_command` below

@@ -541,6 +541,71 @@ fn the_highlight_of_an_entry_is_the_inset_rounded_stripe_of_the_mock_up() {
     );
 }
 
+/// **Criterion 10 of task T-12-9.** The mock-up hands **every** entry the same ink — line 167
+/// of `chrome.ps1` gives `$brFg` to the row under the cursor and to every other row alike —
+/// and the highlight is the whole of what marks the hot one. The product used to brighten
+/// that row's text to `sel_fg` instead.
+///
+/// Swept over the source, and that is deliberate rather than lazy: the ink is chosen inside
+/// the answer to `WM_DRAWITEM`, and SEC-05 keeps that answer behind a gate which is **down**
+/// unless the program itself has a menu on the screen — the test right above this file's
+/// drawing tests exists to prove the gate stays down. So there is no way to make the drawing
+/// run from here, and the live half of the criterion is a shot of the menu with the cursor on
+/// an entry plus a histogram of its glyph cores: 155 px of `text` where 155 px of `sel_fg`
+/// used to be. That measurement is in `reports\T-12-9.md`; this guards the line it changed.
+#[test]
+fn the_ink_of_a_menu_entry_does_not_depend_on_the_cursor() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable");
+
+    let hits: Vec<usize> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let code = line.trim_start();
+            line.contains("sel_fg") && !code.starts_with("//") && !code.starts_with("///")
+        })
+        .map(|(index, _)| index + 1)
+        .collect();
+
+    println!("lines of src\\tray.rs naming sel_fg outside a comment: {hits:?}");
+
+    assert!(
+        hits.is_empty(),
+        "T-12-9: src\\tray.rs picks up sel_fg at lines {hits:?}; the menu paints every entry \
+         in `text`, hot or not"
+    );
+
+    // And the sweep guards something a shot can see. The two roles are the same number on
+    // «Тумане», which is why the defect hid there for a whole stage, and twelve levels apart
+    // on «Графите» — read from the palettes rather than written out, because what matters
+    // here is that the roles *differ*, not what either of them is this month.
+    let graphite = (
+        lang_switcher::theme::GRAPHITE.text.0,
+        lang_switcher::theme::GRAPHITE.sel_fg.0,
+    );
+    let fog = (
+        lang_switcher::theme::FOG.text.0,
+        lang_switcher::theme::FOG.sel_fg.0,
+    );
+
+    println!("graphite text/sel_fg {graphite:?}; fog text/sel_fg {fog:?}");
+
+    assert_ne!(
+        graphite.0, graphite.1,
+        "«Графит» is the palette where choosing the wrong role is visible"
+    );
+    assert_eq!(
+        fog.0, fog.1,
+        "«Туман» is the palette where it was invisible — which is why the sweep above, and \
+         not a shot of one theme, is what keeps it fixed"
+    );
+}
+
 #[test]
 fn the_check_mark_stands_inside_the_check_column_of_the_entry() {
     // The square of the mark is centred on the check column and on the middle of the entry,
