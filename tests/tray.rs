@@ -23,6 +23,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use lang_switcher::diag;
+use lang_switcher::hook;
 use lang_switcher::settings::{self, CONFIG_FILE_NAME};
 use lang_switcher::tray::{self, Menu, Reaction, Tray};
 
@@ -36,8 +38,8 @@ use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
     GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
-    MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW, RT_DIALOG, RT_VERSION,
-    SM_CXMENUCHECK, SM_CXSMICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
+    RT_DIALOG, RT_VERSION, SM_CXMENUCHECK, SM_CXSMICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_DRAWITEM, WM_ENDSESSION,
     WM_MEASUREITEM, WM_QUERYENDSESSION, WS_EX_TOOLWINDOW, WS_POPUP,
 };
@@ -47,12 +49,36 @@ use windows::core::{PCWSTR, w};
 // FR-91, read back from Windows
 // ---------------------------------------------------------------------------------------
 
+/// The third argument of [`Menu::build`] in the ordinary state of the program — task T-13-9.
+///
+/// `hook::fail_safe()`, which is what the product hands in from `tray::show_menu`.
+/// It is false in every test but the ones that are about FR-99, and it is a name rather than a
+/// bare `false` so that a reader of any of the menu tests below can see which of the three
+/// booleans is which.
+const NOT_FAIL_SAFE: bool = false;
+
+/// The same argument in the state FR-99 leaves behind — the fourth consecutive panic inside
+/// the hook callback has disarmed buffering and the flag is up for the rest of the process.
+const FAIL_SAFE: bool = true;
+
 /// The menu of FR-91 as its block prints, top to bottom. `None` is one of the two rules.
 ///
 /// Written out here on purpose. These seven lines are the requirement; the module's own
 /// resources are the implementation, and a test must not check one against itself.
 const FR_91: [Option<&str>; 7] = [
     Some("Приостановить"),
+    None,
+    Some("Настройки…"),
+    Some("Запускать при входе в систему"),
+    None,
+    Some("О программе"),
+    Some("Выход"),
+];
+
+/// The same seven lines with the program suspended — the first line of FR-91 is a pair and
+/// this is its other word.
+const FR_91_SUSPENDED: [Option<&str>; 7] = [
+    Some("Возобновить"),
     None,
     Some("Настройки…"),
     Some("Запускать при входе в систему"),
@@ -218,7 +244,7 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
 #[test]
 fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91);
 }
@@ -229,12 +255,12 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
     // *is*, and the second must survive the first — same seven entries, same two rules,
     // same places.
     let _locale = product_strings(settings::Language::En);
-    let menu = Menu::build(true, true).expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91_ENGLISH);
 
     // The suspended state moves the same entry in this locale as in the other one.
-    let suspended = Menu::build(false, true).expect("the menu must be creatable");
+    let suspended = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
     assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
@@ -243,8 +269,8 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
 #[test]
 fn the_first_entry_follows_the_state() {
     let _locale = product_strings(settings::Language::Ru);
-    let active = Menu::build(true, true).expect("the menu must be creatable");
-    let suspended = Menu::build(false, true).expect("the menu must be creatable");
+    let active = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let suspended = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
 
     assert_eq!(active.items()[0].label, "Приостановить");
     assert_eq!(suspended.items()[0].label, "Возобновить");
@@ -258,11 +284,273 @@ fn the_first_entry_follows_the_state() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-13-9, point (б) — FR-99 refuses the resumption of FR-90
+//
+// The audit of 2026-08-24 found `FAIL_SAFE` raised once and reset nowhere, so a user who
+// chose «Возобновить» after the fail-safe got `enabled = true`, the "активна" icon and
+// `set_active(true)` over processing that was dead until the process restarted — against the
+// signalling FR-99 names («сигнализирует состояние иконкой в трее») and the two
+// distinguishable states of FR-90.
+//
+// ⚠ **What these tests can and cannot reach.** `hook::fail_safe()` has exactly one writer in
+// the program — the fourth consecutive panic inside the hook callback, which only the system
+// can call — so no test binary can raise it. That is why the rule is
+// `tray::resume_is_refused(enabled, fail_safe)`, a function of its two arguments in the shape
+// `hook::classify` already has and for the reason that module states: every row of it is
+// reachable from here. The menu is measured the same way, with the flag handed in.
+// ---------------------------------------------------------------------------------------
+
+/// **The rule itself, all four rows.** One direction and one state, and nothing else.
+#[test]
+fn the_resumption_is_refused_in_exactly_one_of_the_four_states() {
+    for (enabled, fail_safe, expected) in [
+        // The ordinary program, armed or suspended: both directions are the user's.
+        (true, NOT_FAIL_SAFE, false),
+        (false, NOT_FAIL_SAFE, false),
+        // FR-99 has disarmed the program and it is still showing "активна" — the transition
+        // itself is a `toggle_state`, sent after the flag is already up, and refusing it
+        // would leave the icon lying from the other side.
+        (true, FAIL_SAFE, false),
+        // The state the audit is about: disarmed, the icon honest, and the resumption asked
+        // for. This is the one that is refused.
+        (false, FAIL_SAFE, true),
+    ] {
+        let refused = tray::resume_is_refused(enabled, fail_safe);
+
+        println!("enabled={enabled} fail_safe={fail_safe} -> refused={refused}");
+
+        assert_eq!(
+            refused, expected,
+            "resume_is_refused({enabled}, {fail_safe})"
+        );
+    }
+}
+
+/// **The refusal has a name of its own in the journal, and it is not `UNLISTED`.**
+///
+/// `Operation::from_name` is a *narrowing*: a name that is not a row of the closed table of
+/// `src\diag.rs` becomes `Operation::UNLISTED` and the text is dropped on the floor. That is
+/// what keeps a caller from putting anything of the user's into the ring — and it is also why a
+/// row that was never added would leave this event nameless and indistinguishable from every
+/// other unlisted one. So the round trip is asserted here rather than taken on trust.
+///
+/// SEC-01, SEC-07: what is asserted is that the row exists and which group it belongs to. The
+/// name itself carries no value of any kind — not the state of the configuration, not the count
+/// of panics, nothing typed — and there is no field beside it that could.
+#[test]
+fn the_refused_resumption_has_a_row_of_its_own_in_the_vocabulary_of_diag() {
+    let operation = diag::Operation::from_name("resume refused in fail-safe");
+
+    println!(
+        "«resume refused in fail-safe» -> name={:?} kind={:?} ({})",
+        operation.name(),
+        operation.kind(),
+        operation.kind().name()
+    );
+
+    assert_ne!(
+        operation,
+        diag::Operation::UNLISTED,
+        "the row of task T-13-9 is missing from `src\\diag.rs`: the event would reach the ring \
+         nameless and keep none of its text"
+    );
+    assert_eq!(
+        operation.name(),
+        "resume refused in fail-safe",
+        "and it maps back to its own row rather than to somebody else's"
+    );
+    assert_eq!(
+        operation.kind(),
+        diag::Kind::Tray,
+        "the icon and the menu of FR-90 and FR-91 are the tray's"
+    );
+
+    // The unlisted answer is what this would be without the row — kept beside it so that the
+    // assertion above cannot quietly become vacuous.
+    let absent = diag::Operation::from_name("resume refused in fail-safe (not a row)");
+
+    println!("a name that is not a row -> {:?}", absent.name());
+
+    assert_eq!(absent, diag::Operation::UNLISTED);
+    assert_eq!(absent.name(), "(unlisted)");
+}
+
+/// **The rule is where `general.enabled` moves, and it is the first thing there.**
+///
+/// Swept over the source, and for the reason two other tests of this suite already sweep it
+/// (`the_ink_of_a_menu_entry_does_not_depend_on_the_cursor` here, and
+/// `the_capslock_seed_is_outside_the_callback` in `tests\hook.rs`): the live path cannot be
+/// entered from a test binary. `Tray::toggle_state` consults `hook::fail_safe()`, whose one
+/// writer is the fourth consecutive panic inside a callback the system alone calls, so the
+/// refusing branch cannot be *run* from here however the tray is driven. What can be checked
+/// is that the guard is in the one method that writes the field, that it stands before the
+/// write rather than after it, and that it is the shared rule and not a second copy of it.
+#[test]
+fn the_guard_of_fr99_stands_at_the_top_of_the_method_that_moves_the_state() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    // The canonical checkout of this repository is CRLF (`.gitattributes`: `eol=crlf`), so a
+    // needle written with `\n` has to be matched against a text that holds `\n`. The reason is
+    // written out at `the_capslock_seed_is_outside_the_callback` in `tests\hook.rs`, which was
+    // red on every fresh worktree until task T-13-9 for exactly this.
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("pub fn toggle_state(&mut self) {")
+        .expect("Tray::toggle_state must be in this file");
+    let body = &source[at..];
+    let end = body
+        .find("\n    }")
+        .expect("a method closes with its brace");
+    let body = &body[..end];
+
+    println!("--- Tray::toggle_state ---\n{body}");
+
+    let guard = body
+        .find("resume_is_refused")
+        .expect("toggle_state must consult the rule of task T-13-9");
+    let write = body
+        .find("self.config.general.enabled =")
+        .expect("toggle_state must be the place `general.enabled` moves");
+
+    assert!(
+        guard < write,
+        "the refusal must come before the change, not after it"
+    );
+    assert!(
+        body.contains("crate::hook::fail_safe()"),
+        "and it must be asked of the flag FR-99 raises, not of anything the caller passes"
+    );
+
+    // One rule, one definition. `Menu::build` reads the same function; a second copy of the
+    // condition is how two answers to the same question start to differ.
+    let definitions = source.matches("pub fn resume_is_refused(").count();
+
+    assert_eq!(definitions, 1, "the rule is defined exactly once");
+
+    // The refusal is not a silence: one event goes into the ring, inside the refusing branch
+    // and therefore before the `return`, and it is the row the test above proves exists.
+    let event = body
+        .find("diag::record(")
+        .expect("the refusal must leave an event in the journal");
+    let name = body
+        .find("RESUME_REFUSED_IN_FAIL_SAFE")
+        .expect("and it must be the named row, not a string built here");
+
+    assert!(
+        guard < event && event < write,
+        "the event belongs inside the refusing branch — after the rule and before the change \
+         the branch never reaches"
+    );
+    assert!(
+        event < name,
+        "the name is the argument of that call and not a mention somewhere else"
+    );
+
+    // The literal behind that name is the one `src\diag.rs` carries, written out here so that
+    // the two cannot drift apart without this failing.
+    assert!(
+        source
+            .contains("const RESUME_REFUSED_IN_FAIL_SAFE: &str = \"resume refused in fail-safe\";"),
+        "the journal name of the refusal must be the row of the closed table"
+    );
+
+    // SEC-01, SEC-07: the event carries no code of its own. `OsCode` has no constructor that
+    // takes a number, and this is an event of the program rather than a failed Win32 call.
+    assert!(
+        body.contains("diag::OsCode::NONE"),
+        "the refusal reports no error code"
+    );
+}
+
+/// **Criterion 7 of task T-13-9.** With the flag up, «Возобновить» is in the menu, greyed, and
+/// cannot be chosen — so the icon cannot go back to "активна" through the menu at all.
+///
+/// `MF_DISABLED` is the half that decides: `TrackPopupMenuEx` answers zero for a disabled
+/// entry instead of returning `CMD_TOGGLE`, so `dispatch_command` never runs and
+/// `Tray::toggle_state` — which refuses the same move a second time — is never even reached.
+/// `MF_GRAYED` is the half the user sees, and the drawing of FR-92а pairs it with the
+/// palette's `text_muted`.
+#[test]
+fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
+    let _locale = product_strings(settings::Language::Ru);
+    let menu = Menu::build(false, true, FAIL_SAFE).expect("the menu must be creatable");
+
+    println!(
+        "entry 0: label={:?} enabled={} grayed={} disabled={}",
+        menu.items()[0].label,
+        menu.items()[0].enabled,
+        is_grayed(menu.handle(), 0),
+        is_disabled(menu.handle(), 0)
+    );
+
+    assert_eq!(
+        menu.items()[0].label,
+        "Возобновить",
+        "the entry stays in the menu and stays readable — a line that vanished would say \
+         nothing at all"
+    );
+    assert!(is_grayed(menu.handle(), 0), "and it is drawn unavailable");
+    assert!(
+        is_disabled(menu.handle(), 0),
+        "and `TrackPopupMenuEx` can never return CMD_TOGGLE for it"
+    );
+    assert!(
+        !menu.items()[0].enabled,
+        "the builder's own record, which is what the drawing picks its ink by"
+    );
+
+    // Nothing below the first entry moves: FR-99 takes away the resumption and not the
+    // settings, the autostart, the about box or the way out.
+    for position in [2u32, 3, 5, 6] {
+        assert!(
+            !is_grayed(menu.handle(), position) && !is_disabled(menu.handle(), position),
+            "entry {position} of FR-91 must stay available"
+        );
+    }
+
+    for item in &menu.items()[1..] {
+        assert!(item.enabled, "{:?} must stay available", item.label);
+    }
+
+    // And the block of FR-91 is still the block of FR-91 — seven entries, five commands, two
+    // rules, the same words. Greying is not a second menu.
+    assert_menu_is(&menu, &FR_91_SUSPENDED);
+}
+
+/// The other two states leave the first entry exactly as it was before this task.
+#[test]
+fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
+    let _locale = product_strings(settings::Language::Ru);
+
+    // The ordinary suspended program: «Возобновить» is the user's to choose.
+    let ordinary = Menu::build(false, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+
+    assert_eq!(ordinary.items()[0].label, "Возобновить");
+    assert!(ordinary.items()[0].enabled);
+    assert!(!is_grayed(ordinary.handle(), 0));
+    assert!(!is_disabled(ordinary.handle(), 0));
+
+    // FR-99 has just disarmed an armed program. The move it is about to make is the
+    // suspension, and that one must stay available or the icon never becomes honest.
+    let suspending = Menu::build(true, true, FAIL_SAFE).expect("the menu must be creatable");
+
+    assert_eq!(suspending.items()[0].label, "Приостановить");
+    assert!(suspending.items()[0].enabled);
+    assert!(!is_grayed(suspending.handle(), 0));
+    assert!(!is_disabled(suspending.handle(), 0));
+}
+
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let on = Menu::build(true, true).expect("the menu must be creatable");
-    let off = Menu::build(true, false).expect("the menu must be creatable");
+    let on = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
+    let off = Menu::build(true, false, NOT_FAIL_SAFE).expect("the menu must be creatable");
 
     assert!(
         is_checked(on.handle(), 3),
@@ -292,7 +580,7 @@ fn the_item_data_of_every_command_entry_is_its_command_number() {
     // Windows: the `itemData` of every command entry equals the command identifier of the
     // same entry, and both equal what the builder recorded.
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true).expect("the menu must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE).expect("the menu must be creatable");
 
     // The five command positions of the FR-91 block — everything but the two rules.
     let command_positions = [0u32, 2, 3, 5, 6];
@@ -1004,6 +1292,86 @@ fn switching_the_state_reaches_the_icon_and_the_file() {
     assert!(config.general.enabled);
 }
 
+/// **Criterion 5 of task T-13-9, the half that is about the file.** A forged
+/// `WM_APP_FAIL_SAFE` creates no configuration.
+///
+/// The audit's finding was not that the program could be suspended — it was that being
+/// suspended by a stranger's message **wrote `general.enabled = false` to the disk**, because
+/// the only way the tray offers to the "приостановлена" icon is `Tray::toggle_state` and that
+/// method saves. So the measurement here is the directory, not an intention: `Tray::install_at`
+/// reads and never writes, so `config.toml` does not exist when the message arrives, and a
+/// write of any kind would make it appear.
+///
+/// ⚠ **What this measures and what it does not.** `tray::with_tray` answers `None` on every
+/// thread that has no tray of its own, and a test thread is one of those, so the arm could not
+/// have reached *this* tray even without the gate — the gate's own effect is measured in
+/// `tests\hook.rs`, on `hook::is_active`, which is the half that was never thread-bound. What
+/// this test adds is the fact the audit asked for, measured the way the task asks for it: after
+/// a hundred forged messages the folder is still empty. The `toggle_state` at the end is the
+/// positive control — it shows that a write really would have been seen.
+#[test]
+fn a_forged_fail_safe_message_leaves_no_configuration_behind() {
+    let window = TestWindow::new();
+    let home = TestDir::new("forged-fail-safe");
+    let mut tray = install(&window, &home);
+
+    assert!(
+        !hook::fail_safe(),
+        "no callback of this process has panicked four times running, so the flag is down — \
+         which is the state a forgery arrives in"
+    );
+    assert!(tray.enabled(), "and the icon says «активна»");
+    assert_eq!(
+        home.entries(),
+        Vec::<String>::new(),
+        "installing the tray reads the configuration and writes nothing"
+    );
+
+    let active_before = hook::is_active();
+
+    for _ in 0..100 {
+        let answered = hook::handle_input_message(hook::WM_APP_FAIL_SAFE, WPARAM(0), LPARAM(0));
+
+        assert_eq!(
+            answered,
+            Some(LRESULT(0)),
+            "the message stays one of ours: the list of `handle_input_message` is closed and \
+             explicit (SEC-05), and a gate that refused it would hand it to DefWindowProcW"
+        );
+    }
+
+    println!(
+        "after 100 forged WM_APP_FAIL_SAFE: entries={:?} enabled={} hook::is_active={}",
+        home.entries(),
+        tray.enabled(),
+        hook::is_active()
+    );
+
+    assert_eq!(
+        home.entries(),
+        Vec::<String>::new(),
+        "SEC-05: a forged message must not write the configuration"
+    );
+    assert!(tray.enabled(), "and must not move the icon");
+    assert_eq!(
+        hook::is_active(),
+        active_before,
+        "and must not disarm the hook"
+    );
+
+    // The positive control: the same folder, watched the same way, does see a write.
+    tray.toggle_state();
+
+    println!("after one genuine toggle: entries={:?}", home.entries());
+
+    assert_eq!(home.entries(), vec![CONFIG_FILE_NAME.to_owned()]);
+    assert!(
+        fs::read_to_string(home.config())
+            .expect("the file must be readable")
+            .contains("enabled = false")
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-6 — the tray acts on the outcome of the read
 //
@@ -1649,4 +2017,18 @@ fn is_checked(menu: HMENU, position: u32) -> bool {
 /// Whether the entry at `position` is owner-drawn — FR-92а, task T-11-10.
 fn is_owner_drawn(menu: HMENU, position: u32) -> bool {
     flags_at(menu, position).0 & MF_OWNERDRAW.0 != 0
+}
+
+/// Whether the entry at `position` is drawn as unavailable — task T-13-9.
+fn is_grayed(menu: HMENU, position: u32) -> bool {
+    flags_at(menu, position).0 & MF_GRAYED.0 != 0
+}
+
+/// Whether the entry at `position` cannot be chosen — task T-13-9.
+///
+/// The half that matters for the rule rather than for the look: with `MF_DISABLED` set,
+/// `TrackPopupMenuEx` answers zero instead of the command, so no `dispatch_command` ever runs
+/// for this entry.
+fn is_disabled(menu: HMENU, position: u32) -> bool {
+    flags_at(menu, position).0 & MF_DISABLED.0 != 0
 }

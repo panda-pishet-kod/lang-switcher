@@ -137,6 +137,37 @@ pub const WM_APP_HOTKEY: u32 = WM_APP + 3;
 
 /// Message the callback posts to the UI thread's window when FR-99 has disarmed buffering,
 /// so that the tray icon can show the "приостановлена" state FR-99 asks for.
+///
+/// # SEC-05 — the justification this constant lacked until task T-13-9
+///
+/// Its neighbour [`WM_APP_HOTKEY`] has carried one since it was written, and every other
+/// private message of the program is built the same way: `watchdog::WM_APP_REHOOK`,
+/// `switch::WM_APP_SWITCH`, `guard::WM_APP_PROBE` and `selection::WM_APP_SELECTION` all check
+/// something the sender cannot write, so **a forged message finds nothing pending and does
+/// nothing**. This one had no such check, and the audit of 2026-08-24 measured what that
+/// bought a sender: one `PostMessage(WM_APP + 4)` at a window found by the class name
+/// `LangSwitcher.Hidden`, or through `FindWindowEx(HWND_MESSAGE)`, suspended the program —
+/// and, because the only way the tray offers to the "приостановлена" icon is
+/// `Tray::toggle_state`, wrote `general.enabled = false` into `config.toml`, so the suspension
+/// outlived the restart. There was no compensating road to close instead: the `WM_COMMAND`
+/// path to that same toggle was deliberately removed with `TPM_RETURNCMD` — the SEC-05
+/// section of [`crate::tray`] says so — which left this message the one forgeable way to a
+/// configuration write in the whole program. The handler is compiled into Release as well,
+/// where every line of FR-99 is `cfg`-ed away and a *legitimate* sender therefore cannot
+/// exist at all.
+///
+/// What the message is now gated on is `FAIL_SAFE`, an atomic with exactly one writer in the
+/// program — the `swap(true, …)` of `count_callback_panic`, reached only by the fourth
+/// consecutive panic inside the hook callback. Nothing outside this process can set it and
+/// nothing inside it sets it for any other reason, so the message says no more than "look at
+/// your own flag", and a sender who has not made this program panic four times running finds
+/// the flag down and buys one atomic load. The gate is the first thing the arm in
+/// [`handle_input_message`] does. `with_tray` answering `None` off the UI thread is a second
+/// line and never was a substitute for this one: it does not cover the `set_active(false)`
+/// that follows it, which is what silently disarmed the hook when the forgery was posted at
+/// the input thread's own window.
+///
+/// The message still carries no parameters, and none are read (SEC-01, SEC-07).
 pub const WM_APP_FAIL_SAFE: u32 = WM_APP + 4;
 
 /// Message that asks the **input** thread to read the machine's `CapsLock` into the typing
@@ -916,7 +947,13 @@ pub fn current_mode() -> Mode {
 /// belongs to the module that defined them.
 ///
 /// SEC-05: the list is closed and explicit, none of its entries carries a parameter that is
-/// read, and none initiates a privileged action.
+/// read, and none initiates a privileged action. Since task T-13-9 each of the three also
+/// answers to something the sender cannot write, which is the standard the rest of the
+/// program's private messages were already built to: [`WM_APP_HOTKEY`] converts text the
+/// sender can neither see nor influence and is argued at its constant; [`WM_APP_FAIL_SAFE`] is
+/// gated on `FAIL_SAFE`, the flag only the fourth consecutive panic inside the callback
+/// raises; [`WM_APP_SEED_CAPS`] replaces this program's belief with the system's own reading
+/// and cannot carry a value at all.
 pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
     match message {
         // FR-02, the far end of the handoff. This runs on the input thread, in its ordinary
@@ -938,19 +975,25 @@ pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> O
             Some(LRESULT(0))
         }
 
-        // FR-99: buffering has been disarmed and the icon has to say so. `with_tray` answers
-        // `None` on any thread that is not the UI thread, so posting this to the wrong window
-        // is harmless by construction. `toggle_state` is the only public way the tray offers
-        // to reach the "приостановлена" icon; the guard keeps it from toggling a program that
-        // is already suspended back to active.
+        // FR-99: buffering has been disarmed and the icon has to say so.
+        //
+        // **The gate of task T-13-9, point (а) — SEC-05.** The reasoning is written out at
+        // [`WM_APP_FAIL_SAFE`]; in one line: this is the only private message of the program
+        // that used to act on nothing but the sender's word, and acting meant suspending the
+        // program and writing `general.enabled = false` to the disk. `FAIL_SAFE` is written
+        // by this process and by nothing else, exactly once, on the fourth consecutive panic
+        // inside the callback, so a message that arrives with the flag down is a message this
+        // program did not send. It is answered — the list of this function is closed and
+        // explicit, and a message of ours stays ours — and nothing is done.
+        //
+        // `with_tray` answering `None` off the UI thread is the older, weaker half of the
+        // defence and stays where it is; it never covered the `set_active(false)` below.
         WM_APP_FAIL_SAFE => {
-            crate::tray::with_tray(|tray| {
-                if tray.enabled() {
-                    tray.toggle_state();
-                }
-            });
+            if !fail_safe() {
+                return Some(LRESULT(0));
+            }
 
-            set_active(false);
+            suspend_for_fail_safe();
 
             Some(LRESULT(0))
         }
@@ -972,6 +1015,41 @@ pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> O
 
         _ => None,
     }
+}
+
+/// Everything the [`WM_APP_FAIL_SAFE`] arm does once its gate has let the message through —
+/// the "сигнализирует состояние иконкой в трее" of FR-99, unchanged by task T-13-9.
+///
+/// The tray is asked first and only if it believes itself armed: `toggle_state` is the one
+/// public way the tray offers to the "приостановлена" icon, and calling it on a program that
+/// is already suspended would toggle it back to active. `with_tray` answers `None` on every
+/// thread but the UI one, so on the input thread — which is where a legitimate
+/// `signal_fail_safe` posts nothing, and where a forgery used to arrive — this half is a
+/// thread-local read and a `None`. The second half, [`set_active`], is not thread-bound and is
+/// what the gate above exists for.
+///
+/// # Why this is a function of its own, and `pub`
+///
+/// The same reason [`classify`] takes a [`Mode`] instead of reading the atomics itself, and
+/// the module documentation states it there: `FAIL_SAFE` has exactly one writer, the fourth
+/// consecutive panic inside the hook callback, and no test can reach it — a callback the
+/// system alone can call, behind a hook a test binary has no window to install. A rule whose
+/// only demonstration was "make the program panic four times" would be a rule nothing ever
+/// demonstrated. So the *gate* is measured through [`handle_input_message`], with the real
+/// atomic in its real state, and the *work behind the gate* is measured through this function
+/// — `tests\hook.rs` drives both, and the live proof of FR-99 end to end stays where it has
+/// always been, in the acceptance run of §11.5.
+///
+/// Not a way in for anybody else: it is in-process only, and every caller of it in the
+/// program is the one arm above.
+pub fn suspend_for_fail_safe() {
+    crate::tray::with_tray(|tray| {
+        if tray.enabled() {
+            tray.toggle_state();
+        }
+    });
+
+    set_active(false);
 }
 
 // ---------------------------------------------------------------------------------------

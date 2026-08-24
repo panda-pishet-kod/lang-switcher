@@ -375,6 +375,23 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
     // `Kind` is added**, the rule every note above follows.
     ("clipboard restore skipped", Kind::Selection),
+    // The resumption FR-99 does not allow — task T-13-9, the finding "fail-safe is
+    // irreversible and the icon lies after «Возобновить»". One row, appended at the end so
+    // that no index above it moves: a slot already written carries a number, and renumbering
+    // the table would change what a dump of an earlier run means.
+    //
+    // ⚠ **A fact and no value at all (SEC-01, SEC-07).** It says that a resumption arrived
+    // while FR-99 held the program disarmed and was refused. It does not say what
+    // `general.enabled` was, how many panics had run, which entry of the menu was chosen or
+    // what the user had typed — and there is no branch here through which any of those could
+    // reach the ring. The code beside it is always [`OsCode::NONE`]: this is an event of the
+    // program, not the failure of a Win32 call.
+    //
+    // `Kind::Tray` and **no new `Kind`** — the rule every note above follows. Unlike the five
+    // configuration rows, which are half the tray's and half the process's, this one belongs
+    // to the tray whole: it is raised in `crate::tray::Tray::toggle_state`, it is about the
+    // icon and the menu of FR-90 and FR-91, and the kind already exists.
+    ("resume refused in fail-safe", Kind::Tray),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

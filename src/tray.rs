@@ -29,6 +29,10 @@
 //! answers about the file is now acted on rather than dropped, so a configuration this build
 //! could not read is kept before anything is written over it and one from a newer build is not
 //! written to at all — see [`Tray::save_config`].
+//! T-13-9 (done) closed a second finding of the same audit, the low one: while FR-99 holds the
+//! program disarmed the resumption of FR-90 is refused rather than performed, so the icon can
+//! no longer say "активна" over dead processing — [`resume_is_refused`], [`Tray::toggle_state`]
+//! and the greyed first entry of [`Menu::build`].
 //!
 //! # Where this lives — section 6.1
 //!
@@ -113,14 +117,14 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CWPSTRUCT, CallNextHookEx, CreatePopupMenu, DestroyIcon, DestroyMenu,
     GetClassNameW, GetSystemMetrics, HHOOK, HICON, HMENU, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
-    MENUINFO, MF_CHECKED, MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED, MIM_BACKGROUND,
-    NONCLIENTMETRICSW, PostMessageW, RT_VERSION, RegisterWindowMessageW, SM_CXMENUCHECK,
-    SM_CXSMICON, SM_CYMENU, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo, SetWindowsHookExW,
-    SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx,
-    UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION,
-    WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
-    WM_THEMECHANGED, WM_USER,
+    MENUINFO, MF_CHECKED, MF_DISABLED, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR,
+    MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
+    RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
+    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
+    SetWindowsHookExW, SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM,
+    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL, WM_QUERYENDSESSION,
+    WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
@@ -346,6 +350,63 @@ pub enum Reaction {
     /// a message loop that comes back into this module, and it must therefore not be opened
     /// while the tray is borrowed.
     ShowSettings,
+}
+
+// ---------------------------------------------------------------------------------------
+// The resumption FR-99 does not allow — task T-13-9, point (б)
+// ---------------------------------------------------------------------------------------
+
+/// The journal name of a refused resumption — task T-13-9, one row of `diag`'s closed table.
+///
+/// **SEC-01, SEC-07.** A literal chosen at compile time, and it names the fact and nothing
+/// beside it: a resumption arrived while FR-99 held the program disarmed, and it was refused.
+/// Not what `general.enabled` was, not how many panics had run, not which entry of the menu was
+/// chosen, and nothing whatever that was typed. [`diag::Operation::from_name`] narrows even
+/// this onto the table of `src\diag.rs`, so a name that were not a row of it would keep none of
+/// its text.
+const RESUME_REFUSED_IN_FAIL_SAFE: &str = "resume refused in fail-safe";
+
+/// Whether «Возобновить» has to be refused right now — **the rule of task T-13-9, point (б)**.
+///
+/// # What it is about
+///
+/// FR-99 disarms the program after the fourth consecutive panic inside the hook callback:
+/// «весь ввод пропускается без обработки», and the program «сигнализирует состояние иконкой
+/// в трее». The flag that says so, `hook::fail_safe`, is raised exactly once and is reset
+/// nowhere — the audit of 2026-08-24 confirmed by grep that the codebase holds one write and
+/// only reads besides. Until this task nothing stopped the user from then choosing
+/// «Возобновить»: [`Tray::toggle_state`] set `general.enabled` back to true, the icon went
+/// back to "активна" and `hook::set_active(true)` re-published it — while `hook::classify`
+/// went on answering `PASS` to every stroke, hotkey included. The program looked alive and was
+/// not, and there was no way back short of restarting the process.
+///
+/// That breaks the signalling FR-99 names in as many words and the distinguishability FR-90
+/// requires of the two icon states, so the resumption is refused and the icon stays where
+/// FR-99 put it.
+///
+/// # Only the one direction
+///
+/// `fail_safe && !enabled` and not `fail_safe` alone. Suspending stays allowed, and it has to:
+/// the transition into the fail-safe state is itself a `toggle_state`, sent by
+/// `hook::handle_input_message` on [`crate::hook::WM_APP_FAIL_SAFE`] **after** the flag is
+/// already up. A blanket refusal would refuse the very move FR-99 asks for and leave the icon
+/// saying "активна" — the same lie, arrived at from the other side.
+///
+/// # The way back is a restart, and that is the whole of it
+///
+/// Deliberately no reset of the flag. See the long note at [`Tray::toggle_state`] for why the
+/// alternative — clearing `FAIL_SAFE` and the panic streak on an explicit resumption — was
+/// weighed and not taken.
+///
+/// # Why a function of two arguments instead of a read of the atomic
+///
+/// The same reason `hook::classify` takes a `Mode`, and that module says it outright: the flag
+/// has one writer, the fourth consecutive panic inside a callback only the system can call, so
+/// a rule that read the atomic inside itself would be a rule no test could ever drive. The two
+/// callers — [`Tray::toggle_state`] and [`Menu::build`] — read `hook::fail_safe()` and hand it
+/// in; `tests\tray.rs` hands in both values and measures all four rows.
+pub fn resume_is_refused(enabled: bool, fail_safe: bool) -> bool {
+    fail_safe && !enabled
 }
 
 /// The tray of one thread: the icon, its state, and the configuration behind it.
@@ -660,7 +721,64 @@ impl Tray {
     /// The state of FR-90 is stored in `general.enabled`, so switching it and saving it are
     /// the same operation. There is no hook to arm or disarm yet — task T-03-1 reads this
     /// flag; until then the state is the icon, the tooltip and the file.
+    ///
+    /// # The one move this refuses — task T-13-9, point (б)
+    ///
+    /// **While FR-99 holds, the resumption is refused and nothing at all happens here**: no
+    /// change in memory, no icon, no tooltip, no save. One event goes into the ring journal —
+    /// [`RESUME_REFUSED_IN_FAIL_SAFE`], the fact and no value beside it — so that a refusal is
+    /// visible in a dump instead of being a silence. The rule and the reasoning are at
+    /// [`resume_is_refused`]; this is where it is enforced, because this method is the only
+    /// way `general.enabled` ever moves — «Возобновить» in the menu reaches it through
+    /// [`dispatch_command`], and nothing else in the program writes that field.
+    ///
+    /// The greying of the menu entry ([`Menu::build`]) is a second line and not this one: it
+    /// stops the command being asked for, which is what makes the refusal visible instead of
+    /// merely silent, but the menu is user interface and this is the rule.
+    ///
+    /// **Восстановление — только перезапуском процесса.** That is the accepted price and the
+    /// alternative was weighed: resetting `hook::fail_safe` and the panic streak on an explicit
+    /// resumption would give a way back inside the session, and it would also re-arm the
+    /// callback that has just panicked four times in a row against unchanged causes — the
+    /// stroke that panics, the layout that panics, the buffer state that panics. FR-99 counts
+    /// «подряд», and the counter is put back to zero by every callback that returns normally,
+    /// so a program resumed into the same cause spends four more panics arriving at the same
+    /// place, and a user who keeps pressing «Возобновить» is a loop of exactly that. The panics
+    /// are not free: each one unwinds through the most timing-critical function in the program
+    /// (NFR-01: p99 under 100 µs), and FR-80 removes a hook that is too slow **silently**. A
+    /// state that is honest and needs a restart is worth more than one that is reversible and
+    /// oscillates. The choice is written up in the report of this task.
+    ///
+    /// # How this sits with the save policy of task T-13-6
+    ///
+    /// They never meet, and that is by construction rather than by luck. This refusal returns
+    /// **before** anything is changed, so [`Tray::save_config`] is not reached at all: a
+    /// refused resumption asks nothing of [`Tray::save_policy`], attempts no quarantine and
+    /// puts no «configuration save suppressed» in the journal. The two also answer different
+    /// questions and neither can shadow the other — T-13-6 decides the fate of the **file**
+    /// (and may forbid writing it for the session, [`SavePolicy::Forbidden`]), while this
+    /// decides whether the **state** moves at all. In the direction that is still allowed —
+    /// the suspension FR-99 itself performs — the icon changes and `save_config` then decides
+    /// the file's fate on its own terms, so a configuration from a newer schema is still left
+    /// alone and the icon still tells the truth. Neither outcome depends on the other.
     pub fn toggle_state(&mut self) {
+        if resume_is_refused(self.enabled(), crate::hook::fail_safe()) {
+            // One event, and it is worth having precisely because it should be rare: the entry
+            // that asks for this is appended `MF_GRAYED | MF_DISABLED` while FR-99 holds, so
+            // `TrackPopupMenuEx` cannot return `CMD_TOGGLE` and the ordinary road here is shut.
+            // A refusal reaching this line therefore says the resumption arrived some other
+            // way, and a dump that shows it is what tells a reader the state was honest rather
+            // than stuck. SEC-01 and SEC-07 are argued at the name; the code is
+            // [`diag::OsCode::NONE`] because this is an event of the program and not the
+            // failure of a Win32 call.
+            diag::record(
+                diag::Operation::from_name(RESUME_REFUSED_IN_FAIL_SAFE),
+                diag::OsCode::NONE,
+            );
+
+            return;
+        }
+
         self.config.general.enabled = !self.config.general.enabled;
         self.refresh_icon();
         self.save_config();
@@ -1156,6 +1274,15 @@ pub struct MenuItem {
     pub label: String,
     /// Whether the entry shows the check mark of FR-93.
     pub checked: bool,
+    /// Whether the entry can be chosen — task T-13-9, point (б).
+    ///
+    /// True for every entry of FR-91 except one: «Возобновить» while FR-99 holds the program
+    /// disarmed, which [`resume_is_refused`] decides and [`Menu::build`] appends as
+    /// `MF_GRAYED | MF_DISABLED`. The record is here as well as in Windows because the drawing
+    /// of task T-11-10 paints the entry itself and has to know which ink to use — and it takes
+    /// that from **this** field rather than from the `ODS_GRAYED` of the message, so that
+    /// nothing a forged `WM_DRAWITEM` carries decides how our menu looks (SEC-05).
+    pub enabled: bool,
 }
 
 /// The context menu of FR-91, destroyed when this value is dropped.
@@ -1176,7 +1303,19 @@ impl Menu {
     /// The composition is the block of FR-91 read top to bottom: the state item, a rule, the
     /// settings and autostart items, a rule, about and exit. Seven entries in all,
     /// [`MENU_ENTRY_COUNT`].
-    pub fn build(enabled: bool, autostart: bool) -> WinResult<Self> {
+    ///
+    /// # `fail_safe` — task T-13-9, point (б)
+    ///
+    /// The third argument is `hook::fail_safe()`, handed in by [`show_menu`] rather than read
+    /// here, for the reason [`resume_is_refused`] gives. It changes exactly one thing and only
+    /// in one state: «Возобновить» is appended `MF_GRAYED | MF_DISABLED`, so
+    /// `TrackPopupMenuEx` cannot return `CMD_TOGGLE` at all and the entry is written in
+    /// [`theme::Palette::text_muted`] instead of `text`. The **composition** of FR-91 does not
+    /// move: seven entries, the same five commands, the same two rules, the same labels. The
+    /// entry stays in the menu, greyed rather than removed, because a user looking for the way
+    /// back has to see that there is one and that it is not available — a menu that quietly
+    /// lost a line would say nothing at all.
+    pub fn build(enabled: bool, autostart: bool, fail_safe: bool) -> WinResult<Self> {
         // SAFETY: takes no arguments and touches no memory of ours. The handle it returns is
         // owned by this value from here on and is destroyed exactly once, in `Drop`. The
         // crate turns a null handle into an error, so NFR-13 is satisfied by the `?`.
@@ -1196,21 +1335,36 @@ impl Menu {
             settings::IDS_MENU_RESUME
         });
 
-        menu.append_command(CMD_TOGGLE, &first, false)?;
+        // Task T-13-9: the one entry of FR-91 whose availability is not constant.
+        let toggle_available = !resume_is_refused(enabled, fail_safe);
+
+        menu.append_command(CMD_TOGGLE, &first, false, toggle_available)?;
         menu.append_separator()?;
         menu.append_command(
             CMD_SETTINGS,
             &settings::text(settings::IDS_MENU_SETTINGS),
             false,
+            true,
         )?;
         menu.append_command(
             CMD_AUTOSTART,
             &settings::text(settings::IDS_MENU_AUTOSTART),
             autostart,
+            true,
         )?;
         menu.append_separator()?;
-        menu.append_command(CMD_ABOUT, &settings::text(settings::IDS_MENU_ABOUT), false)?;
-        menu.append_command(CMD_EXIT, &settings::text(settings::IDS_MENU_EXIT), false)?;
+        menu.append_command(
+            CMD_ABOUT,
+            &settings::text(settings::IDS_MENU_ABOUT),
+            false,
+            true,
+        )?;
+        menu.append_command(
+            CMD_EXIT,
+            &settings::text(settings::IDS_MENU_EXIT),
+            false,
+            true,
+        )?;
 
         Ok(menu)
     }
@@ -1239,8 +1393,29 @@ impl Menu {
     /// The check mark of FR-93 is still declared to Windows as `MF_CHECKED` — that is what
     /// keeps the entry's state readable from outside, `GetMenuState` and screen readers
     /// alike — and recorded in the entry, which is what the drawing paints by.
-    fn append_command(&mut self, command: u32, label: &str, checked: bool) -> WinResult<()> {
+    ///
+    /// `enabled` is declared the same way and for the same reason (task T-13-9): `MF_GRAYED`
+    /// together with `MF_DISABLED` is what keeps `TrackPopupMenuEx` from ever returning the
+    /// command and what `GetMenuState` and accessibility read, and the record in the entry is
+    /// what the drawing chooses its ink by.
+    fn append_command(
+        &mut self,
+        command: u32,
+        label: &str,
+        checked: bool,
+        enabled: bool,
+    ) -> WinResult<()> {
         let mark = if checked { MF_CHECKED } else { MF_UNCHECKED };
+
+        // `MF_ENABLED` is zero, so the ordinary entry is unchanged bit for bit by this task.
+        // Both flags of the other case matter: `MF_GRAYED` is what draws it as unavailable to
+        // everybody outside this program, and `MF_DISABLED` is what makes the choice
+        // impossible — `TrackPopupMenuEx` returns zero instead of the command.
+        let availability = if enabled {
+            MF_ENABLED
+        } else {
+            MF_GRAYED | MF_DISABLED
+        };
 
         // SAFETY: `self.handle` is a live menu created by `CreatePopupMenu` and owned by
         // this value. `command` is one of our own non-zero identifiers. Under
@@ -1252,7 +1427,7 @@ impl Menu {
         unsafe {
             AppendMenuW(
                 self.handle,
-                MF_OWNERDRAW | mark,
+                MF_OWNERDRAW | mark | availability,
                 usize::try_from(command).unwrap_or(0),
                 PCWSTR(std::ptr::without_provenance(
                     usize::try_from(command).unwrap_or(0),
@@ -1264,6 +1439,7 @@ impl Menu {
             command,
             label: label.to_owned(),
             checked,
+            enabled,
         });
 
         Ok(())
@@ -1648,8 +1824,22 @@ impl MenuPaint {
         // have. («Туман» hid it: there `sel_fg` *is* `text`.) The ink of an entry is
         // therefore no longer a function of `selected` at all.
         //
+        // **Task T-13-9 adds the one exception, and it is not the cursor**: an entry that
+        // cannot be chosen is written in [`theme::Palette::text_muted`], the palette's own
+        // quieter ink, so that the greyed «Возобновить» of FR-99 reads as greyed on both
+        // palettes instead of merely refusing to respond. The value comes from **our own**
+        // record of the entry and never from the `ODS_GRAYED` of the message: a forged
+        // `WM_DRAWITEM` decides nothing about how this menu looks (SEC-05). No colour is
+        // invented here — `text_muted` is a role `theme` already defines and this file already
+        // has no say in.
+        let ink = if item.enabled {
+            self.palette.text
+        } else {
+            self.palette.text_muted
+        };
+
         // SAFETY: as above — a colour by value.
-        let _ = unsafe { SetTextColor(dc, self.palette.text) };
+        let _ = unsafe { SetTextColor(dc, ink) };
 
         let mut text_rect = RECT {
             left: rect.left + MENU_H_PAD + check_column() + MENU_CHECK_GAP,
@@ -2194,7 +2384,9 @@ fn show_menu(x: i32, y: i32) {
         return;
     };
 
-    let menu = match Menu::build(enabled, autostart) {
+    // Task T-13-9: read once, here, and handed to the builder — the same direction the two
+    // states above travel, and the reason [`resume_is_refused`] takes arguments at all.
+    let menu = match Menu::build(enabled, autostart, crate::hook::fail_safe()) {
         Ok(menu) => menu,
         Err(error) => {
             app::report_non_critical("Menu::build", &error);
@@ -2343,6 +2535,10 @@ fn set_menu_background(menu: HMENU, brush: HBRUSH) {
 /// is reachable by sending this process a message — see SEC-05 in the module documentation.
 fn dispatch_command(hwnd: HWND, command: u32) {
     match command {
+        // FR-90. Task T-13-9: while FR-99 holds, this arm is unreachable — the entry was
+        // appended `MF_GRAYED | MF_DISABLED`, so `TrackPopupMenuEx` answered zero rather than
+        // this command — and [`Tray::toggle_state`] refuses the resumption a second time
+        // whatever brought it here.
         CMD_TOGGLE => {
             let _ = with_tray(Tray::toggle_state);
         }

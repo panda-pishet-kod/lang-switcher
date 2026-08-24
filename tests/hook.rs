@@ -734,6 +734,220 @@ fn fr99_tolerates_three_panics_and_trips_on_the_fourth() {
     assert_eq!(MAX_CONSECUTIVE_PANICS, 3);
 }
 
+// -------------------------------------------------------------------------------------
+// Task T-13-9, point (а) — the SEC-05 gate on `WM_APP_FAIL_SAFE`
+//
+// The audit of 2026-08-24: this was the one private message of the program that acted on
+// nothing but the sender's word. Any process at the same integrity level finds the windows
+// by the class name `LangSwitcher.Hidden` or through `FindWindowEx(HWND_MESSAGE)`, and one
+// `PostMessage(WM_APP + 4)` suspended the program — writing `general.enabled = false` to the
+// disk on the UI window, and silently disarming the hook with `set_active(false)` on the
+// input one. Every other message of the program was already built the other way round: a
+// forgery finds nothing pending and does nothing.
+//
+// ⚠ **The one flag and the one writer.** `hook::fail_safe()` is raised by
+// `FAIL_SAFE.swap(true, …)` inside `count_callback_panic` and by nothing else in the
+// program, and that line is reached only by the fourth consecutive panic inside a callback
+// the system alone can call. So no test binary can raise it, which is why the gate is
+// measured here with the flag in its real state — down — and the work **behind** the gate is
+// measured through `hook::suspend_for_fail_safe`, exactly as `classify` is measured against a
+// `Mode` handed in rather than against the atomics. The live proof of FR-99 end to end stays
+// where it has always been: the acceptance run of §11.5.
+// -------------------------------------------------------------------------------------
+
+/// Serialises the tests that read or move the mode the UI thread publishes.
+///
+/// `ACTIVE` is process-wide and the tests of one binary run on parallel threads, so the test
+/// below — which suspends the program and puts it back — and
+/// `the_program_starts_armed_on_the_default_hotkey`, which asserts what the value is, must not
+/// overlap.
+static PUBLISHED_MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// **Criterion 5 of task T-13-9.** A forged `WM_APP_FAIL_SAFE` finds the flag down and nothing
+/// at all happens.
+///
+/// The measurement is of the half that was never thread-bound. `with_tray` answers `None` on
+/// any thread but the UI one, so the tray was always out of a forgery's reach *on this thread*;
+/// `set_active(false)` was not, and disarming the hook while the icon went on saying "активна"
+/// is what the finding calls out for the input thread's own window. The file half of the same
+/// criterion — that no configuration is written — is measured in `tests\tray.rs`, where there
+/// is a tray and a folder to watch.
+#[test]
+fn a_forged_fail_safe_message_finds_the_flag_down_and_does_nothing() {
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+
+    let _mode = PUBLISHED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    assert!(
+        !hook::fail_safe(),
+        "no callback of this process has panicked four times running"
+    );
+
+    let before = (
+        hook::is_active(),
+        hook::hotkey_handoffs(),
+        hook::post_failures(),
+        hook::consecutive_panics(),
+    );
+
+    for _ in 0..1_000 {
+        let answered = hook::handle_input_message(hook::WM_APP_FAIL_SAFE, WPARAM(0), LPARAM(0));
+
+        assert_eq!(
+            answered,
+            Some(LRESULT(0)),
+            "the message is still one of ours — the list of `handle_input_message` is closed \
+             and explicit (SEC-05); a gate that answered `None` would hand it to DefWindowProcW"
+        );
+    }
+
+    let after = (
+        hook::is_active(),
+        hook::hotkey_handoffs(),
+        hook::post_failures(),
+        hook::consecutive_panics(),
+    );
+
+    println!("1000 forged WM_APP_FAIL_SAFE: before={before:?} after={after:?}");
+
+    assert_eq!(
+        after, before,
+        "SEC-05: a thousand forgeries buy the sender one atomic load each and nothing else"
+    );
+    assert!(
+        hook::is_active(),
+        "the program is still armed — FR-90, FR-95"
+    );
+}
+
+/// **Criterion 6 of task T-13-9.** Past the gate the message does what it always did.
+///
+/// The two halves of the arm, in the order the arm runs them: the tray is asked to show
+/// "приостановлена" — `with_tray` finds none on a test thread, which is the same `None` the
+/// input and watcher threads get and is why the gate and not `with_tray` is the defence — and
+/// the program is disarmed with `set_active(false)`, which is the half a forgery used to reach.
+///
+/// The state is put back at the end. `set_active(true)` is the resumption of FR-90 and posts
+/// [`hook::WM_APP_SEED_CAPS`] at the input thread's window; there is none in a test binary, so
+/// the post is dropped, which is what the counters below check.
+#[test]
+fn the_genuine_fail_safe_message_still_disarms_the_program() {
+    let _mode = PUBLISHED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    let was_active = hook::is_active();
+    let failures_before = hook::post_failures();
+
+    hook::suspend_for_fail_safe();
+
+    println!(
+        "after suspend_for_fail_safe: is_active={} post_failures={} (was {failures_before})",
+        hook::is_active(),
+        hook::post_failures()
+    );
+
+    assert!(
+        !hook::is_active(),
+        "FR-99: the program is disarmed and every stroke is passed through untouched"
+    );
+
+    // And the decision follows the published mode, which is the whole point of disarming it:
+    // an ordinary stroke is passed on and the hotkey is no longer suppressed (FR-90, FR-95).
+    let mut state = HotkeyState::default();
+    let stroke = KeyEvent {
+        vk: hook::hotkey_vk(),
+        edge: Edge::Down,
+        extra_info: 0,
+        scan: 0,
+        flags: 0,
+        time: 0,
+    };
+    let outcome = hook::classify(hook::current_mode(), &mut state, stroke);
+
+    assert_eq!(outcome.decision, Decision::Pass);
+    assert!(!outcome.fire_hotkey);
+
+    hook::set_active(was_active);
+
+    assert_eq!(hook::is_active(), was_active, "the mode is put back");
+    assert_eq!(
+        hook::post_failures(),
+        failures_before,
+        "NFR-13: nothing failed on the way — with no input window the seed of task T-13-4 is \
+         dropped rather than counted"
+    );
+}
+
+/// **Criterion 8 of task T-13-9.** Every arm of `handle_input_message` answers to something the
+/// sender cannot write.
+///
+/// Swept over the source, for the reason `the_capslock_seed_is_outside_the_callback` below
+/// sweeps it: what is being asserted is a property of the *shape* of a function whose inputs
+/// come from the system. The list of arms is read out of the file so that an arm added later
+/// cannot slip past this test by not being named in it.
+#[test]
+fn every_private_message_of_this_module_is_gated_on_state_the_sender_cannot_write() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable")
+    // The canonical checkout of this repository is CRLF (`.gitattributes`: `eol=crlf`), so a
+    // needle written with `\n` has to be matched against a text that holds `\n`. Every
+    // source-reading test in this file normalises for that reason — see
+    // `the_capslock_seed_is_outside_the_callback`.
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("pub fn handle_input_message(")
+        .expect("the function must be in this file");
+    let body = &source[at..];
+    let end = body
+        .find("\n}")
+        .expect("a top-level function closes its brace");
+    let body = &body[..end];
+
+    let arms: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("WM_APP_") && line.ends_with("=> {"))
+        .collect();
+
+    println!("arms of handle_input_message: {arms:?}");
+
+    assert_eq!(
+        arms,
+        vec![
+            "WM_APP_HOTKEY => {",
+            "WM_APP_FAIL_SAFE => {",
+            "WM_APP_SEED_CAPS => {",
+        ],
+        "three arms, and a fourth would have to be argued here before it is added"
+    );
+
+    // The one this task is about. The other two are argued at their constants and neither can
+    // be driven by what the message carries: `WM_APP_HOTKEY` converts text the sender cannot
+    // see, and `WM_APP_SEED_CAPS` replaces this program's belief with the system's own reading.
+    let gate = body
+        .find("if !fail_safe() {")
+        .expect("the WM_APP_FAIL_SAFE arm must be gated on the flag only this process writes");
+    let arm = body
+        .find("WM_APP_FAIL_SAFE => {")
+        .expect("the arm must be in this function");
+    let work = body
+        .find("suspend_for_fail_safe();")
+        .expect("the work of the arm must be behind the gate");
+
+    assert!(
+        arm < gate && gate < work,
+        "the gate is the first thing the arm does, and the work comes after it"
+    );
+}
+
 #[test]
 fn removing_a_hook_that_is_not_there_is_safe_and_says_so() {
     // The idempotence every exit path of FR-96, FR-97, FR-98, FR-83 and `Installed::drop`
@@ -747,6 +961,13 @@ fn removing_a_hook_that_is_not_there_is_safe_and_says_so() {
 
 #[test]
 fn the_program_starts_armed_on_the_default_hotkey() {
+    // ⚠ `ACTIVE` is process-wide and the tests of one binary run on parallel threads. Task
+    // T-13-9 added a test that moves it and puts it back — see [`PUBLISHED_MODE`] — and this
+    // one asserts what the value is, so the two take the same lock.
+    let _mode = PUBLISHED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
     // What the callback matches against before the UI thread has published anything — the
     // window NFR-08 exists to keep short.
     let mode = hook::current_mode();
@@ -1080,6 +1301,19 @@ fn the_resumption_of_fr90_seeds_capslock_on_the_thread_that_owns_the_buffer() {
 /// of FR-98 and the decision of FR-10 — contain neither the seeding probe nor the Win32 call
 /// behind it. The seeding of task T-13-4 lives in `install` and in the message loop of the input
 /// thread, on the other side of that line.
+///
+/// # ⚠ The line endings, and why the source is normalised — task T-13-9, by the controller's
+/// instruction
+///
+/// This test used to read the file and look for `"\n}\n"`. `.gitattributes` declares
+/// `* text=auto eol=crlf`, so **the canonical checkout of this repository is CRLF** and the
+/// file really holds `"\r\n}\r\n"` — in which that needle does not occur once. The first
+/// `.expect` then fired and the test was red on every fresh `git worktree`, whatever the code
+/// said; it passed only in a working tree that happened to hold LF. The verdict of a test
+/// about the callback must not depend on how a checkout stored the newlines, so the text is
+/// normalised before it is parsed and every needle below is written in the one form that
+/// remains. Nothing else about the test changed: the same three functions, every definition of
+/// each, comments kept in the body, the same three forbidden names.
 #[test]
 fn the_capslock_seed_is_outside_the_callback() {
     let source = std::fs::read_to_string(
@@ -1087,7 +1321,9 @@ fn the_capslock_seed_is_outside_the_callback() {
             .join("src")
             .join("hook.rs"),
     )
-    .expect("src/hook.rs must be readable");
+    .expect("src/hook.rs must be readable")
+    // The one line the eol fix adds. `\r` carries no meaning for anything asserted below.
+    .replace("\r\n", "\n");
 
     // A top-level function closes with a brace in the first column, which is what bounds the
     // body here. **Every** definition of a name is checked, not the first: `guarded_decision`
