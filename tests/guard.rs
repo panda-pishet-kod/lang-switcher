@@ -283,26 +283,71 @@ fn the_flag_of_sec04a_is_one_bit_and_follows_the_state() {
 
 /// The budget of the interval is a number, and it is the sum of the bounds the three levels are
 /// given rather than a wish.
+///
+/// ⚠ **An equality and not «≤ 2000», task T-13-12.** The inequality this test used to carry was
+/// true of the constant before the correction (1050) and true of it after (1550), and true of any
+/// other wrong value in between — it could not tell the documented width of the [`Field::Pending`]
+/// window from the width the calls actually have. What is asserted now is the arithmetic itself:
+/// the number, and the four terms it is the sum of.
 #[test]
 fn the_pending_interval_is_bounded_by_the_budgets_of_the_levels() {
     assert_eq!(guard::PASSWORD_CHAR_TIMEOUT_MS, 50, "FR-72 writes fifty");
 
     // FR-73 is unreachable without a bound on level 3, and the interval in which nothing is
-    // buffered has to stay bounded by a small number of seconds — a user who typed for longer
-    // than that without the buffer following would notice. Both are properties of constants, so
-    // they are checked where a constant is checked: at compile time.
+    // buffered has to stay a small number of seconds — a user who typed for longer than that
+    // without the buffer following would notice. Both are properties of constants, so they are
+    // checked where a constant is checked: at compile time.
     const _: () = assert!(guard::UIA_TIMEOUT_MS > 0);
-    const _: () = assert!(guard::PROBE_BUDGET_MS <= 2_000);
+    const _: () = assert!(guard::PROBE_BUDGET_MS == 1_550);
+
+    // The sum, term by term, as `is_password_element` and `automation` actually spend it: fifty
+    // for level 2's `SendMessageTimeout`, one `SetConnectionTimeout` for reaching the provider,
+    // and one `SetTransactionTimeout` for **each** of the two cross-process calls level 3 makes —
+    // `GetFocusedElement` and `CurrentIsPassword`.
+    assert_eq!(
+        guard::PROBE_BUDGET_MS,
+        guard::PASSWORD_CHAR_TIMEOUT_MS + 3 * guard::UIA_TIMEOUT_MS,
+        "the connection is one budget and each of level 3's two transactions is another"
+    );
 
     assert_eq!(
         guard::PROBE_BUDGET_MS,
-        guard::PASSWORD_CHAR_TIMEOUT_MS + 2 * guard::UIA_TIMEOUT_MS
+        1_550,
+        "50 + 500 + 500 + 500; it read 1050 until task T-13-12 counted the second transaction"
     );
 }
 
 // ---------------------------------------------------------------------------------------
 // The sweeps of acceptance points 9 and 17 — over the sources, every time
 // ---------------------------------------------------------------------------------------
+
+/// One source file, read as text **with its line endings normalised to `\n`**.
+///
+/// # ⚠ Why every read in this file goes through here — task **T-13-12**, addendum
+///
+/// `.gitattributes` holds this tree in CRLF (`* text=auto eol=crlf`), and `cargo fmt` in its
+/// **writing** mode takes the `\r` back out of whatever it reformats. One and the same file is
+/// therefore `\r\n` after a fresh checkout and `\n` after a format, and any sweep whose needle
+/// contains a newline answers differently on the two — one thing for whoever just ran `cargo fmt`
+/// and another for whoever checks the work out.
+///
+/// That is not hypothetical in this project. `tests\hook.rs` carries a sweep that looks for
+/// `"\n}\n"` and is **red** on the canonical tree for exactly this reason; the sweep in
+/// `the_winevent_callback_names_nothing_of_module_guard_and_the_probe_has_one_dispatch_site`
+/// below was **green** for exactly this reason, which is worse — a red sweep is visible, and a
+/// sweep that has silently stopped bounding what it reads is not.
+///
+/// The cure is to normalise once, at the only place a source file is read, so that everything
+/// downstream sees `\n` whatever is on the disk, and the line-ending style of the working tree
+/// becomes cosmetic. Nothing else in this file changes meaning: [`code_lines_with`] already
+/// trimmed the `\r` off each line, and line numbers are untouched — `\r\n` and `\n` are one line
+/// either way.
+fn read_normalised(path: &Path) -> String {
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+
+    text.replace("\r\n", "\n")
+}
 
 /// Every `.rs` file under `src\`, with its path.
 fn sources() -> Vec<(PathBuf, String)> {
@@ -313,8 +358,7 @@ fn sources() -> Vec<(PathBuf, String)> {
         let path = entry.expect("a readable directory entry").path();
 
         if path.extension().is_some_and(|extension| extension == "rs") {
-            let text = fs::read_to_string(&path).expect("a readable source file");
-            out.push((path, text));
+            out.push((path.clone(), read_normalised(&path)));
         }
     }
 
@@ -330,13 +374,13 @@ fn file_name(path: &Path) -> String {
         .to_owned()
 }
 
-/// One named module of `src\`, read as text.
+/// One named module of `src\`, read as text — line endings normalised, see [`read_normalised`].
 fn source_of(module: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join(module);
 
-    fs::read_to_string(&path).unwrap_or_else(|_| panic!("src\\{module} must be readable"))
+    read_normalised(&path)
 }
 
 /// Lines of `text` that contain `needle` and are not comment lines.
@@ -424,12 +468,7 @@ fn send_message_is_used_nowhere_and_the_timeout_is_the_fifty_of_fr72() {
 
     // And the one call that exists is made with the number FR-72 writes, taken from the constant
     // rather than spelled out at the call site.
-    let guard_source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("guard.rs"),
-    )
-    .expect("src\\guard.rs must be readable");
+    let guard_source = source_of("guard.rs");
 
     assert!(
         guard_source.contains("PASSWORD_CHAR_TIMEOUT_MS,"),
@@ -472,17 +511,18 @@ fn the_focus_subscription_is_still_the_only_one_in_the_program() {
 /// string out of something it read from another process.
 #[test]
 fn module_guard_formats_nothing_it_learned_about_another_program() {
-    let text = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("guard.rs"),
-    )
-    .expect("src\\guard.rs must be readable");
+    let text = source_of("guard.rs");
 
     // Everything below `mod tests` is test code and is allowed its assertion messages.
-    let product = text
+    //
+    // The boundary is required rather than fallen back from — task **T-13-12**, addendum. This
+    // is the nearest relative of the sweep over `win_event_proc` below and not a clone of it:
+    // the needle carries no newline, so this one never depended on the line endings, and losing
+    // the boundary would **widen** an absence check rather than empty it. It is still a boundary
+    // silently lost, and this file no longer has one of those.
+    let (product, _) = text
         .split_once("mod tests {")
-        .map_or(text.as_str(), |(before, _)| before);
+        .expect("src\\guard.rs: no `mod tests {` — the product half cannot be bounded");
 
     for forbidden in [
         "format!",
@@ -512,12 +552,7 @@ fn module_guard_formats_nothing_it_learned_about_another_program() {
 /// **NFR-14.** Every `unsafe` block in the module carries a `// SAFETY:` note above it.
 #[test]
 fn every_unsafe_in_module_guard_carries_a_safety_note() {
-    let text = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("guard.rs"),
-    )
-    .expect("src\\guard.rs must be readable");
+    let text = source_of("guard.rs");
 
     let lines: Vec<&str> = text.lines().collect();
     let mut blocks = 0;
@@ -706,9 +741,11 @@ fn the_emergency_combination_is_reached_before_any_logic_this_task_touches() {
 fn the_list_is_published_and_the_heavy_part_is_out_of_the_callback() {
     let guard_source = source_of("guard.rs");
 
-    let product = guard_source
+    // Required rather than fallen back from — task **T-13-12**, addendum; see the same split in
+    // `module_guard_formats_nothing_it_learned_about_another_program`.
+    let (product, _) = guard_source
         .split_once("mod tests {")
-        .map_or(guard_source.as_str(), |(before, _)| before);
+        .expect("src\\guard.rs: no `mod tests {` — the product half cannot be bounded");
 
     for blocking in [
         "Mutex", "RwLock", "Condvar", "OnceLock", "LazyLock", ".lock(", "Barrier", "mpsc",
@@ -781,10 +818,34 @@ fn the_winevent_callback_names_nothing_of_module_guard_and_the_probe_has_one_dis
 
     // To the first brace that closes at column zero — the end of the function, and the end of
     // everything the system runs inside its own event delivery.
-    let body = &watchdog[start..];
-    let body = body
-        .find("\n}\n")
-        .map_or(body, |end| &body[..end + "\n}\n".len()]);
+    let remainder = &watchdog[start..];
+
+    // ⚠ **No silent fall-back — task T-13-12, addendum by the controller's direction.**
+    //
+    // This line used to read `.map_or(body, |end| …)`: "if the closing brace cannot be found,
+    // sweep the rest of the file instead". The brace could not be found — the needle carries a
+    // newline and the tree is CRLF (see `read_normalised`) — so the sweep below ran over the
+    // whole tail of `src\watchdog.rs` and **passed**, because none of these names occurs as code
+    // anywhere in that tail either. A green test asserting nothing about the callback is worse
+    // than a red one: nobody comes to look at it.
+    //
+    // A boundary that cannot be found is a broken sweep, and a broken sweep must fail.
+    let end = remainder.find("\n}\n").expect(
+        "src\\watchdog.rs: no closing brace in the first column after win_event_proc, so the body \
+         of the callback cannot be bounded — the sweep below would assert nothing",
+    );
+
+    let body = &remainder[..end + "\n}\n".len()];
+
+    // And the cut really cut: a body that is the whole remainder is the degenerate case above
+    // wearing a different mask, so it is asserted against rather than trusted.
+    assert!(
+        body.len() < remainder.len(),
+        "the body of win_event_proc was bounded ({} bytes) rather than taken as the rest of the \
+         file ({} bytes)",
+        body.len(),
+        remainder.len()
+    );
 
     for name in [
         "guard::",

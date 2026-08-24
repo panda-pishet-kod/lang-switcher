@@ -87,7 +87,9 @@
 //!
 //! The price is stated plainly: a handful of keystrokes made in the first tens of milliseconds
 //! after a focus change are not in the buffer, in an ordinary field as much as in a password
-//! one. That is the trade SEC-06 requires, and it is bounded — see [`PROBE_BUDGET_MS`].
+//! one. That is the trade SEC-06 requires, and it is bounded — by 1550 milliseconds in the worst
+//! case, see [`PROBE_BUDGET_MS`] for the four terms that make the number and for the two calls
+//! that stand outside it.
 //!
 //! ⚠ **[`Field::Pending`] is not FR-73, and the two must not be confused.** FR-73 speaks of the
 //! **impossibility** of determining the field — a timeout, an unknown control — and answers it
@@ -95,7 +97,9 @@
 //! and it answers with buffering **off**. Opposite answers to different questions, and they are
 //! separate arms of [`Field`] precisely so that neither can be reached by the other's path:
 //! [`Field::Undetermined`] is stored only by [`determine`] returning it, and [`Field::Pending`]
-//! only by [`note_focus_moved`].
+//! only by [`enter_pending`], the input thread's half of [`note_focus_moved`]. [`publish`] is
+//! never called with the interval state and refuses it outright if it ever is, which is what
+//! holds the two apart in the code and not only in this paragraph.
 //!
 //! # FR-73 — why the default is "buffer", and why it stays
 //!
@@ -323,13 +327,42 @@ pub const PASSWORD_CHAR_TIMEOUT_MS: u32 = 50;
 pub const UIA_TIMEOUT_MS: u32 = 500;
 
 /// The worst time [`determine`] can take, in milliseconds — the width of the [`Field::Pending`]
-/// window as a number rather than as a hope.
+/// window as a number rather than as a hope. **1550.**
 ///
 /// Level 1 is bounded by `OpenProcess` and `QueryFullProcessImageNameW`, neither of which waits
-/// on another process; level 2 by [`PASSWORD_CHAR_TIMEOUT_MS`]; level 3 by
-/// [`UIA_TIMEOUT_MS`], twice — the connection and the transaction are separate budgets. The sum
-/// is what a caller may assume, and the measured figures are in the report of task T-06-1.
-pub const PROBE_BUDGET_MS: u32 = PASSWORD_CHAR_TIMEOUT_MS + 2 * UIA_TIMEOUT_MS;
+/// on another process; level 2 by [`PASSWORD_CHAR_TIMEOUT_MS`]; level 3 by [`UIA_TIMEOUT_MS`],
+/// **three times over**, and the three are counted one by one because they are three separate
+/// budgets of `IUIAutomation2` (see [`automation`] and [`is_password_element`]):
+///
+/// | Term | Where it is spent | ms |
+/// |---|---|---|
+/// | [`PASSWORD_CHAR_TIMEOUT_MS`] | level 2, `SendMessageTimeout(EM_GETPASSWORDCHAR)` | 50 |
+/// | `SetConnectionTimeout` | reaching the provider at all | 500 |
+/// | `SetTransactionTimeout` | `GetFocusedElement` | 500 |
+/// | `SetTransactionTimeout` | `CurrentIsPassword` | 500 |
+///
+/// ⚠ **Two transactions and not one**, which is what task **T-13-12** corrected: level 3 asks the
+/// provider twice — once for the focused element and once for its `IsPasswordProperty` — and a
+/// transaction timeout bounds **each** cross-process call rather than the level as a whole. The
+/// constant said 1050 until that task and understated the window it documents by five hundred
+/// milliseconds. The direction of the error was safe — [`Field::Pending`] is buffering **off**,
+/// so a window that is wider than advertised risks nothing and only costs the user keystrokes the
+/// buffer did not keep — but the number was arithmetically wrong, and this constant is quoted as
+/// a guarantee (see [`crate::app::window_proc`]).
+///
+/// ⚠ **And it is a budget for the levels, not for the first call ever made.** The
+/// `CoCreateInstance` in [`automation`] loads and initialises `UIAutomationCore.dll` on the first
+/// probe of the process and is bounded by **nothing** — the two properties that bound the rest
+/// belong to the object that call returns, so they cannot apply to the call that returns it.
+/// Neither does anything bound a client whose `cast::<IUIAutomation2>()` was refused: that path is
+/// best-effort by decision, journals the refusal and returns a client with no budgets at all. Both
+/// are named here rather than hidden behind the sum, because a caller that reads this constant as
+/// "the probe can never take longer than this" would be wrong on the first probe and on a system
+/// without `IUIAutomation2`.
+///
+/// The sum is what a caller may assume of every probe after the first on a system that has
+/// `IUIAutomation2`, and the measured figures are in the report of task T-06-1.
+pub const PROBE_BUDGET_MS: u32 = PASSWORD_CHAR_TIMEOUT_MS + 3 * UIA_TIMEOUT_MS;
 
 // ---------------------------------------------------------------------------------------
 // The published state — FR-70, FR-71, FR-73
@@ -447,8 +480,16 @@ pub const fn buffering_allowed_in(field: Field, excluded: bool) -> bool {
 /// this is the one place either is decoded. Section 6.3 is met to the letter — one flag, one
 /// atomic, `Relaxed` — and the gate got **cheaper** rather than dearer for FR-84: one load, where
 /// task T-06-1 already paid one.
+///
+/// ⚠ **Still one load after task T-13-12 widened the word**, and that is a requirement rather
+/// than a nicety: FR-71 says «результат кэшируется в атомарный флаг, который хук читает **одной
+/// операцией**». The word now carries the focus generation above [`STATE_BITS`] (see [`FIELD`]),
+/// and the reader does not look at it: the truncating cast keeps exactly the byte [`pack`] wrote
+/// and drops the rest, which is one instruction on a value already in a register and **not** a
+/// second visit to the atomic. Every use of the generation — the packing and the unpacking alike
+/// — is on the writers' side, in [`enter_pending`] and [`publish`].
 fn state() -> (Field, bool) {
-    unpack(FIELD.load(Ordering::Relaxed))
+    unpack(FIELD.load(Ordering::Relaxed) as u8)
 }
 
 /// The two answers as the one byte [`FIELD`] holds — the inverse of [`unpack`].
@@ -567,45 +608,114 @@ pub fn counters() -> Counters {
 // Process-wide state
 // ---------------------------------------------------------------------------------------
 
-/// **The published state**: a [`Field`] code in [`FIELD_MASK`] and FR-84's answer in
-/// [`EXCLUDED_BIT`].
+/// **The published state**: a [`Field`] code in [`FIELD_MASK`], FR-84's answer in
+/// [`EXCLUDED_BIT`] and the focus generation above [`STATE_BITS`].
 ///
-/// Section 6.3 names the ordering: «`AtomicBool` с упорядочением `Relaxed`». It is an
-/// `AtomicU8` rather than an `AtomicBool` because the requirement's two answers turned out to be
-/// four states — FR-71's interval and FR-73's impossibility are not the same thing as "password"
-/// and "not password" — and the ordering is the one section 6.3 gives: `Relaxed`, because there
-/// is no other datum whose visibility has to be ordered against it. The reader acts on the value
-/// alone.
+/// Section 6.3 names the ordering: «`AtomicBool` с упорядочением `Relaxed`». It is not an
+/// `AtomicBool` because the requirement's two answers turned out to be four states — FR-71's
+/// interval and FR-73's impossibility are not the same thing as "password" and "not password" —
+/// and the ordering is the one section 6.3 gives: `Relaxed`, because there is no other datum
+/// whose visibility has to be ordered against it. The reader acts on the value alone.
 ///
-/// ⚠ **Task T-06-3 put FR-84's flag in the top bit of this same word rather than beside it**, and
+/// ⚠ **Task T-06-3 put FR-84's flag in the top bit of the state byte rather than beside it**, and
 /// the reason is the sentence above turned around: the moment there are two published facts the
 /// gate acts on **together**, "no other datum whose visibility has to be ordered against it" stops
 /// being true of either of them taken alone. One word restores it. [`state`] carries the whole
 /// argument; it is the only place this value is decoded, and [`publish`] and
-/// [`note_focus_moved`] are the only two that write it.
+/// [`enter_pending`] are the only two that write it.
 ///
-/// Starts at [`Field::Undetermined`] with the bit clear, which is FR-73's answer and therefore
-/// buffering on, beside section 7's `processes = []` and therefore nothing excluded: before the
-/// first focus event this program has determined nothing and has been told nothing.
-static FIELD: AtomicU8 = AtomicU8::new(Field::Undetermined as u8);
+/// # ⚠ Task **T-13-12**: the focus generation moved **into** this word, and why it had to
+///
+/// The generation used to be a second atomic of its own, read by [`run_pending_probe`] before the
+/// levels ran and re-read after them, with the publication a plain store that followed the
+/// re-read. Between that re-read and that store there was no atomic tie of any kind, and the
+/// window between two instructions is a window a preempted thread can be held in for a whole
+/// scheduling quantum. What fell into it is exactly what the generation was raised to prevent:
+/// the input thread runs the whole of [`note_focus_moved`] — generation up, state to
+/// [`Field::Pending`], a fresh probe asked for — and the verdict of the **previous** field is
+/// then stored on top of the `Pending` of a field that may be a password box. `Ordinary` there is
+/// buffering **on** while the caret sits in a password field, and it stands until the new probe
+/// answers: tens of milliseconds, and up to [`PROBE_BUDGET_MS`] against a silent provider.
+///
+/// Two locations cannot be tied by an ordering — `Relaxed` or otherwise — so the two facts became
+/// one location, which is the same answer task T-06-3 gave for the field and the exclusion. The
+/// generation lives above the state byte, [`enter_pending`] raises it and publishes `Pending` in
+/// **one** read-modify-write, and [`publish`] is a compare-and-swap that succeeds only while the
+/// generation is still the one the probe was started under. A stale verdict now loses a CAS
+/// instead of winning a race, and it is counted in [`STALE_VERDICTS`] exactly as a verdict
+/// dropped by the old pre-check was.
+///
+/// **The reader paid nothing for this** — see [`state`]: one relaxed load and a truncating cast,
+/// which is what FR-71's «одной операцией» asks for and what it already was.
+///
+/// Starts at [`Field::Undetermined`] in generation zero with the bit clear, which is FR-73's
+/// answer and therefore buffering on, beside section 7's `processes = []` and therefore nothing
+/// excluded: before the first focus event this program has determined nothing and has been told
+/// nothing.
+static FIELD: AtomicU32 = AtomicU32::new(Field::Undetermined as u32);
 
-/// Bit of [`FIELD`] that carries FR-84's answer: set while the foreground process is one of
-/// `[exclusions] processes`.
+/// Bit of the state byte of [`FIELD`] that carries FR-84's answer: set while the foreground
+/// process is one of `[exclusions] processes`.
 ///
-/// The top bit, so that the field codes keep the values [`Field`] gives them and
+/// The top bit **of the byte**, so that the field codes keep the values [`Field`] gives them and
 /// `Field::from_code` keeps meaning what it meant — see [`state`] for why the two facts share a
 /// word at all.
 const EXCLUDED_BIT: u8 = 0b1000_0000;
 
-/// The bits of [`FIELD`] that carry the field code — everything [`EXCLUDED_BIT`] does not.
+/// The bits of the state byte of [`FIELD`] that carry the field code — everything
+/// [`EXCLUDED_BIT`] does not.
 const FIELD_MASK: u8 = !EXCLUDED_BIT;
 
-/// The interval state is the zero code, which is what lets [`note_focus_moved`] reach it with a
-/// single `fetch_and` that keeps [`EXCLUDED_BIT`] and clears everything else.
+/// Width of the state byte of [`FIELD`] — everything [`pack`] produces, and the shift the focus
+/// generation sits above. Task **T-13-12**.
+///
+/// A whole byte and not seven bits, so that the reader's decode is the truncating cast of
+/// [`state`] and needs no mask of its own.
+const STATE_BITS: u32 = 8;
+
+/// What one focus change adds to [`FIELD`] — one step of the generation, the state byte
+/// untouched. Task **T-13-12**.
+const GENERATION_STEP: u32 = 1 << STATE_BITS;
+
+/// The largest generation the word can hold before it wraps — **the ABA question of task
+/// T-13-12, as a number**.
+///
+/// Twenty-four bits, which is 16 777 215 focus changes. For a stale verdict to be mistaken for a
+/// live one the generation would have to come the whole way round **inside a single probe**, and
+/// a probe is bounded by [`PROBE_BUDGET_MS`]: sixteen million `EVENT_OBJECT_FOCUS` events, each
+/// one a system callback plus a `PostMessageW` plus a full pass of the input thread's message
+/// loop, would have to be delivered in at most one and a half seconds — ten million focus changes
+/// per second on a thread that also runs the keyboard hook. The counter is not merely unlikely to
+/// wrap in time; it cannot be driven that fast by the mechanism that drives it.
+const GENERATION_MASK: u32 = u32::MAX >> STATE_BITS;
+
+/// The generation a word of [`FIELD`] was published under — the writer's half of the decode.
+///
+/// Never called by the reader: see [`state`] for why that matters and for what the reader does
+/// instead.
+const fn generation_of(word: u32) -> u32 {
+    word >> STATE_BITS
+}
+
+/// A word of [`FIELD`]: a generation over the two published answers [`pack`] folds into a byte.
+///
+/// A `const fn` of its arguments, like every other decision in this module that could be made
+/// one, so that the layout is checked against [`generation_of`] and [`unpack`] without a window,
+/// a focus or a process.
+const fn word(generation: u32, field: Field, excluded: bool) -> u32 {
+    ((generation & GENERATION_MASK) << STATE_BITS) | pack(field, excluded) as u32
+}
+
+/// The interval state is the zero code, which is what lets [`enter_pending`] reach it by clearing
+/// [`FIELD_MASK`] and keeping everything else — [`EXCLUDED_BIT`] and the generation alike.
 ///
 /// Checked here rather than trusted: the discriminant is written out in [`Field`], and a future
 /// edit that renumbered the arms would turn that one line into a silent bug.
 const _: () = assert!(Field::Pending as u8 == 0);
+
+/// The state byte is exactly the byte [`pack`] fills, so the truncating cast of [`state`] is a
+/// complete decode and the generation can never reach the reader's `match`. Task **T-13-12**.
+const _: () = assert!(EXCLUDED_BIT as u32 | FIELD_MASK as u32 == GENERATION_STEP - 1);
 
 /// Whether a probe has been asked for and not yet run.
 ///
@@ -616,17 +726,6 @@ const _: () = assert!(Field::Pending as u8 == 0);
 /// queue are one probe, and the probe reads the focus that is current when it runs rather than
 /// the one that caused it.
 static PROBE_PENDING: AtomicBool = AtomicBool::new(false);
-
-/// Bumped on every focus change; captured by [`run_pending_probe`] before it starts and compared
-/// after it finishes.
-///
-/// **What it prevents.** A probe takes tens of milliseconds, and the focus can move again inside
-/// them. Publishing the finished verdict blindly would then describe the field the user has
-/// already left, and in the worst order — an `Ordinary` verdict for the previous field switching
-/// buffering back **on** while the caret sits in a password box. A generation that has moved on
-/// means the verdict is dropped and the state stays [`Field::Pending`] until the probe that
-/// belongs to the current focus answers.
-static FOCUS_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// Focus changes seen — see [`Counters`].
 static FOCUS_CHANGES: AtomicU32 = AtomicU32::new(0);
@@ -684,29 +783,15 @@ static EXCLUDED_VERDICTS: AtomicU32 = AtomicU32::new(0);
 ///
 /// # NFR-01 to NFR-05
 ///
-/// Two relaxed atomics, one fetch-add and one `PostMessageW`, which queues and returns. No
-/// allocation, no lock, no I/O. This runs on the input thread, in its message loop, with the
-/// hook callback long returned.
+/// Two relaxed atomics — one fetch-add and one compare-and-swap — and one `PostMessageW`, which
+/// queues and returns. No allocation, no lock, no I/O. This runs on the input thread, in its
+/// message loop, with the hook callback long returned.
 pub fn note_focus_moved() {
     FOCUS_CHANGES.fetch_add(1, Ordering::Relaxed);
-    FOCUS_GENERATION.fetch_add(1, Ordering::Relaxed);
 
     // Order matters: the state is published **before** the probe is asked for, so a watcher
-    // thread that answers instantly cannot have its verdict overwritten by this store.
-    //
-    // ⚠ A `fetch_and` and not a `store`, task **T-06-3**: FR-84's answer shares this word (see
-    // `FIELD`), and `Field::Pending` is the zero code, so keeping `EXCLUDED_BIT` and clearing
-    // everything else *is* "publish `Pending`". One read-modify-write rather than a load and a
-    // store, because the watcher thread may publish a verdict between the two halves of the
-    // second form and this thread would then put the previous field back.
-    //
-    // The exclusion bit is **carried over** rather than cleared, and that is the honest value:
-    // FR-84's answer for the window now arriving is not known yet either, and until the probe
-    // says otherwise the last thing this program was told is the best it has. Nothing rests on
-    // the choice — `Pending` switches buffering off through `buffering_allowed_in` whatever the
-    // bit says — so what decides it is that clearing it would be a claim, and this is the one
-    // moment when the program is entitled to none.
-    FIELD.fetch_and(EXCLUDED_BIT, Ordering::Relaxed);
+    // thread that answers instantly cannot have its verdict overwritten by this transition.
+    let generation = enter_pending();
 
     if !request_probe() {
         // The watcher thread has no window — it has not created one yet, or it is already gone.
@@ -718,10 +803,63 @@ pub fn note_focus_moved() {
         // to compare the name on, this program has not been shown an excluded process. Guessing
         // `true` would leave a program that never records again — see the module documentation on
         // which way an unknown answer goes for each of the two requirements, and why they differ.
-        publish(Probe {
-            field: Field::Undetermined,
-            excluded: false,
-        });
+        //
+        // The generation is the one this call has just opened, so the publication below is the
+        // one publication that cannot be stale: nothing has run between the two lines but a
+        // `PostMessageW` that failed.
+        publish(
+            Probe {
+                field: Field::Undetermined,
+                excluded: false,
+            },
+            generation,
+        );
+    }
+}
+
+/// Opens a new focus generation and publishes [`Field::Pending`] into it — **the whole of what
+/// the input thread does to [`FIELD`]**, task **T-13-12**. Answers the generation it opened.
+///
+/// # Why one read-modify-write and not two
+///
+/// The two things that happen here — the generation goes up, the state goes to `Pending` — are
+/// what a publication of a verdict has to be refused *between*. Splitting them into two atomic
+/// operations would put a word on display that says "a new focus, the previous field's verdict"
+/// and would let this thread's second half undo a verdict the watcher thread published, correctly,
+/// under the new generation. One compare-and-swap has no between.
+///
+/// ⚠ **A compare-and-swap loop and not a `fetch_*`**, and the reason is arithmetic: no single
+/// fetch primitive both adds to the generation and clears [`FIELD_MASK`]. It is not a lock and
+/// NFR-04 is untouched — nothing is held, nothing waits, and the loop can only turn while the one
+/// other writer in the program ([`publish`], on the watcher thread, once per probe) lands a store
+/// in between. This runs on the input thread's message loop and never in the hook callback, which
+/// names no item of this module at all (see `tests\guard.rs`).
+///
+/// # What is kept and what is cleared
+///
+/// `Field::Pending` is the zero code, so "publish `Pending`" is "clear [`FIELD_MASK`]" — the
+/// generation above it and [`EXCLUDED_BIT`] below it are both carried over.
+///
+/// The exclusion bit is **carried over** rather than cleared, and that is the honest value:
+/// FR-84's answer for the window now arriving is not known yet either, and until the probe says
+/// otherwise the last thing this program was told is the best it has. Nothing rests on the choice
+/// — `Pending` switches buffering off through [`buffering_allowed_in`] whatever the bit says — so
+/// what decides it is that clearing it would be a claim, and this is the one moment when the
+/// program is entitled to none.
+fn enter_pending() -> u32 {
+    let mut current = FIELD.load(Ordering::Relaxed);
+
+    loop {
+        // `wrapping_add`: the generation is a tag and not a quantity, and the wrap is the case
+        // `GENERATION_MASK` argues about rather than a case to avoid. The state byte takes no
+        // carry from it — the step is one whole byte over — and the mask then clears the field
+        // code alone.
+        let next = current.wrapping_add(GENERATION_STEP) & !(FIELD_MASK as u32);
+
+        match FIELD.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return generation_of(next),
+            Err(seen) => current = seen,
+        }
     }
 }
 
@@ -787,46 +925,95 @@ pub fn run_pending_probe() -> bool {
 
     PROBES.fetch_add(1, Ordering::Relaxed);
 
-    // Captured before the levels run and compared after them — see `FOCUS_GENERATION`.
-    let generation = FOCUS_GENERATION.load(Ordering::Relaxed);
+    // Captured before the levels run and **carried into the publication**, which refuses it
+    // unless the generation is still this one — see `FIELD` and `publish`. Task **T-13-12**: the
+    // capture used to be paired with a re-read here and a plain store inside `publish`, and the
+    // two instructions between them were the window a stale `Ordinary` came through.
+    let generation = generation_of(FIELD.load(Ordering::Relaxed));
 
     let verdict = determine();
 
-    if FOCUS_GENERATION.load(Ordering::Relaxed) != generation {
-        // The focus moved while this ran. The verdict describes a field the user has left, and
-        // the probe that belongs to the new one is already queued. Dropping it leaves the state
-        // at `Pending`, which is buffering off — the safe direction while nothing is known.
-        STALE_VERDICTS.fetch_add(1, Ordering::Relaxed);
-        return true;
-    }
+    // The answer is `false` when the focus moved while this ran: the verdict describes a field
+    // the user has left, the probe that belongs to the new one is already queued, and the state
+    // stays at `Pending`, which is buffering off — the safe direction while nothing is known
+    // (SEC-06). It is dropped rather than acted on, and `STALE_VERDICTS` counts it.
+    publish(verdict, generation);
 
-    publish(verdict);
     true
 }
 
-/// Publishes a verdict and tells the input thread to act on it.
-fn publish(verdict: Probe) {
+/// Publishes a verdict **into the generation it was determined under**, and tells the input thread
+/// to act on it. Answers whether it was published at all.
+///
+/// # ⚠ The compare-and-swap is the fix of task T-13-12, and it replaces a check
+///
+/// The caller used to compare the generation and then store, and between the comparison and the
+/// store the input thread could run the whole of [`note_focus_moved`] — see [`FIELD`] for the
+/// consequence. Here the comparison **is** the store: the word carries the generation, and a
+/// verdict determined under a generation the focus has since left cannot win the swap. There is
+/// no instant at which a stale `Ordinary` is on display, not even one this thread would undo a
+/// moment later; the safe state stands untouched, which is what SEC-06 asks of an uncertainty.
+///
+/// The predicate is the generation and **only** the generation, deliberately. It is not "the state
+/// is still `Pending`": [`publish_exclusions`] asks for a probe without a focus change, so a
+/// second verdict for a generation that already has one is an ordinary event and must land.
+///
+/// # ABA
+///
+/// A stale verdict would be taken for a live one only if the generation came the whole way round
+/// between the capture in [`run_pending_probe`] and the swap here. That is [`GENERATION_MASK`]
+/// focus changes inside one probe, and the note there works out why the mechanism that raises the
+/// generation cannot be driven at that rate.
+fn publish(verdict: Probe, generation: u32) -> bool {
+    if matches!(verdict.field, Field::Pending) {
+        // `publish` is never called with the interval state: `enter_pending` stores that one
+        // directly, which is what keeps the two apart at the level of the code and not only of
+        // the comments.
+        return false;
+    }
+
+    let mut current = FIELD.load(Ordering::Relaxed);
+
+    loop {
+        if generation_of(current) != generation {
+            // The focus moved after this verdict was determined. Dropping it leaves whatever the
+            // newer generation published — `Pending` until its own probe answers.
+            STALE_VERDICTS.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
+
+        // **Both answers in one store**, which is what makes them impossible to observe apart —
+        // see `state` and `FIELD`. There is no order to get right here, because there is no
+        // second store: the swap writes the generation, the field and the exclusion as one word.
+        let next = word(generation, verdict.field, verdict.excluded);
+
+        match FIELD.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(seen) => current = seen,
+        }
+    }
+
+    // Counted **after** the swap, so that the counters describe what was published rather than
+    // what was attempted, and so that `STALE_VERDICTS` and the verdict counters partition the
+    // probes instead of overlapping.
     match verdict.field {
         Field::Password => PASSWORD_VERDICTS.fetch_add(1, Ordering::Relaxed),
         Field::Ordinary => ORDINARY_VERDICTS.fetch_add(1, Ordering::Relaxed),
         Field::Undetermined => UNDETERMINED_VERDICTS.fetch_add(1, Ordering::Relaxed),
-        // `publish` is never called with the interval state: `note_focus_moved` stores that
-        // one directly, which is what keeps the two apart at the level of the code and not
-        // only of the comments.
-        Field::Pending => return,
+        // Unreachable — refused at the top of this function — and written out rather than swept
+        // into a wildcard, so that a fifth state could not be added without this arm objecting.
+        Field::Pending => 0,
     };
 
     if verdict.excluded {
         EXCLUDED_VERDICTS.fetch_add(1, Ordering::Relaxed);
     }
 
-    // **Both answers in one store**, which is what makes them impossible to observe apart — see
-    // `state` and `FIELD`. There is no order to get right here, because there is no second store.
-    FIELD.store(pack(verdict.field, verdict.excluded), Ordering::Relaxed);
-
     // The buffer is a thread-local of the input thread (section 6.3), so the thread that owns it
     // has to be the one that switches it. One `PostMessageW`, which queues and returns.
     crate::app::post_to_input_thread(WM_APP_FIELD);
+
+    true
 }
 
 /// **FR-84's comparison and the three levels of FR-72, over one read of the process name.**
@@ -1887,10 +2074,185 @@ mod tests {
             "the two halves do not overlap"
         );
 
-        // `note_focus_moved` reaches `Pending` with a single `fetch_and(EXCLUDED_BIT)`, which is
-        // only "publish Pending, keep the bit" while the interval state is the zero code.
+        // `enter_pending` reaches `Pending` by clearing `FIELD_MASK` and keeping everything else,
+        // which is only "publish Pending, keep the bit and the generation" while the interval
+        // state is the zero code.
         assert_eq!(pack(Field::Pending, false), 0);
         assert_eq!(pack(Field::Pending, true), EXCLUDED_BIT);
+    }
+
+    /// **The generation rides above the two published facts and cannot reach the reader** — task
+    /// **T-13-12**, and the whole of what makes the widened word safe for FR-71.
+    ///
+    /// The reader is one relaxed load and a truncating cast (see [`state`]), so what has to hold
+    /// is that the cast is a *complete* decode: for every generation and every combination of the
+    /// two answers, the low byte of the word is exactly the byte [`pack`] would have produced on
+    /// its own, and the generation comes back out of the same word for the writer.
+    #[test]
+    fn the_generation_shares_the_word_and_never_reaches_the_reader() {
+        for generation in [
+            0u32,
+            1,
+            2,
+            0xFF,
+            0x100,
+            12_345,
+            GENERATION_MASK - 1,
+            GENERATION_MASK,
+        ] {
+            for field in [
+                Field::Pending,
+                Field::Ordinary,
+                Field::Password,
+                Field::Undetermined,
+            ] {
+                for excluded in [false, true] {
+                    let raw = word(generation, field, excluded);
+
+                    assert_eq!(
+                        generation_of(raw),
+                        generation,
+                        "{generation} / {} / {excluded}",
+                        field.name()
+                    );
+
+                    // This cast is the reader's whole decode — `state` performs exactly it.
+                    assert_eq!(
+                        unpack(raw as u8),
+                        (field, excluded),
+                        "{generation} / {} / {excluded}",
+                        field.name()
+                    );
+                }
+            }
+        }
+
+        // And the generation is wide enough for the ABA argument of `GENERATION_MASK`: a stale
+        // verdict is mistaken for a live one only after this many focus changes inside one probe.
+        assert_eq!(GENERATION_MASK, 0x00FF_FFFF);
+        assert_eq!(GENERATION_STEP, 0x100);
+    }
+
+    /// **⚠ The TOCTOU of the audit of 2026-08-24, driven through the window it lived in** — task
+    /// **T-13-12**, finding «средняя: TOCTOU в `run_pending_probe`».
+    ///
+    /// The accepted code compared [`FIELD`]'s generation and then stored the verdict, and between
+    /// those two instructions the input thread could run the whole of [`note_focus_moved`]: the
+    /// generation went up, the state went to [`Field::Pending`] for a field that may be a password
+    /// box, a fresh probe was asked for — and then the *previous* field's `Ordinary` landed on top
+    /// of it. Buffering back **on**, with the caret already in the password field, until the new
+    /// probe answered: tens of milliseconds ordinarily and up to [`PROBE_BUDGET_MS`] against a
+    /// provider that does not reply.
+    ///
+    /// # What is interleaved, and why it is interleaved by hand
+    ///
+    /// The window is between two instructions of the watcher thread, so a test that raced two real
+    /// threads for it would be a test that passes by luck. What is driven here instead is the seam
+    /// itself: the probe's two halves — capture the generation, publish under it — are called
+    /// apart, and the input thread's half of [`note_focus_moved`] is run **between** them, which is
+    /// the interleaving named in the finding and nothing weaker.
+    ///
+    /// [`enter_pending`] and not the whole of [`note_focus_moved`], for one reason: the other half
+    /// of that function posts [`WM_APP_PROBE`], a test process has no watcher window to post it to,
+    /// and the FR-73 fall-back that follows the failure would publish a verdict of its own and hide
+    /// the state under test. `enter_pending` **is** everything [`note_focus_moved`] does to
+    /// [`FIELD`] — that is why it is a function — so nothing of the interleaving is lost.
+    ///
+    /// The seam needs no new element of feature `testing` (R-53) and there is none: both halves are
+    /// ordinary private functions of this module, called from the module's own test.
+    #[test]
+    fn a_stale_verdict_cannot_overwrite_the_pending_of_a_new_field() {
+        // ---- the state a probe starts in --------------------------------------------------
+        let generation = enter_pending();
+
+        assert_eq!(
+            field(),
+            Field::Pending,
+            "the focus moved and nothing is known"
+        );
+
+        // `determine()` would run here, on the watcher thread, for tens of milliseconds. Its
+        // verdict — for the field the user is about to leave.
+        let stale = Probe {
+            field: Field::Ordinary,
+            excluded: false,
+        };
+
+        // ---- ⚠ the interleaving ------------------------------------------------------------
+        // The focus moves again, entirely, after the probe captured its generation and before it
+        // publishes. This is the input thread running while the watcher thread is preempted.
+        let newer = enter_pending();
+
+        assert_ne!(newer, generation, "a focus change opens a new generation");
+        assert_eq!(
+            field(),
+            Field::Pending,
+            "and republishes the interval state"
+        );
+
+        let before = counters();
+
+        // ---- the stale publication ---------------------------------------------------------
+        assert!(
+            !publish(stale, generation),
+            "a verdict determined under a generation the focus has left is refused"
+        );
+
+        assert_eq!(
+            field(),
+            Field::Pending,
+            "SEC-06: the interval state of the new field stands; the previous field's Ordinary \
+             did not overwrite it"
+        );
+        assert!(
+            !buffering_allowed(),
+            "FR-70: buffering is still off, which is what the caret being in a password field \
+             requires"
+        );
+
+        let after = counters();
+
+        assert_eq!(
+            after.stale_verdicts,
+            before.stale_verdicts + 1,
+            "the refusal is counted where the audit asked for it"
+        );
+        assert_eq!(
+            after.ordinary_verdicts, before.ordinary_verdicts,
+            "and a verdict that was not published is not counted as one"
+        );
+
+        // ---- and nothing else is refused ---------------------------------------------------
+        // The predicate is the generation and only the generation: the same verdict published
+        // under the generation that is current lands, so the fix costs no correct publication.
+        assert!(publish(stale, newer));
+        assert_eq!(field(), Field::Ordinary);
+        assert_eq!(counters().ordinary_verdicts, before.ordinary_verdicts + 1);
+
+        // A second verdict for a generation that already has one lands too — this is the probe
+        // `publish_exclusions` asks for without a focus change, and refusing it would leave a new
+        // exclusion list unapplied until the user moved the focus.
+        assert!(publish(
+            Probe {
+                field: Field::Password,
+                excluded: true,
+            },
+            newer
+        ));
+        assert_eq!(field(), Field::Password);
+        assert!(excluded());
+
+        // ---- the process is left as it starts ----------------------------------------------
+        // FR-73's state with nothing excluded, which is what `FIELD` is initialised to.
+        assert!(publish(
+            Probe {
+                field: Field::Undetermined,
+                excluded: false,
+            },
+            newer
+        ));
+        assert_eq!(field(), Field::Undetermined);
+        assert!(!excluded());
     }
 
     /// **The comparison rule of FR-84, as a function of a string.**

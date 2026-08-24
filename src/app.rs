@@ -2209,7 +2209,11 @@ unsafe extern "system" fn window_proc(
             // same event resolved by the timestamps of FR-12. The order matters only in that the
             // gate is stricter: FR-12 keeps what is newer than the event, and the gate then
             // removes it as well. That is the trade the task specification prescribes for SEC-06
-            // and it is bounded by `guard::PROBE_BUDGET_MS`.
+            // and it is bounded by `guard::PROBE_BUDGET_MS` — **1550 ms** in the worst case, the
+            // figure task T-13-12 corrected from 1050 when it counted level 3's two cross-process
+            // transactions one by one instead of as one. The doc comment of that constant also
+            // names the two calls the number does **not** cover: the first `CoCreateInstance` of
+            // the process, and a client that came back without the two timeout properties.
             //
             // The second is the gate itself, on every message and for the reason
             // `apply_configured_capacity` below is: a published value re-read after every message
