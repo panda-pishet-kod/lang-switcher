@@ -990,3 +990,144 @@ fn the_latency_instrument_reports_the_recorded_distribution() {
         "one histogram, one rank rule: the median cannot exceed the 99th percentile"
     );
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-13-4 — the resumption of FR-90 seeds `CapsLock` (point 3)
+// -------------------------------------------------------------------------------------
+
+/// **Point 3 of task T-13-4, driven through the product's own path.**
+///
+/// While FR-90 has the program suspended, `classify` answers `PASS` before `record` is reached,
+/// so a `CapsLock` pressed during the pause never reaches the tracker and the belief comes out of
+/// the pause **inverted** — for the rest of the session, in every application. The resumption
+/// therefore asks the input thread to read the machine again, and this is that ask arriving:
+/// `hook::set_active` publishes the resumption on the UI thread and posts
+/// [`hook::WM_APP_SEED_CAPS`], and `handle_input_message` answers it where the buffer lives.
+///
+/// # Why the assertion is against `caps_lock_on()` and not against `true`
+///
+/// The machine's toggle is the machine's. A test that asserted `true` would pass or fail by
+/// whether whoever is running `cargo test` happens to have `CapsLock` on, which is a state of the
+/// room and not of the code. Asserting that the tracker ends up **equal to the reading the
+/// product makes** is the property the repair is about, and it is the same on every machine.
+///
+/// # Why the missed press is stated rather than pressed
+///
+/// A press that reaches `Recorder::record` is exactly the press this defect is *not* about. What
+/// is stated here is the state such a press leaves behind when it is missed — the tracker
+/// disagreeing with the machine — which no keystroke this binary could make would produce,
+/// because a test binary installs no hook (the header of this file says why).
+#[test]
+fn the_resumption_of_fr90_seeds_capslock_on_the_thread_that_owns_the_buffer() {
+    use lang_switcher::buffer::{self, Recorder};
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+
+    let seed = || hook::handle_input_message(hook::WM_APP_SEED_CAPS, WPARAM(0), LPARAM(0));
+
+    // Act 1 — a thread that owns no typing buffer, which is every thread of this process but
+    // the input one. The message is answered and nothing whatever happens: the probe is called
+    // inside `buffer::with`, so `GetKeyState` is not reached at all. That is the rule "do not
+    // ask the UI thread about a queue it does not have", enforced by construction.
+    assert!(
+        !buffer::is_installed(),
+        "this test must start on a thread with no buffer"
+    );
+    assert!(
+        seed().is_some(),
+        "the message is this module's and is answered wherever it lands"
+    );
+
+    // Act 2 — the input thread's situation: a buffer, and a tracker that disagrees with the
+    // machine because the press that would have flipped it never reached `record`.
+    buffer::install_recorder(Recorder::with_capacity(8));
+
+    let machine = hook::caps_lock_on();
+    buffer::with(|recorder| recorder.set_caps_lock(!machine));
+
+    assert_eq!(
+        buffer::with(|recorder| recorder.held().caps()),
+        Some(!machine),
+        "the state a missed CapsLock leaves behind, as the baseline of this test"
+    );
+
+    // Act 3 — the resumption arrives, and the belief is the machine's again.
+    assert!(seed().is_some());
+
+    assert_eq!(
+        buffer::with(|recorder| recorder.held().caps()),
+        Some(machine),
+        "point 3: coming back from the pause of FR-90 must re-read the machine's CapsLock"
+    );
+
+    buffer::uninstall();
+}
+
+/// **NFR-01 to NFR-05: task T-13-4 put nothing into the hook callback**, and this is where the
+/// boundary runs.
+///
+/// # Why this test reads the source
+///
+/// The property is an *absence* on a path that cannot be called from a test —
+/// `keyboard_hook_proc` is `unsafe extern "system"`, is called by the system with a pointer only
+/// the system can produce, and no return value of it can show which calls it did not make. What
+/// can be checked honestly is the shape of the functions themselves, which is also what a
+/// reviewer checks; `fr_96_is_decided_before_any_other_logic_of_the_callback` above reads the
+/// source for the same reason and in the same way.
+///
+/// # What is asserted
+///
+/// The three functions the callback is made of — the callback itself, the `catch_unwind` wrapper
+/// of FR-98 and the decision of FR-10 — contain neither the seeding probe nor the Win32 call
+/// behind it. The seeding of task T-13-4 lives in `install` and in the message loop of the input
+/// thread, on the other side of that line.
+#[test]
+fn the_capslock_seed_is_outside_the_callback() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable");
+
+    // A top-level function closes with a brace in the first column, which is what bounds the
+    // body here. **Every** definition of a name is checked, not the first: `guarded_decision`
+    // has two, one under `cfg(panic = "unwind")` and one without, and a rule that held for one
+    // of them would be no rule at all. Comments are kept in the body: a mention of
+    // `GetKeyState` in prose inside the callback would be worth failing over too, since the
+    // next reader would take it for a licence.
+    for signature in [
+        "unsafe extern \"system\" fn keyboard_hook_proc",
+        "fn guarded_decision(",
+        "pub fn classify(",
+    ] {
+        let mut definitions = 0;
+
+        for (at, _) in source.match_indices(signature) {
+            let after = &source[at..];
+            let end = after
+                .find("\n}\n")
+                .expect("a top-level function closes in the first column");
+            let body = &after[..end];
+
+            definitions += 1;
+
+            assert!(
+                !body.contains("caps_lock_on"),
+                "{signature}: the CapsLock seed of task T-13-4 must stay out of the callback"
+            );
+            assert!(
+                !body.contains("GetKeyState"),
+                "{signature}: NFR-01 to NFR-05 give the callback no new system call"
+            );
+            assert!(
+                !body.contains("set_caps_lock"),
+                "{signature}: the seeding entry point is not reachable from the callback"
+            );
+        }
+
+        assert!(
+            definitions > 0,
+            "the function {signature:?} must be in this file"
+        );
+    }
+}

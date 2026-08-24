@@ -79,9 +79,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE, VK_F1, VK_F12,
-    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK,
-    VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    GetAsyncKeyState, GetKeyState, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE,
+    VK_F1, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT,
+    VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SNAPSHOT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -138,6 +138,37 @@ pub const WM_APP_HOTKEY: u32 = WM_APP + 3;
 /// Message the callback posts to the UI thread's window when FR-99 has disarmed buffering,
 /// so that the tray icon can show the "приостановлена" state FR-99 asks for.
 pub const WM_APP_FAIL_SAFE: u32 = WM_APP + 4;
+
+/// Message that asks the **input** thread to read the machine's `CapsLock` into the typing
+/// buffer — point 3 of task T-13-4, the resumption of FR-90.
+///
+/// `WM_APP + 15`, the next free number of the program-wide row: `+ 1` is the wake-up of
+/// [`crate::app`], `+ 2` the tray callback, `+ 3` and `+ 4` are the two above, `+ 5`
+/// `app::WM_APP_CONFIGURED`, `+ 6` and `+ 7` `watchdog::WM_APP_FLUSH` and
+/// `watchdog::WM_APP_LAYOUT`, `+ 8` `switch::WM_APP_SWITCH`, `+ 9` `watchdog::WM_APP_REHOOK`,
+/// `+ 10` and `+ 11` the two of `guard`, `+ 12` and `+ 13` the two of `selection`, `+ 14`
+/// `settings::WM_APP_SYSTEM_THEME`.
+///
+/// # Why a message and not a call — decision R-20
+///
+/// FR-90 is resumed by the UI thread: the tray owns `general.enabled` and `app::window_proc`
+/// re-publishes it through [`set_active`] after every message it sees. The reading this message
+/// asks for is `GetKeyState`, which answers from the **calling thread's** input state and is
+/// therefore worth nothing on the UI thread. So the resumption travels the way every other
+/// cross-thread fact in this program travels: **the message carries no data at all**, and the
+/// value is read where it means something, on the input thread, by the arm in
+/// [`handle_input_message`].
+///
+/// # SEC-05
+///
+/// A process at the same integrity level can post this, and what it buys is one `GetKeyState`
+/// on our input thread and a tracker set to what the keyboard's own light is showing. There is
+/// nothing to forge: the message has no parameters, and its whole effect is to replace this
+/// program's belief with the system's truth — the sender cannot choose the value, and a flood of
+/// them writes the same correct bit over and over. On a thread with no typing buffer — the UI
+/// and watcher windows, which share this procedure — it does nothing whatever, because the
+/// probe is called inside `buffer::with`.
+pub const WM_APP_SEED_CAPS: u32 = WM_APP + 15;
 
 /// How many panics in a row FR-99 tolerates before buffering is disarmed.
 ///
@@ -716,6 +747,21 @@ pub fn install(notify: HWND, instance: HINSTANCE) -> WinResult<Installed> {
     #[cfg(feature = "testing")]
     fault::arm_from_environment();
 
+    // **Point 2 of task T-13-4 — and point 1 arrives here too whenever the buffer is already
+    // up.** This function is the single door: `app::serve_window` comes through it at start-up
+    // and `watchdog::reinstall_hook` comes through it for every reinstallation FR-80 orders,
+    // after a stretch in which this program was seeing no keystrokes at all — including any
+    // `CapsLock` the user pressed during it. The seed is one thread-local read on the thread
+    // that owns the buffer and nothing at all on any other; see `buffer::set_caps_lock`.
+    //
+    // At start-up the buffer does not exist yet — NFR-08 puts the hook first and the buffer
+    // second, which is `app::start_input_pipeline` — so this call finds nothing and point 1
+    // does the seeding a moment later. Ordering the two the other way would cost NFR-08 the
+    // one thing it buys.
+    //
+    // NFR-01 to NFR-05: this is `install`, not the callback. Nothing was added to the callback.
+    crate::buffer::set_caps_lock(caps_lock_on);
+
     Ok(Installed {
         _not_send: PhantomData,
     })
@@ -782,8 +828,33 @@ pub fn hotkey_vk() -> u16 {
 }
 
 /// Publishes `general.enabled` — FR-90, FR-95. Called by the UI thread.
+///
+/// # Point 3 of task T-13-4 — the resumption asks for a fresh `CapsLock`
+///
+/// While FR-90 has the program suspended, `classify` answers `PASS` before `record` is reached,
+/// so a `CapsLock` pressed during the pause never reaches the tracker of `buffer::Held` and the
+/// belief comes out of the pause inverted — for the rest of the session, in every application.
+/// The resumption is therefore a point past which a press may have been missed, and it asks the
+/// input thread to read the machine again.
+///
+/// **Only the `false → true` edge asks.** `app::window_proc` re-publishes `tray.enabled()`
+/// through this function after *every* message the UI thread sees, so an unconditional ask would
+/// post a message per mouse move over the tray icon. The `swap` makes the edge the condition:
+/// the value published is unchanged, and only the transition into "armed" carries the request.
+///
+/// The request travels as [`WM_APP_SEED_CAPS`] and not as a call, because this runs on the UI
+/// thread and the reading is worth nothing there — see that constant, and `buffer::set_caps_lock`
+/// for the thread rule it enforces by construction. `app::post_to_input_thread` is one atomic
+/// load and one `PostMessageW`: it queues and returns, so the thread publishing a setting never
+/// waits on the thread that owns the hook (NFR-04). With no input window registered yet — before
+/// start-up has finished, and in every test binary — the post is dropped, which is correct: the
+/// buffer that window belongs to does not exist either, and point 1 seeds it when it does.
 pub fn set_active(active: bool) {
-    ACTIVE.store(active, Ordering::Relaxed);
+    let was_active = ACTIVE.swap(active, Ordering::Relaxed);
+
+    if active && !was_active {
+        crate::app::post_to_input_thread(WM_APP_SEED_CAPS);
+    }
 }
 
 /// Whether the program is armed. FR-95 suppresses the hotkey exactly when this is true.
@@ -844,8 +915,8 @@ pub fn current_mode() -> Mode {
 /// reason: the window procedure belongs to `app` and the knowledge of which messages matter
 /// belongs to the module that defined them.
 ///
-/// SEC-05: the list is closed and explicit, both entries carry no parameters that are read,
-/// and neither initiates a privileged action.
+/// SEC-05: the list is closed and explicit, none of its entries carries a parameter that is
+/// read, and none initiates a privileged action.
 pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
     match message {
         // FR-02, the far end of the handoff. This runs on the input thread, in its ordinary
@@ -880,6 +951,21 @@ pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> O
             });
 
             set_active(false);
+
+            Some(LRESULT(0))
+        }
+
+        // **Point 3 of task T-13-4, the far end.** [`set_active`] published the resumption of
+        // FR-90 on the UI thread and posted this; the reading happens here, in the ordinary
+        // message loop of the input thread, with the callback long returned and NFR-01 to NFR-05
+        // untouched — the callback gained nothing at all from this task.
+        //
+        // The window is not tested for. It does not have to be: the probe is called inside
+        // `buffer::with`, so on the UI and watcher windows — which share this procedure — this
+        // reads one thread-local, finds no buffer and returns without reaching Win32 at all.
+        // That is the same shape `WM_APP_FAIL_SAFE` above relies on `with_tray` for.
+        WM_APP_SEED_CAPS => {
+            crate::buffer::set_caps_lock(caps_lock_on);
 
             Some(LRESULT(0))
         }
@@ -973,6 +1059,50 @@ pub fn physical_modifiers() -> crate::buffer::Physical {
         alt_right: is_held(alt_right),
         win: is_held(win_left) || is_held(win_right),
     }
+}
+
+/// Whether the machine's `CapsLock` is **on** — the Win32 half of task T-13-4.
+///
+/// Handed to module `buffer` through [`crate::buffer::set_caps_lock`], which names the five
+/// points that ask and why each of them has to.
+///
+/// # `GetKeyState` here, where every other reader of this module uses `GetAsyncKeyState`
+///
+/// The two answer different questions and only one of them is asked here. `GetAsyncKeyState`
+/// reports whether a key is **held down at this instant**; its low bit means "was pressed since
+/// the last call", which depends on who called before us and is not a toggle. `CapsLock` is not
+/// a held key at all — what matters is the **toggle**, the same bit the keyboard's light shows,
+/// and `GetKeyState`'s low bit is the only reading of it Win32 offers.
+///
+/// ⚠ **That is why every caller must be on the input thread.** `GetKeyState` answers from the
+/// calling thread's own input state, so asking it on the UI or watcher thread would describe a
+/// queue that has nothing to do with typing. The rule is enforced by construction rather than by
+/// discipline: [`crate::buffer::set_caps_lock`] calls this **inside** `buffer::with`, and the
+/// typing buffer is a thread-local of the input thread and of no other (section 6.3).
+///
+/// # NFR-01 to NFR-05 — where the boundary runs
+///
+/// **This is never called from the hook callback**, and nothing in task T-13-4 may put it there:
+/// the callback is allowed no new call of any kind, and this is a system call. Its callers are
+/// [`install`] and the message loop of the input thread. The callback's own reading of modifiers
+/// is [`physical_modifiers`] above and is unchanged.
+///
+/// # NFR-13
+///
+/// There is no return value to check. `GetKeyState` answers a `SHORT` that is the state itself;
+/// it has no failure value, sets no last error and cannot report one — a virtual-key code
+/// outside the table simply reads as "up and untoggled". So the value is used whole, and the
+/// absence of a check is this paragraph rather than an oversight.
+pub fn caps_lock_on() -> bool {
+    // SAFETY: the invariants are the ones `emergency_modifiers_held` states above and they hold
+    // identically here — the call takes a virtual-key code by value, returns a `SHORT`, touches
+    // no memory of ours, allocates nothing and cannot block. It reads the calling thread's input
+    // state, which is why the callers are the ones documented above.
+    let state = unsafe { GetKeyState(i32::from(VK_CAPITAL.0)) };
+
+    // The **low** bit is the toggle — the keyboard's light. The high bit would be "held down
+    // right now", which is a different question and not the one seeding asks.
+    state & 1 != 0
 }
 
 /// FR-96: release the keyboard and end the process, in that order.

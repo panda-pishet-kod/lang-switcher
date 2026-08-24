@@ -2462,3 +2462,189 @@ fn the_layout_read_leaves_fr10_and_fr11_exactly_as_they_were() {
     assert_eq!(recorder.len(), 0, "FR-10: Win+R is a command and flushes");
     assert_eq!(release(&mut recorder, VK_LWIN), Recorded::Modifier);
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-13-4 — the seed of `CapsLock`
+// -------------------------------------------------------------------------------------
+
+/// **Criterion 6 of task T-13-4: a seeded `CapsLock` reaches the stroke, on both sides of the
+/// transition.**
+///
+/// `Recorder::set_caps_lock` was written by task T-03-2, documented — and called from nowhere in
+/// the product until task T-13-4, so `Held::caps` started `false` in every session whatever the
+/// keyboard's light said. What that costs is visible in one line of this test: the `CAPS` bit is
+/// the cache key of FR-20, so a session started with `CapsLock` on typed «a» where the user saw
+/// «A», keyed the cache on the wrong row, and injected the replacement of FR-22 through
+/// `KEYEVENTF_UNICODE`, which carries the character literally and knows nothing of the real
+/// `CapsLock`.
+///
+/// Both directions are driven, because a seed is an assignment and not a toggle: the point that
+/// seeds does not know whether it is correcting or confirming, and must be right either way.
+#[test]
+fn a_seeded_capslock_is_carried_by_the_strokes_that_follow_it() {
+    let mut recorder = fresh();
+
+    // On: the machine was already in this state when the program started, and nothing but a seed
+    // could ever tell the recorder so.
+    recorder.set_caps_lock(true);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+
+    let seeded = recorder.stroke(0).expect("the stroke typed under the seed");
+
+    assert!(
+        seeded.mods().contains(StrokeMods::CAPS),
+        "FR-04: the mask of the stroke carries the CapsLock the seed established"
+    );
+    assert!(
+        seeded.keystroke().mods().caps(),
+        "and so does the key the conversion of FR-22 will be asked about"
+    );
+
+    // Off: the other side of the transition, seeded onto the very same recorder.
+    recorder.set_caps_lock(false);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+
+    let cleared = recorder.stroke(1).expect("the stroke typed after the seed");
+
+    assert!(
+        !cleared.mods().contains(StrokeMods::CAPS),
+        "a seed of `false` clears the bit as surely as a seed of `true` sets it"
+    );
+
+    // The bit is not decoration: it is the row of the cache FR-20 reads, so the two strokes of
+    // one physical key came out as two different characters.
+    assert_eq!(typed(&recorder), "Aa");
+}
+
+/// Counts the calls the `CapsLock` probe of the test below is asked for.
+///
+/// A `CapsProbe` is a bare `fn() -> bool` — the same shape `PhysicalProbe` and `LayoutProbe` have
+/// and for the same reasons — so it cannot capture, and a counter it can reach has to be a static.
+/// Only one test touches these two.
+static CAPS_PROBE_CALLS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Whether the machine the test below is standing in for has `CapsLock` on.
+static CAPS_PROBE_ANSWER: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// The machine, as that test states it — the seam that stands in for `hook::caps_lock_on`.
+fn stated_machine() -> bool {
+    CAPS_PROBE_CALLS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+    CAPS_PROBE_ANSWER.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// **Criterion 7 of task T-13-4: a `CapsLock` that never reached `record` is repaired by the seed
+/// of points 3 and 4.**
+///
+/// # What is being driven
+///
+/// `buffer::set_caps_lock` is the entry point all five points of the task go through: the
+/// start-up pipeline, `hook::install`, the resumption of FR-90 (point 3, whose message arrives at
+/// `hook::handle_input_message` — driven in `tests\hook.rs`), the return of the buffer from the
+/// gate of FR-70 (point 4, driven against `app::restore_buffer` in the unit tests of that module)
+/// and the return of the session. Here it is driven with the test's **own probe**, which is what
+/// makes a test of this defect possible at all: the state that has to be repaired is one no
+/// keystroke can produce, because the whole defect is that the keystroke was **not seen**.
+///
+/// # The three acts
+///
+/// 1. the machine's `CapsLock` goes on while the program is suspended (FR-90) or the buffer is
+///    parked (FR-70, FR-84) — the tracker keeps saying "off" and the letters come out lower case;
+/// 2. the point seeds, and the bits agree with the machine again;
+/// 3. it goes off the same way, and the seed agrees again — the transition has two sides.
+///
+/// The fourth assertion is the thread rule of the task: on a thread with no typing buffer the
+/// probe is **not called at all**. That is what keeps `GetKeyState` — which answers about the
+/// calling thread's own input queue and would describe nothing on the UI thread — off every
+/// thread but the input one, by construction rather than by discipline.
+#[test]
+fn a_capslock_missed_by_the_hook_is_repaired_by_the_seed() {
+    use std::sync::atomic::Ordering;
+
+    // Act 0 — a thread with no buffer: nothing is seeded and the machine is not even asked.
+    assert!(!buffer::is_installed());
+    CAPS_PROBE_CALLS.store(0, Ordering::Relaxed);
+
+    assert!(
+        !buffer::set_caps_lock(stated_machine),
+        "a thread with no typing buffer has nothing to seed"
+    );
+    assert_eq!(
+        CAPS_PROBE_CALLS.load(Ordering::Relaxed),
+        0,
+        "and Win32 is never reached from it — the probe runs inside `buffer::with`"
+    );
+
+    buffer::install_recorder(fresh_of(16));
+
+    // Act 1 — the user pressed `CapsLock` where the hook could not see it. The tracker still
+    // says "off", and every letter comes out in the wrong case.
+    CAPS_PROBE_ANSWER.store(true, Ordering::Relaxed);
+
+    assert_eq!(
+        buffer::record(user_press(VK_A, SCAN_A)),
+        Recorded::Stored,
+        "the strokes the user makes after the missed press are recorded as usual"
+    );
+    assert_eq!(
+        buffer::with(|recorder| recorder.held().caps()),
+        Some(false),
+        "the defect: the belief cannot follow a press that never reached `record`"
+    );
+
+    // Act 2 — the point seeds: the resumption of FR-90, or the buffer coming back from the gate
+    // of FR-70. The bits agree with the machine again.
+    assert!(buffer::set_caps_lock(stated_machine));
+    assert_eq!(CAPS_PROBE_CALLS.load(Ordering::Relaxed), 1);
+
+    assert_eq!(
+        buffer::with(|recorder| recorder.held().caps()),
+        Some(true),
+        "after the seed the belief is the machine's"
+    );
+    assert_eq!(
+        buffer::record(user_press(VK_A, SCAN_A)),
+        Recorded::Stored,
+        "and the stroke that follows carries it"
+    );
+
+    // Act 3 — the other side of the transition, missed the same way and repaired the same way.
+    CAPS_PROBE_ANSWER.store(false, Ordering::Relaxed);
+
+    assert!(buffer::set_caps_lock(stated_machine));
+    assert_eq!(
+        buffer::with(|recorder| recorder.held().caps()),
+        Some(false),
+        "a machine whose CapsLock went off while nobody was looking is followed as well"
+    );
+    assert_eq!(buffer::record(user_press(VK_A, SCAN_A)), Recorded::Stored);
+
+    // One physical key, three presses, three rows of the cache of FR-20 — which is what the
+    // `CAPS` bit decides and what the defect was silently getting wrong for whole sessions.
+    assert_eq!(
+        buffer::with(|recorder| typed(recorder)).expect("the buffer of this thread"),
+        "aAa"
+    );
+
+    buffer::uninstall();
+    CAPS_PROBE_ANSWER.store(false, Ordering::Relaxed);
+}
+
+/// One press of an ordinary key, delivered through the module-level entry point the hook uses.
+///
+/// The tests above drive an owned `Recorder`; the seed is reached through `buffer::with`, so the
+/// test of it needs the buffer to be **installed on the thread**, which is the situation of the
+/// input thread and the one the five points are written for.
+fn user_press(vk: u16, scan: u16) -> lang_switcher::hook::KeyEvent {
+    KeyEvent {
+        vk,
+        edge: Edge::Down,
+        extra_info: FOREIGN_SIGNATURE,
+        scan,
+        flags: 0,
+        time: SOME_TIME,
+    }
+}

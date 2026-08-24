@@ -755,7 +755,9 @@ const fn modifier_role(vk: u16) -> Option<Role> {
 /// hook was installed, or while the program was suspended (FR-90, when [`Recorder::record`] is
 /// never reached), is not seen. Its release is seen, and clears it, so the state cannot stay
 /// wrong indefinitely; and `CapsLock` can be seeded from a caller that has a trustworthy source
-/// through [`Recorder::set_caps_lock`].
+/// through [`Recorder::set_caps_lock`] — which task T-13-4 finally gave callers, five of them,
+/// listed at [`crate::buffer::set_caps_lock`]. Until then it described a mechanism nobody used and
+/// `caps` started `false` in every session, whatever the keyboard's light said.
 ///
 /// ⚠ **Task T-10-12 corrected the sentence above: "its release is seen" was an assumption, and
 /// it is false.** A release that never arrives leaves the belief raised for ever, and defect D
@@ -894,6 +896,21 @@ pub type PhysicalProbe = fn() -> Physical;
 /// window is while it feeds its synthetic strokes — which is what makes the detector of criterion
 /// 11 two-sided without a live keyboard, exactly as `PhysicalProbe` did for defect D.
 pub type LayoutProbe = fn() -> LayoutId;
+
+/// How a caller tells [`Recorder`] what the machine's `CapsLock` really is — **task T-13-4**.
+///
+/// A bare function pointer for the same three reasons [`PhysicalProbe`] and [`LayoutProbe`] are
+/// ones: it allocates nothing, it leaves [`Recorder`] free of interior mutability, and it lets a
+/// test **state** the machine's toggle instead of asking a keyboard nobody is holding.
+///
+/// ⚠ **It is never read from inside the hook callback and must never be.** NFR-01 to NFR-05 give
+/// the callback no new call of any kind, and this one is a `GetKeyState`. Every point that seeds
+/// goes through [`crate::buffer::set_caps_lock`], reached from the message loop of the input
+/// thread —
+/// see there for the whole list and for why the thread is the right one.
+///
+/// The product's implementation is [`crate::hook::caps_lock_on`].
+pub type CapsProbe = fn() -> bool;
 
 // ---------------------------------------------------------------------------------------
 // The flush rules of FR-10 — the LL-hook rows only
@@ -1339,6 +1356,19 @@ impl Recorder {
     /// The tracker follows every `CapsLock` press the hook sees, so it is right from the first
     /// toggle onwards; it cannot know the state the machine was already in when the program
     /// started. Nothing in this module asks the system, and see [`Held`] for why.
+    ///
+    /// ⚠ **Task T-13-4 wired this up.** It was written by task T-03-2, documented, and then
+    /// called from nowhere in the product, which is the whole of the defect the audit of
+    /// 2026-08-24 recorded: a program started with `CapsLock` on — the autostart of FR-93 among
+    /// other ways — recorded every stroke of the session under a cleared `CAPS` bit, keyed the
+    /// cache of FR-20 with it and injected the replacement of FR-22 in the wrong case, because
+    /// `KEYEVENTF_UNICODE` carries the character literally and knows nothing of the real
+    /// `CapsLock`. The callers are named at [`crate::buffer::set_caps_lock`], the module-level
+    /// function of the same name that drives this one; the setter itself is unchanged.
+    ///
+    /// **A seed, not a toggle.** The value is *assigned*, so seeding twice in a row is the same
+    /// as seeding once, and a point that fires when nothing was missed writes back what was
+    /// already there. That is what lets the five points be as generous as they are.
     pub fn set_caps_lock(&mut self, on: bool) {
         self.held.caps = on;
     }
@@ -2004,6 +2034,50 @@ pub fn with<R>(action: impl FnOnce(&mut Recorder) -> R) -> Option<R> {
 /// of `tests\hook.rs` — takes one thread-local read and returns [`Recorded::Ignored`].
 pub fn record(key: KeyEvent) -> Recorded {
     with(|recorder| recorder.record(key)).unwrap_or(Recorded::Ignored)
+}
+
+/// Seeds the `CapsLock` of the buffer of the calling thread from `probe` — **task T-13-4**.
+///
+/// Answers whether this thread had a buffer to seed.
+///
+/// Named after the method it drives, the way [`record`], [`reset`] and [`note_conversion`] are
+/// named after theirs: this is [`Recorder::set_caps_lock`] as the rest of the program is allowed
+/// to reach it. The argument differs because the value cannot be — see below.
+///
+/// # The five points
+///
+/// The tracker of [`Held`] flips on the `CapsLock` presses that reach [`Recorder::record`], and
+/// there are three ways for a press not to reach it: the program is suspended (FR-90, where
+/// `hook::classify` answers `PASS` before `record`), the buffer is parked (FR-70 for a password
+/// field, FR-84 for an excluded process), and the hook is not up yet. So the machine's own
+/// toggle is read again at every point past which a press could have been missed:
+///
+/// 1. **the buffer is installed at start-up** — `app::install_buffer`;
+/// 2. **the hook is installed, first time and every reinstallation** — [`crate::hook::install`],
+///    the single door `watchdog::reinstall_hook` and start-up both go through;
+/// 3. **FR-90 is resumed** — [`crate::hook::set_active`] on the `false → true` edge, which
+///    happens on the UI thread and therefore travels as [`crate::hook::WM_APP_SEED_CAPS`];
+/// 4. **the buffer comes back from the FR-70 gate** — `app::restore_buffer`;
+/// 5. **the session comes back, or the machine wakes** — the receiving side of
+///    `watchdog::WM_APP_LAYOUT` in `app::window_proc`, where the watchdog already asks the input
+///    thread for a fresh layout stamp for exactly the same reason.
+///
+/// # Why the probe is called in here and not by the caller
+///
+/// `GetKeyState` answers from the **calling thread's** input state, so it is only worth asking on
+/// the thread that owns the queue the hook feeds — section 6.3's input thread. The probe is
+/// therefore invoked *inside* [`with`], which answers `None` on every thread that owns no buffer:
+/// the UI and watcher threads cannot reach the Win32 call at all, however a point is wired, and
+/// point 3 above is free to publish from the UI thread without the reading following it there.
+///
+/// # NFR-01 to NFR-05
+///
+/// **The boundary of this repair runs at the hook callback and none of this crosses it.** Every
+/// one of the five points is on the message loop of the input thread or in `install`; the
+/// callback gained no call, no branch and no thread-local of its own. `Recorder::record` is
+/// untouched by task T-13-4.
+pub fn set_caps_lock(probe: CapsProbe) -> bool {
+    with(|recorder| recorder.set_caps_lock(probe())).is_some()
 }
 
 /// Flushes and zeroes the buffer of the calling thread — FR-10, SEC-02.

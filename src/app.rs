@@ -941,10 +941,25 @@ fn start_input_pipeline() {
 /// The capacity is whatever the UI thread has published, and the default of section 7 when it
 /// has published nothing yet — [`BUFFER_CAPACITY`] and [`crate::buffer::effective_capacity`]
 /// agree that zero means the default, so there is no third state to handle here.
+///
+/// ⭐ **Point 1 of task T-13-4.** A buffer is born believing `CapsLock` is off — `Held::caps`
+/// starts `false` and the tracker only ever learns from presses that reach `Recorder::record`,
+/// which the presses made before this moment did not. A user who starts the program with
+/// `CapsLock` on, and the autostart of FR-93 does it for them at every logon, would otherwise
+/// have every stroke of the session recorded under a cleared `CAPS` bit: the cache of FR-20 is
+/// keyed on it, and the replacement of FR-22 goes out through `KEYEVENTF_UNICODE`, which carries
+/// the character literally and knows nothing of the real `CapsLock`. «GHBDTN» would come back as
+/// «привет» instead of «ПРИВЕТ», silently, until the process was restarted.
+///
+/// Seeded here rather than inside `buffer::install` so that the Win32 reading stays a decision
+/// of the product's start-up path: `buffer::install` is a plain constructor a test may call, and
+/// this is the one place the *input thread* creates the buffer it will type into.
 fn install_buffer() {
     crate::buffer::install(&settings::Buffer {
         capacity: BUFFER_CAPACITY.load(Ordering::Acquire),
     });
+
+    crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
 }
 
 /// Resizes the buffer to the capacity the UI thread published, if it is not that size already.
@@ -1451,12 +1466,26 @@ fn park_buffer() {
 /// ⚠ **Nothing is recovered.** What comes back is the ring as [`park_buffer`] left it: empty and
 /// zeroed. The strokes made while buffering was off were never stored, so there is nothing for
 /// this to restore even in principle — which is the point of the design, not a limitation of it.
+///
+/// ⭐ **Point 4 of task T-13-4 — the one belief that must not come back as it left.** The ring is
+/// deliberately empty, but `Held::caps` is not part of the ring: it is a belief about the
+/// *machine*, and while the buffer sat in [`PARKED_BUFFER`] the machine went on being typed at.
+/// `record` was never reached for any of it — `buffer::with` answers `None` on a parked thread —
+/// so a `CapsLock` pressed in the password field of FR-70 or in the excluded process of FR-84
+/// leaves the tracker inverted for the rest of the session. So the machine is asked again here,
+/// at the moment the buffer goes back on the thread, and only here: the early return above makes
+/// this the transition and not every message.
+///
+/// SEC-02 is untouched by that. What is seeded is one `bool` about a key, over a ring that is
+/// still empty and still zeroed; no stroke is recovered, restored or inferred.
 fn restore_buffer() {
     let Some(parked) = PARKED_BUFFER.with(|cell| cell.replace(None)) else {
         return;
     };
 
     crate::buffer::install_recorder(parked);
+
+    crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
 }
 
 /// Applies `f` to the typing buffer of this thread wherever FR-70 currently keeps it —
@@ -1943,6 +1972,34 @@ unsafe extern "system" fn window_proc(
                     }
                     Some(crate::watchdog::Rebuild::IfLayoutChanged) => refresh_layout_and_cache(),
                     None => {}
+                }
+
+                // ⭐ **Point 5 of task T-13-4 — the session came back, or the machine woke.**
+                // `watchdog::WM_APP_LAYOUT` is posted at this thread on exactly the occasions on
+                // which this program may have been shown nothing: the two `WinEvent` rows of the
+                // FR-10 table, and the return from an absence — an unlocked session, a resumed
+                // machine — where the watchdog already asks for a fresh layout stamp because
+                // what happened while it was away is unknown. **The `CapsLock` of the machine is
+                // unknown for precisely the same reason and over precisely the same interval**,
+                // so it is read in the same breath, on the same message, at the same thread.
+                //
+                // ⚠ **Decision R-20, and nothing is added to `watchdog`.** The message already
+                // flies and carries no data; the value is read here, where it means something.
+                // `watchdog::reinstall_hook` and the `WM_APP_LAYOUT` posts belong to another
+                // task's file and are not touched — this is the receiving side and it lives here.
+                //
+                // Costs one thread-local read and one `GetKeyState` on a message that already
+                // re-reads the keyboard layout and may rebuild the whole cache of FR-20. Nothing
+                // of this is in the hook callback (NFR-01 to NFR-05).
+                //
+                // Unlike the layout stamp above, this does **not** reach for a parked recorder
+                // through `with_recorder_wherever_it_is`, and it does not need to: the trap of
+                // task T-10-0f is that a probe dispatched during the interval of FR-71 would be
+                // *lost*, and this one is not — `restore_buffer` is point 4 of the same task and
+                // seeds the recorder at the moment it comes back off the shelf. Two points, one
+                // reading each, no state carried between them.
+                if message == crate::watchdog::WM_APP_LAYOUT {
+                    crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
                 }
             }
 
@@ -2877,6 +2934,50 @@ mod tests {
             buffer::len(),
             0,
             "publications while parked must not resurrect or add strokes"
+        );
+
+        buffer::uninstall();
+    }
+
+    /// **Point 4 of task T-13-4: the buffer comes back from the gate of FR-70 believing what the
+    /// machine believes, not what it parked with.**
+    ///
+    /// While the buffer sits in [`PARKED_BUFFER`] — the password field of FR-70, the excluded
+    /// process of FR-84 — `buffer::with` answers `None` for every stroke, so a `CapsLock` pressed
+    /// during it never reaches `Recorder::record` and the tracker comes back **inverted**. The
+    /// ring is deliberately empty on the way back (nothing is recovered, and SEC-02 saw to the
+    /// memory), but `Held::caps` is not a stroke: it is a belief about the machine, and the
+    /// machine went on being typed at.
+    ///
+    /// The assertion is against `hook::caps_lock_on()` and not against `true`, for the reason the
+    /// twin test in `tests\hook.rs` states: the machine's toggle belongs to whoever is running
+    /// `cargo test`, and what this task promises is that the tracker ends up **equal to the
+    /// reading the product makes** — which is the same claim on every machine.
+    #[test]
+    fn a_buffer_restored_from_the_gate_is_seeded_with_the_machines_caps_lock() {
+        buffer::install_recorder(Recorder::with_capacity(8));
+
+        let machine = crate::hook::caps_lock_on();
+
+        // The press that never reached `record`. Stated rather than pressed: a press that
+        // reaches `record` is exactly the case this defect is not about.
+        buffer::with(|recorder| recorder.set_caps_lock(!machine));
+
+        park_buffer();
+        assert!(!buffer::is_installed(), "the interval of FR-70");
+
+        restore_buffer();
+        assert!(buffer::is_installed());
+
+        assert_eq!(
+            buffer::with(|recorder| recorder.held().caps()),
+            Some(machine),
+            "point 4: the buffer coming back must re-read the machine's CapsLock"
+        );
+        assert_eq!(
+            buffer::len(),
+            0,
+            "FR-70 is not weakened: the ring comes back empty, seed or no seed"
         );
 
         buffer::uninstall();
