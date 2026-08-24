@@ -39,7 +39,7 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use lang_switcher::buffer::{self, Recorder, ResetOutcome};
+use lang_switcher::buffer::{self, Recorder, ResetOutcome, Stroke};
 use lang_switcher::guard::{self, Field};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
@@ -539,8 +539,23 @@ fn delta(before: Counters, after: Counters) -> Counters {
 /// The one test that touches the process-wide flush cell and the process-wide counters, and it
 /// is one test on purpose: `cargo test` runs the tests of a binary in parallel, and two tests
 /// asserting on the same statics would be asserting on each other's timing.
+///
+/// ⭐ **Task Т-13-23 — and the whole of that task's window half is here**, for the same reason:
+/// `PARTIAL_CLEARS` and `KEPT_EVENTS` are process-wide, so the proof that a window flush no
+/// longer moves them has to be made where the flush cell is already owned rather than in a
+/// second test racing this one. The audit of 2026-08-24 (hook-buffer, «FR-12 для событий смены
+/// окна/фокуса вычисляется и тут же аннулируется») is what these assertions close, and the
+/// classification they rest on is checked separately and without any static at all by
+/// `only_the_window_flush_is_parked_behind_the_gate`.
+///
+/// ⚠ **The turn is taken since task Т-13-23.** `coming_back_from_an_absence_asks_for_a_fresh_
+/// layout_stamp` reads `window_flushes` as flat under [`NOTICE_TURN`] and this test is what
+/// moves it; the flush requests below went from three to five, and a neighbour asserting "FR-11:
+/// a probe never flushes" must not be asserting on this test's timing.
 #[test]
 fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
+    let _turn = notice_turn();
+
     let before = watchdog::counters();
 
     // No buffer on this thread yet — every thread but the input one is in that position, and
@@ -592,23 +607,167 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
     assert_eq!(watchdog::apply_flush(WM_INPUT, LPARAM(0)), None);
     assert_eq!(buffer::len(), 1, "a forged WM_INPUT flushes nothing");
 
+    // ⭐ ---------------------------------------------------------------------------------
+    // Task Т-13-23 — the two arms whose survivors the FR-70 gate takes away
+    // ---------------------------------------------------------------------------------
+
+    // Three strokes in the ring and a flush older than all of them: `Kept`, the arm FR-12 exists
+    // for, and the arm the audit found being counted as though the user were left with it.
+    press_at(2_001);
+    press_at(2_002);
+    assert_eq!(buffer::len(), 3);
+
+    watchdog::request_flush(1_999);
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Kept { kept: 3 }),
+        "FR-12 itself is untouched: the event is older than every stroke"
+    );
+
+    // ⭐ **The behaviour is untouched, and this is the proof of it.** FR-12 leaves the three
+    // standing; `app::park_buffer` takes them a few lines later — `buffer::reset()` first, then
+    // the recorder off the thread — because a window flush empties the buffer «независимо от
+    // исхода временно́го разрешения FR-12» (SPEC §10, record 10; decision П-2). Staged the way
+    // that function makes it, and read the way the SEC-02 tests of `tests\buffer.rs` read it: on
+    // the backing array itself, the slots outside the live window included.
+    assert_eq!(
+        buffer::len(),
+        3,
+        "FR-12 kept them; the park has not run yet"
+    );
+    assert!(buffer::reset(), "the park empties what the flush kept");
+    assert_eq!(buffer::len(), 0);
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "SEC-02: the ring a window flush leaves behind is empty and zeroed"
+    );
+
+    // The same again for `Partial`: two strokes at or before the event, one after it.
+    for time in [3_000, 3_001, 3_002] {
+        press_at(time);
+    }
+
+    watchdog::request_flush(3_001);
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Partial {
+            removed: 2,
+            kept: 1
+        }),
+        "FR-12 itself is untouched here as well"
+    );
+    assert_eq!(buffer::len(), 1, "one stroke is newer than the event");
+
+    assert!(buffer::reset(), "and the park takes that one too");
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "SEC-02 after the second window flush"
+    );
+
     buffer::uninstall();
+
+    // ⭐ **The mouse row of FR-10, driven where the arithmetic lives.** A real `WM_INPUT` needs a
+    // live raw-input packet, which no test process can stage — the forged one above is refused by
+    // `GetRawInputData` before anything is counted at all — so `note_flush_outcome` is called
+    // directly. This is the half of task Т-13-23 that is easiest to break: `Partial` and `Kept`
+    // do reach the user on this row, nothing parks the buffer behind a click, and these readings
+    // have to be exactly what they always were.
+    watchdog::note_flush_outcome(
+        WM_INPUT,
+        ResetOutcome::Partial {
+            removed: 2,
+            kept: 3,
+        },
+    );
+    watchdog::note_flush_outcome(WM_INPUT, ResetOutcome::Kept { kept: 3 });
+    watchdog::note_flush_outcome(WM_INPUT, ResetOutcome::Cleared { removed: 4 });
 
     let counted = delta(before, watchdog::counters());
 
-    assert_eq!(counted.window_flushes, 3, "three requests were raised");
-    assert_eq!(counted.window_flushes_taken, 2, "two of them were taken");
-    assert_eq!(counted.partial_clears, 1);
-    assert_eq!(counted.full_clears, 1);
+    assert_eq!(counted.window_flushes, 5, "five requests were raised");
+    assert_eq!(counted.window_flushes_taken, 4, "four of them were taken");
+
+    // ⭐ **The finding, in two numbers.** Three window flushes above resolved as `Partial` or
+    // `Kept` — with «выжившие» strokes and all — and not one of them is counted here; what is
+    // left is the single mouse `Partial` and the single mouse `Kept`. Before task Т-13-23 the
+    // same run read `partial_clears=3` and `kept_events=2`, and every one of those extra counts
+    // was a claim about strokes `app::park_buffer` had already taken away.
     assert_eq!(
-        counted.strokes_removed, 5,
-        "two by the partial, three by the full"
+        counted.partial_clears, 1,
+        "only the mouse row may claim that strokes survived a flush (was 3)"
     );
+    assert_eq!(
+        counted.kept_events, 1,
+        "the window `Kept` is not counted; the mouse one is (was 2)"
+    );
+
+    // Deliberately unchanged: neither of these is a claim about survivors. A `Cleared` emptied
+    // the ring wherever it came from, and every stroke `reset_up_to` removed is still counted.
+    assert_eq!(
+        counted.full_clears, 2,
+        "one window `Cleared`, one mouse `Cleared`"
+    );
+    assert_eq!(
+        counted.strokes_removed, 13,
+        "window: 2 by the partial, 3 by the full, 2 by the partial of Т-13-23; mouse: 2 + 4"
+    );
+
     assert_eq!(
         counted.mouse_packets, 0,
         "the forged WM_INPUT was not a packet"
     );
     assert_eq!(counted.mouse_flushes, 0);
+}
+
+/// How many slots of the backing array of this thread's buffer are not zero, or `None` on a
+/// thread that owns no buffer.
+///
+/// The SEC-02 reading of `tests\buffer.rs` — «явно перезаписывается нулями, а не просто
+/// помечается пустым» — taken from the other side of `buffer::with`, so that a parked ring can be
+/// examined here without a `Recorder` of this file's own.
+fn non_zero_slots() -> Option<usize> {
+    buffer::with(|recorder| {
+        recorder
+            .slots()
+            .iter()
+            .filter(|slot| **slot != Stroke::ZEROED)
+            .count()
+    })
+}
+
+/// ⭐ **Task Т-13-23 — which flushes the FR-70 gate parks, and which it leaves alone.**
+///
+/// The classification the two conditional arms of `watchdog::note_flush_outcome` rest on, checked
+/// on its own: it is a function of the message and of nothing else, so it needs no buffer, no
+/// window and no process-wide counter, and it can therefore be a test of its own beside the
+/// serialised one above.
+///
+/// `WM_APP_FLUSH` is the two `WinEvent` rows of the FR-10 table, and `app::window_proc` answers it
+/// with an unconditional `app::park_buffer` (SPEC §10, record 10; decision П-2). `WM_INPUT` is the
+/// mouse row and is parked behind nothing — which is why it is the one row on which `Partial` and
+/// `Kept` were ever true, and why task Т-13-23 left its counting exactly as it found it.
+#[test]
+fn only_the_window_flush_is_parked_behind_the_gate() {
+    assert!(
+        watchdog::parks_the_buffer(WM_APP_FLUSH),
+        "SPEC §10 record 10: a window or focus change empties the buffer whatever FR-12 decided"
+    );
+
+    assert!(
+        !watchdog::parks_the_buffer(WM_INPUT),
+        "FR-13: nothing parks the buffer behind a mouse click"
+    );
+
+    // Neither is anything else a flush that parks: the classification is closed, and the two
+    // messages this module posts at the input thread for other errands are not flushes at all.
+    for message in [WM_APP_LAYOUT, watchdog::WM_APP_REHOOK, WM_TIMER, 0x0401] {
+        assert!(
+            !watchdog::parks_the_buffer(message),
+            "only WM_APP_FLUSH is answered by a park"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------

@@ -650,12 +650,22 @@ static WINDOW_FLUSHES_TAKEN: AtomicU32 = AtomicU32::new(0);
 /// Flushes that emptied the whole buffer — [`ResetOutcome::Cleared`].
 static FULL_CLEARS: AtomicU32 = AtomicU32::new(0);
 
-/// Flushes that removed some strokes and left others — [`ResetOutcome::Partial`], the arm FR-12
-/// exists for.
+/// Flushes that removed some strokes and **left others standing** — [`ResetOutcome::Partial`],
+/// the arm FR-12 exists for.
+///
+/// ⚠ **The mouse row of the FR-10 table and nothing else — task Т-13-23.** A [`WM_APP_FLUSH`] is
+/// never counted here, however FR-12 resolved it: the strokes that arm calls "kept" do not
+/// outlive the message they were kept in, because `crate::app` parks the buffer behind that
+/// message unconditionally. See [`note_flush_outcome`] and [`parks_the_buffer`] for the decision
+/// that settled it (**П-2**) and for SPEC §10, record 10.
 static PARTIAL_CLEARS: AtomicU32 = AtomicU32::new(0);
 
 /// Flushes that removed nothing because every stroke was newer than the event —
 /// [`ResetOutcome::Kept`].
+///
+/// ⚠ **The mouse row of the FR-10 table and nothing else — task Т-13-23**, for the reason
+/// [`PARTIAL_CLEARS`] gives: this is the stronger of the two claims that strokes survived a
+/// flush, and behind a [`WM_APP_FLUSH`] none of them do.
 static KEPT_EVENTS: AtomicU32 = AtomicU32::new(0);
 
 /// Strokes removed by all flushes together.
@@ -711,9 +721,13 @@ pub struct Counters {
     pub window_flushes_taken: u32,
     /// Flushes that emptied the buffer completely.
     pub full_clears: u32,
-    /// Flushes that removed only the strokes older than the event — FR-12.
+    /// Flushes that removed only the strokes older than the event — FR-12. **The mouse row of
+    /// the FR-10 table only**, since task Т-13-23: see [`PARTIAL_CLEARS`] and
+    /// [`note_flush_outcome`] for why a window flush is not a claim this number may make.
     pub partial_clears: u32,
-    /// Flushes that removed nothing because the buffer was newer than the event — FR-12.
+    /// Flushes that removed nothing because the buffer was newer than the event — FR-12. **The
+    /// mouse row of the FR-10 table only**, since task Т-13-23: see [`KEPT_EVENTS`] and
+    /// [`note_flush_outcome`].
     pub kept_events: u32,
     /// Strokes removed by all flushes together.
     pub strokes_removed: u32,
@@ -1016,6 +1030,10 @@ pub fn note_device_change(message: u32) -> bool {
 /// that thread and to no other): a `WM_INPUT` posted at the UI window by another process must
 /// not be read, and a forged [`WM_APP_FLUSH`] must not be able to consume a pending request the
 /// input thread has not seen yet.
+///
+/// The outcome is **returned** and is also **counted**, and the two are not the same thing: what
+/// FR-12 decided is one fact, and what the user was left with a few lines later is another. The
+/// arithmetic lives in [`note_flush_outcome`], which is where task Т-13-23 separated them.
 pub fn apply_flush(message: u32, lparam: LPARAM) -> Option<ResetOutcome> {
     if !crate::buffer::is_installed() {
         return None;
@@ -1024,21 +1042,116 @@ pub fn apply_flush(message: u32, lparam: LPARAM) -> Option<ResetOutcome> {
     let event_time = flush_time(message, lparam)?;
     let outcome = crate::buffer::reset_up_to(event_time)?;
 
+    note_flush_outcome(message, outcome);
+
+    Some(outcome)
+}
+
+/// Whether the flush `message` carries is one that [`crate::app`] **parks the buffer** behind —
+/// the two `WinEvent` rows of the FR-10 table, and nothing else.
+///
+/// # What the answer `true` means — decision **П-2** and SPEC §10, record 10
+///
+/// [`WM_APP_FLUSH`] is posted by [`win_event_proc`] for `EVENT_SYSTEM_FOREGROUND` and
+/// `EVENT_OBJECT_FOCUS` and for no other event, and `crate::app::window_proc` answers it with
+/// `guard::note_focus_moved` **and an unconditional `app::park_buffer`**: the ring is emptied and
+/// the memory it stood in overwritten (SEC-02) on the focus change itself, whatever FR-12 has
+/// just decided about it. A `Partial` or a `Kept` computed for such an event therefore does not
+/// outlive the message it was computed in.
+///
+/// That is not a defect and it is not this module's to repair. The user settled it as decision
+/// **П-2**, «утвердить», and SPEC §10 record 10 now says so in as many words:
+///
+/// > События смены окна и фокуса сбрасывают буфер полностью независимо от исхода временно́го
+/// > разрешения FR-12: строка, набранная после смены фокуса, не сохраняется до вердикта проверки
+/// > поля пароля (SEC-06). Окно ограничено бюджетом probe.
+///
+/// What **was** a defect is the arithmetic beside it, and that is what task Т-13-23 repairs; see
+/// [`note_flush_outcome`].
+///
+/// # `WM_INPUT` answers `false`, and that half is untouched
+///
+/// Nothing parks the buffer behind a mouse click: the click is not a focus change, `guard` is not
+/// asked for a verdict, and the strokes FR-12 keeps are exactly the strokes the user goes on
+/// typing into. The mouse row is the one place `Partial` and `Kept` ever reached the user, its
+/// readings have always been true, and task Т-13-23 changed nothing about it.
+///
+/// # Why the question is asked of the message and not of the window
+///
+/// [`apply_flush`] has already established that this is the input thread — `buffer::is_installed`,
+/// section 6.3 — and the park is gated on `app::is_input_window`, which names the same thread
+/// through the register of windows. Between the two calls stands no path that returns early for
+/// [`WM_APP_FLUSH`]: `handle_watchdog_message` claims four other messages and
+/// `hook::handle_input_message` claims two of its own. So on the one thread that can reach this
+/// function at all, the message alone decides.
+///
+/// Public for the same reason [`coalesced`] and [`pending_time`] are: the classification is the
+/// whole of what task Т-13-23 changed, and `tests\watchdog.rs` drives it directly — a real
+/// `WM_INPUT` needs a live raw-input packet, which a test process cannot stage.
+pub fn parks_the_buffer(message: u32) -> bool {
+    message == WM_APP_FLUSH
+}
+
+/// Counts what one flush did, in terms a reader of [`Counters`] may act on — the honesty half of
+/// task **Т-13-23**.
+///
+/// Split out of [`apply_flush`] so that the decision has a name, a place to be documented, and a
+/// test that can reach it without a mouse.
+///
+/// # Two arms unconditional, two conditional
+///
+/// [`FULL_CLEARS`] and [`STROKES_REMOVED`] are unconditional. A `Cleared` emptied the ring and the
+/// strokes it names really are gone; that stays true whether or not the park then takes an
+/// already-empty ring off the thread, and a `Partial` really did remove the strokes it names.
+/// Neither number claims anything about what **survived**.
+///
+/// [`PARTIAL_CLEARS`] and [`KEPT_EVENTS`] do claim exactly that, and behind a flush that
+/// [`parks_the_buffer`] nothing survives. Counting them there made the two numbers assert the
+/// opposite of what the user was left with — the audit of 2026-08-24, direction hook-buffer:
+/// «FR-12 для событий смены окна/фокуса вычисляется и тут же аннулируется: безусловный
+/// `park_buffer` стирает строки, которые `reset_up_to` только что сохранил как „новее события“»,
+/// with `PARTIAL_CLEARS`/`KEPT_EVENTS` incremented alike for the mouse and for the window flush
+/// «создавая ложное впечатление, что механизм действует». Since task Т-13-23 the two numbers are
+/// the mouse row of FR-10 and nothing else, which is the only row on which they were ever true.
+///
+/// # Why the parked outcome is not counted as a full clear instead
+///
+/// It ends as one — the park empties the ring — and moving it into [`FULL_CLEARS`] would have kept
+/// a window flush visible in the outcome counters. It was rejected: `full_clears` and
+/// `strokes_removed` are **keys of the SEC-04a channel** (`control.rs`), read against the figures
+/// of the acceptance session, and `control.rs` states of this very path that it «goes *past* the
+/// flush counters». Redefining two published keys to close a finding about two numbers the channel
+/// does not publish at all would trade a small lie for a larger one. What the flush did remains
+/// visible where it always was: [`Counters::window_flushes_taken`] counts the request this thread
+/// took, and it moves for exactly these events.
+///
+/// # NFR-01…NFR-05, SEC-04a, SEC-07
+///
+/// Relaxed atomics on the message loop of the input thread, exactly as before — the hook callback
+/// does not reach this function and gained neither a call nor a branch. No counter was added and
+/// none was removed, so the debug channel of SEC-04a has no new line and the feature `testing` no
+/// new member (Р-53). Counts, never strokes.
+pub fn note_flush_outcome(message: u32, outcome: ResetOutcome) {
+    let parked = parks_the_buffer(message);
+
     match outcome {
         ResetOutcome::Cleared { removed } => {
             FULL_CLEARS.fetch_add(1, Ordering::Relaxed);
             note_removed(removed);
         }
         ResetOutcome::Partial { removed, .. } => {
-            PARTIAL_CLEARS.fetch_add(1, Ordering::Relaxed);
+            if !parked {
+                PARTIAL_CLEARS.fetch_add(1, Ordering::Relaxed);
+            }
+
             note_removed(removed);
         }
         ResetOutcome::Kept { .. } => {
-            KEPT_EVENTS.fetch_add(1, Ordering::Relaxed);
+            if !parked {
+                KEPT_EVENTS.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
-
-    Some(outcome)
 }
 
 /// Adds `removed` to the running total of strokes taken out by flushes.
