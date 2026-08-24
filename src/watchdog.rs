@@ -1710,6 +1710,18 @@ const NO_WINDOW: usize = 0;
 /// [`is_ui_window`] — so it is never converted back.
 static NOTICE_WINDOW: AtomicUsize = AtomicUsize::new(NO_WINDOW);
 
+/// The window [`start_liveness_timer`] was given, as a raw value — the input thread's own
+/// window, and the only window of this process on which the recovery path of FR-80 may run.
+///
+/// Raw rather than an `HWND` for the reason [`NOTICE_WINDOW`] states, and used the same way:
+/// nothing is ever done with it but a comparison — see [`is_input_window`] — so it is never
+/// converted back.
+///
+/// **Task Т-13-3.** Before it the question "is this the input thread?" was asked as
+/// `buffer::is_installed()`, which FR-70 makes false on that very thread; see
+/// [`is_input_window`] for what that cost.
+static INPUT_WINDOW: AtomicUsize = AtomicUsize::new(NO_WINDOW);
+
 /// Whether a reinstallation is between its `UnhookWindowsHookEx` and its `SetWindowsHookExW`.
 ///
 /// Read by [`hook_down`] and by nothing else: without it the tray of FR-90 could sample
@@ -2021,7 +2033,7 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
         // **FR-80, fourth mechanism** — the only one that fires when nothing has happened, and
         // the only one that answers the `LowLevelHooksTimeout` case, which announces itself with
         // nothing whatsoever.
-        WM_TIMER if wparam.0 == LIVENESS_TIMER_ID && is_input_window() => {
+        WM_TIMER if wparam.0 == LIVENESS_TIMER_ID && is_input_window(window) => {
             LIVENESS_TICKS.fetch_add(1, Ordering::Relaxed);
             reinstall_hook(window, Reason::Timer);
             Some(LRESULT(0))
@@ -2030,7 +2042,7 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
         // The far end of [`request_rehook`], for the three mechanisms that observe the event on
         // another thread. SEC-05: the message carries nothing, and a forged one finds
         // [`PENDING_REASON`] empty and returns without touching the hook.
-        WM_APP_REHOOK if is_input_window() => {
+        WM_APP_REHOOK if is_input_window(window) => {
             let pending = PENDING_REASON.swap(Reason::None as u32, Ordering::AcqRel);
 
             match Reason::from_code(pending) {
@@ -2046,7 +2058,7 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
         // SEC-04a, feature `testing`, absent from the Release configuration: the fault injection
         // that lets an acceptance run watch the watchdog work.
         #[cfg(feature = "testing")]
-        WM_TIMER if wparam.0 == fault::DROP_HOOK_TIMER_ID && is_input_window() => {
+        WM_TIMER if wparam.0 == fault::DROP_HOOK_TIMER_ID && is_input_window(window) => {
             fault::drop_the_hook(window);
             Some(LRESULT(0))
         }
@@ -2077,13 +2089,52 @@ fn is_ui_window(window: HWND) -> bool {
     notice != NO_WINDOW && window.0 as usize == notice
 }
 
-/// Whether the calling thread is the input thread.
+/// Whether `window` is the input thread's own window — the one window of this process on which
+/// the hook of FR-01 may be taken off and put back.
 ///
-/// Section 6.3 gives the typing buffer to that thread and to no other, so owning it is what
-/// being the input thread means — the same test `app::window_proc` already uses to tell the
-/// three windows apart.
-fn is_input_window() -> bool {
-    crate::buffer::is_installed()
+/// # Why this is not `buffer::is_installed()` — task Т-13-3
+///
+/// It was, and the comment here said so in as many words: "the same test `app::window_proc`
+/// already uses". Both halves of that stopped being true at task T-06-1, and the audit of
+/// 2026-08-24 found what it cost. Section 6.3 does give the typing buffer to the input thread
+/// and to no other, but **FR-70 is the one requirement that takes the buffer away**:
+/// `app::park_buffer` calls [`crate::buffer::uninstall`] for the whole of `Field::Pending`, of a
+/// password field (FR-70) and of an excluded process (FR-84 — a game, for hours). A gate spelled
+/// that way therefore answers "this is not the input thread" precisely on the thread that owns
+/// the hook, and precisely while the answer has to be "yes".
+///
+/// What that cost, in the three arms this guards: the liveness tick of FR-80 fell into
+/// `DefWindowProcW`, so the `LowLevelHooksTimeout` case went unanswered; a [`WM_APP_REHOOK`]
+/// from the desktop switch, the session change or the resume was dropped with
+/// [`PENDING_REASON`] still armed and nobody left to repost it — up to thirty seconds without a
+/// hook after every unlock whose `WM_APP_FLUSH` was answered first; and the fault injection of
+/// SEC-04a stopped being able to stage the failure in the very states where it happens.
+///
+/// `app::is_input_window` had already been moved off that predicate for its own gates, and for
+/// this reason exactly — it reads the register of windows instead. This is the same fact from
+/// the same side; only the register differs, and the next paragraph is why.
+///
+/// # Why the handle is this module's own and not `app`'s
+///
+/// The reason [`is_ui_window`] gives, and it is a compile error rather than a preference:
+/// `app::ui_window_raw` is `#[cfg(panic = "unwind")]` while the Release profile of section 3.2
+/// is `panic = "abort"`, and `app::is_input_window` is private to `app`. So the module remembers
+/// the handle itself, at the one place it is handed the input window for a purpose that is
+/// FR-80's own: [`start_liveness_timer`], which `app::serve_window` calls on the input thread
+/// and on no other, and which is what makes both `WM_TIMER` arms below arrive at all. One
+/// relaxed atomic load and no Win32 call — this runs on every message of every window.
+///
+/// ⚠ `cargo build --release` is a separate point of the acceptance criteria because that build,
+/// and not reasoning, is what caught the mistake the first time.
+///
+/// **SEC-05.** This is an **addition** to the emptiness each arm already finds and never a
+/// replacement for it: a forged [`WM_APP_REHOOK`] aimed at the UI or the watcher window is now
+/// turned away here, and one aimed at the input window still finds [`PENDING_REASON`] empty and
+/// touches no hook.
+fn is_input_window(window: HWND) -> bool {
+    let input = INPUT_WINDOW.load(Ordering::Acquire);
+
+    input != NO_WINDOW && window.0 as usize == input
 }
 
 /// Handle of this module, the `hInstance` `SetWindowsHookExW` wants.
@@ -2182,6 +2233,18 @@ pub fn start_liveness_timer(window: HWND) -> WinResult<Liveness> {
         return Err(WinError::from_thread());
     }
 
+    // **Task Т-13-3.** Published only after the timer is known good, exactly as
+    // `register_session_notice` publishes [`NOTICE_WINDOW`], and it is what [`is_input_window`]
+    // reads: this is the moment the module learns which of the three windows is the input one.
+    //
+    // This function and no other of the three `app::serve_window` hands the input window to
+    // (`register_raw_input`, `register_device_notice`) because this is the registration that
+    // makes the guarded messages exist: `WM_TIMER` of [`LIVENESS_TIMER_ID`] is set here, the
+    // `WM_TIMER` of SEC-04a is set by the line below, and both die in [`Liveness::drop`]. The
+    // handle is therefore published for exactly as long as a message can arrive that needs it —
+    // which is the relation [`is_ui_window`] has with the session registration.
+    INPUT_WINDOW.store(window.0 as usize, Ordering::Release);
+
     #[cfg(feature = "testing")]
     fault::arm_from_environment(window);
 
@@ -2190,6 +2253,11 @@ pub fn start_liveness_timer(window: HWND) -> WinResult<Liveness> {
 
 impl Drop for Liveness {
     fn drop(&mut self) {
+        // Unpublished first, so that no message can be answered on a window whose timer is about
+        // to go — the same order `SessionNotice::drop` and `app::Window::drop` use, for the same
+        // reason.
+        INPUT_WINDOW.store(NO_WINDOW, Ordering::Release);
+
         #[cfg(feature = "testing")]
         fault::disarm(self.window);
 

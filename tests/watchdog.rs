@@ -665,8 +665,9 @@ fn all_three_subscriptions_install_and_come_off() {
     drop(again);
 }
 
-/// The turn-taking lock for every test that makes this process's **one** notice window, or that
-/// asserts on the counters the two system messages of FR-80 move — task **T-10-13**.
+/// The turn-taking lock for every test that makes this process's **one** notice window or its
+/// **one** input window, or that asserts on the counters the messages of FR-80 move — tasks
+/// **T-10-13** and **Т-13-3**.
 ///
 /// ⚠ `NOTICE_WINDOW` is a process-wide cell and `register_session_notice` is what fills it, so
 /// two tests holding registrations at once would each be answering `is_ui_window` for the
@@ -674,6 +675,11 @@ fn all_three_subscriptions_install_and_come_off() {
 /// counters, so a test asserting "nothing moved" beside a test that moves them is asserting on
 /// its neighbour's timing. `cargo test` runs the tests of a binary in parallel, which is exactly
 /// how the Raw Input pair above first failed; the same cure, for the same reason.
+///
+/// ⚠ Task **Т-13-3** puts a second cell of the same kind under this lock: `INPUT_WINDOW`, which
+/// `start_liveness_timer` fills and `Liveness::drop` empties, and which is now what answers
+/// `is_input_window`. `PENDING_REASON` belongs to the same turn — it is process-wide, the two
+/// system arms arm it, and the rehook arm is what empties it.
 static NOTICE_TURN: Mutex<()> = Mutex::new(());
 
 /// Takes the turn, ignoring poisoning — see [`raw_input_turn`] for why.
@@ -714,6 +720,9 @@ fn the_liveness_timer_is_the_thirty_seconds_of_fr80_and_comes_off() {
         "FR-80: периодическая проверка живости хука с интервалом 30 с"
     );
 
+    // Task Т-13-3: starting the timer is also what publishes `INPUT_WINDOW`, so this test takes
+    // the turn its neighbours take.
+    let _turn = notice_turn();
     let window = TestWindow::new();
 
     let liveness =
@@ -796,6 +805,122 @@ fn no_watchdog_message_installs_a_hook_on_a_foreign_window() {
     // The one that matters: no keyboard hook exists in this process, and the keyboard of
     // whoever is running `cargo test` is untouched.
     assert!(!lang_switcher::hook::is_installed());
+}
+
+// ---------------------------------------------------------------------------------------
+// Task Т-13-3 — the gates of FR-80 ask the window, not the typing buffer
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **The repair of task Т-13-3, the detector.** The arms of FR-80 are bound to the input
+/// **window**, so the watchdog goes on working while `guard` has the typing buffer parked.
+///
+/// # What was wrong
+///
+/// `watchdog::is_input_window` answered `buffer::is_installed()`, and `app::park_buffer` calls
+/// `buffer::uninstall` for the whole of `Field::Pending`, of a password field (FR-70) and of an
+/// excluded process (FR-84 — a game, for hours). In those states every arm below fell into
+/// `DefWindowProcW`: the liveness tick stopped ticking and the rehook request was dropped with
+/// `PENDING_REASON` still armed and nobody left to repost it. Audit of 2026-08-24,
+/// guard-watchdog finding 2.
+///
+/// # What this test shows, and what the two `#[ignore]`d tests below add to it
+///
+/// This one is about the **gate** and nothing else: whether the arm is entered at all, which is
+/// `Some` against `None`. It drives `WM_APP_REHOOK` with `PENDING_REASON` deliberately empty —
+/// the arm's own SEC-05 path — so that no hook is installed in a process that is not the
+/// product, which is the rule this file's module documentation states and the reason
+/// `the_gap_without_a_hook_is_microseconds` is ignored. The reinstallation the open gate leads
+/// to, and the counters it moves, are the two ignored tests further down.
+#[test]
+fn a_parked_buffer_no_longer_shuts_the_gates_of_fr80() {
+    let _turn = notice_turn();
+
+    assert!(
+        !lang_switcher::hook::is_installed(),
+        "no test in this binary may install a keyboard hook"
+    );
+
+    // ⚠ `PENDING_REASON` is process-wide and the two system arms of FR-80 arm it — the neighbour
+    // test that wakes the machine leaves it armed. `Reason::None` is what the rehook arm reads
+    // as "nothing was requested", so publishing it here is how this test guarantees that the
+    // open gate below cannot reach `reinstall_hook`. It is also the state SEC-05 describes: a
+    // forgery finds emptiness.
+    watchdog::request_rehook(watchdog::Reason::None);
+
+    let window = TestWindow::new();
+    let foreign = TestWindow::new();
+
+    // **The park, staged the way `app::park_buffer` makes it**: a buffer on this thread, and
+    // then `buffer::uninstall` taking it away. This is the state FR-70 and FR-84 hold for
+    // minutes and for hours.
+    buffer::install_recorder(Recorder::with_capacity(16));
+    assert!(buffer::is_installed(), "the precondition of a park");
+    assert!(buffer::uninstall(), "the park takes the buffer away");
+    assert!(
+        !buffer::is_installed(),
+        "parked: the thread that owns the hook owns no typing buffer"
+    );
+
+    let before = watchdog::health();
+
+    // Before the registration there is no input window at all, and the gate is shut — which is
+    // also what makes the assertion after it mean something: what opens the gate is the
+    // registration, and the buffer is absent on both sides of it.
+    assert!(
+        watchdog::handle_watchdog_message(window.handle, watchdog::WM_APP_REHOOK, WPARAM(0))
+            .is_none(),
+        "with no input window published the arm belongs to no window"
+    );
+
+    let liveness =
+        watchdog::start_liveness_timer(window.handle).expect("the liveness timer must start");
+
+    // ⭐ The line the finding is about. Before task Т-13-3 this answered `None`, because this
+    // thread owns no typing buffer — which is exactly the state FR-70 puts the **input** thread
+    // in, and exactly when FR-80 has to keep working.
+    assert_eq!(
+        watchdog::handle_watchdog_message(window.handle, watchdog::WM_APP_REHOOK, WPARAM(0)),
+        Some(LRESULT(0)),
+        "FR-80: a parked buffer must not swallow the rehook request"
+    );
+
+    // **SEC-05, undiminished.** The same two messages aimed at a window of ours that is not the
+    // input one still do nothing whatsoever.
+    for (message, wparam) in [
+        (watchdog::WM_APP_REHOOK, WPARAM(0)),
+        (WM_TIMER, WPARAM(watchdog::LIVENESS_TIMER_ID)),
+    ] {
+        assert!(
+            watchdog::handle_watchdog_message(foreign.handle, message, wparam).is_none(),
+            "SEC-05: message {message:#x} on a foreign window must fall through"
+        );
+    }
+
+    let after = watchdog::health();
+
+    // The other half of SEC-05: the arm was entered and found `PENDING_REASON` empty, so it
+    // touched no hook. The gate by window is an addition to that emptiness, never a substitute.
+    assert_eq!(
+        after.recoveries, before.recoveries,
+        "an empty request reinstalls nothing"
+    );
+    assert_eq!(after.install_failures, before.install_failures);
+    assert_eq!(after.liveness_ticks, before.liveness_ticks);
+    assert_eq!(after.last_reason, before.last_reason);
+    assert!(
+        !lang_switcher::hook::is_installed(),
+        "and no hook was installed in a process that is not the product"
+    );
+
+    // The handle is taken back by the hand that published it: after the timer dies no `WM_TIMER`
+    // can arrive for that window, and neither may anything else answer on it.
+    drop(liveness);
+
+    assert!(
+        watchdog::handle_watchdog_message(window.handle, watchdog::WM_APP_REHOOK, WPARAM(0))
+            .is_none(),
+        "a window stops being the input window when its liveness timer dies"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1099,6 +1224,250 @@ fn drain_the_queue() {
         // SAFETY: `message` was just filled by `PeekMessageW` and is passed unchanged.
         unsafe { DispatchMessageW(&message) };
     }
+}
+
+/// ⭐ **Task Т-13-3, the whole of the repair.** With the typing buffer parked, the liveness tick
+/// of FR-80 **and** the rehook request both reach `reinstall_hook`, and a foreign window still
+/// reaches nothing.
+///
+/// ⚠ `#[ignore]`d for the reason `the_gap_without_a_hook_is_microseconds` above is: entering
+/// these two arms is entering `reinstall_hook`, which installs a **live global
+/// `WH_KEYBOARD_LL` hook** in a process that is not the product. It is deliberate and short, it
+/// pumps the queue so that a stroke arriving meanwhile is answered rather than left to
+/// `LowLevelHooksTimeout`, and it takes the hook off itself at the end — `reinstall_hook` keeps
+/// it on purpose (`ManuallyDrop`), because in the product the guard `app::serve_window` holds is
+/// what removes it.
+///
+/// ⚠ The name sorts after `the_gap_without_a_hook_is_microseconds`, and that is not an accident:
+/// `libtest` runs tests in name order, that test asserts on `recoveries` as an absolute number,
+/// and these reinstallations would be added to its total if they ran first.
+///
+/// The gate itself — `Some` against `None`, with no hook anywhere near it — is
+/// `a_parked_buffer_no_longer_shuts_the_gates_of_fr80` above.
+#[test]
+#[ignore = "installs a live global WH_KEYBOARD_LL hook; run deliberately with --ignored --test-threads=1"]
+fn the_parked_buffer_still_gets_its_liveness_tick_and_its_rehook() {
+    let _turn = notice_turn();
+
+    let window = TestWindow::new();
+    let foreign = TestWindow::new();
+
+    // The park, staged the way `app::park_buffer` makes it — FR-70, FR-84.
+    buffer::install_recorder(Recorder::with_capacity(16));
+    assert!(buffer::uninstall(), "the park takes the buffer away");
+    assert!(!buffer::is_installed(), "parked");
+
+    let liveness =
+        watchdog::start_liveness_timer(window.handle).expect("the liveness timer must start");
+
+    let before = watchdog::health();
+
+    // **FR-80, fourth mechanism.** The tick that answers the `LowLevelHooksTimeout` case, which
+    // announces itself with nothing whatsoever — and which, before this task, was silently
+    // dropped for as long as a password field or an excluded game held the foreground.
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            window.handle,
+            WM_TIMER,
+            WPARAM(watchdog::LIVENESS_TIMER_ID)
+        ),
+        Some(LRESULT(0)),
+        "FR-80: the liveness tick is answered on the input window, parked buffer or not"
+    );
+
+    drain_the_queue();
+
+    let after_tick = watchdog::health();
+
+    println!(
+        "tick:   liveness_ticks {} -> {}, recoveries {} -> {}, reason {} -> {}",
+        before.liveness_ticks,
+        after_tick.liveness_ticks,
+        before.recoveries,
+        after_tick.recoveries,
+        before.last_reason.name(),
+        after_tick.last_reason.name()
+    );
+
+    assert_eq!(after_tick.liveness_ticks, before.liveness_ticks + 1);
+    assert_eq!(after_tick.recoveries, before.recoveries + 1);
+    assert_eq!(after_tick.install_failures, before.install_failures);
+    assert_eq!(after_tick.last_reason, watchdog::Reason::Timer);
+    assert!(
+        lang_switcher::hook::is_installed(),
+        "the tick put the hook back"
+    );
+
+    // **FR-80, the far end of the other three mechanisms.** A request raised while the buffer is
+    // parked is answered while the buffer is parked.
+    watchdog::request_rehook(watchdog::Reason::PowerResume);
+    assert!(!buffer::is_installed(), "still parked");
+
+    assert_eq!(
+        watchdog::handle_watchdog_message(window.handle, watchdog::WM_APP_REHOOK, WPARAM(0)),
+        Some(LRESULT(0))
+    );
+
+    drain_the_queue();
+
+    let after_rehook = watchdog::health();
+
+    println!(
+        "rehook: recoveries {} -> {}, reason {} -> {}",
+        after_tick.recoveries,
+        after_rehook.recoveries,
+        after_tick.last_reason.name(),
+        after_rehook.last_reason.name()
+    );
+
+    assert_eq!(after_rehook.recoveries, after_tick.recoveries + 1);
+    assert_eq!(after_rehook.last_reason, watchdog::Reason::PowerResume);
+    assert_eq!(after_rehook.install_failures, before.install_failures);
+    assert!(lang_switcher::hook::is_installed());
+
+    // **SEC-05.** The same two messages on a window of ours that is not the input one still do
+    // nothing at all — the gate by window did not replace that, it added to it.
+    for (message, wparam) in [
+        (WM_TIMER, WPARAM(watchdog::LIVENESS_TIMER_ID)),
+        (watchdog::WM_APP_REHOOK, WPARAM(0)),
+    ] {
+        assert!(
+            watchdog::handle_watchdog_message(foreign.handle, message, wparam).is_none(),
+            "SEC-05: message {message:#x} on a foreign window must fall through"
+        );
+    }
+
+    let after_foreign = watchdog::health();
+
+    assert_eq!(after_foreign.recoveries, after_rehook.recoveries);
+    assert_eq!(after_foreign.liveness_ticks, after_rehook.liveness_ticks);
+
+    // No hook survives a test in this binary.
+    drop(liveness);
+
+    assert!(
+        lang_switcher::hook::uninstall(),
+        "the hook these two reinstallations left must come off"
+    );
+
+    drain_the_queue();
+
+    assert!(!lang_switcher::hook::is_installed());
+}
+
+/// ⭐ **The race of the audit, staged**: park → rehook → restore. An unlock arms the request, the
+/// flush that parks the buffer is answered **first**, and the rehook that arrives second is
+/// still spent on a reinstallation instead of being dropped.
+///
+/// # The order that used to lose
+///
+/// `WM_WTSSESSION_CHANGE` arrives at the UI window, arms `PENDING_REASON` and posts
+/// `WM_APP_REHOOK` to the input thread. An unlocking session also delivers focus events, so
+/// `WM_APP_FLUSH` may reach the input thread first; `guard` answers it with `Field::Pending` and
+/// `app::park_buffer` takes the buffer away. The `WM_APP_REHOOK` behind it then found
+/// `buffer::is_installed()` false, fell into `DefWindowProcW` and was gone — `PENDING_REASON`
+/// left armed with nobody to repost it, and up to thirty seconds without a hook.
+///
+/// ⚠ `#[ignore]`d, and named to sort after `the_gap_without_a_hook_is_microseconds`, for the
+/// reasons the test above states.
+#[test]
+#[ignore = "installs a live global WH_KEYBOARD_LL hook; run deliberately with --ignored --test-threads=1"]
+fn the_unlock_race_parks_the_buffer_and_the_rehook_survives_it() {
+    let _turn = notice_turn();
+
+    let ui = TestWindow::new();
+    let input = TestWindow::new();
+
+    // The two registrations are what bind the two halves of the race to their windows: the
+    // session notice publishes the UI window `is_ui_window` reads, the liveness timer publishes
+    // the input window `is_input_window` reads.
+    let notice = watchdog::register_session_notice(ui.handle)
+        .expect("WTSRegisterSessionNotification must be accepted");
+    let liveness =
+        watchdog::start_liveness_timer(input.handle).expect("the liveness timer must start");
+
+    // Before the lock the input thread has its buffer, as section 6.3 gives it.
+    buffer::install_recorder(Recorder::with_capacity(16));
+    assert!(buffer::is_installed());
+
+    let before = watchdog::health();
+
+    // **1. The session comes back.** The UI thread arms the request and posts; it touches no
+    // hook, because the hook belongs to the input thread.
+    assert_eq!(
+        watchdog::handle_watchdog_message(
+            ui.handle,
+            WM_WTSSESSION_CHANGE,
+            WPARAM(WTS_SESSION_UNLOCK as usize)
+        ),
+        Some(LRESULT(0))
+    );
+
+    let after_unlock = watchdog::health();
+
+    assert_eq!(after_unlock.session_changes, before.session_changes + 1);
+    assert_eq!(
+        after_unlock.recoveries, before.recoveries,
+        "the UI thread never reinstalls the hook itself"
+    );
+
+    // **2. The flush is answered first** — the losing order. `guard` parks the buffer for the
+    // duration of `Field::Pending`.
+    assert!(buffer::uninstall(), "the park");
+    assert!(!buffer::is_installed());
+
+    // **3. The rehook arrives second**, into the parked state.
+    assert_eq!(
+        watchdog::handle_watchdog_message(input.handle, watchdog::WM_APP_REHOOK, WPARAM(0)),
+        Some(LRESULT(0))
+    );
+
+    drain_the_queue();
+
+    let after_rehook = watchdog::health();
+
+    println!(
+        "race:   recoveries {} -> {}, reason {} -> {}",
+        after_unlock.recoveries,
+        after_rehook.recoveries,
+        after_unlock.last_reason.name(),
+        after_rehook.last_reason.name()
+    );
+
+    // The request was not lost, and it arrived carrying the reason the session change gave it.
+    assert_eq!(
+        after_rehook.recoveries,
+        after_unlock.recoveries + 1,
+        "park → rehook → restore: the hook is put back"
+    );
+    assert_eq!(after_rehook.last_reason, watchdog::Reason::SessionChange);
+    assert_eq!(after_rehook.install_failures, before.install_failures);
+    assert!(lang_switcher::hook::is_installed());
+
+    // And it was **spent**, not repeated: a second copy of the message finds `PENDING_REASON`
+    // empty and reinstalls nothing (SEC-05).
+    assert_eq!(
+        watchdog::handle_watchdog_message(input.handle, watchdog::WM_APP_REHOOK, WPARAM(0)),
+        Some(LRESULT(0))
+    );
+
+    assert_eq!(
+        watchdog::health().recoveries,
+        after_rehook.recoveries,
+        "a spent request reinstalls nothing"
+    );
+
+    drop(liveness);
+    drop(notice);
+
+    assert!(
+        lang_switcher::hook::uninstall(),
+        "the hook this reinstallation left must come off"
+    );
+
+    drain_the_queue();
+
+    assert!(!lang_switcher::hook::is_installed());
 }
 
 // ---------------------------------------------------------------------------------------
