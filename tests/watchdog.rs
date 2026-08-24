@@ -40,6 +40,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use lang_switcher::buffer::{self, Recorder, ResetOutcome};
+use lang_switcher::guard::{self, Field};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{self, Counters, FLUSH_EVENTS, Rebuild, WM_APP_FLUSH, WM_APP_LAYOUT};
@@ -49,12 +50,13 @@ use windows::Win32::UI::Input::{GetRegisteredRawInputDevices, RAWINPUTDEVICE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, EVENT_OBJECT_FOCUS,
     EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetMessageTime,
-    GetWindowThreadProcessId, HWND_MESSAGE, MSG, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PM_REMOVE,
-    PeekMessageW, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
-    RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN,
-    RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL,
-    RI_MOUSE_WHEEL, WINDOW_STYLE, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
-    WM_INPUTLANGCHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK,
+    GetWindowThreadProcessId, HWND_MESSAGE, MSG, OBJID_CLIENT, OBJID_WINDOW,
+    PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PM_REMOVE, PeekMessageW, RI_MOUSE_BUTTON_1_DOWN,
+    RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN,
+    RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN,
+    RI_MOUSE_BUTTON_5_UP, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, WINDOW_STYLE, WM_DEVICECHANGE, WM_INPUT,
+    WM_INPUT_DEVICE_CHANGE, WM_INPUTLANGCHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
+    WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
 
@@ -1146,19 +1148,40 @@ fn the_gate_refuses_a_window_that_cannot_be_the_foreground_and_passes_the_one_th
     }
 }
 
-/// **Task T-10-0e, the decision level.** A focus event on the window the focus is already
-/// on is a repeat — the frontmost window's own churn, measured to erase the user's typing —
-/// and a repeat neither flushes nor probes. A focus event on another window is a transfer
-/// and keeps flushing; `EVENT_SYSTEM_FOREGROUND` is never a repeat, whatever handle it
-/// carries — a window change always flushes.
+/// Serialises the tests that write the **process-wide focus memory** of module `watchdog` —
+/// the window and the element of the last focus event, one location for the whole process,
+/// and the `focus_repeats` counter these tests assert exact deltas of.
+///
+/// The same device, and the same reason, as `RAW_INPUT_TURN` above: `cargo test` runs the tests
+/// of a binary in parallel, and two tests staging focus events at once would be measuring each
+/// other. The staged-churn tests further down drive the same memory through a real
+/// subscription and are `#[ignore]`d, so they never run beside these.
+static FOCUS_MEMORY_TURN: Mutex<()> = Mutex::new(());
+
+/// Takes the turn, ignoring poisoning — see `raw_input_turn`.
+fn focus_memory_turn() -> std::sync::MutexGuard<'static, ()> {
+    FOCUS_MEMORY_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// **Task T-10-0e, the decision level.** A focus event that re-announces the element the focus
+/// is already on is a repeat — the frontmost window's own churn, measured to erase the user's
+/// typing — and a repeat neither flushes nor probes. A focus event on another window is a
+/// transfer and keeps flushing; `EVENT_SYSTEM_FOREGROUND` is never a repeat, whatever handle
+/// it carries — a window change always flushes.
+///
+/// Every event here names the same element of its window (`OBJID_CLIENT`, child `0` — the
+/// triple a Win32 provider raises for a control that *is* the window), so what this test varies
+/// is the handle and nothing else: the window half of the memory, exactly as task T-10-0e left
+/// it. The element half is the test below.
 ///
 /// The handles below are made-up values: `focus_repeated` compares them and never
-/// dereferences them, which is the property the fix relies on for stale handles too. This
-/// is the one default-run test that touches the process-wide focus memory; the staged-churn
-/// tests below drive the same memory through a real subscription and are `#[ignore]`d, so
-/// the two never run together.
+/// dereferences them, which is the property the fix relies on for stale handles too.
 #[test]
 fn a_focus_event_on_the_same_window_is_a_repeat_and_a_window_change_never_is() {
+    let _turn = focus_memory_turn();
+
     let first = HWND(0x1000_0F01_usize as *mut core::ffi::c_void);
     let second = HWND(0x1000_0F02_usize as *mut core::ffi::c_void);
 
@@ -1166,35 +1189,245 @@ fn a_focus_event_on_the_same_window_is_a_repeat_and_a_window_change_never_is() {
 
     // The first focus event ever seen: nothing is remembered yet, so it must flush.
     assert!(
-        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, first),
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, first, OBJID_CLIENT.0, 0),
         "the first focus event is not a repeat"
     );
 
-    // The same window again — the churn of task T-10-0e — is a repeat.
-    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, first));
+    // The same window and the same element again — the churn of task T-10-0e — is a repeat.
+    assert!(watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        first,
+        OBJID_CLIENT.0,
+        0
+    ));
 
     // A transfer to another window is not, and it moves the memory.
     assert!(
-        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second),
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second, OBJID_CLIENT.0, 0),
         "a transfer to a different hwnd must keep flushing (FR-10)"
     );
-    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second));
+    assert!(watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        second,
+        OBJID_CLIENT.0,
+        0
+    ));
 
     // A window change is never a repeat, same handle or not: leaving and coming back is a
     // change of the user's input context (Р-60), and the flush must stay.
     assert!(
-        !watchdog::focus_repeated(EVENT_SYSTEM_FOREGROUND, second),
+        !watchdog::focus_repeated(EVENT_SYSTEM_FOREGROUND, second, OBJID_CLIENT.0, 0),
         "EVENT_SYSTEM_FOREGROUND is not subject to the deduplication"
     );
 
     // And it does not clobber the memory either: the focus is still where it was, so the
     // frontmost churn that follows a foreground event is still recognised as churn.
-    assert!(watchdog::focus_repeated(EVENT_OBJECT_FOCUS, second));
+    assert!(watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        second,
+        OBJID_CLIENT.0,
+        0
+    ));
 
     assert_eq!(
         watchdog::counters().focus_repeats,
         before + 3,
         "exactly the three repeats above were counted"
+    );
+}
+
+/// **Task Т-13-1 — the memory is the triple, and that is what gives browsers their probe back.**
+///
+/// The audit of 2026-08-24 (guard-watchdog, finding 1) established that comparing the window
+/// alone made the deduplication a hole in SEC-06: in Chromium, Electron and Qt the whole page
+/// is one window, so login → `Tab` → password raised `EVENT_OBJECT_FOCUS` with the **same**
+/// handle, the event was dropped as churn, and `guard::note_focus_moved` — which only ever runs
+/// on the `WM_APP_FLUSH` this decision gates, and which is the only thing that starts the three
+/// checks of FR-72 — never ran. The verdict stayed `Ordinary` and the password went into the
+/// typing buffer.
+///
+/// Two synthetic focus events with **one** hwnd and **different** `idChild` must therefore both
+/// pass: two `WM_APP_FLUSH`, and so two probes. `win_event_proc` posts that message and the
+/// layout question on the straight line right after this verdict, with nothing between them to
+/// decide anything further, which is why the verdict is the whole of what there is to check
+/// here; the same thing through a live subscription is
+/// `the_same_hwnd_churn_with_moving_children_is_a_transfer_and_still_flushes` below, and live
+/// in a real browser it is task Т-13-2.
+///
+/// The other half of the criterion is that task T-10-0e keeps what it bought: the **same**
+/// triple over and over is still a repeat and still raises nothing.
+///
+/// The first half of the body is the number the repair is measured against, and it is measured
+/// rather than argued: comparing the handle alone — the rule this function had before task
+/// Т-13-1 — *is* this function with the element held constant, so driving the six events of one
+/// page with one element counts what the old rule counted on the real six. Five repeats of six
+/// events and a single one let through, against three and three after the repair.
+#[test]
+fn two_focus_events_in_one_window_with_different_children_are_both_flushes() {
+    let _turn = focus_memory_turn();
+
+    // One `Chrome_RenderWidgetHostHWND`: the page, its login field and its password field all
+    // live behind this single handle, and the provider tells its elements apart by `idChild`
+    // (Chromium assigns one per accessible node, negative).
+    let page = HWND(0x1000_0F0A_usize as *mut core::ffi::c_void);
+    // Another window, so that both passes below start from a memory holding neither the page
+    // nor any element of it, whatever ran before them.
+    let elsewhere = HWND(0x1000_0F09_usize as *mut core::ffi::c_void);
+    const LOGIN: i32 = -3;
+    const PASSWORD: i32 = -7;
+
+    // ---- the number before the repair ---------------------------------------------------
+    //
+    // The same six events of one page, told apart by the handle alone. Only the first is let
+    // through, so the one probe of the six describes the *login* field, and the password typed
+    // after it goes into the buffer under an `Ordinary` verdict: the finding, in numbers.
+    let mark = watchdog::counters().focus_repeats;
+
+    assert!(!watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        elsewhere,
+        OBJID_CLIENT.0,
+        0
+    ));
+
+    for _ in 0..6 {
+        watchdog::focus_repeated(EVENT_OBJECT_FOCUS, page, OBJID_CLIENT.0, 0);
+    }
+
+    assert_eq!(
+        watchdog::counters().focus_repeats - mark,
+        5,
+        "the window-only rule takes five of the six events of one page for churn"
+    );
+
+    // ---- and after it ---------------------------------------------------------------------
+
+    let before = watchdog::counters().focus_repeats;
+
+    assert!(!watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        elsewhere,
+        OBJID_CLIENT.0,
+        0
+    ));
+
+    // The click into the login field. The memory holds another window, so this flushes and
+    // probes.
+    assert!(!watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        page,
+        OBJID_CLIENT.0,
+        LOGIN
+    ));
+
+    // `Tab` into the password field of the same page — the event of the finding. Before this
+    // task it answered `true`, the probe of FR-72 was skipped and FR-70 with it.
+    assert!(
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, page, OBJID_CLIENT.0, PASSWORD),
+        "FR-70, SEC-06: a move to another element of the same window is not churn — it must \
+         reach the probe"
+    );
+
+    // The echo of *that* element — the churn task T-10-0e measured — is still a repeat, and so
+    // is the next one: the saving of T-10-0e is untouched.
+    assert!(watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        page,
+        OBJID_CLIENT.0,
+        PASSWORD
+    ));
+    assert!(
+        watchdog::focus_repeated(EVENT_OBJECT_FOCUS, page, OBJID_CLIENT.0, PASSWORD),
+        "the identical triple stays suppressed however often it repeats"
+    );
+
+    // `idObject` tells elements apart in its own right: the window's own object is not the
+    // client area inside it, and one field differing is enough.
+    assert!(
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, page, OBJID_WINDOW.0, PASSWORD),
+        "a triple that differs in idObject alone is not a repeat either"
+    );
+
+    // And the memory carries the whole triple forward: the event just seen is the one the next
+    // is compared against, both halves of it.
+    assert!(watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        page,
+        OBJID_WINDOW.0,
+        PASSWORD
+    ));
+
+    assert_eq!(
+        watchdog::counters().focus_repeats,
+        before + 3,
+        "three of the same six events are repeats now — the identical triples — and the three \
+         that move inside the page are not: two more probes than the rule above allowed, and \
+         the one that matters is the move into the password field"
+    );
+}
+
+/// **Task Т-13-1, the reverse direction: `Password` → `Ordinary` in one window returns
+/// buffering.**
+///
+/// The finding broke both ways. A page that opens with the focus in its password field
+/// publishes `Field::Password`, buffering is off (FR-70), and the user then `Tab`s out into an
+/// ordinary field of the *same* page: with the window-only memory that event was dropped as
+/// churn, no probe ran, the verdict stayed `Password` — and the program stopped recording for
+/// as long as the page kept the focus.
+///
+/// The two halves of the repair are asserted here as one chain, because the second is what the
+/// first is for:
+///
+/// 1. the move back to the ordinary element of the same window is **not** a repeat, so
+///    `win_event_proc` posts `WM_APP_FLUSH`;
+/// 2. answering that message is `guard::note_focus_moved`, and that call leaves the published
+///    verdict behind whatever it was — `Pending` while a probe is asked for, and in a process
+///    with no watcher window to ask, the FR-73 default, which is buffering **on**.
+///
+/// ⚠ What no unit test can stage is the *starting* verdict: `Field::Password` is published by
+/// `guard::run_pending_probe`, which reads the real foreground window, so putting it there
+/// needs a live password field in front — the stand of task Т-13-2. What is asserted instead is
+/// the rule that governs it (`buffering_allowed_for(Field::Password)` is `false`, FR-70) and
+/// the live state the chain actually reaches.
+#[test]
+fn a_move_out_of_a_password_element_in_one_window_returns_buffering() {
+    let _turn = focus_memory_turn();
+
+    let page = HWND(0x1000_0F0B_usize as *mut core::ffi::c_void);
+    const PASSWORD: i32 = -11;
+    const ORDINARY: i32 = -12;
+
+    // The page opened with the focus in its password field: this is the event that made the
+    // probe answer `Password`, and while that verdict stands nothing is recorded (FR-70).
+    assert!(!watchdog::focus_repeated(
+        EVENT_OBJECT_FOCUS,
+        page,
+        OBJID_CLIENT.0,
+        PASSWORD
+    ));
+    assert!(
+        !guard::buffering_allowed_for(Field::Password),
+        "FR-70: with the password verdict standing, the buffer is not kept"
+    );
+
+    // `Tab` out into an ordinary field of the same page. One window, another element.
+    assert!(
+        !watchdog::focus_repeated(EVENT_OBJECT_FOCUS, page, OBJID_CLIENT.0, ORDINARY),
+        "the way out of a password field inside one window must reach the probe, or the \
+         verdict never changes and the program never records again"
+    );
+
+    // ...which is what the input thread answers with, on the `WM_APP_FLUSH` that event posts.
+    guard::note_focus_moved();
+
+    assert_ne!(
+        guard::field(),
+        Field::Password,
+        "the password verdict does not survive a focus change"
+    );
+    assert!(
+        guard::buffering_allowed(),
+        "FR-73: nobody could answer in a test process, and an undeterminable field buffers"
     );
 }
 
@@ -1742,6 +1975,63 @@ $form.Add_Shown({ [AltNative]::TakeForeground($form.Handle); $hold.Start(); $chu
 [System.Windows.Forms.Application]::Run($form)
 "#;
 
+/// The helper of task **Т-13-1**: the same foreign foreground window and the same handle in
+/// every event — but the **element** moves, `idChild` alternating every 150 ms. This is what a
+/// browser raises when the user `Tab`s between the fields of one page: one
+/// `Chrome_RenderWidgetHostHWND`, another node of the accessibility tree. Every one of these is
+/// a transfer and must flush and probe.
+const CHILD_ALTERNATOR_PS1: &str = r#"
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ChildNative
+{
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern void NotifyWinEvent(uint ev, IntPtr hwnd, int idObject, int idChild);
+    public static void TakeForeground(IntPtr hwnd)
+    {
+        IntPtr fg = GetForegroundWindow();
+        if (fg == hwnd) return;
+        uint pid;
+        uint fgTid = GetWindowThreadProcessId(fg, out pid);
+        uint myTid = GetCurrentThreadId();
+        bool attached = false;
+        if (fgTid != 0 && fgTid != myTid) attached = AttachThreadInput(myTid, fgTid, true);
+        SetForegroundWindow(hwnd);
+        if (attached) AttachThreadInput(myTid, fgTid, false);
+    }
+}
+'@
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'LangSw-T13-1-children'
+$form.StartPosition = 'Manual'
+$form.Location = New-Object System.Drawing.Point(600, 320)
+$form.Size = New-Object System.Drawing.Size(260, 100)
+$hold = New-Object System.Windows.Forms.Timer
+$hold.Interval = 400
+$hold.Add_Tick({ [ChildNative]::TakeForeground($form.Handle) })
+$script:flip = $false
+$churn = New-Object System.Windows.Forms.Timer
+$churn.Interval = 150
+$churn.Add_Tick({
+    $script:flip = -not $script:flip
+    $child = if ($script:flip) { -3 } else { -7 }
+    [ChildNative]::NotifyWinEvent(0x8005, $form.Handle, -4, $child)
+})
+$stop = New-Object System.Windows.Forms.Timer
+$stop.Interval = 60000
+$stop.Add_Tick({ [System.Windows.Forms.Application]::Exit() })
+$form.Add_Shown({ [ChildNative]::TakeForeground($form.Handle); $hold.Start(); $churn.Start(); $stop.Start() })
+[System.Windows.Forms.Application]::Run($form)
+"#;
+
 /// **Criterion 12, the churn half.** A foreign process holds the foreground and re-raises
 /// `EVENT_OBJECT_FOCUS` for the same window over and over — the frontmost-window churn that
 /// erased the typing on the acceptance machine. The subscription must see every event
@@ -1885,6 +2175,85 @@ fn a_focus_transfer_to_a_different_hwnd_by_a_foreign_process_still_flushes() {
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Cleared { removed: 6 }),
         "FR-10: a focus transfer to a different hwnd still flushes what was typed before it"
+    );
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
+    drop(watching);
+}
+
+/// **Task Т-13-1 through a real subscription.** The same foreign foreground window and the
+/// **same handle** in every event, with only `idChild` moving — the shape a browser raises when
+/// the user moves between the fields of one page, and the shape the window-only memory of task
+/// T-10-0e ate whole.
+///
+/// Every event must be taken for the transfer it is: `window_flushes` grows — that is the
+/// `WM_APP_FLUSH` behind which `guard::note_focus_moved` starts the probe of FR-72 — and
+/// `focus_repeats` does not, because not one of these events repeats the triple before it.
+/// The unit-level statement of the same rule is
+/// `two_focus_events_in_one_window_with_different_children_are_both_flushes`; live in a browser
+/// with a real `<input type="password">` it is task Т-13-2.
+#[test]
+#[ignore = "spawns PowerShell helper windows and takes the foreground; run deliberately with --ignored --test-threads=1"]
+fn the_same_hwnd_churn_with_moving_children_is_a_transfer_and_still_flushes() {
+    let children = SpawnedScript::spawn("langsw-t13-1-children.ps1", CHILD_ALTERNATOR_PS1);
+
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            foreground_pid() == children.id()
+        }),
+        "the helper window never became the foreground; its events would be background churn \
+         and the scenario would be the one of task T-10-0, not this one"
+    );
+
+    let watching = watchdog::watch().expect("the subscriptions must install");
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let start = watchdog::counters();
+
+    // Delivery first: without at least one flush request there is nothing to judge.
+    assert!(
+        pump_until(Duration::from_secs(15), || {
+            watchdog::counters().window_flushes - start.window_flushes >= 1
+        }),
+        "positive control failed: no same-hwnd event with a moving child was delivered — \
+         before task Т-13-1 this is exactly what the run looked like, and it is what the \
+         defect was (WINEVENT_SKIPOWNPROCESS is the other way to get here)"
+    );
+
+    let _ = watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0));
+
+    // SAFETY: takes no arguments, touches no memory of ours, and returns the tick count of the
+    // last message this thread retrieved; the queue was pumped a moment ago. The `as u32` is
+    // the documented reinterpretation of a tick the system hands back signed.
+    let typed_at = unsafe { GetMessageTime() } as u32;
+
+    for _ in 0..6 {
+        press_at(typed_at);
+    }
+    assert_eq!(buffer::len(), 6);
+
+    let mid = watchdog::counters();
+
+    // Two more events guarantee at least one raised strictly after the strokes.
+    assert!(
+        pump_until(Duration::from_secs(15), || {
+            watchdog::counters().window_flushes - mid.window_flushes >= 2
+        }),
+        "the alternating children stopped arriving"
+    );
+
+    let counted = delta(mid, watchdog::counters());
+
+    assert_eq!(
+        counted.focus_repeats, 0,
+        "not one of these events repeats the triple before it, so not one is churn"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Cleared { removed: 6 }),
+        "FR-10: a move to another element of the same window flushes what was typed before it"
     );
     assert_eq!(buffer::len(), 0);
 

@@ -225,8 +225,9 @@
 //! own delivery, exactly like a hook callback: a slow one holds up whatever generated the event.
 //! [`win_event_proc`] is therefore built to the same budget as the keyboard callback even though
 //! no requirement names a number for it — **two read-only window queries
-//! (`GetForegroundWindow` and `GetAncestor`, the gate of task T-10-0), one atomic swap (the
-//! focus memory of task T-10-0e), one compare-and-swap on an atomic, two counter increments
+//! (`GetForegroundWindow` and `GetAncestor`, the gate of task T-10-0), two atomic swaps (the
+//! focus memory of task T-10-0e: the window, and since task Т-13-1 the element inside it),
+//! one compare-and-swap on an atomic, two counter increments
 //! and one `PostMessageW`**, none of which blocks: the two queries read the window manager's
 //! session state without entering any other process and without taking any lock an
 //! application could hold, the same standing `GetMessageTime` has on the `WM_INPUT` path. No
@@ -237,7 +238,7 @@
 //! background churn [`concerns_the_foreground`] turns away — the callback now does *less*
 //! than it did before task T-10-0: the two queries and one increment, and neither post. The
 //! churn of the foreground window itself — task T-10-0e, [`focus_repeated`] — stops one step
-//! later, at the swap, and skips the compare-and-swap and both posts.
+//! later, at the two swaps, and skips the compare-and-swap and both posts.
 //!
 //! The `WM_INPUT` path is not a callback at all: it is a message, handled in the message loop
 //! of the input thread. Its cost is one `GetRawInputData` into a stack buffer and a comparison
@@ -582,8 +583,9 @@ static WINDOW_FLUSHES: AtomicU32 = AtomicU32::new(0);
 /// would prove only that nothing was delivered at all.
 static BACKGROUND_SKIPS: AtomicU32 = AtomicU32::new(0);
 
-/// The window of the last `EVENT_OBJECT_FOCUS` that concerned the user's foreground — the
-/// memory of [`focus_repeated`], task **T-10-0e**.
+/// The window of the last `EVENT_OBJECT_FOCUS` that concerned the user's foreground — half of
+/// the memory of [`focus_repeated`], task **T-10-0e**; the other half is
+/// [`LAST_FOCUS_ELEMENT`], task **Т-13-1**.
 ///
 /// The handle is stored **as a value** (`HWND` is pointer-sized; an `AtomicIsize` holds it)
 /// and is never dereferenced: the only thing ever done with it is an equality comparison
@@ -598,8 +600,39 @@ static BACKGROUND_SKIPS: AtomicU32 = AtomicU32::new(0);
 /// the new target and updates the memory itself.
 static LAST_FOCUS_TARGET: AtomicIsize = AtomicIsize::new(0);
 
-/// `EVENT_OBJECT_FOCUS` events of the foreground window skipped because their window was
-/// already the focus target — task **T-10-0e**.
+/// The **element inside** that window — `idObject` and `idChild` of the same event, packed by
+/// [`focus_element`]. The half task **Т-13-1** added to the memory of [`focus_repeated`].
+///
+/// # Why a second atomic rather than a fold into the first
+///
+/// The triple does not fit in one word: a handle is pointer-sized on its own, and the two ids
+/// are 32 bits each. Folding them together (`hwnd ^ hash(idObject, idChild)`) would have to be
+/// argued *not* to collide, and the cost of a collision is precisely the defect this task
+/// repairs — two different elements taken for one, the probe of FR-72 skipped, a password in
+/// the typing buffer. Two words need no such argument: the ids are stored **whole** and
+/// compared whole, so no two different elements can ever compare equal, and the handle keeps
+/// the exact comparison it already had.
+///
+/// # Why the pair needs no generation counter to be read consistently
+///
+/// The two swaps are not one atomic operation, and they do not have to be: in this program the
+/// memory has exactly one writer. [`focus_repeated`] is called from [`win_event_proc`] and from
+/// nowhere else, an out-of-context `WinEvent` callback is delivered from the message loop of the
+/// thread that installed the subscription, and [`watch`] installs all of them on the one watcher
+/// thread ([`crate::app`], `Role::Watcher`). Two calls therefore never overlap, and the pair a
+/// call reads is exactly the pair the previous call wrote. The tests of `tests\watchdog.rs`
+/// drive the function directly and serialise themselves for the same reason — the memory is one
+/// location for the whole process.
+///
+/// Zero — no focus event seen yet — is `idObject == 0, idChild == 0` (`OBJID_WINDOW` and no
+/// child), which is a value an event could carry; nothing rests on it, because the first event
+/// after a start still differs in the handle, which is null in the same initial state and can
+/// never be null in a delivered event that passed [`concerns_the_foreground`].
+static LAST_FOCUS_ELEMENT: AtomicU64 = AtomicU64::new(0);
+
+/// `EVENT_OBJECT_FOCUS` events of the foreground window skipped because they re-announced the
+/// element that was already the focus target — task **T-10-0e**, narrowed from the window to
+/// the element by task **Т-13-1**.
 ///
 /// The observable half of that repair, the same standing [`BACKGROUND_SKIPS`] has for task
 /// T-10-0: a test that stages the same-hwnd churn from a **foreign** process (the
@@ -697,9 +730,10 @@ pub struct Counters {
     /// [`BACKGROUND_SKIPS`]: growth here under a staged storm is the positive control that the
     /// storm was delivered and turned away rather than never seen.
     pub background_skips: u32,
-    /// Foreground focus events skipped because their window was already the focus target —
-    /// task T-10-0e. See [`FOCUS_REPEATS`]: growth here under a staged same-hwnd churn is
-    /// the positive control that the churn was delivered and turned away.
+    /// Foreground focus events skipped because they re-announced the element that was already
+    /// the focus target — task T-10-0e, the triple of task Т-13-1. See [`FOCUS_REPEATS`]:
+    /// growth here under a staged same-element churn is the positive control that the churn
+    /// was delivered and turned away.
     pub focus_repeats: u32,
     /// Layout probes posted after an absence — task T-10-13. See [`RECOVERY_PROBES`]: this is
     /// the send side of the probe, where `layout_probes` is the answer side.
@@ -1305,8 +1339,9 @@ pub fn concerns_the_foreground(window: HWND) -> bool {
     root == foreground
 }
 
-/// Whether a flush event is an `EVENT_OBJECT_FOCUS` whose window is the one the focus is
-/// already on — the internal churn of the foreground window itself. Task **T-10-0e**.
+/// Whether a flush event is an `EVENT_OBJECT_FOCUS` that re-announces the element the focus is
+/// already on — the internal churn of the foreground window itself. Task **T-10-0e**, narrowed
+/// from the window to the element inside it by task **Т-13-1**.
 ///
 /// # The defect this answers — measured, not assumed (Р-39)
 ///
@@ -1322,9 +1357,9 @@ pub fn concerns_the_foreground(window: HWND) -> bool {
 /// in a native application carried the hwnd of the newly focused control, different each
 /// time (task report, section 4).
 ///
-/// # Why skipping a same-window event loses nothing
+/// # Why skipping a repeated event loses nothing
 ///
-/// A focus event whose window equals the previous focus event's window does not move the
+/// A focus event that names the element the previous focus event named does not move the
 /// user's input target: the strokes keep going where they went. Every gesture that *does*
 /// move the caret inside one window flushes by its own row of FR-10 — the mouse click over
 /// Raw Input, `Tab` and the navigation keys over the LL hook (`BOUNDARY_KEYS`,
@@ -1334,34 +1369,102 @@ pub fn concerns_the_foreground(window: HWND) -> bool {
 /// is skipped with the flush for the same reason: the layout of a thread the focus never
 /// left cannot have changed by that event.
 ///
+/// # What the skip also costs, and why the memory is the triple — task **Т-13-1**
+///
+/// Dropping the event drops **both** posts, and behind the first of them stands more than the
+/// flush: the password verdict of FR-70 is asked for on [`WM_APP_FLUSH`] and nowhere else —
+/// `crate::app::window_proc` answers that message with `crate::guard::note_focus_moved`, which
+/// is the only thing in the program that starts the three checks of FR-72 for a focus change
+/// (`guard::publish_exclusions` asks for a probe too, but about the list, not about the focus).
+///
+/// While the memory was the **window** alone, that turned the deduplication from a saving into
+/// a hole in SEC-06. In Chromium, Electron and Qt the whole page lives in one window
+/// (`Chrome_RenderWidgetHostHWND`), so the ordinary way into a site — click the login field,
+/// type, `Tab` into the password field — raises `EVENT_OBJECT_FOCUS` with the **same** handle:
+/// the event was dropped as churn, no probe ran, the verdict stayed `Field::Ordinary` and the
+/// password was recorded into the typing buffer, against FR-70 and SEC-06. The reverse
+/// direction failed the same way: a page that opened with the focus already in the password
+/// field never got its buffering back when the user left it (audit of 2026-08-24,
+/// guard-watchdog, finding 1).
+///
+/// The event carries exactly what tells those apart, and it was being thrown away: `idObject`
+/// and `idChild` name the element **inside** the window — `OBJID_CLIENT` and the provider's own
+/// child id, which Chromium assigns per accessible node. So the memory is the triple
+/// (`hwnd`, `idObject`, `idChild`) and a repeat is all three matching; a move between two
+/// fields of one page differs in `idChild` and is not a repeat, which is the probe restored.
+///
+/// **The probe cannot be spared separately.** The alternative shape — go on suppressing the
+/// flush but ask for the probe anyway — was measured against the code and rejected: answering
+/// `WM_APP_FLUSH` *is* `note_focus_moved` **and** `crate::app::park_buffer` (the wipe of SEC-02
+/// that closes the race of FR-71, `app.rs`), so a probe requested for a churn event empties the
+/// user's buffer exactly as the flush would have. There is no half of this to ask for, which is
+/// why the deduplication stays whole and only becomes exact.
+///
+/// What task T-10-0e bought is kept by the same stroke: an echo re-announces the focus the
+/// window already has, that is, the element it announced before, so its triple matches and it
+/// is dropped as it was. That measurement recorded the handle and not the ids (they were not
+/// read at the time), so the claim is checked where it can be — the staged-churn tests of
+/// `tests\watchdog.rs` raise the triple the measurement did, `OBJID_CLIENT` and child `0`, and
+/// still see zero flush requests — and confirmed live by task Т-13-2. Should some provider ever
+/// echo with the ids moving under it, the cost is a flush and a probe it does not need; the
+/// cost of the window-only memory is a password in the buffer, and the two are not comparable.
+///
 /// **`EVENT_SYSTEM_FOREGROUND` is deliberately not subject to this**: a window change
 /// always flushes, however often it lands on the same window — leaving a window and coming
 /// back *is* a change of the user's input context, whatever handle it reuses.
 ///
 /// # Cost — NFR-01…NFR-05
 ///
-/// One atomic swap, and on the skip path one counter increment; **no new system call** over
-/// what the callback already did (the budget of task T-10-0 stands). The handle is compared
-/// as a value and never dereferenced. A same-handle skip *saves* the compare-and-swap loop
-/// and both posts.
+/// Two atomic swaps and two comparisons of values, and on the skip path one counter
+/// increment; **no new system call** over what the callback already did (the budget of task
+/// T-10-0 stands, and task Т-13-1 added one swap to it and nothing else). The handle is
+/// compared as a value and never dereferenced, and the two ids arrive by value in registers.
+/// A repeat still *saves* the compare-and-swap loop and both posts.
+///
+/// **This is the watcher thread and never the hook (NFR-01…NFR-05).** The keyboard callback of
+/// `crate::hook` does not call this function, does not read either half of the memory and is
+/// not reached from here; nothing on this path allocates, locks, or does I/O.
 ///
 /// Public for the same reason [`concerns_the_foreground`] is: the verdict is the whole of
-/// what task T-10-0e changed, and `tests\watchdog.rs` drives it directly with handle values
-/// of its own alongside the staged-churn tests that drive it through a real subscription.
-pub fn focus_repeated(event: u32, window: HWND) -> bool {
+/// what tasks T-10-0e and Т-13-1 changed, and `tests\watchdog.rs` drives it directly with
+/// handle and id values of its own alongside the staged-churn tests that drive it through a
+/// real subscription.
+pub fn focus_repeated(event: u32, window: HWND, object_id: i32, child_id: i32) -> bool {
     if event != EVENT_OBJECT_FOCUS {
         return false;
     }
 
     let handle = window.0 as isize;
-    let last = LAST_FOCUS_TARGET.swap(handle, Ordering::AcqRel);
+    let element = focus_element(object_id, child_id);
 
-    if last == handle {
+    // Both halves are swapped whichever way the comparison goes: the memory has to end up
+    // holding the whole of the event that has just been examined, or the *next* event would be
+    // compared against a mixture of two.
+    let last_handle = LAST_FOCUS_TARGET.swap(handle, Ordering::AcqRel);
+    let last_element = LAST_FOCUS_ELEMENT.swap(element, Ordering::AcqRel);
+
+    if last_handle == handle && last_element == element {
         FOCUS_REPEATS.fetch_add(1, Ordering::Relaxed);
         return true;
     }
 
     false
+}
+
+/// Packs `idObject` and `idChild` of a `WinEvent` into the one word [`LAST_FOCUS_ELEMENT`] holds.
+///
+/// Two 32-bit fields into 64 bits, each in its own half: the mapping is one-to-one, so equality
+/// of two packed values is equality of both pairs and **no two different elements can compare
+/// equal**. That is the whole property task Т-13-1 needs of it, and it is why nothing here
+/// hashes: a hash would need an argument that the collision it may produce is harmless, and the
+/// collision would be a skipped password probe.
+///
+/// Both casts are widenings of a bit pattern (`as u32` first, so a negative id — Chromium's
+/// child ids are negative — keeps its bits rather than being sign-extended over the other
+/// half), and neither can overflow or panic: NFR-14 and the `extern "system"` boundary of
+/// [`win_event_proc`].
+const fn focus_element(object_id: i32, child_id: i32) -> u64 {
+    ((object_id as u32 as u64) << 32) | (child_id as u32 as u64)
 }
 
 /// The `WinEvent` callback — FR-10, half of the FR-21 delivery, and the first mechanism of
@@ -1384,7 +1487,8 @@ pub fn focus_repeated(event: u32, window: HWND) -> bool {
 ///
 /// Called by the OS with the arguments of a `WinEvent`. Every argument is read by value, none
 /// is dereferenced — the window handle travels by value into [`concerns_the_foreground`],
-/// which hands it to the window manager and dereferences nothing — so the caller owes this
+/// which hands it to the window manager and dereferences nothing, and the two ids are plain
+/// integers that [`focus_repeated`] packs and compares — so the caller owes this
 /// function nothing. Nothing in the body can panic, which is what keeps the `extern "system"`
 /// boundary sound: there is no allocation, no indexing, no `unwrap` and no arithmetic that can
 /// overflow.
@@ -1392,8 +1496,8 @@ unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     event: u32,
     window: HWND,
-    _object_id: i32,
-    _child_id: i32,
+    object_id: i32,
+    child_id: i32,
     _thread_id: u32,
     event_time: u32,
 ) {
@@ -1448,13 +1552,17 @@ unsafe extern "system" fn win_event_proc(
         return;
     }
 
-    if focus_repeated(event, window) {
+    if focus_repeated(event, window, object_id, child_id) {
         // **Task T-10-0e: the frontmost window's own churn re-announces the focus it
-        // already has.** The window equals the previous focus event's window, so the user's
-        // input target has not moved and there is nothing to protect by flushing — while
-        // flushing here is exactly what erased the user's typing on the acceptance machine
-        // (VS Code in front, measured). Counted and dropped whole: no flush, and no layout
-        // probe either — the layout of a thread the focus never left has not changed.
+        // already has.** The whole triple — window, `idObject`, `idChild` — equals the previous
+        // focus event's, so the user's input target has not moved and there is nothing to
+        // protect by flushing, while flushing here is exactly what erased the user's typing on
+        // the acceptance machine (VS Code in front, measured). Counted and dropped whole: no
+        // flush, no layout probe — the layout of a thread the focus never left has not changed
+        // — and no password probe, which is why the comparison is the triple and not the
+        // handle: task **Т-13-1**, and the long form in `focus_repeated`. An event that moves
+        // between two fields of one page differs in `idChild`, passes here, and reaches
+        // `guard::note_focus_moved` through the [`WM_APP_FLUSH`] below (FR-70, FR-72, SEC-06).
         // `EVENT_SYSTEM_FOREGROUND` never answers true here: a window change always flushes.
         return;
     }
