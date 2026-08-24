@@ -588,6 +588,19 @@ fn refusal_counters() -> MutexGuard<'static, ()> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The turn of the tests that touch the **process-wide** published `[layouts]`.
+///
+/// `layouts::publish` and `layouts::published` talk through statics, so two tests that both write
+/// them, or one that writes while another reads, cannot mean anything running side by side. The
+/// same device as [`REFUSAL_COUNTERS`] and for the same reason; the two tests below this line are
+/// the only ones in the file that need it.
+static PUBLICATION: Mutex<()> = Mutex::new(());
+
+/// See [`PUBLICATION`]. A poisoned turn is still a turn.
+fn publication() -> MutexGuard<'static, ()> {
+    PUBLICATION.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// The pair of decision 19, in mode `pair`.
 fn the_pair_of_decision_19() -> Configured {
     settings(
@@ -1032,11 +1045,14 @@ fn nothing_the_selection_can_say_carries_a_keystroke() {
 
 /// Section 7 travels from a `settings::Layouts` into the atomics the hotkey path reads.
 ///
-/// The publication is process-wide, so this is the only test in this file that reads it; every
-/// other test above passes its configuration in by hand. It puts the defaults back when it is
-/// done, for the reason `tests\inject.rs` states about the two atomics of `[replacement]`.
+/// The publication is process-wide, so this test and the interleaving one below it take the turn
+/// of [`PUBLICATION`] and no other test in this file touches the atomics at all; every test above
+/// passes its configuration in by hand. It puts the defaults back when it is done, for the reason
+/// `tests\inject.rs` states about the two atomics of `[replacement]`.
 #[test]
 fn the_layouts_section_of_the_configuration_reaches_the_input_thread() {
+    let _turn = publication();
+
     let configured = settings(
         LayoutMode::Cycle,
         ["0x00000409", "0x00000419"],
@@ -1070,6 +1086,88 @@ fn the_layouts_section_of_the_configuration_reaches_the_input_thread() {
             .layouts(),
         [US, RUSSIAN]
     );
+}
+
+/// The layout the **first** publication of the interleaving test names in both halves of its pair.
+///
+/// A keyboard layout identifier of section 7 and not a handle: `LayoutSpec::matches` reads a spec
+/// whose high word is zero as a language, so this one names US whichever handle the session gave
+/// it. Nothing about this test needs the layout to be loaded — the specs never leave the atomics.
+#[cfg(feature = "testing")]
+const FIRST_PUBLICATION: &str = "0x00000409";
+
+/// The layout the **second** publication names in both halves. See [`FIRST_PUBLICATION`].
+#[cfg(feature = "testing")]
+const SECOND_PUBLICATION: &str = "0x00000419";
+
+/// The whole publication the seam drives into the middle of a read.
+///
+/// A plain `fn()` because that is what the seam takes: it is stored in a `OnceLock` inside the
+/// module and called from the read, and a capturing closure could not travel there.
+#[cfg(feature = "testing")]
+fn publish_the_second_configuration() {
+    lang_switcher::layouts::publish(settings(
+        LayoutMode::Pair,
+        [SECOND_PUBLICATION, SECOND_PUBLICATION],
+        &[],
+    ));
+}
+
+/// **A publication landing between the two halves of the pair is not read in halves.**
+///
+/// Written for task T-13-22 after the audit of 2026-08-24 ("публикация `[layouts]` в поток ввода
+/// допускает рваное чтение: россыпь атомиков без поколения, в отличие от seqlock у guard",
+/// `src\layouts.rs:1496`). The audit's own example is the shape of this test: a press of the
+/// hotkey that "прочитает `pair[0]` новым, а `pair[1]` старым".
+///
+/// The race is made an appointment rather than raced for. The seam of `layouts::seam` runs an
+/// armed publication once, after `published` has loaded `PAIR[0]` and before it loads `PAIR[1]`,
+/// so the two halves of the pair are taken from two different configurations **by construction**
+/// and on one thread. Two threads spinning at each other would prove nothing: a green run would
+/// only mean the collision did not happen that day.
+///
+/// What the assertions below say is therefore exactly what the generation buys and nothing more:
+///
+/// * the two halves agree, so they came from one publication rather than two;
+/// * that publication is the **second** one — which nothing in this test body published, so a pair
+///   of Russian is at the same time the proof that the seam fired at all and that the read was
+///   retried instead of stitched.
+///
+/// Without the generation the answer is `[US, RUSSIAN]` and the first assertion fails; the
+/// experiment was run, and the report of the task records it.
+#[cfg(feature = "testing")]
+#[test]
+fn a_publication_between_the_halves_of_the_pair_is_not_read_in_halves() {
+    let _turn = publication();
+
+    // What stands before the press: US in both halves of the pair.
+    lang_switcher::layouts::publish(settings(
+        LayoutMode::Pair,
+        [FIRST_PUBLICATION, FIRST_PUBLICATION],
+        &[],
+    ));
+
+    // The appointment.
+    lang_switcher::layouts::interleave_next_read(publish_the_second_configuration);
+
+    let read = published();
+
+    assert_eq!(
+        read.pair()[0],
+        read.pair()[1],
+        "the two halves of the pair must come from one publication, not one from each"
+    );
+    assert!(
+        read.pair()[0].matches(RUSSIAN),
+        "and from the publication the read ended in — which only the seam performed"
+    );
+    assert!(
+        !read.pair()[1].matches(US),
+        "nothing of the configuration that was standing may survive into the answer"
+    );
+
+    // The defaults of section 7, back where they were.
+    lang_switcher::layouts::publish(Configured::from_settings(&Layouts::default()));
 }
 
 #[test]

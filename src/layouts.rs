@@ -82,7 +82,7 @@
 
 use core::ffi::c_void;
 use core::fmt;
-use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardLayoutList, HKL, MAPVK_VK_TO_VSC_EX, MapVirtualKeyExW, ToUnicodeEx, VK_CAPITAL,
@@ -1477,16 +1477,83 @@ impl Configured {
     }
 }
 
-/// The published `[layouts]`, one atomic per value — section 6.3.
+/// The published `[layouts]`, one atomic per value and all of them under one generation —
+/// section 6.3.
 ///
 /// The configuration belongs to the UI thread and the choice is made on the input thread, so the
 /// values are *published* rather than fetched, exactly as `[replacement]` is (task T-04-2). Plain
 /// atomics and no lock: NFR-04 forbids blocking primitives near the input path, and the cheapest
-/// way to obey a ban is to have nothing to ban.
+/// way to obey a ban is to have nothing to ban. What makes the four of them **one** published
+/// value rather than four independent ones is [`GENERATION`].
 static MODE: AtomicU8 = AtomicU8::new(PAIR_CODE);
 static PAIR: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
 static CYCLE: [AtomicUsize; MAX_CYCLE] = [const { AtomicUsize::new(0) }; MAX_CYCLE];
 static CYCLE_LEN: AtomicUsize = AtomicUsize::new(0);
+
+/// **Odd while [`publish`] is writing, even while what stands above is one configuration.**
+///
+/// Every cell above is an atomic, so no choice of orderings could make this a data race; what the
+/// counter guards against is narrower and real, and the audit of 2026-08-24 named it — «публикация
+/// `[layouts]` в поток ввода допускает рваное чтение: россыпь атомиков без поколения, в отличие от
+/// seqlock у guard». A press of the hotkey that arrived while the settings dialog was applying
+/// could take `PAIR[0]` from the configuration that was standing and `PAIR[1]` from the one being
+/// written, and then convert into a pair nobody ever configured. **Ordering the stores does not
+/// answer that**, because ordering does not make a *read* atomic: it fixes the sequence the writer
+/// is seen to move in, not the instant the reader takes its several samples in.
+///
+/// The mechanism is the seqlock of [`crate::guard::publish_exclusions`], which solves the same
+/// problem for the `[exclusions]` table: the writer makes the counter odd for the whole of the
+/// write and even again after it, the reader keeps its answer only if the counter did not move and
+/// was even, and a moved counter costs a re-read rather than a wait. Section 6.3 names two
+/// mechanisms for publishing the configuration — an `arc_swap`-like pointer, or `PostMessage` —
+/// and this is neither; what it is, is the discipline the module next door already applies, so
+/// that the two published tables of section 7 are protected the same way rather than one of them
+/// only.
+///
+/// # The barriers are Boehm's, not the ones that read naturally
+///
+/// Hans-J. Boehm, *"Can seqlocks get along with programming language memory models?"*, MSPC 2012.
+/// The canon that paper settles, and the form every seqlock in this program is to be written in:
+///
+/// * the **reader** loads the counter, reads the fields with `Relaxed` loads, then executes
+///   `fence(Acquire)` **before** the control load of the counter, which may itself be `Relaxed`.
+///   Putting `Acquire` *on* the control load instead is the trap the paper is about: acquire on a
+///   load orders the operations that come **after** it, and what has to be pinned here is the
+///   field loads that came **before** — nothing stops them from being sunk past an acquire load;
+/// * the **writer** executes `fence(Release)` between making the counter odd and storing the
+///   fields, so that no store can be hoisted above the odd value that announces it, and closes
+///   with a `Release` bump, which is what publishes the fields to a reader that sees the even
+///   value.
+///
+/// Task T-13-16 of this stage brings the two seqlock readers that predate this one —
+/// [`crate::diag`] and [`crate::guard`] — to the same canon. This one is written in it from the
+/// start rather than copied from their present shape: the shape is the model, the deviation is
+/// not.
+static GENERATION: AtomicU32 = AtomicU32::new(0);
+
+/// How many times [`published`] re-reads a configuration that moved under it.
+///
+/// Three, and the **bound** is the point rather than the number. This is read on the input thread,
+/// where the `WH_KEYBOARD_LL` callback of section 6.1 lives; a thread that spins there stops
+/// delivering keystrokes to the whole session, and NFR-01 gives the callback a hundred
+/// microseconds at p99 with NFR-02 an absolute millisecond over it. An unbounded seqlock retry is
+/// a wait by another name, and a wait here is the blocking primitive NFR-04 forbids.
+///
+/// **Why so few rounds are enough** — it is a property of the writer, not a hope about timing.
+/// [`publish`] runs on the UI thread and the window in which the counter is odd is at most twelve
+/// plain stores: no loop bounded by anything a user can put in the file, no allocation, no
+/// syscall, no file, no lock. So the window cannot be *stretched* — not by a long cycle list, not
+/// by a slow disk, not by another thread holding something. For three attempts to lose in a row
+/// the UI thread would have to be preempted inside those twelve stores and then rescheduled back
+/// into them twice more, while one press of the hotkey spends microseconds here.
+///
+/// **And the worst outcome of losing all three is not a failure.** [`published`] then returns the
+/// last thing it read, which is one press served with a mixed configuration — precisely what every
+/// press got before this counter existed, and precisely the impact the audit measured («худший
+/// исход — одна конвертация в неверную раскладку в момент нажатия «Применить»»). The retry can
+/// only improve that answer and can never spoil it, which is what makes a small bound the right
+/// trade on this thread.
+const PUBLISHED_READ_ATTEMPTS: u32 = 3;
 
 /// `mode = "pair"` as one byte.
 const PAIR_CODE: u8 = 0;
@@ -1498,35 +1565,63 @@ const CYCLE_CODE: u8 = 1;
 /// Called by `app` after the configuration has been read, on the UI thread, together with the
 /// other published values of section 7. Nothing is applied to anything already built: the next
 /// press of the hotkey reads whatever stands here at that moment.
+///
+/// # The generation
+///
+/// The whole of the write sits between an odd [`GENERATION`] and an even one, which is what makes
+/// the four groups of atomics one value to [`published`]. There is exactly one writer — the UI
+/// thread — so the two bumps need no compare-and-swap; `fetch_add` is used because that is what
+/// [`crate::guard::publish_exclusions`] uses for the same counter and the two are meant to read
+/// alike.
+///
+/// The field stores are `Relaxed` where they were `Release` before, and **nothing is weakened by
+/// that**: the single `fence(Release)` above them does for all twelve what twelve release stores
+/// did one at a time, and the closing `Release` bump is what carries them to a reader that sees
+/// the even value. See [`GENERATION`] for why the fence and not an ordering on the bump itself.
 pub fn publish(configured: Configured) {
+    // Odd for the whole of the write — see `GENERATION`.
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    fence(Ordering::Release);
+
     for (slot, spec) in PAIR.iter().zip(configured.pair()) {
-        slot.store(spec.raw(), Ordering::Release);
+        slot.store(spec.raw(), Ordering::Relaxed);
     }
 
     for (slot, spec) in CYCLE.iter().zip(configured.cycle()) {
-        slot.store(spec.raw(), Ordering::Release);
+        slot.store(spec.raw(), Ordering::Relaxed);
     }
 
     // The length is stored after the values it bounds, so a reader that sees the new length sees
     // the entries that go with it; and the mode last, because it is what decides which of the two
-    // groups is read at all.
-    CYCLE_LEN.store(configured.cycle().len(), Ordering::Release);
+    // groups is read at all. The order is kept exactly as it was written — module `guard`
+    // publishes its own list in this same order and says so — and it is now the second line of
+    // the defence rather than the first: it is what keeps the answer of an exhausted retry the
+    // mildest one there is, a length that never outruns the values it describes.
+    CYCLE_LEN.store(configured.cycle().len(), Ordering::Relaxed);
     MODE.store(
         match configured.mode() {
             LayoutMode::Pair => PAIR_CODE,
             LayoutMode::Cycle => CYCLE_CODE,
         },
-        Ordering::Release,
+        Ordering::Relaxed,
     );
+
+    // Even again: what stands here is a configuration, not one somebody is in the middle of
+    // writing.
+    GENERATION.fetch_add(1, Ordering::Release);
 }
 
-/// What was published — read once per press of the hotkey.
+/// One pass over the published atomics, without the generation check around it.
 ///
-/// [`MAX_CYCLE`] plus three atomic loads and nothing else: no allocation (NFR-03), no lock
-/// (NFR-04), no file (NFR-05, NFR-09).
-pub fn published() -> Configured {
+/// Split out so that [`published`] reads as the retry it is, the way `guard::search_published` is
+/// split out of `guard::is_excluded_name`. Every load is `Relaxed`: what orders them is the pair
+/// of fences [`published`] puts around this call — the canon of [`GENERATION`].
+///
+/// [`MAX_CYCLE`] plus four atomic loads at worst — the mode, the two halves of the pair, the
+/// length, and one per cycle entry the length admits.
+fn read_published() -> Configured {
     let mut configured = Configured {
-        mode: match MODE.load(Ordering::Acquire) {
+        mode: match MODE.load(Ordering::Relaxed) {
             CYCLE_CODE => LayoutMode::Cycle,
             // Nothing but `publish` writes the byte and it writes only the two codes, so this is
             // unreachable — and the hotkey path must have a mode rather than a question even so,
@@ -1537,17 +1632,131 @@ pub fn published() -> Configured {
     };
 
     for (spec, slot) in configured.pair.iter_mut().zip(&PAIR) {
-        *spec = LayoutSpec::from_raw(slot.load(Ordering::Acquire));
+        *spec = LayoutSpec::from_raw(slot.load(Ordering::Relaxed));
+
+        // The seam of the interleaving, and it stands **after** the load on purpose: a publication
+        // driven in here lands between the two halves of the pair, which is the mixture the audit
+        // described. Absent from the shipping build — see `seam`.
+        #[cfg(feature = "testing")]
+        seam::interleave();
     }
 
-    let len = CYCLE_LEN.load(Ordering::Acquire).min(MAX_CYCLE);
+    let len = CYCLE_LEN.load(Ordering::Relaxed).min(MAX_CYCLE);
     for (spec, slot) in configured.cycle.iter_mut().zip(&CYCLE).take(len) {
-        *spec = LayoutSpec::from_raw(slot.load(Ordering::Acquire));
+        *spec = LayoutSpec::from_raw(slot.load(Ordering::Relaxed));
     }
     configured.cycle_len = len as u8;
 
     configured
 }
+
+/// What was published — read once per press of the hotkey.
+///
+/// One pass is [`MAX_CYCLE`] plus **six** atomic loads and one `fence`, and nothing else: no
+/// allocation (NFR-03), no lock (NFR-04), no file (NFR-05, NFR-09). The six are the four
+/// [`read_published`] takes — the mode, the two halves of the pair and the length — plus the two
+/// loads of [`GENERATION`] this function adds around them. (The line here used to say "plus three"
+/// and was one short of its own code even then: `CYCLE_LEN` was never in the count.)
+///
+/// At most [`PUBLISHED_READ_ATTEMPTS`] passes, and the second and third are reached only by a
+/// press that landed inside a publication. Nothing is retried in a loop that a writer could keep
+/// alive — see [`PUBLISHED_READ_ATTEMPTS`] for why a bound this small is safe and what the answer
+/// is when it runs out.
+///
+/// # The shape of the loop
+///
+/// The fields are read on **every** attempt, before the counter is judged, so that the answer to
+/// an exhausted retry is literally "the last thing this read" and never a value nobody published.
+/// That costs one wasted pass in the case where the counter was already odd when the attempt
+/// began, and buys the property that this function has no answer of its own to invent.
+pub fn published() -> Configured {
+    let mut configured = Configured::default();
+
+    for _ in 0..PUBLISHED_READ_ATTEMPTS {
+        let before = GENERATION.load(Ordering::Acquire);
+
+        configured = read_published();
+
+        // Boehm's fence, and it stands **before** the control load rather than inside it — see
+        // `GENERATION`. This is what keeps the field loads above from being sunk below the check
+        // that is supposed to vouch for them.
+        fence(Ordering::Acquire);
+
+        // Even, and unmoved: what was read was one configuration, and the answer stands.
+        if before.is_multiple_of(2) && GENERATION.load(Ordering::Relaxed) == before {
+            return configured;
+        }
+    }
+
+    // A publication in flight through every attempt. The answer is the last pass, which is the
+    // torn read this counter exists to avoid — and is exactly the answer every press got before it
+    // existed. See `PUBLISHED_READ_ATTEMPTS`.
+    configured
+}
+
+/// Drives one whole publication into the middle of one read — **compiled only under `testing`**.
+///
+/// A generation cannot be tested by racing two threads at it: the collision either happens on the
+/// day the test runs or it does not, and a green run proves nothing either way. This seam turns
+/// the collision into an appointment. [`read_published`] calls [`interleave`] after each of its
+/// two `PAIR` loads; a test arms a `fn()` that publishes a second configuration, and that whole
+/// publication then lands **between** the two halves of the pair — the interleaving the audit of
+/// 2026-08-24 described, on demand and in one thread.
+///
+/// What the seam can prove is therefore [`GENERATION`] and nothing else. Without the counter the
+/// read comes back half from one configuration and half from the other; with it the first pass is
+/// thrown away and the second comes back whole.
+///
+/// The gate is SEC-04a's, the one [`crate::control`] and the fault injectors of [`crate::hook`]
+/// carry: the `testing` feature is absent from the Release configuration, so the shipping build
+/// has neither the arming function nor the load that checks it. Nothing in here is `unsafe` and
+/// nothing in here waits — `OnceLock::get` is a load, not a lock (NFR-04).
+///
+/// [`interleave`]: seam::interleave
+#[cfg(feature = "testing")]
+mod seam {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::OnceLock;
+
+    /// The publication to run, set at most once in the life of a process.
+    static PUBLICATION: OnceLock<fn()> = OnceLock::new();
+
+    /// Whether the armed publication is still owed a run. One shot: [`interleave`] takes it.
+    static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// Arms `publication` to run **once**, inside the next read of the published atomics.
+    ///
+    /// The first caller in a process decides which function that is; a later call with a different
+    /// one re-arms the first, which is why the one test that uses this holds a turn that keeps it
+    /// alone with the published atomics.
+    pub fn arm(publication: fn()) {
+        let _ = PUBLICATION.set(publication);
+        ARMED.store(true, Ordering::Release);
+    }
+
+    /// Runs the armed publication if one is owed, and disarms it.
+    ///
+    /// The unarmed path — every call from every other test and from the bench — is one relaxed
+    /// load and a return.
+    pub fn interleave() {
+        if !ARMED.load(Ordering::Relaxed) {
+            return;
+        }
+
+        if !ARMED.swap(false, Ordering::AcqRel) {
+            return;
+        }
+
+        if let Some(publication) = PUBLICATION.get() {
+            publication();
+        }
+    }
+}
+
+/// Arms `publication` to run once **inside** the next [`published`], between the two halves of the
+/// pair — the test seam of the interleaving. See the module `seam` this comes from.
+#[cfg(feature = "testing")]
+pub use seam::arm as interleave_next_read;
 
 /// **The list the hotkey walks, for this configuration and this session — FR-30, FR-31, FR-33.**
 ///
