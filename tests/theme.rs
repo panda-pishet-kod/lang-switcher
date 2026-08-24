@@ -171,6 +171,40 @@ fn the_resolve_table_is_all_six_combinations_and_each_answers_the_very_palette()
     }
 }
 
+/// **Task T-13-17 — what makes a pixel probe of a palette change mean anything.**
+///
+/// The acceptance of a window that follows the system theme is a pair of shots and a probe
+/// of the same pixels on both of them, against these constants. That probe only says
+/// something while the two palettes actually *differ* in the roles it reads: a role the two
+/// palettes spelled the same number for would read identically before and after a real
+/// change and identically before and after no change at all, and the shot would prove
+/// nothing either way.
+///
+/// The four roles below are the ones the стенд probes — the ground of the client area, the
+/// ink on it, and the two colours DWM is handed for the caption — and this test pins that
+/// they are four honest discriminators. (`cap` and `text_muted` are deliberately *not* here:
+/// «Графит» spells one number for both, which is a property of that palette the module
+/// documents at length, and neither role is probed.)
+#[test]
+fn the_roles_a_theme_change_is_probed_by_differ_between_the_two_palettes() {
+    let roles: [(&str, u32, u32); 4] = [
+        ("window_bg", GRAPHITE.window_bg.0, FOG.window_bg.0),
+        ("text", GRAPHITE.text.0, FOG.text.0),
+        ("title_bg", GRAPHITE.title_bg.0, FOG.title_bg.0),
+        ("title_fg", GRAPHITE.title_fg.0, FOG.title_fg.0),
+    ];
+
+    for (role, graphite, fog) in roles {
+        println!("{role}: GRAPHITE 0x{graphite:06X} vs FOG 0x{fog:06X}");
+
+        assert_ne!(
+            graphite, fog,
+            "«Графит» and «Туман» must not spell one number for `{role}` — a probe of that \
+             role could then not tell a palette change from no change at all"
+        );
+    }
+}
+
 // =========================================================================================
 // The setting — criterion 12, the literals and the garbage
 // =========================================================================================

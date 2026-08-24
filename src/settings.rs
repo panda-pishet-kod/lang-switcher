@@ -2401,6 +2401,89 @@ impl Drop for DialogSession {
     }
 }
 
+/// Whether an «О программе» window of FR-92а is on the screen of **this** thread — task
+/// T-13-17.
+///
+/// The published half of [`ABOUT_WINDOW`], and the whole of what leaves this module about
+/// that window: one `bool`, read, never written. True from the `WM_INITDIALOG` of
+/// [`about_proc`] until the guard of [`show_about_dialog`] clears the record, which is
+/// exactly the stretch of time there is a window to tell anything to.
+///
+/// # One thread-local here and two next door
+///
+/// The settings dialog needs a flag *beside* its window record because [`dialog_is_open`]
+/// has to answer «да» before the window exists — it refuses a second copy of the dialog and
+/// locks two tray commands, and both decisions are taken while `DialogBoxParamW` is still
+/// on its way in. Nothing asks that of this window: the whole of what anybody wants to know
+/// about it is «есть ли кому отдать сообщение», and the record of the live window *is* that
+/// answer. A second flag would be a second answer to one question, and [`DialogSession`]
+/// says in as many words how two answers to one question start to differ.
+///
+/// **SEC-05, R-20.** Nothing outside this process can move this: the record is a
+/// thread-local of the UI thread, written by the procedure of a window this program created
+/// and cleared by the guard of the function that opened it. There is no window message, no
+/// `wParam` and no pointer anywhere on this road.
+///
+/// ⚠ **Task T-13-20 must read this beside [`dialog_is_open`].** That task narrows the
+/// reading of the `WM_SETTINGCHANGE` string to the case «есть кому отдать»; after this task
+/// «кому отдать» is «диалог открыт **или** about жив», and a gate that asked only the first
+/// would stop the about window from following the system theme again.
+pub fn about_is_open() -> bool {
+    ABOUT_WINDOW.with(Cell::get) != 0
+}
+
+/// The open «О программе» window of this thread, for as long as this value lives — FR-92а,
+/// task T-13-17.
+///
+/// [`DialogSession`] in the window next door, and deliberately the same shape: created by
+/// [`show_about_dialog`] before the modal call and dropped however that function leaves — a
+/// normal return, the `-1` return of a dialog that could not be created, or a panic
+/// unwinding through the call. The window itself is closed by four different roads — «ОК»,
+/// `Esc`, the cross of the caption, and a failed `debug_assert` on the way out in Debug —
+/// and not one of them is a place to clear a record from: a [`Drop`] on the frame that owns
+/// the window is the one place that covers all four at once.
+///
+/// A record left behind would be worse than an empty one. [`on_system_theme_message`] posts
+/// [`WM_APP_SYSTEM_THEME`] to whatever the record names, and Windows is free to have given
+/// that handle to somebody else's window by then — the very reason the dialog's own record
+/// is cleared on a guard rather than in a handler.
+///
+/// ⚠ Not re-entrant, and does not have to be: the window is modal, and the tray command
+/// that opens it cannot run while the modal loop of this very window is up.
+pub struct AboutSession;
+
+impl AboutSession {
+    /// Hands back the guard whose [`Drop`] clears the record.
+    ///
+    /// Nothing is recorded here: `DialogBoxParamW` has not been called yet and there is no
+    /// window to name — [`AboutSession::record`] does that from `WM_INITDIALOG`. The guard
+    /// is taken from *before* the modal call all the same, so that the exit paths which
+    /// never reach a window are covered by the same `Drop` as the ones that do.
+    pub fn open() -> Self {
+        Self
+    }
+
+    /// Records the window this session names — called from the `WM_INITDIALOG` of
+    /// [`about_proc`] and from nowhere else in the program.
+    ///
+    /// Public for the reason [`GLYPH_CHECK_CONTROLS`] is public: `tests\settings.rs`
+    /// exercises the very guard the product uses, over the very record it writes, without a
+    /// live window. It is an in-process Rust call and not a door SEC-05 speaks of — no
+    /// window message reaches it, and nothing but this program links this library.
+    pub fn record(hwnd: HWND) {
+        ABOUT_WINDOW.with(|window| window.set(hwnd.0 as isize));
+    }
+}
+
+impl Drop for AboutSession {
+    fn drop(&mut self) {
+        // FR-92а, task T-13-17: the record must not outlive the window it names — see
+        // `ABOUT_WINDOW`. Cleared on the guard so that no exit path, panic included, can
+        // leave a stale window behind.
+        ABOUT_WINDOW.with(|window| window.set(0));
+    }
+}
+
 thread_local! {
     /// Whether this thread already has a settings dialog on the screen — see [`show_dialog`].
     ///
@@ -2416,10 +2499,21 @@ thread_local! {
     /// thread-local wants a value. A thread-local like its neighbour, because the dialog
     /// belongs to the UI thread and to no other (section 6.1).
     static DIALOG_WINDOW: Cell<isize> = const { Cell::new(0) };
+
+    /// The window of the «О программе» dialog while it is up, zero otherwise — FR-92а,
+    /// task T-13-17.
+    ///
+    /// The neighbour of [`DIALOG_WINDOW`], on the same terms and for the same reasons:
+    /// written on `WM_INITDIALOG` by [`AboutSession::record`], cleared by the guard of
+    /// [`show_about_dialog`] however that function leaves, stored as the plain integer the
+    /// handle is, and thread-local because the window belongs to the UI thread and to no
+    /// other (section 6.1). Read through [`about_is_open`]; the half that posts to it is
+    /// [`on_system_theme_message`], the same function that posts to its neighbour.
+    static ABOUT_WINDOW: Cell<isize> = const { Cell::new(0) };
 }
 
 // ---------------------------------------------------------------------------------------
-// The system theme changing under the open dialog — FR-92а, task T-11-9
+// The system theme changing under an open window — FR-92а, tasks T-11-9 and T-13-17
 // ---------------------------------------------------------------------------------------
 
 /// The one string of `WM_SETTINGCHANGE` this program reacts to — FR-92а, task T-11-9.
@@ -2429,7 +2523,7 @@ thread_local! {
 /// using the message's content any further.
 pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
 
-/// The dialog's own «системная тема сменилась» nudge — FR-92а, task T-11-9.
+/// The windows' own «системная тема сменилась» nudge — FR-92а, tasks T-11-9 and T-13-17.
 ///
 /// `WM_APP + 14`, the next free number of the program-wide row: `+ 1` is the wake-up of
 /// [`crate::app`] and `+ 5` its configuration nudge, `+ 2` the tray callback, `+ 3` and
@@ -2437,11 +2531,13 @@ pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
 /// [`crate::switch::WM_APP_SWITCH`], `+ 10` and `+ 11` are [`crate::guard`]'s pair, and
 /// `+ 12` and `+ 13` are [`crate::selection`]'s.
 ///
-/// SEC-05: the message carries nothing and decides nothing. The handler in [`dialog_proc`]
-/// re-resolves the palette out of this program's own setting and the system switch
-/// ([`refresh_palette`]), and an unchanged resolution repaints nothing — so a forged message
-/// buys the sender one comparison of two pointers, and at worst one repaint of our own
-/// dialog with the palette it already ought to wear.
+/// SEC-05: the message carries nothing and decides nothing. Both handlers of it — the one
+/// in [`dialog_proc`] and, since task T-13-17, the one in [`about_proc`] — re-resolve the
+/// palette out of this program's own setting and its own read of the system switch
+/// ([`refresh_palette`], [`refresh_about_palette`]), and an unchanged resolution repaints
+/// nothing — so a forged message buys the sender one reading of the personalization switch
+/// and one comparison of two pointers, and at worst one repaint of our own window with the
+/// palette it already ought to wear.
 pub const WM_APP_SYSTEM_THEME: u32 = WM_APP + 14;
 
 /// «Перекрашивать?» — the pure decision of task T-11-9, closed by a table in
@@ -2467,53 +2563,112 @@ pub fn repaint_for_system_theme(
 }
 
 /// The far end of the tray's `WM_SETTINGCHANGE` and `WM_THEMECHANGED` arms — FR-92а,
-/// task T-11-9.
+/// tasks T-11-9 and T-13-17.
 ///
 /// `setting_string` is what the message named, already read within the bounds SEC-05
-/// prescribes — the reading belongs to the module that owns the receiving window. A closed
-/// dialog is the first exit and costs one thread-local read: it will resolve the fresh
-/// system switch when it opens ([`show_dialog`] reads it at initialisation), so there is
-/// nothing to tell it now. Otherwise the decision is [`repaint_for_system_theme`] over the
-/// dialog's own state, and a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to the
-/// dialog — posted, never sent, like everything this program tells its own windows (the
-/// implication of FR-72).
+/// prescribes — the reading belongs to the module that owns the receiving window.
 ///
-/// A message arriving while the state is borrowed — a re-entrant dispatch inside a handler —
-/// finds `with_state` answering `None` and does nothing; Windows sends these in a batch, and
-/// a later arrival of the batch finds the borrow free.
+/// **Two windows of FR-92а can be on the screen, and this function is the one road to both
+/// of them.** The settings dialog of FR-92 (task T-11-9) and the «О программе» window
+/// (task T-13-17) are told in the same way, in this order, from this function alone: a
+/// second delivery mechanism would be a second answer to «пора ли перекраситься», and the
+/// audit that produced this task was about a window nobody told at all. Neither window
+/// listens for `WM_SETTINGCHANGE` itself — the broadcast reaches the tray's hidden window,
+/// which is the only window of this program that reads it (§6.2).
+///
+/// A window that is not up is the cheap exit and costs one thread-local read: it will
+/// resolve the fresh system switch when it opens ([`show_dialog`] and
+/// [`show_about_dialog`] both read it at that moment), so there is nothing to tell it now.
+/// Otherwise the decision is [`repaint_for_system_theme`] over that window's own state, and
+/// a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to it — posted, never sent, like
+/// everything this program tells its own windows (the implication of FR-72).
+///
+/// A message arriving while a state is borrowed — a re-entrant dispatch inside a handler —
+/// finds `with_state` / `with_about_state` answering `None` and does nothing; Windows sends
+/// these in a batch, and a later arrival of the batch finds the borrow free.
 pub fn on_system_theme_message(setting_string: Option<&str>) {
-    let raw = DIALOG_WINDOW.with(Cell::get);
+    // The settings dialog of FR-92 — task T-11-9.
+    if let Some(hwnd) = live_window(&DIALOG_WINDOW) {
+        // SAFETY: a non-zero record names the live modal dialog of this thread — recorded on
+        // `WM_INITDIALOG`, cleared however `show_dialog` leaves — so `hwnd` is the window of a
+        // dialog created by `show_dialog`, which is the contract of `with_state`.
+        let repaint = unsafe {
+            with_state(hwnd, |state| {
+                repaint_for_system_theme(
+                    setting_string,
+                    state.working.general.theme,
+                    state.palette,
+                    theme::resolve(ThemeSetting::System, theme::system_is_light()),
+                )
+            })
+        };
 
-    if raw == 0 {
-        return;
+        if repaint == Some(true) {
+            post_system_theme(hwnd);
+        }
     }
 
-    let hwnd = HWND(raw as *mut std::ffi::c_void);
+    // The «О программе» window of FR-92а — task T-13-17. The same three steps over the state
+    // that window keeps: its own setting — the one the tray copied out of the configuration
+    // when it opened the window — its own palette, and the same fresh reading of the system
+    // switch. The dialog's own «Применить» has no counterpart here: this window changes
+    // nothing (SEC-05), so the setting it was opened under cannot move under it.
+    if let Some(hwnd) = live_window(&ABOUT_WINDOW) {
+        // SAFETY: a non-zero record names the live modal about window of this thread —
+        // written on `WM_INITDIALOG` by `AboutSession::record`, cleared however
+        // `show_about_dialog` leaves — so `hwnd` is the window of a dialog created by
+        // `show_about_dialog`, which is the contract of `with_about_state`.
+        let repaint = unsafe {
+            with_about_state(hwnd, |state| {
+                repaint_for_system_theme(
+                    setting_string,
+                    state.setting,
+                    state.palette,
+                    theme::resolve(ThemeSetting::System, theme::system_is_light()),
+                )
+            })
+        };
 
-    // SAFETY: a non-zero record names the live modal dialog of this thread — recorded on
-    // `WM_INITDIALOG`, cleared however `show_dialog` leaves — so `hwnd` is the window of a
-    // dialog created by `show_dialog`, which is the contract of `with_state`.
-    let repaint = unsafe {
-        with_state(hwnd, |state| {
-            repaint_for_system_theme(
-                setting_string,
-                state.working.general.theme,
-                state.palette,
-                theme::resolve(ThemeSetting::System, theme::system_is_light()),
-            )
-        })
-    };
-
-    if repaint == Some(true) {
-        // SAFETY: `hwnd` is the live dialog; the message carries two plain zeros and no
-        // pointer — `PostMessageW` queues them by value and returns.
-        if let Err(error) =
-            unsafe { PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME, WPARAM(0), LPARAM(0)) }
-        {
-            // NFR-13. Not fatal: the palette catches up on the next occasion — the next
-            // message of the batch, or a pressed «Применить» — and the journal is told.
-            crate::app::report_non_critical("PostMessageW", &error);
+        if repaint == Some(true) {
+            post_system_theme(hwnd);
         }
+    }
+}
+
+/// The window a record names, or `None` when the record is empty — FR-92а, task T-13-17.
+///
+/// The two records of [`on_system_theme_message`] are read by one body rather than by two
+/// copies of four lines. Zero is «нет окна» in both, and it is the value both are born with
+/// and are returned to by their guards, so a `None` here is «этому окну сейчас нечего
+/// сказать» and never «окно есть, но его номер потерян».
+fn live_window(record: &'static std::thread::LocalKey<Cell<isize>>) -> Option<HWND> {
+    let raw = record.with(Cell::get);
+
+    if raw == 0 {
+        return None;
+    }
+
+    Some(HWND(raw as *mut std::ffi::c_void))
+}
+
+/// Posts the empty [`WM_APP_SYSTEM_THEME`] nudge to one of this program's own windows —
+/// FR-92а, task T-13-17: the one posting site both recipients share.
+///
+/// SEC-05: the message carries two plain zeros. Nothing of the `WM_SETTINGCHANGE` that
+/// started this — no string, no pointer, no length — travels with it; the receiving handler
+/// asks the system itself what the theme now is.
+fn post_system_theme(hwnd: HWND) {
+    // SAFETY: `hwnd` came from a live record of this thread — the settings dialog or the
+    // about window, both of them windows this program created and neither of them able to
+    // outlive its record; the message carries two plain zeros and no pointer, so
+    // `PostMessageW` queues them by value and returns.
+    if let Err(error) =
+        unsafe { PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME, WPARAM(0), LPARAM(0)) }
+    {
+        // NFR-13. Not fatal: the palette catches up on the next occasion — the next message
+        // of the batch, or a pressed «Применить», or the next opening of the window — and
+        // the journal is told.
+        crate::app::report_non_critical("PostMessageW", &error);
     }
 }
 
@@ -2977,8 +3132,9 @@ unsafe fn with_glyph_checks<R>(hwnd: HWND, f: impl FnOnce(&GlyphChecks) -> R) ->
 /// # Safety
 ///
 /// May only be called with the window of a dialog created by [`show_about_dialog`] — the
-/// `hwnd` its dialog procedure was called with — whose `GWLP_USERDATA` therefore holds
-/// either zero or the pointer that function stored.
+/// `hwnd` its dialog procedure was called with, or the live window [`ABOUT_WINDOW`] records
+/// (task T-13-17) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that
+/// function stored.
 unsafe fn with_about_state<R>(hwnd: HWND, f: impl FnOnce(&mut AboutState) -> R) -> Option<R> {
     // SAFETY: by this function's own contract, `GWLP_USERDATA` of `hwnd` holds either zero
     // or the pointer `show_about_dialog` stored, which names a `RefCell<AboutState>` alive
@@ -4001,10 +4157,12 @@ pub fn title_bar_is_dark(palette: &theme::Palette) -> bool {
 /// (`0xFFFFFFFF`), which this program never has cause to send: every window it opens is
 /// opened in a palette.
 ///
-/// ⚠ **Called at every palette change, not only at creation.** The three call sites are
-/// `WM_INITDIALOG` of the settings dialog, `WM_INITDIALOG` of the about window, and
+/// ⚠ **Called at every palette change, not only at creation.** The four call sites are
+/// `WM_INITDIALOG` of the settings dialog, `WM_INITDIALOG` of the about window,
 /// [`refresh_palette`] — the common tail of a pressed «Применить» and of
-/// `WM_SETTINGCHANGE`. The attributes are properties of the window and survive nothing but
+/// `WM_SETTINGCHANGE` — and [`refresh_about_palette`], which is the same tail for the about
+/// window (task T-13-17): one road to the caption for both windows, not a second one for
+/// the newcomer. The attributes are properties of the window and survive nothing but
 /// another call, so a palette change that skipped this would leave yesterday's caption over
 /// today's client area.
 ///
@@ -4246,7 +4404,9 @@ impl Drop for CaptionIcons {
     }
 }
 
-/// Repaints the dialog and every child in it — the visible half of a palette change.
+/// Repaints a window of this module and every child in it — the visible half of a palette
+/// change. Called by [`refresh_palette`] for the settings dialog and by
+/// [`refresh_about_palette`] for the about window (task T-13-17): one body, two windows.
 fn repaint_after_palette_change(hwnd: HWND) {
     // NFR-13: both answers are examined in words and deliberately dropped. Either call
     // refuses only for a window that is not alive, and `hwnd` is the dialog whose
@@ -12635,9 +12795,30 @@ fn end_dialog(hwnd: HWND, result: isize) {
 /// holding no configuration and no callback is how the new window stays exactly that: there
 /// is nothing here a handler could change.
 struct AboutState {
-    /// The palette of this window, resolved once at the moment it is opened. The window is
-    /// short-lived and is not repainted on the fly: nobody posts it
-    /// [`WM_APP_SYSTEM_THEME`], and the next opening resolves afresh.
+    /// The setting `[general].theme` this window was opened under — FR-92а, task T-13-17.
+    ///
+    /// Kept because the palette has to be resolvable **again**. The handler of
+    /// [`WM_APP_SYSTEM_THEME`] re-resolves out of this setting and a fresh reading of the
+    /// system switch ([`refresh_about_palette`]), and a window that remembered only the
+    /// answer could not tell «система стала светлой» from «настройка light»: under `light`
+    /// and `dark` FR-92а fixes the palette and the system has no say, which is the very
+    /// sentence [`repaint_for_system_theme`] decides by.
+    ///
+    /// Copied out of the configuration by the caller at the moment of opening and never
+    /// moved afterwards: this window changes nothing (SEC-05), so there is no «Применить»
+    /// here to move it — and a settings dialog cannot be open at the same time, because the
+    /// tray command that would open one is a command of a menu this modal window is holding
+    /// the thread away from.
+    setting: ThemeSetting,
+    /// The palette of this window, resolved at the moment it is opened and re-resolved
+    /// whenever the system theme moves under it — FR-92а, task T-13-17.
+    ///
+    /// Until that task this field was resolved once and never again: the window was called
+    /// short-lived and nobody posted it [`WM_APP_SYSTEM_THEME`]. The audit of 2026-08-24
+    /// read that as a departure from the letter of FR-92а — the requirement names this
+    /// window among «всё видимое глазом» and asks for the change to apply to open windows
+    /// without a restart, without an exception for short-lived ones, and a person can hold
+    /// this window open for as long as they like.
     palette: &'static theme::Palette,
     /// The brushes of `palette`, created for this window alone and dropped however
     /// [`show_about_dialog`] leaves. `None` — `CreateSolidBrush` refused — is survived
@@ -12803,9 +12984,18 @@ pub fn show_about_dialog(
     setting: ThemeSetting,
     version: Option<(u16, u16, u16, u16)>,
 ) -> windows::core::Result<()> {
+    // FR-92а, task T-13-17. Taken here and released however this function leaves, the `-1`
+    // return below and a panic on the way through included — see [`AboutSession`]. The
+    // window itself is recorded from `WM_INITDIALOG`, which is the first moment there is
+    // one to record.
+    let _open = AboutSession::open();
+
     let palette = theme::resolve(setting, theme::system_is_light());
 
     let state = RefCell::new(AboutState {
+        // FR-92а, task T-13-17: kept for the re-resolution, not for the first one — see the
+        // field.
+        setting,
         palette,
         brushes: theme::Brushes::new(palette),
         version,
@@ -12865,6 +13055,12 @@ unsafe extern "system" fn about_proc(
             // stored is the pointer the manager forwarded from `DialogBoxParamW`; it is
             // only ever read back by `with_about_state`.
             unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
+
+            // FR-92а, task T-13-17: the record `on_system_theme_message` finds this window
+            // by. Cleared by the guard of `show_about_dialog` however that function leaves,
+            // so it never outlives the window it names — the dialog's own record next door
+            // is written and cleared on exactly these terms.
+            AboutSession::record(hwnd);
 
             // Task T-12-8: the response of the cursor, wired on this window's one push button
             // exactly as on the nine of the settings dialog. The other half of the pair is the
@@ -13010,7 +13206,60 @@ unsafe extern "system" fn about_proc(
             0
         }
 
+        // FR-92а, task T-13-17: the system theme moved while this window is up — the far end
+        // of the nudge `on_system_theme_message` posted, the same message and the same road
+        // the settings dialog is told by. The message carries nothing and decides nothing
+        // (SEC-05): `refresh_about_palette` resolves the palette afresh out of this
+        // program's own setting and its own reading of the system switch, and leaves
+        // everything alone when the resolution did not move — the check that settles the
+        // batch Windows sends of these into one repaint. A forged message therefore buys the
+        // sender one reading of the personalization switch and one pointer comparison, at
+        // worst one repaint of our own window in the palette the system already asks for.
+        WM_APP_SYSTEM_THEME => {
+            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
+            // alive for the whole of this modal call.
+            unsafe { with_about_state(hwnd, |state| refresh_about_palette(hwnd, state)) };
+
+            0
+        }
+
         _ => 0,
+    }
+}
+
+/// Re-resolves the palette of the «О программе» window and repaints it if the resolution
+/// moved — FR-92а, task T-13-17.
+///
+/// [`refresh_palette`] over the state this window keeps, and deliberately the same steps in
+/// the same order: a fresh [`theme::resolve`] out of the window's own setting and one
+/// reading of the system switch; the identity test that is both the correctness check and
+/// the debounce of the batch — `resolve` answers `&'static` identity, so pointer equality is
+/// the whole of it; and, only when the resolution moved *and* a whole new brush set was
+/// made, the new palette, the caption through [`apply_title_bar_theme`], and one
+/// invalidation of the window together with its children.
+///
+/// Two lines of the dialog's version are absent because this window has neither of the
+/// things they are for: the layout list's three `LVM_SET*COLOR` colours, and the cached
+/// background picture. Everything this window does paint with is read from `state.palette`
+/// on the next paint — the shared `WM_CTLCOLOR*` answer, the shared owner-drawn button and
+/// the two `FillRect`s of [`on_about_erase_background`] — so the invalidation is the whole
+/// of what the client area needs (§6.2).
+///
+/// A refused [`theme::Brushes::new`] (NFR-13) leaves palette and brushes exactly as they
+/// were: the previous consistent palette on the screen is better than half a new one. It is
+/// not journaled, for the reason `Brushes::new` gives for its own refusal.
+fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
+    let fresh = theme::resolve(state.setting, theme::system_is_light());
+
+    if !std::ptr::eq(fresh, state.palette)
+        && let Some(brushes) = theme::Brushes::new(fresh)
+    {
+        state.palette = fresh;
+        state.brushes = Some(brushes);
+
+        apply_title_bar_theme(hwnd, fresh);
+
+        repaint_after_palette_change(hwnd);
     }
 }
 

@@ -6677,6 +6677,255 @@ fn the_system_theme_message_is_wm_app_plus_14_and_collides_with_nothing_public()
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// FR-92а — the system theme changing under the open «О программе» window. Task T-13-17.
+// ---------------------------------------------------------------------------------------
+//
+// The finding of the audit of 2026-08-24: FR-92а names this window among «всё видимое
+// глазом» and asks for a system theme change to reach open windows without a restart, and
+// this one resolved its palette once and was told nothing afterwards. What is measurable
+// without a live window is the record and the shape — who writes it down, who clears it, and
+// whether the reaction to the message is a reading of the system rather than of the message.
+// The look on the screen is the controller's, on the real window: the стенд, not a test.
+
+use lang_switcher::settings::AboutSession;
+use windows::Win32::Foundation::HWND;
+
+/// A handle that names no window, for the record tests below.
+///
+/// Deliberately not a live window. What is under test is the *record* — an integer this
+/// module writes down and clears — and a test that opened a real window would be testing the
+/// dialog manager instead. Nothing is ever sent to this number: the tests below assert that
+/// the record is gone before anything could be.
+fn a_handle_that_names_no_window() -> HWND {
+    HWND(0x1357 as *mut std::ffi::c_void)
+}
+
+/// **Criterion 6 of task T-13-17, and ловушка 1 of it.** The window of «О программе» is
+/// registered while it lives and unregistered on the way out — whatever the way out is.
+///
+/// The ordinary road and the panic are both walked here, because the guard exists precisely
+/// so that they are one road: the window is closed by «ОК», by `Esc`, by the cross of the
+/// caption and — in Debug — by a failed `debug_assert`, and a record cleared in a handler
+/// would be cleared on some of those and not on others.
+#[test]
+fn the_about_window_record_is_cleared_on_every_exit_path() {
+    assert!(
+        !settings::about_is_open(),
+        "no about window has been opened on this thread"
+    );
+
+    {
+        let _open = AboutSession::open();
+
+        assert!(
+            !settings::about_is_open(),
+            "the guard alone names no window — there is none until `WM_INITDIALOG`"
+        );
+
+        AboutSession::record(a_handle_that_names_no_window());
+
+        assert!(
+            settings::about_is_open(),
+            "a recorded window is the whole of what «about жив» means"
+        );
+    }
+
+    assert!(
+        !settings::about_is_open(),
+        "the record must not outlive the frame that owns the window"
+    );
+
+    // The other road. The program stays up after a panic (FR-98, FR-99), and a record left
+    // behind would keep `on_system_theme_message` posting to a number Windows is free to
+    // have given to somebody else's window by then.
+    let unwound = std::panic::catch_unwind(|| {
+        let _open = AboutSession::open();
+        AboutSession::record(a_handle_that_names_no_window());
+        assert!(settings::about_is_open(), "recorded inside the frame");
+        panic!("the frame is left by a panic");
+    });
+
+    assert!(unwound.is_err(), "the panic must have been the way out");
+    assert!(
+        !settings::about_is_open(),
+        "a panic on the way out clears the record like every other exit path"
+    );
+}
+
+/// **Criterion 6 of task T-13-17, second half.** A theme message that arrives after the
+/// window is gone is delivered to nobody and does nothing.
+///
+/// The handle recorded and released here names no window at all. Were the record to survive
+/// its guard, this call would take that number out again and post `WM_APP_SYSTEM_THEME` to
+/// whatever Windows has since made of it; it returns having touched nothing, because an
+/// empty record is the first exit of the function — before `with_about_state`, before any
+/// reading of the system switch and before any `PostMessageW`.
+#[test]
+fn a_theme_message_after_the_about_window_closed_reaches_nobody() {
+    {
+        let _open = AboutSession::open();
+        AboutSession::record(a_handle_that_names_no_window());
+        assert!(settings::about_is_open());
+    }
+
+    assert!(
+        !settings::about_is_open(),
+        "the window is closed, so there is nobody to tell"
+    );
+
+    // All three shapes the tray can hand in: the exact word, a foreign word, and the null
+    // `lParam` of SEC-05 read as `None`.
+    settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
+    settings::on_system_theme_message(Some("WindowsThemeElement"));
+    settings::on_system_theme_message(None);
+
+    assert!(
+        !settings::about_is_open(),
+        "and nothing about the call resurrected the record"
+    );
+}
+
+/// **Criterion 2 of task T-13-17 — ловушка 2.** One delivery road, two recipients.
+///
+/// `on_system_theme_message` already decided who to tell; after this task it tells two, out
+/// of the two records, through the one posting site. A second mechanism — the about window
+/// listening for `WM_SETTINGCHANGE` on its own, or a second `PostMessageW` of this message
+/// somewhere else — would be a second answer to «пора ли перекраситься».
+#[test]
+fn the_theme_nudge_has_one_delivery_road_and_two_recipients() {
+    let source = settings_module_source();
+    let body = function_body(
+        &source,
+        "pub fn on_system_theme_message(setting_string: Option<&str>) {",
+    );
+
+    for record in ["DIALOG_WINDOW", "ABOUT_WINDOW"] {
+        assert!(
+            body.contains(&format!("live_window(&{record})")),
+            "`on_system_theme_message` must reach {record}"
+        );
+    }
+
+    assert_eq!(
+        body.matches("post_system_theme(hwnd);").count(),
+        2,
+        "both recipients are posted to, and both through the shared site"
+    );
+
+    let posts = product_lines_with("PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME");
+    println!("WM_APP_SYSTEM_THEME posting sites: {posts:?}");
+    assert_eq!(
+        posts.len(),
+        1,
+        "the message is posted from one place in the module and no other"
+    );
+
+    // And the about window does not listen for the broadcast itself: the tray's hidden
+    // window is the one window of this program that reads `WM_SETTINGCHANGE` (§6.2).
+    let about = function_body(&source, "unsafe extern \"system\" fn about_proc(");
+    assert!(
+        !about.contains("WM_SETTINGCHANGE") && !about.contains("WM_THEMECHANGED"),
+        "the about window is told by the one road and does not open a second one"
+    );
+}
+
+/// **Criteria 3 and 4 of task T-13-17.** The about window answers the nudge by asking the
+/// system, and its caption goes the road the dialog's caption goes.
+///
+/// SEC-05 in one test: the message carries nothing, and the palette that comes out of the
+/// handler is `theme::resolve` over this program's own setting and this program's own
+/// reading of `AppsUseLightTheme`. A forged message cannot impose a palette, because there
+/// is no place in the message for one to be named.
+#[test]
+fn the_about_window_answers_the_nudge_by_re_reading_the_system() {
+    let source = settings_module_source();
+
+    let about = function_body(&source, "unsafe extern \"system\" fn about_proc(");
+    assert!(
+        about.contains("WM_APP_SYSTEM_THEME => {"),
+        "the about procedure must handle the nudge at all — it did not before this task"
+    );
+    assert!(
+        about.contains("with_about_state(hwnd, |state| refresh_about_palette(hwnd, state))"),
+        "and answer it out of its own state"
+    );
+
+    let refresh = function_body(
+        &source,
+        "fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {",
+    );
+
+    for line in [
+        // The reaction is a reading of the system's switch under the window's own setting.
+        "let fresh = theme::resolve(state.setting, theme::system_is_light());",
+        // The identity test — the correctness check and the debounce of the batch in one.
+        "if !std::ptr::eq(fresh, state.palette)",
+        // The caption of the window: the one shared road (п. 3), not a second DWM path.
+        "apply_title_bar_theme(hwnd, fresh);",
+        // And the visible half.
+        "repaint_after_palette_change(hwnd);",
+    ] {
+        assert!(
+            refresh.contains(line),
+            "`refresh_about_palette` must carry the line `{line}`"
+        );
+    }
+
+    // No second road to DWM: every caption of this module goes through the one function.
+    let dwm = product_lines_with("DwmSetWindowAttribute(");
+    println!("DwmSetWindowAttribute call sites: {dwm:?}");
+    assert_eq!(
+        dwm.len(),
+        2,
+        "the two calls of `apply_title_bar_theme` and `set_caption_colour`, and no third"
+    );
+}
+
+/// **Criterion 1 of task T-13-17.** The record has exactly two writers — the one that names
+/// the window and the one that forgets it — and the guard is taken before the modal call.
+#[test]
+fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
+    let source = settings_module_source();
+
+    let writes = product_lines_with("ABOUT_WINDOW.with(|window| window.set(");
+    println!("ABOUT_WINDOW writers: {writes:?}");
+    assert_eq!(
+        writes.len(),
+        2,
+        "one writer names the window, one forgets it, and there is no third"
+    );
+    assert!(
+        writes
+            .iter()
+            .any(|line| line.contains("window.set(hwnd.0 as isize)")),
+        "the window is written down as the plain integer the handle is"
+    );
+    assert!(
+        writes.iter().any(|line| line.contains("window.set(0)")),
+        "and cleared to the zero that means «нет окна»"
+    );
+
+    let dropped = function_body(&source, "impl Drop for AboutSession {");
+    assert!(
+        dropped.contains("ABOUT_WINDOW.with(|window| window.set(0));"),
+        "the clearing belongs to the guard's `Drop` and to nothing else"
+    );
+
+    let show = function_body(&source, "pub fn show_about_dialog(");
+    let guard = show
+        .find("let _open = AboutSession::open();")
+        .expect("`show_about_dialog` must take the guard");
+    let modal = show
+        .find("DialogBoxParamW(")
+        .expect("`show_about_dialog` must still be the modal call");
+
+    assert!(
+        guard < modal,
+        "the guard is taken before the modal call, so the `-1` return is covered too"
+    );
+}
+
 // =========================================================================================
 // FR-92а — своё сглаживание на чистом GDI и серое сглаживание нашего текста. Task T-11-17.
 // =========================================================================================
