@@ -2158,13 +2158,27 @@ mod resolver_live {
 // SEC-01, SEC-02 — how the working buffers are released. Task T-13-15.
 // ---------------------------------------------------------------------------------------
 
-/// The text of a module under `src\`.
+/// The text of a module under `src\`, with the line endings normalised — task **T-13-30**.
+///
+/// The one place this file reads a source file, and it collapses `\r\n` to `\n` before anybody
+/// downstream sees the text. `.gitattributes` declares `* text=auto eol=crlf`, so **the canonical
+/// checkout of this repository is CRLF**, while `cargo fmt` writes LF: one commit is one text
+/// after a checkout and another after a format. Any sweep whose needle carries a newline answers
+/// differently for the two, and the answer it gives on the canonical tree is the wrong one — the
+/// cut in `the_working_buffers_are_released_through_the_volatile_zeroing` below was taking the
+/// whole rest of `src\inject.rs` for a function body.
+///
+/// The same reading, and for the same reason, as `read_normalised` in `tests\guard.rs` after task
+/// T-13-12; not reinvented here, because normalising at the read is the only place it can be done
+/// once.
 fn source_of(module: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join(module);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("src\\{module} must be readable: {error}"));
 
-    std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("src\\{module} must be readable"))
+    text.replace("\r\n", "\n")
 }
 
 /// Lines of `text` that contain `needle` and are not comment lines.
@@ -2216,13 +2230,43 @@ fn the_working_buffers_are_released_through_the_volatile_zeroing() {
     );
 
     for signature in ["pub fn replace_in_with", "pub fn on_hotkey"] {
-        let body = source
+        let remainder = source
             .split(signature)
             .nth(1)
-            .unwrap_or_else(|| panic!("{signature} exists in the module"))
-            .split("\n}\n")
-            .next()
-            .unwrap_or_else(|| panic!("{signature} closes in the first column"));
+            .unwrap_or_else(|| panic!("{signature} exists in the module"));
+
+        // ⚠ **No silent fall-back — task T-13-30.**
+        //
+        // This used to end in `.split("\n}\n").next().unwrap_or_else(|| panic!(…))`. `.next()`
+        // on a `Split` that has just been handed a non-empty string **never** answers `None`, so
+        // the panic was unreachable; and on the canonical CRLF tree the needle does not occur at
+        // all — the file holds `\r\n}\r\n` — so the "first piece" was the whole rest of
+        // `src\inject.rs`: 15 661 bytes after `on_hotkey`, against the 1 438 its body is. The
+        // assertion below was then satisfied by a `buffer::zero_slice(` belonging to some other
+        // function, which was measured rather than supposed: moving the call out of `on_hotkey`
+        // into a helper beside it passes the old form of this test and fails this one.
+        //
+        // A boundary that cannot be found is a broken cut, and a broken cut must fail — the shape
+        // `tests\guard.rs` settled on in task T-13-12.
+        let end = remainder.find("\n}\n").unwrap_or_else(|| {
+            panic!(
+                "src\\inject.rs: no closing brace in the first column after {signature}, so its \
+                 body cannot be bounded — the assertion below would be made about the rest of \
+                 the file"
+            )
+        });
+
+        let body = &remainder[..end + "\n}\n".len()];
+
+        // And the cut really cut: a body that is the whole remainder is the degenerate case above
+        // wearing a different mask, so it is asserted against rather than trusted.
+        assert!(
+            body.len() < remainder.len(),
+            "the body of {signature} was bounded ({} bytes) rather than taken as the rest of the \
+             file ({} bytes)",
+            body.len(),
+            remainder.len()
+        );
 
         assert!(
             body.contains("buffer::zero_slice("),

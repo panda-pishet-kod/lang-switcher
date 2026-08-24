@@ -572,12 +572,36 @@ fn settings(mode: LayoutMode, pair: [&str; 2], cycle: &[&str]) -> Configured {
     })
 }
 
-/// The turn of the tests that measure a refusal counter of [`selection_failures`] **exactly**.
+/// The turn of the tests that **raise or measure** the `no_layouts` counter of
+/// [`selection_failures`].
 ///
 /// The three counters are process-wide, and the tests of one binary run side by side, so a test
 /// asserting that a counter rose by exactly one has to be the only test raising it while it runs.
-/// The two tests below that touch `no_layouts` take this turn; every other test in this file
-/// asserts a bound rather than a difference and needs nothing.
+///
+/// ⚠ **The turn is taken by every test that moves the counter, not only by those that read it —
+/// task T-13-30.** This comment used to say "the two tests below that touch `no_layouts`", and a
+/// third one did: `cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start` raises the
+/// refusal once, at its last assertion, and said nothing about the count. A test that raises a
+/// counter **outside** the turn is exactly as damaging as one that reads it outside — it is what
+/// makes the reader's `before + 1` come out as `before + 2` — and it is the reason
+/// `a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session` was seen red
+/// under load by the executor of T-13-17 while being green five times out of five in isolation. A
+/// battery that flickers is a battery nobody trusts, and this stage does not get to leave one
+/// behind.
+///
+/// The three that take it, and what each does to the counter:
+///
+/// * `cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start` — **raises** it once and
+///   asserts nothing about it;
+/// * `a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session` — raises it
+///   twice and asserts **exactly** `before + 1` and then `before + 2`;
+/// * `a_cycle_is_bounded_and_holds_no_repetitions` — raises it three times and asserts a bound.
+///
+/// Nothing else in the file can move `no_layouts`: the only two places that raise it are
+/// `Cycle::from_layouts` when fewer than two distinct layouts are left and `Cycle::target` on a
+/// cycle shorter than two, and every call of either that can refuse is inside one of the three.
+/// The other two counters — `ime_layout` and `origin_outside` — are asserted as bounds wherever
+/// they appear and need no turn.
 static REFUSAL_COUNTERS: Mutex<()> = Mutex::new(());
 
 /// See [`REFUSAL_COUNTERS`]. A poisoned turn is still a turn: what it guards is a counter, and a
@@ -705,6 +729,11 @@ fn three_layouts_in_pair_mode_walk_the_named_pair_and_ignore_the_rest() {
 
 #[test]
 fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
+    // The third test that moves `no_layouts` — see [`REFUSAL_COUNTERS`]. It asserts nothing about
+    // the counter itself, and takes the turn for the sake of the two that do: the refusal at the
+    // foot of this test is what used to land between their `before` and their `after`.
+    let _serialised = refusal_counters();
+
     let session = [US, RUSSIAN, GREEK];
     let three = settings(
         LayoutMode::Cycle,
@@ -965,7 +994,7 @@ fn the_identifiers_of_section_7_are_read_in_both_forms() {
 
 #[test]
 fn a_cycle_is_bounded_and_holds_no_repetitions() {
-    // The other test that raises `no_layouts`; see `REFUSAL_COUNTERS`.
+    // One of the three tests that raise `no_layouts`; see [`REFUSAL_COUNTERS`].
     let _serialised = refusal_counters();
 
     // A list longer than the bound keeps its first `MAX_CYCLE` entries: a hand-edited file

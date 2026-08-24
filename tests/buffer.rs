@@ -2653,6 +2653,28 @@ fn user_press(vk: u16, scan: u16) -> lang_switcher::hook::KeyEvent {
 // SEC-02 outside the ring — the form of `buffer::zero_slice`. Task T-13-15.
 // -------------------------------------------------------------------------------------
 
+/// The text of a module under `src\`, with the line endings normalised — task **T-13-30**.
+///
+/// The one place this file reads a source file, and it collapses `\r\n` to `\n` before anybody
+/// downstream sees the text. `.gitattributes` declares `* text=auto eol=crlf`, so **the canonical
+/// checkout of this repository is CRLF**, while `cargo fmt` writes LF: one commit is one text
+/// after a checkout and another after a format. Any sweep whose needle carries a newline answers
+/// differently for the two, and the answer it gives on the canonical tree is the wrong one.
+///
+/// The same reading, and for the same reason, as `read_normalised` in `tests\guard.rs` after
+/// task T-13-12 — see the long note there for what a sweep that has quietly stopped bounding what
+/// it reads costs. Not reinvented here: normalising at the read is the only place it can be done
+/// once.
+fn source_of(module: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join(module);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("src\\{module} must be readable: {error}"));
+
+    text.replace("\r\n", "\n")
+}
+
 /// The helper the buffers of `inject` and `selection` are zeroed with is a **volatile** write.
 ///
 /// The value checks of that helper — put text in, call it, read the slots back — live next to it
@@ -2664,21 +2686,47 @@ fn user_press(vk: u16, scan: u16) -> lang_switcher::hook::KeyEvent {
 /// source, the way the SEC-02 tests of the ring read the backing array.
 #[test]
 fn the_zeroing_helper_outside_the_ring_is_a_volatile_fenced_write() {
-    let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("buffer.rs"),
-    )
-    .expect("src\\buffer.rs must be readable");
+    let source = source_of("buffer.rs");
 
     let helper = source
         .split("pub(crate) fn zero_slice")
         .nth(1)
         .expect("the helper of task T-13-15 exists");
-    let body = helper
-        .split("\n}\n")
-        .next()
-        .expect("a top-level function closes in the first column");
+
+    // ⚠ **No silent fall-back — task T-13-30.**
+    //
+    // These three lines used to read `.split("\n}\n").next().expect(…)`. `.next()` on a `Split`
+    // that has just been handed a non-empty string **never** answers `None`, so the `expect` was
+    // unreachable and said nothing; and on the canonical CRLF tree the needle does not occur at
+    // all — the file holds `\r\n}\r\n` — so the "first piece" was the **whole rest of
+    // `src\buffer.rs`**: 84 960 bytes where the body of the helper is 1 585.
+    //
+    // Which way that erred is worth stating exactly, because it is not one way. The two positive
+    // assertions became satisfiable by any later function of the module — moving the volatile
+    // write into a neighbour of `zero_slice` was measured to pass the old form and fail this one
+    // — while the third, the one that forbids `.fill(`, became **stricter** than it claims: it
+    // was being asserted about the whole tail. A cut that has stopped cutting is not a cut,
+    // whichever way it errs.
+    //
+    // A boundary that cannot be found is a broken cut, and a broken cut must fail. The shape is
+    // the one `tests\guard.rs` settled on in task T-13-12.
+    let end = helper.find("\n}\n").expect(
+        "src\\buffer.rs: no closing brace in the first column after zero_slice, so the body of \
+         the helper cannot be bounded — the assertions below would be made about the rest of the \
+         file",
+    );
+
+    let body = &helper[..end + "\n}\n".len()];
+
+    // And the cut really cut: a body that is the whole remainder is the degenerate case above
+    // wearing a different mask, so it is asserted against rather than trusted.
+    assert!(
+        body.len() < helper.len(),
+        "the body of zero_slice was bounded ({} bytes) rather than taken as the rest of the file \
+         ({} bytes)",
+        body.len(),
+        helper.len()
+    );
 
     assert!(
         helper.starts_with("<T: Copy + Default>(slice: &mut [T])"),

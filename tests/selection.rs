@@ -1133,13 +1133,37 @@ fn one_format_refusing_does_not_cost_the_others_their_restore() {
 // Sweeps over the source — the acceptance points that are statements about the code
 // ---------------------------------------------------------------------------------------
 
-/// The text of a module under `src\`.
+/// A source file of the tree, read with the line endings normalised — task **T-13-30**.
+///
+/// **The one place this file reads a source file**, and it collapses `\r\n` to `\n` before
+/// anybody downstream sees the text. `.gitattributes` declares `* text=auto eol=crlf`, so **the
+/// canonical checkout of this repository is CRLF**, while `cargo fmt` writes LF: one commit is
+/// one text after a checkout and another after a format. Any sweep whose needle carries a newline
+/// answers differently for the two, and the answer it gives on the canonical tree is the wrong
+/// one — [`body_after`] below was taking the whole rest of `src\selection.rs` for a function body,
+/// 96 939 bytes of it where the body of `decode_utf16` is 310.
+///
+/// Every reader in this file goes through here, [`source_of`] and the directory sweep of
+/// `the_console_classes_and_the_class_read_are_each_written_once` alike: a second `read_to_string`
+/// beside it would make the normalisation a property of one call site instead of a property of
+/// the file.
+///
+/// The same reading, and for the same reason, as `read_normalised` in `tests\guard.rs` after task
+/// T-13-12. Not reinvented here.
+fn read_normalised(path: &Path) -> String {
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+
+    text.replace("\r\n", "\n")
+}
+
+/// The text of a module under `src\`. Line endings normalised — see [`read_normalised`].
 fn source_of(module: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join(module);
 
-    fs::read_to_string(&path).unwrap_or_else(|_| panic!("src\\{module} must be readable"))
+    read_normalised(&path)
 }
 
 /// Lines of `text` that contain `needle` and are not comment lines.
@@ -1154,6 +1178,54 @@ fn code_lines_with<'a>(text: &'a str, needle: &str) -> Vec<(usize, &'a str)> {
         .filter(|(_, line)| !line.starts_with("//"))
         .filter(|(_, line)| line.contains(needle))
         .collect()
+}
+
+/// `remainder` up to the first `boundary` — the region a sweep is about, and nothing beyond it.
+///
+/// ⚠ **The one place this file ends a region, and there is no silent fall-back — task T-13-30.**
+///
+/// Every sweep in this file used to cut its region with `.split(boundary).next()` followed by
+/// `.unwrap_or_default()`, `.unwrap_or(after)`, `.expect(…)` or `unwrap_or_else(|| panic!(…))`.
+/// All four are dead code: `.next()` on a `Split` that has just been handed a string **never**
+/// answers `None`, so what those lines actually encode is not a fall-back and not a check — it is
+/// the sentence «if the boundary is lost, sweep on regardless», which is precisely what a lost
+/// boundary must not do. Where the needle carries a newline the boundary really was lost, because
+/// `.gitattributes` holds this tree in CRLF and `\r\n}\r\n` does not contain `"\n}\n"`: see
+/// [`body_after`], which was reading 96 939 bytes of module where the function it names is 310.
+///
+/// Two things are refused here rather than trusted, so that a region cannot degenerate whichever
+/// way a later edit loses its boundary:
+///
+/// * a boundary that cannot be found is a **failure**, with the needle printed;
+/// * a region that is empty, or that is the whole remainder, is a sweep asserting nothing — and
+///   a green sweep asserting nothing is worse than a red one, because nobody comes to look.
+///
+/// `what` names the region for the failure message. The same shape `tests\guard.rs` settled on in
+/// task T-13-12, factored rather than repeated because this file cuts a region in seventeen
+/// places and a rule that lives in one of them is not a rule.
+fn cut_at<'a>(remainder: &'a str, boundary: &str, what: &str) -> &'a str {
+    let end = remainder.find(boundary).unwrap_or_else(|| {
+        panic!(
+            "src\\selection.rs: {what} is not bounded by \"{}\" — everything asserted about it \
+             below would be asserted about the rest of the module instead",
+            boundary.escape_debug()
+        )
+    });
+
+    let region = &remainder[..end];
+
+    assert!(
+        !region.is_empty(),
+        "{what} is not empty: a boundary at the very start leaves the sweep with nothing to say"
+    );
+    assert!(
+        region.len() < remainder.len(),
+        "{what} was bounded ({} bytes) rather than taken as the rest of the module ({} bytes)",
+        region.len(),
+        remainder.len()
+    );
+
+    region
 }
 
 /// **Acceptance point 14, the structural half.** There is one `OpenClipboard` in the module and
@@ -1186,10 +1258,11 @@ fn the_clipboard_is_opened_in_one_place_and_closed_only_from_drop() {
         .split("impl Drop for Clipboard")
         .nth(1)
         .expect("the Drop implementation exists");
-    let after_drop = drop_impl
-        .split("// ------")
-        .next()
-        .expect("the section ends");
+    let after_drop = cut_at(
+        drop_impl,
+        "// ------",
+        "the body of impl Drop for Clipboard",
+    );
 
     assert!(
         after_drop.contains("CloseClipboard()"),
@@ -1244,10 +1317,7 @@ fn every_unsafe_block_of_the_module_is_justified() {
 fn the_module_neither_panics_nor_unwraps_outside_its_tests() {
     let source = source_of("selection.rs");
 
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     for forbidden in [
         "panic!(",
@@ -1270,10 +1340,7 @@ fn the_module_neither_panics_nor_unwraps_outside_its_tests() {
 #[test]
 fn nothing_of_the_clipboard_can_reach_the_journal() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     // Every journal call names an `Operation` and an `OsCode`; there is no `format!` anywhere in
     // the module, so there is no string for content to be built into.
@@ -1287,10 +1354,11 @@ fn nothing_of_the_clipboard_can_reach_the_journal() {
     );
 
     // And `Snapshot` does not derive `Debug`, which would print the bytes.
-    let derives_before_snapshot = product
-        .split("pub struct Snapshot")
-        .next()
-        .expect("the type exists");
+    let derives_before_snapshot = cut_at(
+        product,
+        "pub struct Snapshot",
+        "the text above the declaration of Snapshot",
+    );
 
     assert!(
         !derives_before_snapshot
@@ -1318,10 +1386,7 @@ fn nothing_of_the_clipboard_can_reach_the_journal() {
 #[test]
 fn the_selection_path_is_built_out_of_the_accepted_modules() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     for required in [
         "crate::inject",
@@ -1804,10 +1869,7 @@ fn a_panic_between_steps_four_and_seven_still_restores_the_clipboard() {
 #[test]
 fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     for (call, owner) in [
         ("path.restore_clipboard(", "impl<P: Path> Drop for Session"),
@@ -1825,19 +1887,20 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
             .split(owner)
             .nth(1)
             .unwrap_or_else(|| panic!("{owner} exists"));
-        let body = after.split("// ------").next().unwrap_or(after);
+        let body = cut_at(after, "// ------", owner);
 
         assert!(body.contains(call), "and that one place is inside {owner}");
     }
 
     // And `run` itself contains no restore at all: the guard owns both of them.
-    let run_body = product
-        .split("pub fn run<P: Path>")
-        .nth(1)
-        .expect("run exists")
-        .split("\n/// ")
-        .next()
-        .unwrap_or_default();
+    let run_body = cut_at(
+        product
+            .split("pub fn run<P: Path>")
+            .nth(1)
+            .expect("run exists"),
+        "\n/// ",
+        "the body of Session::run",
+    );
 
     assert!(
         !run_body.contains("restore_clipboard(")
@@ -1857,18 +1920,16 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
 #[test]
 fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
-    let body = product
-        .split("pub fn restore_after(")
-        .nth(1)
-        .expect("the delayed restore exists")
-        .split("\n// ---")
-        .next()
-        .unwrap_or_default();
+    let body = cut_at(
+        product
+            .split("pub fn restore_after(")
+            .nth(1)
+            .expect("the delayed restore exists"),
+        "\n// ---",
+        "the body of restore_after",
+    );
 
     let thread = body
         .find("require_blocking_thread()")
@@ -1894,13 +1955,14 @@ fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
     assert!(asks < puts, "and nothing is put back before it is answered");
 
     // And the answer is the classification of FR-63, not a second one invented here.
-    let decision = product
-        .split("fn restore_is_due(")
-        .nth(1)
-        .expect("the decision of П-5 exists")
-        .split("\n///")
-        .next()
-        .unwrap_or_default();
+    let decision = cut_at(
+        product
+            .split("fn restore_is_due(")
+            .nth(1)
+            .expect("the decision of П-5 exists"),
+        "\n///",
+        "the body of restore_is_due",
+    );
 
     assert!(
         decision.contains("is_own_change(current)"),
@@ -1953,11 +2015,8 @@ fn a_selection_is_recognised_by_the_sequence_number_and_by_nothing_else() {
 
     // There is no other way of asking, and the module does not invent one: nothing in it looks
     // at a window, a selection or an accessibility interface.
-    let product = source_of("selection.rs");
-    let product = product
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let source = source_of("selection.rs");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     for absent in [
         "GetFocus",
@@ -2145,10 +2204,7 @@ fn the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject() {
     // And the sending itself is `inject`'s: the module calls `inject::dispatch`, which is what
     // counts FR-45 and paces FR-44, rather than `SendInput` of its own.
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     assert_eq!(
         code_lines_with(product, "crate::inject::dispatch(").len(),
@@ -2740,7 +2796,7 @@ fn the_console_classes_and_the_class_read_are_each_written_once() {
             continue;
         }
 
-        let text = fs::read_to_string(&path).expect("a module of src\\ must be readable");
+        let text = read_normalised(&path);
         for (number, line) in code_lines_with(&text, "CONSOLE_WINDOW_CLASSES") {
             if line.contains("const CONSOLE_WINDOW_CLASSES") {
                 declarations.push(format!("{}:{number}", path.display()));
@@ -2790,19 +2846,26 @@ fn the_console_classes_and_the_class_read_are_each_written_once() {
 #[test]
 fn the_press_is_handed_to_the_ui_thread_and_the_clipboard_is_not_touched_where_it_arrives() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     // The branch the input thread runs contains no step of FR-61: it publishes a plan and posts.
-    let branch = product
+    let remainder = product
         .split("pub fn wants_selection_path()")
         .nth(1)
-        .expect("the branch exists")
-        .split("\n/// ")
-        .next()
-        .unwrap_or_default();
+        .expect("the branch exists");
+
+    // ⚠ **Through [`cut_at`], and it is worth being exact about what was wrong here — T-13-30.**
+    //
+    // This used to end in `.split("\n/// ").next().unwrap_or_default()`. Unlike the `"\n}\n"`
+    // cuts of `body_after`, the boundary was **not** lost on the canonical tree: `\r\n/// ` does
+    // contain `\n/// `, so `branch` really was the branch — 3582 bytes on this slice against 3512
+    // after a `cargo fmt`. Nothing was being asserted about the wrong text.
+    //
+    // What was wrong is the fall-back itself, and it is not cosmetic: it is the sentence «if the
+    // boundary is lost, sweep on regardless» standing where the reader expects a guarantee — the
+    // very instruction that cost `body_after` its meaning. One changed needle, one doc comment
+    // moved to a different column, and this becomes the same defect.
+    let branch = cut_at(remainder, "\n/// ", "the branch of wants_selection_path");
 
     for forbidden in [
         "snapshot(",
@@ -2876,10 +2939,7 @@ fn the_clipboard_event_has_a_name_in_the_journal() {
 #[test]
 fn nothing_of_the_selection_can_reach_the_journal_or_a_panic() {
     let source = source_of("selection.rs");
-    let product = source
-        .split("mod tests {")
-        .next()
-        .expect("the module has a body before its tests");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
 
     // The sweep of T-07-1 still holds for the whole module, the selection path included.
     for forbidden in [
@@ -2925,16 +2985,31 @@ fn nothing_of_the_selection_can_reach_the_journal_or_a_panic() {
 /// The body of the top-level item `signature` opens, up to the brace in the first column.
 ///
 /// The same reading `tests\hook.rs` uses for the callback: a top-level function closes with `}`
-/// at column zero, and everything before that belongs to it.
+/// at column zero, and everything before that belongs to it. `source` must have come through
+/// [`read_normalised`] — the needle carries a newline, and on the CRLF working tree the raw text
+/// holds `\r\n}\r\n`.
+///
+/// ⚠ **No silent fall-back — task T-13-30.**
+///
+/// This used to end in `.split("\n}\n").next().unwrap_or_else(|| panic!(…))`. `.next()` on a
+/// `Split` that has just been handed a non-empty string **never** answers `None`, so the panic
+/// was unreachable and the sentence in it was never said; and with the source read raw off a CRLF
+/// checkout the needle did not occur at all, so "the first piece" was **the whole rest of
+/// `src\selection.rs`** — 96 939 bytes after `fn decode_utf16`, where its body is 310. Both
+/// callers were then satisfied by text belonging to other functions, which was measured rather
+/// than supposed: moving the zeroing out of `decode_utf16` into a helper beside it passes the old
+/// form of `the_three_transit_buffers_of_the_clipboard_path_are_zeroed_as_well` and fails this
+/// one.
+///
+/// A boundary that cannot be found is a broken cut, and a broken cut must fail — the refusal and
+/// the two degeneracy checks live in [`cut_at`], which every region of this file now goes through.
 fn body_after(source: &str, signature: &str) -> String {
-    source
+    let remainder = source
         .split(signature)
         .nth(1)
-        .unwrap_or_else(|| panic!("{signature} exists in the module"))
-        .split("\n}\n")
-        .next()
-        .unwrap_or_else(|| panic!("{signature} closes in the first column"))
-        .to_string()
+        .unwrap_or_else(|| panic!("{signature} exists in the module"));
+
+    cut_at(remainder, "\n}\n", signature).to_string()
 }
 
 /// **The audit of 2026-08-24, the middle finding: `fill` is not a zeroing that survives.**

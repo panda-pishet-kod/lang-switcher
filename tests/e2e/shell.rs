@@ -80,8 +80,11 @@ pub fn run_script(name: &str, args: &[String]) -> Result<(bool, String), String>
 ///
 /// Two conditions, not one. `AppActivate` returning true means the request was made; the
 /// foreground window actually belonging to `pid` is the fact the next `SendInput` depends on,
-/// and it is what this waits for. The retry loop lives here rather than inside the script so
-/// that the bench keeps exactly one sleeping place — see `wait`.
+/// and it is what this waits for. The retry loop lives here rather than inside the script so that
+/// the waiting is a condition asked through `wait::until` and not a delay this file invents: the
+/// module comment of `wait` carries the inventory of all **nine** `std::thread::sleep` call sites
+/// of the bench and says what each of them is, and none of the nine is here — task **T-13-30**,
+/// which brought this sentence in line with what T-13-26 had already measured.
 /// [`activate_window`] with the window handle, when the caller has it.
 ///
 /// ⚠ **Why a handle helps, and why using it is allowed.** `AppActivate` addresses a *process*
@@ -204,8 +207,10 @@ fn raise_own_window(handle: windows::Win32::Foundation::HWND) {
 
 /// One `AppActivate` and one re-read of the fact — rake 3, the shell-arbitrated way.
 ///
-/// The script does not loop and does not sleep: the repetition belongs to `wait::until`, which
-/// is the bench's single sleeping place.
+/// The script does not loop and does not sleep: the repetition belongs to `wait::until`, whose
+/// poll interval is the only sleep in the bench a verdict ever waits behind. It is not the only
+/// sleep in the bench — there are **nine**, listed one by one at the top of `wait` and re-derived
+/// from the source on every run by `the_bench_sleeps_only_in_the_nine_places_this_module_lists`.
 fn ask_and_check(pid: u32) -> bool {
     let asked = run_script(
         "word-activate.ps1",

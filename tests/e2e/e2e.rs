@@ -16,7 +16,7 @@
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`own`] | ⛔ the registry of processes the bench may touch — requirements A to E |
-//! | [`wait`] | the one place the bench sleeps, and only as a poll interval |
+//! | [`wait`] | the poll interval — the only sleep a verdict waits behind, of the nine listed there |
 //! | [`input`] | `SendInput` with the bench's own signature; the foreground guard |
 //! | [`uia`] | UI Automation: window readiness, `ValuePattern`, `TextPattern` |
 //! | [`layout`] | FR-52 layout of a window; the bench's position on footnote 3 |
