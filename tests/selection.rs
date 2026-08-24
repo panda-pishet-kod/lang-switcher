@@ -2331,6 +2331,240 @@ fn p62_is_asked_after_fr65_and_before_the_probe_can_run() {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// The note to §4.7 — decision П-3: a console never gets the probe (audit of 2026-08-24)
+// ---------------------------------------------------------------------------------------
+
+/// **The note to §4.7, decision П-3 — the sixth reason, and its own count.**
+///
+/// Р-62 closes only half of the harm its own comment names: `Enter` flushes the typing buffer
+/// completely by FR-10, so in a console the buffer is empty almost always and the `Ctrl+C` of
+/// step 2 of FR-61 goes out as a real interrupt. The note answers it — in the console classes of
+/// FR-42а the selection path does not run — and the refusal is counted **apart** from the
+/// others, because П-3 working and the path failing are not the same event.
+///
+/// Driven by class name and not by a live window, the split
+/// `inject::resolve_auto`/`inject::window_class` exists for.
+#[test]
+fn a_console_class_refuses_the_selection_path_by_the_sixth_reason() {
+    let _serialised = serialised();
+
+    // The list is not repeated here either: it is the one `inject` declares for FR-42а.
+    for class in inject::CONSOLE_WINDOW_CLASSES {
+        let before = selection::path_counters();
+
+        assert!(
+            selection::console_refuses_selection(Some(class)),
+            "{class} is a console of FR-42а: the selection path does not run there"
+        );
+
+        let after = selection::path_counters();
+
+        assert_eq!(
+            after.console_refusals,
+            before.console_refusals + 1,
+            "the sixth reason is counted once for {class}"
+        );
+
+        // ⚠ And into a counter of its own. A missing cache, a password field and a missing UI
+        // window are the path *failing*; this one is the path doing what the note prescribes,
+        // and an acceptance that could not tell them apart could not tell П-3 from a regression.
+        assert_eq!(
+            after.refusals, before.refusals,
+            "the console refusal is not poured into the common counter"
+        );
+        assert_eq!(after.handovers, before.handovers, "nothing was handed over");
+    }
+}
+
+/// **П-3, the case of the name.** Windows compares window class names without regard to case, so
+/// the rule does too — the same comparison `inject::resolve_auto` makes for FR-42а.
+#[test]
+fn the_case_of_a_console_class_name_does_not_matter() {
+    let _serialised = serialised();
+
+    for class in [
+        "consolewindowclass",
+        "CONSOLEWINDOWCLASS",
+        "ConSoleWindowCLASS",
+        "cascadia_hosting_window_class",
+        "Cascadia_Hosting_Window_Class",
+    ] {
+        let before = selection::path_counters();
+
+        assert!(
+            selection::console_refuses_selection(Some(class)),
+            "{class} names a console whatever the case"
+        );
+
+        let after = selection::path_counters();
+        assert_eq!(
+            after.console_refusals,
+            before.console_refusals + 1,
+            "and it is counted like any other spelling of it"
+        );
+    }
+}
+
+/// **П-3, the separating control — an ordinary window is left exactly as it was.**
+///
+/// Nothing but the two measured console classes refuses, the comparison is of the whole name
+/// rather than of a prefix, and an unreadable class (`None`) answers "not a console" — NFR-13,
+/// the direction the function documents: a window that cannot be named is going away, and a
+/// `Ctrl+C` at a desktop switch has no console session to interrupt.
+#[test]
+fn an_ordinary_window_class_leaves_the_sixth_reason_alone() {
+    let _serialised = serialised();
+
+    let before = selection::path_counters();
+
+    for class in [
+        Some("Notepad"),
+        Some("Chrome_WidgetWin_1"),
+        Some("Edit"),
+        Some("TelegramDesktop"),
+        // Whole name, not a prefix and not a suffix.
+        Some("ConsoleWindowClas"),
+        Some("ConsoleWindowClassic"),
+        Some("XConsoleWindowClass"),
+        // An empty string is a class no registered window can have.
+        Some(""),
+        // No foreground window at all, or `GetClassNameW` refused — NFR-13.
+        None,
+    ] {
+        assert!(
+            !selection::console_refuses_selection(class),
+            "{class:?} is not one of the consoles of FR-42а: the path runs as it always did"
+        );
+    }
+
+    let after = selection::path_counters();
+
+    assert_eq!(
+        after.console_refusals, before.console_refusals,
+        "the counter of the sixth reason does not move for an ordinary window"
+    );
+    assert_eq!(after.refusals, before.refusals);
+    assert_eq!(after.handovers, before.handovers);
+}
+
+/// **П-3, the structural half — where the sixth reason stands in the branch, and what it costs.**
+///
+/// Two statements at once, and both are prices:
+///
+/// * it is asked **after** the cheap reasons, so the ordinary press — the one with a non-empty
+///   typing buffer — still leaves `wants_selection_path` without a single system call, which is
+///   what the comment on the Р-62 read promises;
+/// * it is asked **before** the plan is published and before the hand-over, so a console press
+///   never leaves a plan behind for a later message and never reaches the probe of FR-61.
+#[test]
+fn the_console_reason_is_asked_after_the_cheap_ones_and_before_the_handover() {
+    let source = source_of("selection.rs");
+    let body = source
+        .split("pub fn wants_selection_path()")
+        .nth(1)
+        .expect("the branch exists");
+
+    let console = body
+        .find("console_refuses_selection(")
+        .expect("the sixth reason is asked");
+    let p62 = body
+        .find("crate::buffer::is_empty()")
+        .expect("Р-62 reads the buffer length");
+    let plan = body.find("plan_for_press()").expect("the plan is built");
+
+    assert!(
+        p62 < console,
+        "the non-empty buffer answers before the class is read: no system call on the usual press"
+    );
+    assert!(
+        plan < console,
+        "the console count means presses taken away from a path that would otherwise have run"
+    );
+
+    for later in ["publish_pending(", "post_to_ui_thread("] {
+        let position = body
+            .find(later)
+            .unwrap_or_else(|| panic!("{later} is reached"));
+
+        assert!(
+            console < position,
+            "a console must be answered before {later}: no plan left behind, no probe sent"
+        );
+    }
+
+    // And the answer to a console is `false` — the path does not run — rather than anything else.
+    let from_the_question = &body[console..];
+    let refusal = from_the_question
+        .find("return false")
+        .expect("the console answer is a refusal");
+    let publish = from_the_question
+        .find("publish_pending(")
+        .expect("the hand-over follows");
+
+    assert!(
+        refusal < publish,
+        "the sixth reason answers `false` before anything is published"
+    );
+}
+
+/// **Criterion 7 of the task, as a test rather than as a `grep` run once.**
+///
+/// The console classes of FR-42а are declared in `src\` exactly once, and the selection path
+/// reaches that declaration instead of repeating the two names. `GetClassNameW` is not written a
+/// second time either: the call, its buffer and the NFR-13 examination of its zero return live in
+/// `inject::window_class`, which this path reuses.
+#[test]
+fn the_console_classes_and_the_class_read_are_each_written_once() {
+    let mut declarations = Vec::new();
+
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for entry in fs::read_dir(&src).expect("src\\ must be readable") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let text = fs::read_to_string(&path).expect("a module of src\\ must be readable");
+        for (number, line) in code_lines_with(&text, "CONSOLE_WINDOW_CLASSES") {
+            if line.contains("const CONSOLE_WINDOW_CLASSES") {
+                declarations.push(format!("{}:{number}", path.display()));
+            }
+        }
+    }
+
+    assert_eq!(
+        declarations.len(),
+        1,
+        "the consoles of FR-42а are named once in src\\: {declarations:?}"
+    );
+
+    let source = source_of("selection.rs");
+
+    assert!(
+        !code_lines_with(&source, "crate::inject::CONSOLE_WINDOW_CLASSES").is_empty(),
+        "the selection path reaches the one declaration"
+    );
+    for copied in [
+        "\"ConsoleWindowClass\"",
+        "\"CASCADIA_HOSTING_WINDOW_CLASS\"",
+    ] {
+        assert!(
+            code_lines_with(&source, copied).is_empty(),
+            "{copied} must not be spelled a second time in selection.rs"
+        );
+    }
+
+    assert!(
+        code_lines_with(&source, "GetClassNameW").is_empty(),
+        "the class is read through inject::window_class, not by a second GetClassNameW"
+    );
+    assert!(
+        !code_lines_with(&source, "crate::inject::window_class(").is_empty(),
+        "and it really is that function the Win32 half calls"
+    );
+}
+
 /// **Acceptance point 16в.** The clipboard is never touched by the thread that owns the hook —
 /// the branch on that thread posts a message and does nothing else.
 ///

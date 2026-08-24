@@ -5462,6 +5462,15 @@ pub fn experiment_explorer(
 /// way the bench can make the product resolve `auto` to `Backspace`.
 const CONSOLE_CLASS: &str = "ConsoleWindowClass";
 
+/// What a console prints when it is interrupted — the whole verdict of [`console_empty_press`].
+///
+/// `Ctrl+C` in a console is not «copy». The console's line editor echoes `^C`, abandons the line
+/// and hands the interrupt to the program attached to the session, and that echo is the visible
+/// trace the note to §4.7 forbids the product from producing. It is looked for in the screen text
+/// UI Automation gives, which is why the check is «проверка текста строки» and not a claim about
+/// what was sent.
+const CONSOLE_INTERRUPT: &str = "^C";
+
 /// ⭐ **A real console window the bench may drive, without weakening a single requirement.**
 ///
 /// # The measurement this is built on, and the three routes it rules out
@@ -5703,6 +5712,93 @@ fn console_press(
     })
 }
 
+/// ⭐ **The console position on an EMPTY typing buffer — the note to §4.7, decision П-3.**
+///
+/// # What this replaces, and why it was rewritten rather than added to
+///
+/// Until the audit of 2026-08-24 the bench recorded the *old* behaviour of this gesture: a press
+/// on an empty typing buffer is handed to the selection path of FR-60/FR-61 and «a real `Ctrl+C`
+/// goes out» ([`empty_press`], and the note on [`item_enter`] says the same of the press after
+/// `Enter`). Finding **inject-selection №1** of the audit — «Деструктивный зонд `Ctrl+C` при
+/// пустом буфере набора», severity **высокая** — is that in a console that sentence describes a
+/// *harm*: `Ctrl+C` there is an interrupt, and it can kill the command the user is running. The
+/// user's decision on question 58 (**П-3, вариант А — «Вариант А: отключить»**) put the note to
+/// §4.7 into the specification: in the console classes of FR-42а the selection path does not
+/// apply, and the hotkey on an empty buffer in a console does nothing.
+///
+/// So this round asserts the **opposite** of what the bench used to record, deliberately: after
+/// the press, the console screen must carry no `^C` it did not carry before.
+///
+/// # Why the gesture is one key
+///
+/// `Esc` is a boundary key of FR-10 — a **full** flush of the typing buffer — and it is also what
+/// the console's own line editor clears the line with. One key therefore leaves both empty, which
+/// is exactly the state the finding is about: in a console the buffer is empty after every
+/// `Enter`, so it is empty almost always.
+///
+/// # What is *not* asserted
+///
+/// That nothing happened. Nothing happening is what П-3 buys and it is not observable: the price
+/// the user accepted is that a selection in a terminal is no longer converted by the key. The one
+/// observable thing is the interrupt, and that is what is measured.
+///
+/// `Err` is the instrument failing — a screen that will not read, a key that will not go out —
+/// and is reported as «не исполнено». The verdict itself, pass or fail, comes back in `Ok`.
+fn console_empty_press(
+    ctx: &Context,
+    target: &input::Target,
+    content: &Element,
+) -> Result<String, String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+
+    input::tap(VK_ESCAPE.0, target).map_err(|error| format!("Escape: {error}"))?;
+    wait::until(SERIES_STEP_TIMEOUT, || {
+        read_field(content).filter(|screen| !screen.contains(TYPED) && !screen.contains(EXPECTED))
+    });
+
+    let before =
+        read_field(content).ok_or_else(|| "экран консоли не читается перед нажатием".to_owned())?;
+    let interrupts_before = before.matches(CONSOLE_INTERRUPT).count();
+    println!(
+        "{}",
+        watched("консоль, П-3: строка очищена, буфер набора пуст — до нажатия")
+    );
+
+    input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+    // A bound on the state settling, not on a result: П-3 says there is no result to wait for.
+    // Two seconds is what `empty_press` waits for the same reason, and it is longer than the sum
+    // of the two timings of section 7 the selection path would have spent if it had run.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        std::thread::sleep(wait::POLL);
+    }
+
+    let after =
+        read_field(content).ok_or_else(|| "экран консоли не читается после нажатия".to_owned())?;
+    let interrupts_after = after.matches(CONSOLE_INTERRUPT).count();
+    println!(
+        "{}",
+        watched("консоль, П-3: после нажатия на пустом буфере")
+    );
+
+    let line = console_line(&after);
+
+    if interrupts_after > interrupts_before {
+        return Ok(format!(
+            "⛔ консоль, пустой буфер: на экране появилось {CONSOLE_INTERRUPT:?} \
+             ({interrupts_before} → {interrupts_after}) — зонд Ctrl+C ушёл в консоль, примечание \
+             к §4.7 (П-3) НАРУШЕНО. Последняя строка экрана: {line:?}"
+        ));
+    }
+
+    Ok(format!(
+        "консоль, пустой буфер: {CONSOLE_INTERRUPT:?} на экране {interrupts_before} → \
+         {interrupts_after} — не выросло, прерывания не было (примечание к §4.7, П-3 соблюдено). \
+         Последняя строка экрана: {line:?}"
+    ))
+}
+
 /// The last non-empty run of characters on a console screen — what a person sees on the line
 /// they are typing.
 ///
@@ -5810,6 +5906,14 @@ impl Tally {
 /// between the two presses, and the second press therefore starts from an empty buffer in a field
 /// that is **not** empty — which is what hands it to the selection path of FR-60/FR-61 (Р-62) with
 /// a real `Ctrl+C` and a real clipboard round trip.
+///
+/// ⚠ **True of Notepad, and no longer true everywhere — decision П-3.** The note to §4.7 (audit
+/// of 2026-08-24, finding inject-selection №1: «Деструктивный зонд `Ctrl+C` при пустом буфере
+/// набора») takes the console classes of FR-42а out of the selection path altogether, because
+/// there the probe is an interrupt rather than a copy. The sentence above therefore describes an
+/// ordinary window — which this item is, an ordinary Notepad, and where the gesture is unchanged
+/// — while in a console the same gesture is a no-op. That half is measured by
+/// [`console_empty_press`], in the console position.
 fn item_enter(
     ctx: &Context,
     target: &input::Target,
@@ -6275,6 +6379,23 @@ fn run_sequence(
                                 skipped.push(format!("пункты 4–5, круг {round} консоли: {error}"));
                                 break;
                             }
+                        }
+                    }
+
+                    // ⚠ **Примечание к §4.7 — решение П-3, находка inject-selection №1 аудита
+                    // 2026-08-24.** Круги выше набирают перед нажатием, то есть буфер набора у
+                    // них НЕ пуст, и по Р-62 путь выделения к ним не подходит — зонд `Ctrl+C`
+                    // ими не проверяется вовсе. Проверяемое состояние — пустой буфер, а в
+                    // консоли он пуст после каждого `Enter` (FR-10), то есть почти всегда.
+                    match console_empty_press(ctx, &console_target, &console_content) {
+                        Ok(line) => {
+                            println!("  {line}");
+                            protocol(&format!("ВЕРДИКТ {line}"));
+                        }
+                        Err(error) => {
+                            println!("  ⛔ П-3, пустой буфер: НЕ ИСПОЛНЕН: {error}");
+                            skipped
+                                .push(format!("пункты 4–5 (П-3, пустой буфер в консоли): {error}"));
                         }
                     }
 

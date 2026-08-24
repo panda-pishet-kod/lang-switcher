@@ -102,7 +102,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
     VK_C, VK_CONTROL, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::{WM_APP, WM_CLIPBOARDUPDATE};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, WM_APP, WM_CLIPBOARDUPDATE};
 use windows::core::{Error as WinError, Free, Result as WinResult};
 
 use crate::convert::Keystroke;
@@ -2365,7 +2365,15 @@ static NO_SELECTION: AtomicU32 = AtomicU32::new(0);
 /// Presses the selection path refused, for any of the reasons of [`Refusal`].
 static REFUSALS: AtomicU32 = AtomicU32::new(0);
 
-/// The counters of the selection path — SEC-01, SEC-07: four counts of program events.
+/// Presses the selection path did not take because the window in front is a console.
+///
+/// **The note to §4.7 — decision П-3.** Kept apart from [`REFUSALS`] deliberately: the other
+/// refusals are the path failing (no cache, no window, a password field), this one is the path
+/// working exactly as the note prescribes, and an acceptance that could not tell them apart
+/// could not tell П-3 from a regression.
+static CONSOLE_REFUSALS: AtomicU32 = AtomicU32::new(0);
+
+/// The counters of the selection path — SEC-01, SEC-07: five counts of program events.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PathCounters {
     /// Presses handed to the UI thread.
@@ -2376,6 +2384,8 @@ pub struct PathCounters {
     pub no_selection: u32,
     /// Presses the path refused.
     pub refusals: u32,
+    /// Presses the path did not take because a console was in front — the note to §4.7, П-3.
+    pub console_refusals: u32,
 }
 
 /// The counters of the selection path as they stand.
@@ -2385,6 +2395,7 @@ pub fn path_counters() -> PathCounters {
         conversions: CONVERSIONS.load(Ordering::Relaxed),
         no_selection: NO_SELECTION.load(Ordering::Relaxed),
         refusals: REFUSALS.load(Ordering::Relaxed),
+        console_refusals: CONSOLE_REFUSALS.load(Ordering::Relaxed),
     }
 }
 
@@ -2394,8 +2405,8 @@ pub fn path_counters() -> PathCounters {
 /// with it; `false` when the typing-buffer path is to run **right here, right now**, exactly as
 /// it did before this task existed.
 ///
-/// Five reasons to answer `false`, and all five are settled before a single system call is made
-/// on the user's behalf:
+/// Six reasons to answer `false`, and not one of them sends a `Ctrl+C`, opens the clipboard or
+/// changes anything the user can observe:
 ///
 /// | Reason | Requirement | What was touched |
 /// |---|---|---|
@@ -2403,6 +2414,7 @@ pub fn path_counters() -> PathCounters {
 /// | the typing buffer is not empty | **Р-62, FR-60, FR-10** | nothing |
 /// | the focus is in a password field | **SEC-06, FR-70** | nothing |
 /// | no cache, or no target layout | FR-30, FR-35 | nothing |
+/// | a console is in front | **note to §4.7 (П-3), FR-42а** | two read-only `user32` queries |
 /// | the UI thread has no window | — | nothing |
 ///
 /// ⚠ **The first row is the whole of acceptance point 17.** With the path switched off this
@@ -2432,6 +2444,25 @@ pub fn path_counters() -> PathCounters {
 /// so it is answered as quietly as FR-65 is. When the buffer is empty — the only state a real
 /// selection can coexist with — the function proceeds unchanged, which is why the selection
 /// path of position 15 is untouched.
+///
+/// # The fifth row — the sixth reason, and the note to §4.7 (decision П-3)
+///
+/// Р-62 above closes only **half** of the harm its own comment names, and the audit of
+/// 2026-08-24 measured which half is left open. In a console the typing buffer is empty almost
+/// always — `Enter` is a boundary key of FR-10 and flushes it completely, and a console line is
+/// finished with `Enter` — so the emptiness the second row falls through on is the console's
+/// normal state, and the probe of step 2 of FR-61 goes out as a real interrupt into whatever
+/// command the user is running. The note to §4.7 answers it: **in the console classes of FR-42а
+/// the selection path does not run at all**, and the press on an empty buffer does nothing.
+///
+/// The key is still suppressed. FR-95 and record 8 of §10 put that decision in the hook, taken
+/// synchronously and long before this function is reached, and nothing here can or should
+/// reconsider it: what changes is what the press *does*, not whether the system sees it.
+///
+/// The rule and the Win32 call are split the way FR-42а is split —
+/// [`console_refuses_selection`] is the rule and [`foreground_window_class`] is the only line
+/// that asks a window — and the class names come from `inject`, so the consoles of this program
+/// are named once ([`crate::inject::CONSOLE_WINDOW_CLASSES`]).
 pub fn wants_selection_path() -> bool {
     // FR-65, first, and before anything else can have an opinion.
     if !path_enabled() {
@@ -2465,6 +2496,25 @@ pub fn wants_selection_path() -> bool {
         return false;
     };
 
+    // ⚠ **The note to §4.7 — decision П-3, audit of 2026-08-24 (inject-selection №1).** The probe
+    // of step 2 of FR-61 is a real `Ctrl+C`, and in a console `Ctrl+C` is an **interrupt** that
+    // can kill the command the user is running. Р-62 above does not reach this case: `Enter`
+    // flushes the typing buffer completely by FR-10, so in a console the buffer is empty almost
+    // always. The press becomes a no-op here, which is what the note prescribes; FR-95 is not
+    // affected, the suppression having been decided in the hook (§10, record 8).
+    //
+    // ⚠ **Asked here and not earlier, and both halves of that are deliberate.** It is the only
+    // reason that costs a system call, so every cheaper reason is asked first — the ordinary
+    // press, the one with a non-empty buffer, still leaves this function without a single system
+    // call, which is what the comment on the Р-62 read above promises. And it is asked *after*
+    // the plan, so the count below means «presses this decision took away from a path that would
+    // otherwise have run»: a press with no cache is refused for a reason that holds in every
+    // window, and attributing it to the console would overstate what П-3 does. Before
+    // `publish_pending`, so that a refusal never leaves a plan behind for a later message.
+    if console_refuses_selection(foreground_window_class().as_deref()) {
+        return false;
+    }
+
     // Published before the message is posted, so a thread woken by it cannot find an empty slot
     // — the order `app::publish_buffer_capacity` uses for the same reason.
     publish_pending(plan);
@@ -2481,6 +2531,96 @@ pub fn wants_selection_path() -> bool {
     HANDOVERS.fetch_add(1, Ordering::Relaxed);
 
     true
+}
+
+/// **The sixth reason of FR-60, decided from a class name — the note to §4.7, decision П-3.**
+///
+/// `true` when a foreground window of class `class` is one of the consoles FR-42а names, which
+/// is the state in which the selection path does not run: no `Ctrl+C`, no clipboard, no
+/// hand-over, and the press on an empty typing buffer does nothing at all.
+///
+/// # Why it is a function of a string
+///
+/// Split from the Win32 call for the reason FR-42а is split — [`crate::inject::resolve_auto`] is
+/// the rule and [`crate::inject::window_class`] is the one place that really asks a window — so
+/// that acceptance can drive this rule with any class name it likes and **no live window at
+/// all**. The Win32 half is [`foreground_window_class`], and it is the only thing on this path
+/// that touches the system.
+///
+/// The names themselves are [`crate::inject::CONSOLE_WINDOW_CLASSES`], not a second list: the
+/// consoles of this program are named once, in the module whose measurement (T-10-7) named them.
+/// A class nobody measured has no business in that list, and a copy of it here would be a second
+/// place for one to appear.
+///
+/// # Why the count is taken here
+///
+/// «Counted where it is decided», the rule [`plan_for_press`] states for its own refusals — and
+/// into [`CONSOLE_REFUSALS`] rather than [`REFUSALS`], because acceptance has to tell this
+/// refusal from a missing cache or a password field: this one is П-3 working, the others are the
+/// path failing.
+///
+/// # `None`, and the direction of that refusal — NFR-13
+///
+/// `None` means there is no foreground window at all, or that `GetClassNameW` refused
+/// ([`crate::inject::window_class`] is where the zero return is examined). It answers **`false`**
+/// — the path runs — and that is the safe direction rather than the lazy one: a window that
+/// cannot be named is a window that is going away or already gone, and a `Ctrl+C` sent at a
+/// desktop switch or a lock screen has no console session to interrupt. Refusing instead would
+/// turn every such moment into a silently dead hotkey, and it is the same direction FR-42а
+/// already chose for an unreadable class (the `_` arm of `resolve_auto`).
+///
+/// Case-insensitively, because window class names are case-insensitive to Windows itself — the
+/// comparison `inject::resolve_auto` and `guard::class_is_edit` both make.
+pub fn console_refuses_selection(class: Option<&str>) -> bool {
+    let console = match class {
+        Some(class) => crate::inject::CONSOLE_WINDOW_CLASSES
+            .iter()
+            .any(|console| class.eq_ignore_ascii_case(console)),
+        // No window, or a class that cannot be read. NFR-13: examined, and answered as "not a
+        // console" for the reason the section above gives.
+        None => false,
+    };
+
+    if console {
+        CONSOLE_REFUSALS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    console
+}
+
+/// The class of the window in front, or `None` when there is none or it cannot be read.
+///
+/// **The Win32 half of the sixth reason** — the shape of [`crate::inject::window_class`], and
+/// the one call site of this path that asks the system anything.
+///
+/// # Which thread this runs on, and why it is not the hook callback — NFR-01…NFR-05
+///
+/// The **input thread**, inside [`wants_selection_path`], which is the same thread and the same
+/// call the `crate::buffer::is_empty()` read above it happens on: `app::window_proc` guards that
+/// call with `buffer::is_installed`, and the typing buffer of section 6.3 is installed on the
+/// input thread and on no other. The hook callback ends at `PostMessageW` (module `hook`); every
+/// line below runs after that hand-off, under NFR-09's thirty milliseconds rather than NFR-01's
+/// hundred microseconds. Two read-only `user32` queries, which is exactly what
+/// `inject::effective_method` already spends once per replacement on the same thread — no
+/// allocation on the callback's behalf, no blocking primitive, no I/O.
+///
+/// `GetClassNameW` is **not** written a second time: the call, its 257-character buffer and the
+/// NFR-13 examination of its zero return all live in [`crate::inject::window_class`], and this
+/// reuses them.
+fn foreground_window_class() -> Option<String> {
+    // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches no
+    // memory of ours; it is callable from any thread. The documented NULL return is checked
+    // immediately below.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.is_invalid() {
+        // NFR-13: examined. There is no foreground window — the documented NULL, seen around
+        // desktop switches and the lock screen. Nothing to read a class from, and
+        // `console_refuses_selection` documents why that answers "not a console".
+        return None;
+    }
+
+    crate::inject::window_class(foreground)
 }
 
 /// **Runs the selection path — the UI thread's half of the hand-over.**
