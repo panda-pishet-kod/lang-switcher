@@ -34,11 +34,13 @@
 //! `WH_KEYBOARD_LL` hook in a process that is not pumping messages freezes the keyboard of
 //! whoever is running `cargo test`.
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
 use lang_switcher::buffer::{self, Recorder};
 use lang_switcher::convert::{self, Keystroke};
 use lang_switcher::hook::INJECTED_SIGNATURE;
 use lang_switcher::inject::{
-    self, Dispatched, Environment, InjectError, MODIFIER_COUNT, Modifiers,
+    self, Dispatched, Environment, InjectError, MODIFIER_COUNT, Modifiers, Replaced,
 };
 use lang_switcher::layouts::{KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, Mods};
 use lang_switcher::settings::{self, ReplacementMethod};
@@ -336,6 +338,23 @@ fn layout_with(layout: LayoutId, scan: u16, mapping: KeyMapping) -> LayoutMap {
 /// `text` as UTF-16.
 fn utf16(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
+}
+
+/// **The lock every check that makes a `SendInput` come up short has to take** — task T-13-25.
+///
+/// [`inject::send_mismatches`] is state of the *process* and `cargo test` runs a binary's checks
+/// in parallel, so two checks that both make a call come up short while both assert on the
+/// counters would be asserting on each other's timing. Until this task there was exactly one
+/// such check and the file said so; the counter now has to be readable from the checks of the
+/// press as well, and one lock is a cheaper answer than counters that may only be compared with
+/// `>=`.
+static SHORT_SEND: Mutex<()> = Mutex::new(());
+
+/// Takes that lock, ignoring the poisoning a check that already failed would have left: the
+/// counters are `AtomicU32` and no panic can leave them half-written, so a poisoned lock here
+/// would only turn one red check into several.
+fn short_sends_are_mine() -> MutexGuard<'static, ()> {
+    SHORT_SEND.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -946,10 +965,13 @@ fn a_slice_that_stops_inside_a_character_is_portioned_to_its_end_and_no_further(
 ///
 /// Both the count of calls and the number of events lost are asserted in one test on purpose:
 /// the counters belong to the process, `cargo test` runs a binary's tests in parallel, and two
-/// tests asserting on the same counter would be asserting on each other's timing. This is the
-/// only test in this file that makes a `SendInput` come up short.
+/// tests asserting on the same counter would be asserting on each other's timing. The other
+/// tests that make a `SendInput` come up short are the press checks of task T-13-25, and
+/// [`short_sends_are_mine`] is what keeps them out of each other's way.
 #[test]
 fn a_short_return_from_sendinput_reaches_the_counter_of_fr45() {
+    let _short_sends = short_sends_are_mine();
+
     let text = utf16("нет");
     let mut packet = [INPUT::default(); inject::replacement_events(3, 3)];
     let len = inject::build_replacement(3, &text, &mut packet).expect("sized");
@@ -1041,6 +1063,245 @@ fn an_empty_buffer_is_nothing_to_replace() {
     buffer::install_recorder(Recorder::with_capacity(16));
 
     assert!(inject::on_hotkey().is_none());
+
+    buffer::uninstall();
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-13-25 — the press moves the counter of FR-32 only when the injection was taken
+// ---------------------------------------------------------------------------------------
+//
+// The finding of the audit of 2026-08-24: `on_hotkey` branched on `outcome.is_some()` alone,
+// and `replace_with` answers `Ok(Replaced)` even when `SendInput` accepted nothing — so a
+// blocked injection (UIPI towards an elevated window from a build without `uiAccess`,
+// `BlockInput`) left the screen unchanged while the position counter of FR-32 moved and the
+// session was marked converted. Every press after that rendered the wrong step of the cycle.
+//
+// `inject::note_press` is the half of the press that decides, and it is reachable through the
+// `Environment` seam — which is the only way to ask this question without letting a single
+// event reach the machine, for the reason the head of this file gives.
+
+/// A cycle of three layouts, so that "the counter moved" and "the counter did not" are two
+/// different numbers rather than two ways of reading a zero.
+const CYCLE_LEN: usize = 3;
+
+/// The whole `backspace` packet for `ghbdtn` → `привет`: six characters taken off the screen and
+/// six code units typed back, each of them an edge down and an edge up.
+const WHOLE_PACKET: usize = inject::replacement_events(6, 6);
+
+/// Installs a buffer on this thread and leaves the position counter of FR-32 at **1**.
+///
+/// Off zero on purpose: "the counter did not move" has to be a statement about the press and
+/// not about an atomic that was zero anyway. Answers the pair every check below compares with.
+fn a_buffer_one_step_along_the_cycle() -> (usize, bool) {
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    buffer::with(|recorder| {
+        recorder.advance_cycle(CYCLE_LEN);
+        (recorder.cycle_position(), recorder.in_conversion())
+    })
+    .expect("the buffer was installed on this thread one line ago")
+}
+
+/// The position counter of FR-32 and the conversion session of FR-10, as they stand now.
+fn cycle_and_session() -> (usize, bool) {
+    buffer::with(|recorder| (recorder.cycle_position(), recorder.in_conversion()))
+        .expect("the buffer is installed on this thread")
+}
+
+/// One press of `ghbdtn` against `bench`, in the `backspace` mode of FR-41.
+fn press_ghbdtn(bench: &mut Bench) -> Replaced {
+    inject::replace_in(bench, &ghbdtn(), &russian(), 0)
+        .expect("the packet is sized from the lengths it is built with")
+}
+
+/// **The finding itself.** A replacement `SendInput` refused outright leaves the position
+/// counter of FR-32 and the conversion session of FR-10 exactly where it found them.
+///
+/// The bench takes none of the packet, which is what a blocked injection looks like from inside
+/// this program: `replace_in` still answers `Ok`, and the screen still shows the text the user
+/// typed. A counter that moved here would describe a screen that does not exist.
+#[test]
+fn an_injection_the_system_refused_moves_neither_the_counter_nor_the_session() {
+    let _short_sends = short_sends_are_mine();
+
+    let (before_cycle, before_session) = a_buffer_one_step_along_the_cycle();
+    assert_eq!(
+        (before_cycle, before_session),
+        (1, false),
+        "before the press"
+    );
+
+    // Nothing is held, so steps 3 and 6 build empty modifier packets and send nothing at all:
+    // the one `SendInput` of this press is the replacement, and this bench takes none of it.
+    let mut bench = Bench::refusing(WHOLE_PACKET);
+    let outcome = press_ghbdtn(&mut bench);
+
+    assert_eq!(bench.sent().len(), 1, "step 4 alone reached the system");
+    assert_eq!(outcome.replacement.requested, WHOLE_PACKET);
+    assert_eq!(outcome.replacement.accepted, 0, "the injection was blocked");
+    assert!(!outcome.reached_the_screen());
+
+    inject::note_press(Some(&outcome), CYCLE_LEN);
+
+    let (after_cycle, after_session) = cycle_and_session();
+    assert_eq!(
+        after_cycle, 1,
+        "FR-32: the screen did not change, so the position did not move"
+    );
+    assert!(
+        !after_session,
+        "FR-10: a session in which nothing was converted is not open"
+    );
+    assert_eq!((after_cycle, after_session), (before_cycle, before_session));
+
+    // The other way in, unchanged by this task: a press that produced no `Replaced` at all — a
+    // sizing failure — moves nothing either.
+    inject::note_press(None, CYCLE_LEN);
+    assert_eq!(cycle_and_session(), (1, false));
+
+    buffer::uninstall();
+}
+
+/// **The ordinary press is untouched.** A packet the system took whole marks the session
+/// converted and moves the position counter of FR-32 by one, exactly as before this task.
+#[test]
+fn a_replacement_the_system_took_whole_moves_the_counter_and_opens_the_session() {
+    let (before_cycle, before_session) = a_buffer_one_step_along_the_cycle();
+    assert_eq!(
+        (before_cycle, before_session),
+        (1, false),
+        "before the press"
+    );
+
+    let mut bench = Bench::new();
+    let outcome = press_ghbdtn(&mut bench);
+
+    assert_eq!(outcome.replacement.requested, WHOLE_PACKET);
+    assert_eq!(outcome.replacement.accepted, WHOLE_PACKET);
+    assert!(outcome.reached_the_screen());
+
+    inject::note_press(Some(&outcome), CYCLE_LEN);
+
+    assert_eq!(
+        cycle_and_session(),
+        (2, true),
+        "FR-32 and FR-10: one step further along the cycle, session open"
+    );
+
+    buffer::uninstall();
+}
+
+/// **Conservative on purpose.** A packet the system took only *in part* does not move the
+/// counter either — and the discrepancy is still counted where FR-45 counts it.
+///
+/// Half a word replaced is the failure nobody notices: the screen and the counter part company
+/// and stay parted for the rest of the session. A counter that did not move is the failure the
+/// user repairs by pressing the hotkey again. The second assertion is the other half of the
+/// requirement — the bookkeeping of FR-45 was to be left exactly as it was, and it is: one call
+/// came up short by one event, and both counters say so.
+#[test]
+fn a_replacement_taken_in_part_moves_nothing_and_is_still_counted_by_fr45() {
+    let _short_sends = short_sends_are_mine();
+
+    let (before_cycle, before_session) = a_buffer_one_step_along_the_cycle();
+    assert_eq!(
+        (before_cycle, before_session),
+        (1, false),
+        "before the press"
+    );
+
+    let before_counters = inject::send_mismatches();
+
+    let mut bench = Bench::refusing(1);
+    let outcome = press_ghbdtn(&mut bench);
+
+    assert_eq!(outcome.replacement.requested, WHOLE_PACKET);
+    assert_eq!(outcome.replacement.accepted, WHOLE_PACKET - 1);
+    assert!(
+        !outcome.reached_the_screen(),
+        "part of a packet is not the packet"
+    );
+
+    inject::note_press(Some(&outcome), CYCLE_LEN);
+
+    assert_eq!(
+        cycle_and_session(),
+        (1, false),
+        "FR-32 and FR-10: a half-replaced word moves neither"
+    );
+
+    let after_counters = inject::send_mismatches();
+    assert_eq!(
+        after_counters.0,
+        before_counters.0 + 1,
+        "FR-45: one call still came up short, and is still counted"
+    );
+    assert_eq!(
+        after_counters.1,
+        before_counters.1 + 1,
+        "FR-45: and the one event it lost is still counted too"
+    );
+
+    buffer::uninstall();
+}
+
+/// **What `is_complete` counts, and what it does not.** Neither the pause of FR-44 nor a
+/// surrogate pair can make a packet the system took whole look incomplete.
+///
+/// `Dispatched::requested` and `Dispatched::accepted` are `INPUT` **structures**, summed over
+/// every call the dispatch made, so the split FR-44 introduces changes `calls` and nothing else.
+/// A character outside the BMP is four structures that `portion_end` keeps inside one portion,
+/// so the pair is not split across calls in the first place — and even the short last portion of
+/// a packet that ended mid-character would still be counted on both sides of the comparison.
+/// The check matters because the strength the audit confirmed must not turn into a refusal to
+/// advance the cycle.
+#[test]
+fn neither_the_pause_of_fr44_nor_a_surrogate_pair_makes_a_taken_packet_incomplete() {
+    let target = layout_with(
+        LayoutId::from_raw(0x0419_0419),
+        0x22,
+        KeyMapping::from_char(NON_BMP),
+    );
+
+    let source = us();
+    let strokes = [Keystroke::recorded_in(&source, 0x22, false, Mods::NONE)];
+
+    let (before_cycle, before_session) = a_buffer_one_step_along_the_cycle();
+    assert_eq!(
+        (before_cycle, before_session),
+        (1, false),
+        "before the press"
+    );
+
+    // A pause above zero is the opt-in case of FR-44: the packet leaves in portions.
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in(&mut bench, &strokes, &target, 4)
+        .expect("the packet is sized from the lengths it is built with");
+
+    assert_eq!(outcome.erased, 1, "one character on the screen");
+    assert_eq!(outcome.typed, 2, "two code units — the surrogate pair");
+    assert!(
+        outcome.replacement.calls > 1,
+        "FR-44 really did split the packet into portions"
+    );
+    assert_eq!(
+        outcome.replacement.requested,
+        inject::replacement_events(1, 2),
+        "the portions add up to the whole packet, structure for structure"
+    );
+    assert!(
+        outcome.reached_the_screen(),
+        "`is_complete` counts structures the system took, not the calls that carried them"
+    );
+
+    inject::note_press(Some(&outcome), CYCLE_LEN);
+
+    assert_eq!(
+        cycle_and_session(),
+        (2, true),
+        "so the ordinary press of FR-44 advances the cycle exactly as FR-41's does"
+    );
 
     buffer::uninstall();
 }

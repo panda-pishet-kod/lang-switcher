@@ -1417,6 +1417,48 @@ pub struct Replaced {
     pub restore: Dispatched,
 }
 
+impl Replaced {
+    /// **Whether the replacement itself reached the system whole** — the condition the position
+    /// counter of FR-32 and the conversion session of FR-10 are allowed to move on.
+    ///
+    /// Step 4 and step 4 only. Steps 3 and 6 are modifier hygiene: a `Shift` that failed to come
+    /// down or to go back up is a defect of its own, counted where every `SendInput` discrepancy
+    /// is counted ([`send_mismatches`]), but it says nothing about whether the *text* on the
+    /// screen changed — and what FR-32 counts is positions of the text.
+    ///
+    /// # Why anything less than whole counts as nothing
+    ///
+    /// Conservative on purpose: a packet the system took **in part** does not advance the cycle
+    /// either. The counter is a promise about the whole run of characters — the press that brings
+    /// it back to zero is the rollback of FR-33, "code unit for code unit" — and half a word
+    /// replaced breaks that promise for the rest of the session. Of the two ways to be wrong, a
+    /// counter that did not move is the one the user repairs by pressing the hotkey again,
+    /// because the screen and the counter still agree; a counter that moved over a half-replaced
+    /// word is the one nobody notices, because every later press then renders the wrong step of
+    /// the cycle against text that is in some other state entirely.
+    ///
+    /// # This is not a second [`Dispatched::is_complete`]
+    ///
+    /// It is that very method, asked at the one place on the press path that never asked it —
+    /// audit of 2026-08-24, task T-13-25. What `is_complete` compares is `accepted` against
+    /// `requested`, both counted in `INPUT` **structures handed to `SendInput`** and summed over
+    /// every call the dispatch made. So it is invariant under the split of FR-44: the pause mode
+    /// changes how many calls carry the packet, never how many structures the packet has, and
+    /// [`portion_end`] keeps the four structures of a character outside the BMP inside one
+    /// portion, so a surrogate pair is not split across calls in the first place. A pair
+    /// travelling as its own portion is complete exactly when both halves were accepted. Nothing
+    /// about the mode of FR-44 or about surrogate pairs can make this answer `false`; only
+    /// `SendInput` taking fewer events than it was given can — which is the blocked injection
+    /// this asks about.
+    ///
+    /// The FR-45 side is untouched: the discrepancy is still counted in [`send_mismatches`] by
+    /// [`record_discrepancy`], and the packet is still not re-sent, for the reason
+    /// [`dispatch_in`] gives — re-sending the tail would duplicate whatever did get through.
+    pub const fn reached_the_screen(self) -> bool {
+        self.replacement.is_complete()
+    }
+}
+
 /// **FR-40, steps 3 to 6, for one recognised hotkey press.**
 ///
 /// `strokes` is what the typing buffer recorded, `target` is the layout to convert into — task
@@ -1697,25 +1739,51 @@ pub fn on_hotkey() -> Option<Replaced> {
     crate::buffer::zero_slice(&mut strokes);
     drop(strokes);
 
-    if outcome.is_some() {
-        crate::buffer::with(|recorder| {
-            // The last row of the FR-10 table, as module `buffer` describes it: the session is
-            // marked converted and the buffer is deliberately **not** flushed, so that FR-32 can
-            // render the same scan codes into the next layout on the next press. It is the next
-            // ordinary key that ends the session, and `Recorder::record` flushes then.
-            recorder.note_conversion();
-
-            // **FR-32, the other half.** The strokes stay as they were; what moves is the
-            // position counter, and it moves once per replacement that actually happened. The
-            // next press therefore renders *these same* strokes one step further along the
-            // cycle, and the press that brings the counter back to zero renders them into the
-            // layout they were typed under — which is the original text, code unit for code
-            // unit.
-            recorder.advance_cycle(cycle_len);
-        });
-    }
+    note_press(outcome.as_ref(), cycle_len);
 
     outcome
+}
+
+/// **What one press leaves behind in the typing buffer** — the last row of FR-10 and the position
+/// counter of FR-32.
+///
+/// Split out of [`on_hotkey`] and public for one reason: this is the half of the press that
+/// *decides*, and the decision is made from a [`Replaced`] that the [`Environment`] seam can
+/// produce. `on_hotkey` itself runs against the real machine, and a check that drove it would
+/// have to let `SendInput` reach whatever window is in the foreground — which is the one thing
+/// `tests\inject.rs` refuses to do. With the decision here, a bench whose `send` accepts nothing
+/// (or only part of the packet) can be pointed at the very code the input thread runs.
+///
+/// It is called from the input thread's message loop, after the handoff of FR-02 and never from
+/// the hook callback: one thread-local borrow, one flag, one remainder — no allocation, no
+/// blocking primitive, no I/O (NFR-01 to NFR-05).
+pub fn note_press(outcome: Option<&Replaced>, cycle_len: usize) {
+    // ⚠ **Nothing moves unless the replacement really reached the screen** — audit of
+    // 2026-08-24, task T-13-25. `replace_with` answers `Ok(Replaced)` even when `SendInput`
+    // accepted nothing at all (a blocked injection: UIPI towards an elevated window from a
+    // build without `uiAccess`, `BlockInput`), and a press that changed nothing on the screen
+    // must not move a counter that describes the screen. See [`Replaced::reached_the_screen`]
+    // for why a *partial* packet counts as nothing here too, and for why the FR-45 bookkeeping
+    // is deliberately left exactly as it was.
+    if !outcome.is_some_and(|replaced| replaced.reached_the_screen()) {
+        return;
+    }
+
+    crate::buffer::with(|recorder| {
+        // The last row of the FR-10 table, as module `buffer` describes it: the session is
+        // marked converted and the buffer is deliberately **not** flushed, so that FR-32 can
+        // render the same scan codes into the next layout on the next press. It is the next
+        // ordinary key that ends the session, and `Recorder::record` flushes then.
+        recorder.note_conversion();
+
+        // **FR-32, the other half.** The strokes stay as they were; what moves is the
+        // position counter, and it moves once per replacement that actually happened. The
+        // next press therefore renders *these same* strokes one step further along the
+        // cycle, and the press that brings the counter back to zero renders them into the
+        // layout they were typed under — which is the original text, code unit for code
+        // unit.
+        recorder.advance_cycle(cycle_len);
+    });
 }
 
 /// What one press of the hotkey needs, taken under a single borrow of the buffer.
