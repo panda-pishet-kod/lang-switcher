@@ -82,13 +82,38 @@
 //!
 //! Task T-11-10 (FR-92а) draws the menu items itself, which brings `WM_MEASUREITEM` and
 //! `WM_DRAWITEM` to this window. Both are behind a gate: the thread-local [`MENU_PAINT`]
-//! holds `Some` exactly while our menu is on the screen — set immediately before
+//! holds `Some` exactly while our own drawing of a menu is active — set immediately before
 //! `TrackPopupMenuEx`, cleared immediately after it returns — and outside that window both
 //! messages are [`Reaction::Ignored`] like everything else foreign. The `itemData` of every
 //! entry is a number and never a pointer — the command number for the five commands of FR-91,
 //! the one reserved [`MENU_SEPARATOR_DATA`] for the two rules task T-11-22 also draws — so
 //! nothing a forged message carries is dereferenced beyond the identifier check and the drawing
 //! rectangle — the SEC-05 wording verbatim.
+//!
+//! # Two thread-locals about the menu, and why they are two — task T-13-18
+//!
+//! [`MENU_PAINT`] and [`MENU_ON_SCREEN`] look alike and answer **different questions**. Neither
+//! is the other's spare, and removing either brings back a defect the audit of 2026-08-24
+//! found:
+//!
+//! * [`MENU_PAINT`] answers «**is our own drawing active?**» — is there paint state these two
+//!   messages may read. It is the gate SEC-05 asks for, and it is `None` in the degraded
+//!   showing where [`MenuPaint::new`] was refused: there the menu is up, the rows come up in
+//!   the shell's own colours, and the two messages have nothing of ours to answer with.
+//! * [`MENU_ON_SCREEN`] answers «**is a menu of ours on the screen?**» — the question
+//!   [`show_menu`] has to ask of *itself* before it starts a second showing on top of a live
+//!   one. It goes up on the first line of that function and comes down once
+//!   `TrackPopupMenuEx` has returned, so it wraps the modal call together with everything the
+//!   showing builds for it, and it is up for the ordinary showing and the degraded one alike
+//!   — which is exactly why a check of `MENU_PAINT.is_some()` could not have taken its place.
+//!
+//! The re-entry is not hypothetical: the callback message is postable by any process at the
+//! same integrity level (below), and while `TrackPopupMenuEx` pumps its modal loop every such
+//! message is dispatched into [`handle_ui_message`]. Without the second flag the nested call
+//! replaced [`MENU_PAINT`] — freeing, out from under Windows, the brush `SetMenuInfo` had been
+//! given for the menu still on the screen — and then took the slot away, leaving the outer
+//! showing with the SEC-05 gate down. With it, a second `WM_APP_TRAY` finds nothing: it does
+//! not reach the tray, the shell, GDI or the menu of the live showing.
 //!
 //! # SEC-01, SEC-07
 //!
@@ -1652,6 +1677,10 @@ impl Drop for Menu {
 /// the menu goes away. That is the same «exactly that long», which is why the brush is this
 /// one and not a second one made for the purpose.
 ///
+/// ⚠ That «exactly that long» is kept true by [`MenuOnScreen`] since task T-13-18 — before it,
+/// a second entry into [`show_menu`] freed this value's brushes in the middle of the showing
+/// they were painting.
+///
 /// # Why a thread-local of its own — the rule of the module header
 ///
 /// While `TrackPopupMenuEx` runs its modal loop, every message re-enters this module, so
@@ -1681,11 +1710,87 @@ struct MenuPaint {
 }
 
 thread_local! {
-    /// The state of the menu now on the screen — `Some` exactly from just before
+    /// The paint state of the showing now on the screen — `Some` exactly from just before
     /// `TrackPopupMenuEx` until just after it returns. This *is* the gate SEC-05 asks
     /// for: [`measure_menu_item`] and [`draw_menu_item`] answer [`Reaction::Ignored`]
     /// while it holds `None`, before anything of the message is dereferenced.
+    ///
+    /// ⚠ **«Our drawing is active», not «a menu is on the screen».** The two part company on
+    /// the degraded path, where [`MenuPaint::new`] was refused and the menu is shown anyway:
+    /// this slot is then `None` for the whole of a showing that is very much on the screen.
+    /// The other question is [`MENU_ON_SCREEN`]'s, and the module header sets the two out
+    /// side by side.
     static MENU_PAINT: RefCell<Option<MenuPaint>> = const { RefCell::new(None) };
+
+    /// Whether a menu of this program is on the screen right now — task T-13-18.
+    ///
+    /// The second line of defence, and the answer to a question [`MENU_PAINT`] cannot be
+    /// asked. It wraps `TrackPopupMenuEx`: up from the first line of [`show_menu`], down
+    /// once that call has returned — so it is up for the ordinary showing and for the
+    /// degraded one where [`MenuPaint::new`] was refused alike. Read and written through
+    /// [`MenuOnScreen`] and through nothing else, so that no path out of a showing —
+    /// including an unwind — can leave it up.
+    static MENU_ON_SCREEN: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The right to show one menu, held for exactly as long as that menu is up — task T-13-18.
+///
+/// [`MenuOnScreen::raise`] answers `None` when a showing is already live on this thread, and
+/// that `None` is the early exit of [`show_menu`]: the finding of the audit of 2026-08-24 is
+/// that a second `WM_APP_TRAY`, dispatched to us by the modal loop of `TrackPopupMenuEx`
+/// itself, used to walk straight into the middle of the live showing and drop its
+/// [`MenuPaint`] — brushes, menu face and the ground brush Windows had been handed by
+/// `SetMenuInfo`, all freed while the menu they painted was still on the screen.
+///
+/// ⚠ **The lowering is a `Drop` and not a call**, for the reason [`MenuFrameHook`] gives next
+/// door: `TrackPopupMenuEx` runs a message loop of its own, and a flag left up by a path
+/// nobody thought of — the early returns, a refused `Menu::build`, an unwind out of anything
+/// the modal loop dispatched — would wedge the menu shut for the rest of the run. A bare
+/// `set(true) … set(false)` pair around the call would survive neither.
+///
+/// Neither `Send` nor `Sync`: the flag belongs to the thread that raised it, exactly like
+/// [`Attachment`] and for the same reason.
+struct MenuOnScreen {
+    _not_send: PhantomData<*const ()>,
+}
+
+impl MenuOnScreen {
+    /// Claims the screen for one showing, or answers `None` because it is already claimed.
+    fn raise() -> Option<Self> {
+        if MENU_ON_SCREEN.with(Cell::get) {
+            return None;
+        }
+
+        MENU_ON_SCREEN.with(|flag| flag.set(true));
+
+        Some(Self {
+            _not_send: PhantomData,
+        })
+    }
+}
+
+impl Drop for MenuOnScreen {
+    fn drop(&mut self) {
+        MENU_ON_SCREEN.with(|flag| flag.set(false));
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many entries into [`show_menu`] have got **past** its first gate on this thread —
+    /// task T-13-18.
+    ///
+    /// Test-only, and counted in [`show_menu`] on the far side of the gate rather than inside
+    /// [`MenuOnScreen::raise`] on purpose. What the tests have to tell apart is «turned round
+    /// at the gate» from «returned a line or two later for a reason of its own», and a counter
+    /// living inside the gate would measure the mechanism instead of the line: a gate written
+    /// the other way — a reading of [`MENU_PAINT`], which the degraded showing defeats — has
+    /// to move this number where the test of that showing says it must not.
+    static MENU_SHOWINGS: Cell<u32> = const { Cell::new(0) };
+
+    /// Makes [`MenuPaint::new`] answer `None` — the seam of the degraded showing, task
+    /// T-13-18. Test-only; see the branch it feeds.
+    static REFUSE_MENU_PAINT: Cell<bool> = const { Cell::new(false) };
 }
 
 impl MenuPaint {
@@ -1697,6 +1802,15 @@ impl MenuPaint {
     /// because these calls do not promise a last-error code. The caller shows the menu
     /// anyway — unpainted rows over no menu at all.
     fn new(items: Vec<MenuItem>, palette: &'static theme::Palette) -> Option<Self> {
+        // Task T-13-18, the seam of the degraded showing. GDI exhaustion is not something a
+        // test can ask the system for, and the half of this task that matters most — a menu
+        // on the screen with **no** paint state behind it — begins exactly here. Compiled
+        // only into the unit-test build; the product has no branch to reach it.
+        #[cfg(test)]
+        if REFUSE_MENU_PAINT.with(Cell::get) {
+            return None;
+        }
+
         // NFR-13: `None` — the non-client metrics were refused. Without them there is no
         // menu face to measure with, and a guessed face would mislabel every measurement
         // that follows. Task T-11-21: the face that comes back is already the smoothed
@@ -2037,8 +2151,19 @@ impl Drop for MenuPaint {
             // SAFETY: every handle came from a successful creation in `new` and is freed
             // exactly once: the type is neither `Copy` nor `Clone`, the fields are
             // private and never reassigned, and `drop` runs once. The menu the objects
-            // painted is gone — `show_menu` drops this value only after `TrackPopupMenuEx`
-            // has returned.
+            // painted is gone by now, `window_bg` is no longer a brush Windows may paint
+            // with, and **that is true by construction** since task T-13-18: the only
+            // `drop` of a value of this type that a showing can reach is the `take` in
+            // [`show_menu`] on the line after `TrackPopupMenuEx` returned, because
+            // [`MenuOnScreen`] turns back every second entry into [`show_menu`] before it
+            // reaches the `replace` above.
+            //
+            // ⚠ Until that task this comment asserted the same thing and the code did not
+            // hold it up: a `WM_APP_TRAY` dispatched by the modal loop re-entered
+            // [`show_menu`], and its `replace` ran this `Drop` on the live showing's paint
+            // state — `DeleteObject` on the ground brush `SetMenuInfo` had handed to a menu
+            // still on the screen (audit of 2026-08-24). The invariant is now enforced where
+            // it is relied on, and not merely written down here.
             let deleted = unsafe { DeleteObject(handle) };
 
             // NFR-13: examined — loudly where the tests run, in words here; the same
@@ -2506,7 +2631,40 @@ fn apply_menu_frame(hwnd: HWND) {
 ///
 /// Called with no borrow of the tray held: `TrackPopupMenuEx` runs a modal message loop that
 /// dispatches back into our own window procedure.
+///
+/// # One showing at a time — task T-13-18
+///
+/// The first thing here is [`MenuOnScreen::raise`], and a `None` from it is the whole of the
+/// answer: while a menu of ours is up, a second `WM_APP_TRAY` — a second click that queued
+/// before the menu took the mouse, or a forged message from a process at the same integrity
+/// level (SEC-05) — turns round on this line, before the tray is borrowed, before the shell or
+/// GDI is touched and before anything of the live showing is disturbed.
+///
+/// **Why the flag and not `MENU_PAINT.is_some()`.** Because of the branch below where
+/// [`MenuPaint::new`] is refused: the menu is then shown with the shell's own drawing and
+/// [`MENU_PAINT`] stays `None` for the whole showing, so a gate reading it would wave the
+/// second entry through into exactly the state this task exists to prevent. The two answer
+/// different questions and the module header sets them out side by side.
+///
+/// **Where the right is given up, and why there.** [`MenuOnScreen`] is dropped by name on the
+/// line after the `take` of [`MENU_PAINT`] — that is, once `TrackPopupMenuEx` has returned and
+/// the popup window is gone, and **before** [`dispatch_command`]. Before, and not at the end
+/// of the function, because `dispatch_command` opens the modal dialog of FR-92, and a menu
+/// opened over that dialog is a legitimate showing that task T-13-14 greys two entries of.
+/// Holding the right across `dispatch_command` would refuse it and undo that task; releasing
+/// it any earlier would reopen the window this one closes.
 fn show_menu(x: i32, y: i32) {
+    // Task T-13-18. Held from here to the `drop` below; every early return of this function
+    // gives it up on the way out, and so does an unwind — see [`MenuOnScreen`].
+    let Some(on_screen) = MenuOnScreen::raise() else {
+        return;
+    };
+
+    // The number the acceptance of task T-13-18 reads — see [`MENU_SHOWINGS`] for why it is
+    // counted here, past the gate, and not inside it. Test-only; the product has no counter.
+    #[cfg(test)]
+    MENU_SHOWINGS.with(|count| count.set(count.get().saturating_add(1)));
+
     let Some((hwnd, enabled, autostart, theme_setting)) = with_tray(|tray| {
         (
             tray.hwnd,
@@ -2525,7 +2683,9 @@ fn show_menu(x: i32, y: i32) {
     // ⚠ That the second of the two can be true at all is the finding this menu is built
     // against: `TrackPopupMenuEx` and `DialogBoxParamW` both run message loops of their own,
     // so the modal settings dialog does not stop the icon being clicked and does not stop this
-    // function running underneath it.
+    // function running underneath it. That is also why the gate of task T-13-18 is given up
+    // before `dispatch_command` and not at the end of this function: this very line has to
+    // stay reachable while the dialog that greys the two entries is up.
     let menu = match Menu::build(
         enabled,
         autostart,
@@ -2566,6 +2726,13 @@ fn show_menu(x: i32, y: i32) {
     // A refused `MenuPaint::new` (GDI exhaustion; nothing to report — see its
     // documentation) leaves the gate down and the menu is shown anyway: the rows come up
     // unpainted, but every command of FR-91 still works and `Esc` still dismisses.
+    //
+    // ⚠ **That refusal is why this is not the gate of task T-13-18 as well.** On this branch
+    // the slot below stays `None` for a whole showing that is on the screen, so «is our
+    // drawing active?» and «is a menu of ours up?» give different answers, and the second
+    // question is [`MenuOnScreen`]'s — raised at the top of this function, already up on both
+    // paths through the `if`. `replace` here can therefore no longer land on a live showing's
+    // paint state, which is the finding of the audit of 2026-08-24.
     if let Some(paint) = MenuPaint::new(menu.items().to_vec(), palette) {
         // FR-92а, task T-11-22: the ground **between** the entries — the padding the menu
         // keeps around them — is the palette's from here on. The brush is the one
@@ -2615,6 +2782,14 @@ fn show_menu(x: i32, y: i32) {
     // among them, and the menu it was given to is gone by this line.
     let paint = MENU_PAINT.with(|slot| slot.borrow_mut().take());
     drop(paint);
+
+    // Task T-13-18: the second gate comes down here and not at the end of the function.
+    // `TrackPopupMenuEx` has returned, the popup window is gone and the paint state of the
+    // showing has been freed above, so there is no longer a menu of ours for a second entry to
+    // walk into — while `dispatch_command` below opens the modal dialog of FR-92, underneath
+    // which a menu **is** allowed to be shown (task T-13-14 greys two of its entries for
+    // exactly that case). Dropped by name for the reason `frame_hook` is, one gate above.
+    drop(on_screen);
 
     // The second half of the workaround: without a message arriving after the menu closes,
     // the window that tracked it can be left showing a menu that never repaints away.
@@ -3081,6 +3256,8 @@ fn coordinate(word: u16) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::Graphics::Gdi::GetObjectType;
+
     use super::*;
 
     /// A `VS_VERSIONINFO` prefix carrying the given two version words.
@@ -3170,6 +3347,251 @@ mod tests {
         assert!(
             width > 0 && height > 0,
             "SM_CXSMICON and SM_CYSMICON must give a usable size"
+        );
+    }
+
+    // -----------------------------------------------------------------------------------
+    // The re-entry of `show_menu` — task T-13-18
+    // -----------------------------------------------------------------------------------
+    //
+    // ⚠ These live here and not in `tests\tray.rs` because everything they read is private
+    // to this module by design: [`show_menu`], [`MENU_PAINT`], [`MENU_ON_SCREEN`] and
+    // [`MenuOnScreen`]. Publishing any of them so that an integration test could reach it
+    // would widen the surface of SEC-05 for the sake of a test, which is the wrong trade.
+    //
+    // ⚠ **Nothing here puts a menu on the screen, and nothing here can.** Two of the three
+    // tests call [`show_menu`] with the flag already up, so the call turns round on its first
+    // line — before the tray, before the shell, before GDI. The third calls it with the flag
+    // down, and on a test thread that has no tray it returns one line further on, at
+    // [`with_tray`]. `TrackPopupMenuEx` is unreachable from all three, which is what keeps a
+    // suite that must not run the product from hanging on a modal loop.
+
+    /// The number the gate moves: entries into [`show_menu`] that got past its first line.
+    fn showings() -> u32 {
+        MENU_SHOWINGS.with(Cell::get)
+    }
+
+    /// The four GDI handles of a paint state, as plain numbers — identity, not liveness.
+    fn handles_of(paint: &MenuPaint) -> [isize; 4] {
+        [
+            paint.font.0 as isize,
+            paint.window_bg.0 as isize,
+            paint.hover_bg.0 as isize,
+            paint.panel_border.0 as isize,
+        ]
+    }
+
+    /// What GDI says each of those four handles is right now — zero means «not an object of
+    /// mine any more», which is precisely the dangling handle of the finding.
+    fn kinds_of(paint: &MenuPaint) -> [u32; 4] {
+        // SAFETY: `GetObjectType` takes a handle by value, reads no memory of ours and
+        // writes none. It is documented to answer zero for a handle that is not a live GDI
+        // object, which is the answer this asks for — the four handles are those of a paint
+        // state this test owns and has not dropped.
+        unsafe {
+            [
+                GetObjectType(paint.font.into()),
+                GetObjectType(paint.window_bg.into()),
+                GetObjectType(paint.hover_bg.into()),
+                GetObjectType(paint.panel_border.into()),
+            ]
+        }
+    }
+
+    /// Empties [`MENU_PAINT`] the way [`show_menu`] does, so the thread leaves no GDI
+    /// objects behind whichever way the test ended.
+    fn clear_paint() {
+        let paint = MENU_PAINT.with(|slot| slot.borrow_mut().take());
+        drop(paint);
+    }
+
+    /// **Criterion 5 of task T-13-18.** A second `WM_APP_TRAY` over a live showing — the
+    /// click that queued before the menu took the mouse, or the forged message SEC-05 admits
+    /// is postable by any process at the same integrity level — turns round at the gate, and
+    /// the paint state of the live showing is *the same object*, with its brushes still
+    /// brushes.
+    ///
+    /// The finding of the audit of 2026-08-24 is exactly what the last of those assertions
+    /// would catch: before this task the second entry ran
+    /// `MENU_PAINT.with(|slot| slot.replace(Some(paint)))` on a live showing, whose `Drop`
+    /// then called `DeleteObject` on the ground brush `SetMenuInfo` had handed to the menu
+    /// still on the screen. `GetObjectType` answers zero for a handle in that state.
+    #[test]
+    fn a_second_show_menu_over_a_live_showing_turns_round_at_the_gate() {
+        // The live showing, assembled in the order `show_menu` assembles it: the right to
+        // the screen first, the paint state of that showing second.
+        let showing = MenuOnScreen::raise().expect("the first showing must be given the screen");
+        let paint = MenuPaint::new(Vec::new(), &theme::GRAPHITE)
+            .expect("this thread must be able to make a menu face and three brushes");
+
+        let before_handles = handles_of(&paint);
+        let before_kinds = kinds_of(&paint);
+
+        MENU_PAINT.with(|slot| slot.replace(Some(paint)));
+
+        let before = showings();
+
+        // The second entry. With the flag up this returns on its first line.
+        show_menu(7, 11);
+
+        let after = showings();
+
+        let (after_handles, after_kinds) = MENU_PAINT.with(|slot| {
+            let borrowed = slot.borrow();
+            let paint = borrowed
+                .as_ref()
+                .expect("the live showing's paint state must still be in the slot");
+
+            (handles_of(paint), kinds_of(paint))
+        });
+
+        println!("showings past the gate: {before} -> {after}");
+        println!("handles: {before_handles:?} -> {after_handles:?}");
+        println!(
+            "GetObjectType (0 = not a live object; 6 = OBJ_FONT, 2 = OBJ_BRUSH): \
+             {before_kinds:?} -> {after_kinds:?}"
+        );
+
+        clear_paint();
+        drop(showing);
+
+        assert_eq!(
+            after, before,
+            "the second entry must not get past the gate — the counter is incremented on \
+             the line after it and nowhere else"
+        );
+        assert_eq!(
+            after_handles, before_handles,
+            "the paint state must be the very same object: a re-created one would carry \
+             other handles"
+        );
+        assert_eq!(
+            after_kinds, before_kinds,
+            "and the same objects: this is the assertion the finding fails"
+        );
+        assert!(
+            after_kinds.iter().all(|kind| *kind != 0),
+            "the menu face and the three brushes must still be live GDI objects — the \
+             ground brush among them is the one Windows is painting the live menu with"
+        );
+    }
+
+    /// **Criterion 6 of task T-13-18 — the half the second flag exists for.**
+    ///
+    /// [`MenuPaint::new`] is refused through the seam, which is the degraded showing of
+    /// NFR-13: the menu is on the screen, drawn by the shell, and [`MENU_PAINT`] holds
+    /// `None` for the whole of it. The early exit the audit proposed — `MENU_PAINT.is_some()`
+    /// — reads `false` in that state and would wave the second entry through. The flag does
+    /// not.
+    #[test]
+    fn a_degraded_showing_without_paint_state_of_its_own_is_refused_a_second_entry_too() {
+        let showing = MenuOnScreen::raise().expect("the degraded showing takes the screen too");
+
+        REFUSE_MENU_PAINT.with(|flag| flag.set(true));
+
+        // The refusal itself, through the branch `show_menu` takes: `if let Some(paint) =
+        // MenuPaint::new(..)` simply does not fire, and the slot is never filled.
+        let refused = MenuPaint::new(Vec::new(), &theme::GRAPHITE);
+        let paint_gate = MENU_PAINT.with(|slot| slot.borrow().is_some());
+
+        let before = showings();
+
+        show_menu(7, 11);
+
+        let after = showings();
+
+        println!("MenuPaint::new refused: {}", refused.is_none());
+        println!("MENU_PAINT.is_some() during the degraded showing: {paint_gate}");
+        println!(
+            "MENU_ON_SCREEN during the same: {}",
+            MENU_ON_SCREEN.with(Cell::get)
+        );
+        println!("showings past the gate: {before} -> {after}");
+
+        REFUSE_MENU_PAINT.with(|flag| flag.set(false));
+        drop(showing);
+
+        assert!(
+            refused.is_none(),
+            "the seam must produce the state NFR-13 describes — no paint state for this \
+             showing"
+        );
+        assert!(
+            !paint_gate,
+            "and the SEC-05 gate is therefore down while a menu of ours is on the screen: \
+             a gate reading it would have let the second entry through"
+        );
+        assert_eq!(
+            after, before,
+            "the second entry must be refused all the same — this is what the flag is for"
+        );
+    }
+
+    /// **Criterion 7 of task T-13-18.** The right to the screen comes back on every path out,
+    /// and the next legitimate showing gets in.
+    ///
+    /// The panic half is not decoration: `TrackPopupMenuEx` dispatches other people's
+    /// messages into this program, a `debug_assert!` in that path unwinds in the build the
+    /// tests run, and a flag left up by such an unwind would wedge the menu shut for the rest
+    /// of the run. A bare `set(true) … set(false)` pair around the modal call fails exactly
+    /// this test.
+    #[test]
+    fn the_right_to_the_screen_comes_back_on_every_path_out_including_a_panic() {
+        let first = MenuOnScreen::raise().expect("the first showing must be given the screen");
+        let while_up = MenuOnScreen::raise().is_none();
+
+        drop(first);
+
+        let after_drop = MENU_ON_SCREEN.with(Cell::get);
+
+        // A legitimate showing, past the gate. On a thread with no tray it returns at
+        // `with_tray` one line later, so nothing of the shell is touched — but the counter
+        // has already moved, which is what says the gate let it through.
+        let before = showings();
+        show_menu(7, 11);
+        let after = showings();
+        let after_show = MENU_ON_SCREEN.with(Cell::get);
+
+        // The unwinding path.
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _showing = MenuOnScreen::raise().expect("the guard must be raised here");
+
+            panic!("T-13-18: a deliberate unwind out of a showing");
+        }));
+        let after_panic = MENU_ON_SCREEN.with(Cell::get);
+
+        // And the menu is not wedged shut afterwards.
+        let before_again = showings();
+        show_menu(7, 11);
+        let after_again = showings();
+
+        println!("a second raise while the first is up refused: {while_up}");
+        println!("flag after the drop: {after_drop}");
+        println!("showings past the gate: {before} -> {after}, flag after: {after_show}");
+        println!(
+            "panic caught: {}, flag after: {after_panic}",
+            unwound.is_err()
+        );
+        println!("showings past the gate after the panic: {before_again} -> {after_again}");
+
+        assert!(while_up, "one showing at a time");
+        assert!(!after_drop, "the Drop of the guard lowers the flag");
+        assert_eq!(
+            after,
+            before + 1,
+            "the next legitimate showing passes the gate"
+        );
+        assert!(!after_show, "and gives the right back on its way out");
+        assert!(unwound.is_err(), "the panic must have been caught here");
+        assert!(
+            !after_panic,
+            "an unwind out of a showing must lower the flag as well — this is why the \
+             lowering is a Drop and not a call"
+        );
+        assert_eq!(
+            after_again,
+            before_again + 1,
+            "and the menu is not wedged shut for the rest of the run"
         );
     }
 }

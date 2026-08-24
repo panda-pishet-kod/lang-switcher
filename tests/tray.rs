@@ -1116,6 +1116,153 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
     );
 }
 
+/// **The shape of the re-entry gate — task T-13-18.**
+///
+/// What the gate *does* is measured where it can be measured, in the unit tests of
+/// `src\tray.rs`: those reach `show_menu`, `MENU_PAINT` and the flag, all of which are private
+/// to the module by design and are going to stay that way. What no test can drive is the one
+/// thing this task is about — the boundary. `TrackPopupMenuEx` is modal, and a test that let
+/// `show_menu` reach it would hang instead of failing. So the boundary is swept, for the reason
+/// the two sweeps above this one are swept.
+///
+/// Three claims, and each of them is a defect the task's own terms of reference name:
+///
+/// * the flag goes up **before** `MenuPaint::new` and `set_menu_background` — otherwise the
+///   window between them stays open and the finding reproduces inside it;
+/// * it comes down **after** `TrackPopupMenuEx` has returned — a bare pair of assignments
+///   around the call would not survive an unwind, so the lowering is a `Drop`;
+/// * and it comes down **before** `dispatch_command` — the modal dialog of FR-92 opens there,
+///   and a menu shown over that dialog is the legitimate showing task T-13-14 greys two
+///   entries of. Holding the gate across it would undo that task.
+///
+/// Insensitive to line endings by construction: `.gitattributes` declares `* text=auto
+/// eol=crlf`, so a fresh worktree holds the file in CRLF while the index holds LF, and the
+/// needles below are written with `\n`. Every boundary is an `expect` and not a fallback — a
+/// body whose closing brace cannot be found is a failure of this test, not an invitation to
+/// read to the end of the file.
+#[test]
+fn the_re_entry_gate_wraps_the_modal_call_and_lets_go_before_the_dialog() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    // The product half of the file. The unit tests of the same module read and write the flag
+    // too, and counting their mentions in with the product's would make the counts below say
+    // nothing.
+    let end = source
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("src\\tray.rs must carry its unit tests at the end");
+    let product = &source[..end];
+
+    let at = product
+        .find("fn show_menu(x: i32, y: i32) {")
+        .expect("show_menu must be in this file");
+    let body = &product[at..];
+    let end = body
+        .find("\n}")
+        .expect("show_menu must close with a brace of its own");
+    let body = &body[..end];
+
+    println!("--- show_menu ---\n{body}");
+
+    let raise = body
+        .find("let Some(on_screen) = MenuOnScreen::raise() else {")
+        .expect("show_menu must ask for the right to the screen and turn round without it");
+    let borrow = body
+        .find("with_tray(|tray| {")
+        .expect("show_menu reads the tray through with_tray");
+    let paint = body
+        .find("MenuPaint::new(menu.items().to_vec(), palette)")
+        .expect("show_menu builds the paint state of the showing");
+    let ground = body
+        .find("set_menu_background(menu.handle(), paint.window_bg)")
+        .expect("and hands the ground brush to Windows");
+    let track = body
+        .find("TrackPopupMenuEx(")
+        .expect("show_menu shows the menu with TrackPopupMenuEx");
+    let take = body
+        .find("MENU_PAINT.with(|slot| slot.borrow_mut().take())")
+        .expect("the SEC-05 gate comes down after the modal call");
+    let release = body
+        .find("drop(on_screen);")
+        .expect("the right to the screen is given up by name, like the frame hook");
+    let dispatch = body
+        .find("dispatch_command(hwnd, command)")
+        .expect("and the chosen command is carried out at the end");
+
+    println!(
+        "offsets in show_menu: raise {raise}, with_tray {borrow}, MenuPaint::new {paint}, \
+         set_menu_background {ground}, TrackPopupMenuEx {track}, take {take}, \
+         drop(on_screen) {release}, dispatch_command {dispatch}"
+    );
+
+    assert!(
+        raise < borrow,
+        "the gate is the first thing in the function — a refused entry must not even reach \
+         the tray"
+    );
+    assert!(
+        raise < paint && raise < ground,
+        "and it is up before the paint state is built and before the ground brush is handed \
+         to Windows, or the finding reproduces in the window between"
+    );
+    assert!(
+        track < take && take < release,
+        "it comes down after TrackPopupMenuEx has returned and after the paint state has \
+         been taken out"
+    );
+    assert!(
+        release < dispatch,
+        "and before dispatch_command opens the modal dialog of FR-92 — a menu shown over \
+         that dialog is the legitimate showing task T-13-14 greys two entries of"
+    );
+
+    // The gates are two, and they are not each other's spare. `MENU_PAINT` answers «is our
+    // drawing active», the flag answers «is a menu of ours up», and the degraded showing is
+    // where the two part company.
+    assert_eq!(
+        body.matches("MenuOnScreen::raise()").count(),
+        1,
+        "one door into the showing"
+    );
+    assert!(
+        !body.contains("MENU_PAINT.with(|slot| slot.borrow().is_some())"),
+        "and it is not a reading of the paint slot — that gate is down for the whole of a \
+         degraded showing"
+    );
+    assert!(
+        body.contains("MENU_PAINT.with(|slot| slot.replace(Some(paint)))"),
+        "the SEC-05 gate itself is untouched by this task"
+    );
+
+    // The lowering is a `Drop` and the flag has no other writer. A bare `set(true) …
+    // set(false)` pair around the modal call is exactly what these two counts forbid.
+    let writes = product
+        .matches("MENU_ON_SCREEN.with(|flag| flag.set(")
+        .count();
+    let guard_at = product
+        .find("impl Drop for MenuOnScreen {")
+        .expect("the flag must be lowered by a Drop and not by a call");
+    let lower = product
+        .find("MENU_ON_SCREEN.with(|flag| flag.set(false));")
+        .expect("and that Drop must be what lowers it");
+
+    println!("writers of MENU_ON_SCREEN in the product half: {writes}");
+
+    assert_eq!(
+        writes, 2,
+        "the flag has exactly two writers — one raise and one lowering"
+    );
+    assert!(
+        guard_at < lower,
+        "and the lowering lives inside the Drop, so no path out of a showing can miss it"
+    );
+}
+
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
