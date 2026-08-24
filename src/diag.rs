@@ -361,6 +361,20 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("configuration file quarantined", Kind::Process),
     ("configuration file quarantine refused", Kind::Process),
     ("configuration save suppressed", Kind::Process),
+    // Step 8 of FR-61 not made — task T-13-11, the note decision П-5 added to §4.7: «затирать
+    // новую копию пользователя снимком недопустимо». `selection::restore_after` asks whether the
+    // clipboard still holds this program's own write and puts nothing back when it does not, and
+    // that refusal is a promise of the module not kept — so it may not be silent.
+    //
+    // ⚠ **The name is a fact about this program's own decision and carries nothing else.** Not
+    // the content that was skipped over, not its size, not its formats, not the sequence numbers
+    // that decided it — a number of the window station's counter is not the user's data, but it
+    // is not this row's business either, and `OsCode::NONE` goes with the entry for the reason
+    // «clipboard snapshot truncated» above passes it. SEC-01, SEC-07.
+    //
+    // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
+    // `Kind` is added**, the rule every note above follows.
+    ("clipboard restore skipped", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

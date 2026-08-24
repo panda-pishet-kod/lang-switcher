@@ -1433,6 +1433,9 @@ enum Step {
     RestoreModifiers,
     /// **Step 8 of FR-61** — the user's clipboard goes back.
     RestoreClipboard,
+    /// **Not a step of FR-61** — the user's clipboard goes back at once, because the `Ctrl+C` of
+    /// step 2 was answered after step 3 had given up. Task T-13-11.
+    Reclaim,
 }
 
 /// The eight steps with the outside world replaced by a tape recorder.
@@ -1445,6 +1448,14 @@ struct Bench {
     panic_at: Option<Step>,
     /// What step 3 answers.
     wait: Wait,
+    /// What the sequence number reads *after* step 3 gave up — task T-13-11.
+    ///
+    /// The baseline of a bench is `Snapshot::empty().sequence()`, so the default answers "the
+    /// clipboard did not move" and every test written before T-13-11 sees what it saw.
+    sequence_now: u32,
+    /// How many times the sequence number was asked for outside step 3. **Not a [`Step`]**: the
+    /// tape records the steps of FR-61 and FR-40, and this is neither.
+    sequence_probes: u32,
     /// The baseline step 3 was given — acceptance point 11.
     baseline_seen: Option<u32>,
     /// What step 4 answers.
@@ -1466,6 +1477,8 @@ impl Bench {
                 sequence: 1,
                 waited: Duration::from_millis(7),
             },
+            sequence_now: Snapshot::empty().sequence(),
+            sequence_probes: 0,
             baseline_seen: None,
             reads: Some(text.to_owned()),
             written: None,
@@ -1481,6 +1494,18 @@ impl Bench {
             },
             reads: None,
             ..Self::with_selection("")
+        }
+    }
+
+    /// A bench where step 3 times out **and the clipboard moves anyway** — the late `Ctrl+C` of
+    /// the audit of 2026-08-24, task T-13-11.
+    ///
+    /// The number is any number other than the baseline: what the eight steps read out of it is
+    /// «it is not what step 1 saw», and nothing else.
+    fn moving_after_the_timeout() -> Self {
+        Self {
+            sequence_now: Snapshot::empty().sequence().wrapping_add(4242),
+            ..Self::without_selection()
         }
     }
 
@@ -1546,6 +1571,12 @@ impl SelectionPath for Bench {
         self.wait
     }
 
+    fn sequence(&mut self) -> u32 {
+        self.sequence_probes += 1;
+
+        self.sequence_now
+    }
+
     fn read(&mut self) -> Result<Option<String>, ClipboardError> {
         if self.note(Step::Read) {
             return Err(ClipboardError::Busy);
@@ -1586,6 +1617,10 @@ impl SelectionPath for Bench {
 
     fn restore_clipboard(&mut self, _snapshot: &Snapshot) {
         self.note(Step::RestoreClipboard);
+    }
+
+    fn reclaim_clipboard(&mut self, _snapshot: &Snapshot) {
+        self.note(Step::Reclaim);
     }
 }
 
@@ -1767,6 +1802,10 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
     for (call, owner) in [
         ("path.restore_clipboard(", "impl<P: Path> Drop for Session"),
         ("path.restore_modifiers(", "impl<P: Path> Drop for Session"),
+        // Task T-13-11 added a second way back to the user's clipboard — the late `Ctrl+C` of
+        // step 3's timeout. It is a **second reason**, not a second mechanism: the guard still
+        // owns every put-back, and this row is what keeps it that way.
+        ("path.reclaim_clipboard(", "impl<P: Path> Drop for Session"),
     ] {
         let hits = code_lines_with(product, call);
 
@@ -1791,9 +1830,93 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
         .unwrap_or_default();
 
     assert!(
-        !run_body.contains("restore_clipboard(") && !run_body.contains("restore_modifiers("),
+        !run_body.contains("restore_clipboard(")
+            && !run_body.contains("restore_modifiers(")
+            && !run_body.contains("reclaim_clipboard("),
         "the eight steps must not restore by hand — the guard does it"
     );
+}
+
+/// **The note to step 8 of §4.7 — decision П-5, and the order FR-80 needs.**
+///
+/// Three facts about `restore_after`, and the first of them is older than this task: the thread
+/// is asked **before** anything sleeps, because a 200 ms sleep on the thread that owns the hook
+/// is the failure FR-80 removes a hook for. The other two are П-5 — the question is asked after
+/// the delay, because it is a question about the delay window, and nothing is written before it
+/// has been answered.
+#[test]
+fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
+    let source = source_of("selection.rs");
+    let product = source
+        .split("mod tests {")
+        .next()
+        .expect("the module has a body before its tests");
+
+    let body = product
+        .split("pub fn restore_after(")
+        .nth(1)
+        .expect("the delayed restore exists")
+        .split("\n// ---")
+        .next()
+        .unwrap_or_default();
+
+    let thread = body
+        .find("require_blocking_thread()")
+        .expect("FR-80, NFR-01: the thread is asked");
+    let sleeps = body
+        .find("sleep(delay)")
+        .expect("the delay of step 8 is waited out");
+    let asks = body
+        .find("restore_is_due(sequence_number())")
+        .expect("П-5: the sequence number is asked once more");
+    let puts = body
+        .find("restore(owner, snapshot)")
+        .expect("the restore itself is still here");
+
+    assert!(
+        thread < sleeps,
+        "FR-80, NFR-01: nothing sleeps before the thread has been asked"
+    );
+    assert!(
+        sleeps < asks,
+        "П-5 asks about the delay window, so the question comes after the delay"
+    );
+    assert!(asks < puts, "and nothing is put back before it is answered");
+
+    // And the answer is the classification of FR-63, not a second one invented here.
+    let decision = product
+        .split("fn restore_is_due(")
+        .nth(1)
+        .expect("the decision of П-5 exists")
+        .split("\n///")
+        .next()
+        .unwrap_or_default();
+
+    assert!(
+        decision.contains("is_own_change(current)"),
+        "the verdict FR-63 builds is what decides the restore"
+    );
+    assert!(
+        decision.contains("RESTORE_SKIPS") && decision.contains("note_restore_skipped()"),
+        "a skipped restore is counted and journalled"
+    );
+}
+
+/// **SEC-07.** The skipped restore of decision П-5 has a name in the journal's closed vocabulary.
+#[test]
+fn the_skipped_restore_has_a_name_in_the_journal() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let operation = Operation::from_name("clipboard restore skipped");
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "the row task T-13-11 added is in the table, so the entry is named rather than counted"
+    );
+    assert_eq!(operation.name(), "clipboard restore skipped");
+    assert_eq!(operation.kind(), Kind::Selection);
+    assert_eq!(operation.kind().name(), "selection");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1874,6 +1997,88 @@ fn no_change_within_the_timeout_means_no_selection_and_falls_back() {
     assert!(!bench.ran(Step::RestoreClipboard));
     assert!(!bench.ran(Step::Write));
     assert!(bench.written.is_none());
+}
+
+/// **The late `Ctrl+C` — the audit of 2026-08-24, task T-13-11.** Both outcomes of the question
+/// step 3's timeout now asks before it walks away.
+///
+/// The two halves are one test because [`selection::path_counters`] is process-wide and the
+/// assertions are about `late_copies` moving by **exactly** one and by **exactly** nothing, which
+/// two tests running beside each other could not both claim.
+#[test]
+fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_left_alone() {
+    let before = selection::path_counters();
+
+    // ---- the clipboard did not move: everything is as it was before this task ---------------
+    let mut quiet = Bench::without_selection();
+    let outcome = selection::run(&mut quiet, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(outcome, Outcome::NoSelection);
+    assert_eq!(
+        quiet.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::Wait,
+            Step::RestoreModifiers,
+        ],
+        "a clipboard nobody touched is not written to"
+    );
+    assert!(!quiet.ran(Step::Reclaim), "there is nothing to put back");
+    assert!(!quiet.ran(Step::RestoreClipboard));
+    assert_eq!(
+        quiet.sequence_probes, 1,
+        "the question is asked once, and only on the timeout"
+    );
+
+    let quiet_after = selection::path_counters();
+    assert_eq!(
+        quiet_after.late_copies, before.late_copies,
+        "nothing moved, so nothing is counted"
+    );
+
+    // ---- the clipboard moved after the wait gave up: the snapshot goes back ------------------
+    let mut late = Bench::moving_after_the_timeout();
+    let outcome = selection::run(&mut late, &pair_plan(convert::FALLBACK_US));
+
+    // FR-60 is unchanged: there was no selection to convert, so the press still falls back.
+    assert_eq!(outcome, Outcome::NoSelection);
+    assert!(outcome.falls_back());
+
+    assert_eq!(
+        late.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::Wait,
+            Step::RestoreModifiers, // FR-40 step 6 first — the user is waiting for their Shift
+            Step::Reclaim,          // and then the clipboard they had before the probe
+        ],
+        "the snapshot goes back, and after the modifiers"
+    );
+
+    // ⚠ It is **not** step 8: no delay to wait out, and no refusal to make.
+    assert!(
+        !late.ran(Step::RestoreClipboard),
+        "the delayed, refusable door of step 8 is not the one this path takes"
+    );
+    assert_eq!(late.sequence_probes, 1);
+
+    let late_after = selection::path_counters();
+    assert_eq!(
+        late_after.late_copies,
+        before.late_copies + 1,
+        "the race is counted where it can be read"
+    );
+
+    // Steps 4 to 7 still did not run: there was no selection, and nothing was converted.
+    assert!(!late.ran(Step::Read));
+    assert!(!late.ran(Step::Write));
+    assert!(!late.ran(Step::Paste));
+    assert!(!late.ran(Step::Switch));
+    assert!(late.written.is_none());
 }
 
 // ---------------------------------------------------------------------------------------

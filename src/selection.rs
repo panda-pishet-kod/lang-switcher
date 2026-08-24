@@ -22,6 +22,20 @@
 //! nothing in this module returns early between an [`EmptyClipboard`] and the writes that follow
 //! it.
 //!
+//! That sentence has **one exception** and had **one hole**, and task **T-13-11** — the audit of
+//! 2026-08-24 — is where both were settled.
+//!
+//! The exception is **decision П-5**, written into the note to step 8 of §4.7: the snapshot is
+//! *not* put back when another process changed the clipboard after this program wrote its result.
+//! "Comes back" may not mean writing over a copy the user made inside the two hundred
+//! milliseconds step 8 waits — that would be the same loss with the program on the other side of
+//! it. [`restore_after`] asks the question and [`is_own_change`] answers it.
+//!
+//! The hole was step 3 timing out. `Ctrl+C` had gone out, the clipboard had not moved *yet*, and
+//! the snapshot was dropped unread — so an application that answered the probe late left the user
+//! with a clipboard nobody was going to put back. [`run`] now asks the sequence number once more
+//! before it gives up, and [`Path::reclaim_clipboard`] is the restore that follows.
+//!
 //! **Second: the clipboard is closed.** `OpenClipboard` takes a system-wide lock. A process that
 //! opens it and does not close it does not break itself — it breaks `Ctrl+C` in **every
 //! application on the machine** until it exits. That is the most visible failure this task is
@@ -319,6 +333,14 @@ static HANDLE_FORMATS_SEEN: AtomicU32 = AtomicU32::new(0);
 /// `RemoveClipboardFormatListener` calls that failed — FR-63.
 static LISTENER_REMOVE_FAILURES: AtomicU32 = AtomicU32::new(0);
 
+/// Restores of step 8 that were **not** made — the note to step 8 of §4.7, decision П-5.
+///
+/// The clipboard had moved away from this program's own write while step 8 waited out its delay,
+/// so the snapshot would have been written over somebody's new copy. Counted because a restore
+/// that does not happen is a promise of this module deliberately not kept, and the one thing it
+/// may not be is invisible — the same argument [`CLOSE_FAILURES`] is counted on.
+static RESTORE_SKIPS: AtomicU32 = AtomicU32::new(0);
+
 // ---------------------------------------------------------------------------------------
 // The public error and the outcome types
 // ---------------------------------------------------------------------------------------
@@ -439,6 +461,11 @@ pub struct Counters {
     pub handle_formats: u32,
     /// `RemoveClipboardFormatListener` calls that failed.
     pub listener_remove_failures: u32,
+    /// Restores of step 8 skipped because the clipboard had moved on — the note to step 8 of
+    /// §4.7, decision П-5. **A count of decisions of this program, not of anything in the
+    /// clipboard**: it says how often somebody else's copy was left standing, and nothing about
+    /// what either copy held.
+    pub restore_skips: u32,
 }
 
 /// The counters as they stand.
@@ -457,6 +484,7 @@ pub fn counters() -> Counters {
         refused_formats: REFUSED_FORMATS.load(Ordering::Relaxed),
         handle_formats: HANDLE_FORMATS_SEEN.load(Ordering::Relaxed),
         listener_remove_failures: LISTENER_REMOVE_FAILURES.load(Ordering::Relaxed),
+        restore_skips: RESTORE_SKIPS.load(Ordering::Relaxed),
     }
 }
 
@@ -1175,7 +1203,33 @@ pub fn restore(owner: HWND, snapshot: &Snapshot) -> Result<Restored, ClipboardEr
 ///
 /// The sleep is inside this module so that it is inside the guard: [`Clipboard::open`] refuses a
 /// thread that may not block, and a caller that slept first and called second would have done
-/// the dangerous half on the wrong thread before finding out.
+/// the dangerous half on the wrong thread before finding out. **That order is load-bearing** —
+/// FR-80 and NFR-01 rest on the thread being asked before anything sleeps — and the question
+/// added below sits deliberately on the far side of the sleep, because it is a question about
+/// what happened *during* the delay.
+///
+/// # The delay window belongs to the user too — the note to step 8, decision П-5
+///
+/// Two hundred milliseconds is long enough for a person to press `Ctrl+C` inside it, and a
+/// clipboard manager needs far less. Until decision П-5 this function slept and restored
+/// unconditionally — which was **the literal wording of step 8**, a decision of the specification
+/// rather than a departure of the code from it; FR-63 asked only that changes be *tracked*, and
+/// they were and are. What the wording did not say, and what the note now does, is what becomes
+/// of a clipboard that has moved on:
+///
+/// > Восстановление пропускается, если после записи результата программой буфер обмена изменил
+/// > другой процесс (сверка `GetClipboardSequenceNumber` с меткой собственной записи): затирать
+/// > новую копию пользователя снимком недопустимо.
+///
+/// So the sequence number is read once more when the sleep ends and put to [`restore_is_due`],
+/// which is [`is_own_change`] — the classification FR-63 builds, here deciding something instead
+/// of only being counted. The mark it is compared against is the one step 6 left behind in
+/// [`write_unicode_text`]; **this is the place where the two are joined**, and the join is inside
+/// this module.
+///
+/// `Ok(Restored::default())` is the answer when the restore is skipped: nothing was placed and
+/// nothing was refused, which is the truth of it. What happened is in
+/// [`Counters::restore_skips`] and in the journal.
 pub fn restore_after(
     owner: HWND,
     snapshot: &Snapshot,
@@ -1185,7 +1239,65 @@ pub fn restore_after(
 
     sleep(delay);
 
+    if !restore_is_due(sequence_number()) {
+        return Ok(Restored::default());
+    }
+
     restore(owner, snapshot)
+}
+
+/// Whether step 8 may still write — **the note to step 8 of §4.7, decision П-5**.
+///
+/// `current` is the clipboard sequence number as it stands when the delay of step 8 has run out.
+/// [`is_own_change`] answers against the ring [`OWN_MARK`], which holds the numbers this
+/// process's own writes produced — step 6 of FR-61 among them. A `current` the ring knows means
+/// nothing has touched the clipboard since this program wrote, and the snapshot is owed. A
+/// `current` it does not know means somebody wrote after us, and the note forbids putting the
+/// snapshot over that.
+///
+/// The inexactness [`note_own_write`] describes runs in the safe direction here too: a write of
+/// ours taken for a foreign one costs the user a restore of a clipboard they hold a newer copy
+/// of, whereas the reverse would cost them the newer copy itself.
+///
+/// # Why a refusal is counted and journalled
+///
+/// A restore that does not happen is the promise of this module's first paragraph deliberately
+/// not kept. It is right here — and it is not nothing, so it leaves a counter and one entry in
+/// the journal behind it.
+fn restore_is_due(current: u32) -> bool {
+    if is_own_change(current) {
+        return true;
+    }
+
+    RESTORE_SKIPS.fetch_add(1, Ordering::Relaxed);
+
+    note_restore_skipped();
+
+    false
+}
+
+/// Puts the journal entry the skipped restore of decision П-5 leaves behind.
+///
+/// # SEC-01, SEC-07 — what this entry can and cannot say
+///
+/// «clipboard restore skipped» is a fact about **a decision of this program**: step 8 was due and
+/// was not made. The string is chosen at compile time, it is a row of the closed table of module
+/// `diag`, and nothing in it is derived from the clipboard — not the content that was left
+/// standing, not its size, not its formats, not the two sequence numbers that decided it.
+/// [`crate::diag::OsCode::NONE`] goes with it for the reason [`note_truncation`] passes it: no
+/// Win32 call failed here, and a number built from a measurement would be a shape of somebody's
+/// contents.
+///
+/// # Where this runs — NFR-01…NFR-05
+///
+/// On the caller of [`restore_after`], which [`require_blocking_thread`] has already confined to
+/// the thread [`listen`] claimed — the UI thread of section 6.1. The hook callback cannot reach
+/// it: it is refused several lines earlier, before the sleep.
+fn note_restore_skipped() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard restore skipped"),
+        crate::diag::OsCode::NONE,
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2012,6 +2124,15 @@ pub trait Path {
     /// **Step 3** — wait for the clipboard sequence number to leave `baseline`.
     fn wait(&mut self, baseline: u32) -> Wait;
 
+    /// **Not a numbered step** — the clipboard sequence number as it stands *now*.
+    ///
+    /// Step 3 asks whether the number left the baseline **within** the timeout; this asks whether
+    /// it left it **after** the timeout gave up, which is the late `Ctrl+C` of the audit of
+    /// 2026-08-24 (task T-13-11). It is behind the trait for the reason every other member is: a
+    /// test that had to move the machine's real clipboard to reach that branch would be a test of
+    /// the machine.
+    fn sequence(&mut self) -> u32;
+
     /// **Step 4** — read `CF_UNICODETEXT`.
     fn read(&mut self) -> Result<Option<String>, ClipboardError>;
 
@@ -2029,6 +2150,20 @@ pub trait Path {
 
     /// **Step 8** — put the user's clipboard back, after the delay of section 7.
     fn restore_clipboard(&mut self, snapshot: &Snapshot);
+
+    /// **Not step 8** — the user's clipboard back **at once**, after a late `Ctrl+C`.
+    ///
+    /// Reached from the `LateCopy` arm of [`Session`]'s `Drop` and from nowhere else: step 3 gave
+    /// up, the clipboard moved anyway, and what is on it is a selection this program asked for.
+    /// Two things separate it from step 8, and both are in the name:
+    ///
+    /// * **no delay.** The delay of step 8 exists to let a paste land first, and on this path
+    ///   nothing was pasted — there is nothing to wait for, and every millisecond of waiting is a
+    ///   millisecond of the user's clipboard being wrong;
+    /// * **no refusal.** The note П-5 added to step 8 compares the clipboard against this
+    ///   program's own write, and on this path there is no own write to compare with — see the
+    ///   comment in [`run`] for what that means and why the restore is made anyway.
+    fn reclaim_clipboard(&mut self, snapshot: &Snapshot);
 }
 
 /// Why the eight steps did not convert anything.
@@ -2099,29 +2234,52 @@ impl Outcome {
 /// | step 4 found no text | `Drop` | early `return`, scope ends |
 /// | step 5 could not decide | `Drop` | early `return`, scope ends |
 /// | step 6 could not write | `Drop` | early `return`, scope ends |
-/// | step 3 said there is no selection | `Drop`, and there is nothing to put back — see `armed` |
+/// | step 3 said there is no selection | `Drop`, and there is usually nothing to put back — see [`Owed`] |
+/// | step 3 gave up and the clipboard moved anyway | `Drop`, by the other door — [`Path::reclaim_clipboard`], task T-13-11 |
 /// | a panic, Debug build | `Drop`, run by the unwind |
 /// | a panic, Release build (`panic = "abort"`) | nothing here; the system frees the clipboard with the owning thread, measured in T-07-1 |
 ///
-/// `tests\selection.rs` checks that mechanically: `restore_clipboard(` and `restore_modifiers(`
-/// each appear **once** in the module outside the trait and the bench, and that once is inside
-/// `impl Drop for Session`.
+/// `tests\selection.rs` checks that mechanically: `restore_clipboard(`, `reclaim_clipboard(` and
+/// `restore_modifiers(` each appear **once** in the module outside the trait and the bench, and
+/// that once is inside `impl Drop for Session`.
 ///
-/// # `armed`, and why a restore is not always right
+/// # [`Owed`], and why a restore is not always right
 ///
 /// Before step 3 answers, the clipboard **is still the user's**: step 1 only read it and step 2
 /// asked the application to copy. Putting the snapshot back at that point would replace the
 /// user's clipboard with this program's copy of it — losing exactly the formats FR-64 admits it
 /// cannot capture, the metafiles and the delay-rendered ones. So the restore is armed at the
 /// instant the clipboard stops being the user's, which is the instant step 3 reports the
-/// sequence number moved, and at no other.
+/// sequence number moved — or, since task T-13-11, the instant it turns out to have moved after
+/// step 3 gave up. See [`Owed`].
 struct Session<'a, P: Path> {
     path: &'a mut P,
     snapshot: Snapshot,
-    /// Whether the clipboard has been changed by anybody since the snapshot was taken.
-    armed: bool,
+    /// Which restore the clipboard is owed, if any.
+    owed: Owed,
     /// Whether FR-40 step 3 has taken the user's modifiers down.
     hygiene: bool,
+}
+
+/// What [`Session`] owes the user's clipboard when it goes out of scope.
+///
+/// Three states rather than the `bool` this was until task **T-13-11**, because the two restores
+/// are not the same restore. They differ in **when** — after the delay of section 7, or at once —
+/// and in **whether they may be refused** — the note П-5 added to step 8 can skip a restore, and
+/// the late copy may not be skipped. A `bool` could carry neither difference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Owed {
+    /// Nothing. The clipboard is still exactly what the user left there: step 1 only read it, and
+    /// step 3 answered that the `Ctrl+C` of step 2 changed nothing.
+    ///
+    /// Putting the snapshot back here would replace the user's clipboard with this program's copy
+    /// of it, losing precisely the formats FR-64 admits it cannot capture.
+    Nothing,
+    /// **Step 8 of FR-61.** Step 3 said the clipboard holds the selection, so what is on it is
+    /// this program's to put back — after the delay of section 7, and subject to the note П-5.
+    StepEight,
+    /// **The late `Ctrl+C`.** Step 3 gave up and the clipboard moved anyway — see [`run`].
+    LateCopy,
 }
 
 impl<P: Path> Drop for Session<'_, P> {
@@ -2132,8 +2290,10 @@ impl<P: Path> Drop for Session<'_, P> {
             self.path.restore_modifiers();
         }
 
-        if self.armed {
-            self.path.restore_clipboard(&self.snapshot);
+        match self.owed {
+            Owed::Nothing => {}
+            Owed::StepEight => self.path.restore_clipboard(&self.snapshot),
+            Owed::LateCopy => self.path.reclaim_clipboard(&self.snapshot),
         }
     }
 }
@@ -2159,7 +2319,7 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     let mut session = Session {
         path,
         snapshot,
-        armed: false,
+        owed: Owed::Nothing,
         hygiene: false,
     };
 
@@ -2177,13 +2337,46 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     // else. No change means no selection, and the press goes down the typing-buffer path.
     match session.path.wait(baseline) {
         Wait::Changed { .. } => {}
-        Wait::TimedOut { .. } => return Outcome::NoSelection,
+        Wait::TimedOut { .. } => {
+            // ---- the late `Ctrl+C` — the audit of 2026-08-24, task T-13-11 ------------------
+            //
+            // A timeout is not a promise that nothing will happen. Step 2 sent a real `Ctrl+C`,
+            // and a busy application — the case the three hundred milliseconds exist for — can
+            // answer it after the wait has given up. So the sequence number is asked once more
+            // against the mark step 1 left: if it has moved, the clipboard is no longer what the
+            // user put there, and the snapshot in hand is the only copy of it left anywhere.
+            //
+            // Until this was here the answer was to walk away with the snapshot unread, because
+            // the put-back was armed only by a `Wait::Changed`. That cost the user their
+            // clipboard without a single sign of it, on the one path where the change was made
+            // by this program's own probe.
+            //
+            // **Whose change it was cannot be told apart here, and this does not pretend to.**
+            // There is no mark either way: the probe made the *application* write, not this
+            // program, so the ring of FR-63 is silent for our own late copy exactly as it is for
+            // a stranger's. It can only be one of those two, and putting the user's own content
+            // back is the honest answer to both — it undoes damage this program did in the first
+            // case, and in the second it costs a copy made in the moment since the wait's last
+            // look, against a clipboard the user had before this program touched anything.
+            //
+            // ⚠ The window this closes is the gap between that last look and this one; a change
+            // that lands later still arrives after everything here has returned. What the check
+            // ends is the *structural* blindness — a path that could not restore however plainly
+            // the clipboard had moved.
+            if session.path.sequence() != baseline {
+                LATE_COPIES.fetch_add(1, Ordering::Relaxed);
+
+                session.owed = Owed::LateCopy;
+            }
+
+            return Outcome::NoSelection;
+        }
         Wait::WrongThread => return Outcome::Refused(Refusal::Clipboard),
     }
 
     // From here the clipboard holds the selection and not what the user put there. Step 8 is
     // now owed, whatever happens below — see [`Session`].
-    session.armed = true;
+    session.owed = Owed::StepEight;
 
     // ---- step 4 — read CF_UNICODETEXT ---------------------------------------------------
     let text = match session.path.read() {
@@ -2282,6 +2475,10 @@ impl Path for Machine {
         wait_for_change(baseline, self.timeout)
     }
 
+    fn sequence(&mut self) -> u32 {
+        sequence_number()
+    }
+
     fn read(&mut self) -> Result<Option<String>, ClipboardError> {
         read_unicode_text(self.owner)
     }
@@ -2322,6 +2519,13 @@ impl Path for Machine {
         // do with the answer that it is not already doing. What must not happen is an early
         // return that skips this, and there is none — this is the whole body.
         let _ = restore_after(self.owner, snapshot, self.restore_delay);
+    }
+
+    fn reclaim_clipboard(&mut self, snapshot: &Snapshot) {
+        // The undelayed door, and the unrefusable one. The result is dropped for the reason
+        // above; `self.restore_delay` is deliberately not read here, because the delay of step 8
+        // waits for a paste that never happened on this path.
+        let _ = restore(self.owner, snapshot);
     }
 }
 
@@ -2373,7 +2577,16 @@ static REFUSALS: AtomicU32 = AtomicU32::new(0);
 /// could not tell П-3 from a regression.
 static CONSOLE_REFUSALS: AtomicU32 = AtomicU32::new(0);
 
-/// The counters of the selection path — SEC-01, SEC-07: five counts of program events.
+/// Presses where the clipboard moved **after** step 3 had given up — task T-13-11.
+///
+/// The late `Ctrl+C` of the audit of 2026-08-24: the probe of step 2 was answered past the
+/// timeout, and the snapshot of step 1 went back instead of being thrown away. Kept apart from
+/// every other counter because it is the one number that says how often the race is real on a
+/// given machine, and because the press itself still ends as [`Outcome::NoSelection`] — the two
+/// facts are independent and must be readable apart.
+static LATE_COPIES: AtomicU32 = AtomicU32::new(0);
+
+/// The counters of the selection path — SEC-01, SEC-07: six counts of program events.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PathCounters {
     /// Presses handed to the UI thread.
@@ -2386,6 +2599,9 @@ pub struct PathCounters {
     pub refusals: u32,
     /// Presses the path did not take because a console was in front — the note to §4.7, П-3.
     pub console_refusals: u32,
+    /// Presses whose clipboard moved after step 3 gave up, and whose snapshot therefore went
+    /// back at once — the late `Ctrl+C` of task T-13-11.
+    pub late_copies: u32,
 }
 
 /// The counters of the selection path as they stand.
@@ -2396,6 +2612,7 @@ pub fn path_counters() -> PathCounters {
         no_selection: NO_SELECTION.load(Ordering::Relaxed),
         refusals: REFUSALS.load(Ordering::Relaxed),
         console_refusals: CONSOLE_REFUSALS.load(Ordering::Relaxed),
+        late_copies: LATE_COPIES.load(Ordering::Relaxed),
     }
 }
 
@@ -2834,6 +3051,96 @@ mod tests {
         assert!(!is_own_change(u32::MAX - 13));
         // Zero is never ours: it is the empty value of the ring.
         assert!(!is_own_change(0));
+    }
+
+    /// **The note to step 8 of §4.7 — decision П-5.** A change of ours leaves the restore owed; a
+    /// change of somebody else's takes it away, says so twice, and opens no clipboard.
+    ///
+    /// The three cases are one test on purpose: [`RESTORE_SKIPS`] is process-wide and the
+    /// assertions below are about it moving by **exactly** one, which two tests running beside
+    /// each other could not both claim.
+    ///
+    /// The numbers are chosen the way `a_write_of_ours_is_recognised_and_a_number_nobody_wrote`
+    /// chooses them — values the window station's counter cannot reach while this test runs —
+    /// and one slot of the ring is written, so that a test running beside this one keeps its own.
+    #[test]
+    fn a_foreign_change_in_the_delay_window_takes_the_restore_away() {
+        let ours = u32::MAX - 24;
+        let theirs = u32::MAX - 25;
+
+        let index = OWN_NEXT.fetch_add(1, Ordering::Relaxed) % OWN_MARKS;
+        OWN_MARK[index].store(ours, Ordering::Release);
+
+        let before = counters();
+
+        // Nothing has touched the clipboard since this program wrote: step 8 is owed, and the
+        // behaviour is the one that was there before decision П-5.
+        assert!(
+            restore_is_due(ours),
+            "our own write is not a foreign change"
+        );
+        assert_eq!(
+            counters().restore_skips,
+            before.restore_skips,
+            "an owed restore counts no skip"
+        );
+
+        // And somebody else's copy inside the delay window takes the restore away.
+        assert!(!restore_is_due(theirs), "П-5: a foreign change is skipped");
+        assert_eq!(
+            counters().restore_skips,
+            before.restore_skips + 1,
+            "exactly one skip is counted"
+        );
+
+        // The fact is in the journal, under a name of the closed vocabulary — SEC-07.
+        assert_ne!(
+            crate::diag::Operation::from_name("clipboard restore skipped"),
+            crate::diag::Operation::UNLISTED,
+            "the row is in the table of module diag, so the entry is named"
+        );
+        assert!(
+            crate::diag::snapshot()
+                .iter()
+                .any(|event| event.operation.name() == "clipboard restore skipped"),
+            "the skipped restore left no entry behind it"
+        );
+
+        // Behaviourally, through the door step 8 uses. The branch is deterministic here:
+        // nothing in this binary writes to a clipboard, so the ring holds no number
+        // `GetClipboardSequenceNumber` can answer and the skip is the arm taken. The owner
+        // handle is an invalid one on purpose — it is the safety net rather than the subject.
+        // Were this ever to stop skipping, `OpenClipboard` would refuse the handle and the
+        // assertion would go red, instead of `EmptyClipboard` throwing away the clipboard of
+        // whoever is running the tests.
+        let bogus = HWND(core::ptr::dangling_mut::<core::ffi::c_void>());
+
+        let restored = restore_after(bogus, &Snapshot::empty(), Duration::ZERO);
+
+        assert!(
+            matches!(
+                restored,
+                Ok(Restored {
+                    placed: 0,
+                    refused: 0
+                })
+            ),
+            "a skipped restore answers that it placed nothing: {restored:?}"
+        );
+
+        let after = counters();
+
+        assert_eq!(after.opens, before.opens, "the clipboard was not opened");
+        assert_eq!(after.closes, before.closes);
+        assert_eq!(
+            after.open_retries, before.open_retries,
+            "and it was not even attempted"
+        );
+        assert_eq!(
+            after.restore_skips,
+            before.restore_skips + 2,
+            "the second skip is the one `restore_after` made"
+        );
     }
 
     #[test]
