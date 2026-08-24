@@ -73,6 +73,12 @@
 //! writer never waits for anybody, which is the property a hook-adjacent path needs and a
 //! mutex cannot give.
 //!
+//! That arrangement is a **seqlock**, and it is written in Boehm's canon rather than in the shape
+//! that reads naturally: one `fence(Release)` in the writer and one `fence(Acquire)` in the
+//! reader, each of them in a place where an ordering *on* the stamp store or load would not do the
+//! job. [`Slot`] carries the citation and the reasoning; modules [`crate::guard`] and
+//! [`crate::layouts`] hold the other two seqlocks of this program and say the same thing.
+//!
 //! # Threads — sections 6.1 and 6.3
 //!
 //! [`record`] is callable from every thread of section 6.1, the input thread included: it
@@ -94,7 +100,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering, fence};
 use std::time::Instant;
 
 use windows::core::Error as WinError;
@@ -497,6 +503,31 @@ impl Event {
 /// written right now"; any other value is `ordinal + 1`. A reader that finds the same non-zero
 /// stamp before and after reading the other three fields has read one consistent entry; one
 /// that does not has been overtaken by a writer and skips the slot.
+///
+/// # The barriers are Boehm's, not the ones that read naturally
+///
+/// Hans-J. Boehm, *"Can seqlocks get along with programming language memory models?"*, MSPC 2012.
+/// The canon that paper settles, and the form every seqlock in this program is written in — the
+/// same words stand over [`crate::layouts::published`] and [`crate::guard::is_excluded_name`]:
+///
+/// * the **reader** loads the stamp, reads the fields with `Relaxed` loads, then executes
+///   `fence(Acquire)` **before** the control load of the stamp, which may itself be `Relaxed`.
+///   Putting `Acquire` *on* the control load instead is the trap the paper is about: acquire on a
+///   load orders the operations that come **after** it, and what has to be pinned here is the
+///   field loads that came **before** — nothing stops them from being sunk past an acquire load;
+/// * the **writer** executes `fence(Release)` between clearing the stamp and storing the fields,
+///   so that no field store can be hoisted above the zero that announces the write, and closes
+///   with a `Release` store of the new stamp, which is what publishes the fields to a reader that
+///   sees it.
+///
+/// **Neither fence was here until task T-13-16**, and the sentence above about one consistent
+/// entry was a promise the memory model did not keep — which is what the audit of 2026-08-24
+/// found: «заявленный инвариант … моделью памяти не обеспечен». On x86_64 the omission was
+/// practically unobservable; section 3 admits an ARM64 build, where a load-load reordering is not
+/// a thought experiment. Nothing heavier than the two fences was added, and nothing could be: a
+/// fence is an ordering instruction and not a synchronisation primitive — it takes no lock, waits
+/// for nobody and cannot block, which is what NFR-04 asks of everything [`record`] does. On x86_64
+/// both compile to no instruction at all.
 struct Slot {
     stamp: AtomicU64,
     at_ms: AtomicU32,
@@ -568,7 +599,14 @@ pub fn init() {
 /// 3. the index — a remainder by a power of two, which the compiler emits as a mask.
 /// 4. `&RING[..]` — an address inside a `static`. Nothing is allocated; the slot has existed
 ///    since the image was mapped.
-/// 5. four `store`s — atomic writes of a `u64`, a `u32`, a `u32` and an `i32`.
+/// 5. `slot.stamp.store(0, …)` — one atomic write of a `u64`: the announcement that the slot is
+///    being written and must be skipped.
+/// 6. `fence(Release)` — an **ordering instruction and not a synchronisation primitive**: it takes
+///    no lock, waits for nobody, cannot block and cannot fail, so NFR-04 has nothing to object to.
+///    On x86_64 it emits no instruction at all; on the optional ARM64 build of section 3 it is one
+///    barrier. See [`Slot`] for why it is here and why an ordering on the store above would not do.
+/// 7. four `store`s — atomic writes of a `u32`, a `u32`, an `i32` and the `u64` stamp that
+///    publishes them, the last of them with `Release`.
 ///
 /// No branch of it formats anything, and no branch of it can: the arguments are two `Copy`
 /// numbers. **This is where "the journal does not format while recording" is enforced** — the
@@ -577,10 +615,20 @@ pub fn init() {
 /// # Publication
 ///
 /// The stamp is cleared before the fields are written and restored after them, with `Release`,
-/// so a reader either sees the entry whole or sees that it must skip the slot. A writer that
-/// wraps onto a slot a reader is in the middle of does not wait for it — the reader loses the
-/// entry, the writer loses nothing. That trade is the right way round: the write path is the
-/// one with a deadline.
+/// and a `fence(Release)` stands **between** the clearing and the first field store — the writer's
+/// half of the canon of [`Slot`]. Without it the `Relaxed` clearing may be reordered with the
+/// field stores, and then "a zero stamp means the slot is being written" is not a fact any reader
+/// can lean on. With it, a reader either sees the entry whole or sees that it must skip the slot.
+///
+/// **Why the fence and not `Release` on each field store.** Boehm's canon admits both; the fence
+/// is chosen because it is one ordering instruction for all three stores instead of three, because
+/// it puts the barrier where the reasoning is — between the announcement and what it announces,
+/// rather than spread over the things announced — and because it is the shape module
+/// [`crate::layouts`] is written in, so that the three seqlocks of this program read alike.
+///
+/// A writer that wraps onto a slot a reader is in the middle of does not wait for it — the reader
+/// loses the entry, the writer loses nothing. That trade is the right way round: the write path is
+/// the one with a deadline.
 pub fn record(operation: Operation, code: OsCode) {
     let at_ms = elapsed_ms();
 
@@ -591,6 +639,12 @@ pub fn record(operation: Operation, code: OsCode) {
     let slot = &RING[(ordinal % CAPACITY as u64) as usize];
 
     slot.stamp.store(0, Ordering::Relaxed);
+
+    // Boehm's fence, and it stands **between** the cleared stamp and the fields rather than as an
+    // ordering on either one — see `Slot`. This is what keeps the three stores below from being
+    // hoisted above the zero that is supposed to announce them.
+    fence(Ordering::Release);
+
     slot.at_ms.store(at_ms, Ordering::Relaxed);
     slot.operation
         .store(u32::from(operation.index()), Ordering::Relaxed);
@@ -621,7 +675,10 @@ fn elapsed_ms() -> u32 {
 /// [`record`] may not do; it is meant for [`render`] and for the tests, both of which run
 /// where allocation is allowed.
 ///
-/// An entry a writer overtakes while this reads it is dropped rather than reported torn.
+/// An entry a writer overtakes while this reads it is dropped rather than reported torn. The
+/// three field loads are `Relaxed` and what orders them is the reader's half of the canon of
+/// [`Slot`]: the `Acquire` load of the stamp above them and the `fence(Acquire)` below them,
+/// before the control load.
 pub fn snapshot() -> Vec<Event> {
     let mut events = Vec::with_capacity(CAPACITY);
 
@@ -637,7 +694,12 @@ pub fn snapshot() -> Vec<Event> {
         let operation = Operation::from_index(slot.operation.load(Ordering::Relaxed));
         let code = OsCode(slot.code.load(Ordering::Relaxed));
 
-        if slot.stamp.load(Ordering::Acquire) != stamp {
+        // Boehm's fence, and it stands **before** the control load rather than inside it — see
+        // `Slot`. This is what keeps the three field loads above from being sunk below the check
+        // that is supposed to vouch for them.
+        fence(Ordering::Acquire);
+
+        if slot.stamp.load(Ordering::Relaxed) != stamp {
             // A writer wrapped onto this slot while the three fields above were read. The
             // entry is not reported rather than reported wrong.
             continue;

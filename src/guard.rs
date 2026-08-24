@@ -161,14 +161,21 @@
 //! and an entry that does not fit is **refused and counted** rather than truncated — a truncated
 //! name is a name that matches a different program.
 //!
-//! ⚠ **One thing is added over [`crate::layouts::publish`]: a generation counter**, and the
-//! difference that asks for it is real. There, every entry is one `usize` and a reader that
-//! races the writer sees the old value or the new one, both of which existed. Here an entry is a
-//! row of bytes read one at a time, and a reader that raced the writer could assemble a name that
-//! was never in either list. [`EXCLUSIONS_GENERATION`] is odd while the table is being written and
-//! is re-read after the search; a reader that sees it move discards what it read and asks again.
-//! Requirement: no mutex on the read path (NFR-04, section 6.3), and there is none — the reader
-//! takes no lock, waits for nothing and can be preempted anywhere without holding anything up.
+//! ⚠ **One thing is added over a bare table of atomics: a generation counter**, and the difference
+//! that asks for it is real. An entry here is a row of bytes read one at a time, and a reader that
+//! raced the writer could assemble a name that was never in either list.
+//! [`EXCLUSIONS_GENERATION`] is odd while the table is being written and is re-read after the
+//! search; a reader that sees it move discards what it read and asks again. Requirement: no mutex
+//! on the read path (NFR-04, section 6.3), and there is none — the reader takes no lock, waits for
+//! nothing and can be preempted anywhere without holding anything up.
+//!
+//! ⚠ What used to stand here was that module [`crate::layouts`] needs no such counter because each
+//! of its published entries is a single `usize`. **That stopped being true with task T-13-22**,
+//! which found the same torn read in `[layouts]` — a hotkey press taking one half of a pair from
+//! the configuration that was standing and the other from the one being written — and gave that
+//! module a generation of its own. The two counters, and the stamp of module [`crate::diag`]'s
+//! ring, are one mechanism written three times; the barriers of all three are the canon named in
+//! [`EXCLUSIONS_GENERATION`].
 //!
 //! ## Comparison — the name, case-insensitively
 //!
@@ -229,7 +236,7 @@
 //! concerned, and a UI Automation call that fails is [`Field::Undetermined`], which FR-73 fixes
 //! the meaning of. Every `unsafe` block carries a `// SAFETY:` comment.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
 use std::cell::RefCell;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
@@ -1338,12 +1345,33 @@ static EXCLUSION_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// that was in neither. [`is_excluded_name`] reads this before and after its search and throws the
 /// answer away if it moved.
 ///
-/// This is what module [`crate::layouts`] does not need and this does. There, a published entry is
-/// one `usize` and a racing reader sees the old value or the new one — both of which existed here.
-/// Here an entry is a row of bytes read one at a time.
+/// This program holds three of these and they are one mechanism: the stamp of module
+/// [`crate::diag`]'s ring, this counter, and the [`crate::layouts`] generation task T-13-22 added
+/// for the same reason. The sentence that used to stand here — that the module next door does not
+/// need one — was made false by that task and is gone rather than qualified.
 ///
-/// `AcqRel` on the writer's two bumps and `Acquire` on the reader's two loads is what puts the
-/// data stores of one publication between them on every architecture this program is built for.
+/// # The barriers are Boehm's, not the ones that read naturally
+///
+/// Hans-J. Boehm, *"Can seqlocks get along with programming language memory models?"*, MSPC 2012.
+/// The canon that paper settles, and the form every seqlock in this program is written in — the
+/// same words stand over [`crate::layouts::published`] and over `diag`'s `Slot`:
+///
+/// * the **reader** loads the counter, reads the rows with `Relaxed` loads, then executes
+///   `fence(Acquire)` **before** the control load of the counter, which may itself be `Relaxed`.
+///   Putting `Acquire` *on* the control load instead is the trap the paper is about: acquire on a
+///   load orders the operations that come **after** it, and what has to be pinned here is the row
+///   loads that came **before** — nothing stops them from being sunk past an acquire load. That
+///   trap is exactly what stood here until task T-13-16, and this comment asserted the opposite in
+///   so many words; the audit of 2026-08-24 quoted the assertion back and called it wrong. On
+///   x86_64 (TSO) nothing was observable, and on the ARM64 build section 3 admits, a load-load
+///   reordering is not a thought experiment;
+/// * the **writer** must not let a row store be hoisted above the odd value that announces the
+///   write. Module `layouts` gets that from a `fence(Release)` placed after a `Relaxed` bump; here
+///   it comes from the bump itself, `fetch_add` with `AcqRel`, whose acquire half is precisely the
+///   promise that nothing after it moves before it — and the closing `AcqRel` bump is what carries
+///   the rows to a reader that sees the even value. Two spellings of one rule. The audit examined
+///   this side and did not fault it, so task T-13-16 left it spelled as it was rather than churn a
+///   correct writer for symmetry.
 static EXCLUSIONS_GENERATION: AtomicU32 = AtomicU32::new(0);
 
 /// Names the last [`publish_exclusions`] accepted — see [`Counters`].
@@ -1394,7 +1422,9 @@ pub fn fold_process_name(name: &str) -> String {
 ///
 /// # NFR-04
 ///
-/// No lock, no mutex, no wait. A table of atomics, a bounded retry, and an answer.
+/// No lock, no mutex, no wait. A table of atomics, a bounded retry, one `fence` and an answer —
+/// and a fence is an ordering instruction rather than a synchronisation primitive: it takes
+/// nothing, waits for nobody and cannot block. On x86_64 it emits no instruction at all.
 ///
 /// # An empty list
 ///
@@ -1417,8 +1447,13 @@ pub fn is_excluded_name(name: &str) -> bool {
         if before.is_multiple_of(2) {
             let found = search_published(wanted);
 
+            // Boehm's fence, and it stands **before** the control load rather than inside it — see
+            // `EXCLUSIONS_GENERATION`. This is what keeps the row loads of the search above from
+            // being sunk below the check that is supposed to vouch for them.
+            fence(Ordering::Acquire);
+
             // Unmoved: what was searched was one list, and the answer stands.
-            if EXCLUSIONS_GENERATION.load(Ordering::Acquire) == before {
+            if EXCLUSIONS_GENERATION.load(Ordering::Relaxed) == before {
                 return found;
             }
         }
@@ -1435,6 +1470,10 @@ pub fn is_excluded_name(name: &str) -> bool {
 
 /// One pass over the table. Split out so that [`is_excluded_name`] reads as the generation check
 /// it is.
+///
+/// Every load is `Relaxed`: what orders them is the `Acquire` load of the counter before this call
+/// and the `fence(Acquire)` [`is_excluded_name`] executes after it, before the control load — the
+/// canon of [`EXCLUSIONS_GENERATION`].
 fn search_published(wanted: &[u8]) -> bool {
     let count = EXCLUSION_COUNT.load(Ordering::Relaxed).min(MAX_EXCLUSIONS);
 
