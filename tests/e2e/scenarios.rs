@@ -32,7 +32,7 @@
 //! at all, which §11.6 hands to a person, and the requirements no task has written yet.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -4109,11 +4109,42 @@ const PASSWORD_WINDOW_TITLE: &str = "LangSw-Password-14";
 /// Position 14 — **a password field, and the one position SEC-06 is proved by.**
 ///
 /// ⚠ This is the one position where the result is invisible from outside — requirement 4 of
-/// §11.5 names it, and footnote 2 of §11.3 says how: «через тестовое приложение с полем
-/// `ES_PASSWORD` … и отладочный канал SEC-04a, подтверждающий нулевую длину буфера». The
-/// contents of a password field are not reachable from outside by the design of Windows, so the
-/// only witness there can be is the product's own `buffer_len`, and the only thing that says the
-/// product *recognised* the field is its own `password_field` — the key task T-06-1 added.
+/// §11.5 names it, and footnote 2 of §11.3 says how, in full and without an ellipsis:
+///
+/// > Через тестовое приложение с полем `ES_PASSWORD`, **локальную HTML-страницу
+/// > с `<input type="password">`** и отладочный канал SEC-04a, подтверждающий нулевую длину
+/// > буфера.
+///
+/// **Three supports, and the position stands on all of them.** Until task T-13-2 it stood on
+/// two: the `ES_PASSWORD` window and the channel. The audit of 2026-08-24 found what that cost —
+/// a `WinForms` box with `UseSystemPasswordChar` is a Win32 `EDIT`, so **level 2** of FR-72
+/// (`EM_GETPASSWORDCHAR`) answers it and the walk never reaches **level 3**
+/// (`IsPasswordProperty`). Level 3 is the level that protects browsers and Electron, where the
+/// focused element has no `Edit` window class at all; it was executed by no repeatable test, and
+/// the regression of T-13-1 — focus deduplication by `HWND` alone, which killed the probe inside
+/// `Chrome_RenderWidgetHostHWND` — lived a whole stage behind a position that reported `pass`.
+///
+/// So the position is two scenarios and **two rows**, both with the numbers of the channel:
+///
+/// | Row | Support | Level of FR-72 it reaches |
+/// |---|---|---|
+/// | [`position_14_es_password`] | the bench's own `ES_PASSWORD` window | 2 — `EM_GETPASSWORDCHAR` |
+/// | [`position_14_html_page`] | a local HTML page in Chrome | 3 — `IsPasswordProperty` |
+///
+/// The second row is also the **live acceptance of T-13-1**: its three fields live in one
+/// `Chrome_RenderWidgetHostHWND`, so `text → Tab → password → Tab → text` is precisely the
+/// transition the old deduplication swallowed.
+pub fn position_14(ctx: &Context) -> Vec<Row> {
+    let mut rows = position_14_es_password(ctx);
+    rows.extend(position_14_html_page(ctx));
+    rows
+}
+
+/// Position 14, first support — **the `ES_PASSWORD` window of footnote 2**, level 2 of FR-72.
+///
+/// The contents of a password field are not reachable from outside by the design of Windows, so
+/// the only witness there can be is the product's own `buffer_len`, and the only thing that says
+/// the product *recognised* the field is its own `password_field` — the key task T-06-1 added.
 ///
 /// ⛔ **The window is the bench's own.** Requirements A to E are not relaxed for this position or
 /// for any other: nothing on this machine is searched for a password box, no window of anybody
@@ -4135,7 +4166,7 @@ const PASSWORD_WINDOW_TITLE: &str = "LangSw-Password-14";
 /// All three are needed and none of them is enough alone: `buffer_len=0` beside a field that
 /// never received the keystrokes would be a scenario that proved nothing, and `buffer_len=0`
 /// beside `password_field=0` would mean the buffer was empty for some other reason.
-pub fn position_14(ctx: &Context) -> Vec<Row> {
+fn position_14_es_password(ctx: &Context) -> Vec<Row> {
     const APP: &str = "Поле пароля (окно стенда)";
 
     let assertion = Assertion::Other("буфер остаётся пустым");
@@ -4369,6 +4400,465 @@ fn launch_password_window() -> Result<App, String> {
         CloseWith::WmClose,
         Some(scratch),
     ))
+}
+
+// ---------------------------------------------------------------------------------------
+// Position 14, second support — the local HTML page of footnote 2, and level 3 of FR-72
+// ---------------------------------------------------------------------------------------
+
+/// Title prefix of the page — what the scenario reads the **lengths** of the three fields out of.
+///
+/// The page rewrites its own `document.title` on every `input` event, and the browser puts that
+/// string into the window title, which UI Automation gives back as the window's `Name`. So a
+/// reading of `b=6` says the six keystrokes reached the masked field — the same trick the
+/// `ES_PASSWORD` window uses, and for the same reason: it is the one way to show that input was
+/// **not** suppressed (FR-70) without reading a character out of a password box (SEC-01, SEC-07).
+const PASSWORD_PAGE_TITLE: &str = "LangSw-Password-14-HTML";
+
+/// `aria-label` of the first field — the ordinary one the page opens focused.
+const PAGE_FIELD_ONE: &str = "langsw-plain-one";
+
+/// `aria-label` of the second field — `<input type="password">`, the subject of level 3.
+const PAGE_FIELD_TWO: &str = "langsw-secret";
+
+/// `aria-label` of the third field — ordinary again, and the return the whole scenario is for.
+const PAGE_FIELD_THREE: &str = "langsw-plain-three";
+
+/// The page itself. `{title}`, `{one}`, `{two}` and `{three}` are substituted before it is
+/// written; nothing else in it is generated.
+///
+/// ⚠ **Three fields and not two.** Footnote 2 asks for `<input type="password">`; the two
+/// ordinary fields around it are what turn the page into a *comparison* — the same six
+/// keystrokes, the same window, the same process, one `Tab` apart, with opposite answers. The
+/// third field exists so that the return out of the masked one is another `Tab` **forward**:
+/// `Shift+Tab` would work too, but releasing a modifier is itself a layout probe of the product
+/// (measured in T-03-3c) and would put an extra event into the middle of the measurement.
+///
+/// ⚠ **No script reads a value.** `retitle` reads `.value.length` of each field and nothing else,
+/// so the page cannot carry a character of what was typed into its own title.
+const PASSWORD_PAGE: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{title} a=0 b=0 c=0</title>
+</head>
+<body>
+<p>Local page of the acceptance bench. Nothing here is sent anywhere.</p>
+<input id="a" type="text" aria-label="{one}" autofocus>
+<input id="b" type="password" aria-label="{two}">
+<input id="c" type="text" aria-label="{three}">
+<script>
+var a = document.getElementById('a');
+var b = document.getElementById('b');
+var c = document.getElementById('c');
+function retitle() {
+  document.title = '{title} a=' + a.value.length +
+                   ' b=' + b.value.length +
+                   ' c=' + c.value.length;
+}
+a.addEventListener('input', retitle);
+b.addEventListener('input', retitle);
+c.addEventListener('input', retitle);
+retitle();
+</script>
+</body>
+</html>
+"#;
+
+/// One reading of the SEC-04a channel at a point the report names.
+///
+/// ⛔ **Numbers and words of the product's own vocabulary, never text.** `buffer_len` is a
+/// length; `field_state` is one of the four words `guard::Field::name` produces. Neither can
+/// carry a character of what was typed — SEC-01, SEC-06, SEC-07.
+///
+/// ⚠ **`field_state` and not `password_field`.** The flag is `0` for two different situations —
+/// an ordinary field, and a verdict that has not come back yet (`Pending`) — and the two are
+/// what this scenario has to tell apart at every one of its four points. The word says which.
+struct ChannelPoint {
+    label: &'static str,
+    buffer_len: String,
+    field_state: String,
+}
+
+impl ChannelPoint {
+    /// The reading a wait already produced, or a fresh one when the wait never succeeded.
+    ///
+    /// A failed wait must still leave a number in the report: "the channel never said 6" and
+    /// "the channel said 4" are different findings, and the second one is only visible if the
+    /// point is read anyway.
+    fn of(label: &'static str, snapshot: Option<crate::channel::Snapshot>) -> Self {
+        let snapshot = match snapshot {
+            Some(snapshot) => Ok(snapshot),
+            None => crate::channel::read(),
+        };
+
+        match snapshot {
+            Ok(snapshot) => Self {
+                label,
+                buffer_len: snapshot.get("buffer_len").unwrap_or(MISSING_KEY).to_owned(),
+                field_state: snapshot
+                    .get("field_state")
+                    .unwrap_or(MISSING_KEY)
+                    .to_owned(),
+            },
+            Err(error) => Self {
+                label,
+                buffer_len: format!("<канал недоступен: {error}>"),
+                field_state: "<канал недоступен>".to_owned(),
+            },
+        }
+    }
+
+    /// A reading taken now.
+    fn now(label: &'static str) -> Self {
+        Self::of(label, None)
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "{}: buffer_len={}, field_state={}",
+            self.label, self.buffer_len, self.field_state
+        )
+    }
+}
+
+/// What a point says when the running product does not publish the key at all.
+const MISSING_KEY: &str = "<ключ отсутствует>";
+
+/// Position 14, second support — **the local HTML page of footnote 2**, level 3 of FR-72.
+///
+/// # What it does, and why each step is the step it is
+///
+/// 1. writes a page of its own into a throwaway directory — `<input type="text">`,
+///    `<input type="password">`, `<input type="text">`;
+/// 2. opens it in Chrome started against a throwaway profile ([`launch_chrome`], the same
+///    launcher positions 3 and 4 use), and adopts the window through
+///    [`adopt_window`]/`own::claim_window_process` — requirements A to E, unrelaxed;
+/// 3. waits for the three fields **through UI Automation** (requirement 1 of §11.5), and asks
+///    the masked one for [`Element::is_password`]: `Some(true)` is `IsPasswordProperty`, the
+///    very property level 3 reads, so the row can state which level it exercises;
+/// 4. reads the channel — the control point, before a key is sent;
+/// 5. types `ghbdtn` into the ordinary field: the channel must show `buffer_len` **growing** to
+///    six, which is what says buffering is on and the field is being recorded;
+/// 6. `Tab` into the masked field, waits for the product's own verdict `field_state=password`,
+///    then types the same six letters **one at a time**, reading the channel after each —
+///    `buffer_len` must be `0` at every single sample, which is what «длина 0 всё время набора»
+///    means when it is measured rather than assumed;
+/// 7. `Tab` on into the third field and types again: `buffer_len` back to six is **buffering
+///    returned**, and that is the live acceptance of T-13-1.
+///
+/// # Why this is the acceptance of T-13-1 and not only of FR-72
+///
+/// All three fields live inside one `Chrome_RenderWidgetHostHWND`. Before T-13-1 the watcher
+/// deduplicated focus events by `HWND` alone, so steps 6 and 7 raised events it threw away: the
+/// probe never ran, the field stayed `Ordinary`, and the six letters typed into the masked field
+/// went into the buffer. Step 6 is red on that build and green on this one, and nothing about
+/// the scenario is tuned to make it so.
+///
+/// # SEC-01, SEC-06, SEC-07
+///
+/// Nothing typed is read back. The three lengths come out of the window title, the buffer is
+/// asked for its **length**, and the verdict is built out of numbers. The word `ghbdtn` is the
+/// same word every other position types; there is no secret anywhere in this scenario.
+fn position_14_html_page(ctx: &Context) -> Vec<Row> {
+    const APP: &str = "Поле пароля (HTML-страница в Chrome)";
+
+    let assertion = Assertion::Other("буфер остаётся пустым (уровень 3 FR-72)");
+    let expected = "IsPassword=1; a=6, b=6, c=6; buffer_len 0 → 6 → 0 → 6; field_state \
+                    password в парольном и ordinary при возврате; все замеры набора в парольном 0"
+        .to_owned();
+
+    let (scratch, page) = match write_password_page() {
+        Ok(pair) => pair,
+        Err(error) => {
+            return vec![Row::new(14, APP, assertion, Verdict::Fail, error, expected)];
+        }
+    };
+
+    // ⚠ A path and not a `file:` URL: `Command::arg` quotes it, and Chrome resolves a local path
+    // argument itself. A hand-built URL would have to encode whatever the temp directory of the
+    // machine happens to contain.
+    let url = page.display().to_string();
+
+    let (measured, closed) = match launch_chrome("chrome14", &[url.as_str()]) {
+        Ok(mut app) => {
+            let measured = measure_html_password(ctx, &mut app);
+            let closed = app.close();
+            (measured, closed)
+        }
+        Err(error) => (
+            Err(format!("запуск Chrome: {error}")),
+            "Chrome не запускался".to_owned(),
+        ),
+    };
+
+    // Requirement 5 of §11.5: the page goes with the run, and the row says whether it did.
+    let removed = remove_password_page(&scratch);
+
+    let row = match measured {
+        Ok(measured) => Row::new(
+            14,
+            APP,
+            assertion,
+            if measured.ok {
+                Verdict::Pass
+            } else {
+                Verdict::Fail
+            },
+            measured.actual,
+            expected,
+        )
+        .with_note(format!("{}; закрытие: {closed}; {removed}", measured.note)),
+        Err(reason) => Row::new(14, APP, assertion, Verdict::Fail, reason, expected)
+            .with_note(format!("закрытие: {closed}; {removed}")),
+    };
+
+    vec![row]
+}
+
+/// Writes the page into a throwaway directory of its own, and answers with both paths.
+///
+/// ⚠ **Its own directory, not Chrome's profile one.** The profile directory is removed by
+/// `App::close` together with the browser, and a page living inside it would be deleted while
+/// the tab still pointed at it. Two directories also make the clean-up of requirement 5
+/// separately checkable, which is what [`remove_password_page`] reports.
+fn write_password_page() -> Result<(PathBuf, PathBuf), String> {
+    let scratch = scratch_dir("password-html");
+    let page = scratch.join("password-field.html");
+
+    let body = PASSWORD_PAGE
+        .replace("{title}", PASSWORD_PAGE_TITLE)
+        .replace("{one}", PAGE_FIELD_ONE)
+        .replace("{two}", PAGE_FIELD_TWO)
+        .replace("{three}", PAGE_FIELD_THREE);
+
+    if let Err(error) = std::fs::write(&page, body) {
+        // ⚠ Requirement 5 of §11.5 on the path nobody looks at: `scratch_dir` has already
+        // created the directory, so a failure here would leave one behind for a run that never
+        // opened a browser. The caller has no path to clean up with — this is the only place
+        // that still knows it.
+        let swept = remove_password_page(&scratch);
+        return Err(format!(
+            "не удалось записать {}: {error}; {swept}",
+            page.display()
+        ));
+    }
+
+    Ok((scratch, page))
+}
+
+/// Removes the throwaway directory of the page and says, in words for the report, what happened.
+///
+/// Checked rather than assumed: requirement 5 of §11.5 asks for the state to be restored, and
+/// «`remove_dir_all` was called» is not the same fact as «the directory is gone».
+fn remove_password_page(scratch: &Path) -> String {
+    let removed = std::fs::remove_dir_all(scratch);
+
+    if scratch.exists() {
+        return match removed {
+            Ok(()) => format!("⚠ временная страница ещё на месте: {}", scratch.display()),
+            Err(error) => format!(
+                "⚠ временную страницу удалить не удалось ({error}): {}",
+                scratch.display()
+            ),
+        };
+    }
+
+    format!("временная страница удалена: {}", scratch.display())
+}
+
+/// Everything the HTML support measured, already turned into the two strings a row carries.
+struct HtmlPasswordRun {
+    ok: bool,
+    actual: String,
+    note: String,
+}
+
+/// The scenario itself, against a Chrome the caller launched and will close.
+///
+/// `Err` is a set-up failure — a window that could not be adopted, a field that never appeared,
+/// a send the foreground check refused. Those are not measurements and must not be dressed up as
+/// ones, so they come back as a reason and never as a row full of zeroes.
+fn measure_html_password(ctx: &Context, app: &mut App) -> Result<HtmlPasswordRun, String> {
+    let window = adopt_window(ctx.automation, app, &is_chrome_window)?;
+
+    let Some(hwnd) = app.window else {
+        return Err("у окна Chrome нет дескриптора".to_owned());
+    };
+
+    shell::activate_window(app.pid, Some(hwnd))?;
+
+    let target = input::Target { pid: app.pid, hwnd };
+
+    // Requirement 1 of §11.5 — the fields are waited for in the tree, never after a delay.
+    let field = |label: &'static str| -> Result<Element, String> {
+        ctx.automation
+            .await_element(&window, wait::WINDOW_TIMEOUT, &|element: &Element| {
+                element.control_type() == Some(UIA_EditControlTypeId) && element.name() == label
+            })
+            .ok_or_else(|| {
+                format!(
+                    "поле {label:?} не появилось в дереве UI Automation; поля страницы: {}",
+                    describe_page_fields(ctx.automation, &window)
+                )
+            })
+    };
+
+    let _plain_one = field(PAGE_FIELD_ONE)?;
+    let secret = field(PAGE_FIELD_TWO)?;
+    let _plain_three = field(PAGE_FIELD_THREE)?;
+
+    // ⚠ The reading that names the level. `IsPasswordProperty` on the masked field is what level
+    // 3 of FR-72 asks of it, and it is asked here **before** anything is typed, so the row states
+    // the branch under test as an observation and not as an inference from the markup.
+    let is_password_property = secret.is_password();
+
+    // ---- point 0 — the control reading, before a key is sent ----
+    let before = ChannelPoint::now("контрольная точка до всего");
+
+    // ---- point 1 — the ordinary field ----
+    input::type_text(TYPED, &target)
+        .map_err(|error| format!("ввод в первое текстовое поле не отправлен: {error}"))?;
+
+    let one_landed = wait::until_true(wait::TEXT_TIMEOUT, || window.name().contains("a=6"));
+    let plain = ChannelPoint::of(
+        "набор в текстовом поле",
+        wait::until(wait::TEXT_TIMEOUT, || {
+            crate::channel::read()
+                .ok()
+                .filter(|snapshot| snapshot.get("buffer_len") == Some("6"))
+        }),
+    );
+
+    // ---- point 2 — the masked field ----
+    input::tap(VK_TAB.0, &target)
+        .map_err(|error| format!("Tab в парольное поле не отправлен: {error}"))?;
+
+    // The product's own verdict, waited for rather than timed: the focus change reaches it as a
+    // `WinEvent`, and the three levels of FR-72 run on its watcher thread afterwards.
+    let recognised = wait::until_true(FIELD_VERDICT_TIMEOUT, || {
+        crate::channel::read()
+            .ok()
+            .is_some_and(|snapshot| snapshot.get("field_state") == Some("password"))
+    });
+
+    // ⛔ **One letter at a time, and a reading after each.** «Длина 0 всё время набора» is a
+    // statement about every moment of the typing, and a single reading at the end could not
+    // distinguish it from a buffer that filled and was emptied again.
+    let mut samples = Vec::new();
+    for letter in TYPED.chars() {
+        let mut buffer = [0u8; 4];
+        input::type_text(letter.encode_utf8(&mut buffer), &target)
+            .map_err(|error| format!("ввод в парольное поле не отправлен: {error}"))?;
+
+        samples.push(
+            crate::channel::read()
+                .ok()
+                .and_then(|snapshot| snapshot.get("buffer_len").map(str::to_owned))
+                .unwrap_or_else(|| "<нет чтения>".to_owned()),
+        );
+    }
+
+    let two_landed = wait::until_true(wait::TEXT_TIMEOUT, || window.name().contains("b=6"));
+    let password = ChannelPoint::now("набор в парольном поле");
+
+    // ---- point 3 — the return, which is the acceptance of T-13-1 ----
+    input::tap(VK_TAB.0, &target)
+        .map_err(|error| format!("Tab обратно в текстовое поле не отправлен: {error}"))?;
+
+    let returned = wait::until_true(FIELD_VERDICT_TIMEOUT, || {
+        crate::channel::read()
+            .ok()
+            .is_some_and(|snapshot| snapshot.get("field_state") == Some("ordinary"))
+    });
+
+    input::type_text(TYPED, &target)
+        .map_err(|error| format!("ввод во второе текстовое поле не отправлен: {error}"))?;
+
+    let three_landed = wait::until_true(wait::TEXT_TIMEOUT, || window.name().contains("c=6"));
+    let back = ChannelPoint::of(
+        "возврат в текстовое",
+        wait::until(wait::TEXT_TIMEOUT, || {
+            crate::channel::read()
+                .ok()
+                .filter(|snapshot| snapshot.get("buffer_len") == Some("6"))
+        }),
+    );
+
+    let ok = one_landed
+        && two_landed
+        && three_landed
+        && is_password_property == Some(true)
+        && before.buffer_len == "0"
+        && plain.buffer_len == "6"
+        && password.buffer_len == "0"
+        && password.field_state == "password"
+        && samples.iter().all(|length| length == "0")
+        && back.buffer_len == "6"
+        && back.field_state == "ordinary";
+
+    let actual = format!(
+        "IsPassword={}, a=6: {one_landed}, b=6: {two_landed}, c=6: {three_landed}; {}; {}; {}; {}",
+        match is_password_property {
+            Some(true) => "1",
+            Some(false) => "0",
+            None => "<нет ответа>",
+        },
+        before.describe(),
+        plain.describe(),
+        password.describe(),
+        back.describe(),
+    );
+
+    let note = format!(
+        "локальная страница {PASSWORD_PAGE_TITLE}: text + password + text в одном \
+         Chrome_RenderWidgetHostHWND (живая приёмка Т-13-1); поле пароля признано продуктом за \
+         {} с: {recognised}, возврат к обычному полю признан: {returned}; buffer_len по каждой из \
+         шести букв в парольном поле: [{}]; заголовок окна: {:?}; присутствуют ключи: {}",
+        FIELD_VERDICT_TIMEOUT.as_secs(),
+        samples.join(", "),
+        window.name(),
+        crate::channel::read()
+            .map(|snapshot| snapshot.present_keys().join(", "))
+            .unwrap_or_else(|error| format!("<канал недоступен: {error}>")),
+    );
+
+    Ok(HtmlPasswordRun { ok, actual, note })
+}
+
+/// How long the product is given to come back with a verdict about a field.
+///
+/// The same bound the `ES_PASSWORD` support uses, and it is a bound on **an answer**: the wait
+/// ends at the first reading that carries one. `UIA_TIMEOUT_MS` inside the product is 500 ms per
+/// probe, so ten seconds is room for the event, the probe and a retry, and not a guess at how
+/// long any of them takes.
+const FIELD_VERDICT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Every `Edit` element of the page, for the message of a field that never appeared.
+///
+/// A failure that says only "the field was not found" costs a whole run to diagnose; this says
+/// what **was** in the tree, with the one property that matters, so the next step is a reading
+/// and not another run.
+fn describe_page_fields(automation: &Automation, window: &Element) -> String {
+    let found = automation.find_all(window, &|element: &Element| {
+        element.control_type() == Some(UIA_EditControlTypeId)
+    });
+
+    if found.is_empty() {
+        return "ни одного элемента Edit".to_owned();
+    }
+
+    found
+        .iter()
+        .map(|element| {
+            format!(
+                "{{{}, IsPassword={:?}}}",
+                element.describe(),
+                element.is_password()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Every position the bench cannot run, with who it now waits on.

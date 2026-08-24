@@ -302,6 +302,31 @@ impl Element {
         unsafe { self.0.CurrentControlType() }.ok()
     }
 
+    /// `IsPasswordProperty` — **the property level 3 of FR-72 reads**, asked of the same element.
+    ///
+    /// `Some(true)` is a password field; `Some(false)` an element that answered and is not one;
+    /// `None` is "no answer" — the provider does not implement the property, or stopped
+    /// replying. The three outcomes are kept apart on purpose (NFR-13): the product's own
+    /// `guard::is_password_element` distinguishes exactly the same three, and a bench that
+    /// folded `None` into `false` could report "the field is ordinary" about a field nobody ever
+    /// answered for.
+    ///
+    /// ⚠ This is the one reading that says **which level of FR-72 a scenario exercises**.
+    /// Position 14's `ES_PASSWORD` box is caught by level 2 (`EM_GETPASSWORDCHAR`) and never
+    /// reaches level 3; a browser's `<input type="password">` has no `Edit` window class at all,
+    /// so level 3 is the only level that can see it. Asserting `Some(true)` here, before a key
+    /// is sent, is how the HTML pillar of position 14 states in its own report row that the
+    /// branch under test is that one.
+    pub fn is_password(&self) -> Option<bool> {
+        // SAFETY: `self.0` is a live interface pointer, as in `name` above. The property read
+        // takes no arguments of ours and returns a `BOOL` or a failing `HRESULT`. NFR-13: the
+        // failure is examined and becomes `None` rather than a `false` that would read as a
+        // verdict about the element.
+        unsafe { self.0.CurrentIsPassword() }
+            .ok()
+            .map(|flag| flag.as_bool())
+    }
+
     /// The window handle behind this element, when it has one.
     pub fn hwnd(&self) -> Option<HWND> {
         // SAFETY: as `name` above. A zero handle means the element is not a window, which is
