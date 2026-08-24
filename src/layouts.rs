@@ -433,20 +433,25 @@ impl KeyMapping {
     /// outcomes of NFR-13 are decided here and nowhere else.
     pub fn from_to_unicode(produced: i32, buffer: &[u16]) -> Self {
         if produced < 0 {
-            // Dead key. The call reports the dead character itself in the first unit; a
-            // negative return with an empty buffer would mean the OS contradicted its own
-            // contract, and the key is then recorded as producing nothing.
-            return match buffer.first() {
-                Some(&unit) => {
-                    let mut units = [0u16; MAX_UNITS];
-                    units[0] = unit;
-                    Self {
-                        kind: MappingKind::Dead,
-                        len: 1,
-                        units,
-                    }
-                }
-                None => Self::EMPTY,
+            // Dead key. The call reports the dead character itself in the first unit, and the
+            // check is on that unit rather than on the length of the buffer: the one product
+            // caller — `decode` — always hands over a full slice of DECODE_UNITS zeroes, so an
+            // OS that returned a dead key without writing the character ("if possible", says
+            // the documentation) would leave a zero here, not an empty slice. Such a return
+            // contradicts the contract of the call, and the key is then recorded as producing
+            // nothing: a dead mapping carrying NUL would be carried over unchanged by FR-24
+            // and handed to `SendInput` as a character.
+            let unit = buffer.first().copied().unwrap_or(0);
+            if unit == 0 {
+                return Self::EMPTY;
+            }
+
+            let mut units = [0u16; MAX_UNITS];
+            units[0] = unit;
+            return Self {
+                kind: MappingKind::Dead,
+                len: 1,
+                units,
             };
         }
 
@@ -1550,6 +1555,12 @@ pub fn published() -> Configured {
 /// what ends up in the list. Below this line there is no mode any more — [`Cycle::target`] steps
 /// along whatever came out, and a pair is a list of two.
 ///
+/// On the hotkey path `inject::take_press` calls this and then [`Cycle::target`], in that order
+/// and with nothing between them; it needs [`Cycle::len`] as well, which is why the two steps are
+/// not wrapped into one call. There is no second door: a wrapper that existed here until task
+/// T-13-21 was called by no product code and by one test, and its documentation had already
+/// drifted into naming a caller it did not have (audit of 2026-08-24).
+///
 /// # Mode `pair`, and the two bullets of FR-30
 ///
 /// * **Exactly two layouts in the session.** "Работа полностью автоматическая, настройка не
@@ -1568,9 +1579,25 @@ pub fn published() -> Configured {
 /// The configured list, resolved against the session in the order the file gives, which is the
 /// order FR-31 walks. Entries naming layouts this session does not have are dropped: a list that
 /// mentions a layout the user has since removed is still a list of the others. If fewer than two
-/// survive there is nothing configured to walk, and the session's own layouts are walked
-/// instead — the same answer the defaults of section 7 would have given, since `cycle` defaults
-/// to the two layouts of decision 19.
+/// survive, the answer is the refusal [`SelectionError::NoLayouts`] — **not** the layouts of the
+/// session.
+///
+/// ## Why this branch has no fallback and the one above does
+///
+/// It had one until the audit of 2026-08-24 ("фолбэк режима «Несколько» шагает по всем раскладкам
+/// сессии, включая явно исключённые пользователем"): fewer than two resolved entries walked
+/// `available` instead. The list of FR-31 is not a hint, though — FR-92 gives the user a "список
+/// раскладок **с галочками участия**", so a layout that is not in it is a layout whose tick was
+/// taken off by hand. Section 7 stores only the participants, so a list resolving to one layout
+/// cannot be told apart from a list nobody ever wrote, and walking the session in that case walks
+/// exactly what the user excluded: with [EN, RU, DE] in the session and [EN, RU] ticked, removing
+/// RU from the system made the hotkey convert into DE.
+///
+/// FR-31 licenses no prefill to fall back to. FR-30 does — "поля предзаполняются первыми двумя
+/// раскладками системного списка" — and that sentence is written for the pair and only for the
+/// pair, which is the whole of the difference between the two branches here. Refusing costs the
+/// user nothing that FR-31 promised: [`SelectionError::NoLayouts`] is a defined answer of this
+/// module, it is counted like every other refusal, and the press then changes nothing at all.
 ///
 /// Allocates nothing: both branches build the list in a fixed array.
 pub fn cycle_for(configured: Configured, available: &[LayoutId]) -> Result<Cycle, SelectionError> {
@@ -1603,27 +1630,10 @@ pub fn cycle_for(configured: Configured, available: &[LayoutId]) -> Result<Cycle
                 }
             }
 
-            if len >= 2 {
-                Cycle::from_layouts(&resolved[..len])
-            } else {
-                Cycle::from_layouts(available)
-            }
+            // Whatever the ticks of FR-92 left, and nothing besides. Fewer than two of them is
+            // `SelectionError::NoLayouts` by the one rule `Cycle::from_layouts` already applies,
+            // so the refusal is raised — and counted — in the same place as every other.
+            Cycle::from_layouts(&resolved[..len])
         }
     }
-}
-
-/// **The whole of section 4.4 in one call**: the layout this press renders the strokes into.
-///
-/// `origin` is the layout the strokes were recorded under (FR-26) and `step` the position
-/// counter of FR-32 as it will stand *after* this press. Everything else is
-/// [`cycle_for`] and [`Cycle::target`], in that order, with nothing between them.
-///
-/// This is what [`crate::inject::on_hotkey`] calls, once per press.
-pub fn target_for(
-    configured: Configured,
-    available: &[LayoutId],
-    origin: LayoutId,
-    step: usize,
-) -> Result<LayoutId, SelectionError> {
-    cycle_for(configured, available)?.target(origin, step)
 }

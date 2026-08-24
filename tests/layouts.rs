@@ -13,10 +13,12 @@
 //! user input here, only a sweep of the keyboard. SEC-01 and SEC-07 govern the product, and
 //! the product never prints them.
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
 use lang_switcher::layouts::{
     Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
     LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MappingKind, Mods, REBUILD_MESSAGES, SelectionError,
-    cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures, target_for,
+    cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -466,6 +468,55 @@ fn dead_keys_and_ligatures_are_stored_whole() {
     assert!(too_long.is_empty());
 }
 
+/// **FR-24: a dead key the OS did not actually write is nothing, not a dead `NUL`.**
+///
+/// Written for task T-13-21 after the audit of 2026-08-24 ("страховка мёртвой клавиши в
+/// `KeyMapping::from_to_unicode` проверяет не то и потому мертва", `src\layouts.rs:439`). The
+/// guarantee is reached through the seam the module already offers: `from_to_unicode` takes the
+/// raw return value and the buffer separately, so an answer the OS is not supposed to give can be
+/// handed to it by hand, without a keyboard and without a layout.
+///
+/// The point of the case is what the buffer looks like on the *product* path. `decode` always
+/// passes a full scratch slice of `DECODE_UNITS` zeroes, so a call that returned a dead key
+/// without writing the spacing character its documentation promises "if possible" leaves a zero
+/// in the first unit — never an empty slice. A dead mapping carrying `\0` would then be carried
+/// over unchanged by FR-24 and handed to `SendInput` as a character.
+#[test]
+fn a_negative_return_that_wrote_nothing_reads_as_empty_and_not_as_a_dead_nul() {
+    // What `decode` really hands over: the scratch buffer, untouched.
+    let untouched = [0u16; 16];
+    let broken_contract = KeyMapping::from_to_unicode(-1, &untouched);
+
+    assert_eq!(broken_contract.kind(), MappingKind::None);
+    assert!(
+        broken_contract.is_empty(),
+        "nothing, as the comment promises"
+    );
+    assert!(
+        !broken_contract.is_dead(),
+        "a dead key with no dead character is not a dead key"
+    );
+    assert!(
+        broken_contract.units().is_empty(),
+        "and nothing reaches SendInput"
+    );
+    assert_eq!(broken_contract.single_char(), None);
+
+    // A short slice is the same answer, so the guarantee does not rest on the length either.
+    assert!(KeyMapping::from_to_unicode(-1, &[]).is_empty());
+
+    // And the dead key the OS does write is unchanged: the first unit is the dead character,
+    // the entry is one unit long whatever else the scratch buffer still holds.
+    let mut written = [0u16; 16];
+    written[0] = 0x0300;
+    let dead = KeyMapping::from_to_unicode(-1, &written);
+
+    assert_eq!(dead.kind(), MappingKind::Dead);
+    assert!(dead.is_dead());
+    assert_eq!(dead.units(), [0x0300]);
+    assert_eq!(dead, KeyMapping::dead('\u{0300}'));
+}
+
 #[test]
 fn a_key_with_no_character_reads_as_empty_rather_than_as_a_failure() {
     let cache = cache();
@@ -519,6 +570,22 @@ fn settings(mode: LayoutMode, pair: [&str; 2], cycle: &[&str]) -> Configured {
         pair_target: pair[1].to_owned(),
         cycle: cycle.iter().map(|entry| (*entry).to_owned()).collect(),
     })
+}
+
+/// The turn of the tests that measure a refusal counter of [`selection_failures`] **exactly**.
+///
+/// The three counters are process-wide, and the tests of one binary run side by side, so a test
+/// asserting that a counter rose by exactly one has to be the only test raising it while it runs.
+/// The two tests below that touch `no_layouts` take this turn; every other test in this file
+/// asserts a bound rather than a difference and needs nothing.
+static REFUSAL_COUNTERS: Mutex<()> = Mutex::new(());
+
+/// See [`REFUSAL_COUNTERS`]. A poisoned turn is still a turn: what it guards is a counter, and a
+/// panic in another test does not make it unreadable.
+fn refusal_counters() -> MutexGuard<'static, ()> {
+    REFUSAL_COUNTERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The pair of decision 19, in mode `pair`.
@@ -654,9 +721,8 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
     assert_eq!(cycle.layouts(), [US, GREEK, RUSSIAN]);
     assert_eq!(cycle.target(US, 1).expect("variant 2"), GREEK);
 
-    // A list mentioning layouts this session does not have is the list of the others; a list
-    // that leaves fewer than two is the session's own layouts, which is what the defaults of
-    // section 7 name anyway.
+    // A list mentioning layouts this session does not have is the list of the others: two or
+    // more survivors are walked exactly as before, in the file's order.
     let partly_absent = settings(
         LayoutMode::Cycle,
         ["0x00000409", "0x00000419"],
@@ -669,17 +735,121 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
         [RUSSIAN, US]
     );
 
+    // Fewer than two survivors is a refusal and not the session's own layouts — the test below
+    // is the one that states why.
     let all_absent = settings(
         LayoutMode::Cycle,
         ["0x00000409", "0x00000419"],
         &["0x0000040C"],
     );
     assert_eq!(
-        cycle_for(all_absent, &session)
-            .expect("the session's own layouts")
-            .layouts(),
-        session
+        cycle_for(all_absent, &session),
+        Err(SelectionError::NoLayouts)
     );
+}
+
+/// **FR-31 has no prefill, and a tick taken off stays off.**
+///
+/// Written knowingly for task T-13-21, in place of the assertion
+/// `cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start` used to carry — that a cycle
+/// list resolving to fewer than two layouts is answered with the session's own layouts. The audit
+/// of 2026-08-24 struck that fallback out ("фолбэк режима «Несколько» шагает по всем раскладкам
+/// сессии, включая явно исключённые пользователем", `src\layouts.rs:1609`).
+///
+/// The behaviour changed because the list of FR-31 is the "список раскладок с галочками участия"
+/// of FR-92: a layout outside it is a layout the user excluded by hand, and section 7 keeps only
+/// the participants, so a list that resolves to one layout is indistinguishable from no list at
+/// all. Walking the session in that case walks precisely what was excluded. FR-31 licenses no
+/// fallback to lean on — the prefill sentence of FR-30 is written for the pair alone (which is
+/// why the test below still finds it there) — so the honest answer is the refusal that already
+/// exists and is already counted.
+#[test]
+fn a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session() {
+    let _serialised = refusal_counters();
+
+    // The user ticked EN and RU out of a session of EN, RU and EL. While both are present the
+    // list is walked as it always was, and the layout left unticked takes no part.
+    let ticked = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    );
+    let cycle = cycle_for(ticked, &[US, RUSSIAN, GREEK]).expect("both participants are present");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+    assert!(
+        !cycle.contains(GREEK),
+        "the layout left unticked takes no part"
+    );
+
+    // Then RU is removed from the system. One participant is left, and the answer is a refusal:
+    // before this task the hotkey started converting into EL — the one layout the user had
+    // explicitly excluded.
+    let before = selection_failures().no_layouts;
+
+    assert_eq!(
+        cycle_for(ticked, &[US, GREEK]),
+        Err(SelectionError::NoLayouts),
+        "one live participant is nothing to switch between, not a licence to walk the session"
+    );
+
+    assert_eq!(
+        selection_failures().no_layouts,
+        before + 1,
+        "the refusal is counted, and counted once"
+    );
+
+    // A list that resolves to nothing at all is the same answer, counted the same way.
+    let none_left = settings(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x0000040C", "0x00000407"],
+    );
+
+    assert_eq!(
+        cycle_for(none_left, &[US, GREEK]),
+        Err(SelectionError::NoLayouts)
+    );
+
+    assert_eq!(selection_failures().no_layouts, before + 2);
+}
+
+/// **The pair keeps its prefill — FR-30, unchanged by task T-13-21.**
+///
+/// The refusal above is the `cycle` branch only. FR-30 says in as many words that the fields
+/// "предзаполняются первыми двумя раскладками системного списка", so a pair naming a layout this
+/// session does not have falls back to the first two of the session, and a session of exactly two
+/// does not consult the configuration at all. Both are asserted here against the very
+/// configuration that the test above refuses, so that the two branches cannot quietly be made to
+/// agree.
+#[test]
+fn the_pair_still_prefills_from_the_session_where_the_cycle_refuses() {
+    /// German — a third layout of this session, so that the prefill of FR-30 has something to
+    /// prefill *from* and the answer is not simply "the whole session".
+    const GERMAN: LayoutId = LayoutId::from_raw(0x0407_0407);
+
+    let session = [US, GREEK];
+
+    // The same participants that leave one survivor, read in mode `pair`: the prefill of FR-30
+    // answers the first two of the session instead of refusing.
+    let as_pair = settings(
+        LayoutMode::Pair,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    );
+
+    // The target of the named pair is not in this session, so the named pair is unusable.
+    let cycle = cycle_for(as_pair, &[US, GREEK, GERMAN]).expect("the prefill of FR-30");
+
+    assert_eq!(cycle.layouts(), [US, GREEK]);
+    assert!(!cycle.contains(GERMAN), "the first two, as FR-30 words it");
+
+    // And with exactly two layouts in the session the configuration is not consulted at all —
+    // the first bullet of FR-30, which no change to the cycle branch may touch.
+    let cycle = cycle_for(as_pair, &session).expect("two layouts are a pair regardless");
+
+    assert_eq!(cycle.layouts(), session);
+    assert_eq!(cycle.target(US, 1).expect("the other one"), GREEK);
 }
 
 // -------------------------------------------------------------------------------------
@@ -713,10 +883,13 @@ fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
         Err(SelectionError::ImeLayout)
     );
 
-    // And through the one call the product makes, which is where a refusal turns into "no
-    // replacement and no switch".
+    // And through the composition the product makes — `cycle_for` and then `Cycle::target`,
+    // which is what `inject::take_press` walks on the hotkey path — where a refusal turns into
+    // "no replacement and no switch". Until task T-13-21 this line went through a wrapper
+    // `layouts::target_for`, which no product code called; the wrapper is gone and the test now
+    // exercises the same two steps in the same order as the product.
     assert_eq!(
-        target_for(the_pair_of_decision_19(), &[US, PINYIN], US, 1),
+        cycle_for(the_pair_of_decision_19(), &[US, PINYIN]).and_then(|cycle| cycle.target(US, 1)),
         Err(SelectionError::ImeLayout)
     );
 
@@ -779,6 +952,9 @@ fn the_identifiers_of_section_7_are_read_in_both_forms() {
 
 #[test]
 fn a_cycle_is_bounded_and_holds_no_repetitions() {
+    // The other test that raises `no_layouts`; see `REFUSAL_COUNTERS`.
+    let _serialised = refusal_counters();
+
     // A list longer than the bound keeps its first `MAX_CYCLE` entries: a hand-edited file
     // must not be able to turn into an unbounded array on the hotkey path.
     let many: Vec<LayoutId> = (0..(MAX_CYCLE as u16 + 4))
