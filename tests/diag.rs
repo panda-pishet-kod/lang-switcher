@@ -673,3 +673,102 @@ fn what_still_reaches_the_journal_unnamed_is_only_what_fr_71_blocks() {
          be brought into line with the answer"
     );
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-13-6 — the fate of the configuration file has names, and a fate is not a file
+// -------------------------------------------------------------------------------------
+
+/// The five rows task T-13-6 added, each resolving to itself and landing in its group.
+///
+/// They are names of program events rather than of Win32 calls — the shape `journal started`
+/// and `clipboard snapshot truncated` already established. `Kind::Process` for all five: the
+/// configuration is state of the process, read as it starts and written as it ends, and its two
+/// readers are `tray` and this module itself, so a `Kind::Tray` would be wrong for half of them.
+#[test]
+fn the_fate_of_the_configuration_file_has_names_of_its_own() {
+    let names = [
+        "configuration file unreadable",
+        "configuration file from a newer schema",
+        "configuration file quarantined",
+        "configuration file quarantine refused",
+        "configuration save suppressed",
+    ];
+
+    let _gate = ring();
+
+    for name in names {
+        let operation = Operation::from_name(name);
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "«{name}» still reaches the journal as a code with no name"
+        );
+        assert_eq!(operation.name(), name);
+        assert_eq!(
+            operation.kind(),
+            Kind::Process,
+            "{name} landed in the wrong group"
+        );
+
+        diag::record(operation, OsCode::NONE);
+    }
+
+    let dump = diag::render();
+
+    for name in names {
+        assert!(dump.contains(name), "the dump does not print {name}");
+    }
+
+    println!("{dump}");
+}
+
+/// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
+///
+/// A configuration file can be edited by hand and filled with anything at all, which is the
+/// reasoning `ConfigError` is already built on. The danger the new rows have to be proof
+/// against is therefore a caller — present or future — that builds a name out of what it has
+/// just failed to parse. Everything such a name could be made of is fed to the funnel here: a
+/// line of the file, a value out of it, the name of a field this build has no name for, the
+/// position a parser stopped at, and a real row with a fragment of the file glued to it. Every
+/// one narrows to `(unlisted)` and none of them reaches the dump.
+#[test]
+fn nothing_that_could_have_been_in_the_configuration_reaches_the_journal() {
+    let as_if_from_the_file = [
+        "processes = [\"мой-редактор.exe\"]",
+        "мой-редактор.exe",
+        "something_added_in_schema_99",
+        "configuration file is malformed at line 4, column 9",
+        "schema_version = 99",
+        "# не трогать",
+        "configuration file unreadable: [general",
+    ];
+
+    let _gate = ring();
+
+    for text in as_if_from_the_file {
+        let operation = Operation::from_name(text);
+
+        assert_eq!(
+            operation,
+            Operation::UNLISTED,
+            "«{text}» was recognised as a program event"
+        );
+        assert_eq!(operation.kind(), Kind::Unlisted);
+
+        diag::record(operation, OsCode::NONE);
+    }
+
+    let dump = diag::render();
+
+    for text in as_if_from_the_file {
+        assert!(!dump.contains(text), "the dump contains «{text}»");
+    }
+
+    // The last case is the one worth spelling out: a name that *starts* with a real row and
+    // continues into a fragment of the file is not that row. The table is matched whole.
+    assert!(
+        !dump.contains("[general"),
+        "a fragment of the file reached the dump through a name built around a real row"
+    );
+}

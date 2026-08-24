@@ -1004,6 +1004,211 @@ fn switching_the_state_reaches_the_icon_and_the_file() {
     assert!(config.general.enabled);
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-13-6 — the tray acts on the outcome of the read
+//
+// The audit of 2026-08-24 found `install_at` writing «let _ = outcome;» and `save_config`
+// writing the file unconditionally underneath it, so a configuration this build could not
+// read, or one a newer build wrote, was replaced by defaults at the first toggle or at the
+// shutdown FR-83 guarantees. These three tests are the three answers.
+//
+// ⚠ Every one of them installs the tray with `Tray::install_at` on a `TestDir` under `%TEMP%`,
+// as every test in this file does. `Tray::install` — the one entry point that calls
+// `settings::default_config_path`, and through it `%APPDATA%` — is never called from here.
+// ---------------------------------------------------------------------------------------
+
+/// **Acceptance point 5.** A malformed file is kept, byte for byte, before anything is written
+/// over it.
+///
+/// The comparison is of bytes and not of length on purpose. Section 7 leaves the file editable
+/// by hand and FR-92 gives `[buffer] capacity` no field in the dialog, so editing it by hand is
+/// the only way to set one — which means the file holds a person's typing, comments and line
+/// endings included. A copy that re-rendered "the part that parsed" would be the very loss this
+/// answers: the sections below the stray bracket are exactly the ones the parser never reached.
+#[test]
+fn a_malformed_configuration_is_kept_before_anything_is_written_over_it() {
+    let window = TestWindow::new();
+    let home = TestDir::new("malformed");
+
+    // CRLF, a comment in Russian, a value in Russian, and a whole section the parser stops
+    // before ever seeing. Nothing here survives a "write back what we understood".
+    let original = "schema_version = 2\r\n\
+                    # не трогать\r\n\
+                    \r\n\
+                    [general\r\n\
+                    enabled = = true\r\n\
+                    \r\n\
+                    [exclusions]\r\n\
+                    processes = [\"мой-редактор.exe\"]\r\n";
+    fs::write(home.config(), original).expect("the malformed file must be writable");
+
+    let mut tray = install(&window, &home);
+
+    // The unreadable file is still untouched: reading decides nothing, saving does.
+    assert_eq!(home.entries(), [CONFIG_FILE_NAME]);
+    assert!(
+        tray.enabled(),
+        "the defaults of section 7 came back, which is what keeps the program running"
+    );
+
+    tray.toggle_state();
+
+    let aside = settings::quarantine_path_for(&home.config());
+    let kept = fs::read(&aside).expect("the malformed file must have been kept");
+
+    println!(
+        "{} bytes written by hand, {} bytes kept in {}",
+        original.len(),
+        kept.len(),
+        aside.display()
+    );
+
+    assert_eq!(
+        kept,
+        original.as_bytes(),
+        "the kept copy is not byte for byte what the person had"
+    );
+
+    // And a valid new configuration is beside it, carrying the switch that was just made.
+    let (config, outcome) = settings::read_or_default(&home.config());
+    assert!(
+        outcome.is_ok(),
+        "the new file must parse: {:?}",
+        outcome.err()
+    );
+    assert!(
+        !config.general.enabled,
+        "FR-90: the switch reached the file"
+    );
+    assert_eq!(config.schema_version, settings::CURRENT_SCHEMA_VERSION);
+
+    // Two files and no litter — the temporary of the atomic write is gone.
+    assert_eq!(home.entries(), ["config.toml", "config.toml.bad"]);
+}
+
+/// **Acceptance point 6.** A file from a newer build is not written to once, and that includes
+/// the shutdown of FR-83.
+///
+/// All four ways to a save are driven here — `toggle_state`, `set_autostart`, `replace_config`
+/// and `shut_down` — because a ban that holds on three of them is not a ban. The state still
+/// changes; it changes in memory, which is what a session on a file this build must not damage
+/// looks like from the inside.
+#[test]
+fn a_configuration_from_a_newer_build_is_not_written_to_once() {
+    let window = TestWindow::new();
+    let home = TestDir::new("from_future");
+
+    let original = "schema_version = 99\r\n\
+                    \r\n\
+                    [general]\r\n\
+                    enabled = false\r\n\
+                    \r\n\
+                    [something_added_in_schema_99]\r\n\
+                    setting = \"kept\"\r\n";
+    fs::write(home.config(), original).expect("the newer file must be writable");
+
+    let before = fs::read(home.config()).expect("the newer file must be readable");
+    let mut tray = install(&window, &home);
+
+    assert!(
+        !tray.enabled(),
+        "the file was read: `enabled = false` came out of it"
+    );
+
+    // 1 of 4 — FR-90, «Приостановить».
+    tray.toggle_state();
+    assert!(
+        tray.enabled(),
+        "the state lives in memory and still changes"
+    );
+    assert_eq!(
+        fs::read(home.config()).expect("the file must still be there"),
+        before,
+        "toggle_state wrote to a file it must not write to"
+    );
+
+    // 2 of 4 — FR-93, the check mark of the menu.
+    tray.set_autostart(false);
+    assert!(!tray.autostart());
+    assert_eq!(
+        fs::read(home.config()).expect("the file must still be there"),
+        before,
+        "set_autostart wrote to a file it must not write to"
+    );
+
+    // 3 of 4 — FR-92, «Применить» in the settings dialog.
+    let mut replacement = tray.config().clone();
+    replacement.buffer.capacity = 1024;
+    replacement.general.language = settings::Language::En;
+    tray.replace_config(replacement);
+    assert_eq!(tray.config().buffer.capacity, 1024);
+    assert_eq!(
+        fs::read(home.config()).expect("the file must still be there"),
+        before,
+        "replace_config wrote to a file it must not write to"
+    );
+
+    // 4 of 4 — FR-83, the one path every exit of the program goes through.
+    tray.shut_down();
+    let after = fs::read(home.config()).expect("the file must still be there");
+
+    println!(
+        "{} bytes before the session, {} after it",
+        before.len(),
+        after.len()
+    );
+
+    assert_eq!(
+        after, before,
+        "FR-83 saved the configuration over a file it was required not to damage"
+    );
+
+    // Nothing was created beside it either: no `.bad`, no temporary of a half-finished write.
+    assert_eq!(home.entries(), [CONFIG_FILE_NAME]);
+}
+
+/// **Acceptance point 7.** A readable file behaves exactly as it did before.
+///
+/// The two tests above change what happens to a file this build cannot use. This one is the
+/// statement that they changed nothing else: an ordinary configuration is read, written back
+/// on a toggle, keeps the fields the dialog never touches, and no copy is made of anything.
+#[test]
+fn a_readable_configuration_is_written_back_exactly_as_before() {
+    let window = TestWindow::new();
+    let home = TestDir::new("readable");
+
+    // `[buffer] capacity` is the field FR-92 gives no control for — the reason a person edits
+    // this file by hand at all — so it is the right one to follow through a save.
+    let original = "schema_version = 2\n\
+                    \n\
+                    [general]\n\
+                    enabled = true\n\
+                    \n\
+                    [buffer]\n\
+                    capacity = 512\n";
+    fs::write(home.config(), original).expect("the configuration file must be writable");
+
+    let mut tray = install(&window, &home);
+    assert!(tray.enabled());
+    assert_eq!(tray.config().buffer.capacity, 512);
+
+    tray.toggle_state();
+
+    let (config, outcome) = settings::read_or_default(&home.config());
+    assert!(outcome.is_ok(), "the file must parse: {:?}", outcome.err());
+    assert!(!config.general.enabled, "the switch reached the file");
+    assert_eq!(
+        config.buffer.capacity, 512,
+        "a field the dialog does not show must survive a save"
+    );
+
+    assert_eq!(
+        home.entries(),
+        [CONFIG_FILE_NAME],
+        "a readable file is not copied anywhere"
+    );
+}
+
 #[test]
 fn the_session_may_not_be_held_up_and_ends_in_the_cleanup() {
     let window = TestWindow::new();
@@ -1355,6 +1560,26 @@ impl TestDir {
     /// Path of `config.toml` inside this directory. The file is not created.
     fn config(&self) -> PathBuf {
         self.path.join(CONFIG_FILE_NAME)
+    }
+
+    /// Names of everything currently in the directory, sorted — task T-13-6.
+    ///
+    /// The same helper `tests\settings.rs` has, and it is here for the same reason: what a save
+    /// left behind is as much a fact as what it wrote, and a stray `config.toml.bad` or a
+    /// temporary of an unfinished atomic write is only visible by listing the folder.
+    fn entries(&self) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(&self.path)
+            .expect("the temporary directory must be readable")
+            .map(|entry| {
+                entry
+                    .expect("the directory entry must be readable")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
     }
 }
 

@@ -337,6 +337,30 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("RemoveClipboardFormatListener", Kind::Selection),
     ("CloseClipboard", Kind::Selection),
     ("CloseHandle(process)", Kind::Process),
+    // The fate of the configuration file — task T-13-6, the finding "the outcome of reading
+    // `config.toml` is thrown away". `settings::read_or_default` answers what became of the
+    // file, `crate::tray` decides what may be done to it, and these five rows are how that
+    // decision reaches a dump.
+    //
+    // ⚠ **Every one of them is a fact about the file and none of them is anything out of it.**
+    // Not a line, not a fragment, not the name of a field this build has no name for, not the
+    // line and column a parser stopped at. A configuration file can be edited by hand and
+    // filled with anything at all — `ConfigError` is built on that very reasoning — so a row
+    // here that could carry a shape of the file's contents would be the leak SEC-01 and SEC-07
+    // forbid. These say *that* the file could not be read, *that* it was kept, *that* a save
+    // was given up. A reader who needs to know why opens the file, which is where the text is
+    // and the only place it is.
+    //
+    // `Kind::Process` for all five, and **no new `Kind` is added** — the rule every note above
+    // follows. The configuration is state of the process: it is read once as the process
+    // starts and written as it ends, and the second reader of it is this module itself, so a
+    // `Kind::Tray` would be wrong for half of them and a `Kind::Settings` would be a new
+    // variant, which is not a name.
+    ("configuration file unreadable", Kind::Process),
+    ("configuration file from a newer schema", Kind::Process),
+    ("configuration file quarantined", Kind::Process),
+    ("configuration file quarantine refused", Kind::Process),
+    ("configuration save suppressed", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
@@ -672,12 +696,30 @@ pub fn dump_on_shutdown() {
         return;
     };
 
-    // The second half of the pair says what happened to the file; a journal that refused to
-    // run because the configuration would not parse would be worse than no journal, so the
-    // defaults are taken and `log_enabled` is read off them — which is `false`.
-    let (config, _outcome) = settings::read_or_default(&config_path);
+    let (config, outcome) = settings::read_or_default(&config_path);
 
-    if !config.diagnostics.log_enabled {
+    // **The second consumer of `read_or_default`, and it uses the outcome — task T-13-6.**
+    //
+    // What it decides here is narrow, and narrow is correct: **this function never writes the
+    // configuration file.** It reads one flag out of it and writes a file of its own,
+    // elsewhere. So not one of the decisions the outcome drives in `crate::tray` exists on
+    // this path — there is nothing to move aside, nothing to forbid, and no way for this code
+    // to damage a file it does not write. That is why dropping the value here was never a
+    // danger, and it is still not written.
+    //
+    // What the outcome does decide is *whose* answer `log_enabled` is. A read that failed
+    // hands back the defaults of section 7 rather than the file, so the flag is this program's
+    // own default and not a setting anybody chose — and that default is `false`, which is the
+    // direction that creates no file nobody asked for. A journal that refused to run because
+    // the configuration would not parse would be worse than no journal; a journal that started
+    // writing on a guess about an unreadable file would be worse still. The branch says so in
+    // one place instead of leaving it to be re-derived from the default table.
+    let log_enabled = match outcome {
+        Ok(_) => config.diagnostics.log_enabled,
+        Err(_) => false,
+    };
+
+    if !log_enabled {
         return;
     }
 

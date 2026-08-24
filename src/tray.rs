@@ -25,6 +25,10 @@
 //! of the popup window itself, square and grey `160,160,160` until then, is now the rounded
 //! frame of the palette ([`install_menu_frame_hook`]), and the entry under the cursor is
 //! written in the same ink as every other, as the mock-up writes it.
+//! T-13-6 (done) closed the finding of the audit of 2026-08-24: what [`settings::read_or_default`]
+//! answers about the file is now acted on rather than dropped, so a configuration this build
+//! could not read is kept before anything is written over it and one from a newer build is not
+//! written to at all — see [`Tray::save_config`].
 //!
 //! # Where this lives — section 6.1
 //!
@@ -120,8 +124,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
-use crate::settings::{self, Config};
-use crate::{APP_NAME, app, theme};
+use crate::settings::{self, Config, Quarantined, SavePolicy};
+use crate::{APP_NAME, app, diag, theme};
 
 // ---------------------------------------------------------------------------------------
 // The menu of FR-91 — labels and commands
@@ -362,6 +366,21 @@ pub struct Tray {
     config: Config,
     /// Where the configuration is written back to. `None` when `%APPDATA%` is not set.
     config_path: Option<PathBuf>,
+    /// What [`settings::read_or_default`] said may be done to the file — task T-13-6.
+    ///
+    /// **The state of the decision, and it lives for the session.** It is set once, from the
+    /// outcome of the one read this program performs, and every one of the four ways to
+    /// [`Tray::save_config`] — [`Tray::toggle_state`], [`Tray::set_autostart`],
+    /// [`Tray::replace_config`] and [`Tray::shut_down`] — goes through it. The tray is the
+    /// right place for it because the tray is the only writer: `settings::write_to` has
+    /// exactly one call site in the program and it is in this file, and the tray is created
+    /// once, on the UI thread, and dropped as the process ends.
+    ///
+    /// The only transition is [`SavePolicy::QuarantineFirst`] to [`SavePolicy::Allowed`], and
+    /// it happens after the unreadable file has actually been moved aside.
+    /// [`SavePolicy::Forbidden`] never changes: a file from a newer schema is still from a
+    /// newer schema at shutdown.
+    save_policy: SavePolicy,
     /// What `RegisterWindowMessageW("TaskbarCreated")` returned — FR-81. Zero means the
     /// registration failed, and zero is also `WM_NULL`, so it must never be compared against.
     taskbar_created: u32,
@@ -395,19 +414,38 @@ impl Tray {
         let active = Icon::load(instance, IDI_APP_ACTIVE, icon_size)?;
         let paused = Icon::load(instance, IDI_APP_PAUSED, icon_size)?;
 
-        let config = match config_path.as_deref() {
+        let (config, save_policy) = match config_path.as_deref() {
             Some(path) => {
                 let (config, outcome) = settings::read_or_default(path);
-                // `read_or_default` has already substituted the defaults of section 7 for
-                // anything it could not read, which is what it exists for; no decision is
-                // left to the tray. Recording *why* a file failed to parse belongs to the
-                // ring journal — TODO(T-06-4): hand `outcome` to `diag`.
-                let _ = outcome;
-                config
+
+                // **This is the place `read_or_default` returns a pair for** — task T-13-6.
+                // The configuration half is usable whatever happened, which is what that
+                // function exists for; the other half is the fate of the *file*, and it is a
+                // decision this tray has to take, because this tray is the only thing in the
+                // program that ever writes that file back. Dropping it here was the defect:
+                // `save_config` below is unconditional and FR-83 reaches it on every exit, so
+                // a file this build could not read was overwritten with defaults at the first
+                // toggle or the first shutdown.
+                let policy = SavePolicy::for_read(&outcome);
+
+                // SEC-01, SEC-07: the journal is told *that* the file could not be read or
+                // came from a newer build, and never a byte of what was in it — no line, no
+                // fragment, not the name of a field this build has no name for. An ordinary
+                // read says nothing at all: an event per healthy start-up is noise, and the
+                // two entries below are only worth having because they are rare.
+                match policy {
+                    SavePolicy::Allowed => {}
+                    SavePolicy::QuarantineFirst => note_configuration(CONFIG_UNREADABLE),
+                    SavePolicy::Forbidden => note_configuration(CONFIG_NEWER_SCHEMA),
+                }
+
+                (config, policy)
             }
             // `%APPDATA%` is not set. A resident utility still has to run, and the defaults
             // of section 7 are a complete configuration, so this is not a reason to refuse.
-            None => Config::default(),
+            // Nothing was read and nothing will be written — `save_config` leaves on the same
+            // `None` — so the policy is the one that changes nothing.
+            None => (Config::default(), SavePolicy::Allowed),
         };
 
         // SAFETY: `TASKBAR_CREATED` is a NUL-terminated `'static` UTF-16 literal, so the
@@ -430,6 +468,7 @@ impl Tray {
             paused,
             config,
             config_path,
+            save_policy,
             taskbar_created,
             icon_present: false,
             add_calls: 0,
@@ -851,12 +890,68 @@ impl Tray {
     // -----------------------------------------------------------------------------------
 
     /// Writes the configuration back — section 7, and the "сохранение конфигурации" of FR-83.
-    fn save_config(&self) {
+    ///
+    /// # The decision of task T-13-6, and where it is taken
+    ///
+    /// **All four ways to save arrive here** — [`Tray::toggle_state`],
+    /// [`Tray::set_autostart`], [`Tray::replace_config`] and [`Tray::shut_down`] — and
+    /// [`Tray::save_policy`], set from the outcome of the one read this program performs,
+    /// stands in front of all four. That is the whole of the fix: there is one door and the
+    /// decision is on it, so no path can be added later that walks round it.
+    ///
+    /// * [`SavePolicy::Allowed`] — the file was read whole; write it, exactly as before.
+    /// * [`SavePolicy::QuarantineFirst`] — the bytes on the disk are text this build could not
+    ///   read. They are moved to `config.toml.bad` first, byte for byte, and only then is the
+    ///   new file written. If they cannot be moved, nothing is written: the disk still holds
+    ///   the only copy, and a save is never worth it.
+    /// * [`SavePolicy::Forbidden`] — the file came from a newer build. **Nothing is written,
+    ///   ever, this session, and that includes the shutdown of FR-83.** FR-83 asks for
+    ///   «сохранение конфигурации»; for this one file the way to save it is to leave it alone,
+    ///   because everything this build could write back is a strict subset of what is in it —
+    ///   see [`SavePolicy::Forbidden`], where that reasoning is written out in full against
+    ///   the module's own promise at [`settings::ReadOutcome::FromNewerSchema`].
+    fn save_config(&mut self) {
         let Some(path) = self.config_path.as_deref() else {
             // No `%APPDATA%`: there is nowhere to save to, and nothing was read from there
             // either, so the state simply does not outlive the session.
             return;
         };
+
+        match self.save_policy {
+            SavePolicy::Allowed => {}
+
+            SavePolicy::Forbidden => {
+                note_configuration(CONFIG_SAVE_SUPPRESSED);
+                return;
+            }
+
+            SavePolicy::QuarantineFirst => match settings::quarantine(path) {
+                Ok(Quarantined::Moved) => {
+                    note_configuration(CONFIG_QUARANTINED);
+                    // Done once. What is at `path` from here on is this program's own file.
+                    self.save_policy = SavePolicy::Allowed;
+                }
+                Ok(Quarantined::NothingThere) => {
+                    // The file went away between the read and now. There are no bytes to
+                    // keep, so there is nothing to name in the journal and nothing to stop
+                    // the write.
+                    self.save_policy = SavePolicy::Allowed;
+                }
+                Err(_) => {
+                    // NFR-13: the refusal is acted on — it is the reason nothing is written —
+                    // rather than dropped. The direction is the one that keeps the file: the
+                    // bytes on the disk are still the user's only copy, so the save is given
+                    // up and the policy stays, which makes the next save try the move again.
+                    //
+                    // The error value itself does not reach the journal. It is text, and
+                    // SEC-01 and SEC-07 keep text out — the same reasoning
+                    // `diag::dump_on_shutdown` writes down for the `io::Error` of a refused
+                    // dump. The event names the fact; the fact is what a reader needs.
+                    note_configuration(CONFIG_QUARANTINE_REFUSED);
+                    return;
+                }
+            },
+        }
 
         if let Err(error) = settings::write_to(path, &self.config) {
             // A failed save must not take the process down: in the FR-83 case the program is
@@ -865,6 +960,40 @@ impl Tray {
             let _ = error;
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// The configuration events of the journal — task T-13-6, SEC-01 and SEC-07
+// ---------------------------------------------------------------------------------------
+
+/// The read came back with text this build could not turn into a configuration.
+const CONFIG_UNREADABLE: &str = "configuration file unreadable";
+
+/// The file carries a `schema_version` this build does not know. Saving is off for the session.
+const CONFIG_NEWER_SCHEMA: &str = "configuration file from a newer schema";
+
+/// The unreadable file was moved to `config.toml.bad` before the first write.
+const CONFIG_QUARANTINED: &str = "configuration file quarantined";
+
+/// It could not be moved, so nothing was written over it.
+const CONFIG_QUARANTINE_REFUSED: &str = "configuration file quarantine refused";
+
+/// A save was asked for and given up so that the file on the disk survives.
+const CONFIG_SAVE_SUPPRESSED: &str = "configuration save suppressed";
+
+/// Puts one configuration event into the ring: the fact, and nothing of the file.
+///
+/// **SEC-01, SEC-07.** The argument is one of the five literals above, chosen at compile time,
+/// and [`diag::Operation::from_name`] narrows even those onto the closed table of `src\diag.rs`
+/// — a name that is not a row of it becomes `UNLISTED` and keeps none of its text. There is no
+/// branch here through which a byte of the file, the name of a field this build does not know,
+/// or the line and column a parser stopped at could reach the journal: the journal says *what
+/// happened to the file* and never *what was in it*.
+///
+/// The code is always [`diag::OsCode::NONE`]. These are events of the program, not failures of
+/// a Win32 call, and `OsCode` has no constructor that takes a number by design.
+fn note_configuration(operation: &'static str) {
+    diag::record(diag::Operation::from_name(operation), diag::OsCode::NONE);
 }
 
 impl Drop for Tray {

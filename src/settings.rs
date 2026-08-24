@@ -820,6 +820,136 @@ pub fn read_or_default(path: &Path) -> (Config, Result<ReadOutcome, ConfigError>
     }
 }
 
+// -----------------------------------------------------------------------------------------
+// The decision `read_or_default` exists to be given — task T-13-6
+// -----------------------------------------------------------------------------------------
+
+/// Whether the configuration file may be written back, and what has to happen first.
+///
+/// **This is the delivery of the second half of the [`read_or_default`] pair to the place that
+/// decides.** That pair exists so that "overwriting is a decision, not a side effect" can be
+/// true of a caller which keeps the configuration in memory and writes it out again later —
+/// [`crate::tray::Tray`], the one caller of [`write_to`] in the whole program. A value of this
+/// type *is* that decision: taken once, at the moment of the read, and carried for the rest of
+/// the session, because every later write is about the same file this read looked at.
+///
+/// The type is deliberately about the **file**, not about the configuration: the configuration
+/// that comes back from [`read_or_default`] is usable in every case, and nothing here changes
+/// that. A resident utility runs on the defaults of section 7 whatever the file says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavePolicy {
+    /// The file may be written whenever the owner of the configuration asks.
+    ///
+    /// What every successful read answers, [`ReadOutcome::Migrated`] included: everything the
+    /// file held has been understood and is in memory, so writing the memory back loses none
+    /// of it. This is the ordinary case and the behaviour that was here before.
+    Allowed,
+    /// The bytes on disk are somebody's text that this build could not read. They are moved to
+    /// [`quarantine_path_for`] before the first write, and if they cannot be moved, **nothing
+    /// is written at all**.
+    ///
+    /// Section 7 leaves the file editable by hand and the dialog of FR-92 has no field for
+    /// `[buffer] capacity`, so editing it by hand is the only way to set one. A stray bracket
+    /// in it must therefore not cost the rest of it: the exclusions, the cycle order and the
+    /// hotkey are still the user's, still on the disk, and the program has no business
+    /// replacing them with defaults it merely fell back on.
+    QuarantineFirst,
+    /// The file must not be written at all, for the whole session.
+    ///
+    /// ⚠ **FR-83 asks for «сохранение конфигурации» at shutdown, and this refuses to perform
+    /// it. The refusal is what performs it.** The reading is the one this module has already
+    /// written down for itself at [`ReadOutcome::FromNewerSchema`]: "this build is not required
+    /// to understand such a file, but it is required not to damage it". A file from a newer
+    /// schema holds fields this build has no name for; [`Config::to_toml_string`] writes the
+    /// schema it knows and nothing else, and [`Config::migrate`] deliberately leaves the newer
+    /// `schema_version` in place. One write would therefore delete the unknown fields *and*
+    /// leave the stamp that tells the newer build there is nothing to migrate — a loss neither
+    /// build could afterwards detect. For such a file **not saving is what saving the user's
+    /// configuration means**, and that is the sense in which FR-83 is honoured here rather than
+    /// broken.
+    Forbidden,
+}
+
+impl SavePolicy {
+    /// The decision the second half of a [`read_or_default`] pair calls for.
+    ///
+    /// Every failed read maps to [`SavePolicy::QuarantineFirst`] and not only
+    /// [`ConfigError::Malformed`]: a file that could not be *opened* is just as much text this
+    /// build has not seen, the defaults that came back in its place are just as much not what
+    /// is on the disk, and the move to [`quarantine_path_for`] either preserves those bytes or
+    /// refuses the write. There is no failure of a read after which overwriting the file is
+    /// known to be safe, so there is no arm here that says it is.
+    pub fn for_read(outcome: &Result<ReadOutcome, ConfigError>) -> Self {
+        match outcome {
+            Ok(ReadOutcome::NoFile | ReadOutcome::Current | ReadOutcome::Migrated { .. }) => {
+                Self::Allowed
+            }
+            Ok(ReadOutcome::FromNewerSchema { .. }) => Self::Forbidden,
+            Err(_) => Self::QuarantineFirst,
+        }
+    }
+}
+
+/// What is appended to the name of a configuration file that is moved out of the way.
+///
+/// One name, with nothing unique in it, so that exactly one copy is ever kept: a program that
+/// left a numbered trail of unreadable configurations in somebody's `%APPDATA%` would be
+/// solving a small problem by making a permanent one.
+pub const QUARANTINE_SUFFIX: &str = ".bad";
+
+/// Where [`quarantine`] moves a configuration file this build could not read.
+///
+/// Beside the original and named after it — `config.toml.bad` next to `config.toml` — so that
+/// whoever opens the folder of section 7 finds the two together and can see what happened by
+/// looking. Same shape as [`temporary_path_for`], and same reason for the shape: a rename is
+/// only atomic within one directory.
+pub fn quarantine_path_for(path: &Path) -> PathBuf {
+    let mut name = match path.file_name() {
+        Some(name) => name.to_os_string(),
+        None => OsString::from(CONFIG_FILE_NAME),
+    };
+    name.push(QUARANTINE_SUFFIX);
+    path.with_file_name(name)
+}
+
+/// What [`quarantine`] found at the path it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quarantined {
+    /// A file was there and is now at [`quarantine_path_for`], byte for byte.
+    Moved,
+    /// There was nothing to move. Nothing of the user's is at risk, so the caller may write.
+    NothingThere,
+}
+
+/// Moves a configuration this build could not read out of the way, byte for byte.
+///
+/// **A rename and never a rewrite.** The point of the copy is the text a person typed, which
+/// this build by definition failed to parse — so there is nothing "understood" to write out,
+/// and writing out the part that did parse would be the very loss this exists to prevent. The
+/// file is moved with its bytes untouched: not re-encoded, not re-serialised, not truncated.
+///
+/// A previous `.bad` is replaced: `fs::rename` overwrites an existing destination on Windows,
+/// which is what keeps the count of copies at one.
+///
+/// # The two ways it ends
+///
+/// [`Quarantined::NothingThere`] is answered when the source is gone — the file was deleted
+/// between the read and the save. Source and destination share a directory by construction, so
+/// a `NotFound` can only be about the source, and a source that does not exist has no bytes to
+/// lose: the caller is free to write.
+///
+/// Any other failure comes back as [`ConfigError::Io`] and is an instruction to the caller,
+/// not a detail to log: the bytes on the disk are still the only copy, so nothing may be
+/// written over them (NFR-13 — the result is acted on, and the direction it is acted on in is
+/// the one that keeps the file).
+pub fn quarantine(path: &Path) -> Result<Quarantined, ConfigError> {
+    match fs::rename(path, quarantine_path_for(path)) {
+        Ok(()) => Ok(Quarantined::Moved),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Quarantined::NothingThere),
+        Err(err) => Err(ConfigError::Io(err)),
+    }
+}
+
 /// Writes the configuration to `path`, atomically, creating the directory if needed.
 ///
 /// The write goes to a temporary file beside the target, is flushed to the device, and

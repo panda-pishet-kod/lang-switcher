@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
-    ReadOutcome, ReplacementMethod,
+    QUARANTINE_SUFFIX, Quarantined, ReadOutcome, ReplacementMethod, SavePolicy,
 };
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Gdi::{
@@ -392,6 +392,178 @@ fn file_from_a_newer_schema_is_recognised_and_left_intact() {
     let on_disk = fs::read_to_string(&path).expect("the file must still be readable");
     assert_eq!(on_disk, original);
     assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
+}
+
+// -----------------------------------------------------------------------------------------
+// Task T-13-6 — the outcome of the read decides the fate of the file
+//
+// The pair `read_or_default` answers is only worth returning if somebody acts on it, and the
+// finding of the audit of 2026-08-24 was that nobody did. These tests are about the half this
+// module owns: the decision a given outcome calls for, and the move that keeps a file this
+// build could not read. What the tray then does with the decision is `tests\tray.rs`.
+//
+// ⚠ Not one test here goes near `%APPDATA%`. Every path is built by `TestDir` under `%TEMP%`
+// and handed to the functions explicitly — the same way every test above this line does it —
+// and `settings::default_config_path`, the one function in the module that reads `APPDATA` at
+// all, is called by no test of this section.
+// -----------------------------------------------------------------------------------------
+
+/// Every outcome of a read names the one thing that may be done to the file afterwards.
+///
+/// The outcomes are taken from real reads of real files rather than built by hand, so that the
+/// mapping is checked against what the reader actually answers. The one exception is the
+/// input-output failure, which has no portable way to be provoked from a test and is built
+/// directly — the arm it exercises is the same one.
+#[test]
+fn each_read_outcome_names_what_may_be_done_to_the_file() {
+    let dir = TestDir::new("save_policy");
+
+    // No file at all — a first run. Nothing on the disk to lose.
+    let missing = dir.path.join("not-created.toml");
+    let (_, outcome) = settings::read_or_default(&missing);
+    assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::NoFile));
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
+
+    // A current file: read whole, so writing the memory back loses none of it.
+    let current = write_file(&dir, "schema_version = 2\n\n[general]\nenabled = false\n");
+    let (_, outcome) = settings::read_or_default(&current);
+    assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
+
+    // A migrated file: the ladder understood every rung, so it may be written back — that is
+    // what a migration is for, and this is the behaviour the criterion calls "unchanged".
+    let old = write_file(&dir, "[general]\nenabled = false\n");
+    let (_, outcome) = settings::read_or_default(&old);
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::Migrated { from: 0 })
+    );
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
+
+    // Malformed: the bytes are somebody's text and this build did not understand them.
+    let broken = write_file(&dir, "schema_version = 2\n\n[general\nenabled = = true\n");
+    let (_, outcome) = settings::read_or_default(&broken);
+    assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::QuarantineFirst);
+
+    // A failure to read at all is treated the same way, and for the same reason: the defaults
+    // that came back are not what is on the disk, so the disk must not be overwritten with
+    // them until the bytes are safe somewhere.
+    let unreadable: Result<ReadOutcome, ConfigError> = Err(ConfigError::Io(std::io::Error::from(
+        std::io::ErrorKind::PermissionDenied,
+    )));
+    assert_eq!(
+        SavePolicy::for_read(&unreadable),
+        SavePolicy::QuarantineFirst
+    );
+
+    // From a newer build: readable, and precisely therefore untouchable.
+    let future = write_file(&dir, "schema_version = 99\n\n[general]\nenabled = false\n");
+    let (_, outcome) = settings::read_or_default(&future);
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: 99 })
+    );
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Forbidden);
+}
+
+/// The kept copy is named after the original and sits in the same folder.
+///
+/// Same folder because a move is only atomic within one volume, and named after the original
+/// because whoever opens the folder of section 7 should be able to see what happened without
+/// being told.
+#[test]
+fn the_kept_copy_is_named_after_the_original_and_sits_beside_it() {
+    let dir = TestDir::new("bad_name");
+    let path = dir.config();
+    let aside = settings::quarantine_path_for(&path);
+
+    assert_eq!(aside.parent(), path.parent());
+    assert_eq!(
+        aside.file_name().expect("the copy has a name"),
+        format!("{CONFIG_FILE_NAME}{QUARANTINE_SUFFIX}").as_str()
+    );
+    assert_eq!(
+        aside.file_name().expect("the copy has a name"),
+        "config.toml.bad"
+    );
+}
+
+/// **The copy is the bytes of the original and not a rendering of the part that parsed.**
+///
+/// Compared as bytes and never as length: the point of the copy is the text a person typed, so
+/// a line ending that changed, an encoding that was normalised or a section that was dropped
+/// would all be the loss this exists to prevent, and all three keep the length plausible.
+#[test]
+fn a_kept_configuration_is_the_original_bytes_and_nothing_else() {
+    let dir = TestDir::new("bad_bytes");
+    let path = dir.config();
+
+    // CRLF, a comment, non-ASCII in a value, and a section the parser never reaches because
+    // of the bracket above it — every one of them a thing a rewrite would lose.
+    let original = "schema_version = 2\r\n\
+                    # моя правка\r\n\
+                    \r\n\
+                    [general\r\n\
+                    enabled = = true\r\n\
+                    \r\n\
+                    [exclusions]\r\n\
+                    processes = [\"мой-редактор.exe\"]\r\n";
+    fs::write(&path, original).expect("the configuration file must be writable");
+
+    assert_eq!(
+        settings::quarantine(&path).expect("the move must succeed"),
+        Quarantined::Moved
+    );
+
+    let kept = fs::read(settings::quarantine_path_for(&path)).expect("the copy must be readable");
+
+    assert_eq!(
+        kept,
+        original.as_bytes(),
+        "the copy is not byte for byte what the person had"
+    );
+    assert!(!path.exists(), "a move leaves nothing at the old name");
+    assert_eq!(dir.entries(), ["config.toml.bad"]);
+}
+
+/// Exactly one copy is kept: a second unreadable file replaces the first.
+///
+/// A numbered trail of unreadable configurations in somebody's `%APPDATA%` would be a small
+/// problem turned into a permanent one.
+#[test]
+fn only_one_kept_copy_is_ever_left_behind() {
+    let dir = TestDir::new("bad_once");
+    let path = dir.config();
+
+    fs::write(&path, "first [\n").expect("the file must be writable");
+    settings::quarantine(&path).expect("the first move must succeed");
+
+    fs::write(&path, "second [\n").expect("the file must be writable again");
+    settings::quarantine(&path).expect("the second move must succeed");
+
+    assert_eq!(dir.entries(), ["config.toml.bad"]);
+    assert_eq!(
+        fs::read(settings::quarantine_path_for(&path)).expect("the copy must be readable"),
+        b"second [\n",
+        "the copy must be the file that was there last"
+    );
+}
+
+/// Nothing to move is not a failure — it is permission to write.
+///
+/// The file can disappear between the read at start-up and the first save, and there is
+/// nothing of anybody's to keep in that case. Source and destination share a directory by
+/// construction, so a `NotFound` can only be about the source.
+#[test]
+fn moving_a_file_that_is_not_there_is_not_a_failure() {
+    let dir = TestDir::new("bad_missing");
+
+    assert_eq!(
+        settings::quarantine(&dir.config()).expect("a missing file is not an error"),
+        Quarantined::NothingThere
+    );
+    assert!(dir.entries().is_empty(), "and nothing was created");
 }
 
 // -----------------------------------------------------------------------------------------
