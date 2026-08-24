@@ -15,8 +15,27 @@
 //! is ever sent to whatever window happens to be in front: every send goes through
 //! [`send_verified`], which asks the system which window is foreground, compares its process
 //! against the window the bench itself launched and identified, and **returns without sending**
-//! when they differ. `SendInput` is called on exactly one line of the whole bench, inside that
-//! function, so the check cannot be bypassed by a new call site appearing later.
+//! when they differ.
+//!
+//! `SendInput` is called on **two** lines of the whole bench, both of them in this module, and
+//! what makes each of them safe is a different thing:
+//!
+//! * inside [`send_verified`] — the guarded send, and the only one that can carry text. The
+//!   function is private to this module and every public entry point that types anything
+//!   ([`type_text`], [`tap`], [`chord`]) ends in it, so no other module of the bench can reach
+//!   `SendInput` at all: the guard is not bypassed by a new call site because there is nowhere
+//!   else to put one.
+//! * inside [`emergency_combination`] — `Ctrl+Alt+Shift+F12` of FR-96, sent **without** a
+//!   foreground check on purpose, for the reason set out at that function. It is safe not
+//!   because it is guarded but because of what it carries: four modifier-and-function keys with
+//!   no text among them, aimed at the product's global hook and not at anybody's document.
+//!
+//! ⚠ **The pair is checked, not asserted.** This paragraph used to say «exactly one line», and
+//! had been wrong since the second call site was added; a reader who believes such a sentence
+//! never goes to look, which makes a false invariant worse than none. The test
+//! `send_input_is_called_only_in_the_two_named_functions` at the foot of this file re-derives
+//! both call sites from the source of `tests\e2e\` on every `cargo test --features testing`, so
+//! a third one — or either of these two moving out of its function — turns the claim red.
 
 use std::fmt;
 
@@ -151,7 +170,11 @@ fn title_of(hwnd: HWND) -> String {
     String::from_utf16_lossy(&buffer[..length.max(0) as usize])
 }
 
-/// **The only call site of `SendInput` in the bench**, and the foreground check that guards it.
+/// **The guarded call site of `SendInput`**, and the foreground check in front of it.
+///
+/// One of the two call sites in the bench — the module comment names both — and the only one
+/// that can carry text into an application. It is private, and every public entry point that
+/// types anything ends here.
 ///
 /// The order is the point: the check happens first and a mismatch returns before a single
 /// event is written. Requirement of the "Окружение и безопасность" section of the task —
@@ -377,4 +400,50 @@ fn is_extended(vk: u16) -> bool {
         VK_RWIN.0,
     ]
     .contains(&vk)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::wait::sweep;
+
+    /// Both call sites of `SendInput` in the bench: the file, and the function each is inside.
+    ///
+    /// One entry per bullet of the module comment. The table and the bullets are changed
+    /// together or not at all — a third send is a decision, not an edit.
+    const SENDS: [(&str, &str); 2] = [
+        ("input.rs", "send_verified"),
+        ("input.rs", "emergency_combination"),
+    ];
+
+    /// **The foreground guard of §11.5 stated as a fact about the source, and checked.**
+    ///
+    /// The guard is only worth what the absence of an unguarded call site is worth, and that
+    /// absence is what this re-derives every run: every send that carries text has to go through
+    /// [`super::send_verified`], because there is no other place in the bench where `SendInput`
+    /// is named as a call.
+    #[test]
+    fn send_input_is_called_only_in_the_two_named_functions() {
+        let mut found: Vec<(String, String)> = Vec::new();
+
+        for (name, text) in sweep::sources() {
+            for line in sweep::call_lines(&text, sweep::SEND_INPUT_CALL) {
+                found.push((name.clone(), sweep::function_at(&text, line)));
+            }
+        }
+
+        let mut expected: Vec<(String, String)> = SENDS
+            .iter()
+            .map(|(file, owner)| ((*file).to_owned(), (*owner).to_owned()))
+            .collect();
+
+        found.sort();
+        expected.sort();
+
+        assert_eq!(
+            found, expected,
+            "the bench sends from somewhere the module comment of `input.rs` does not name. A \
+             send that carries text belongs behind `send_verified`; one that does not still \
+             belongs in this module, in the comment and in this table."
+        );
+    }
 }

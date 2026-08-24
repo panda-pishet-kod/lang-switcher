@@ -941,10 +941,44 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 /// One keyboard `INPUT` for a virtual key.
 ///
 /// ⚠ **FR-03.** `dwExtraInfo` is [`crate::hook::INJECTED_SIGNATURE`] here and in
-/// [`unicode_event`], and those two functions are the only places in the program that build an
-/// `INPUT`. There is deliberately no third: a structure assembled anywhere else could miss the
-/// signature, `hook::classify` would take it for the user's own typing, it would go into the
-/// buffer and the next hotkey press would convert the program's own output.
+/// [`unicode_event`]. A structure assembled without it would come back through the hook as the
+/// user's own typing, `hook::classify` would let it into the buffer, and the next hotkey press
+/// would convert the program's own output — for ever.
+///
+/// # The three builders of this program
+///
+/// This comment used to say that the two functions of this module were the only places an
+/// `INPUT` is built and that there was deliberately no third. That stopped being true at task
+/// T-07-2 and stayed on the page, which is the worst state an inventory can be in: the next
+/// reader greps by it and stops one place short. The list, in full:
+///
+/// 1. [`key_event`] — this function. Every virtual key the program sends: the `Backspace` pairs
+///    of FR-41, the `Shift+Left` selection of FR-42 and the modifier packets of FR-40 steps 3
+///    and 6.
+/// 2. [`unicode_event`] — every character of a replacement, `KEYEVENTF_UNICODE`, FR-41.
+/// 3. `selection::key_event` in `src\selection.rs` — the four events of `Ctrl+C` and of
+///    `Ctrl+V`, the two chords of the selection path of §4.7. **It exists as a third builder
+///    rather than as a call of this one because `src\inject.rs` was closed to task T-07-2 and
+///    both builders here are private.** That reason is recorded at the duplicate itself and is
+///    not an invitation to merge the two: doing so is a refactor of its own, with its own task.
+///
+/// # What actually holds the invariant
+///
+/// Not this list — a comment holds nothing. The signature is held mechanically, by tests that
+/// read the events which really left rather than a builder called in isolation:
+///
+/// * `tests\inject.rs::every_input_sent_carries_the_injected_signature_of_fr03` — every event
+///   of all three packets of a `Backspace` replacement;
+/// * `tests\inject.rs::every_input_of_the_compatibility_mode_carries_the_injected_signature_of_fr03`
+///   — the same for the `Shift+Left` path, arrows and `Shift` included;
+/// * `tests\inject.rs::the_signature_is_on_every_modifier_event_of_both_directions` — the
+///   release and restore packets, including modifiers a plain replacement never produces;
+/// * `tests\selection.rs::the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject`
+///   — every field of every event of the third builder, on both chords.
+///
+/// What none of them can see is a **fourth** builder whose events never reach one of those
+/// paths. That is why the inventory above is spelled out by name rather than as a count: a
+/// number is a thing to update, and a number nobody updated is how this comment became untrue.
 ///
 /// `time` is left at zero, which asks the system to stamp the event itself. That is not
 /// cosmetic: FR-12 resolves flush races by comparing `KBDLLHOOKSTRUCT.time` against the
@@ -988,9 +1022,10 @@ fn key_event(vk: VIRTUAL_KEY, extended: bool, up: bool) -> INPUT {
 /// unreleased unicode keydown as the latched character, so a run of downs alone comes out as
 /// the first character repeated.
 ///
-/// See [`key_event`] for `dwExtraInfo`, `time` and why these are the only two builders. In
-/// particular the signature of FR-03 is on **both** edges: an up without it would come back
-/// through the hook as the user's own keystroke.
+/// See [`key_event`] for `dwExtraInfo`, `time` and for the inventory of the three `INPUT`
+/// builders of this program — this is the second of them. In particular the signature of FR-03
+/// is on **both** edges: an up without it would come back through the hook as the user's own
+/// keystroke.
 fn unicode_event(unit: u16, up: bool) -> INPUT {
     let mut flags = KEYEVENTF_UNICODE;
 
