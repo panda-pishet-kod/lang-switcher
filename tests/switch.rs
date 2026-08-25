@@ -1,19 +1,35 @@
-//! Module `switch` — the fallback chain of FR-50, the scope of FR-51, the reading of FR-52 and
-//! the refusal of an IME target from FR-35. Task **T-05-1**.
+//! Module `switch` — the one method of FR-50, the scope of FR-51, the reading of FR-52 with its
+//! addendum, and the refusal of an IME target from FR-35. Tasks **T-05-1** and **Т-14-4**.
 //!
 //! # What is checked here and what is not
 //!
-//! The requirement of this task is a **rule about failure**: a method of FR-50 counts as failed
-//! when the layout did not become the target, and never because the call that attempted it
-//! returned an error — decision R-32. That rule is invisible from outside a chain that obeys it.
-//! On a machine where method 1 works, a correct chain and a chain that trusts `PostMessage`
-//! behave identically, every single time, and the whole fallback mechanism of methods 2 and 3
-//! would be dead code with nothing to notice it by.
+//! The requirement is a **rule about failure**: FR-50 counts as failed when the layout did not
+//! become the target, and never because the call that attempted it returned an error — decision
+//! R-32. That rule is invisible from outside code that obeys it. On a machine where the posted
+//! message is honoured, a correct implementation and one that trusts `PostMessage` behave
+//! identically, every single time.
 //!
-//! So the chain is driven through [`lang_switcher::switch::Machine`], the seam the module
+//! So the switch is driven through [`lang_switcher::switch::Machine`], the seam the module
 //! provides, and the case that tells the two apart is built explicitly: a machine whose
 //! `post_request` answers `true` and whose layout never moves. See
-//! [`a_method_that_reports_success_without_changing_the_layout_is_still_a_failure`].
+//! [`a_post_that_reports_success_without_changing_the_layout_is_still_a_failure`].
+//!
+//! # ⭐ What task Т-14-4 changed in this file
+//!
+//! FR-50 used to prescribe a chain of three methods, and roughly a third of this file existed to
+//! pin the order of that chain: method 2 after method 1, method 3 after method 2, the handover to
+//! the watcher thread, its single-use channel, the scope reaching the two methods that had one.
+//! The user struck methods 2 and 3 out of the requirement on 2026-08-25 (question 63 of
+//! `DECISIONS.md`) on the measurements of T-13-10 and Т-14-2 — across 504 executions the two
+//! fallbacks gave a verdict not once, and method 2 hung the calling thread without limit against
+//! a window that had stopped pumping. Those tests are gone: a test that goes on asserting a
+//! requirement that no longer exists is not a check, it is a second copy of the defect.
+//!
+//! What arrived in their place is the addendum of FR-52, which the same measurement produced: in
+//! a classic console window `GetGUIThreadInfo` refuses 120 times out of 120, so no verdict can be
+//! taken there at all, and the switch counts as **sent without confirmation**. Three tests drive
+//! that case through the seam, and a fourth reads `src\switch.rs` itself and asserts that not one
+//! of the calls the retired methods were built out of is left in its code.
 //!
 //! The behavioural half — a real switch of a real window — is at the bottom of this file, marked
 //! `#[ignore]`. It is not part of `cargo test` on purpose: it changes the keyboard layout of the
@@ -21,11 +37,12 @@
 //! `cargo test --test switch -- --ignored --nocapture`. Everything it touches is a window this
 //! test created itself, and the layout it found is put back however it ends (decision R-42).
 
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use lang_switcher::layouts::LayoutId;
 use lang_switcher::switch::{
-    self, Failures, FocusThread, Machine, Method, Outcome, Scope, SwitchError, VERIFY_BUDGET_MS,
+    self, Failures, FocusThread, Machine, Outcome, Reading, Scope, SwitchError, VERIFY_BUDGET_MS,
     VERIFY_POLL_MS,
 };
 
@@ -62,18 +79,19 @@ const RU: LayoutId = LayoutId::from_raw(0x0419_0419);
 /// handle is what Windows reserves for text services that compose characters.
 const PINYIN: LayoutId = LayoutId::from_raw(0xE020_0804);
 
-/// What a method of the fake machine did to the layout.
+/// What the fake machine's `PostMessage` did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Report {
-    /// What the method's Win32 call answered. `true` is "the call succeeded", which decision
-    /// R-32 says is **not** the same statement as "the layout changed".
+    /// What the Win32 call answered. `true` is "the call succeeded", which decision R-32 says is
+    /// **not** the same statement as "the layout changed".
     returned: bool,
     /// Whether the layout actually became the target.
     switched: bool,
 }
 
 impl Report {
-    /// The trap of this task: the call reports success and nothing happens.
+    /// The trap of this task: the call reports success and nothing happens. This is what every
+    /// application that ignores `WM_INPUTLANGCHANGEREQUEST` looks like from here.
     const LIES: Self = Self {
         returned: true,
         switched: false,
@@ -90,110 +108,94 @@ impl Report {
         returned: false,
         switched: false,
     };
+
+    /// R-32 with the sign reversed: the call reported failure and the effect happened anyway.
+    const WORKS_ANYWAY: Self = Self {
+        returned: false,
+        switched: true,
+    };
 }
 
 /// A machine whose every answer the test writes.
 ///
-/// It records what the chain asked of it, which is how the order of FR-50 is checked: an order
-/// is not observable from outside a function that performs it.
+/// It records what was asked of it, which is how "no wait was performed" is checked: not waiting
+/// is not observable from outside a function that does not wait.
 #[derive(Clone, Debug)]
 struct Fake {
-    /// What [`Machine::current`] answers.
+    /// What [`Machine::read`] answers as the layout.
     layout: LayoutId,
-    /// What each of the three methods does, in the order of FR-50.
-    methods: [Report; 3],
+    /// **FR-52's addendum.** What [`Machine::read`] answers for [`Reading::blind`] — `true` is a
+    /// classic console window, where `GetGUIThreadInfo` refuses and nothing readable is a verdict.
+    blind: bool,
+    /// What the one method of FR-50 does.
+    method: Report,
     /// What [`Machine::wait`] answers it waited, in milliseconds.
     slice_ms: u32,
 
-    // ---- what the chain did ----
+    // ---- what the switch did ----
     posts: u32,
-    activates: u32,
-    handovers: u32,
     reads: u32,
     waits: u32,
     waited_ms: u32,
-    scopes: Vec<Scope>,
     targets: Vec<LayoutId>,
 }
 
 impl Fake {
-    /// A machine sitting on `layout`, on which every method lies (see [`Report::LIES`]).
+    /// A machine sitting on `layout`, whose judge can see, and on which the method lies (see
+    /// [`Report::LIES`]).
     fn on(layout: LayoutId) -> Self {
         Self {
             layout,
-            methods: [Report::LIES; 3],
+            blind: false,
+            method: Report::LIES,
             slice_ms: VERIFY_POLL_MS,
             posts: 0,
-            activates: 0,
-            handovers: 0,
             reads: 0,
             waits: 0,
             waited_ms: 0,
-            scopes: Vec::new(),
             targets: Vec::new(),
         }
     }
 
-    /// Makes method `index` (`0`, `1` or `2` in the order of FR-50) the one that really works.
-    fn working(mut self, index: usize) -> Self {
-        self.methods[index] = Report::WORKS;
+    /// Makes the method behave as `report` says.
+    fn method(mut self, report: Report) -> Self {
+        self.method = report;
         self
     }
 
-    /// Makes method `index` fail its own call as well as its effect.
-    fn refusing(mut self, index: usize) -> Self {
-        self.methods[index] = Report::REFUSED;
+    /// **FR-52's addendum.** Makes the judge blind — `GetGUIThreadInfo` refused, which is what a
+    /// `ConsoleWindowClass` window does every time.
+    fn blind(mut self) -> Self {
+        self.blind = true;
         self
-    }
-
-    /// Applies method `index` and answers what its call reported.
-    fn attempt(&mut self, index: usize, target: LayoutId, scope: Option<Scope>) -> bool {
-        self.targets.push(target);
-
-        if let Some(scope) = scope {
-            self.scopes.push(scope);
-        }
-
-        let report = self.methods[index];
-
-        if report.switched {
-            self.layout = target;
-        }
-
-        report.returned
-    }
-
-    /// How many times the chain called any of the three methods.
-    fn attempts(&self) -> u32 {
-        self.posts + self.activates + self.handovers
     }
 }
 
 impl Machine for Fake {
-    fn current(&mut self) -> LayoutId {
+    fn read(&mut self) -> Reading {
         self.reads += 1;
-        self.layout
+
+        Reading {
+            layout: self.layout,
+            blind: self.blind,
+        }
     }
 
     fn post_request(&mut self, target: LayoutId) -> bool {
         self.posts += 1;
-        self.attempt(0, target, None)
-    }
+        self.targets.push(target);
 
-    fn activate(&mut self, target: LayoutId, scope: Scope) -> bool {
-        self.activates += 1;
-        self.attempt(1, target, Some(scope))
-    }
+        if self.method.switched {
+            self.layout = target;
+        }
 
-    fn hand_over(&mut self, target: LayoutId, scope: Scope) -> bool {
-        self.handovers += 1;
-        self.attempt(2, target, Some(scope))
+        self.method.returned
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
         assert_eq!(
             ms, VERIFY_POLL_MS,
-            "the chain must ask for one slice at a time, so that a switch that took effect \
+            "the wait must be asked for one slice at a time, so that a switch that took effect \
              early is noticed early"
         );
 
@@ -209,181 +211,307 @@ impl Machine for Fake {
 
 /// **Point 10, FR-50, decision R-32.** The one test this task exists for.
 ///
-/// Every method's call answers success and not one of them changes the layout. `PostMessage`
-/// returns success when the message is **queued**, and an application is free to ignore it, so
-/// this is not a contrived case — it is what happens in every application that does not handle
-/// `WM_INPUTLANGCHANGEREQUEST`.
+/// The call answers success and the layout does not move. `PostMessage` returns success when the
+/// message is **queued**, and an application is free to ignore it, so this is not a contrived
+/// case — it is what happens in every application that does not handle
+/// `WM_INPUTLANGCHANGEREQUEST`, and Т-14-2 measured it against a window that had stopped pumping
+/// messages, 60 times out of 60.
 ///
-/// A chain that read return values would stop at method 1 and report success. This chain must
-/// re-read the layout by FR-52, see that nothing moved, and go on to methods 2 and 3.
+/// An implementation that read return values would report a switch. This one must re-read the
+/// layout by FR-52, see that nothing moved, and say so.
 #[test]
-fn a_method_that_reports_success_without_changing_the_layout_is_still_a_failure() {
+fn a_post_that_reports_success_without_changing_the_layout_is_still_a_failure() {
     let _guard = counters();
 
     let mut fake = Fake::on(US);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let outcome = switch::to_in(&mut fake, RU);
 
-    // Not `Switched(PostMessage)`. That is the whole assertion.
-    assert_eq!(outcome, Ok(Outcome::HandedOver));
+    // Not `Ok(Outcome::Switched)`. That is the whole assertion.
+    assert_eq!(outcome, Err(SwitchError::NotSwitched));
 
-    assert_eq!(fake.posts, 1, "method 1 ran");
-    assert_eq!(
-        fake.activates, 1,
-        "method 2 ran, which a chain trusting the return value of method 1 would never do"
-    );
-    assert_eq!(fake.handovers, 1, "method 3 was handed over");
+    assert_eq!(fake.posts, 1, "the message went out exactly once");
 
     let counted = switch::failures();
-    assert_eq!(counted.post_message, 1, "method 1 is counted as failed");
-    assert_eq!(counted.attach_activate, 1, "method 2 is counted as failed");
+    assert_eq!(counted.post_message, 1, "the failure is counted");
     assert_eq!(
         counted.post_rejected, 0,
         "the call itself reported success — the verdict came from re-reading, not from it"
     );
+    assert_eq!(
+        counted.sent_unconfirmed, 0,
+        "the judge could see; this is a failure and not an unconfirmed send"
+    );
 }
 
-/// The mirror image, so that the test above cannot pass by a chain that always runs all three.
+/// The mirror image, so that the test above cannot pass by an implementation that always fails.
 #[test]
-fn a_method_that_really_switches_ends_the_chain() {
+fn a_post_that_really_switches_is_a_verified_switch() {
     let _guard = counters();
 
-    let mut fake = Fake::on(US).working(0);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let mut fake = Fake::on(US).method(Report::WORKS);
+    let outcome = switch::to_in(&mut fake, RU);
 
-    assert_eq!(outcome, Ok(Outcome::Switched(Method::PostMessage)));
+    assert_eq!(outcome, Ok(Outcome::Switched));
     assert_eq!(fake.posts, 1);
-    assert_eq!(
-        fake.activates, 0,
-        "method 2 must not run after method 1 worked"
-    );
-    assert_eq!(fake.handovers, 0);
+    assert_eq!(fake.layout, RU);
     assert_eq!(switch::failures(), Failures::default());
 }
 
-/// NFR-13 against R-32: a call that reports failure is **counted**, and the verdict still comes
-/// from re-reading — so a method whose call failed but whose effect happened is a success.
+/// NFR-13 against R-32, in both directions.
+///
+/// A call that reports failure is **counted**; and the verdict still comes from re-reading, so a
+/// call whose return value said "no" while the effect happened is a success all the same.
 #[test]
 fn a_call_that_reports_failure_is_counted_and_is_still_not_the_verdict() {
     let _guard = counters();
 
-    // Method 1's call fails outright.
-    let mut fake = Fake::on(US).refusing(0).working(1);
-    assert_eq!(
-        switch::to_in(&mut fake, Scope::PerWindow, RU),
-        Ok(Outcome::Switched(Method::AttachActivate))
-    );
+    let mut fake = Fake::on(US).method(Report::WORKS_ANYWAY);
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Switched));
 
     let counted = switch::failures();
     assert_eq!(
         counted.post_rejected, 1,
-        "NFR-13: the return value was examined"
+        "NFR-13: the return value was examined and its failure counted"
     );
     assert_eq!(
-        counted.post_message, 1,
-        "and the method is counted as failed too"
+        counted.post_message, 0,
+        "R-32: and it was not the verdict — the layout did become the target"
     );
-    assert_eq!(counted.activate_rejected, 0);
-}
 
-// ---------------------------------------------------------------------------------------
-// Points 11 and 12 — the order of the chain
-// ---------------------------------------------------------------------------------------
+    // The other direction: the call failed and so did the effect.
+    switch::reset_failures();
 
-/// **Point 11, FR-50.** Method 2 runs when method 1 did not change the layout.
-#[test]
-fn method_two_runs_when_method_one_did_not_change_the_layout() {
-    let _guard = counters();
-
-    let mut fake = Fake::on(US).working(1);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
-
-    assert_eq!(outcome, Ok(Outcome::Switched(Method::AttachActivate)));
-    assert_eq!(fake.posts, 1, "method 1 was tried first");
-    assert_eq!(fake.activates, 1);
-    assert_eq!(
-        fake.handovers, 0,
-        "method 3 must not run after method 2 worked"
-    );
-    assert_eq!(fake.layout, RU);
-
-    assert_eq!(switch::failures().post_message, 1);
-    assert_eq!(switch::failures().attach_activate, 0);
-}
-
-/// **Point 12, FR-50 and decision R-31.** Method 3 is reached when neither of the first two
-/// changed the layout — and it is *handed over*, not performed here.
-#[test]
-fn method_three_runs_when_neither_of_the_first_two_changed_the_layout() {
-    let _guard = counters();
-
-    let mut fake = Fake::on(US).working(2);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
-
-    assert_eq!(outcome, Ok(Outcome::HandedOver));
-    assert_eq!((fake.posts, fake.activates, fake.handovers), (1, 1, 1));
+    let mut fake = Fake::on(US).method(Report::REFUSED);
+    assert_eq!(switch::to_in(&mut fake, RU), Err(SwitchError::NotSwitched));
 
     let counted = switch::failures();
+    assert_eq!(counted.post_rejected, 1);
     assert_eq!(counted.post_message, 1);
-    assert_eq!(counted.attach_activate, 1);
-    assert_eq!(
-        counted.text_services, 0,
-        "method 3's verdict belongs to the watcher thread, not to the chain"
-    );
 }
 
-/// The end of the chain: methods 1 and 2 failed and the watcher thread was not there to take
-/// method 3.
+/// The message carries the target the caller named, and no other layout.
 #[test]
-fn a_handover_that_finds_no_watcher_thread_ends_the_chain() {
-    let _guard = counters();
-
-    let mut fake = Fake::on(US).refusing(2);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
-
-    assert_eq!(outcome, Err(SwitchError::Exhausted));
-    assert_eq!(switch::failures().exhausted, 1);
-}
-
-/// Every method is asked for the target the caller named, and for no other layout.
-#[test]
-fn every_method_is_asked_for_the_target_the_caller_named() {
+fn the_message_carries_the_target_the_caller_named() {
     let _guard = counters();
 
     let mut fake = Fake::on(US);
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let _ = switch::to_in(&mut fake, RU);
 
-    assert_eq!(fake.targets, vec![RU, RU, RU]);
+    assert_eq!(fake.targets, vec![RU]);
+}
+
+// ---------------------------------------------------------------------------------------
+// ⭐ FR-52's addendum — the classic console window, task Т-14-4
+// ---------------------------------------------------------------------------------------
+
+/// **FR-52's addendum, question 63.** When `GetGUIThreadInfo` refuses for the window in front,
+/// the switch is **sent and not waited for**.
+///
+/// # What the requirement says and what it costs
+///
+/// «Вердикт по FR-52 в таких окнах невыносим: переключение считается отправленным без
+/// подтверждения, ожидания подтверждения не выполняются.» Т-14-2 measured why: in a
+/// `ConsoleWindowClass` window `GetWindowThreadProcessId` answers with a counterfeit thread id,
+/// `GetGUIThreadInfo` refuses on it 120 times out of 120, and the fallback then reads
+/// `0x00000000` — also 120 of 120 — while the switch has in fact happened, 60 of 60. Waiting
+/// there re-reads the same blind zero until the budget runs out; with the old chain of three that
+/// was about 95 ms of the input thread on **every press**.
+///
+/// So: one post, **zero waits**, and an outcome that is neither a success nor a failure.
+#[test]
+fn a_blind_reading_sends_the_switch_and_waits_for_nothing() {
+    let _guard = counters();
+
+    // A console window as this module sees it: the judge refuses, and the number it hands back
+    // is the zero the fallback read off a counterfeit thread id.
+    let mut fake = Fake::on(LayoutId::default()).blind();
+    let outcome = switch::to_in(&mut fake, RU);
+
+    assert_eq!(outcome, Ok(Outcome::Sent));
+    assert_eq!(fake.posts, 1, "the switch was sent");
+    assert_eq!(fake.targets, vec![RU]);
+    assert_eq!(
+        fake.waits, 0,
+        "«ожидания подтверждения не выполняются» — not one slice of the budget"
+    );
+    assert_eq!(fake.waited_ms, 0);
+    assert_eq!(
+        fake.reads, 1,
+        "one reading, the one that found the judge blind; re-reading it would answer the same \
+         zero for ever"
+    );
+}
+
+/// The blind case has a counter of its own, and it is not one of the failure counters.
+///
+/// ⚠ The point of a separate counter is that «отправлено без подтверждения» must never be
+/// readable as either "confirmed" or "failed". A number in [`Failures::sent_unconfirmed`] is the
+/// count of switches this program sent and cannot vouch for — Т-14-2 measured that they do in
+/// fact happen, 60 times out of 60 — and it is the only place that fact is visible.
+#[test]
+fn a_blind_reading_is_counted_apart_from_every_failure() {
+    let _guard = counters();
+
+    let mut fake = Fake::on(LayoutId::default()).blind();
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Sent));
+
+    let counted = switch::failures();
+
+    assert_eq!(counted.sent_unconfirmed, 1);
+    assert_eq!(
+        counted.no_foreground, 0,
+        "a blind zero is not «there is no foreground window» — the two are the same number and \
+         different facts"
+    );
+    assert_eq!(counted.post_message, 0, "and it is not a failed switch");
+    assert_eq!(
+        counted,
+        Failures {
+            sent_unconfirmed: 1,
+            ..Failures::default()
+        },
+        "nothing else moved"
+    );
+
+    // And it is not a confirmation either: the stamp of FR-04 must not follow it.
+    assert!(
+        !switch::confirmed(Ok(Outcome::Sent)),
+        "«отправлено» is not «подтверждено»"
+    );
+}
+
+/// A blind reading is decided **before** the two branches that would read its number, and both
+/// of those branches would be wrong.
+///
+/// * `layout == 0` would answer [`SwitchError::NoForeground`] — a refusal that sends nothing, in
+///   a window where the switch works every time.
+/// * `layout == target` would answer [`Outcome::AlreadyActive`] — silently swallowing a switch
+///   the user asked for, on the strength of a number that is not a statement about that window.
+#[test]
+fn a_blind_reading_is_never_mistaken_for_no_foreground_or_for_already_active() {
+    let _guard = counters();
+
+    // The zero of a console window.
+    let mut fake = Fake::on(LayoutId::default()).blind();
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Sent));
+    assert_eq!(fake.posts, 1, "a refusal would have sent nothing");
+
+    // A blind reading that happens to carry the target. It is still not a statement about the
+    // window in front, so the switch goes out.
+    switch::reset_failures();
+
+    let mut fake = Fake::on(RU).blind();
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Sent));
+    assert_eq!(
+        fake.posts, 1,
+        "an untrustworthy reading must not silence a switch"
+    );
+    assert_eq!(switch::failures().sent_unconfirmed, 1);
+}
+
+/// NFR-13 holds on the blind path too: the return value of the post is examined and counted.
+#[test]
+fn the_post_of_a_blind_switch_still_examines_its_return_value() {
+    let _guard = counters();
+
+    let mut fake = Fake::on(LayoutId::default())
+        .blind()
+        .method(Report::REFUSED);
+
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Sent));
+
+    let counted = switch::failures();
+    assert_eq!(counted.post_rejected, 1, "NFR-13 does not lapse here");
+    assert_eq!(
+        counted.sent_unconfirmed, 1,
+        "and the outcome is still what FR-52's addendum says it is"
+    );
+}
+
+/// A reading that goes blind **in the middle** of the wait is not a confirmation.
+///
+/// The foreground window changed under the switch, to one no verdict can be taken about. FR-52's
+/// addendum is about the window that was in front when the switch was made; this is a different
+/// event, and the honest answer to it is "not settled" rather than a success invented out of a
+/// number nobody may believe.
+#[test]
+fn a_reading_that_goes_blind_during_the_wait_is_not_a_confirmation() {
+    let _guard = counters();
+
+    /// A machine that answers the target from the first re-read — but blind.
+    struct GoesBlind {
+        reads: u32,
+        waits: u32,
+    }
+
+    impl Machine for GoesBlind {
+        fn read(&mut self) -> Reading {
+            self.reads += 1;
+
+            Reading {
+                layout: if self.reads == 1 { US } else { RU },
+                blind: self.reads > 1,
+            }
+        }
+
+        fn post_request(&mut self, _target: LayoutId) -> bool {
+            true
+        }
+
+        fn wait(&mut self, ms: u32) -> u32 {
+            self.waits += 1;
+            ms
+        }
+    }
+
+    let mut machine = GoesBlind { reads: 0, waits: 0 };
+
+    assert_eq!(
+        switch::to_in(&mut machine, RU),
+        Err(SwitchError::NotSwitched),
+        "a blind reading equal to the target is still not a verdict"
+    );
+    assert_eq!(
+        machine.waits, VERIFY_BUDGET_MS,
+        "and the budget was spent rather than cut short by a value nobody may believe"
+    );
+    assert_eq!(switch::failures().sent_unconfirmed, 0);
 }
 
 // ---------------------------------------------------------------------------------------
 // Point 13 — the wait is bounded above
 // ---------------------------------------------------------------------------------------
 
-/// **Point 13, section 6.1 and FR-80.** The wait between an attempt and its check has a
+/// **Point 13, section 6.1 and FR-80.** The wait between the attempt and its check has a
 /// ceiling, and the ceiling is on the time really waited.
 ///
 /// The input thread holds the low-level hook, and a thread that stops being available for
-/// longer than `LowLevelHooksTimeout` — about 5000 ms — loses the hook silently. The chain's
-/// worst case is the two methods that run on that thread.
+/// longer than `LowLevelHooksTimeout` — about 5000 ms — loses the hook silently.
+///
+/// ⭐ **Task Т-14-4 divided this ceiling by two.** While FR-50 was a chain the worst case was two
+/// budgets on the input thread, and in a console window three (about 95 ms per press, measured by
+/// Т-14-2) — plus, on a window that had stopped pumping, an `ActivateKeyboardLayout` under
+/// `AttachThreadInput` that did not return at all, 60 times out of 60. One method means one
+/// budget, and it is asserted here.
 #[test]
-fn the_wait_between_an_attempt_and_its_check_is_bounded() {
+fn the_wait_between_the_attempt_and_its_check_is_bounded() {
     let _guard = counters();
 
-    // Nothing ever settles, which is the worst case: every method spends its whole budget.
+    // Nothing ever settles, which is the worst case: the whole budget is spent.
     let mut fake = Fake::on(US);
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let _ = switch::to_in(&mut fake, RU);
 
-    let ceiling = 2 * (VERIFY_BUDGET_MS + VERIFY_POLL_MS);
+    let ceiling = VERIFY_BUDGET_MS + VERIFY_POLL_MS;
     assert!(
         fake.waited_ms <= ceiling,
-        "the chain waited {} ms, ceiling {ceiling} ms",
+        "the switch waited {} ms, ceiling {ceiling} ms",
         fake.waited_ms
     );
 
     // And the ceiling itself is far below the timeout that costs the program its hook.
     assert!(
-        u64::from(ceiling) * 100 < 5000,
-        "the whole chain must stay at least two orders of magnitude inside LowLevelHooksTimeout"
+        u64::from(ceiling) * 200 < 5000,
+        "the whole switch must stay at least two orders of magnitude inside LowLevelHooksTimeout"
     );
 }
 
@@ -399,11 +527,11 @@ fn a_wait_that_overshoots_its_slice_ends_the_verification_at_once() {
     let mut fake = Fake::on(US);
     fake.slice_ms = 1_000;
 
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let _ = switch::to_in(&mut fake, RU);
 
     assert_eq!(
-        fake.waits, 2,
-        "one slice per method, because one slice already spent the whole budget"
+        fake.waits, 1,
+        "one slice already spent the whole budget, so there is no second one"
     );
 }
 
@@ -412,90 +540,16 @@ fn a_wait_that_overshoots_its_slice_ends_the_verification_at_once() {
 fn a_switch_that_takes_effect_at_once_costs_one_slice() {
     let _guard = counters();
 
-    let mut fake = Fake::on(US).working(0);
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let mut fake = Fake::on(US).method(Report::WORKS);
+    let _ = switch::to_in(&mut fake, RU);
 
     assert_eq!(fake.waits, 1);
     assert_eq!(fake.waited_ms, VERIFY_POLL_MS);
 }
 
 // ---------------------------------------------------------------------------------------
-// Point 14 — method 3 belongs to the watcher thread
-// ---------------------------------------------------------------------------------------
-
-/// **Point 14, decision R-31 and section 6.1.** The chain hands method 3 over and does not wait
-/// for it: no verification follows the handover, so the input thread returns at once.
-#[test]
-fn the_chain_does_not_wait_for_method_three() {
-    let _guard = counters();
-
-    let mut fake = Fake::on(US).working(2);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
-
-    assert_eq!(outcome, Ok(Outcome::HandedOver));
-
-    // One read before the chain starts, then one per slice of the two verified methods. If the
-    // handover were verified here as well there would be more, and the input thread would be
-    // waiting on COM performed by another thread.
-    let verified_reads = 2 * VERIFY_BUDGET_MS / VERIFY_POLL_MS;
-    assert_eq!(fake.reads, 1 + verified_reads);
-    assert_eq!(fake.waits, verified_reads);
-}
-
-/// **Point 14 and SEC-05.** The channel the handover of R-31 travels on.
-///
-/// The message carries nothing; the target lives in an atomic this process alone writes. So a
-/// forged `WM_APP_SWITCH` from another process finds nothing pending and does nothing, and one
-/// request can never become two switches.
-#[test]
-fn the_handover_channel_is_single_use_and_empty_until_it_is_filled() {
-    let _guard = counters();
-
-    assert_eq!(
-        switch::take_pending(),
-        None,
-        "SEC-05: a forged message finds nothing"
-    );
-
-    switch::publish_pending(RU, Scope::Session);
-    assert_eq!(switch::take_pending(), Some((RU, Scope::Session)));
-    assert_eq!(switch::take_pending(), None, "one request, one switch");
-
-    switch::publish_pending(US, Scope::PerWindow);
-    assert_eq!(switch::take_pending(), Some((US, Scope::PerWindow)));
-}
-
-/// `run_pending` on a machine with nothing pending does nothing at all — which is what a forged
-/// message gets, and what makes it safe to call from the shared window procedure.
-#[test]
-fn run_pending_with_nothing_pending_does_nothing() {
-    let _guard = counters();
-
-    assert_eq!(switch::take_pending(), None);
-    assert_eq!(switch::run_pending(), None);
-    assert_eq!(switch::failures(), Failures::default());
-}
-
-// ---------------------------------------------------------------------------------------
 // Point 16 — FR-51, the scope
 // ---------------------------------------------------------------------------------------
-
-/// **Point 16, FR-51.** The scope reaches both methods whose behaviour depends on it, unchanged.
-#[test]
-fn the_scope_of_fr_51_reaches_the_two_methods_that_have_one() {
-    let _guard = counters();
-
-    for scope in [Scope::PerWindow, Scope::Session] {
-        let mut fake = Fake::on(US);
-        let _ = switch::to_in(&mut fake, scope, RU);
-
-        assert_eq!(
-            fake.scopes,
-            vec![scope, scope],
-            "method 2 and the handover of method 3 both take the scope FR-51 decides"
-        );
-    }
-}
 
 /// **FR-51.** The Windows setting is on by default, so the default of the type is the scope that
 /// setting means.
@@ -506,6 +560,12 @@ fn the_default_scope_is_the_windows_default() {
 
 /// **Point 16, FR-51 on the real machine.** The setting is read from the OS and answers one of
 /// the two scopes, without a failure being swallowed.
+///
+/// ⚠ Since task Т-14-4 nothing takes the scope as an argument: the two methods whose behaviour
+/// depended on it are gone, and the one method FR-50 prescribes has no scope-dependent form. What
+/// FR-51 asks for is that the setting be **taken into account**, and reading it, counting a
+/// failure to read it and reporting it through the diagnostics is what that now amounts to. This
+/// test is the check that the reading still works and still counts.
 #[test]
 fn the_setting_of_fr_51_is_readable_on_this_machine() {
     let _guard = counters();
@@ -529,7 +589,7 @@ fn the_setting_of_fr_51_is_readable_on_this_machine() {
 /// **Point 17, FR-35.** A TSF/IME layout as the target is a refusal and a count, not a switch.
 ///
 /// Module `layouts` keeps IME-based layouts out of the participating set, so a caller that asks
-/// for one has a defect. The chain must not attempt anything: composition in an IME breaks the
+/// for one has a defect. Nothing must be attempted: composition in an IME breaks the
 /// correspondence between keystrokes and the field's contents, which is what FR-35 is about.
 #[test]
 fn an_ime_target_is_refused_and_counted_and_nothing_is_attempted() {
@@ -538,10 +598,10 @@ fn an_ime_target_is_refused_and_counted_and_nothing_is_attempted() {
     assert!(PINYIN.is_ime(), "the fixture really is an IME handle");
 
     let mut fake = Fake::on(US);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, PINYIN);
+    let outcome = switch::to_in(&mut fake, PINYIN);
 
     assert_eq!(outcome, Err(SwitchError::ImeTarget));
-    assert_eq!(fake.attempts(), 0, "no method may run for an IME target");
+    assert_eq!(fake.posts, 0, "nothing may be sent for an IME target");
     assert_eq!(fake.reads, 0, "not even the layout is read");
     assert_eq!(switch::failures().ime_target, 1);
 }
@@ -552,25 +612,30 @@ fn the_zero_handle_is_refused_and_counted() {
     let _guard = counters();
 
     let mut fake = Fake::on(US);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, LayoutId::default());
+    let outcome = switch::to_in(&mut fake, LayoutId::default());
 
     assert_eq!(outcome, Err(SwitchError::NoTarget));
-    assert_eq!(fake.attempts(), 0);
+    assert_eq!(fake.posts, 0);
+    assert_eq!(fake.reads, 0);
     assert_eq!(switch::failures().no_target, 1);
 }
 
 /// No foreground window — the secure desktop, or a desktop switch in progress — is a refusal and
 /// not an attempt to switch a window that is not there.
+///
+/// ⚠ The judge is **not blind** here, and that is what tells this case from the console one: the
+/// zero is FR-52's own answer about a desktop with nothing in front of it.
 #[test]
 fn no_foreground_window_is_refused_and_counted() {
     let _guard = counters();
 
     let mut fake = Fake::on(LayoutId::default());
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let outcome = switch::to_in(&mut fake, RU);
 
     assert_eq!(outcome, Err(SwitchError::NoForeground));
-    assert_eq!(fake.attempts(), 0);
+    assert_eq!(fake.posts, 0);
     assert_eq!(switch::failures().no_foreground, 1);
+    assert_eq!(switch::failures().sent_unconfirmed, 0);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -592,31 +657,27 @@ fn no_foreground_window_is_refused_and_counted() {
 /// So both halves of the assertion carry weight, and the `false` half carries more. Publishing
 /// after a refusal would tell the buffer the window moved when it did not, which is the same
 /// defect with the sign reversed and would be *harder* to see: it would strike only on machines
-/// where the chain of FR-50 fails.
+/// where FR-50 fails.
 ///
 /// The cases are enumerated over the whole of both enums rather than sampled, so that an outcome
 /// added later cannot quietly default to either answer.
 #[test]
 fn only_a_verified_switch_is_confirmed() {
-    // The two R-32 has re-read FR-52 for: "a method ran and the layout became the target", and
-    // "it was the target before anything was sent".
-    for outcome in [
-        Ok(Outcome::Switched(Method::PostMessage)),
-        Ok(Outcome::Switched(Method::AttachActivate)),
-        Ok(Outcome::Switched(Method::TextServices)),
-        Ok(Outcome::AlreadyActive),
-    ] {
+    // The two R-32 has re-read FR-52 for: "the message went out and the layout became the
+    // target", and "it was the target before anything was sent".
+    for outcome in [Ok(Outcome::Switched), Ok(Outcome::AlreadyActive)] {
         assert!(
             switch::confirmed(outcome),
             "{outcome:?} is a verified switch and the stamp may follow it"
         );
     }
 
-    // Method 3 is running on the watcher thread and its verdict is not known here (R-31).
-    // "Not yet" is not "yes": the input thread must not stamp a layout nobody has verified.
+    // ⭐ FR-52's addendum. The switch was sent to a window no verdict can be taken about, and
+    // Т-14-2 measured that in such a window it really happens (60 of 60) — but this program
+    // cannot see it happen, 120 times out of 120, and "almost certainly" is not "verified".
     assert!(
-        !switch::confirmed(Ok(Outcome::HandedOver)),
-        "a handover is an unfinished switch, not a finished one"
+        !switch::confirmed(Ok(Outcome::Sent)),
+        "an unconfirmable send is not a confirmation, however likely it is to have worked"
     );
 
     // Every refusal: nothing was sent, or nothing took, and the window kept its layout.
@@ -624,7 +685,7 @@ fn only_a_verified_switch_is_confirmed() {
         SwitchError::ImeTarget,
         SwitchError::NoTarget,
         SwitchError::NoForeground,
-        SwitchError::Exhausted,
+        SwitchError::NotSwitched,
     ] {
         assert!(
             !switch::confirmed(Err(error)),
@@ -633,61 +694,38 @@ fn only_a_verified_switch_is_confirmed() {
     }
 }
 
-/// The gate answers over the real chain, not only over hand-built values.
+/// The gate answers over the real path, not only over hand-built values.
 ///
-/// The four cases below are driven through `to_in` against the seam, so what is asserted is what
-/// step 5 of FR-40 will actually see: a machine that switches, a machine already on the target,
-/// a machine nothing works on, and a refusal. A test built only from literals would still pass
-/// if the chain stopped producing one of them.
+/// The five cases below are driven through `to_in` against the seam, so what is asserted is what
+/// step 5 of FR-40 will actually see: a machine that switches, a machine already on the target, a
+/// machine nothing works on, a console window, and a refusal. A test built only from literals
+/// would still pass if the module stopped producing one of them.
 #[test]
-fn the_gate_answers_over_the_chain_itself() {
+fn the_gate_answers_over_the_real_path() {
     let _guard = counters();
 
-    // Method 1 works: the layout really became the target.
-    let mut fake = Fake::on(US).working(0);
-    assert!(switch::confirmed(switch::to_in(
-        &mut fake,
-        Scope::PerWindow,
-        RU
-    )));
+    // The post works: the layout really became the target.
+    let mut fake = Fake::on(US).method(Report::WORKS);
+    assert!(switch::confirmed(switch::to_in(&mut fake, RU)));
 
-    // Already there — no method runs at all.
+    // Already there — nothing is sent at all.
     let mut fake = Fake::on(RU);
-    assert!(switch::confirmed(switch::to_in(
-        &mut fake,
-        Scope::PerWindow,
-        RU
-    )));
+    assert!(switch::confirmed(switch::to_in(&mut fake, RU)));
 
-    // Every method lies and the watcher thread takes the handover: the verdict is not known
-    // on this thread, so the stamp must not move here.
+    // The post lies and the layout never moves.
     let mut fake = Fake::on(US);
-    assert_eq!(
-        switch::to_in(&mut fake, Scope::PerWindow, RU),
-        Ok(Outcome::HandedOver)
-    );
-    let mut fake = Fake::on(US);
-    assert!(!switch::confirmed(switch::to_in(
-        &mut fake,
-        Scope::PerWindow,
-        RU
-    )));
+    assert!(!switch::confirmed(switch::to_in(&mut fake, RU)));
 
-    // Methods 1 and 2 lie and the handover finds no watcher: the chain is exhausted.
-    let mut fake = Fake::on(US).refusing(2);
-    assert!(!switch::confirmed(switch::to_in(
-        &mut fake,
-        Scope::PerWindow,
-        RU
-    )));
+    // ⭐ A console window: sent, and unconfirmable.
+    let mut fake = Fake::on(LayoutId::default()).blind();
+    assert_eq!(switch::to_in(&mut fake, RU), Ok(Outcome::Sent));
+
+    let mut fake = Fake::on(LayoutId::default()).blind();
+    assert!(!switch::confirmed(switch::to_in(&mut fake, RU)));
 
     // A refusal before anything is attempted — FR-35.
     let mut fake = Fake::on(US);
-    assert!(!switch::confirmed(switch::to_in(
-        &mut fake,
-        Scope::PerWindow,
-        PINYIN
-    )));
+    assert!(!switch::confirmed(switch::to_in(&mut fake, PINYIN)));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -701,10 +739,10 @@ fn a_target_that_is_already_active_is_not_a_failure_and_switches_nothing() {
     let _guard = counters();
 
     let mut fake = Fake::on(RU);
-    let outcome = switch::to_in(&mut fake, Scope::PerWindow, RU);
+    let outcome = switch::to_in(&mut fake, RU);
 
     assert_eq!(outcome, Ok(Outcome::AlreadyActive));
-    assert_eq!(fake.attempts(), 0, "no redundant WM_INPUTLANGCHANGEREQUEST");
+    assert_eq!(fake.posts, 0, "no redundant WM_INPUTLANGCHANGEREQUEST");
     assert_eq!(fake.waits, 0, "and no time spent on the input thread");
     assert_eq!(switch::failures(), Failures::default(), "no counter moves");
 }
@@ -723,25 +761,23 @@ fn every_kind_of_failure_is_counted_and_the_counts_are_public() {
 
     // FR-35, the zero handle, no foreground window.
     let mut fake = Fake::on(US);
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, PINYIN);
-    let _ = switch::to_in(&mut fake, Scope::PerWindow, LayoutId::default());
-    let _ = switch::to_in(&mut Fake::on(LayoutId::default()), Scope::PerWindow, RU);
+    let _ = switch::to_in(&mut fake, PINYIN);
+    let _ = switch::to_in(&mut fake, LayoutId::default());
+    let _ = switch::to_in(&mut Fake::on(LayoutId::default()), RU);
 
-    // Methods 1 and 2 failing, method 3 not even handed over.
-    let _ = switch::to_in(
-        &mut Fake::on(US).refusing(0).refusing(2),
-        Scope::PerWindow,
-        RU,
-    );
+    // The post refused and the layout did not move.
+    let _ = switch::to_in(&mut Fake::on(US).method(Report::REFUSED), RU);
+
+    // FR-52's addendum: a console window.
+    let _ = switch::to_in(&mut Fake::on(LayoutId::default()).blind(), RU);
 
     let counted = switch::failures();
     assert_eq!(counted.ime_target, 1);
     assert_eq!(counted.no_target, 1);
     assert_eq!(counted.no_foreground, 1);
     assert_eq!(counted.post_message, 1);
-    assert_eq!(counted.attach_activate, 1);
     assert_eq!(counted.post_rejected, 1);
-    assert_eq!(counted.exhausted, 1);
+    assert_eq!(counted.sent_unconfirmed, 1);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -751,9 +787,9 @@ fn every_kind_of_failure_is_counted_and_the_counts_are_public() {
 /// **Point 20, SEC-01 and SEC-07.** Nothing that could carry a keystroke exists in the counters
 /// or in the error values, and their rendered forms are fixed strings and digits.
 ///
-/// The counters are twelve `u32`s and the errors are four fieldless variants, so there is
-/// nowhere for a character, a scan code or a piece of the typing buffer to be. This test pins
-/// that shape: a field or a variant that started carrying data would break it.
+/// The counters are nine `u32`s and the errors are four fieldless variants, so there is nowhere
+/// for a character, a scan code or a piece of the typing buffer to be. This test pins that shape:
+/// a field or a variant that started carrying data would break it.
 #[test]
 fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
     let _guard = counters();
@@ -762,7 +798,7 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
         SwitchError::ImeTarget,
         SwitchError::NoTarget,
         SwitchError::NoForeground,
-        SwitchError::Exhausted,
+        SwitchError::NotSwitched,
     ] {
         let rendered = format!("{error:?}");
         assert!(
@@ -771,18 +807,10 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
         );
     }
 
-    for outcome in [
-        Outcome::AlreadyActive,
-        Outcome::HandedOver,
-        Outcome::Switched(Method::PostMessage),
-        Outcome::Switched(Method::AttachActivate),
-        Outcome::Switched(Method::TextServices),
-    ] {
+    for outcome in [Outcome::AlreadyActive, Outcome::Switched, Outcome::Sent] {
         let rendered = format!("{outcome:?}");
         assert!(
-            rendered
-                .chars()
-                .all(|ch| ch.is_ascii_alphabetic() || ch == '(' || ch == ')'),
+            rendered.chars().all(|ch| ch.is_ascii_alphabetic()),
             "an outcome must be a bare name: {rendered}"
         );
     }
@@ -790,7 +818,7 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
     // The counters after a run that failed every way it could: names, digits and punctuation of
     // the derived `Debug`, and no value that came from a keystroke, because there is none to
     // come from.
-    let _ = switch::to_in(&mut Fake::on(US), Scope::PerWindow, RU);
+    let _ = switch::to_in(&mut Fake::on(US), RU);
     let rendered = format!("{:?}", switch::failures());
 
     assert!(
@@ -799,6 +827,96 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
             .all(|ch| ch.is_ascii_alphanumeric() || " ,:{}_".contains(ch)),
         "the counters render as names and numbers only: {rendered}"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// ⭐ Task Т-14-4 — the retired methods are gone from the code, not merely unreachable
+// ---------------------------------------------------------------------------------------
+
+/// **The abolition of methods 2 and 3, as a test rather than as a grep somebody ran once.**
+///
+/// The old FR-50 was a chain, and its two fallbacks were built out of exactly five names. Т-14-2
+/// measured what they were worth: a verdict **not once in 504 executions** across two tasks, and
+/// — for `ActivateKeyboardLayout` under `AttachThreadInput` — an unbounded block of the calling
+/// thread against a window that had stopped pumping, 60 times out of 60. In this program that
+/// caller is the input thread with the low-level hook of section 6.1, so the block is the whole
+/// keyboard of the session hanging until Windows removes the hook (FR-80), silently.
+///
+/// The check is therefore stronger than "the module does not call them": **not one of these names
+/// occurs in the code of `src\switch.rs` at all**. Prose is deliberately exempt — the module
+/// documentation names them to say why they are gone, and a history that cannot name what it
+/// buried is not a history.
+#[test]
+fn no_call_of_the_retired_methods_is_left_in_the_code_of_the_module() {
+    /// The five names methods 2 and 3 were built out of, plus the two COM calls TSF needed.
+    const RETIRED: [&str; 7] = [
+        "AttachThreadInput",
+        "ActivateKeyboardLayout",
+        "DetachThreadInput",
+        "ITfInputProcessorProfileMgr",
+        "ActivateProfile",
+        "CoInitialize",
+        "CoCreateInstance",
+    ];
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("switch.rs");
+
+    let source = std::fs::read_to_string(&path).expect("src\\switch.rs is readable");
+
+    for name in RETIRED {
+        let hits: Vec<usize> = source
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim_start();
+
+                !line.starts_with("//") && !line.starts_with("///") && !line.starts_with("//!")
+            })
+            .filter(|(_, line)| line.contains(name))
+            .map(|(index, _)| index + 1)
+            .collect();
+
+        assert!(
+            hits.is_empty(),
+            "{name} occurs in the code of src\\switch.rs at lines {hits:?}; methods 2 and 3 of \
+             FR-50 were struck out of the requirement by question 63 and this module may not \
+             call them"
+        );
+    }
+}
+
+/// The handover of decision R-31 is gone, and the number it travelled on is **kept reserved**.
+///
+/// `WM_APP + 8` was the message with which the input thread gave method 3 to the watcher thread.
+/// Method 3 is gone, and so is everything that posted or answered that message — but the number
+/// is an entry in a register: the map of `WM_APP + N` is written out in the documentation of
+/// `hook`, `guard`, `watchdog` and `settings`, and four tests of this repository assert that no
+/// two private messages of this process share a number. Freeing it for reuse would make those
+/// documents wrong in the one way that fails silently.
+#[test]
+fn the_retired_message_number_is_still_reserved_and_still_unique() {
+    assert_eq!(switch::WM_APP_SWITCH, 0x8000 + 8);
+
+    for occupied in [
+        lang_switcher::hook::WM_APP_HOTKEY,
+        lang_switcher::hook::WM_APP_FAIL_SAFE,
+        lang_switcher::hook::WM_APP_SEED_CAPS,
+        lang_switcher::watchdog::WM_APP_FLUSH,
+        lang_switcher::watchdog::WM_APP_LAYOUT,
+        lang_switcher::watchdog::WM_APP_REHOOK,
+        lang_switcher::guard::WM_APP_PROBE,
+        lang_switcher::guard::WM_APP_FIELD,
+        lang_switcher::selection::WM_APP_SELECTION,
+        lang_switcher::selection::WM_APP_BUFFER_PATH,
+    ] {
+        assert_ne!(
+            switch::WM_APP_SWITCH,
+            occupied,
+            "the retired number must not be handed to a live message"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -815,8 +933,7 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
 /// layout is a property **of a thread**, and in a packaged application of Windows 11 the
 /// foreground window and the window that receives the input are different threads of one process.
 /// A test that goes on asserting a requirement that no longer exists is not a check, it is a
-/// second copy of the defect. The behavioural tests of FR-10 and FR-11 were not touched by that
-/// task at all.
+/// second copy of the defect.
 ///
 /// The test computes the requirement's new expression itself, from the same four functions, and
 /// compares. It cannot prove the module contains those calls — that is a reading of the source,
@@ -873,13 +990,36 @@ fn fr_52_reads_the_layout_of_the_thread_that_owns_the_focus_window() {
     assert_eq!(switch::current(), expected);
 }
 
+/// **Task Т-14-4.** `current` is [`switch::read`] with the addendum's flag dropped, and nothing
+/// else.
+///
+/// That equality is what keeps every caller outside module `switch` — `app::refresh_layout_and_
+/// cache`, `buffer::Recorder::restamp`, the selection path of FR-60/FR-61 — untouched by the
+/// addendum: they ask what the layout is, and they get the answer FR-52 has always given them.
+/// The extra fact travels beside it and only `to_in` reads it.
+#[test]
+fn current_is_the_reading_of_fr_52_without_its_verdict_flag() {
+    let reading = switch::read();
+
+    assert_eq!(switch::current(), reading.layout);
+
+    // On the machine a `cargo test` runs on, the foreground window is a classic one and the
+    // judge can see it. Printed rather than asserted: a console window really would be blind
+    // here, and this test must not fail because of where it was started from.
+    println!("FR-52 on this machine right now: {reading:?}");
+}
+
 /// **FR-52, sentence 2 — the fallback, all three branches, driven rather than hoped for.**
 ///
 /// ⭐ This test exists because of a number in the review of task T-10-19: over **660 circles and
 /// three applications** `GetGUIThreadInfo` refused **0 times** and answered «no focus window» **0
-/// times**. Neither fallback branch can be reached by running the program, so neither of them is
-/// known to work from any live measurement — and an untested fallback in a requirement that has
-/// already been got wrong four times is exactly the place the fifth mistake would live.
+/// times**. Neither fallback branch can be reached by running the program on an ordinary window,
+/// so neither of them is known to work from any live measurement — and an untested fallback in a
+/// requirement that has already been got wrong four times is exactly the place the fifth mistake
+/// would live.
+///
+/// ⚠ One of the two has since been seen, and constantly: Т-14-2 measured the refusal **120 times
+/// out of 120** in a classic console window, which is where FR-52's addendum came from.
 ///
 /// [`switch::reading_thread`] is the rule with the Win32 taken out of it, so all three cases are
 /// ordinary values here:
@@ -915,11 +1055,14 @@ fn fr_52_falls_back_to_the_foreground_thread_exactly_where_the_requirement_says_
 
 /// ⚠ **The two fallbacks are different facts and stay different facts.**
 ///
-/// They have the same *effect* — the foreground thread — and that is precisely the shape in which
-/// an `Option<u32>` would have collapsed them into one. A thread that has no focus window is a
-/// state of the machine; a call that refused is a failure of a call, and NFR-13 is about the
-/// second. This asserts that the type still tells them apart, so that a later simplification has
-/// to argue with a test rather than with a comment.
+/// They have the same *effect* on which thread is read — the foreground one — and that is
+/// precisely the shape in which an `Option<u32>` would have collapsed them into one. A thread
+/// that has no focus window is a state of the machine; a call that refused is a failure of a
+/// call, and NFR-13 is about the second.
+///
+/// ⭐ Since task Т-14-4 they differ in more than provenance: only the refusal makes a verdict
+/// impossible (FR-52's addendum), so collapsing them would turn every thread with no focus window
+/// into an unconfirmable send.
 #[test]
 fn the_two_fallbacks_of_fr_52_are_not_the_same_answer() {
     assert_ne!(FocusThread::NoFocus, FocusThread::Refused);
@@ -964,14 +1107,14 @@ fn the_fallbacks_of_fr_52_have_counters_of_their_own() {
 /// `#[ignore]` on purpose: this changes the keyboard layout of the machine a person is sitting
 /// at, so it runs only when it is asked for by name —
 /// `cargo test --test switch -- --ignored --nocapture`.
+///
 /// # Why the window lives on a thread of its own
 ///
-/// Method 1 is a **posted** message: it takes effect when the window that owns the queue runs
-/// its own message loop. A window created and then left alone by the test thread never pumps,
-/// so method 1 could never work and the run would measure nothing but the fallback. The bench
-/// therefore puts the window on a thread that pumps, which is also what a real application is,
-/// and drives the chain from the test thread — so `AttachThreadInput` in method 2 is a real
-/// attach between two real threads rather than a self-attach that is skipped.
+/// FR-50 is a **posted** message: it takes effect when the window that owns the queue runs its
+/// own message loop. A window created and then left alone by the test thread never pumps, so the
+/// switch could never work and the run would measure nothing at all. The bench therefore puts the
+/// window on a thread that pumps, which is also what a real application is, and drives the switch
+/// from the test thread.
 #[test]
 #[ignore = "changes the keyboard layout of the machine; run deliberately with --ignored"]
 fn behavioural_a_real_window_is_switched_and_the_layout_is_put_back() {
@@ -1017,45 +1160,33 @@ fn behavioural_a_real_window_is_switched_and_the_layout_is_put_back() {
 
     // ---- point 21: US -> RU -------------------------------------------------------------
     let mut timed = Timed::default();
-    let outcome = switch::to_in(&mut timed, scope, ru);
+    let outcome = switch::to_in(&mut timed, ru);
     println!(
         "point 21: US -> RU  outcome {outcome:?}, settled after {} ms in {} slices",
         timed.waited_ms, timed.waits
     );
-    assert!(matches!(outcome, Ok(Outcome::Switched(_))), "{outcome:?}");
+    assert_eq!(outcome, Ok(Outcome::Switched), "{outcome:?}");
     assert_eq!(switch::current(), ru, "point 21: the layout is now Russian");
 
     // ---- point 22: RU -> US -------------------------------------------------------------
     let mut timed = Timed::default();
-    let outcome = switch::to_in(&mut timed, scope, us);
+    let outcome = switch::to_in(&mut timed, us);
     println!(
         "point 22: RU -> US  outcome {outcome:?}, settled after {} ms in {} slices",
         timed.waited_ms, timed.waits
     );
-    assert!(matches!(outcome, Ok(Outcome::Switched(_))), "{outcome:?}");
+    assert_eq!(outcome, Ok(Outcome::Switched), "{outcome:?}");
     assert_eq!(switch::current(), us, "point 22: the layout is back on US");
 
     // ---- point 24: asking again for what is already there --------------------------------
     let mut timed = Timed::default();
-    let outcome = switch::to_in(&mut timed, scope, us);
+    let outcome = switch::to_in(&mut timed, us);
     println!(
         "point 24: US -> US  outcome {outcome:?}, {} waits",
         timed.waits
     );
     assert_eq!(outcome, Ok(Outcome::AlreadyActive));
     assert_eq!(timed.waits, 0, "point 24: no redundant switching");
-
-    // ---- FR-51, measured rather than assumed --------------------------------------------
-    //
-    // The scope decides whether method 2 has to attach to the foreground window's thread. The
-    // claim behind the `Scope::Session` branch is that with the setting off the input language
-    // is one value for the whole session, so activating a layout on *this* thread reaches the
-    // window on the other one. That is measurable here, and it is measured rather than assumed.
-    let reached = own_window::activate_without_attach_reaches(ru);
-    println!(
-        "FR-51 probe: ActivateKeyboardLayout on this thread, no attach, reached the other \
-         thread's window: {reached}   (scope {scope:?})"
-    );
 
     println!("counters after the run: {:?}", switch::failures());
 
@@ -1073,21 +1204,29 @@ fn behavioural_a_real_window_is_switched_and_the_layout_is_put_back() {
     );
 }
 
-/// **Point 11 on the real machine, and the proof that the fallback chain is not dead code.**
+/// **Task Т-14-4 on the real machine: a window that never pumps fails, and fails *fast*.**
 ///
 /// A window that never runs a message loop is a window that never processes a posted message.
 /// `PostMessage` still reports success — the message *was* queued — so this is exactly the case
-/// decision R-32 was written about, and it happens on real applications, not only in a test:
-/// a console host, a window busy in a modal operation, a control that swallows the message.
+/// decision R-32 was written about.
 ///
-/// The chain must therefore come out of this on **method 2**. A chain that read the return value
-/// of `PostMessage` would come out of it reporting method 1 and leaving the layout unchanged.
+/// ⚠ **This test used to assert the opposite of what it asserts now, and the change is the point
+/// of task Т-14-4.** It used to end on `Outcome::Switched(Method::AttachActivate)`, because the
+/// window it creates belongs to the *test thread itself* and method 2's `ActivateKeyboardLayout`
+/// then moved that very thread's layout — a "success" that says nothing about a foreign
+/// application. Т-14-2 put a real foreign window with a dead queue under all three methods and
+/// measured the truth: **0 of 60 for every one of them**, and method 2 blocking the calling
+/// thread for longer than 2000 ms, 60 times out of 60. With the fallbacks struck out of FR-50 the
+/// required answer here is a plain, bounded failure.
+///
+/// So two things are asserted: the outcome is [`SwitchError::NotSwitched`], and the whole call
+/// returns inside a fraction of the `LowLevelHooksTimeout` that FR-80 is about — which is the
+/// half method 2 could not promise.
 #[test]
-#[ignore = "changes the keyboard layout of the machine; run deliberately with --ignored"]
-fn behavioural_a_window_that_never_pumps_falls_through_to_method_two() {
+#[ignore = "creates a foreground window of its own; run deliberately with --ignored"]
+fn behavioural_a_window_that_never_pumps_fails_fast_and_does_not_hang() {
     use own_window::{Restore, TestWindow};
 
-    let scope = switch::scope();
     let session = lang_switcher::layouts::enumerate().expect("the session has usable layouts");
 
     let us = session
@@ -1116,31 +1255,34 @@ fn behavioural_a_window_that_never_pumps_falls_through_to_method_two() {
     switch::reset_failures();
 
     let target = if started_on == ru { us } else { ru };
+
+    let began = std::time::Instant::now();
     let outcome = switch::to(target);
+    let elapsed = began.elapsed();
 
     println!("a window that never pumps: {started_on} -> {target}, outcome {outcome:?}");
+    println!("the whole call took {elapsed:?}");
     println!("counters: {:?}", switch::failures());
 
     assert_eq!(
         outcome,
-        Ok(Outcome::Switched(Method::AttachActivate)),
-        "method 1 cannot work against a queue nobody drains, so method 2 must"
+        Err(SwitchError::NotSwitched),
+        "nothing can switch a queue nobody drains, and there is nothing left to fall back to"
     );
-    assert_eq!(switch::current(), target);
     assert_eq!(
         switch::failures().post_message,
         1,
-        "and method 1 must be counted as failed, from the re-read and not from its return value"
+        "the failure is counted, from the re-read and not from the return value"
     );
     assert_eq!(
         switch::failures().post_rejected,
         0,
         "PostMessageW itself reported success — decision R-32 in one line"
     );
-
-    let outcome = switch::to(started_on);
-    println!("restoring {started_on} -> {outcome:?} (scope {scope:?})");
-    assert_eq!(switch::current(), started_on);
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "the call must be bounded by the budget of FR-80; it took {elapsed:?}"
+    );
 }
 
 /// **Point 23 — the whole scenario of section 11.3, in a window this test owns.**
@@ -1247,20 +1389,12 @@ struct Timed {
 }
 
 impl Machine for Timed {
-    fn current(&mut self) -> LayoutId {
-        self.inner.current()
+    fn read(&mut self) -> Reading {
+        self.inner.read()
     }
 
     fn post_request(&mut self, target: LayoutId) -> bool {
         self.inner.post_request(target)
-    }
-
-    fn activate(&mut self, target: LayoutId, scope: Scope) -> bool {
-        self.inner.activate(target, scope)
-    }
-
-    fn hand_over(&mut self, target: LayoutId, scope: Scope) -> bool {
-        self.inner.hand_over(target, scope)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
@@ -1287,9 +1421,8 @@ mod own_window {
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        ACTIVATE_KEYBOARD_LAYOUT_FLAGS, ActivateKeyboardLayout, HKL, INPUT, INPUT_0,
-        INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC,
-        MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY, VK_SHIFT,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+        MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY, VK_SHIFT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, CreateWindowExW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
@@ -1311,17 +1444,13 @@ mod own_window {
     /// program filters this input out as its own (FR-03) and the scenario tests nothing.
     const BENCH_SIGNATURE: usize = 0x0000_0000_5431_3035;
 
-    /// How long the FR-51 probe waits for a layout change before answering "it did not reach".
-    const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
-
     /// Published instead of a window handle when the bench thread could not get the foreground.
     const FAILED: usize = usize::MAX;
 
     /// A window of this test's own **on a thread of its own, with a real message loop**.
     ///
     /// That is what makes the run resemble the thing the program actually switches: a posted
-    /// `WM_INPUTLANGCHANGEREQUEST` only takes effect when the owning thread pumps, and
-    /// `AttachThreadInput` in method 2 is only a real attach when the two threads differ.
+    /// `WM_INPUTLANGCHANGEREQUEST` only takes effect when the owning thread pumps.
     pub struct Bench {
         handle: HWND,
         stop: Arc<AtomicBool>,
@@ -1347,8 +1476,8 @@ mod own_window {
 
                 theirs.store(window.handle().0 as usize, Ordering::Release);
 
-                // The message loop. Without it a posted message is never processed and method 1
-                // of FR-50 could not work here whatever the program did.
+                // The message loop. Without it a posted message is never processed and FR-50
+                // could not work here whatever the program did.
                 while !mine.load(Ordering::Acquire) {
                     pump();
                     std::thread::sleep(Duration::from_millis(1));
@@ -1547,54 +1676,6 @@ mod own_window {
                 let _ = thread.join();
             }
         }
-    }
-
-    /// **The FR-51 measurement.** Activates `target` on *this* thread without attaching to the
-    /// foreground window's thread, and answers whether the foreground window followed.
-    ///
-    /// This is the claim the `Scope::Session` branch of method 2 rests on, put to the machine
-    /// instead of being assumed. The layout is put back before the function returns whatever the
-    /// answer is.
-    pub fn activate_without_attach_reaches(target: LayoutId) -> bool {
-        let before = switch::current();
-
-        if before == target {
-            // Nothing to observe: pick a probe target that differs, or say so.
-            return false;
-        }
-
-        // SAFETY: the `HKL` is rebuilt from a numeric handle `layouts::enumerate` answered with;
-        // constructing a pointer is safe and this one is never dereferenced. The call acts on
-        // the calling thread's input queue and writes nothing through a pointer of ours.
-        let activated = unsafe {
-            ActivateKeyboardLayout(
-                HKL(target.raw() as *mut c_void),
-                ACTIVATE_KEYBOARD_LAYOUT_FLAGS(0),
-            )
-        };
-
-        let started = Instant::now();
-        let mut reached = false;
-
-        while started.elapsed() < PROBE_TIMEOUT {
-            if switch::current() == target {
-                reached = true;
-                break;
-            }
-
-            std::thread::sleep(Duration::from_millis(2));
-        }
-
-        println!(
-            "FR-51 probe: ActivateKeyboardLayout returned {:?}",
-            activated.map(|previous| format!("0x{:08X}", previous.0 as usize))
-        );
-
-        // Put back whatever this probe moved, on this thread and through the chain, before the
-        // caller's own restoration runs.
-        let _ = switch::to(before);
-
-        reached
     }
 
     /// `ES_MULTILINE | ES_AUTOVSCROLL` — the styles of a plain text box.

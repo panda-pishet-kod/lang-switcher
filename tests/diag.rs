@@ -531,8 +531,11 @@ fn nothing_that_could_have_been_typed_reaches_the_dump() {
         "layouts.cache_failures",
         "inject.send_mismatches",
         "switch.post_message",
-        "switch.attach_activate",
-        "switch.text_services",
+        "switch.post_rejected",
+        // ⭐ Task Т-14-4. `switch.attach_activate` and `switch.text_services` stood here until
+        // methods 2 and 3 of FR-50 were struck out of the requirement; this is the row that
+        // replaced them — the addendum of FR-52, a switch sent where no verdict can be taken.
+        "switch.sent_unconfirmed",
     ] {
         assert!(text.contains(expected), "the dump is missing {expected}");
     }

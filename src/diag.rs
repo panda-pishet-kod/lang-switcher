@@ -970,21 +970,18 @@ fn render_counters(out: &mut String) {
 
     let failures = crate::switch::failures();
 
+    // ⚠ Six rows left this section in task Т-14-4 — `attach_activate`, `text_services`,
+    // `activate_rejected`, `activate_profile_rejected`, `detach_failed` and `exhausted`. They
+    // counted methods 2 and 3 of the old chain of FR-50 and the end of that chain; the user struck
+    // both methods out of the requirement (question 63 of `DECISIONS.md`), so the counters behind
+    // them no longer exist. `switch.sent_unconfirmed` is the row that arrived in their place: the
+    // addendum of FR-52, a switch sent to a window no verdict can be taken about.
     row_u32(out, "switch.post_message", failures.post_message);
-    row_u32(out, "switch.attach_activate", failures.attach_activate);
-    row_u32(out, "switch.text_services", failures.text_services);
     row_u32(out, "switch.post_rejected", failures.post_rejected);
-    row_u32(out, "switch.activate_rejected", failures.activate_rejected);
-    row_u32(
-        out,
-        "switch.activate_profile_rejected",
-        failures.activate_profile_rejected,
-    );
-    row_u32(out, "switch.detach_failed", failures.detach_failed);
+    row_u32(out, "switch.sent_unconfirmed", failures.sent_unconfirmed);
     row_u32(out, "switch.ime_target", failures.ime_target);
     row_u32(out, "switch.no_target", failures.no_target);
     row_u32(out, "switch.no_foreground", failures.no_foreground);
-    row_u32(out, "switch.exhausted", failures.exhausted);
     row_u32(out, "switch.scope_unreadable", failures.scope_unreadable);
 }
 

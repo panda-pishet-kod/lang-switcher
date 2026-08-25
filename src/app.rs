@@ -1084,8 +1084,8 @@ fn publish_active_layout(layout: LayoutId) {
 ///
 /// # Why this exists rather than a re-read of the foreground layout
 ///
-/// Because `switch::to` has already re-read it. Decision R-32 makes the verdict of every method
-/// a re-reading of FR-52 rather than a return value believed on trust, so by the time
+/// Because `switch::to` has already re-read it. Decision R-32 makes the verdict of FR-50 a
+/// re-reading of FR-52 rather than a return value believed on trust, so by the time
 /// `confirmed` answers `true` the layout has been observed to *be* the target. Asking the system
 /// again here would cost a second round of Win32 calls on the path NFR-09 budgets, and would
 /// open a window in which a layout the user changed in between is mistaken for the one this
@@ -1324,15 +1324,19 @@ pub(crate) fn post_to_ui_thread(message: u32) -> bool {
 
 /// Whether `hwnd` is the watcher thread's own window.
 ///
-/// **Section 6.1 in one line.** Method 3 of FR-50 may run on the watcher thread and on no other,
-/// and all three threads of this process share one window procedure, so the procedure has to be
-/// able to tell which window a message arrived at. `buffer::is_installed` is the same test for
-/// the input thread; the watcher owns no thread-local of its own, and the register of which
-/// thread owns which window is already here.
+/// **Section 6.1 in one line.** The password probe of FR-71 may run on the watcher thread and on
+/// no other, and all three threads of this process share one window procedure, so the procedure
+/// has to be able to tell which window a message arrived at. `buffer::is_installed` is the same
+/// test for the input thread; the watcher owns no thread-local of its own, and the register of
+/// which thread owns which window is already here.
 ///
-/// **SEC-05.** This is also what keeps a forged `switch::WM_APP_SWITCH` harmless twice over: a
+/// **SEC-05.** This is also what keeps a forged `guard::WM_APP_PROBE` harmless twice over: a
 /// message aimed at the input or the UI window is ignored here, and one aimed at the watcher
-/// window finds no pending target and does nothing.
+/// window finds no probe pending and does nothing.
+///
+/// ⚠ Until task Т-14-4 this had a second caller — the arm that ran method 3 of FR-50 on the
+/// watcher thread (decision R-31). Methods 2 and 3 are gone from the requirement, so that arm is
+/// gone from the procedure and FR-71's is the one left.
 fn is_watcher_window(hwnd: HWND) -> bool {
     let raw = WAKE_TARGETS[Role::Watcher.index()].load(Ordering::Acquire);
 
@@ -2167,66 +2171,38 @@ unsafe extern "system" fn window_proc(
                 let _ = crate::inject::on_hotkey();
             }
 
-            // **FR-50 method 3 — decision R-31**, task T-05-1. The far end of the second handoff
-            // in this program, and it exists for the same class of reason the first one does.
+            // ⛔ **There was an arm for `switch::WM_APP_SWITCH` here until task Т-14-4**, and
+            // there is deliberately none now. It was the far end of the handoff of decision R-31:
+            // method 3 of the old FR-50 was `ITfInputProcessorProfileMgr::ActivateProfile`, which
+            // is COM, and section 6.1 writes of the input thread «Не выполняет: UI, файловый
+            // ввод-вывод, **COM**» — so the input thread published a target into an atomic, posted
+            // that message, and the watcher thread did the work here inside its own STA and posted
+            // `watchdog::WM_APP_LAYOUT` back so that the stamp of FR-04 followed (task T-10-5).
             //
-            // The chain of FR-50 runs on the input thread as part of step 5 of FR-40. Its third
-            // method is `ITfInputProcessorProfileMgr::ActivateProfile`, which is COM, and section
-            // 6.1 writes of the input thread: "Не выполняет: UI, файловый ввод-вывод, **COM**".
-            // So the input thread publishes the target and posts this message, and the work is
-            // done *here*, on the watcher thread, which section 6.1 already gives an STA. The
-            // input thread does not block on it and does not learn the verdict — module `switch`
-            // counts it. Method 3 is reached only after the first two failed, that is, rarely.
-            //
-            // `is_watcher_window` is what says "this is the watcher thread", the counterpart of
-            // the `buffer::is_installed` test above, and it is not decoration: without it a
-            // `WM_APP_SWITCH` posted to the input window would run COM on the thread section 6.1
-            // exists to keep free of it.
-            //
-            // SEC-05: the message carries nothing — `wparam` and `lparam` are zero — and the
-            // target travels in an atomic only this process writes, so a forged `WM_APP_SWITCH`
-            // finds nothing pending and does nothing. SEC-01, SEC-07 — a layout handle, never a
-            // stroke.
-            //
-            // ⚠ **The verdict is no longer dropped — task T-10-5.** Module `switch` still counts
-            // it, which is why it used to be thrown away; what that argument missed is the
-            // *stamp*. Methods 1 and 2 finish on the input thread and `inject::System::switch_layout`
-            // publishes the new layout there from `switch::confirmed`. Method 3 finishes **here**,
-            // on another thread, and the stamp is a thread-local of the input thread — so a
-            // layout this branch changed would leave `Recorder::active` behind exactly the way
-            // step 5 did before that task, and the first press of the next word would convert
-            // «в себя».
-            //
-            // It is closed with the mechanism FR-21's delivery already uses and with no other:
-            // one `PostMessageW` of `watchdog::WM_APP_LAYOUT` at the input thread, which answers
-            // it in `refresh_layout_and_cache` by re-reading FR-52 and refreshing the stamp. The
-            // watcher thread posts that very message from its own `WinEvent` callback, so this
-            // adds no mechanism, no timer and no polling — **NFR-10** — and nothing from §4.1 of
-            // `STATE.md` is retried. Method 3 is reached only after methods 1 and 2 have both
-            // failed, that is, rarely, so the rebuild the probe may cause is not on any hot path.
-            //
-            // `Some(false)` — method 3 ran and the layout still did not become the target — posts
-            // nothing: there is no change to tell anyone about, and `switch` has counted the
-            // failure. `None` is a forged message that found nothing pending.
-            if message == crate::switch::WM_APP_SWITCH
-                && is_watcher_window(hwnd)
-                && crate::switch::run_pending() == Some(true)
-            {
-                post_to_input_thread(crate::watchdog::WM_APP_LAYOUT);
-            }
+            // The user struck methods 2 and 3 out of FR-50 on 2026-08-25 (question 63 of
+            // `DECISIONS.md`), on the measurements of T-13-10 and Т-14-2: across 504 executions
+            // the two fallbacks gave a verdict **not once**, and method 2 blocked the calling
+            // thread without limit against a window that had stopped pumping (60 of 60) — in this
+            // program that is the input thread with the low-level hook. With method 3 gone, so is
+            // the handover, the atomic channel and this arm; module `switch` keeps the number
+            // `WM_APP + 8` reserved and nothing posts it. The one method FR-50 now prescribes is
+            // a `PostMessageW` that finishes on the input thread, where
+            // `inject::System::switch_layout` already publishes the stamp from `switch::confirmed`.
 
-            // **FR-71, the heavy half — task T-06-1.** The third handoff in this program, and it
-            // exists for the same class of reason the other two do: the three levels of FR-72 end
+            // **FR-71, the heavy half — task T-06-1.** A handoff to the watcher thread — since
+            // task Т-14-4 the only one this procedure still answers — and it exists for the same
+            // class of reason the hotkey's handoff does: the three levels of FR-72 end
             // in UI Automation, which is COM and takes tens of milliseconds, and section 6.1
             // writes «Определение поля пароля (UI Automation, COM STA)» under the **watcher**
             // thread — the only one of the three with an apartment. FR-71 calls doing it inside
             // the hook «категорически запрещено», and doing it inside the `WinEvent` callback
             // would hold up the source of every focus event in the session.
             //
-            // `is_watcher_window` is what says "this is the watcher thread", the same test method
-            // 3 of FR-50 uses one arm above, and it is not decoration: without it a forged
-            // `WM_APP_PROBE` posted at the input window would run UI Automation on the thread
-            // that owns the keyboard hook.
+            // `is_watcher_window` is what says "this is the watcher thread" — the test the
+            // retired arm of method 3 used one comment above, and since task Т-14-4 the only
+            // caller of it left — and it is not decoration: without it a forged `WM_APP_PROBE`
+            // posted at the input window would run UI Automation on the thread that owns the
+            // keyboard hook.
             //
             // SEC-05: the message carries nothing — `wparam` and `lparam` are zero — and whether
             // a probe is wanted travels in an atomic only this process writes, so a forged

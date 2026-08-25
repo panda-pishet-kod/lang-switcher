@@ -1,14 +1,95 @@
-//! Switching the keyboard layout, the fallback chain.
+//! Switching the keyboard layout — **one method**, and the verdict on it.
 //!
 //! Responsibility taken from the module table in section 6.2 of SPEC.
 //!
-//! Requirements this module covers: FR-50 (the chain of three methods with a move to the next
-//! one **on failure**), FR-51 (the Windows setting that decides the scope of a switch), FR-52
-//! (how the layout of the foreground window is read), and the half of FR-35 that says a
-//! TSF/IME layout can never be a **target** — the backlog row of task T-05-1 names exactly
-//! these four, and the backlog is the source of truth for that distribution (decision R-17).
+//! Requirements this module covers: FR-50 (the one method a switch is made with), FR-51 (the
+//! Windows setting that decides the scope of a switch), FR-52 (how the layout of the window in
+//! front is read, its addendum included), and the half of FR-35 that says a TSF/IME layout can
+//! never be a **target** — the backlog row of task T-05-1 names exactly these four, and the
+//! backlog is the source of truth for that distribution (decision R-17).
 //!
-//! Implemented by backlog tasks: T-05-1, T-10-20 (the new FR-52).
+//! Implemented by backlog tasks: T-05-1, T-10-20 (the new FR-52), **Т-14-4** (the new FR-50).
+//!
+//! # ⭐ There used to be three methods here — task **Т-14-4**
+//!
+//! Until 2026-08-25 FR-50 prescribed a chain of three, each tried when the one before it had not
+//! taken:
+//!
+//! 1. `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)`;
+//! 2. `AttachThreadInput` to the foreground window's thread + `ActivateKeyboardLayout` +
+//!    `DetachThreadInput`;
+//! 3. `ITfInputProcessorProfileMgr::ActivateProfile` — COM, and therefore handed to the watcher
+//!    thread, because section 6.1 forbids COM on the input thread.
+//!
+//! The user struck methods 2 and 3 out of the requirement (question 63 of `DECISIONS.md`) on two
+//! measurements, and the numbers are the whole argument:
+//!
+//! * **T-13-10** (304 circles) and **Т-14-2** (300 circles: a control window with a message loop,
+//!   Windows Terminal, the classic console host in two series, and a window whose thread
+//!   deliberately stops pumping) — between them the two fallbacks saved **not one circle out of
+//!   504 executions**: method 2 gave a verdict 0 times out of 228, method 3 0 times out of 276.
+//! * Method 1 switched the layout **everywhere a window's queue was alive**: control 60 of 60,
+//!   Windows Terminal 60 of 60, the classic console host 60 of 60 by an independent channel of
+//!   truth, plus 160 of 160 in T-13-10.
+//! * Where method 1 is powerless — a window that has stopped pumping messages — **all three are**
+//!   (0 of 60 each). There was nothing there for a fallback to save.
+//! * Method 2 was not merely dead but **dangerous**: against a window that has stopped pumping,
+//!   `ActivateKeyboardLayout` under `AttachThreadInput` blocked the calling thread without limit,
+//!   60 times out of 60 (over 2000 ms each; the probe's own first edition sat in it for some ten
+//!   minutes). In this program the caller is the input thread, which holds the low-level hook, so
+//!   that is the whole keyboard of the session hanging until Windows removes the hook — FR-80,
+//!   silently. ⚠ The attach itself returns fast and successfully; it is the activation under it
+//!   that hangs, so no return value NFR-13 could examine would ever have caught this.
+//!
+//! What the chain cost while it lived: three waits of the budget below, about **95 ms on the input
+//! thread for every press** in a classic console window (93.1 to 97.2 ms measured, mean 95.4) —
+//! spent to reach two methods that could not help, because the judge of FR-52 is blind there and
+//! never let the chain stop at the method that had already worked.
+//!
+//! # ⭐ The judge is blind in a classic console — FR-52's addendum, and [`Outcome::Sent`]
+//!
+//! Т-14-2 measured a second thing, and the user wrote it into FR-52: in a `ConsoleWindowClass`
+//! window `GetWindowThreadProcessId` answers with a **counterfeit** thread id — the console
+//! client's, kept for compatibility — which belongs to no thread with an input queue.
+//! `GetGUIThreadInfo` on it refuses with «Параметр задан неверно» **120 times out of 120**, FR-52's
+//! own fallback then reads `GetKeyboardLayout` of that counterfeit id and gets **0**, also 120 of
+//! 120 — while the switch has in fact happened, 60 of 60.
+//!
+//! So a verdict is not merely absent there, it is *impossible*. FR-52's addendum says what to do
+//! about it in as many words: the switch counts as **sent without confirmation** and no waiting for
+//! confirmation is performed. [`to_in`] answers [`Outcome::Sent`], the case has a counter of its
+//! own ([`Failures::sent_unconfirmed`]) so that it can never be mistaken for a real confirmation,
+//! and the whole call costs one `PostMessageW` — about 110 µs measured — instead of the 95 ms it
+//! used to.
+//!
+//! ## How "the judge is blind" is decided, and why not by the window class
+//!
+//! By the **refusal of `GetGUIThreadInfo` itself** ([`FocusThread::Refused`]), which is the
+//! condition FR-52's addendum states, and not by comparing the foreground window's class against
+//! `inject::CONSOLE_WINDOW_CLASSES`. Three reasons, in the order of their weight:
+//!
+//! 1. The refusal *is* the fact that makes a verdict impossible. A class name is a symptom of it
+//!    that happens to correlate today and would have to be maintained by hand for ever.
+//! 2. That list is **wrong for this question**, and measurably so. It exists for FR-42а and holds
+//!    `CASCADIA_HOSTING_WINDOW_CLASS` — Windows Terminal — whose judge Т-14-2 found perfectly
+//!    **sighted**: the two threads coincided 60 of 60 and the verdict landed 60 of 60. Gating on
+//!    the class would stop verifying a case that verifies every time.
+//! 3. The refusal is already in hand, on a path that has just made it. Reading a class costs
+//!    another Win32 call and a `String`.
+//!
+//! # The rule that survives the chain — decision R-32
+//!
+//! `PostMessage` returns success when the message has been **queued**, not when the layout has
+//! changed, and an application is free to ignore `WM_INPUTLANGCHANGEREQUEST`. So the verdict is
+//! taken from **re-reading the layout by FR-52** and comparing it with the target, never from the
+//! return value. The return values of the Win32 calls are still examined — NFR-13 requires it and
+//! this module does it — but they are counted, never branched on. See [`settled`] for the wait
+//! between the attempt and the check and for the number it is bounded by.
+//!
+//! R-32 was written when there was a chain for a false "success" to short-circuit. With one method
+//! it matters just as much and for a plainer reason: believing the return value would report a
+//! switch to `inject` — through [`confirmed`] — every time an application dropped the message, and
+//! the stamp of FR-04 would follow a layout that never moved.
 //!
 //! # ⭐ One reader of the layout, and only one — task T-10-20
 //!
@@ -17,45 +98,19 @@
 //! and the price of it came due in FR-52: the requirement changed, and a change that had to be
 //! made in two places by hand is a change that will one day be made in one. The duplicate is
 //! gone; `app::refresh_layout_and_cache` calls this function, and so do `buffer::Recorder::
-//! restamp` (task T-10-14), the selection path of FR-60/FR-61 and the verdict of every method of
-//! FR-50 (decision R-32).
-//!
-//! # The one thing that makes this module correct — decision R-32
-//!
-//! FR-50 says "с переходом к следующему **при неуспехе**", and the whole module turns on what
-//! *неуспех* is allowed to mean.
-//!
-//! `PostMessage` returns success when the message has been **queued**, not when the layout has
-//! changed. An application is free to ignore `WM_INPUTLANGCHANGEREQUEST` — a console host, a
-//! window that has no message loop running at that instant, a control that swallows it — and
-//! method 1 then "succeeds" formally without doing anything at all. A chain that trusted that
-//! return value would never reach methods 2 and 3, and the whole fallback mechanism would be
-//! dead code **silently**, with no error anywhere to notice it by.
-//!
-//! So the verdict on every method is taken from **re-reading the layout by FR-52** and
-//! comparing it with the target. The return values of the Win32 calls are still examined —
-//! NFR-13 requires it and this module does it — but they are counted, never branched on. See
-//! [`settled`] for the wait between the attempt and the check and for the number it is bounded
-//! by.
-//!
-//! # The second thing — decision R-31
-//!
-//! Method 3 of FR-50 is `ITfInputProcessorProfileMgr::ActivateProfile`, which is COM, and
-//! section 6.1 writes of the input thread: "Не выполняет: UI, файловый ввод-вывод, **COM**".
-//! The two cannot both be obeyed literally in one thread.
-//!
-//! Methods 1 and 2 run on the input thread. Method 3 is **handed to the watcher thread**, which
-//! already lives in a COM STA by the same table of section 6.1, and the input thread does not
-//! block on it: [`hand_over_to_watcher`] publishes the target into an atomic and posts
-//! [`WM_APP_SWITCH`], which is one `PostMessageW` and a return. Method 3 is reached only after
-//! the first two have failed, that is, rarely, and asynchrony costs nothing there: FR-43 puts
-//! the switch **after** the replacement and NFR-09 budgets the replacement.
+//! restamp` (task T-10-14), the selection path of FR-60/FR-61 and the verdict of FR-50's method
+//! (decision R-32).
 //!
 //! # What is not here
 //!
 //! Choosing *which* layout to switch to — the "Пара" and "Цикл" modes of FR-30 to FR-34 and the
 //! cycle position — is task **T-05-2**'s. The target arrives as a parameter of [`to`] and this
 //! module has no opinion about it beyond refusing an IME (FR-35).
+//!
+//! COM is not here either, and no longer can be: method 3 was the only reason this module ever
+//! touched it, and with it went the handover to the watcher thread of decision R-31. Nothing in
+//! this module blocks on a foreign thread any more — there is no `AttachThreadInput` left to do it
+//! with.
 //!
 //! # SEC-01 and SEC-07
 //!
@@ -64,26 +119,18 @@
 //! messages. An `HKL` is an identifier of a layout, not a keystroke, and is fair game.
 
 use core::ffi::c_void;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    ACTIVATE_KEYBOARD_LAYOUT_FLAGS, ActivateKeyboardLayout, GetKeyboardLayout, HKL,
-};
-use windows::Win32::UI::TextServices::{
-    CLSID_TF_InputProcessorProfiles, ITfInputProcessorProfileMgr, TF_IPPMF_FORSESSION,
-    TF_PROFILETYPE_KEYBOARDLAYOUT,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
 use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW,
     SPI_GETTHREADLOCALINPUTSETTINGS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
     WM_APP, WM_INPUTLANGCHANGEREQUEST,
 };
-use windows::core::{BOOL, GUID};
+use windows::core::BOOL;
 
 use crate::layouts::LayoutId;
 
@@ -91,16 +138,15 @@ use crate::layouts::LayoutId;
 // The bounded wait — section 6.1, FR-80
 // ---------------------------------------------------------------------------------------
 
-/// How long one method is given to take effect before it is declared a failure, in
+/// How long the method of FR-50 is given to take effect before it is declared a failure, in
 /// milliseconds.
 ///
 /// # Why there has to be a wait at all
 ///
 /// `PostMessage` is asynchronous. The message is put on the foreground window's queue and that
 /// window processes it on its own next turn round its own message loop, so a check made in the
-/// instruction after the post reads the **old** layout even when method 1 is working perfectly.
-/// A chain with no wait would declare method 1 failed every single time and would run all three
-/// methods on every hotkey press.
+/// instruction after the post reads the **old** layout even when the method is working perfectly.
+/// With no wait every press would be declared a failure.
 ///
 /// # Why it is bounded, and by this number
 ///
@@ -114,14 +160,14 @@ use crate::layouts::LayoutId;
 /// developed on, a `WM_INPUTLANGCHANGEREQUEST` posted to a window of this very process takes a
 /// single message-loop turn to take effect — the number is in the report of task T-05-1 — so
 /// 20 ms leaves roughly an order of magnitude of headroom for an application that is busy
-/// when the message arrives, while the whole chain's worst case on the input thread is
+/// when the message arrives.
 ///
-/// ```text
-/// method 1: 20 ms  +  method 2: 20 ms  =  40 ms
-/// ```
-///
-/// which is **one part in 125** of `LowLevelHooksTimeout`. Method 3 adds nothing to that: it is
-/// handed to the watcher thread (decision R-31) and the input thread returns at once.
+/// ⭐ **The worst case of the whole module is now this one number**, and task Т-14-4 is what made
+/// it so. While FR-50 was a chain of three the worst case on the input thread was two budgets end
+/// to end, and in a classic console window it was three — about 95 ms per press, measured by
+/// Т-14-2, spent on methods that could not help. One budget of 20 ms is **one part in 250** of
+/// `LowLevelHooksTimeout`, and in a console window not even that is spent: no verdict is possible
+/// there, so no wait is performed at all (see [`Outcome::Sent`]).
 ///
 /// The ceiling is enforced on the time actually slept, not on the number of slices: see
 /// [`Machine::wait`], which answers how long it really waited, because `Sleep(1)` on Windows
@@ -135,6 +181,29 @@ pub const VERIFY_BUDGET_MS: u32 = 20;
 /// `Sleep`; going finer would need `timeBeginPeriod`, which changes the timer resolution of the
 /// **whole system** and is not this program's to change.
 pub const VERIFY_POLL_MS: u32 = 1;
+
+// ---------------------------------------------------------------------------------------
+// The retired number of method 3 — task Т-14-4
+// ---------------------------------------------------------------------------------------
+
+/// `WM_APP + 8` — **retired**, and kept only as a reservation of the number.
+///
+/// It used to be the message with which the input thread handed method 3 of FR-50 to the watcher
+/// thread (decision R-31). Method 3 is gone with the rest of the chain — see the module
+/// documentation and question 63 of `DECISIONS.md` — and with it went the atomic channel the
+/// target travelled in, the handover, the watcher thread's half of it and the arm of
+/// `app::window_proc` that answered this message. **Nothing in this program posts it and nothing
+/// answers it.**
+///
+/// The name stays because the number is an entry in a register, not a private detail: the map of
+/// `WM_APP + N` is written out in the documentation of `hook`, `guard`, `watchdog` and `settings`,
+/// every one of which names `+ 8` as this constant, and four tests assert that no two private
+/// messages of this process share a number. Freeing `+ 8` for reuse would make those four
+/// documents wrong in the one way that fails silently — two messages with one number, told apart
+/// by nothing.
+///
+/// ⚠ Do not give this number to a new message. Take the next free one.
+pub const WM_APP_SWITCH: u32 = WM_APP + 8;
 
 // ---------------------------------------------------------------------------------------
 // FR-51 — the scope of a switch
@@ -163,6 +232,20 @@ pub enum Scope {
 ///
 /// `TRUE` means input settings are **thread-local**, which is the same statement as "each app
 /// window may have its own input method", so it maps to [`Scope::PerWindow`].
+///
+/// # ⚠ Nothing takes this as an argument any more — task Т-14-4
+///
+/// It used to be passed down the chain, because methods 2 and 3 of the old FR-50 each behaved
+/// differently under the two scopes: method 3 took it as the documented flags argument of
+/// `ActivateProfile`, and method 2 had to attach in both. The one method FR-50 now prescribes —
+/// `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)` — has no scope argument and
+/// no scope-dependent behaviour: it asks *that window* to change, and the setting is what decides
+/// how far the change then reaches.
+///
+/// So FR-51 is honoured here the only way one call permits: the setting is **read and reported**,
+/// so that the diagnostics of SEC-04a say which reach was in force when a switch was made. It is
+/// deliberately **not** read on the switching path, where it would be a Win32 call made for
+/// nothing.
 ///
 /// NFR-13: a failed call is not read as `FALSE`. The setting is on by default, the default is
 /// what the overwhelming majority of installations run, and answering [`Scope::PerWindow`] is
@@ -209,6 +292,10 @@ pub fn scope() -> Scope {
 /// machine, they are counted separately in [`Failures`], and the review of task T-10-19 recorded
 /// that neither of the two fallback cases occurred once in 660 circles — a branch nobody has ever
 /// seen is a branch worth being able to name when it finally happens.
+///
+/// ⭐ Since task Т-14-4 one of them decides more than which thread is read: [`FocusThread::Refused`]
+/// is the condition of FR-52's addendum, and it is what makes a verdict impossible. See
+/// [`Reading`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FocusThread {
     /// `GetGUIThreadInfo` answered and `hwndFocus` named a window that belongs to this thread.
@@ -218,6 +305,11 @@ pub enum FocusThread {
     NoFocus,
     /// `GetGUIThreadInfo` **refused**. FR-52 sentence 2, the other half — the foreground thread
     /// is used, which is the behaviour that was in place before this requirement changed.
+    ///
+    /// ⚠ **This is also the addendum of Т-14-2.** In a classic console window the refusal is what
+    /// happens every time (120 of 120), and the fallback then reads a counterfeit thread id and
+    /// answers `0`. Whatever layout comes out of this branch is therefore not a verdict about
+    /// anything, and [`read`] marks it so.
     Refused,
 }
 
@@ -249,8 +341,9 @@ fn focus_thread_of(foreground_thread: u32) -> FocusThread {
     // system. Nothing else of ours is reachable from the call. NFR-13: the `Result` is examined
     // below and a refusal is carried out of here as itself, never flattened into "no focus".
     if unsafe { GetGUIThreadInfo(foreground_thread, &raw mut info) }.is_err() {
-        // NFR-13: examined and counted. A thread that is not a GUI thread, or one that has just
-        // gone, refuses here — and FR-52 says in as many words what to do about it.
+        // NFR-13: examined and counted. A thread that is not a GUI thread, one that has just
+        // gone, or the counterfeit id a classic console window answers with — and FR-52 says in
+        // as many words what to do about all three.
         GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
         return FocusThread::Refused;
     }
@@ -270,7 +363,8 @@ fn focus_thread_of(foreground_thread: u32) -> FocusThread {
         // NFR-13: zero is the documented failure — the focus window died between the two calls —
         // and zero means "the calling thread" to `GetKeyboardLayout`, which is the one answer
         // that would be wrong rather than merely unknown. Treated as a refusal, which FR-52
-        // already has a rule for.
+        // already has a rule for, and which is honest in the stronger sense too: the window whose
+        // layout would have been the verdict no longer exists.
         GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
         return FocusThread::Refused;
     }
@@ -280,14 +374,14 @@ fn focus_thread_of(foreground_thread: u32) -> FocusThread {
 
 /// **FR-52, the whole rule, as a function of its two inputs.**
 ///
-/// Split out from [`current`] for one reason, and it is the reason the four previous repairs of
+/// Split out from [`read`] for one reason, and it is the reason the four previous repairs of
 /// this defect are in the backlog: the two fallback cases of FR-52 **did not occur once in the
 /// 660 circles task T-10-19 measured**, so a live run cannot reach them, and a branch no test can
 /// reach is a branch that is not known to work. Here they are reachable from `tests\switch.rs`
 /// without a foreground window, without a focus window and without Windows agreeing to refuse a
 /// call on demand.
 ///
-/// Public for that test and for nothing else — it has no callers outside [`current`].
+/// Public for that test and for nothing else — it has no callers outside [`read`].
 #[must_use]
 pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
     match focus {
@@ -299,15 +393,42 @@ pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
     }
 }
 
-/// **FR-52.** The keyboard layout of the window the user is typing into.
+/// **FR-52 and its addendum, in one value:** the layout, and whether that layout may be believed.
+///
+/// # Why the two facts travel together
+///
+/// The addendum of Т-14-2 is not a second reading, it is a *property of the same one*: in a
+/// classic console window FR-52 runs to the end and answers `0` — a number that looks exactly
+/// like "there is no foreground window" and means something else entirely. Splitting the answer
+/// into two calls would mean asking the window manager the same three questions twice and would
+/// leave a window between them for the foreground to change; carrying both out of one read leaves
+/// no such window.
+///
+/// [`current`] is the same reading with [`Reading::blind`] dropped, which is why every caller
+/// outside this module — `app::refresh_layout_and_cache`, `buffer::Recorder::restamp`, the
+/// selection path — is unchanged by the addendum: they ask what the layout is, and the answer is
+/// the same one FR-52 has always given.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Reading {
+    /// What FR-52 answers, its own fallback included. [`LayoutId::default`] means there is no
+    /// foreground window, or that nothing could be read of the one there is.
+    pub layout: LayoutId,
+    /// **FR-52's addendum, question 63.** `GetGUIThreadInfo` refused for the thread of the window
+    /// in front, so [`Reading::layout`] is not a statement about that window and no comparison
+    /// with it can be a verdict.
+    ///
+    /// Measured cause: a `ConsoleWindowClass` window, where this happens 120 times out of 120.
+    pub blind: bool,
+}
+
+/// **FR-52 with its addendum.** The keyboard layout of the window the user is typing into, and
+/// whether it may be used as a verdict.
 ///
 /// ⭐ **This is the only place in the program that reads a keyboard layout of a foreign thread**,
 /// and it has to stay the only one. Until task T-10-20 the same four Win32 calls were written out
 /// a second time in `app::foreground_layout`, and the whole cost of that duplication was paid in
 /// this very requirement: the two copies were kept in step by hand across four repairs of defect
-/// E and would have had to be corrected twice more here. `app::refresh_layout_and_cache` calls
-/// this function now, `buffer::Recorder::restamp` already did (task T-10-14), and so do the
-/// selection path of FR-60/FR-61 and the verdict of every method of FR-50 (decision R-32).
+/// E and would have had to be corrected twice more here.
 ///
 /// # The requirement, and why it is not the expression it used to be
 ///
@@ -336,8 +457,9 @@ pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
 ///
 /// A zero answer is not an error. It means there is no foreground window — which happens while
 /// the desktop is switching and on the secure desktop — or that the window went away between two
-/// of the calls. It is returned as [`LayoutId::default`], and [`to`] treats that as a reason to
-/// refuse rather than as a layout.
+/// of the calls, or that FR-52's fallback ran into the counterfeit thread id of a classic console
+/// window. The last of the three is told from the other two by [`Reading::blind`], and only by it:
+/// as a number it is the same `0`.
 ///
 /// # What it costs, measured on the branch that really runs
 ///
@@ -345,7 +467,7 @@ pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
 /// includes the hook callback (`Recorder::restamp`, task T-10-14). Measured with
 /// `--experiment-latency --words`, in which one callback sample in fourteen takes that branch:
 /// the numbers are in the report of task T-10-20.
-pub fn current() -> LayoutId {
+pub fn read() -> Reading {
     // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches
     // no memory of ours. A null result is documented and is checked immediately below.
     let foreground = unsafe { GetForegroundWindow() };
@@ -353,8 +475,9 @@ pub fn current() -> LayoutId {
     if foreground.is_invalid() {
         // NFR-13: examined. Passing a null window on would yield a thread id of zero, and zero
         // means "the calling thread" to `GetKeyboardLayout` — the one answer that would be
-        // wrong rather than merely unknown.
-        return LayoutId::default();
+        // wrong rather than merely unknown. Not blind: there is nothing to be blind *to*, and
+        // `to_in` has a refusal of its own for this.
+        return Reading::default();
     }
 
     // SAFETY: `foreground` is the handle the call above returned and was checked non-null.
@@ -365,11 +488,13 @@ pub fn current() -> LayoutId {
     if foreground_thread == 0 {
         // NFR-13: zero is the documented failure — the window was destroyed between the two
         // calls — and must not be forwarded as "the calling thread".
-        return LayoutId::default();
+        return Reading::default();
     }
 
+    let focus = focus_thread_of(foreground_thread);
+
     // FR-52 sentence 1, with sentence 2 as the fallback. Both live in `reading_thread`.
-    let thread = reading_thread(foreground_thread, focus_thread_of(foreground_thread));
+    let thread = reading_thread(foreground_thread, focus);
 
     // SAFETY: takes a thread id by value, returns a layout handle by value, dereferences
     // nothing. `thread` is non-zero on every path into here: `foreground_thread` was checked
@@ -378,42 +503,55 @@ pub fn current() -> LayoutId {
     // layout by.
     let layout = unsafe { GetKeyboardLayout(thread) };
 
-    LayoutId::from_raw(layout.0 as usize)
+    Reading {
+        layout: LayoutId::from_raw(layout.0 as usize),
+        // FR-52's addendum, question 63: a refusal means no verdict is possible about this
+        // window, whatever number the fallback produced.
+        blind: focus == FocusThread::Refused,
+    }
+}
+
+/// **FR-52.** The keyboard layout of the window the user is typing into.
+///
+/// [`read`] with the addendum's flag dropped — the question every caller outside this module
+/// asks, and the answer FR-52 has always given them. `app::refresh_layout_and_cache`,
+/// `buffer::Recorder::restamp` (task T-10-14) and the selection path of FR-60/FR-61 all call this
+/// one function, and task T-10-20 is the reason there is only one.
+#[must_use]
+pub fn current() -> LayoutId {
+    read().layout
 }
 
 // ---------------------------------------------------------------------------------------
-// FR-50 — the outcome of the chain
+// FR-50 — the outcome
 // ---------------------------------------------------------------------------------------
-
-/// Which method of FR-50 did it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Method {
-    /// Method 1: `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)`.
-    PostMessage,
-    /// Method 2: `AttachThreadInput` + `ActivateKeyboardLayout` + `DetachThreadInput`.
-    AttachActivate,
-    /// Method 3: `ITfInputProcessorProfileMgr::ActivateProfile`, on the watcher thread.
-    TextServices,
-}
 
 /// What one call of [`to`] achieved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Outcome {
     /// The foreground window was already on the target layout and nothing was sent.
     ///
-    /// Not an error and not a failure of any method: it is the ordinary answer when the user
-    /// presses the hotkey twice, and no counter moves for it.
+    /// Not an error and not a failure: it is the ordinary answer when the user presses the hotkey
+    /// twice, and no counter moves for it.
     AlreadyActive,
-    /// The layout of the foreground window is the target, and this method is the one that
-    /// changed it — verified by re-reading FR-52, never by a return value (decision R-32).
-    Switched(Method),
-    /// Methods 1 and 2 failed and method 3 has been handed to the watcher thread (decision
-    /// R-31). Whether it worked is known to the watcher thread and shows up in
-    /// [`Failures::text_services`]; the input thread does not wait to find out.
-    HandedOver,
+    /// The layout of the foreground window **is** the target, and this call is what changed it —
+    /// verified by re-reading FR-52, never by a return value (decision R-32).
+    Switched,
+    /// ⭐ **FR-52's addendum.** The message was posted and **no verdict is obtainable**:
+    /// `GetGUIThreadInfo` refused for the window in front, which is what a classic console window
+    /// does every time, so nothing this module can read is a statement about that window.
+    ///
+    /// The requirement's own words are «переключение считается отправленным без подтверждения,
+    /// ожидания подтверждения не выполняются» — so nothing is waited for and this is not a
+    /// failure. It is not a confirmation either: [`confirmed`] answers `false` for it, because
+    /// the one thing that would make it true — a re-read of FR-52 — is exactly what cannot be had
+    /// here. Т-14-2 measured that the switch does in fact happen in such a window 60 times out of
+    /// 60; this module still may not *claim* it, and [`Failures::sent_unconfirmed`] is where the
+    /// gap between the two is counted.
+    Sent,
 }
 
-/// Why [`to`] refused.
+/// Why [`to`] refused, or failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SwitchError {
     /// **FR-35.** The target is served by a TSF/IME text service. Module `layouts` filters
@@ -424,62 +562,59 @@ pub enum SwitchError {
     /// [`SwitchError::ImeTarget`]: a caller defect must not turn into a Win32 call with a
     /// meaningless argument.
     NoTarget,
-    /// FR-52 answered zero: there is no foreground window to switch. Happens on the secure
-    /// desktop and while the desktop is being switched.
+    /// FR-52 answered zero and was not blind: there is no foreground window to switch. Happens on
+    /// the secure desktop and while the desktop is being switched.
     NoForeground,
-    /// Methods 1 and 2 failed and method 3 could not even be handed over — the watcher thread
-    /// has no window, which means the program is starting up or shutting down.
-    Exhausted,
+    /// The message of FR-50 was posted, FR-52 could see the window, and the layout did not become
+    /// the target inside [`VERIFY_BUDGET_MS`].
+    ///
+    /// ⚠ **This is a real answer about the machine, not a chain running out.** Т-14-2 measured
+    /// the case it names: a window whose thread has stopped pumping messages never processes the
+    /// posted message, so the layout cannot move (0 of 60) — and neither of the two fallback
+    /// methods FR-50 used to prescribe moved it either (0 of 60 each), while one of them hung the
+    /// calling thread without limit (60 of 60). There is nothing to fall back to; there never
+    /// was.
+    NotSwitched,
 }
 
 // ---------------------------------------------------------------------------------------
-// The seam — what the chain needs from the machine
+// The seam — what FR-50 needs from the machine
 // ---------------------------------------------------------------------------------------
 
-/// Everything the chain of FR-50 needs from outside this program.
+/// Everything FR-50 needs from outside this program.
 ///
 /// # Why it is a trait
 ///
-/// The requirement of this task is a **rule about failure**: the verdict on a method comes from
-/// re-reading the layout and never from the return value of the call that attempted it
-/// (decision R-32). That rule is invisible from outside a function that obeys it — a chain that
-/// trusted `PostMessage` behaves identically to a correct one on every machine where method 1
-/// happens to work, which is most of them.
+/// The requirement of this task is a **rule about failure**: the verdict comes from re-reading the
+/// layout and never from the return value of the call that attempted it (decision R-32). That rule
+/// is invisible from outside a function that obeys it — an implementation that trusted
+/// `PostMessage` behaves identically to a correct one on every machine where the post is honoured,
+/// which is most of them.
 ///
-/// With the machine behind this trait, `tests\switch.rs` can build the one case that tells them
-/// apart: a machine whose [`post_request`] answers `true` and whose [`current`] never moves. A
-/// chain that reads return values stops there and reports success; a chain that obeys R-32 goes
-/// on to method 2 and then to method 3. That is the only honest way to check the rule, and it
-/// needs no keyboard, no foreground window and no layout of the user's touched.
+/// With the machine behind this trait, `tests\switch.rs` can build the cases that tell them apart:
+/// a machine whose [`post_request`] answers `true` and whose layout never moves, and — since task
+/// Т-14-4 — a machine whose [`read`] comes back blind, which is what a classic console window is
+/// and what no test could otherwise produce on demand. Neither needs a keyboard, a foreground
+/// window or a layout of the user's touched.
 ///
 /// It is the same seam, for the same reason, that `inject::Environment` is for the order of
 /// FR-40.
 ///
 /// [`post_request`]: Machine::post_request
-/// [`current`]: Machine::current
+/// [`read`]: Machine::read
 pub trait Machine {
-    /// **FR-52.** The layout of the foreground window, right now.
+    /// **FR-52 with its addendum.** What can be said about the window in front, right now.
     ///
-    /// Asked before the first method and again after every one of them: this is the verdict.
-    fn current(&mut self) -> LayoutId;
+    /// Asked once before the attempt and again after every slice of the wait: this is the verdict,
+    /// and [`Reading::blind`] is the statement that there can be no verdict at all.
+    fn read(&mut self) -> Reading;
 
-    /// **Method 1.** `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)`.
+    /// **FR-50.** `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)`.
     ///
     /// Answers whether the message was **queued**, which NFR-13 requires to be examined and
-    /// which decision R-32 forbids to be believed. The chain counts a `false` and moves on to
-    /// the verification either way.
+    /// which decision R-32 forbids to be believed. A `false` is counted and the verification runs
+    /// either way.
     fn post_request(&mut self, target: LayoutId) -> bool;
-
-    /// **Method 2.** `AttachThreadInput` + `ActivateKeyboardLayout` + `DetachThreadInput`.
-    ///
-    /// `scope` is FR-51 and it changes what this does — see [`System::activate`].
-    fn activate(&mut self, target: LayoutId, scope: Scope) -> bool;
-
-    /// **Method 3, the handover.** Gives the target to the watcher thread (decision R-31) and
-    /// returns at once, without waiting for it and without touching COM.
-    ///
-    /// Answers whether the watcher thread was there to take it.
-    fn hand_over(&mut self, target: LayoutId, scope: Scope) -> bool;
 
     /// Waits up to `ms` milliseconds and answers **how long it really waited**.
     ///
@@ -497,20 +632,12 @@ pub trait Machine {
 pub struct System;
 
 impl Machine for System {
-    fn current(&mut self) -> LayoutId {
-        current()
+    fn read(&mut self) -> Reading {
+        read()
     }
 
     fn post_request(&mut self, target: LayoutId) -> bool {
         post_request(target)
-    }
-
-    fn activate(&mut self, target: LayoutId, scope: Scope) -> bool {
-        activate(target, scope)
-    }
-
-    fn hand_over(&mut self, target: LayoutId, scope: Scope) -> bool {
-        hand_over_to_watcher(target, scope)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
@@ -524,7 +651,7 @@ impl Machine for System {
 }
 
 // ---------------------------------------------------------------------------------------
-// FR-50 — the chain
+// FR-50 — the switch
 // ---------------------------------------------------------------------------------------
 
 /// **FR-50 and FR-35, on the real machine.** Switches the foreground window to `target`.
@@ -536,34 +663,35 @@ impl Machine for System {
 ///
 /// `target` is a **parameter**: choosing it is task T-05-2's (FR-30 to FR-34) and this module
 /// has no opinion about it beyond the refusals of [`SwitchError`].
-///
-/// The scope of FR-51 is read once per call, here, so that the chain below is a pure function
-/// of its arguments.
 pub fn to(target: LayoutId) -> Result<Outcome, SwitchError> {
-    to_in(&mut System, scope(), target)
+    to_in(&mut System, target)
 }
 
-/// [`to`] against any [`Machine`] — this is where the chain of FR-50 actually lives.
+/// [`to`] against any [`Machine`] — this is where FR-50 actually lives.
 ///
 /// # The order, and what ends it
 ///
-/// 1. the refusals: an IME target (FR-35), the zero handle, no foreground window;
-/// 2. **the layout is read once before anything is attempted** — if it is already the target
-///    there is nothing to do, and no method runs;
-/// 3. method 1, then the verification of [`settled`];
-/// 4. method 2, then the same verification;
-/// 5. method 3, handed to the watcher thread and not verified here.
+/// 1. the refusals that need no machine at all: an IME target (FR-35), the zero handle;
+/// 2. **FR-52 is read once, before anything is attempted**;
+/// 3. ⭐ if that reading is **blind** — FR-52's addendum, the classic console window — the message
+///    is posted and the call ends there with [`Outcome::Sent`]. No wait is performed, because
+///    there is nothing that waiting could reveal: the judge answers the same `0` for ever;
+/// 4. no foreground window at all, or the target is already active — two refusals that need the
+///    reading;
+/// 5. the message of FR-50, then the verification of [`settled`]: [`Outcome::Switched`] or
+///    [`SwitchError::NotSwitched`].
 ///
-/// ⚠ **The verification is the verdict — decision R-32.** The return value of each attempt is
-/// bound to a name and counted, because NFR-13 forbids discarding it, and it is never what
-/// decides whether the chain moves on. Steps 3 and 4 look identical from the outside for
-/// exactly that reason.
-pub fn to_in(
-    machine: &mut impl Machine,
-    scope: Scope,
-    target: LayoutId,
-) -> Result<Outcome, SwitchError> {
-    // ---- the refusals ------------------------------------------------------------------
+/// ⚠ **The verification is the verdict — decision R-32.** The return value of the attempt is
+/// bound to a name and counted, because NFR-13 forbids discarding it, and it is never what the
+/// next line branches on.
+///
+/// ⚠ **The blind case is decided before the "already active" one**, and that order is the point
+/// rather than an accident. A blind reading may carry any number at all — in a console window it
+/// is `0`, but the branch is about the *refusal* and not about the number — and a value that is
+/// not a statement about the window in front must not be compared with the target and must not
+/// silence a switch the user asked for.
+pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, SwitchError> {
+    // ---- the refusals that need nothing from the machine --------------------------------
     if target == LayoutId::default() {
         NO_TARGET.fetch_add(1, Ordering::Relaxed);
         return Err(SwitchError::NoTarget);
@@ -578,21 +706,35 @@ pub fn to_in(
         return Err(SwitchError::ImeTarget);
     }
 
-    let before = machine.current();
+    let before = machine.read();
 
-    if before == LayoutId::default() {
+    // ---- FR-52's addendum — the judge cannot answer for this window at all ---------------
+    if before.blind {
+        // The message goes out exactly as it would anywhere else. What does not happen is the
+        // wait: `settled` would re-read the same blind `0` twenty times and end in a failure that
+        // says nothing about the machine, which is the ~95 ms per press Т-14-2 measured.
+        if !machine.post_request(target) {
+            // NFR-13: examined and counted, here as everywhere.
+            POST_REJECTED.fetch_add(1, Ordering::Relaxed);
+        }
+
+        SENT_UNCONFIRMED.fetch_add(1, Ordering::Relaxed);
+        return Ok(Outcome::Sent);
+    }
+
+    if before.layout == LayoutId::default() {
         NO_FOREGROUND.fetch_add(1, Ordering::Relaxed);
         return Err(SwitchError::NoForeground);
     }
 
-    if before == target {
-        // Already there. Not a failure of anything, so no counter moves, and — the point of
-        // this branch — no method runs: pressing the hotkey twice must not post a redundant
+    if before.layout == target {
+        // Already there. Not a failure, so no counter moves, and — the point of this branch — no
+        // message is sent: pressing the hotkey twice must not post a redundant
         // `WM_INPUTLANGCHANGEREQUEST` to a window that is already on the layout it asks for.
         return Ok(Outcome::AlreadyActive);
     }
 
-    // ---- method 1 ----------------------------------------------------------------------
+    // ---- the one method of FR-50 --------------------------------------------------------
     if !machine.post_request(target) {
         // NFR-13: the return value is examined and its failure is counted. R-32: it is not, and
         // must never become, the thing the next line branches on.
@@ -600,51 +742,32 @@ pub fn to_in(
     }
 
     if settled(machine, target) {
-        return Ok(Outcome::Switched(Method::PostMessage));
+        return Ok(Outcome::Switched);
     }
 
     POST_MESSAGE.fetch_add(1, Ordering::Relaxed);
-
-    // ---- method 2 ----------------------------------------------------------------------
-    if !machine.activate(target, scope) {
-        ACTIVATE_REJECTED.fetch_add(1, Ordering::Relaxed);
-    }
-
-    if settled(machine, target) {
-        return Ok(Outcome::Switched(Method::AttachActivate));
-    }
-
-    ATTACH_ACTIVATE.fetch_add(1, Ordering::Relaxed);
-
-    // ---- method 3 — decision R-31 ------------------------------------------------------
-    //
-    // Not performed here. `ActivateProfile` is COM and section 6.1 forbids COM on the input
-    // thread; the watcher thread already holds an STA. The handover is one atomic store and one
-    // `PostMessageW`, so this thread does not block on method 3 and does not learn its verdict
-    // — the watcher thread counts it in `Failures::text_services`.
-    if machine.hand_over(target, scope) {
-        return Ok(Outcome::HandedOver);
-    }
-
-    EXHAUSTED.fetch_add(1, Ordering::Relaxed);
-    Err(SwitchError::Exhausted)
+    Err(SwitchError::NotSwitched)
 }
 
 /// **Does this outcome mean the foreground window is now verifiably on the layout it was asked
 /// for?** — task **T-10-5**.
 ///
 /// The two `true` arms are the two outcomes decision R-32 has already *verified* by re-reading
-/// FR-52: [`Outcome::Switched`] is "a method ran and the layout became the target",
+/// FR-52: [`Outcome::Switched`] is "the message went out and the layout became the target",
 /// [`Outcome::AlreadyActive`] is "it was the target before anything was sent". Neither is a
 /// return value believed on trust — that is the whole of R-32 — so a caller may take the target
 /// as fact after either of them.
 ///
-/// The three `false` cases are as much of the answer as the `true` ones:
+/// The `false` cases are as much of the answer as the `true` ones:
 ///
-/// * [`Outcome::HandedOver`] — method 3 is running on the watcher thread and its verdict is not
-///   known here (decision R-31). "Not yet known" is not "no", and it must not be reported as
-///   "yes" either; the caller in `app::window_proc` closes this case from the watcher side, by
-///   posting the layout probe of FR-21 when `run_pending` comes back true.
+/// * ⭐ [`Outcome::Sent`] — the message went out and **no verdict is obtainable** (FR-52's
+///   addendum). Т-14-2 measured that in a classic console window the switch really does happen,
+///   60 times out of 60; what it also measured is that nothing this program can read will say so,
+///   120 times out of 120. "Almost certainly yes" is not "verified", and this function is the
+///   gate the stamp of FR-04 follows — so it answers `false` and the stamp stays where it is.
+///   ⚠ The consequence is real and is named here so that it is not discovered twice: in a classic
+///   console window the stamp does not follow the switch, and [`Failures::sent_unconfirmed`] is
+///   how often that happened.
 /// * every [`SwitchError`] — nothing was sent, or nothing took, and the window kept whatever
 ///   layout it had.
 ///
@@ -655,8 +778,9 @@ pub fn to_in(
 /// моргает» is that stamp not following — and the only honest source for "the window is on
 /// layout X now" is the verification this module already performs. A call site that matched on
 /// the outcome itself would be a second copy of R-32's reasoning, free to drift from this one.
+#[must_use]
 pub const fn confirmed(outcome: Result<Outcome, SwitchError>) -> bool {
-    matches!(outcome, Ok(Outcome::Switched(_) | Outcome::AlreadyActive))
+    matches!(outcome, Ok(Outcome::Switched | Outcome::AlreadyActive))
 }
 
 /// **Decision R-32 in one function:** did the layout of the foreground window actually become
@@ -665,17 +789,25 @@ pub const fn confirmed(outcome: Result<Outcome, SwitchError>) -> bool {
 /// Re-reads FR-52 and compares. The first read happens **after** one slice of the wait and not
 /// before it, because the caller has just made an asynchronous attempt and a read taken in the
 /// same instruction stream is guaranteed to see the old value; a caller that wants the
-/// unattempted state reads [`Machine::current`] itself, as [`to_in`] does.
+/// unattempted state reads [`Machine::read`] itself, as [`to_in`] does.
 ///
 /// The loop is bounded by [`VERIFY_BUDGET_MS`] of time actually waited, which is what
 /// [`Machine::wait`] answers. Time, and not a count of slices: see the constant.
+///
+/// ⚠ A reading that turns **blind** in the middle of the wait is not treated specially. It cannot
+/// equal the target — `LayoutId` carries no such value — so the wait runs out and the answer is
+/// "not settled". That is the honest answer to what such a reading means: the foreground window
+/// changed under the switch, to one no verdict can be taken about. FR-52's addendum is about the
+/// window that was in front when the switch was made, and [`to_in`] applies it there.
 fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
     let mut waited: u32 = 0;
 
     while waited < VERIFY_BUDGET_MS {
         waited = waited.saturating_add(machine.wait(VERIFY_POLL_MS));
 
-        if machine.current() == target {
+        let reading = machine.read();
+
+        if !reading.blind && reading.layout == target {
             return true;
         }
     }
@@ -684,15 +816,21 @@ fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------
-// Method 1 — PostMessage
+// The method of FR-50 — PostMessage
 // ---------------------------------------------------------------------------------------
 
-/// **FR-50 method 1**, exactly as the requirement writes it:
+/// **FR-50**, exactly as the requirement writes it:
 /// `PostMessage(hwndForeground, WM_INPUTLANGCHANGEREQUEST, 0, hkl)`.
 ///
 /// Answers whether the message was queued. ⚠ That answer is not the answer to "did the layout
 /// change" — see decision R-32 and the module documentation. It exists so that NFR-13 has
 /// something to examine.
+///
+/// ⚠ **It does not block, and that is a requirement rather than a convenience.** This runs on the
+/// input thread, which holds the low-level hook of section 6.1; `PostMessageW` queues and returns
+/// — 110 µs even against a window whose thread has stopped pumping, measured by Т-14-2 — whereas
+/// the `ActivateKeyboardLayout` of the old method 2 hung there without limit, 60 times out of 60.
+/// That measurement is why this is the only call left here.
 fn post_request(target: LayoutId) -> bool {
     // SAFETY: takes no arguments, returns a handle by value, touches no memory of ours.
     let foreground = unsafe { GetForegroundWindow() };
@@ -731,340 +869,21 @@ fn post_request(target: LayoutId) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------
-// Method 2 — AttachThreadInput + ActivateKeyboardLayout + DetachThreadInput
+// Counters — SEC-04a, section 11.5, and module `diag`
 // ---------------------------------------------------------------------------------------
 
-/// **FR-50 method 2**, exactly as the requirement writes it: `AttachThreadInput` to the thread of
-/// the active window, `ActivateKeyboardLayout`, `DetachThreadInput`.
-///
-/// `scope` is accepted and deliberately **not** branched on. That is a measured decision and not
-/// an oversight, and the measurement is in the report of task T-05-1: with the setting of FR-51
-/// off — [`Scope::Session`], which is what this machine reports — an `ActivateKeyboardLayout`
-/// issued on a thread that is *not* attached to the foreground window's thread does **not** reach
-/// that window. So the attach is required in both scopes, and a branch that skipped it under
-/// `Scope::Session` would be a method 2 that never worked. Where FR-51 does change what the
-/// program does is method 3 — see [`activate_profile`], where the scope is the documented
-/// argument of the call.
-///
-/// Answers whether `ActivateKeyboardLayout` reported success. As everywhere in this module that
-/// is examined (NFR-13) and is not the verdict (R-32).
-fn activate(target: LayoutId, scope: Scope) -> bool {
-    let _ = scope;
-
-    with_foreground_attached(|| activate_here(target)).unwrap_or(false)
-}
-
-/// Runs `action` with this thread's input queue attached to the thread that owns the foreground
-/// window, and detaches again however `action` ends.
-///
-/// `None` when there was no foreground window, no thread behind it, or the attach was refused —
-/// the caller then has no way to reach that window's input state and says so.
-///
-/// This is the mechanism FR-50 method 2 is built out of, and it is shared with method 3 because
-/// there is no second way in Windows to reach another thread's input state: both
-/// `ActivateKeyboardLayout` and a thread-scoped `ITfInputProcessorProfileMgr::ActivateProfile`
-/// act on the **calling** thread's queue.
-///
-/// ⚠ The detach is not optional. `AttachThreadInput` couples this thread's responsiveness to a
-/// foreign thread's, and leaving that in place is the FR-80 failure section 6.1 exists to
-/// prevent, so it runs on every path out of the attached region.
-fn with_foreground_attached<T>(action: impl FnOnce() -> T) -> Option<T> {
-    // SAFETY: takes no arguments, returns a handle by value, touches no memory of ours.
-    let foreground = unsafe { GetForegroundWindow() };
-
-    if foreground.is_invalid() {
-        return None;
-    }
-
-    // SAFETY: `foreground` was checked non-null; `None` asks for the thread id alone and makes
-    // the call write nothing back through a pointer of ours.
-    let theirs = unsafe { GetWindowThreadProcessId(foreground, None) };
-
-    if theirs == 0 {
-        // NFR-13: the documented failure. Attaching to thread zero is not a thing.
-        return None;
-    }
-
-    // SAFETY: takes no arguments and returns the calling thread's id by value.
-    let ours = unsafe { GetCurrentThreadId() };
-
-    if theirs == ours {
-        // The foreground window belongs to this very thread. `AttachThreadInput` fails when the
-        // two ids are equal, and there is nothing to attach to: the queue is already ours.
-        return Some(action());
-    }
-
-    // SAFETY: both ids name live threads — `theirs` was answered by the OS for a window that
-    // existed a moment ago, `ours` is this thread. The call only couples two input queues and
-    // writes nothing through a pointer. It is undone below on every path.
-    let attached = unsafe { AttachThreadInput(ours, theirs, true) }.as_bool();
-
-    if !attached {
-        // NFR-13: examined. The foreground thread is at a higher integrity level, or it went
-        // away. Nothing was attached, so nothing has to be detached.
-        return None;
-    }
-
-    let done = action();
-
-    // SAFETY: the exact inverse of the call above, with the same two ids, and it runs on every
-    // path out of this function that reached the attach. Leaving the queues attached would tie
-    // this thread's responsiveness to a foreign thread's for ever, which is the FR-80 failure.
-    let detached = unsafe { AttachThreadInput(ours, theirs, false) }.as_bool();
-
-    if !detached {
-        // NFR-13: examined and counted. There is no second way to detach, so the only honest
-        // answer is to record it.
-        DETACH_FAILED.fetch_add(1, Ordering::Relaxed);
-    }
-
-    Some(done)
-}
-
-/// `ActivateKeyboardLayout` on the calling thread, with the return value examined (NFR-13).
-///
-/// The flags are `0`: `KLF_REORDER` would move the layout to the head of the session's list and
-/// `KLF_SETFORPROCESS` would bind it to this process — both are changes to state that outlives
-/// the switch, and FR-50 asks for a switch.
-fn activate_here(target: LayoutId) -> bool {
-    // SAFETY: the `HKL` is rebuilt from the numeric value module `layouts` keeps, which came
-    // from `GetKeyboardLayoutList` or from `GetKeyboardLayout`. Constructing a pointer is safe;
-    // this one is a handle and is never dereferenced, by us or by the OS. The call writes
-    // nothing through a pointer of ours and returns the previous layout by value.
-    let previous =
-        unsafe { ActivateKeyboardLayout(hkl(target), ACTIVATE_KEYBOARD_LAYOUT_FLAGS(0)) };
-
-    match previous {
-        // A null previous handle is the documented failure indication, not a layout.
-        Ok(handle) => !handle.is_invalid(),
-        Err(error) => {
-            // NFR-13: examined and reported.
-            crate::app::report_non_critical("ActivateKeyboardLayout", &error);
-            false
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------
-// Method 3 — the handover to the watcher thread, decision R-31
-// ---------------------------------------------------------------------------------------
-
-/// The private message that tells the watcher thread there is a method 3 waiting for it.
-///
-/// `WM_APP + 8`, the next free number: `WM_APP + 1` is the wake-up of module `app`, `+ 2` is the
-/// tray callback, `+ 3` and `+ 4` belong to `hook`, `+ 5` is `WM_APP_CONFIGURED`, and `+ 6` and
-/// `+ 7` are `watchdog::WM_APP_FLUSH` and `watchdog::WM_APP_LAYOUT`.
-///
-/// **SEC-05.** The message carries nothing: `wparam` and `lparam` are zero and the target
-/// travels in [`PENDING_TARGET`], which only this process writes. A forged `WM_APP_SWITCH` from
-/// another process at the same integrity level finds no pending target and does nothing at all
-/// — see [`run_pending`]. It is the same design as `watchdog::WM_APP_FLUSH` and for the same
-/// reason.
-pub const WM_APP_SWITCH: u32 = WM_APP + 8;
-
-/// The target method 3 is to switch to, as the numeric value of its `HKL`. Zero means "nothing
-/// pending".
-///
-/// Written by the input thread in [`publish_pending`], taken by the watcher thread in
-/// [`take_pending`]. One `usize` of shared state and no mutex: section 6.3 and NFR-04.
-static PENDING_TARGET: AtomicUsize = AtomicUsize::new(0);
-
-/// The scope of FR-51 that went with [`PENDING_TARGET`]: `0` for [`Scope::PerWindow`], `1` for
-/// [`Scope::Session`].
-///
-/// Read by the watcher thread rather than re-read there, so that method 3 uses the same scope
-/// the first two methods did, even if the user changes the setting in between.
-static PENDING_SCOPE: AtomicU32 = AtomicU32::new(0);
-
-/// **The input thread's half of the handover of decision R-31.**
-///
-/// Publishes the target and nudges the watcher thread. One atomic store and one `PostMessageW`:
-/// this does not block, does not touch COM and does not wait for method 3's verdict, which is
-/// the whole point of the decision.
-///
-/// Answers whether the watcher thread had a window to be nudged at. When it did not — the
-/// program is starting up or shutting down — the pending target is taken back, because a target
-/// nobody will ever consume would be handed to the *next* `WM_APP_SWITCH` and would switch a
-/// layout the user did not ask about.
-pub fn hand_over_to_watcher(target: LayoutId, scope: Scope) -> bool {
-    publish_pending(target, scope);
-
-    if crate::app::post_to_watcher_thread(WM_APP_SWITCH) {
-        return true;
-    }
-
-    take_pending();
-    false
-}
-
-/// Puts a target on the channel of [`WM_APP_SWITCH`], without posting anything.
-///
-/// Split out from [`hand_over_to_watcher`] so that `tests\switch.rs` can drive both ends of the
-/// channel in a test binary, which has no watcher thread and no window to post to.
-pub fn publish_pending(target: LayoutId, scope: Scope) {
-    PENDING_SCOPE.store(u32::from(scope == Scope::Session), Ordering::Relaxed);
-
-    // Released after the scope, so a watcher that sees a target sees the scope that goes with
-    // it: the acquire in `take_pending` pairs with this store.
-    PENDING_TARGET.store(target.raw(), Ordering::Release);
-}
-
-/// **The watcher thread's half of the channel.** Takes the pending target, if there is one.
-///
-/// `None` means there was nothing pending, which is what a forged [`WM_APP_SWITCH`] finds
-/// (SEC-05). The swap is what makes the target single-use: two messages cannot make two
-/// switches out of one request.
-pub fn take_pending() -> Option<(LayoutId, Scope)> {
-    let raw = PENDING_TARGET.swap(0, Ordering::AcqRel);
-
-    if raw == 0 {
-        return None;
-    }
-
-    let scope = if PENDING_SCOPE.load(Ordering::Relaxed) == 0 {
-        Scope::PerWindow
-    } else {
-        Scope::Session
-    };
-
-    Some((LayoutId::from_raw(raw), scope))
-}
-
-/// **FR-50 method 3, on the watcher thread** — what `app::window_proc` calls when
-/// [`WM_APP_SWITCH`] arrives at the watcher thread's window.
-///
-/// `None` when nothing was pending. Otherwise the verdict of method 3, taken the way decision
-/// R-32 requires of every method: by re-reading FR-52, not from the `HRESULT`.
-///
-/// ⚠ **Only the watcher thread may call this.** It creates a COM object, and section 6.1 forbids
-/// COM on the input thread; the caller in `app::window_proc` checks that the message arrived at
-/// the watcher thread's own window before it gets here.
-pub fn run_pending() -> Option<bool> {
-    let (target, scope) = take_pending()?;
-
-    if !activate_profile(target, scope) {
-        ACTIVATE_PROFILE_REJECTED.fetch_add(1, Ordering::Relaxed);
-    }
-
-    // R-32 applies here too: the `HRESULT` above says the profile was activated, not that the
-    // foreground window is on it.
-    let settled = settled(&mut System, target);
-
-    if !settled {
-        TEXT_SERVICES.fetch_add(1, Ordering::Relaxed);
-    }
-
-    Some(settled)
-}
-
-/// `ITfInputProcessorProfileMgr::ActivateProfile` for a plain keyboard layout.
-///
-/// # **This is where FR-51 changes what the program does**
-///
-/// `ActivateProfile` is scoped by its flags argument, and that argument is the most direct
-/// reading of "определяющая область действия переключения" anywhere in this program. The two
-/// scopes are two different calls, in both the flag and the input queue they act on:
-///
-/// * [`Scope::PerWindow`] — the setting is **on**, its default: each app window may keep its own
-///   input method. Flags `0`, which activates the profile for the **calling thread's** input
-///   queue — so the call is wrapped in [`with_foreground_attached`], because the queue that has
-///   to change is the foreground window's and not the watcher thread's. Without the attach the
-///   watcher thread would switch its own layout and nothing else, which is the same trap
-///   decision R-32 is about, one level down.
-///
-/// * [`Scope::Session`] — the setting is **off**: the input language is one value for the whole
-///   session. Flags `TF_IPPMF_FORSESSION`, which is the documented way to say exactly that, and
-///   **no attach**: a session-wide activation is not scoped to an input queue, so coupling this
-///   thread to a foreign one would be a risk taken for nothing (FR-80).
-///
-/// `TF_PROFILETYPE_KEYBOARDLAYOUT` with `GUID_NULL` for both the class and the profile is how a
-/// plain keyboard layout — as opposed to a text service — is named to this interface; the `HKL`
-/// is what identifies it, and FR-35 has already refused anything that is not one.
-fn activate_profile(target: LayoutId, scope: Scope) -> bool {
-    match scope {
-        Scope::PerWindow => {
-            with_foreground_attached(|| activate_profile_here(target, scope)).unwrap_or(false)
-        }
-        Scope::Session => activate_profile_here(target, scope),
-    }
-}
-
-/// The COM half of [`activate_profile`], on whatever input queue the caller has arranged.
-fn activate_profile_here(target: LayoutId, scope: Scope) -> bool {
-    // SAFETY: `CoCreateInstance` is called on a thread that entered an STA — `app::thread_body`
-    // does it for the watcher thread and this function is only reached from that thread's
-    // window procedure. The class id is a `'static` constant of the `windows` crate, the outer
-    // aggregate is `None`, and the interface is inferred from the binding's type, so no raw
-    // pointer of ours is involved.
-    let manager: ITfInputProcessorProfileMgr = match unsafe {
-        CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)
-    } {
-        Ok(manager) => manager,
-        Err(error) => {
-            // NFR-13: examined and reported. TSF is not available on this desktop.
-            crate::app::report_non_critical("CoCreateInstance", &error);
-            return false;
-        }
-    };
-
-    let flags = match scope {
-        Scope::PerWindow => 0,
-        Scope::Session => TF_IPPMF_FORSESSION,
-    };
-
-    let null = GUID::zeroed();
-
-    // SAFETY: `manager` is a live interface pointer `CoCreateInstance` just returned and is
-    // released by its `Drop`. The two GUID arguments are pointers to `null`, which lives for the
-    // whole call — `GUID_NULL` is what this interface documents for a keyboard-layout profile —
-    // and the `HKL` is a handle, never dereferenced. Nothing writes back into memory of ours.
-    let activated = unsafe {
-        manager.ActivateProfile(
-            TF_PROFILETYPE_KEYBOARDLAYOUT,
-            target.language_id(),
-            &raw const null,
-            &raw const null,
-            hkl(target),
-            flags,
-        )
-    };
-
-    match activated {
-        Ok(()) => true,
-        Err(error) => {
-            // NFR-13: examined and reported.
-            crate::app::report_non_critical("ITfInputProcessorProfileMgr::ActivateProfile", &error);
-            false
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------
-// Counters — SEC-04a, section 11.5, and module `diag` when task T-06-4 arrives
-// ---------------------------------------------------------------------------------------
-
-/// Method 1 attempted and the layout did not become the target.
+/// The method of FR-50 was attempted and the layout did not become the target.
 static POST_MESSAGE: AtomicU32 = AtomicU32::new(0);
-/// Method 2 attempted and the layout did not become the target.
-static ATTACH_ACTIVATE: AtomicU32 = AtomicU32::new(0);
-/// Method 3 attempted, on the watcher thread, and the layout did not become the target.
-static TEXT_SERVICES: AtomicU32 = AtomicU32::new(0);
-/// `PostMessageW` itself refused the message — NFR-13, not the verdict on method 1.
+/// `PostMessageW` itself refused the message — NFR-13, not the verdict.
 static POST_REJECTED: AtomicU32 = AtomicU32::new(0);
-/// `ActivateKeyboardLayout` itself reported failure — NFR-13, not the verdict on method 2.
-static ACTIVATE_REJECTED: AtomicU32 = AtomicU32::new(0);
-/// `ActivateProfile` itself reported failure — NFR-13, not the verdict on method 3.
-static ACTIVATE_PROFILE_REJECTED: AtomicU32 = AtomicU32::new(0);
-/// `AttachThreadInput` would not undo an attach that succeeded.
-static DETACH_FAILED: AtomicU32 = AtomicU32::new(0);
+/// **FR-52's addendum.** The message was sent to a window no verdict can be taken about.
+static SENT_UNCONFIRMED: AtomicU32 = AtomicU32::new(0);
 /// The target was an IME-based layout and was refused — FR-35.
 static IME_TARGET: AtomicU32 = AtomicU32::new(0);
 /// The target was the zero handle and was refused.
 static NO_TARGET: AtomicU32 = AtomicU32::new(0);
-/// FR-52 answered zero: there was no foreground window to switch.
+/// FR-52 answered zero and could see: there was no foreground window to switch.
 static NO_FOREGROUND: AtomicU32 = AtomicU32::new(0);
-/// All three methods were unavailable: the first two failed and the handover found no watcher.
-static EXHAUSTED: AtomicU32 = AtomicU32::new(0);
 /// The setting of FR-51 could not be read and the default was assumed.
 static SCOPE_UNREADABLE: AtomicU32 = AtomicU32::new(0);
 /// **FR-52, fallback.** `GetGUIThreadInfo` refused for the foreground thread, or the focus window
@@ -1082,37 +901,36 @@ static FOCUS_WINDOW_ABSENT: AtomicU32 = AtomicU32::new(0);
 /// allows to carry metadata and nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Failures {
-    /// **The verdict counters of FR-50** — a method ran and the layout did not change.
+    /// **The verdict counter of FR-50** — the message went out, FR-52 could see, and the layout
+    /// did not become the target inside [`VERIFY_BUDGET_MS`]. The same event as
+    /// [`SwitchError::NotSwitched`].
     pub post_message: u32,
-    /// Method 2 ran and the layout did not change.
-    pub attach_activate: u32,
-    /// Method 3 ran, on the watcher thread, and the layout did not change.
-    pub text_services: u32,
-    /// `PostMessageW` refused to queue the message of method 1 (NFR-13). Distinct from
+    /// `PostMessageW` refused to queue the message (NFR-13). Distinct from
     /// [`Failures::post_message`] on purpose: this is the return value, that is the verdict, and
     /// decision R-32 is the statement that the two are different things.
     pub post_rejected: u32,
-    /// `ActivateKeyboardLayout` reported failure in method 2 (NFR-13).
-    pub activate_rejected: u32,
-    /// `ActivateProfile` reported failure in method 3 (NFR-13).
-    pub activate_profile_rejected: u32,
-    /// An `AttachThreadInput` that succeeded could not be undone.
-    pub detach_failed: u32,
+    /// ⭐ **FR-52's addendum, task Т-14-4.** The message went out to a window `GetGUIThreadInfo`
+    /// refuses to answer for — a classic console window — so no confirmation was waited for and
+    /// none was had. See [`Outcome::Sent`].
+    ///
+    /// ⚠ **Not a failure, and not a confirmation.** It is here so that the two can never be
+    /// confused: a number here is the count of switches this program sent and cannot vouch for,
+    /// and Т-14-2 measured that they do in fact happen, 60 times out of 60.
+    pub sent_unconfirmed: u32,
     /// **FR-35.** A caller asked for a TSF/IME layout as the target and was refused.
     pub ime_target: u32,
     /// A caller asked for the zero handle and was refused.
     pub no_target: u32,
     /// There was no foreground window to switch.
     pub no_foreground: u32,
-    /// The chain ran out: methods 1 and 2 failed and method 3 could not be handed over.
-    pub exhausted: u32,
     /// The setting of FR-51 could not be read; [`Scope::default`] was used.
     pub scope_unreadable: u32,
     /// **FR-52.** `GetGUIThreadInfo` refused, or the focus window it named died before its thread
     /// could be read (NFR-13). The foreground thread was used — which is what the requirement
     /// says to do, so this is not an error; it is the count of how often the requirement's second
-    /// sentence was the one that applied. ⚠ Task T-10-19 measured **0 of 660**, so a number here
-    /// is worth looking at.
+    /// sentence was the one that applied. ⚠ Task T-10-19 measured **0 of 660** in ordinary
+    /// windows, and Т-14-2 measured **120 of 120** in a classic console one — which is what
+    /// [`Failures::sent_unconfirmed`] then counts.
     pub focus_probe_refused: u32,
     /// **FR-52.** `GetGUIThreadInfo` answered and the foreground thread had no window with the
     /// keyboard focus. The foreground thread was used. Also **0 of 660** in T-10-19.
@@ -1120,20 +938,15 @@ pub struct Failures {
 }
 
 /// The counters of this module, for the debug channel of SEC-04a, for the bench of section 11.5
-/// and for the journal of module `diag` when task T-06-4 wires it in.
+/// and for the journal of module `diag`.
 pub fn failures() -> Failures {
     Failures {
         post_message: POST_MESSAGE.load(Ordering::Relaxed),
-        attach_activate: ATTACH_ACTIVATE.load(Ordering::Relaxed),
-        text_services: TEXT_SERVICES.load(Ordering::Relaxed),
         post_rejected: POST_REJECTED.load(Ordering::Relaxed),
-        activate_rejected: ACTIVATE_REJECTED.load(Ordering::Relaxed),
-        activate_profile_rejected: ACTIVATE_PROFILE_REJECTED.load(Ordering::Relaxed),
-        detach_failed: DETACH_FAILED.load(Ordering::Relaxed),
+        sent_unconfirmed: SENT_UNCONFIRMED.load(Ordering::Relaxed),
         ime_target: IME_TARGET.load(Ordering::Relaxed),
         no_target: NO_TARGET.load(Ordering::Relaxed),
         no_foreground: NO_FOREGROUND.load(Ordering::Relaxed),
-        exhausted: EXHAUSTED.load(Ordering::Relaxed),
         scope_unreadable: SCOPE_UNREADABLE.load(Ordering::Relaxed),
         focus_probe_refused: GUI_THREAD_INFO_REFUSED.load(Ordering::Relaxed),
         focus_window_absent: FOCUS_WINDOW_ABSENT.load(Ordering::Relaxed),
@@ -1148,34 +961,15 @@ pub fn failures() -> Failures {
 pub fn reset_failures() {
     for counter in [
         &POST_MESSAGE,
-        &ATTACH_ACTIVATE,
-        &TEXT_SERVICES,
         &POST_REJECTED,
-        &ACTIVATE_REJECTED,
-        &ACTIVATE_PROFILE_REJECTED,
-        &DETACH_FAILED,
+        &SENT_UNCONFIRMED,
         &IME_TARGET,
         &NO_TARGET,
         &NO_FOREGROUND,
-        &EXHAUSTED,
         &SCOPE_UNREADABLE,
         &GUI_THREAD_INFO_REFUSED,
         &FOCUS_WINDOW_ABSENT,
     ] {
         counter.store(0, Ordering::Relaxed);
     }
-}
-
-// ---------------------------------------------------------------------------------------
-// Small shared helper
-// ---------------------------------------------------------------------------------------
-
-/// Rebuilds the `HKL` a Win32 call takes from the numeric value module `layouts` keeps.
-///
-/// `layouts::LayoutId` deliberately holds the number and not the handle, so that a layout can
-/// be moved between threads without an `unsafe impl Send`; this is the one place that has to
-/// turn it back. Creating a pointer is a safe operation — only a dereference would not be — and
-/// this value is a handle that neither this program nor the OS ever dereferences.
-fn hkl(layout: LayoutId) -> HKL {
-    HKL(layout.raw() as *mut c_void)
 }
