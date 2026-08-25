@@ -1077,19 +1077,26 @@ fn publish_active_layout(layout: LayoutId) {
 /// **T-10-5**.
 ///
 /// Called from `inject::System::switch_layout`, on the input thread, once
-/// [`crate::switch::confirmed`] has said the foreground window is verifiably on `layout`. That
-/// function is where the *rule* lives and this is where the *effect* does: the whole of what
-/// happens here is [`publish_active_layout`], which is the same publication the four probe
-/// paths of FR-21 make and which touches nothing but the stamp.
+/// [`crate::switch::stamp_follows`] has said this program's model of the layout may be moved to
+/// `layout`. That function is where the *rule* lives and this is where the *effect* does: the
+/// whole of what happens here is [`publish_active_layout`], which is the same publication the four
+/// probe paths of FR-21 make and which touches nothing but the stamp.
+///
+/// ⚠ The gate used to be [`crate::switch::confirmed`], and task **Т-14-6** moved it one predicate
+/// across on the user's decision of 2026-08-25. The difference is the classic console window,
+/// where FR-52's addendum says no verdict can be taken at all: the switch is believed there rather
+/// than verified, on the 60 of 60 Т-14-2 measured from outside. `confirmed` still means what it
+/// always meant, and `switch::stamp_follows` documents why the two are separate words.
 ///
 /// # Why this exists rather than a re-read of the foreground layout
 ///
-/// Because `switch::to` has already re-read it. Decision R-32 makes the verdict of FR-50 a
-/// re-reading of FR-52 rather than a return value believed on trust, so by the time
-/// `confirmed` answers `true` the layout has been observed to *be* the target. Asking the system
-/// again here would cost a second round of Win32 calls on the path NFR-09 budgets, and would
-/// open a window in which a layout the user changed in between is mistaken for the one this
-/// switch produced.
+/// Because a re-read is either redundant or impossible, and never useful. For the confirmed
+/// outcomes `switch::to` has already done it — decision R-32 makes the verdict of FR-50 a
+/// re-reading of FR-52 rather than a return value believed on trust, so the layout has been
+/// observed to *be* the target. For the console outcome the re-read is what cannot be had at all,
+/// and asking again would answer the same `0` FR-52's addendum is about. Either way a second round
+/// of Win32 calls would be spent on the path NFR-09 budgets, and it would open a window in which a
+/// layout the user changed in between is mistaken for the one this switch produced.
 ///
 /// # Why it is a function of this module
 ///
@@ -2187,7 +2194,8 @@ unsafe extern "system" fn window_proc(
             // the handover, the atomic channel and this arm; module `switch` keeps the number
             // `WM_APP + 8` reserved and nothing posts it. The one method FR-50 now prescribes is
             // a `PostMessageW` that finishes on the input thread, where
-            // `inject::System::switch_layout` already publishes the stamp from `switch::confirmed`.
+            // `inject::System::switch_layout` already publishes the stamp itself — from
+            // `switch::stamp_follows` since task Т-14-6, from `switch::confirmed` before it.
 
             // **FR-71, the heavy half — task T-06-1.** A handoff to the watcher thread — since
             // task Т-14-4 the only one this procedure still answers — and it exists for the same

@@ -40,6 +40,9 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use lang_switcher::app;
+use lang_switcher::buffer::{self, Recorder};
+use lang_switcher::inject;
 use lang_switcher::layouts::LayoutId;
 use lang_switcher::switch::{
     self, Failures, FocusThread, Machine, Outcome, Reading, Scope, SwitchError, VERIFY_BUDGET_MS,
@@ -726,6 +729,173 @@ fn the_gate_answers_over_the_real_path() {
     // A refusal before anything is attempted — FR-35.
     let mut fake = Fake::on(US);
     assert!(!switch::confirmed(switch::to_in(&mut fake, PINYIN)));
+}
+
+// ---------------------------------------------------------------------------------------
+// Task Т-14-6 — the stamp follows a switch that cannot be confirmed
+// ---------------------------------------------------------------------------------------
+
+/// Every value `to_in` can answer, enumerated once so that a test cannot sample the enums and
+/// miss the arm that was added last.
+const EVERY_OUTCOME: [Result<Outcome, SwitchError>; 7] = [
+    Ok(Outcome::AlreadyActive),
+    Ok(Outcome::Switched),
+    Ok(Outcome::Sent),
+    Err(SwitchError::ImeTarget),
+    Err(SwitchError::NoTarget),
+    Err(SwitchError::NoForeground),
+    Err(SwitchError::NotSwitched),
+];
+
+/// **`stamp_follows` is `true` for both confirmed outcomes and for [`Outcome::Sent`], and `false`
+/// for every refusal** — the user's decision of 2026-08-25, «Двигать штамп на веру».
+///
+/// The `true` for `Sent` is the whole of this task: in a classic console window no verdict can be
+/// taken (FR-52's addendum), Т-14-2 measured through a channel this program does not have that the
+/// switch happens anyway 60 times out of 60, and the program's model of the layout now follows it
+/// on that measurement rather than on an observation of its own.
+///
+/// The `false` half is what keeps the change from being «двигать штамп всегда»: a refusal moved no
+/// layout, and publishing after one would tell the typing buffer the window changed when it did
+/// not — the same defect T-10-5 repaired, with the sign reversed.
+#[test]
+fn the_stamp_follows_both_confirmations_and_the_unconfirmable_send() {
+    for outcome in [Ok(Outcome::Switched), Ok(Outcome::AlreadyActive)] {
+        assert!(
+            switch::stamp_follows(outcome),
+            "{outcome:?} is verified, so of course the stamp follows it"
+        );
+    }
+
+    assert!(
+        switch::stamp_follows(Ok(Outcome::Sent)),
+        "⭐ «Двигать штамп на веру»: the console case is believed on Т-14-2's 60 of 60"
+    );
+
+    for error in [
+        SwitchError::ImeTarget,
+        SwitchError::NoTarget,
+        SwitchError::NoForeground,
+        SwitchError::NotSwitched,
+    ] {
+        assert!(
+            !switch::stamp_follows(Err(error)),
+            "{error:?} moved no layout and nothing may be published for it"
+        );
+    }
+}
+
+/// ⭐ **The guard against dilution: the belief did not leak into the word «подтверждено».**
+///
+/// Decision R-32 is that the verdict of FR-50 is a re-reading of FR-52 and never a return value
+/// believed on trust. The cheap way to carry out «двигать штамп на веру» would have been to widen
+/// [`switch::confirmed`] by one variant — and that would have left the program with one word
+/// meaning both "re-read and seen" and "not seen, but very likely", which is exactly the
+/// distinction [`Failures::sent_unconfirmed`] exists to count.
+///
+/// So this test pins the *difference set* rather than either function alone: over the whole of
+/// both enums the two predicates agree everywhere, and disagree about [`Outcome::Sent`] and
+/// nothing else. A `confirmed` that had been widened fails it; a `stamp_follows` that had
+/// swallowed a refusal fails it too.
+#[test]
+fn confirmed_did_not_change_and_the_two_predicates_differ_over_exactly_one_outcome() {
+    // The one this task is about, spelled out rather than left to the loop below.
+    assert!(
+        !switch::confirmed(Ok(Outcome::Sent)),
+        "«отправлено» is still not «подтверждено» — nothing was re-read and nothing may claim it \
+         was"
+    );
+    assert!(switch::stamp_follows(Ok(Outcome::Sent)));
+
+    let disagree: Vec<_> = EVERY_OUTCOME
+        .into_iter()
+        .filter(|&outcome| switch::confirmed(outcome) != switch::stamp_follows(outcome))
+        .collect();
+
+    assert_eq!(
+        disagree,
+        vec![Ok(Outcome::Sent)],
+        "the two questions may differ about the unconfirmable send and about nothing else"
+    );
+
+    // And the belief is one-directional: everything verified is also believed, never the reverse.
+    for outcome in EVERY_OUTCOME {
+        assert!(
+            !switch::confirmed(outcome) || switch::stamp_follows(outcome),
+            "{outcome:?} is confirmed, so the stamp must follow it as well"
+        );
+    }
+}
+
+/// ⭐ **Behavioural: step 5 of FR-40 moves the stamp of FR-04 after a switch it cannot confirm.**
+///
+/// This is the defect the review of task Т-14-4 named and the user closed. The window is a classic
+/// console one — the judge refuses, so `to_in` answers [`Outcome::Sent`] — and until this task the
+/// gate of `inject::switch_layout_in` was [`switch::confirmed`], which answers `false` there. The
+/// stamp then stayed on whatever the last readable window had left in it, for ever
+/// (`app::layout_refresh_needed` answers `false` for an unreadable layout, so nothing cleared it
+/// either), and the direction of FR-26 is read out of that stamp — so the next conversion in that
+/// window went the wrong way.
+///
+/// Both halves are asserted: the stamp moves for the send, and it does **not** move for a switch
+/// that failed. Without the second half this test would also pass against a gate that published
+/// unconditionally.
+#[test]
+fn a_send_moves_the_stamp_and_a_failure_still_does_not() {
+    let _guard = counters();
+
+    buffer::install_recorder(Recorder::with_capacity(8));
+    app::note_layout_switched(US);
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(US),
+        "the stamp starts where the last readable window left it"
+    );
+
+    // ⭐ A classic console window: `GetGUIThreadInfo` refuses, the message goes out, no verdict
+    // is obtainable and none is waited for.
+    let mut console = Fake::on(LayoutId::default()).blind();
+    let published = inject::switch_layout_in(&mut console, RU);
+
+    assert!(published, "step 5 published the stamp");
+    assert_eq!(console.posts, 1, "and the switch really was sent");
+    assert_eq!(console.waits, 0, "«ожидания подтверждения не выполняются»");
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(RU),
+        "⭐ the model follows the switch this program cannot confirm — Т-14-2's 60 of 60"
+    );
+
+    // ⚠ The belief stayed a belief: it is counted where a belief is counted, and it did not turn
+    // into a confirmation or into a failure on the way through.
+    let counted = switch::failures();
+    assert_eq!(
+        counted.sent_unconfirmed, 1,
+        "the counter that keeps the belief visible still moves for exactly this case"
+    );
+    assert_eq!(
+        counted,
+        Failures {
+            sent_unconfirmed: 1,
+            ..Failures::default()
+        },
+        "and nothing else moved: this is neither a failure nor a confirmation"
+    );
+
+    // The other half of the gate. The post lies, the judge can see, the layout never becomes the
+    // target — and the stamp must stay where the send above put it.
+    switch::reset_failures();
+
+    let mut deaf = Fake::on(RU);
+    let published = inject::switch_layout_in(&mut deaf, US);
+
+    assert!(!published, "a failed switch publishes nothing");
+    assert_eq!(
+        buffer::with(|recorder| recorder.active_layout()),
+        Some(RU),
+        "a window that did not move must not be reported as having moved"
+    );
+    assert_eq!(switch::failures().post_message, 1);
 }
 
 // ---------------------------------------------------------------------------------------

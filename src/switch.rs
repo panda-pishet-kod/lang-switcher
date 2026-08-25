@@ -62,6 +62,13 @@
 //! and the whole call costs one `PostMessageW` — about 110 µs measured — instead of the 95 ms it
 //! used to.
 //!
+//! ⭐ **And the stamp of FR-04 follows it anyway — on trust.** Those same 60 of 60 are what the
+//! user decided on 2026-08-25: «Двигать штамп на веру». The module answers that with a **second**
+//! predicate, [`stamp_follows`], and not by widening [`confirmed`] — the belief needed a name that
+//! says it is a belief, because a `confirmed` that meant "or else very likely" would have erased
+//! the very distinction [`Failures::sent_unconfirmed`] exists to count. See [`stamp_follows`] for
+//! what the trust rests on and for the cost of withholding it.
+//!
 //! ## How "the judge is blind" is decided, and why not by the window class
 //!
 //! By the **refusal of `GetGUIThreadInfo` itself** ([`FocusThread::Refused`]), which is the
@@ -548,6 +555,10 @@ pub enum Outcome {
     /// here. Т-14-2 measured that the switch does in fact happen in such a window 60 times out of
     /// 60; this module still may not *claim* it, and [`Failures::sent_unconfirmed`] is where the
     /// gap between the two is counted.
+    ///
+    /// ⭐ **The stamp of FR-04 follows it all the same** — [`stamp_follows`], the user's decision
+    /// of 2026-08-25. That is a belief about this program's own model resting on those 60 of 60,
+    /// and it is deliberately a different word from "confirmed".
     Sent,
 }
 
@@ -763,11 +774,11 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
 /// * ⭐ [`Outcome::Sent`] — the message went out and **no verdict is obtainable** (FR-52's
 ///   addendum). Т-14-2 measured that in a classic console window the switch really does happen,
 ///   60 times out of 60; what it also measured is that nothing this program can read will say so,
-///   120 times out of 120. "Almost certainly yes" is not "verified", and this function is the
-///   gate the stamp of FR-04 follows — so it answers `false` and the stamp stays where it is.
-///   ⚠ The consequence is real and is named here so that it is not discovered twice: in a classic
-///   console window the stamp does not follow the switch, and [`Failures::sent_unconfirmed`] is
-///   how often that happened.
+///   120 times out of 120. "Almost certainly yes" is not "verified", so this answers `false` and
+///   goes on answering `false`. ⚠ **Since the user's decision of 2026-08-25 this is no longer the
+///   gate the stamp of FR-04 follows** — [`stamp_follows`] is, and it is `true` here. The two
+///   questions were split rather than one of them widened, precisely so that this word keeps
+///   meaning "re-read and seen"; [`Failures::sent_unconfirmed`] counts the gap between the two.
 /// * every [`SwitchError`] — nothing was sent, or nothing took, and the window kept whatever
 ///   layout it had.
 ///
@@ -778,9 +789,72 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
 /// моргает» is that stamp not following — and the only honest source for "the window is on
 /// layout X now" is the verification this module already performs. A call site that matched on
 /// the outcome itself would be a second copy of R-32's reasoning, free to drift from this one.
+/// The same argument is why the belief of [`stamp_follows`] lives here beside it and not in
+/// `inject` either.
 #[must_use]
 pub const fn confirmed(outcome: Result<Outcome, SwitchError>) -> bool {
     matches!(outcome, Ok(Outcome::Switched | Outcome::AlreadyActive))
+}
+
+/// **Does the stamp of FR-04 follow this outcome?** — the user's decision of 2026-08-25,
+/// «Двигать штамп на веру».
+///
+/// [`confirmed`] answers what this program has **verified**. This answers what this program's
+/// **model of the world** may be moved to. The two agree about every outcome but one, and the one
+/// is [`Outcome::Sent`]: verified `false`, believed `true`.
+///
+/// # ⚠ Why this is a second function and not a widened [`confirmed`]
+///
+/// Making `confirmed` answer `true` for [`Outcome::Sent`] would have been a one-word change and
+/// would have cost this module the only thing it is for. Decision R-32 is that the verdict of
+/// FR-50 is a **re-reading of FR-52** and never a return value believed on trust; `Sent` is
+/// exactly the case where no re-reading is possible at all. A `confirmed` that included it would
+/// no longer mean "verified" but "verified, or else very likely" — and the two are the distinction
+/// [`Failures::sent_unconfirmed`] exists to count. One word would have been left with two
+/// meanings, and the counter would have been counting a case its own vocabulary had stopped
+/// telling apart.
+///
+/// So the belief gets a name of its own, and the name says it is a belief about the stamp rather
+/// than knowledge about the window. Every caller then picks the question it can defend:
+/// `switch_layout` moves a stamp and asks this one; anything that would *report* the layout of a
+/// foreign window must go on asking [`confirmed`].
+///
+/// # ⚠ What the belief rests on, exactly
+///
+/// For [`Outcome::Sent`] this answers `true` **on trust** — there is no observation inside this
+/// process that supports it, and there cannot be one, which is what FR-52's addendum says.
+///
+/// The ground under it is task **Т-14-2**: 60 circles through a classic console window, with the
+/// layout read back through a channel this program does not own — the real UI thread of `conhost`,
+/// found through Toolhelp, because the counterfeit thread id the window reports is what blinds
+/// FR-52 in the first place. The switch had happened **60 times out of 60**, and it had already
+/// happened by the end of the one wait the retired chain's first method performed. The same run
+/// measured the judge: blind **120 times out of 120**. That is the whole of the evidence, it was
+/// gathered from outside, and this function is where the program acts on it anyway.
+///
+/// The cost of *not* believing it was measured too — by the review of task Т-14-4. With the stamp
+/// frozen, `buffer::Recorder::active` keeps whatever the last readable window left there while the
+/// console window runs another layout; `buffer::Recorder::record` stamps the `hkl` of every
+/// following stroke with it; `inject::take_press` reads the direction of FR-26 out of the first of
+/// those strokes; and `app::layout_refresh_needed` answers `false` for an unreadable layout, so
+/// the stale value is never cleared either. The next conversion in that window then goes the wrong way — not
+/// occasionally, but every time. Between a model that is right 60 times out of 60 and a model that
+/// is wrong from the first switch onwards, the user chose the first, in as many words.
+///
+/// # What this does not change
+///
+/// [`confirmed`] and [`Failures::sent_unconfirmed`] keep precisely the meanings they had. Nothing
+/// here re-reads a layout, waits for anything, or turns a return value into a verdict — R-32 is
+/// untouched, because this function makes no claim about the machine at all. The counter is what
+/// keeps the belief **visible**: it is still the number of switches this program sent and cannot
+/// vouch for, `diag` still prints it under `switch.sent_unconfirmed`, and it is now also the
+/// number of times the stamp moved without a confirmation behind it.
+#[must_use]
+pub const fn stamp_follows(outcome: Result<Outcome, SwitchError>) -> bool {
+    // Written in terms of [`confirmed`] rather than as a second `matches!` over the same enums, so
+    // that the two cannot drift: everything verified is also believed, and `Sent` is the single
+    // addition this function exists for.
+    confirmed(outcome) || matches!(outcome, Ok(Outcome::Sent))
 }
 
 /// **Decision R-32 in one function:** did the layout of the foreground window actually become
@@ -916,6 +990,10 @@ pub struct Failures {
     /// ⚠ **Not a failure, and not a confirmation.** It is here so that the two can never be
     /// confused: a number here is the count of switches this program sent and cannot vouch for,
     /// and Т-14-2 measured that they do in fact happen, 60 times out of 60.
+    ///
+    /// ⭐ Since task **Т-14-6** it is also the count of times the stamp of FR-04 moved on trust
+    /// rather than on a verdict — see [`stamp_follows`]. That is what keeps the belief visible
+    /// from outside instead of silent.
     pub sent_unconfirmed: u32,
     /// **FR-35.** A caller asked for a TSF/IME layout as the target and was refused.
     pub ime_target: u32,

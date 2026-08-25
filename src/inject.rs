@@ -1288,11 +1288,24 @@ impl Environment for System {
     /// replacement that put back the very same characters.
     ///
     /// So the publication belongs exactly here, at the one place in the program that changes the
-    /// layout without the user touching anything, and it is conditional on
-    /// [`crate::switch::confirmed`] — the target is published only for the two outcomes decision
-    /// R-32 has verified by re-reading FR-52. A refusal publishes nothing, because a window that
-    /// did not move must not be reported as having moved: that would be the same defect with the
-    /// sign flipped.
+    /// layout without the user touching anything, and it is conditional: a refusal publishes
+    /// nothing, because a window that did not move must not be reported as having moved — that
+    /// would be the same defect with the sign flipped.
+    ///
+    /// # ⭐ Which question the condition asks — task **Т-14-6**
+    ///
+    /// [`crate::switch::stamp_follows`], and until 2026-08-25 it was [`crate::switch::confirmed`].
+    /// The difference is one outcome: [`crate::switch::Outcome::Sent`], the classic console window
+    /// where FR-52's addendum says no verdict can be taken at all. Under `confirmed` the stamp
+    /// stayed put there — and stayed put for ever, because `app::layout_refresh_needed` answers
+    /// `false` for an unreadable layout, so nothing later cleared it either. The window ran one
+    /// layout, `Recorder::active` claimed another, and FR-26 took its direction from the claim.
+    ///
+    /// The user decided that on 2026-08-25 — «Двигать штамп на веру» — on the 60 of 60 Т-14-2
+    /// measured through a channel this program does not have. ⚠ **The belief is in the predicate
+    /// and not here.** This line asks a question; module `switch` owns what the answer means, why
+    /// `confirmed` was left alone rather than widened, and what the trust is worth. A second copy
+    /// of that reasoning at this call site is exactly what task T-10-5 refused to write.
     ///
     /// ⚠ **FR-32 and FR-33 are untouched by this, and that is a property of the design rather
     /// than a hope.** The stamp is what *future* strokes are recorded under; the strokes already
@@ -1311,10 +1324,40 @@ impl Environment for System {
             return;
         };
 
-        if crate::switch::confirmed(crate::switch::to(target)) {
-            crate::app::note_layout_switched(target);
-        }
+        switch_layout_in(&mut crate::switch::System, target);
     }
+}
+
+/// **FR-40 step 5 against any [`crate::switch::Machine`]** — the body of
+/// [`Environment::switch_layout`] with the machine behind the seam module `switch` provides.
+/// Answers whether the stamp of FR-04 was published.
+///
+/// # Why this exists as a function of its own
+///
+/// Because the decision it holds is one line of branching that no test could otherwise reach, and
+/// it is the line task **Т-14-6** changed. [`System`] talks to the real desktop:
+/// `crate::switch::to` reads the foreground window, posts to it and re-reads it, so a test of
+/// [`Environment::switch_layout`] would need a foreground window in a known layout on the machine
+/// a person is sitting at — and the one case that matters, [`crate::switch::Outcome::Sent`], needs
+/// a **classic console window**, which is a thing no test can conjure on demand at all.
+///
+/// The [`Environment`] seam of this module does not help: its fake `switch_layout` records that
+/// step 5 happened, which is what FR-43 needs and all it needs, and it never enters module
+/// `switch`. So the machine of module `switch` is threaded through instead — the same seam, for
+/// the same reason, that [`dispatch_in`] is to [`dispatch`] and `switch::to_in` is to `switch::to`.
+/// With it, `tests\switch.rs` drives a blind machine — a console window, exactly — into this
+/// decision and watches the stamp move.
+///
+/// ⚠ It is deliberately **not** where the meaning of the gate lives: the question is
+/// [`crate::switch::stamp_follows`]'s and the answer's justification is its documentation.
+pub fn switch_layout_in(machine: &mut impl crate::switch::Machine, target: LayoutId) -> bool {
+    let follows = crate::switch::stamp_follows(crate::switch::to_in(machine, target));
+
+    if follows {
+        crate::app::note_layout_switched(target);
+    }
+
+    follows
 }
 
 /// **FR-41 and FR-44.** Sends `events` through the real system, and records what happened
