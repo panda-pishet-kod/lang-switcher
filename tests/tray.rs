@@ -28,7 +28,10 @@ use lang_switcher::buffer::{self, Recorder, Stroke};
 use lang_switcher::diag;
 use lang_switcher::hook::{self, Edge, KeyEvent};
 use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
-use lang_switcher::theme::ThemeSetting;
+// Task T-14-3: the drawing library the menu paints with moved out of `settings` into its
+// owner, `theme` (§6.2) — the whole point being that the tray no longer goes to the
+// configuration module for pixels.
+use lang_switcher::theme::{self, ThemeSetting};
 use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
 use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
@@ -1755,15 +1758,15 @@ fn the_check_mark_of_the_menu_is_the_figure_the_mock_up_strokes() {
 #[test]
 fn the_smoothing_tile_of_the_check_mark_cuts_nothing_off_it() {
     // **Criterion 9 of T-11-21, the reason `MENU_CHECK_AIR` exists.**
-    // `settings::draw_check_mark` clamps the tile it smooths in to the square it is given,
+    // `theme::draw_check_mark` clamps the tile it smooths in to the square it is given,
     // and everything of the stroke outside that tile is simply never drawn. So the stroke —
     // the path plus half a pen plus the row the smoothed edge fades into, which is exactly
     // what `stroke_bounds` answers — has to fit inside the square at every scale.
     for dpi in [SCREEN_DPI, 120, 144, 192] {
-        let side = settings::scaled(tray::MENU_CHECK_CELL, dpi);
-        let points = settings::check_mark_points((0, 0), tray::MENU_CHECK_MARK, dpi);
-        let thickness = settings::scaled_tenths(tray::MENU_CHECK_MARK.pen_tenths, dpi);
-        let bounds = settings::stroke_bounds(&points, thickness);
+        let side = theme::scaled(tray::MENU_CHECK_CELL, dpi);
+        let points = theme::check_mark_points((0, 0), tray::MENU_CHECK_MARK, dpi);
+        let thickness = theme::scaled_tenths(tray::MENU_CHECK_MARK.pen_tenths, dpi);
+        let bounds = theme::stroke_bounds(&points, thickness);
 
         println!(
             "{dpi} DPI: square {side}, points {points:?}, pen {thickness}, stroke \
@@ -1794,7 +1797,7 @@ fn the_highlight_of_an_entry_is_the_inset_rounded_stripe_of_the_mock_up() {
         bottom: 27,
     };
 
-    let inset = settings::scaled(CHROME_HOVER_INSET, SCREEN_DPI);
+    let inset = theme::scaled(CHROME_HOVER_INSET, SCREEN_DPI);
     let stripe = tray::menu_hover_rect(&item, SCREEN_DPI);
 
     println!(
@@ -1820,9 +1823,9 @@ fn the_highlight_of_an_entry_is_the_inset_rounded_stripe_of_the_mock_up() {
 
     // The radius is the one number the generator gives every rounded figure it draws, which
     // is the constant the dialog already rounds by — there is no second radius for the menu.
-    assert_eq!(settings::CORNER_RADIUS, CHROME_HOVER_RADIUS);
+    assert_eq!(theme::CORNER_RADIUS, CHROME_HOVER_RADIUS);
     assert_eq!(
-        settings::scaled(settings::CORNER_RADIUS, SCREEN_DPI),
+        theme::scaled(theme::CORNER_RADIUS, SCREEN_DPI),
         4,
         "six mock-up pixels are four screen pixels at 96 DPI"
     );
@@ -1920,7 +1923,7 @@ fn the_check_mark_stands_inside_the_check_column_of_the_entry() {
     );
     assert_eq!(
         cell.right - cell.left,
-        settings::scaled(tray::MENU_CHECK_CELL, SCREEN_DPI),
+        theme::scaled(tray::MENU_CHECK_CELL, SCREEN_DPI),
         "and is the mock-up's own side through the scale"
     );
     assert_eq!(
@@ -1968,7 +1971,7 @@ fn an_entry_is_as_tall_as_the_mock_up_draws_it_and_still_grows_with_the_face() {
     // 27,1 screen pixels — because the padding of task T-11-10 was five *screen* pixels.
     // The mock-up number now enters as padding and not as a replacement for the measurement:
     // what is padded is still what `GetTextExtentPoint32W` said.
-    let reference = settings::scaled(CHROME_ITEM_H, SCREEN_DPI);
+    let reference = theme::scaled(CHROME_ITEM_H, SCREEN_DPI);
     let ours = tray::menu_item_height(MENU_FACE_HEIGHT, SCREEN_DPI);
 
     println!(
@@ -2024,13 +2027,13 @@ fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
         bottom: 48,
     };
 
-    let inset = settings::scaled(CHROME_SEP_INSET, SCREEN_DPI);
+    let inset = theme::scaled(CHROME_SEP_INSET, SCREEN_DPI);
     let line = tray::menu_separator_line(&item, SCREEN_DPI);
 
     println!(
         "inset {CHROME_SEP_INSET} px макета -> {inset} px at 96 DPI; band \
          {CHROME_SEP_H} px макета -> {} px; line {}..{} x {}..{}",
-        settings::scaled(CHROME_SEP_H, SCREEN_DPI),
+        theme::scaled(CHROME_SEP_H, SCREEN_DPI),
         line.left,
         line.right,
         line.top,
@@ -2038,7 +2041,7 @@ fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
     );
 
     assert_eq!(
-        settings::scaled(CHROME_SEP_H, SCREEN_DPI),
+        theme::scaled(CHROME_SEP_H, SCREEN_DPI),
         8,
         "eleven mock-up pixels are 7,9 screen pixels at 96 DPI"
     );
@@ -2059,7 +2062,7 @@ fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
 
     // On the vertical middle of the band — `($iy + $sepH/2)`.
     for dpi in [SCREEN_DPI, 120, 144, 192] {
-        let band = settings::scaled(CHROME_SEP_H, dpi);
+        let band = theme::scaled(CHROME_SEP_H, dpi);
         let stripe = windows::Win32::Foundation::RECT {
             left: 0,
             top: 40,
@@ -2092,7 +2095,7 @@ fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
 #[test]
 fn the_entries_are_drawn_in_our_own_grey_antialiased_face() {
     // **Criterion 10 of T-11-21.** The entries are measured and drawn in `lfMenuFont` of
-    // `SPI_GETNONCLIENTMETRICS` put through `settings::antialiased_logfont` — one field
+    // `SPI_GETNONCLIENTMETRICS` put through `theme::antialiased_logfont` — one field
     // changed, the quality, and not a byte else. The metrics therefore do not move: that
     // was measured by task T-11-20 on the dialog's own face and is held by two tests of
     // `tests\settings.rs`; what is checked here is that the menu really does ask for it.

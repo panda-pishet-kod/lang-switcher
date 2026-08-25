@@ -271,7 +271,7 @@ pub const MENU_SEP_INSET: i32 = 12;
 ///
 /// The generator strokes the line with `New-Object System.Drawing.Pen($T.Sep,[single]1)`, and a
 /// pen of GDI+ straddles the path it follows: one pen pixel covers two rows of the picture and
-/// measures as two — the reasoning [`crate::settings::BORDER_THICKNESS`] carries for the frames
+/// measures as two — the reasoning [`crate::theme::BORDER_THICKNESS`] carries for the frames
 /// of the dialog. One screen pixel is what that comes to at every scale these two windows live
 /// at, and it is what the mock-up shows.
 const MENU_SEP_THICKNESS: i32 = 1;
@@ -298,14 +298,14 @@ pub const MENU_SEPARATOR_DATA: u32 = 0x10FF;
 /// mark and `$by` the vertical middle of the entry.
 ///
 /// ⚠ The generator draws at 140 %, so every one of its pixels is 1,4 screen pixels — which is
-/// exactly what [`crate::settings::scaled_tenths_offset`] divides by, and the reason these
+/// exactly what [`crate::theme::scaled_tenths_offset`] divides by, and the reason these
 /// literals are the generator's own numbers rather than numbers somebody has already divided.
 ///
 /// The offsets are measured from the corner of [`menu_check_cell`] and not from `($bx, $by)`:
-/// [`crate::settings::draw_check_mark`] clamps the tile it smooths in to the square it is
+/// [`crate::theme::draw_check_mark`] clamps the tile it smooths in to the square it is
 /// given, so the square has to hold the pen and the fading edge as well as the path. That is
 /// the whole of [`MENU_CHECK_AIR`] — the three points below are the generator's, moved by it.
-pub const MENU_CHECK_MARK: settings::CheckMark = settings::CheckMark {
+pub const MENU_CHECK_MARK: theme::CheckMark = theme::CheckMark {
     points_tenths: [(30, 100), (70, 140), (140, 30)],
     pen_tenths: 21,
 };
@@ -314,8 +314,8 @@ pub const MENU_CHECK_MARK: settings::CheckMark = settings::CheckMark {
 /// of the mock-up.
 ///
 /// Not a number of the mock-up and not meant to be one: it is what keeps the tile of
-/// [`crate::settings::draw_check_mark`] — which is clamped to this square — from cutting the
-/// ends of the strokes off. That tile is `settings::stroke_bounds`, which reaches
+/// [`crate::theme::draw_check_mark`] — which is clamped to this square — from cutting the
+/// ends of the strokes off. That tile is `theme::stroke_bounds`, which reaches
 /// `thickness / 2 + 1` **screen** pixels past the outermost point: two of them at 96 DPI, and
 /// two mock-up pixels are only 1,43 of those. Three is the first number that covers it, and a
 /// test walks four display scales to say so.
@@ -1985,7 +1985,7 @@ impl MenuPaint {
         // the font is.
         //
         // ⚠ There is no pen here since task T-11-21. The check mark is drawn by
-        // [`crate::settings::draw_check_mark`], which owns a pen for exactly the one call —
+        // [`crate::theme::draw_check_mark`], which owns a pen for exactly the one call —
         // a smoothed stroke is drawn twice, once enlarged and once not, with two different
         // thicknesses, so a pen made once for the showing could not have served it.
         let (window_bg, hover_bg, panel_border) = unsafe {
@@ -2050,7 +2050,7 @@ impl MenuPaint {
     fn measure(&self, label: &str) -> (u32, u32) {
         let units: Vec<u16> = label.encode_utf16().collect();
         let mut extent = SIZE::default();
-        let mut dpi = settings::SCREEN_DPI;
+        let mut dpi = theme::SCREEN_DPI;
 
         // SAFETY: `None` asks for a DC of the screen, which needs no window of ours; a
         // valid handle is released below, on this same thread, as `ReleaseDC` requires.
@@ -2060,7 +2060,7 @@ impl MenuPaint {
             // The message carries no device context — an entry is measured before there is
             // a menu window to measure it on — so the DPI comes off the same screen DC the
             // text is measured with, which is the one [`measure_dpi`] would open anyway.
-            dpi = settings::dc_dpi(dc);
+            dpi = theme::dc_dpi(dc);
 
             // SAFETY: `dc` is the live DC just obtained and `self.font` is the live font
             // this value owns; the previous selection is restored below, before the DC is
@@ -2125,8 +2125,8 @@ impl MenuPaint {
     /// the rectangle it is given and not from anything this function returns.
     fn measure_rule(&self) -> (u32, u32) {
         let dpi = measure_dpi();
-        let inset = settings::scaled(MENU_SEP_INSET, dpi);
-        let height = settings::scaled(MENU_SEP_H, dpi);
+        let inset = theme::scaled(MENU_SEP_INSET, dpi);
+        let height = theme::scaled(MENU_SEP_H, dpi);
 
         // As above: zero on the impossible branch rather than a panic on the UI thread.
         (
@@ -2147,7 +2147,7 @@ impl MenuPaint {
     fn draw_rule(&self, structure: &DRAWITEMSTRUCT) {
         let dc = structure.hDC;
         let rect = structure.rcItem;
-        let dpi = settings::dc_dpi(dc);
+        let dpi = theme::dc_dpi(dc);
 
         // SAFETY: `dc` and `rect` came with the message; while the gate is up they describe
         // an entry of our menu being painted, and the call only writes pixels into that DC.
@@ -2186,8 +2186,8 @@ impl MenuPaint {
         // The DPI of the device the entry is being painted on — every mock-up length below
         // goes through it. The menu window is a real window of the screen, so its DC
         // answers the scale of the monitor the menu came up on (NFR-13: a refusal is the
-        // 100 % look, which `settings::dc_dpi` decides).
-        let dpi = settings::dc_dpi(dc);
+        // 100 % look, which `theme::dc_dpi` decides).
+        let dpi = theme::dc_dpi(dc);
 
         // SAFETY: `dc` and `rect` came with the message; while the gate is up they
         // describe an entry of our menu being painted, and every call below only writes
@@ -2205,10 +2205,10 @@ impl MenuPaint {
         // four corners the same way every rounded figure of the dialog is smoothed; the
         // outline is handed the fill's own colour, so the figure has a fill and no frame.
         if selected {
-            settings::paint_rounded(
+            theme::paint_rounded(
                 dc,
                 &menu_hover_rect(&rect, dpi),
-                settings::scaled(settings::CORNER_RADIUS, dpi),
+                theme::scaled(theme::CORNER_RADIUS, dpi),
                 self.palette.hover_bg,
                 self.hover_bg,
                 dpi,
@@ -2282,7 +2282,7 @@ impl MenuPaint {
     /// Drawn by hand rather than by `DrawFrameControl(DFC_MENU, DFCS_MENUCHECK)`, because
     /// that call paints the system's mark in the system's colours whatever the palette of
     /// FR-92а says — the exact thing task T-11-10 existed to stop. Since task T-11-21 the
-    /// hand is [`crate::settings::draw_check_mark`] and not this file's own two lines: the
+    /// hand is [`crate::theme::draw_check_mark`] and not this file's own two lines: the
     /// figure is [`MENU_CHECK_MARK`], the square is [`menu_check_cell`], and the smoothing
     /// is the one supersampling this program has — no second copy of it lives here.
     ///
@@ -2292,7 +2292,7 @@ impl MenuPaint {
     fn draw_check_mark(&self, dc: HDC, rect: &RECT, dpi: i32) {
         let cell = menu_check_cell(rect, check_column(), dpi);
 
-        settings::draw_check_mark(dc, &cell, self.palette.text, MENU_CHECK_MARK, dpi);
+        theme::draw_check_mark(dc, &cell, self.palette.text, MENU_CHECK_MARK, dpi);
     }
 }
 
@@ -2348,10 +2348,10 @@ fn check_column() -> i32 {
 ///
 /// [`MENU_HOVER_INSET`] of the mock-up off the left and the right edge and the whole height of
 /// the entry, exactly as the generator draws it. Pure, so the geometry is a table a test reads
-/// without a menu on the screen; the rounding of the corners is [`crate::settings::paint_rounded`]
-/// with [`crate::settings::CORNER_RADIUS`], which is the `6` the same call carries.
+/// without a menu on the screen; the rounding of the corners is [`crate::theme::paint_rounded`]
+/// with [`crate::theme::CORNER_RADIUS`], which is the `6` the same call carries.
 pub fn menu_hover_rect(item: &RECT, dpi: i32) -> RECT {
-    let inset = settings::scaled(MENU_HOVER_INSET, dpi);
+    let inset = theme::scaled(MENU_HOVER_INSET, dpi);
 
     RECT {
         left: item.left + inset,
@@ -2367,12 +2367,12 @@ pub fn menu_hover_rect(item: &RECT, dpi: i32) -> RECT {
 /// The measurement of the text plus the mock-up's own air on both sides of it,
 /// [`MENU_V_PAD_TENTHS`]. Two properties at once, and the task asked for both: the row lands on
 /// the mock-up's `$itemH = 38` for the face the mock-up is drawn in — 15 + 2 × 6 = **27** screen
-/// pixels at 96 DPI, which is `settings::scaled(38, 96)` to the pixel — and it still **grows
+/// pixels at 96 DPI, which is `theme::scaled(38, 96)` to the pixel — and it still **grows
 /// with the face**, because what the padding is added to is a measurement and not a constant.
 ///
 /// Pure, for the reason [`menu_hover_rect`] is: a test reads it without a menu on the screen.
 pub fn menu_item_height(text_height: i32, dpi: i32) -> i32 {
-    text_height + 2 * settings::scaled_tenths(MENU_V_PAD_TENTHS, dpi)
+    text_height + 2 * theme::scaled_tenths(MENU_V_PAD_TENTHS, dpi)
 }
 
 /// The line of one rule of FR-91, inside the stripe whose rectangle is `item` — FR-92а, task
@@ -2383,7 +2383,7 @@ pub fn menu_item_height(text_height: i32, dpi: i32) -> i32 {
 /// Pure, like [`menu_hover_rect`], and for the same reason: the geometry of a rule is a table a
 /// test reads without a menu on the screen.
 pub fn menu_separator_line(item: &RECT, dpi: i32) -> RECT {
-    let inset = settings::scaled(MENU_SEP_INSET, dpi);
+    let inset = theme::scaled(MENU_SEP_INSET, dpi);
     let middle = (item.top + item.bottom) / 2;
 
     RECT {
@@ -2399,17 +2399,17 @@ pub fn menu_separator_line(item: &RECT, dpi: i32) -> RECT {
 /// `WM_MEASUREITEM` carries no device context: an entry is measured before there is a menu
 /// window to measure it against. A DC of the screen answers instead, exactly as the text
 /// measurement of [`MenuPaint::measure`] uses one, and a refused DC is the 100 % look
-/// (NFR-13, the fallback [`crate::settings::dc_dpi`] itself names).
+/// (NFR-13, the fallback [`crate::theme::dc_dpi`] itself names).
 fn measure_dpi() -> i32 {
     // SAFETY: `None` asks for a DC of the screen, which needs no window of ours; a valid
     // handle is released below, on this same thread, as `ReleaseDC` requires.
     let dc = unsafe { GetDC(None) };
 
     if dc.is_invalid() {
-        return settings::SCREEN_DPI;
+        return theme::SCREEN_DPI;
     }
 
-    let dpi = settings::dc_dpi(dc);
+    let dpi = theme::dc_dpi(dc);
 
     // SAFETY: the DC came from the `GetDC` above, on this same thread. NFR-13: nothing useful
     // can be done about a refused release, and it is not made fatal — the DC was ours for one
@@ -2435,7 +2435,7 @@ fn measure_dpi() -> i32 {
 ///
 /// Pure, for the reason [`menu_hover_rect`] is.
 pub fn menu_check_cell(item: &RECT, column: i32, dpi: i32) -> RECT {
-    let side = settings::scaled(MENU_CHECK_CELL, dpi);
+    let side = theme::scaled(MENU_CHECK_CELL, dpi);
     let left = item.left + MENU_H_PAD + (column - side) / 2;
     let top = (item.top + item.bottom) / 2 - side / 2;
 
@@ -2450,7 +2450,7 @@ pub fn menu_check_cell(item: &RECT, column: i32, dpi: i32) -> RECT {
 /// The face the entries of FR-91 are measured and drawn in — FR-92а, task T-11-21.
 ///
 /// `lfMenuFont` of `SPI_GETNONCLIENTMETRICS`, which is the face a menu of this system is set
-/// in, put through [`crate::settings::antialiased_logfont`]: one field changed — the quality —
+/// in, put through [`crate::theme::antialiased_logfont`]: one field changed — the quality —
 /// and not a byte else, so the entries keep the system's type face, size, weight and character
 /// set and lose only the colour fringe of ClearType. **The metrics do not move.** That is not
 /// an assumption: task T-11-20 measured the same substitution on the dialog's own face with
@@ -2483,7 +2483,7 @@ pub fn menu_item_logfont() -> Option<LOGFONTW> {
         return None;
     }
 
-    Some(settings::antialiased_logfont(metrics.lfMenuFont))
+    Some(theme::antialiased_logfont(metrics.lfMenuFont))
 }
 
 /// The `WM_MEASUREITEM` of the menu of FR-91 — the measuring half of task T-11-10.

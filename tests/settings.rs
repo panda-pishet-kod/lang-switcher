@@ -14,6 +14,10 @@ use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
     QUARANTINE_SUFFIX, Quarantined, ReadOutcome, ReplacementMethod, SavePolicy,
 };
+// Task T-14-3: the drawing library of FR-92а moved out of `settings` into its owner, `theme`
+// (§6.2, finding 24 of the audit of 2026-08-24). The tests of it are still here — they are
+// tests of the pictures this dialog draws — and they call it at its new address.
+use lang_switcher::theme;
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLEARTYPE_QUALITY,
@@ -1050,10 +1054,13 @@ fn the_theme_combo_order_is_the_order_of_the_theme_setting_values() {
 // The `WM_CTLCOLOR*` handlers themselves need a live dialog and are checked by the
 // controller's instrument on the real window at acceptance.
 
-use lang_switcher::settings::{
-    ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, StaticColorRole,
+// Task T-14-3 moved the colour-role vocabulary into its owner, `theme` (§6.2): the roles and
+// the resolution live there, the mapping «identifier → role» — `settings::static_color_role`
+// and its neighbours — stays with the module that owns the window.
+use lang_switcher::theme::{
+    ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, FOG, GRAPHITE, StaticColorRole,
+    resolve,
 };
-use lang_switcher::theme::{FOG, GRAPHITE, resolve};
 
 // Criterion 10 of T-11-4. The mapping is closed by a table: every explanatory note of the
 // dialog by its actual identifier, the `ES_READONLY` trap, and every other static the
@@ -1354,7 +1361,8 @@ fn the_hot_face_is_the_palette_field_the_tray_menu_already_lights_with() {
 // by the controller on the real window at acceptance, along with clicks, Space and the
 // arrow keys.
 
-use lang_switcher::settings::{
+// T-14-3: the glyph roles moved to their owner, `theme`.
+use lang_switcher::theme::{
     GlyphColors, GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole,
 };
 
@@ -1469,7 +1477,7 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 
     for (kind, checked, disabled, expected) in table {
         assert_eq!(
-            settings::glyph_color_roles(kind, checked, disabled),
+            theme::glyph_color_roles(kind, checked, disabled),
             expected,
             "{kind:?}, checked = {checked}, disabled = {disabled}"
         );
@@ -1760,7 +1768,8 @@ fn the_panel_map_is_rectangle_containment_with_the_boundary_counted_in() {
 // closed face, ordinary against highlighted. The drawing half needs a live dialog and is
 // checked by the controller on the real window at acceptance.
 
-use lang_switcher::settings::{ComboFillRole, ComboItemColors, ComboTextRole};
+// T-14-3: the combo roles moved to their owner, `theme`.
+use lang_switcher::theme::{ComboFillRole, ComboItemColors, ComboTextRole};
 
 #[test]
 fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
@@ -1783,7 +1792,7 @@ fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
 
     for (closed_part, highlighted, fill, text) in table {
         assert_eq!(
-            settings::combo_item_color_roles(closed_part, highlighted),
+            theme::combo_item_color_roles(closed_part, highlighted),
             ComboItemColors { fill, text },
             "closed_part = {closed_part}, highlighted = {highlighted}"
         );
@@ -3028,7 +3037,7 @@ fn a_character_the_device_measures_as_nothing_still_takes_room() {
 #[test]
 fn one_radius_rounds_the_panel_the_field_the_combo_the_button_and_both_lists() {
     assert_eq!(
-        settings::CORNER_RADIUS,
+        theme::CORNER_RADIUS,
         6,
         "the `Radius = 6` of the style table of ui.ps1"
     );
@@ -3097,47 +3106,40 @@ fn one_radius_rounds_the_panel_the_field_the_combo_the_button_and_both_lists() {
 fn the_lengths_of_the_mock_ups_scale_with_the_dpi_of_the_window() {
     // The scale itself, in the shape the module writes it: tenths of a DPI, because 134,4 is
     // not whole, and the factor named apart so the source of the number stays visible.
-    assert_eq!(settings::SCREEN_DPI, 96, "100 % is 96 DPI");
+    assert_eq!(theme::SCREEN_DPI, 96, "100 % is 96 DPI");
+    assert_eq!(theme::MOCKUP_SCALE_TENTHS, 14, "the `$DPI = 1.4` of ui.ps1");
     assert_eq!(
-        settings::MOCKUP_SCALE_TENTHS,
-        14,
-        "the `$DPI = 1.4` of ui.ps1"
-    );
-    assert_eq!(
-        settings::MOCKUP_DPI_TENTHS,
+        theme::MOCKUP_DPI_TENTHS,
         1344,
         "96 × 1,4 = 134,4 DPI, carried in tenths"
     );
     assert_eq!(
-        settings::MOCKUP_DPI_TENTHS,
-        settings::SCREEN_DPI * settings::MOCKUP_SCALE_TENTHS,
+        theme::MOCKUP_DPI_TENTHS,
+        theme::SCREEN_DPI * theme::MOCKUP_SCALE_TENTHS,
         "the mock-up DPI must stay 96 × 1,4 and not a number of its own"
     );
 
     // 100 % — the picture divided by 1,4, rounded to nearest.
-    assert_eq!(settings::scaled(6, 96), 4);
-    assert_eq!(settings::scaled(4, 96), 3);
+    assert_eq!(theme::scaled(6, 96), 4);
+    assert_eq!(theme::scaled(4, 96), 3);
 
     // 125 %, 150 %, 200 % — rounded to nearest, so a one-pixel frame never rounds away.
-    assert_eq!(settings::scaled(6, 120), 5);
-    assert_eq!(settings::scaled(4, 120), 4);
-    assert_eq!(settings::scaled(6, 144), 6);
-    assert_eq!(settings::scaled(4, 192), 6);
-    assert_eq!(settings::scaled(1, 120), 1);
-    assert_eq!(settings::scaled(1, 144), 1);
+    assert_eq!(theme::scaled(6, 120), 5);
+    assert_eq!(theme::scaled(4, 120), 4);
+    assert_eq!(theme::scaled(6, 144), 6);
+    assert_eq!(theme::scaled(4, 192), 6);
+    assert_eq!(theme::scaled(1, 120), 1);
+    assert_eq!(theme::scaled(1, 144), 1);
 
     // The letter spacing is carried in tenths of a pixel, and scales as a tenth does.
-    assert_eq!(settings::scaled(11, 96), 8);
-    assert_eq!(settings::scaled(11, 192), 16);
+    assert_eq!(theme::scaled(11, 96), 8);
+    assert_eq!(theme::scaled(11, 192), 16);
 
     // A device that will not say what its DPI is gets the 100 % look, and — since T-11-15 —
     // that is the *scaled* 100 % look and not the mock-up number handed over unchanged.
-    assert_eq!(settings::scaled(6, 0), 4);
-    assert_eq!(settings::scaled(6, -1), 4);
-    assert_eq!(
-        settings::scaled_tenths(15, 0),
-        settings::scaled_tenths(15, 96)
-    );
+    assert_eq!(theme::scaled(6, 0), 4);
+    assert_eq!(theme::scaled(6, -1), 4);
+    assert_eq!(theme::scaled_tenths(15, 0), theme::scaled_tenths(15, 96));
 
     // The scale is one division and nothing else, and at 96 DPI it is an exact fraction:
     // 96 / 134,4 = **5 / 7**. Every mock-up length must therefore come out as the nearest
@@ -3147,7 +3149,7 @@ fn the_lengths_of_the_mock_ups_scale_with_the_dpi_of_the_window() {
         let five_sevenths = (pixels * 10 + 7) / 14;
 
         assert_eq!(
-            settings::scaled(pixels, 96),
+            theme::scaled(pixels, 96),
             five_sevenths,
             "{pixels} px of the mock-ups must be {five_sevenths} px at 96 DPI"
         );
@@ -3199,21 +3201,16 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
     // `MapDialogRect` maps as MulDiv(12, 15, 8) for the 15-pixel base unit of Segoe UI 9 pt.
     let layout_row = 12 * 15 / 8;
     let cell = settings::check_cell(96, layout_row);
-    let glyph_side = settings::scaled(settings::GLYPH_SIZE, 96);
-    let dot_inset = settings::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, 96);
-    let glyph_mark = settings::check_mark_points((0, 0), settings::GLYPH_CHECK_MARK, 96);
+    let glyph_side = theme::scaled(settings::GLYPH_SIZE, 96);
+    let dot_inset = theme::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, 96);
+    let glyph_mark = theme::check_mark_points((0, 0), settings::GLYPH_CHECK_MARK, 96);
 
     // The radius and the frame are one number for five figures each, so the three rows that
     // ask for them in three different tables are answered by the same two expressions.
-    let radius = || vec![(px(settings::scaled(settings::CORNER_RADIUS, 96)), at_96(60))];
+    let radius = || vec![(px(theme::scaled(theme::CORNER_RADIUS, 96)), at_96(60))];
     // ⚠ The frame is the one row whose «при 96 DPI» column the reference does not divide: a
     // pen has no fractional width, and `.max(1)` is what keeps the single pixel at every scale.
-    let border = || {
-        vec![(
-            px(settings::scaled(settings::BORDER_THICKNESS, 96).max(1)),
-            px(1),
-        )]
-    };
+    let border = || vec![(px(theme::scaled(theme::BORDER_THICKNESS, 96).max(1)), px(1))];
 
     let token = |what, reference, pixels: Vec<(i32, i32)>| Token {
         what,
@@ -3243,7 +3240,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "1. Панель · Отступ заголовка сверху",
             "5 px макета",
             vec![(
-                px(settings::scaled(settings::PANEL_CAPTION_INSET_Y, 96)),
+                px(theme::scaled(settings::PANEL_CAPTION_INSET_Y, 96)),
                 at_96(50),
             )],
         ),
@@ -3252,7 +3249,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "1,1 px макета",
             // The tracking is carried in tenths of a *screen* pixel: ten hundredths each.
             vec![(
-                settings::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96) * 10,
+                theme::scaled(settings::PANEL_CAPTION_TRACKING_TENTHS, 96) * 10,
                 at_96(11),
             )],
         ),
@@ -3274,7 +3271,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "2. Глиф · Радиус скругления квадрата",
             "3 px макета",
             vec![(
-                px(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96)),
+                px(theme::scaled(settings::GLYPH_CORNER_RADIUS, 96)),
                 at_96(30),
             )],
         ),
@@ -3282,7 +3279,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "2. Глиф · Толщина пера галочки",
             "2,1 px макета",
             vec![(
-                px(settings::scaled_tenths(
+                px(theme::scaled_tenths(
                     settings::GLYPH_CHECK_MARK.pen_tenths,
                     96,
                 )),
@@ -3339,7 +3336,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "4. Комбобокс · Центр шеврона от правого края",
             "14 px макета",
             vec![(
-                px(settings::scaled(settings::COMBO_CHEVRON_INSET_X, 96)),
+                px(theme::scaled(settings::COMBO_CHEVRON_INSET_X, 96)),
                 at_96(140),
             )],
         ),
@@ -3347,10 +3344,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "4. Комбобокс · Толщина пера шеврона",
             "1,5 px макета",
             vec![(
-                px(settings::scaled_tenths(
-                    settings::COMBO_CHEVRON_PEN_TENTHS,
-                    96,
-                )),
+                px(theme::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96)),
                 at_96(15),
             )],
         ),
@@ -3359,11 +3353,11 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "±4 по x, ∓2 по y px макета",
             vec![
                 (
-                    px(settings::scaled(settings::COMBO_CHEVRON_ARM_X, 96)),
+                    px(theme::scaled(settings::COMBO_CHEVRON_ARM_X, 96)),
                     at_96(40),
                 ),
                 (
-                    px(settings::scaled(settings::COMBO_CHEVRON_ARM_Y, 96)),
+                    px(theme::scaled(settings::COMBO_CHEVRON_ARM_Y, 96)),
                     at_96(20),
                 ),
             ],
@@ -3393,7 +3387,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "6. Список исключений · Первая строка от верха рамки",
             "3 px макета",
             vec![(
-                px(settings::scaled(settings::LIST_FIRST_ROW_TOP, 96)),
+                px(theme::scaled(settings::LIST_FIRST_ROW_TOP, 96)),
                 at_96(30),
             )],
         ),
@@ -3402,11 +3396,11 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "2 / 3 px макета",
             vec![
                 (
-                    px(settings::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    px(theme::scaled(settings::LIST_SELECTION_INSET, 96)),
                     at_96(20),
                 ),
                 (
-                    px(settings::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    px(theme::scaled(settings::LIST_SELECTION_RADIUS, 96)),
                     at_96(30),
                 ),
             ],
@@ -3414,15 +3408,12 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
         token(
             "6. Список исключений · Втяжка текста от левого края списка",
             "7 px макета",
-            vec![(
-                px(settings::scaled(settings::LIST_TEXT_INSET, 96)),
-                at_96(70),
-            )],
+            vec![(px(theme::scaled(settings::LIST_TEXT_INSET, 96)), at_96(70))],
         ),
         token(
             "6. Список исключений · Текст ниже верха строки",
             "2 px макета",
-            vec![(px(settings::scaled(settings::LIST_TEXT_TOP, 96)), at_96(20))],
+            vec![(px(theme::scaled(settings::LIST_TEXT_TOP, 96)), at_96(20))],
         ),
         // -------------------------------------------------------- 7. Список раскладок
         token(
@@ -3449,7 +3440,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "7. Список раскладок · Радиус скругления галочки",
             "2 px макета",
             vec![(
-                px(settings::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)),
+                px(theme::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)),
                 at_96(20),
             )],
         ),
@@ -3457,7 +3448,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "7. Список раскладок · Толщина пера галочки",
             "1,8 px макета",
             vec![(
-                px(settings::scaled_tenths(
+                px(theme::scaled_tenths(
                     settings::LIST_CHECK_MARK.pen_tenths,
                     96,
                 )),
@@ -3477,11 +3468,11 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "2 / 3 px макета",
             vec![
                 (
-                    px(settings::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    px(theme::scaled(settings::LIST_SELECTION_INSET, 96)),
                     at_96(20),
                 ),
                 (
-                    px(settings::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    px(theme::scaled(settings::LIST_SELECTION_RADIUS, 96)),
                     at_96(30),
                 ),
             ],
@@ -3572,7 +3563,8 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
 /// and that nobody turned a dialog unit into a mock-up pixel on the way.
 #[test]
 fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
-    let source = settings_module_source();
+    // T-14-3: the drawing is two files now — see `drawing_source`.
+    let source = drawing_source();
 
     // Criterion 9 of T-11-15, carried forward: the source of the scale is named where it is.
     let scale = source
@@ -3676,7 +3668,8 @@ fn every_inset_is_written_in_the_unit_the_generator_states_it_in() {
 /// gap after it, the inset of a radio dot, and the side of a layout-list tick.
 #[test]
 fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
-    let source = settings_module_source();
+    // T-14-3: the drawing is two files now — see `drawing_source`.
+    let source = drawing_source();
 
     for gone in [
         // the 2-pixel pen and the 13×13 coordinates of T-11-5b
@@ -3733,14 +3726,14 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
     // are held here, against the `(PtF ($bx+3.4) ($by+6.6)) …` of the `'lview'` arm.
     assert_eq!(
         settings::GLYPH_CHECK_MARK,
-        settings::CheckMark {
+        theme::CheckMark {
             points_tenths: [(45, 86), (73, 118), (125, 52)],
             pen_tenths: 21,
         }
     );
     assert_eq!(
         settings::LIST_CHECK_MARK,
-        settings::CheckMark {
+        theme::CheckMark {
             points_tenths: [(34, 66), (56, 90), (96, 40)],
             pen_tenths: 18,
         }
@@ -3753,9 +3746,9 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
         (settings::LIST_CHECK_MARK, settings::LIST_CHECK_SIZE),
     ] {
         for dpi in [96, 120, 144, 192] {
-            let square = settings::scaled(side, dpi);
+            let square = theme::scaled(side, dpi);
 
-            for (x, y) in settings::check_mark_points((0, 0), mark, dpi) {
+            for (x, y) in theme::check_mark_points((0, 0), mark, dpi) {
                 assert!(
                     (0..=square).contains(&x) && (0..=square).contains(&y),
                     "at {dpi} DPI the point ({x}, {y}) is outside the {square}-pixel square"
@@ -4217,6 +4210,37 @@ fn settings_module_source() -> String {
     .replace("\r\n", "\n")
 }
 
+/// The source of `theme`, the same way — task **T-14-3**.
+fn theme_module_source() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("theme.rs"),
+    )
+    .expect("the theme source must be readable")
+    .replace("\r\n", "\n")
+}
+
+/// **The text of the drawing this program does — task T-14-3.**
+///
+/// Until that task the drawing engine of FR-92а lived inside `settings`, and the sweeps of
+/// this file swept one file because there was one file to sweep. T-14-3 moved the engine to
+/// its owner (§6.2, finding 24 of the audit of 2026-08-24), so «the drawing» is now the two
+/// files joined, and the sweeps that are about the drawing read this instead.
+///
+/// ⚠ The join **strengthens** every absence assertion and merely re-addresses the presence
+/// ones: `HALFTONE` may now appear in neither file rather than in one, and
+/// `SetStretchBltMode(dc, COLORONCOLOR)` is still required to be written exactly once — in
+/// whichever of the two it now lives. What it deliberately does *not* do is replace the sweeps
+/// that are about the **shape of `settings` itself** — the subclass pairings, `get_text`, the
+/// absence of `draw_group_panel` — and those go on reading [`settings_module_source`].
+fn drawing_source() -> String {
+    let mut joined = settings_module_source();
+    joined.push('\n');
+    joined.push_str(&theme_module_source());
+    joined
+}
+
 /// The body of one function of the module source, from the opening of its signature to the
 /// closing brace in the first column — enough to sweep one function without dragging the
 /// neighbours in.
@@ -4247,7 +4271,8 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
 /// buttons keep: a combo box the mode has switched off does not light up under the cursor.
 #[test]
 fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
-    use lang_switcher::settings::{ComboBorderRole, ComboChevronRole, ComboClosedColors};
+    // T-14-3: the combo roles moved to their owner, `theme`.
+    use lang_switcher::theme::{ComboBorderRole, ComboChevronRole, ComboClosedColors};
 
     use ComboFillRole as Fill;
     use ComboTextRole as Ink;
@@ -4296,7 +4321,7 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
 
     for (hot, disabled, fill, border, text, chevron) in table {
         assert_eq!(
-            settings::combo_closed_color_roles(hot, disabled),
+            theme::combo_closed_color_roles(hot, disabled),
             ComboClosedColors {
                 fill,
                 border,
@@ -4373,15 +4398,15 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
     // The stroke is the one length of the mock-ups written in tenths of a pixel: 1,5 px of the
     // picture, which is 1,07 px of a 100 % screen — one pixel, and two at 200 % (T-11-15).
     assert_eq!(
-        settings::scaled_tenths(15, 96),
+        theme::scaled_tenths(15, 96),
         1,
         "1,5 px of a 140 % picture is one pixel at 100 %"
     );
-    assert_eq!(settings::scaled_tenths(15, 192), 2, "2 px at 200 %");
+    assert_eq!(theme::scaled_tenths(15, 192), 2, "2 px at 200 %");
     // Never a zero-width pen, which GDI would read as a hairline drawn by other rules.
-    assert_eq!(settings::scaled_tenths(1, 96), 1);
+    assert_eq!(theme::scaled_tenths(1, 96), 1);
     assert_eq!(
-        settings::scaled_tenths(15, 0),
+        theme::scaled_tenths(15, 0),
         1,
         "the 100 % look when the DPI is refused"
     );
@@ -4490,8 +4515,8 @@ fn the_check_box_glyph_is_rounded_by_the_three_pixels_of_the_mock_ups() {
 
     // A length of the mock-ups like every other since T-11-13 — and since T-11-15 a length of
     // pictures drawn at 140 %, so the three pixels of the picture are two on a 100 % screen.
-    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 96), 2);
-    assert_eq!(settings::scaled(settings::GLYPH_CORNER_RADIUS, 192), 4);
+    assert_eq!(theme::scaled(settings::GLYPH_CORNER_RADIUS, 96), 2);
+    assert_eq!(theme::scaled(settings::GLYPH_CORNER_RADIUS, 192), 4);
 
     let source = settings_module_source();
     let body = function_body(&source, "unsafe fn draw_glyph_element(");
@@ -4597,7 +4622,7 @@ fn the_exclusion_list_paints_its_own_selection() {
 
     // The colours: the very table the combo items answer, reused and not copied.
     assert_eq!(
-        settings::list_item_color_roles(false),
+        theme::list_item_color_roles(false),
         ComboItemColors {
             fill: Fill::FieldBg,
             text: Ink::Text
@@ -4605,7 +4630,7 @@ fn the_exclusion_list_paints_its_own_selection() {
         "an ordinary row is the quiet ground of the list"
     );
     assert_eq!(
-        settings::list_item_color_roles(true),
+        theme::list_item_color_roles(true),
         ComboItemColors {
             fill: Fill::SelBg,
             text: Ink::SelFg
@@ -4853,7 +4878,7 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
 
     // 4. The mock-ups are drawn at 140 %, so the air as a length of *theirs* is 1,4 × that —
     //    2,1 mock-up pixels, which is 2 written whole.
-    let air_in_mockup_pixels = air_at_96 * settings::MOCKUP_SCALE_TENTHS / 10; // 2,10 px
+    let air_in_mockup_pixels = air_at_96 * theme::MOCKUP_SCALE_TENTHS / 10; // 2,10 px
     assert_eq!(air_in_mockup_pixels, 210);
     assert_eq!(
         (air_in_mockup_pixels + 50) / 100,
@@ -4868,7 +4893,7 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
     // Through `scaled` — the one road a mock-up length takes into the module — 2 comes back
     // as 1 px at 96 DPI, so the field stands 16 px and the closed part 16 + 6 = 22 against the
     // mock-up's 22,5. The controller's acceptance window is 22..23 px.
-    let field_at_96 = 15 + settings::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96);
+    let field_at_96 = 15 + theme::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96);
 
     assert_eq!(
         field_at_96, 16,
@@ -4885,7 +4910,7 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
 
     // The defect this task was raised on: 30 px, which is what the list air still makes.
     assert_eq!(
-        15 + settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96) + 6,
+        15 + theme::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96) + 6,
         30,
         "the number that made the 30-pixel closed part must be identified, not forgotten"
     );
@@ -4903,14 +4928,14 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
         "the air of a dropped-down list item is the number T-11-15 left; T-12-2 does not move it"
     );
     assert_eq!(
-        15 + settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
+        15 + theme::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
         24,
         "a list item must still be the 24 px `CB_GETITEMHEIGHT(0)` answered before T-12-2"
     );
 
     assert!(
-        settings::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96)
-            < settings::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
+        theme::scaled(settings::COMBO_CLOSED_ITEM_EXTRA, 96)
+            < theme::scaled(settings::COMBO_LIST_ITEM_EXTRA, 96),
         "the closed part is the shorter of the two on the screen — that is the whole of F3"
     );
 
@@ -5209,11 +5234,11 @@ fn the_about_static_colour_roles_follow_their_table() {
     // draws it with `$brMu`, while line 194 draws the name with `$brFg`), and решение В-2 says
     // in as many words that the description stays «в колонке имени и приглушённым цветом».
     let cases = [
-        (1120, settings::StaticColorRole::Label, "иконка"),
-        (1121, settings::StaticColorRole::Label, "имя"),
-        (1122, settings::StaticColorRole::Muted, "строка версии"),
-        (1123, settings::StaticColorRole::Muted, "описание, строка 1"),
-        (1124, settings::StaticColorRole::Muted, "описание, строка 2"),
+        (1120, theme::StaticColorRole::Label, "иконка"),
+        (1121, theme::StaticColorRole::Label, "имя"),
+        (1122, theme::StaticColorRole::Muted, "строка версии"),
+        (1123, theme::StaticColorRole::Muted, "описание, строка 1"),
+        (1124, theme::StaticColorRole::Muted, "описание, строка 2"),
     ];
 
     for (control, expected, what) in cases {
@@ -7236,7 +7261,9 @@ fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
 /// count that swept the prose in with the code would prove nothing — or, since task T-11-23,
 /// would prove the opposite of the truth.
 fn product_lines_with(needle: &str) -> Vec<String> {
-    settings_module_source()
+    // T-14-3: the drawing of FR-92а is two files since the engine moved to `theme`; see
+    // [`drawing_source`] for why the join keeps every sweep below meaning what it meant.
+    drawing_source()
         .lines()
         .map(str::trim)
         .filter(|line| !line.starts_with("//") && line.contains(needle))
@@ -7271,7 +7298,7 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
         *slot = unit;
     }
 
-    let text = settings::antialiased_logfont(base);
+    let text = theme::antialiased_logfont(base);
 
     assert_eq!(
         text.lfQuality.0, 4,
@@ -7339,13 +7366,13 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
 #[test]
 fn the_smoothing_is_a_named_factor_and_an_average_of_our_own_with_no_halftone_left() {
     // Four samples each way, sixteen per pixel — the factor `tools\make-icons.ps1` draws at.
-    assert_eq!(settings::SUPERSAMPLE, 4);
+    assert_eq!(theme::SUPERSAMPLE, 4);
 
     // And a ceiling on what may be enlarged whole, so that a smoothed detail cannot quietly
     // become a smoothed panel: the largest surface this file can ask for is 256 × 256.
-    assert_eq!(settings::SUPERSAMPLE_MAX_SIDE, 64);
+    assert_eq!(theme::SUPERSAMPLE_MAX_SIDE, 64);
     assert_eq!(
-        settings::SUPERSAMPLE_MAX_SIDE * settings::SUPERSAMPLE,
+        theme::SUPERSAMPLE_MAX_SIDE * theme::SUPERSAMPLE,
         256,
         "the widest enlarged surface the module can ask for"
     );
@@ -7353,12 +7380,13 @@ fn the_smoothing_is_a_named_factor_and_an_average_of_our_own_with_no_halftone_le
     // The block one destination pixel is averaged from is the factor squared, and it is a
     // constant rather than a number written at the loop.
     assert_eq!(
-        settings::SUPERSAMPLE_BLOCK,
-        (settings::SUPERSAMPLE * settings::SUPERSAMPLE) as usize
+        theme::SUPERSAMPLE_BLOCK,
+        (theme::SUPERSAMPLE * theme::SUPERSAMPLE) as usize
     );
-    assert_eq!(settings::SUPERSAMPLE_BLOCK, 16);
+    assert_eq!(theme::SUPERSAMPLE_BLOCK, 16);
 
-    let source = settings_module_source();
+    // T-14-3: the drawing is two files now — see `drawing_source`.
+    let source = drawing_source();
 
     // ⚠ Not one line of code may name the mode again — see the note above this test.
     let halftone = product_lines_with("HALFTONE");
@@ -7400,10 +7428,16 @@ fn the_smoothing_is_a_named_factor_and_an_average_of_our_own_with_no_halftone_le
         "the reduction averages in exactly one place: {averaging:?}"
     );
 
+    // ⚠ **The needle is the wrapped signature since task T-14-3, and the wrap is not a change
+    // of the signature.** `Supersample` moved to `theme` with the rest of the engine, so
+    // `render` had to become `pub(crate)` for the dialog to keep calling it — and those eleven
+    // characters push the one-line form past the hundred columns `rustfmt` allows, so it lays
+    // the parameters out one to a line. Name, arity, types and answer are the same six tokens
+    // they were; what follows is the very text the file now carries.
     let reduction = function_body(
         &source,
-        "fn render(&self, dc: HDC, tile: &RECT, thickness: i32, figure: impl FnOnce(Canvas)) \
-         -> bool {",
+        "fn render(\n        &self,\n        dc: HDC,\n        tile: &RECT,\n        \
+         thickness: i32,\n        figure: impl FnOnce(Canvas),\n    ) -> bool {",
     );
 
     assert!(
@@ -7483,11 +7517,11 @@ fn the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes() {
     // every figure must survive the reduction untouched.
     let flat = [ground; 16];
     assert_eq!(
-        settings::average_of_block(&flat),
+        theme::average_of_block(&flat),
         ground,
         "a block of one colour must reduce to that colour"
     );
-    assert_eq!(settings::average_of_block(&[ink; 16]), ink);
+    assert_eq!(theme::average_of_block(&[ink; 16]), ink);
 
     // Every coverage from none to all, against the average computed here from the definition.
     for covered in 0..=16u32 {
@@ -7497,7 +7531,7 @@ fn the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes() {
             *sample = ink;
         }
 
-        let (red, green, blue) = channels(settings::average_of_block(&block));
+        let (red, green, blue) = channels(theme::average_of_block(&block));
 
         for (name, got, low, high) in [
             ("red", red, 32, 228),
@@ -7531,7 +7565,7 @@ fn the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes() {
             *sample = pixel(255, 255, 255);
         }
 
-        let (red, green, blue) = channels(settings::average_of_block(&block));
+        let (red, green, blue) = channels(theme::average_of_block(&block));
         let expected = (255 * covered as u32 + 8) / 16;
 
         assert_eq!((red, green, blue), (expected, expected, expected));
@@ -7548,22 +7582,24 @@ fn the_reduction_of_a_block_is_its_average_and_never_leaves_its_extremes() {
     ];
 
     assert_eq!(
-        channels(settings::average_of_block(&mixed)),
+        channels(theme::average_of_block(&mixed)),
         (70, 80, 90),
         "each channel is averaged with itself and with no other"
     );
 
     // An empty block has no mean and answers zero rather than dividing by nothing. The product
-    // never hands one over — the block is always [`settings::SUPERSAMPLE_BLOCK`] long — and the
+    // never hands one over — the block is always [`theme::SUPERSAMPLE_BLOCK`] long — and the
     // function is public, so the degenerate case is answered rather than left to chance.
-    assert_eq!(settings::average_of_block(&[]), 0);
+    assert_eq!(theme::average_of_block(&[]), 0);
 }
 
 /// **Criterion 11 of T-11-17** — every GDI object this task added is owned by a value with a
 /// `Drop`, and no handle is used before it is examined.
 #[test]
 fn every_surface_picture_and_face_of_this_task_is_owned_and_freed_in_drop() {
-    let source = settings_module_source();
+    // T-14-3: `Supersample` moved to `theme`, `BackgroundCache` and `DialogFonts` stayed with
+    // the window they belong to — the three owners are still three, across two files.
+    let source = drawing_source();
 
     // The three owners this task added, beside the two the module already had.
     for owner in [
@@ -7686,7 +7722,7 @@ fn the_four_corner_tiles_are_the_corners_and_nothing_between_them() {
     };
 
     // Radius 4 plus a one-pixel frame — the panel of the mock-ups at 96 DPI.
-    let tiles = settings::corner_tiles(&area, 5);
+    let tiles = theme::corner_tiles(&area, 5);
 
     let corners = [
         (10, 20, 15, 25),
@@ -7710,14 +7746,14 @@ fn the_four_corner_tiles_are_the_corners_and_nothing_between_them() {
         .iter()
         .map(|tile| {
             (tile.right - tile.left)
-                * settings::SUPERSAMPLE
-                * ((tile.bottom - tile.top) * settings::SUPERSAMPLE)
+                * theme::SUPERSAMPLE
+                * ((tile.bottom - tile.top) * theme::SUPERSAMPLE)
         })
         .sum();
 
     let enlarged_whole = (area.right - area.left)
-        * settings::SUPERSAMPLE
-        * ((area.bottom - area.top) * settings::SUPERSAMPLE);
+        * theme::SUPERSAMPLE
+        * ((area.bottom - area.top) * theme::SUPERSAMPLE);
 
     println!(
         "panel {}×{}: corners {enlarged_corners} px enlarged against {enlarged_whole} px whole \
@@ -7739,7 +7775,7 @@ fn the_four_corner_tiles_are_the_corners_and_nothing_between_them() {
 fn the_tile_of_a_stroke_holds_the_pen_around_every_point() {
     // The three points of a dialog check mark at 96 DPI, with its two-pixel pen.
     let points = [(3, 6), (5, 8), (9, 4)];
-    let tile = settings::stroke_bounds(&points, 2);
+    let tile = theme::stroke_bounds(&points, 2);
 
     // Half the pen on each side, and one pixel more for the smoothed edge itself.
     assert_eq!(
@@ -7755,14 +7791,14 @@ fn the_tile_of_a_stroke_holds_the_pen_around_every_point() {
     }
 
     // A thicker pen widens the tile by half of itself on each side.
-    let thick = settings::stroke_bounds(&points, 8);
+    let thick = theme::stroke_bounds(&points, 8);
     assert_eq!(
         (thick.left, thick.top, thick.right, thick.bottom),
         (-2, -1, 14, 13)
     );
 
     // No points at all is no tile — and the caller draws nothing either way.
-    let nothing = settings::stroke_bounds(&[], 2);
+    let nothing = theme::stroke_bounds(&[], 2);
     assert_eq!(
         (nothing.left, nothing.top, nothing.right, nothing.bottom),
         (0, 0, 0, 0)
@@ -7948,7 +7984,7 @@ fn a_smoothed_corner_meets_the_straight_edge_without_a_seam() {
         bottom: 38,
     };
 
-    settings::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
+    theme::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(fill.into()) };
@@ -8030,18 +8066,18 @@ fn a_smoothed_corner_meets_the_straight_edge_without_a_seam() {
 fn only_an_odd_pen_takes_the_half_pixel_of_the_enlarged_path() {
     // One pixel at 96 DPI, three at 250 % — the frame is odd at most scales, which is why the
     // correction is the difference between a smoothed corner and a seam.
-    assert_eq!(settings::stroke_shift(1), settings::SUPERSAMPLE / 2);
-    assert_eq!(settings::stroke_shift(3), settings::SUPERSAMPLE / 2);
-    assert_eq!(settings::stroke_shift(5), settings::SUPERSAMPLE / 2);
+    assert_eq!(theme::stroke_shift(1), theme::SUPERSAMPLE / 2);
+    assert_eq!(theme::stroke_shift(3), theme::SUPERSAMPLE / 2);
+    assert_eq!(theme::stroke_shift(5), theme::SUPERSAMPLE / 2);
 
     // An even pen has no centre pixel to lose: enlarged, it lands on the block boundary of its
     // own accord.
-    assert_eq!(settings::stroke_shift(0), 0);
-    assert_eq!(settings::stroke_shift(2), 0);
-    assert_eq!(settings::stroke_shift(4), 0);
+    assert_eq!(theme::stroke_shift(0), 0);
+    assert_eq!(theme::stroke_shift(2), 0);
+    assert_eq!(theme::stroke_shift(4), 0);
 
     // Half of one pixel of the window, in the pixels of the enlarged surface.
-    assert_eq!(settings::SUPERSAMPLE / 2, 2);
+    assert_eq!(theme::SUPERSAMPLE / 2, 2);
 }
 
 /// **The defect of T-11-23 on real product pixels** — nothing a smoothed figure paints is
@@ -8117,7 +8153,7 @@ fn no_smoothed_figure_paints_a_colour_it_was_not_drawn_from() {
             bottom: 20,
         };
 
-        settings::draw_check_mark(sheet.dc, &glyph, ink, settings::GLYPH_CHECK_MARK, 96);
+        theme::draw_check_mark(sheet.dc, &glyph, ink, settings::GLYPH_CHECK_MARK, 96);
 
         let (impossible, blended) = survey(&sheet, 24, darkest, brightest, &[32, 228]);
 
@@ -8153,7 +8189,7 @@ fn no_smoothed_figure_paints_a_colour_it_was_not_drawn_from() {
         // SAFETY: the brush is made here, used only by the call below and freed here.
         let fill = unsafe { CreateSolidBrush(fill_colour) };
 
-        settings::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
+        theme::paint_rounded(sheet.dc, &area, 6, ink, fill, 96);
 
         // SAFETY: created above, handed to nobody, freed exactly once.
         let _ = unsafe { DeleteObject(fill.into()) };
@@ -8188,7 +8224,7 @@ fn no_smoothed_figure_paints_a_colour_it_was_not_drawn_from() {
 /// # The lever
 ///
 /// Nothing here exhausts GDI, waits for anything or depends on the state of the machine. A
-/// corner tile is `radius + thickness` a side, so a radius of [`settings::SUPERSAMPLE_MAX_SIDE`]
+/// corner tile is `radius + thickness` a side, so a radius of [`theme::SUPERSAMPLE_MAX_SIDE`]
 /// with the one-pixel frame of 96 DPI asks for a tile of 65 — one past the ceiling
 /// `Supersample::for_tile` holds — and the surface is refused before a single call to GDI is
 /// made. The figure is large enough that `paint_rounded` offers it the smoothing first: the
@@ -8209,7 +8245,7 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
 
     // The frame `paint_rounded` makes at 96 DPI, and the corner tile that follows from it.
     let thickness = 1;
-    let radius = settings::SUPERSAMPLE_MAX_SIDE;
+    let radius = theme::SUPERSAMPLE_MAX_SIDE;
     let side = radius + thickness;
 
     let sheet = Sheet::new(200);
@@ -8226,9 +8262,9 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
     // test of the ordinary path: the tile is past the ceiling, and the figure is wide enough to
     // be offered the smoothing that is then refused.
     assert!(
-        side > settings::SUPERSAMPLE_MAX_SIDE,
+        side > theme::SUPERSAMPLE_MAX_SIDE,
         "the lever of this test is a corner tile past the ceiling — {side} against {}",
-        settings::SUPERSAMPLE_MAX_SIDE
+        theme::SUPERSAMPLE_MAX_SIDE
     );
     assert!(
         side * 2 <= (area.right - area.left).min(area.bottom - area.top),
@@ -8238,7 +8274,7 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
     // SAFETY: the brush is made here, used only by the call below and freed here.
     let fill = unsafe { CreateSolidBrush(fill_colour) };
 
-    settings::paint_rounded(sheet.dc, &area, radius, ink, fill, 96);
+    theme::paint_rounded(sheet.dc, &area, radius, ink, fill, 96);
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(fill.into()) };
@@ -8246,7 +8282,7 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
     // The centre of each corner's arc, in the order `corner_tiles` answers them: top-left,
     // top-right, bottom-left, bottom-right. The figure spans `left … right - 1`, which is why
     // the two far centres are counted off `right - 1` and `bottom - 1`.
-    let tiles = settings::corner_tiles(&area, side);
+    let tiles = theme::corner_tiles(&area, side);
     let centres = [
         (area.left + radius, area.top + radius),
         (area.right - 1 - radius, area.top + radius),
@@ -8324,7 +8360,8 @@ fn a_refused_smoothing_paints_an_aliased_corner_and_never_leaves_a_hole() {
 /// name decides, and the fallback both refusals reach is the one aliased corner.
 #[test]
 fn both_refusals_of_the_smoothing_end_in_the_same_aliased_corner() {
-    let source = settings_module_source();
+    // T-14-3: the drawing is two files now — see `drawing_source`.
+    let source = drawing_source();
 
     // ⚠ `paint_corner_tiles` и не `paint_rounded`: тело переехало задачей T-12-5, которой
     // понадобилось назвать те же четыре угла отдельно от прямой части фигуры
@@ -8477,12 +8514,12 @@ fn the_corner_patch_rounds_a_flat_interior_and_leaves_the_middle_alone() {
 
     let area = settings::list_frame_box(&client, 96);
 
-    settings::paint_rounded_corners(
+    theme::paint_rounded_corners(
         sheet.dc,
         &area,
         &client,
         6,
-        settings::CornerColors {
+        theme::CornerColors {
             ground: ground_brush,
             outline: ink,
             fill,
@@ -8613,12 +8650,12 @@ fn a_corner_outside_the_bounds_paints_nothing_at_all() {
     // its right-hand corners therefore fall inside the strip the scroll bar owns.
     let area = settings::list_frame_box(&window, 96);
 
-    settings::paint_rounded_corners(
+    theme::paint_rounded_corners(
         sheet.dc,
         &area,
         &client,
         6,
-        settings::CornerColors {
+        theme::CornerColors {
             ground: ground_brush,
             outline: ink,
             fill,
@@ -9093,7 +9130,7 @@ const BASE_QUALITIES: [(&str, FONT_QUALITY); 2] = [
 
 /// **Criterion 9 of T-11-20 — the whole of the controller's objection, as a measurement.**
 ///
-/// The dialog's own face and [`settings::antialiased_logfont`] of it are created side by side
+/// The dialog's own face and [`theme::antialiased_logfont`] of it are created side by side
 /// and measured on the same memory DC. Height, ascent, descent, internal and external leading,
 /// average and maximum character width and weight must come back **equal**. Had one field
 /// disagreed, the remainder would have been honestly unfixable and nothing would have been
@@ -9109,7 +9146,7 @@ fn our_face_measures_the_same_as_the_dialog_font_in_every_field_the_task_names()
 
     for (name, quality) in BASE_QUALITIES {
         let base = manager_logfont(sheet.dc, &font, quality);
-        let ours = settings::antialiased_logfont(base);
+        let ours = theme::antialiased_logfont(base);
 
         // The premise first: one field moved and not a byte else. A base that differed
         // somewhere else would make the metrics agree for a reason this task cannot claim.
@@ -9359,7 +9396,7 @@ fn real_strings_take_the_same_width_in_our_face_as_in_the_dialog_font() {
         let base = manager_logfont(sheet.dc, &font, quality);
 
         let dialog_face = Face::new(base);
-        let our_face = Face::new(settings::antialiased_logfont(base));
+        let our_face = Face::new(theme::antialiased_logfont(base));
 
         for text in [
             "0",
@@ -9467,11 +9504,11 @@ fn channels(colour: COLORREF) -> (i32, i32, i32) {
 /// is what a rounded corner is and what a rectangle can never have.
 #[test]
 fn the_selection_of_the_layout_list_is_a_rounded_stripe_inset_into_the_row() {
-    let inset = settings::scaled(settings::LIST_SELECTION_INSET, 96);
-    let radius = settings::scaled(settings::LIST_SELECTION_RADIUS, 96);
+    let inset = theme::scaled(settings::LIST_SELECTION_INSET, 96);
+    let radius = theme::scaled(settings::LIST_SELECTION_RADIUS, 96);
 
     // The corner tile of `paint_rounded`: the radius and the frame that runs around it.
-    let side = radius + settings::scaled(settings::BORDER_THICKNESS, 96).max(1);
+    let side = radius + theme::scaled(theme::BORDER_THICKNESS, 96).max(1);
 
     for palette in [&GRAPHITE, &FOG] {
         let row = Row::draw(LayoutMode::Cycle, true, false, palette);
@@ -9530,7 +9567,7 @@ fn the_selection_of_the_layout_list_is_a_rounded_stripe_inset_into_the_row() {
             bottom: row.area.bottom,
         };
 
-        let tiles = settings::corner_tiles(&stripe, side);
+        let tiles = theme::corner_tiles(&stripe, side);
         let mut blended = [0; 4];
 
         for (corner, tile) in tiles.iter().enumerate() {
@@ -9625,8 +9662,8 @@ fn both_lists_of_the_dialog_draw_the_same_selection_stripe() {
 #[test]
 fn the_square_of_the_tick_is_smoothed_and_carries_no_key_colour() {
     // The corner tile of `paint_rounded` at the radius of a layout-list tick.
-    let side = settings::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)
-        + settings::scaled(settings::BORDER_THICKNESS, 96).max(1);
+    let side = theme::scaled(settings::LIST_CHECK_CORNER_RADIUS, 96)
+        + theme::scaled(theme::BORDER_THICKNESS, 96).max(1);
 
     for palette in [&GRAPHITE, &FOG] {
         for selected in [false, true] {
@@ -9648,7 +9685,7 @@ fn the_square_of_the_tick_is_smoothed_and_carries_no_key_colour() {
                     channels(palette.box_border),
                 ];
 
-                let tiles = settings::corner_tiles(&glyph, side);
+                let tiles = theme::corner_tiles(&glyph, side);
                 let mut blended = [0; 4];
 
                 for (corner, tile) in tiles.iter().enumerate() {
@@ -10161,7 +10198,7 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
 
     // `scaled(LIST_FIRST_ROW_TOP, 96)` — the mock-up pixels of T-11-16 in the pixels of a
     // 96 DPI window, which is what the stand measures on.
-    let lifted = settings::scaled(settings::LIST_FIRST_ROW_TOP, 96).max(1);
+    let lifted = theme::scaled(settings::LIST_FIRST_ROW_TOP, 96).max(1);
 
     let list_frame = vertical_units(list_top, base) - lifted;
     let button_frame = vertical_units(button_top, base);
@@ -10310,7 +10347,7 @@ fn pixels_of(sheet: &Sheet, area: &RECT) -> Vec<i32> {
 ///
 /// `design-tokens.md` §3 calls a number taken from a picture a forbidden class of error, and
 /// it is the class that produced T-11-15 and finding F3: the mock-ups are drawn at 140 %, so a
-/// number counted on them is 1,4 × too large as a screen length until [`settings::scaled`]
+/// number counted on them is 1,4 × too large as a screen length until [`theme::scaled`]
 /// divides it back. The chain that produces this one is written where the constant is, and
 /// this test holds the chain there.
 #[test]
@@ -10360,8 +10397,8 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
          line; scaled(22, 96) = {}, scaled(23, 96) = {}",
         em_tenths,
         pitch_tenths,
-        settings::scaled(22, 96),
-        settings::scaled(settings::LABEL_LINE_PITCH, 96)
+        theme::scaled(22, 96),
+        theme::scaled(settings::LABEL_LINE_PITCH, 96)
     );
 
     assert!(
@@ -10370,14 +10407,14 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
          {pitch_tenths} tenths, so the chain in the doc comment no longer holds"
     );
     assert_eq!(
-        settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(settings::LABEL_LINE_PITCH, 96),
         16,
         "решение В-6: 23 mock-up pixels are 16 pixels at 96 DPI, against the 15 `DrawTextW` \
          advances a line by on its own"
     );
     assert_eq!(
-        settings::scaled(22, 96),
-        settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(22, 96),
+        theme::scaled(settings::LABEL_LINE_PITCH, 96),
         "the whole-pixel rounding of the mock-up literal is not what decides the screen: 22 \
          and 23 mock-up pixels are the same 16 screen pixels, and the fraction between them \
          is the 15,96 the arithmetic asks for"
@@ -10385,8 +10422,8 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
 
     // And it scales with the DPI of the window, which is the second half of В-6.
     assert!(
-        settings::scaled(settings::LABEL_LINE_PITCH, 144)
-            > settings::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(settings::LABEL_LINE_PITCH, 144)
+            > theme::scaled(settings::LABEL_LINE_PITCH, 96),
         "the pitch has to grow with the DPI of the window — it goes through `scaled` for that"
     );
 }
@@ -10475,7 +10512,7 @@ fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
 #[test]
 fn the_lines_of_a_wrapped_label_stand_the_model_pitch_apart() {
     let (sheet, face, metrics, dpi) = label_sheet();
-    let pitch = settings::scaled(settings::LABEL_LINE_PITCH, dpi);
+    let pitch = theme::scaled(settings::LABEL_LINE_PITCH, dpi);
 
     println!(
         "sheet at {dpi} DPI: tmHeight = {}, model pitch = {pitch}",
@@ -10563,7 +10600,7 @@ fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
     println!(
         "sheet at {dpi} DPI: tmHeight = {}, model pitch = {}",
         metrics.tmHeight,
-        settings::scaled(settings::LABEL_LINE_PITCH, dpi)
+        theme::scaled(settings::LABEL_LINE_PITCH, dpi)
     );
 
     let area = RECT {
@@ -10622,7 +10659,7 @@ fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
 #[test]
 fn drawing_a_wrapped_label_over_and_over_leaks_no_gdi_object() {
     let (sheet, face, metrics, dpi) = label_sheet();
-    let pitch = settings::scaled(settings::LABEL_LINE_PITCH, dpi);
+    let pitch = theme::scaled(settings::LABEL_LINE_PITCH, dpi);
 
     let area = RECT {
         left: 2,
