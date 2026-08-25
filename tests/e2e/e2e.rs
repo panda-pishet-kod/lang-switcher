@@ -1176,6 +1176,36 @@ fn hotkey_vk() -> u16 {
     lang_switcher::hook::vk_from_name(&name).unwrap_or(lang_switcher::hook::DEFAULT_HOTKEY_VK)
 }
 
+/// Whether the user's configuration leaves the selection path of §4.7 switched on — read the
+/// way [`hotkey_vk`] reads the hotkey: from the product's own `config.toml`, never assumed.
+///
+/// ⚠ **Н-Э13-34 is why the bench has to look.** With `[selection] enabled = false` the product
+/// refuses the path at the first gate of FR-65 (`wants_selection_path`) and never sends
+/// `Ctrl+C`; position 15 then waits ten seconds on the clipboard sequence number and reports
+/// «приложение не ответило на Ctrl+C» — a sentence blaming the application in a run where the
+/// product did exactly what §7 told it to. Three deliveries of different epochs were measured
+/// to `fail` identically before the real cause — this one setting — was found. The position is
+/// not failing then; it is **unverifiable in this configuration**, and `position_15` answers
+/// with the third verdict of Р-30 instead of running the scenario blindly.
+fn selection_path_enabled() -> bool {
+    lang_switcher::settings::default_config_path()
+        .map(|path| selection_enabled_at(&path))
+        .unwrap_or(true)
+}
+
+/// `[selection] enabled` of the configuration at `path` — default `true`, as §7 has it.
+///
+/// The product's own parser and nothing of this bench's: a missing file, a missing section and
+/// a missing key all come back `true` through the serde defaults of
+/// [`lang_switcher::settings::Config`], which is the same road the running product took when it
+/// decided whether to answer the hotkey with a `Ctrl+C` at all.
+fn selection_enabled_at(path: &std::path::Path) -> bool {
+    lang_switcher::settings::read_or_default(path)
+        .0
+        .selection
+        .enabled
+}
+
 /// Writes the protocol of position 2.
 fn write_word_protocol(protocol: &str, rows: &[report::Row]) {
     let mut text = String::new();
@@ -1418,5 +1448,49 @@ mod tests {
         assert_ne!(infrastructure.actual, unknown.actual);
         assert_ne!(infrastructure.expected, unknown.expected);
         assert_ne!(infrastructure.note, unknown.note);
+    }
+
+    /// **Task Т-14-1, the remainder of Н-Э13-34.** `[selection] enabled` is read the way the
+    /// hotkey is — from a file, through the product's own parser, with the default of §7 —
+    /// and never assumed by this bench.
+    ///
+    /// Four states, each a file of its own: the flag off, the flag on, a file without the
+    /// section, and no file at all. The last two must both come back `true`, because that is
+    /// what the running product does with them — and a bench that answered differently would
+    /// be second-guessing the very configuration it claims to be reading.
+    ///
+    /// No product and no application anywhere near this: the files live under `%TEMP%`, in a
+    /// directory of this test's own, and the user's real `config.toml` is never touched.
+    #[test]
+    fn the_selection_flag_is_read_from_the_toml_with_the_default_of_section_7() {
+        let dir = std::env::temp_dir().join("langsw-e2e-t14-1-selection-flag");
+        std::fs::create_dir_all(&dir).expect("каталог теста создаётся");
+
+        let case = |name: &str, text: &str| -> bool {
+            let path = dir.join(name);
+            std::fs::write(&path, text).expect("файл теста записывается");
+            let read = selection_enabled_at(&path);
+            let _ = std::fs::remove_file(&path);
+            read
+        };
+
+        assert!(
+            !case("off.toml", "[selection]\nenabled = false\n"),
+            "выключенный путь читается как false — состояние Н-Э13-34"
+        );
+        assert!(
+            case("on.toml", "[selection]\nenabled = true\n"),
+            "включённый путь читается как true"
+        );
+        assert!(
+            case("no-section.toml", "[hotkey]\nkey = \"Pause\"\n"),
+            "файл без секции [selection] даёт умолчание §7 — true"
+        );
+        assert!(
+            selection_enabled_at(&dir.join("нет-такого-файла.toml")),
+            "отсутствие файла даёт то же умолчание — true, как у продукта при первом запуске"
+        );
+
+        let _ = std::fs::remove_dir(&dir);
     }
 }

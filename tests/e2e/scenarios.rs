@@ -2014,6 +2014,59 @@ impl Drop for ClipWindow {
     }
 }
 
+/// The `фактическое` of the one row [`position_15_switched_off`] leaves.
+const SELECTION_SWITCHED_OFF: &str = "[selection] enabled = false — путь выделения выключен \
+     настройкой пользователя, позиция непроверяема в этой конфигурации";
+
+/// The reason step 8 of [`selection_body`] gives when the clipboard never moved — and the hint
+/// Н-Э13-34 earned it.
+///
+/// The first line is the symptom as the bench sees it. The second names the other reading of
+/// the same symptom: a product that never **sent** `Ctrl+C`, because one of the four gates of
+/// the selection path refused before the copy — FR-65 (the path switched off in `config.toml`),
+/// Р-62 (a non-empty typing buffer), SEC-06 (a password field), П-3 (a console window). The
+/// message used to carry only the first line, and diagnosing the FR-65 case through it cost a
+/// three-delivery measurement that ended in «изменилась машина, а не код» — the machine had
+/// changed exactly here, in the user's own settings.
+const NO_ANSWER_TO_CTRL_C: &str = "буфер обмена не изменился после горячей клавиши: приложение не ответило на Ctrl+C\n\
+     подсказка: тот же симптом даёт продукт, сам не пославший Ctrl+C по отказу любых ворот \
+     пути выделения — FR-65 ([selection] enabled = false), Р-62 (непустой буфер), SEC-06 \
+     (поле пароля), П-3 (консольное окно)";
+
+/// The one row of position 15 when the user's configuration has the selection path switched
+/// off — the remainder of Н-Э13-34.
+///
+/// # Why `pending` and not `fail`, and why the owner is a person
+///
+/// With `[selection] enabled = false` FR-65 refuses the path at its first gate
+/// (`wants_selection_path` in `src\selection.rs`): the product sends no `Ctrl+C`, the clipboard
+/// never moves, and a scenario run blindly times out into «приложение не ответило» — a `fail`
+/// blaming the product for doing what §7 told it to. Nothing misbehaved, so `fail` would be a
+/// false finding; nothing was checked, so `pass` is out of the question. «Проверка невозможна
+/// в этой конфигурации» is the third outcome of Р-30 — `pending` — and Р-30 already refuses to
+/// call a run with it successful, which is exactly the standing this position deserves while
+/// the path is off.
+///
+/// The owner is «П», a person: no task owes anything here — the checkbox «Конвертировать
+/// выделенный текст» was cleared by the user, and only the user can put it back (or accept the
+/// position as unverifiable). An owner naming a task would be the untruth the owner column
+/// exists to prevent.
+fn position_15_switched_off() -> Vec<Row> {
+    let mut row = Row::pending(
+        15,
+        APP_15,
+        Assertion::Other("путь выделения (FR-65)"),
+        "П",
+        format!("текст {EXPECTED:?} и раскладка RU, буфер обмена восстановлен"),
+    );
+    row.actual = SELECTION_SWITCHED_OFF.to_owned();
+    row.note = "FR-65 — первые ворота wants_selection_path: продукт не посылает Ctrl+C, пока \
+                снята галка «Конвертировать выделенный текст»; включите её в настройках и \
+                повторите прогон"
+        .to_owned();
+    vec![row]
+}
+
 /// All three rows of position 15 when the scenario could not reach the hotkey.
 fn selection_failed(reason: &str) -> Vec<Row> {
     vec![
@@ -2076,6 +2129,15 @@ fn selection_failed(reason: &str) -> Vec<Row> {
 /// of 200 ms by section 7, so the bench waits for the clipboard to come back rather than
 /// asserting immediately — a condition again, with the timeout as its bound.
 pub fn position_15(ctx: &Context) -> Vec<Row> {
+    // ⚠ **FR-65 before anything else — Н-Э13-34.** The user's configuration is the first gate
+    // of the selection path, and a bench that ran the scenario over a switched-off path would
+    // be measuring the setting while reporting about the product: no `Ctrl+C` is ever sent,
+    // step 8 times out, and the row blames «приложение не ответило». Read the same way the
+    // hotkey is read at the start of the run, answered with the third verdict of Р-30.
+    if !crate::selection_path_enabled() {
+        return position_15_switched_off();
+    }
+
     // Requirement 5 of §11.5: the clipboard of whoever is at the machine is captured before
     // anything and put back by the guard's `Drop`, including on the path where this returns
     // early. The seed below is written **after** the capture, so the guard still holds the
@@ -2343,9 +2405,7 @@ fn selection_body(
     let answered_in = pressed_at.elapsed();
 
     if !copied {
-        return selection_failed(
-            "буфер обмена не изменился после горячей клавиши: приложение не ответило на Ctrl+C",
-        );
+        return selection_failed(NO_ANSWER_TO_CTRL_C);
     }
 
     // Step 9 — the conversion. A condition, and the timeout has to cover the rest of FR-61:
@@ -12407,5 +12467,137 @@ fn belief_summary(
             "\nВЕРДИКТ: кругов, где продукт верил не в то, что напечаталось: {wrong} — \u{26D4} КРАСНЫЙ"
         );
         std::process::ExitCode::from(1)
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Unit tests — logic only, no product and no application anywhere near them
+// ---------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::report::Report;
+
+    /// **Task Т-14-1, the remainder of Н-Э13-34.** A switched-off selection path is one
+    /// `pending` row of position 15 — the third verdict of Р-30, owned by a person, with the
+    /// setting named in the row's own words — and a report carrying it has no right to call
+    /// itself successful.
+    #[test]
+    fn a_switched_off_selection_path_is_one_pending_row_owned_by_a_person() {
+        let rows = position_15_switched_off();
+
+        assert_eq!(rows.len(), 1, "одна строка на всю позицию, как у §11.6");
+
+        let row = &rows[0];
+        assert_eq!(row.position, 15, "позиция");
+        assert_eq!(
+            row.application, APP_15,
+            "приложение — то же, что у живых строк позиции"
+        );
+        assert_eq!(row.verdict, Verdict::Pending, "третий исход Р-30, не fail");
+        assert_eq!(
+            row.owner.as_deref(),
+            Some("П"),
+            "владелец — человек: галку снял пользователь, и вернуть её может только он"
+        );
+
+        // The row says what happened in its own words: the setting, whose decision it was, and
+        // that the position is unverifiable — never «приложение не ответило».
+        assert!(
+            row.actual.contains("[selection] enabled = false"),
+            "фактическое называет настройку: {:?}",
+            row.actual
+        );
+        assert!(
+            row.actual.contains("выключен настройкой пользователя"),
+            "фактическое называет, чьё это решение: {:?}",
+            row.actual
+        );
+        assert!(
+            row.actual.contains("непроверяема"),
+            "фактическое говорит «непроверяема», а не обвиняет продукт: {:?}",
+            row.actual
+        );
+        assert!(
+            !row.actual.contains("не ответило"),
+            "и не повторяет симптом таймаута: {:?}",
+            row.actual
+        );
+        assert!(
+            row.note.contains("FR-65"),
+            "примечание называет ворота: {:?}",
+            row.note
+        );
+
+        // Р-30 through the counters — the discipline this task must not break: a run with this
+        // row is not successful, and the summary says so beside the owner.
+        let mut report = Report::default();
+        report.extend(rows.clone());
+
+        assert_eq!(report.count(Verdict::Pending), 1);
+        assert_eq!(
+            report.count(Verdict::Fail),
+            0,
+            "pending, не fail — продукт не виноват"
+        );
+        assert_ne!(
+            report.exit_code(),
+            0,
+            "Р-30: прогон с pending не имеет права быть успешным"
+        );
+        assert!(
+            report.summary().contains("НЕ ЯВЛЯЕТСЯ УСПЕШНЫМ"),
+            "сводка отказывается от слова «успех»: {}",
+            report.summary()
+        );
+        assert!(
+            report.summary().contains("Владельцы pending: П"),
+            "и называет владельца: {}",
+            report.summary()
+        );
+    }
+
+    /// The hint of Н-Э13-34: the timeout of step 8 keeps its first line — the symptom as the
+    /// bench really sees it — and gains a second naming the other reading of the same symptom,
+    /// with all four gates of the selection path in it.
+    #[test]
+    fn the_timeout_message_hints_at_all_four_gates_of_the_selection_path() {
+        let mut lines = NO_ANSWER_TO_CTRL_C.lines();
+
+        let symptom = lines.next().expect("первая строка есть");
+        assert_eq!(
+            symptom,
+            "буфер обмена не изменился после горячей клавиши: приложение не ответило на Ctrl+C",
+            "первая строка — прежний симптом, дословно"
+        );
+
+        let hint = lines.next().expect("вторая строка-подсказка есть");
+        assert_eq!(lines.next(), None, "и строк ровно две");
+
+        for gate in ["FR-65", "Р-62", "SEC-06", "П-3"] {
+            assert!(
+                hint.contains(gate),
+                "подсказка называет ворота {gate}: {hint:?}"
+            );
+        }
+        assert!(
+            hint.contains("не пославший Ctrl+C"),
+            "подсказка называет второе прочтение симптома: {hint:?}"
+        );
+
+        // And the three rows of the position really carry it: `selection_failed` is the door
+        // this reason walks through, and a hint that never reached a row would help nobody.
+        let rows = selection_failed(NO_ANSWER_TO_CTRL_C);
+        assert_eq!(rows.len(), 3, "три утверждения позиции 15");
+        for row in &rows {
+            assert_eq!(row.verdict, Verdict::Fail);
+            assert!(
+                row.actual.contains("FR-65"),
+                "подсказка дошла до строки отчёта: {:?}",
+                row.actual
+            );
+        }
     }
 }
