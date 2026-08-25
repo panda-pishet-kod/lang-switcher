@@ -1126,11 +1126,11 @@ fn the_static_colour_roles_follow_the_table_of_fr_92a() {
 #[test]
 fn the_title_bar_is_dark_exactly_for_the_graphite_palette() {
     assert!(
-        settings::title_bar_is_dark(&GRAPHITE),
+        theme::title_bar_is_dark(&GRAPHITE),
         "the dark palette must ask for a dark title bar"
     );
     assert!(
-        !settings::title_bar_is_dark(&FOG),
+        !theme::title_bar_is_dark(&FOG),
         "the light palette must not ask for a dark title bar"
     );
 
@@ -1143,7 +1143,7 @@ fn the_title_bar_is_dark_exactly_for_the_graphite_palette() {
         (ThemeSetting::System, false, true),
     ] {
         assert_eq!(
-            settings::title_bar_is_dark(resolve(setting, system_light)),
+            theme::title_bar_is_dark(resolve(setting, system_light)),
             dark_expected,
             "{setting:?} with system_light = {system_light} chose the wrong flag"
         );
@@ -1810,9 +1810,11 @@ fn the_combo_item_colour_roles_follow_the_closed_2x2_table_of_fr_92a() {
 // participation mechanism of FR-31 reads and writes, and the frame order that gives those
 // bits their pictures, are held to the values they had before this task.
 
-use lang_switcher::settings::{
-    CHECK_FRAME_ORDER, CHECKED_IMAGE, CheckFrameColors, CycleRowPaint, UNCHECKED_IMAGE,
-};
+// Task T-14-5 split this import in two: the colour table of the frame and the order of the
+// two frames moved to `theme` with the drawing library, while the state image bits FR-31
+// reads and writes stayed with the window that owns them.
+use lang_switcher::settings::{CHECKED_IMAGE, CycleRowPaint, UNCHECKED_IMAGE};
+use lang_switcher::theme::{CHECK_FRAME_ORDER, CheckFrameColors};
 
 #[test]
 fn the_check_frame_colours_follow_the_2x2_table_of_fr_92a() {
@@ -1822,7 +1824,7 @@ fn the_check_frame_colours_follow_the_2x2_table_of_fr_92a() {
         // Снята: the quiet ground of the list under the single-pixel box frame — the same
         // cell the unchecked owner-drawn check box of the dialog paints.
         assert_eq!(
-            settings::check_frame_colors(false, palette),
+            theme::check_frame_colors(false, palette),
             CheckFrameColors {
                 fill: palette.field_bg,
                 frame: Some(palette.box_border),
@@ -1835,7 +1837,7 @@ fn the_check_frame_colours_follow_the_2x2_table_of_fr_92a() {
         // Взведена: the accent covers the square whole — no frame — and the check mark is
         // cut from the accent's own foreground, as on the dialog's check boxes.
         assert_eq!(
-            settings::check_frame_colors(true, palette),
+            theme::check_frame_colors(true, palette),
             CheckFrameColors {
                 fill: palette.accent_bg,
                 frame: None,
@@ -3007,13 +3009,13 @@ fn a_panel_caption_is_the_upper_case_of_the_control_text() {
 #[test]
 fn a_character_the_device_measures_as_nothing_still_takes_room() {
     // A measured character keeps its own width whatever the font height is.
-    assert_eq!(settings::caption_advance(9, 12), 9);
-    assert_eq!(settings::caption_advance(1, 12), 1);
+    assert_eq!(theme::caption_advance(9, 12), 9);
+    assert_eq!(theme::caption_advance(1, 12), 1);
 
     // A blank — measured as zero, or as a negative by a refused measurement — takes the
     // explicit width instead, and that width is never zero for a font of any real size.
     for height in [10, 12, 16, 24] {
-        let blank = settings::caption_advance(0, height);
+        let blank = theme::caption_advance(0, height);
 
         assert!(
             blank > 0,
@@ -3024,7 +3026,7 @@ fn a_character_the_device_measures_as_nothing_still_takes_room() {
             "a blank in a {height} px face must be narrower than the face is tall, not \
              {blank}"
         );
-        assert_eq!(settings::caption_advance(-1, height), blank);
+        assert_eq!(theme::caption_advance(-1, height), blank);
     }
 }
 
@@ -3042,7 +3044,12 @@ fn one_radius_rounds_the_panel_the_field_the_combo_the_button_and_both_lists() {
         "the `Radius = 6` of the style table of ui.ps1"
     );
 
-    let source = settings_module_source();
+    // ⚠ `drawing_source()` and not `settings_module_source()` since task T-14-5: `CORNER_RADIUS`
+    // itself moved to `theme` with the drawing library (task T-14-3), so the natural place for a
+    // second radius to come back is a file this test used to be blind to. The join restores the
+    // reach the check had before the move — both halves of the drawing are searched, and the
+    // call-site rows below still read the bodies that stayed in `settings`.
+    let source = drawing_source();
 
     // The three names of T-11-13 are gone, not renamed around: a second radius could only come
     // back as a second constant.
@@ -3336,7 +3343,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "4. Комбобокс · Центр шеврона от правого края",
             "14 px макета",
             vec![(
-                px(theme::scaled(settings::COMBO_CHEVRON_INSET_X, 96)),
+                px(theme::scaled(theme::COMBO_CHEVRON_INSET_X, 96)),
                 at_96(140),
             )],
         ),
@@ -3344,7 +3351,7 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "4. Комбобокс · Толщина пера шеврона",
             "1,5 px макета",
             vec![(
-                px(theme::scaled_tenths(settings::COMBO_CHEVRON_PEN_TENTHS, 96)),
+                px(theme::scaled_tenths(theme::COMBO_CHEVRON_PEN_TENTHS, 96)),
                 at_96(15),
             )],
         ),
@@ -3352,14 +3359,8 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "4. Комбобокс · Плечо шеврона",
             "±4 по x, ∓2 по y px макета",
             vec![
-                (
-                    px(theme::scaled(settings::COMBO_CHEVRON_ARM_X, 96)),
-                    at_96(40),
-                ),
-                (
-                    px(theme::scaled(settings::COMBO_CHEVRON_ARM_Y, 96)),
-                    at_96(20),
-                ),
+                (px(theme::scaled(theme::COMBO_CHEVRON_ARM_X, 96)), at_96(40)),
+                (px(theme::scaled(theme::COMBO_CHEVRON_ARM_Y, 96)), at_96(20)),
             ],
         ),
         // ------------------------------------------------------------------- 5. Кнопка
@@ -3386,21 +3387,18 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
         token(
             "6. Список исключений · Первая строка от верха рамки",
             "3 px макета",
-            vec![(
-                px(theme::scaled(settings::LIST_FIRST_ROW_TOP, 96)),
-                at_96(30),
-            )],
+            vec![(px(theme::scaled(theme::LIST_FIRST_ROW_TOP, 96)), at_96(30))],
         ),
         token(
             "6. Список исключений · Втяжка прямоугольника выделения и его радиус",
             "2 / 3 px макета",
             vec![
                 (
-                    px(theme::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    px(theme::scaled(theme::LIST_SELECTION_INSET, 96)),
                     at_96(20),
                 ),
                 (
-                    px(theme::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    px(theme::scaled(theme::LIST_SELECTION_RADIUS, 96)),
                     at_96(30),
                 ),
             ],
@@ -3468,11 +3466,11 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "2 / 3 px макета",
             vec![
                 (
-                    px(theme::scaled(settings::LIST_SELECTION_INSET, 96)),
+                    px(theme::scaled(theme::LIST_SELECTION_INSET, 96)),
                     at_96(20),
                 ),
                 (
-                    px(theme::scaled(settings::LIST_SELECTION_RADIUS, 96)),
+                    px(theme::scaled(theme::LIST_SELECTION_RADIUS, 96)),
                     at_96(30),
                 ),
             ],
@@ -4345,7 +4343,7 @@ fn the_closed_part_of_a_combo_box_follows_its_own_colour_table() {
 fn the_chevron_stands_where_the_mock_up_measured_it() {
     // A closed part 140 × 33 at 100 %, the proportions of the measured picture.
     let area = rect(0, 0, 140, 33);
-    let points = settings::combo_chevron_points(&area, 96);
+    let points = theme::combo_chevron_points(&area, 96);
 
     println!("chevron at 96 dpi: {points:?}");
 
@@ -4389,7 +4387,7 @@ fn the_chevron_stands_where_the_mock_up_measured_it() {
     );
 
     // And it scales, like every other length of the mock-ups since T-11-13.
-    let wide = settings::combo_chevron_points(&rect(0, 0, 280, 66), 192);
+    let wide = theme::combo_chevron_points(&rect(0, 0, 280, 66), 192);
 
     println!("chevron at 192 dpi: {wide:?}");
     assert_eq!(wide[2].0 - wide[0].0, 12, "the span doubles at 200 %");
@@ -8421,14 +8419,14 @@ fn the_frame_of_a_list_is_the_same_rectangle_from_either_side() {
     // мок-ап даёт 3, но в окно тройка приходит через `scaled`, и это ровно те числа, которыми
     // фон рисует рамку с задачи T-11-16.
     assert_eq!(
-        settings::list_frame_air(96),
+        theme::list_frame_air(96),
         (2, 1),
         "the air above a list and the thickness around it, at 96 DPI"
     );
 
     // И воздух никогда не тоньше рамки: `max(border)` в теле — не украшение.
     for dpi in [96, 120, 144, 192] {
-        let (top, border) = settings::list_frame_air(dpi);
+        let (top, border) = theme::list_frame_air(dpi);
 
         assert!(
             top >= border && border >= 1,
@@ -8444,7 +8442,7 @@ fn the_frame_of_a_list_is_the_same_rectangle_from_either_side() {
         right: 210,
         bottom: 81,
     };
-    let box_at_96 = settings::list_frame_box(&client, 96);
+    let box_at_96 = theme::list_frame_box(&client, 96);
 
     assert_eq!(
         (
@@ -8459,8 +8457,8 @@ fn the_frame_of_a_list_is_the_same_rectangle_from_either_side() {
     );
 
     for dpi in [96, 120, 144, 192] {
-        let (top, border) = settings::list_frame_air(dpi);
-        let frame = settings::list_frame_box(&client, dpi);
+        let (top, border) = theme::list_frame_air(dpi);
+        let frame = theme::list_frame_box(&client, dpi);
 
         assert_eq!(
             (frame.left, frame.top, frame.right, frame.bottom),
@@ -8512,7 +8510,7 @@ fn the_corner_patch_rounds_a_flat_interior_and_leaves_the_middle_alone() {
          proving nothing"
     );
 
-    let area = settings::list_frame_box(&client, 96);
+    let area = theme::list_frame_box(&client, 96);
 
     theme::paint_rounded_corners(
         sheet.dc,
@@ -8648,7 +8646,7 @@ fn a_corner_outside_the_bounds_paints_nothing_at_all() {
 
     // The figure is the frame of the **window**, which is where `paint_background` hangs it —
     // its right-hand corners therefore fall inside the strip the scroll bar owns.
-    let area = settings::list_frame_box(&window, 96);
+    let area = theme::list_frame_box(&window, 96);
 
     theme::paint_rounded_corners(
         sheet.dc,
@@ -9504,8 +9502,8 @@ fn channels(colour: COLORREF) -> (i32, i32, i32) {
 /// is what a rounded corner is and what a rectangle can never have.
 #[test]
 fn the_selection_of_the_layout_list_is_a_rounded_stripe_inset_into_the_row() {
-    let inset = theme::scaled(settings::LIST_SELECTION_INSET, 96);
-    let radius = theme::scaled(settings::LIST_SELECTION_RADIUS, 96);
+    let inset = theme::scaled(theme::LIST_SELECTION_INSET, 96);
+    let radius = theme::scaled(theme::LIST_SELECTION_RADIUS, 96);
 
     // The corner tile of `paint_rounded`: the radius and the frame that runs around it.
     let side = radius + theme::scaled(theme::BORDER_THICKNESS, 96).max(1);
@@ -9604,7 +9602,12 @@ fn the_selection_of_the_layout_list_is_a_rounded_stripe_inset_into_the_row() {
 /// of constants is exactly what a second copy would eventually grow.
 #[test]
 fn both_lists_of_the_dialog_draw_the_same_selection_stripe() {
-    let source = settings_module_source();
+    // ⚠ `drawing_source()` and not `settings_module_source()` since task T-14-5: the shared
+    // figure moved to `theme` with the drawing library while both callers stayed with the
+    // window that owns them, so the two ends of this criterion now live in two files. The
+    // join also **strengthens** the count below — a second `scaled(LIST_SELECTION_…` would
+    // now be forbidden in either file rather than in one of them.
+    let source = drawing_source();
     let body = function_body(&source, "fn paint_selection_stripe(");
 
     for call in [
@@ -9997,7 +10000,7 @@ fn vertical_base_unit() -> i32 {
 /// The whole of the cure in one place: the number comes from the generator (`'edit'` rows of
 /// `ui.ps1`, `h = 12`), the control comes from the definition of the vertical dialog unit
 /// (`DIALOG_FONT_HEIGHT_DLU` = 8 of them are one font height), and the frame is drawn by
-/// [`settings::field_frame_air`] round the middle of the control. Read out of the **built**
+/// [`theme::field_frame_air`] round the middle of the control. Read out of the **built**
 /// `LangSwitcher.exe`, like every other statement this suite makes about the template.
 #[test]
 fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
@@ -10044,7 +10047,7 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
     let base = vertical_base_unit();
     let field_box = vertical_units(settings::FIELD_BOX_DLU, base);
     let control = vertical_units(settings::DIALOG_FONT_HEIGHT_DLU, base);
-    let air = settings::field_frame_air(Some(field_box), control, 1);
+    let air = theme::field_frame_air(Some(field_box), control, 1);
     let outer = control + 2 * air;
 
     println!(
@@ -10065,7 +10068,7 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
 
     // The same table with the numbers of 96 DPI written out, so the derivation is held even on
     // a machine that measures something else: box 23, control 15, air 4, outer 23.
-    assert_eq!(settings::field_frame_air(Some(23), 15, 1), 4);
+    assert_eq!(theme::field_frame_air(Some(23), 15, 1), 4);
     assert_eq!(15 + 2 * 4, 23);
 
     // **The rule degenerates into the old one.** A control already as tall as the box, one
@@ -10077,14 +10080,14 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
         ("MapDialogRect refused", None, 15),
     ] {
         assert_eq!(
-            settings::field_frame_air(box_height, control_height, 1),
+            theme::field_frame_air(box_height, control_height, 1),
             1,
             "«{name}» must fall back to one border thickness"
         );
     }
 
     // A thicker border at a higher DPI is the floor, not the answer.
-    assert_eq!(settings::field_frame_air(Some(23), 23, 2), 2);
+    assert_eq!(theme::field_frame_air(Some(23), 23, 2), 2);
 
     // The pass draws it: the same number above and below a field, and the list branch keeps
     // the air of the mock-ups above its first row.
@@ -10182,7 +10185,7 @@ fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
 /// «Удалить» button beside it land on the same row of pixels.
 ///
 /// Declared level in the mock-ups (`ui.ps1`: both at y = 160) they came out two pixels apart,
-/// because the frame of a list is drawn [`settings::LIST_FIRST_ROW_TOP`] mock-up pixels above
+/// because the frame of a list is drawn [`theme::LIST_FIRST_ROW_TOP`] mock-up pixels above
 /// the control — the air of the picture before its first row, task T-11-16 — where a button
 /// frames its own rectangle. The list is what moves: one unit down, one unit shorter, so the
 /// bottom of the box stays on the row it was on.
@@ -10198,7 +10201,7 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
 
     // `scaled(LIST_FIRST_ROW_TOP, 96)` — the mock-up pixels of T-11-16 in the pixels of a
     // 96 DPI window, which is what the stand measures on.
-    let lifted = theme::scaled(settings::LIST_FIRST_ROW_TOP, 96).max(1);
+    let lifted = theme::scaled(theme::LIST_FIRST_ROW_TOP, 96).max(1);
 
     let list_frame = vertical_units(list_top, base) - lifted;
     let button_frame = vertical_units(button_top, base);
@@ -10431,14 +10434,14 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
 /// **The separating question of T-12-12, as a table** — which labels take the model pitch and
 /// which are left exactly as they were drawn before the task.
 ///
-/// [`settings::label_model_pitch`] is the whole of the decision and it is pure, so it can be
+/// [`theme::label_model_pitch`] is the whole of the decision and it is pure, so it can be
 /// closed here rather than photographed. Either «no» means the single plain `DrawTextW` of
 /// T-11-18, unchanged to the pixel.
 #[test]
 fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
     // 96 DPI: `DrawTextW` advances a line by tmHeight = 15 and the model asks for 16.
     assert_eq!(
-        settings::label_model_pitch(2, 15, 16),
+        theme::label_model_pitch(2, 15, 16),
         Some(16),
         "«вступит в силу после перезапуска» is the label this task exists for: two lines, and \
          a model pitch a pixel wider than the natural one"
@@ -10446,21 +10449,21 @@ fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
 
     // The seventeen one-line labels. This is the row that keeps them still.
     assert_eq!(
-        settings::label_model_pitch(1, 15, 16),
+        theme::label_model_pitch(1, 15, 16),
         None,
         "a label that did not wrap has no pitch to set, and seventeen of the eighteen \
          OWNER_DRAWN_LABELS are one line — moving them would be «rewrote the label drawing», \
          not «fixed the line pitch»"
     );
     assert_eq!(
-        settings::label_model_pitch(0, 15, 16),
+        theme::label_model_pitch(0, 15, 16),
         None,
         "no lines at all is no pitch either"
     );
 
     // Three lines take it as readily as two: nothing here counts to two.
     assert_eq!(
-        settings::label_model_pitch(3, 15, 16),
+        theme::label_model_pitch(3, 15, 16),
         Some(16),
         "the rule is «it wrapped», not «it wrapped once»"
     );
@@ -10468,13 +10471,13 @@ fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
     // A model pitch that is not wider has nothing to give: `DrawTextW` already advances by
     // `natural`, and squeezing lines together is not what В-6 asked for.
     assert_eq!(
-        settings::label_model_pitch(2, 16, 16),
+        theme::label_model_pitch(2, 16, 16),
         None,
         "a model pitch equal to the natural one is the drawing that already happens, and one \
          plain call is both cheaper and exact"
     );
     assert_eq!(
-        settings::label_model_pitch(2, 17, 16),
+        theme::label_model_pitch(2, 17, 16),
         None,
         "a model pitch narrower than the natural one would squeeze the lines together"
     );
@@ -10496,7 +10499,7 @@ fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
          question is still the right call"
     );
     assert_eq!(
-        settings::label_model_pitch(2, 15, 16),
+        theme::label_model_pitch(2, 15, 16),
         Some(16),
         "a journal path that did wrap has to get the model pitch too, short control or not — \
          the code leads both multi-line labels by one rule"

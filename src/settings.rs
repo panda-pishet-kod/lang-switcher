@@ -138,14 +138,16 @@ use crate::layouts::{self, LayoutId, LayoutSpec};
 // called as `theme::…` — so that the change of address stayed a change of address: every call
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
-    self, BORDER_THICKNESS, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole,
+    self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
     CORNER_RADIUS, CheckMark, ComboBorderRole, ComboChevronRole, ComboFillRole, CornerColors,
     GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole, HotBrush,
-    ResolvedButtonColors, StaticColorRole, Supersample, ThemeSetting, antialiased_logfont,
-    combo_closed_color_roles, combo_fill_brush, combo_item_color_roles, combo_text_ink,
-    create_font, dc_dpi, draw_check_mark, glyph_color_roles, label_ink, list_item_color_roles,
-    paint_ellipse, paint_rounded, paint_rounded_corners, resolve_button_colors, restore_face,
-    scaled, scaled_tenths, scaled_tenths_offset, select_face, stroke_bounds, stroke_polyline,
+    ResolvedButtonColors, StaticColorRole, ThemeSetting, antialiased_logfont, caption_advance,
+    check_frame_colors, combo_chevron_points, combo_closed_color_roles, combo_fill_brush,
+    combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
+    draw_combo_chevron, field_frame_air, glyph_color_roles, label_ink, label_model_pitch,
+    list_frame_air, list_frame_box, list_item_color_roles, paint_caption_underline, paint_ellipse,
+    paint_rounded, paint_rounded_corners, paint_selection_stripe, resolve_button_colors,
+    restore_face, scaled, scaled_tenths_offset, select_face, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -3579,17 +3581,6 @@ fn child_rects_in_client(hwnd: HWND) -> Vec<(i32, RECT)> {
 /// identifier check written down once.
 const COMBO_BOXES: [i32; 4] = [IDC_LANGUAGE, IDC_THEME, IDC_PAIR_SOURCE, IDC_PAIR_TARGET];
 
-/// Whether the non-client title bar is to be dark for this palette — FR-92а, task T-11-4.
-///
-/// `theme::resolve` answers one of two `&'static` palettes, so identity with
-/// [`theme::GRAPHITE`] *is* «разрешённая палитра тёмная» — no colour arithmetic, no third
-/// opinion, and the acceptance instrument of position 25 compares against the same
-/// constants. Public for the same reason as [`static_color_role`]: the test of criterion 11
-/// calls the function the dialog calls.
-pub fn title_bar_is_dark(palette: &theme::Palette) -> bool {
-    std::ptr::eq(palette, &theme::GRAPHITE)
-}
-
 /// Asks DWM to colour the non-client title bar after the palette — FR-92а, tasks T-11-4 and
 /// T-12-1.
 ///
@@ -5185,40 +5176,6 @@ unsafe fn measure_label_lines(dc: HDC, rect: RECT, caption: &mut [u16]) -> Optio
     Some((whole / one, one))
 }
 
-/// The pitch a wrapped label is to be drawn at, or `None` for «leave it to the one plain
-/// call» — the whole decision of task T-12-12 as a pure function a table test can close.
-///
-/// `lines` and `natural` are what [`measure_label_lines`] answered and `model` is
-/// [`LABEL_LINE_PITCH`] through [`scaled`]. Two questions, and either «no» is the drawing of
-/// before this task:
-///
-/// 1. **Does the caption wrap at all?** One line has no pitch, and seventeen of the eighteen
-///    [`OWNER_DRAWN_LABELS`] are one line — this is the question that keeps them still, and
-///    the one that makes the change «fixed the line pitch» rather than «rewrote the label
-///    drawing».
-/// 2. **Has the model pitch anything to give?** `DrawTextW` already advances a line by
-///    `natural`, so a model pitch that is not larger is either the same drawing or a squeeze,
-///    and neither is what В-6 asked for. At 96 DPI the two are 16 against 15.
-///
-/// # Why the height of the control is not a third question
-///
-/// It was, in the first draft of this task, and it was wrong. `IDC_LOG_DIR` is 16 dialog units
-/// — **30 px** — and two lines at the model pitch reach 1 × 16 + 15 = **31**, so a height
-/// question would have refused the model pitch to precisely the label the task names as having
-/// to get it («подпись, которая перенеслась бы, обязана получить модельный шаг»).
-///
-/// Nothing is risked by leaving it out: an owner-drawn static may not paint outside its own
-/// rectangle, and that is enforced where it belongs — [`paint_label_lines`] clamps every band
-/// of its clip to the rectangle, so a line the control is too short for is cut off by the very
-/// same edge that cuts it off today, and no ink can reach a neighbour.
-pub fn label_model_pitch(lines: i32, natural: i32, model: i32) -> Option<i32> {
-    if lines < 2 || model <= natural {
-        return None;
-    }
-
-    Some(model)
-}
-
 /// Draws a wrapped label one line at a time, each line in the band the model pitch puts it in
 /// — task T-12-12. Answers how many lines it painted.
 ///
@@ -5695,40 +5652,6 @@ unsafe fn draw_list_item(
     1
 }
 
-/// The selection figure of the mock-ups on one row of a list — not the whole row, but a rounded
-/// rectangle [`LIST_SELECTION_INSET`] mock-up pixels in from each side of it, corner radius
-/// [`LIST_SELECTION_RADIUS`]: `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3` of the
-/// `'lbox'` arm and «втяжка выделения 2, радиус 3» of the `'lview'` one — task T-11-16 for the
-/// figure, task T-11-25 for the second list that wears it.
-///
-/// Left and right only, exactly as the generator does it: the stripe keeps the full height of
-/// the row. `ink` is the outline, and both callers hand it the fill's own colour, because
-/// [`paint_rounded`] draws frame and interior in one figure and this one has no frame.
-///
-/// One body and not two copies (§6.2): the exclusion list ([`draw_list_item`], owner-drawn) and
-/// the layout list ([`draw_cycle_row`], custom-drawn) draw the same figure from the same two
-/// constants, and a stripe that drifted between the two lists of one dialog is exactly what a
-/// second copy would eventually produce.
-fn paint_selection_stripe(dc: HDC, row: &RECT, ink: COLORREF, fill: HBRUSH, dpi: i32) {
-    let inset = scaled(LIST_SELECTION_INSET, dpi);
-
-    let stripe = RECT {
-        left: row.left + inset,
-        top: row.top,
-        right: row.right - inset,
-        bottom: row.bottom,
-    };
-
-    paint_rounded(
-        dc,
-        &stripe,
-        scaled(LIST_SELECTION_RADIUS, dpi),
-        ink,
-        fill,
-        dpi,
-    );
-}
-
 /// The check mark of a dialog check box — `(PtF ($px+4.5) ($by+8.6))`, `(PtF ($px+7.3)
 /// ($by+11.8))`, `(PtF ($px+12.5) ($by+5.2))` and `[single]2.1` of the `'check'` arm.
 pub const GLYPH_CHECK_MARK: CheckMark = CheckMark {
@@ -6132,27 +6055,6 @@ pub const LIST_TEXT_INSET: i32 = 7;
 /// pixels — the `($ry + 2)` of the `'lbox'` arm.
 pub const LIST_TEXT_TOP: i32 = 2;
 
-/// Top of the **first** row of a list below the inner edge of its frame, in mock-up pixels —
-/// the `$ry = $py + 3 + $i * $rowH` both list arms of the generator start from.
-///
-/// A list box positions its own rows, starting at the top of its client area, and no message
-/// moves them; the one lever this file holds over the distance between the frame and the first
-/// row is therefore **where the frame is drawn** — the frame is the dialog's own background
-/// ([`on_erase_background`]), and for the two lists it is lifted this far above the control
-/// instead of the [`BORDER_THICKNESS`] every field gets.
-pub const LIST_FIRST_ROW_TOP: i32 = 3;
-
-/// Inset of the selection rectangle of a list row from the **left and right** edges of the
-/// row, in mock-up pixels — `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3`.
-///
-/// Left and right only: the generator gives the stripe the whole height of the row (`$ry`,
-/// `$rowH`) and takes 2 px off each side of its width (`$px+2`, `$pw-4`).
-pub const LIST_SELECTION_INSET: i32 = 2;
-
-/// Corner radius of that selection rectangle, in mock-up pixels — the trailing `3` of the
-/// same call.
-pub const LIST_SELECTION_RADIUS: i32 = 3;
-
 /// Height of one row of the exclusion list, in **dialog units** — the `$rowH = Y 11` of the
 /// `'lbox'` arm, п. 5 of task T-11-16.
 ///
@@ -6335,10 +6237,6 @@ const FOCUS_CUE_TEXT_INSET: i32 = 1;
 /// through the whole caption and divided only at the moment a character is placed.
 pub const PANEL_CAPTION_TRACKING_TENTHS: i32 = 11;
 
-/// Width of a character the DC measures as nothing, as a percentage of the caption font's
-/// height — п. 2.1, the explicit space width.
-const PANEL_CAPTION_BLANK_PERCENT: i32 = 28;
-
 /// The caption of one group panel, as the mock-ups set it — п. 2.1 of task T-11-13, the
 /// pure «строка → выводимая строка» of criterion 11.
 ///
@@ -6353,22 +6251,6 @@ pub fn panel_caption(text: &str) -> String {
     text.to_uppercase()
 }
 
-/// The advance of one caption character: what the DC measured, or an explicit width when it
-/// measured nothing — п. 2.1 of task T-11-13.
-///
-/// A character-by-character caption asks the DC for the width of one character at a time,
-/// and a layout that measures a blank as zero would put the next word on top of the previous
-/// one. Nothing is trusted to be non-zero: any measurement that comes back as nothing gets
-/// [`PANEL_CAPTION_BLANK_PERCENT`] of the caption font's height instead, which is the width
-/// a space has in a face of that size. Pure, so the rule is a table and not a hope.
-pub fn caption_advance(measured: i32, font_height: i32) -> i32 {
-    if measured > 0 {
-        return measured;
-    }
-
-    (font_height.abs() * PANEL_CAPTION_BLANK_PERCENT) / 100
-}
-
 /// What the dialog's own background draws under one control — FR-92а, task T-11-13, the
 /// pure half of the background drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6381,7 +6263,7 @@ pub enum BackgroundFigure {
     /// single-pixel [`theme::Palette::field_border`] frame, drawn outside the control's
     /// rectangle — so the corners the rounding cuts away are the field's own colour and not
     /// the panel's. How far outside is [`field_frame_air`]'s answer for a field and
-    /// [`LIST_FIRST_ROW_TOP`] above a list.
+    /// [`theme::LIST_FIRST_ROW_TOP`] above a list.
     Field,
 }
 
@@ -6423,49 +6305,11 @@ pub const FRAMED_FIELDS: [i32; 7] = [
 /// The two of [`FRAMED_FIELDS`] that hold rows rather than a line of text — task T-11-16.
 ///
 /// Named apart because the mock-ups treat them apart in one respect: the frame of a list
-/// stands [`LIST_FIRST_ROW_TOP`] mock-up pixels above its first row, where the frame of a
+/// stands [`theme::LIST_FIRST_ROW_TOP`] mock-up pixels above its first row, where the frame of a
 /// field is the [`FIELD_BOX_DLU`] box of the generator centred on the control. Both lists are
 /// in [`FRAMED_FIELDS`] as well — this is a subset of it and not a second list of controls,
 /// and a test holds the containment.
 pub const FRAMED_LISTS: [i32; 2] = [IDC_EXCLUSIONS, IDC_CYCLE_LIST];
-
-/// The two distances the frame of a list stands off the rectangle of its control, in pixels of
-/// a window at `dpi`: the air **above** it and the thickness at the other three sides.
-///
-/// Pure, and the one place either number is worked out — [`paint_background`] draws that frame
-/// from the outside and [`list_frame_box`] names the very same figure from inside the control,
-/// so the two could disagree by a pixel and put a corner arc where the interior does not end.
-/// They cannot now: both ask this.
-///
-/// ⚠ The air is [`LIST_FIRST_ROW_TOP`] **through [`scaled`]**, which is 2 px at 96 DPI and not
-/// the 3 of the mock-ups — the number this file has always drawn with, written down here where
-/// it can be read. `max(border)` because a frame thinner than its own thickness is not a frame.
-pub fn list_frame_air(dpi: i32) -> (i32, i32) {
-    let border = scaled(BORDER_THICKNESS, dpi).max(1);
-
-    (scaled(LIST_FIRST_ROW_TOP, dpi).max(border), border)
-}
-
-/// The frame of a list in the **control's own client coordinates** — the same figure
-/// [`paint_background`] paints in the coordinates of the dialog, seen from inside the window it
-/// surrounds — task T-12-5.
-///
-/// `client` is what `GetClientRect` answers for the list, so the rectangle this returns starts
-/// at negative numbers: the frame stands outside the control on all four sides, and only the
-/// four corner arcs of it reach back in over the interior. That is the whole point — the arc
-/// has to be drawn by whoever owns those pixels, and inside the control that is the control.
-///
-/// Pure, so the geometry is a table a test can read without a window.
-pub fn list_frame_box(client: &RECT, dpi: i32) -> RECT {
-    let (top, border) = list_frame_air(dpi);
-
-    RECT {
-        left: client.left - border,
-        top: client.top - top,
-        right: client.right + border,
-        bottom: client.bottom + border,
-    }
-}
 
 /// The height of the box the mock-ups draw around an input field, in vertical **dialog
 /// units** — the `h = 12` of every `'edit'` row of the generator.
@@ -6489,25 +6333,6 @@ pub fn list_frame_box(client: &RECT, dpi: i32) -> RECT {
 /// box around it, centred, so the air of the picture is above and below the text in equal
 /// halves.
 pub const FIELD_BOX_DLU: i32 = 12;
-
-/// Half of what the [`FIELD_BOX_DLU`] box has left over after the control inside it — the
-/// distance the frame of a field is drawn above its rectangle, and the same below it.
-///
-/// `box_height` is that box in the pixels of the window (`None` when `MapDialogRect` was
-/// refused — NFR-13), `control_height` the height the dialog manager gave the control, and
-/// `border` the thickness of the frame itself, which is the floor: a control already as tall
-/// as the box, or taller, keeps exactly the one-thickness-outside frame it wore before task
-/// T-12-3, and so does a refused measurement. That is what makes the rule **degenerate into
-/// the old one** rather than replace it.
-///
-/// Pure, so the arithmetic is a table in `tests\settings.rs` and not a picture to be read.
-pub fn field_frame_air(box_height: Option<i32>, control_height: i32, border: i32) -> i32 {
-    let Some(box_height) = box_height else {
-        return border;
-    };
-
-    ((box_height - control_height) / 2).max(border)
-}
 
 /// The colours one whole background pass needs, taken out of the state in one borrow.
 ///
@@ -6788,50 +6613,6 @@ unsafe fn paint_background(
 // Стоимость фона: одна готовая картинка вместо восьми панелей на каждую перерисовку —
 // FR-92а, task T-11-17, criterion 12
 // =========================================================================================
-
-/// Lays the one-pixel line the mock-ups draw under the title bar along the top row of
-/// `area` — FR-92а, task T-12-1, п. 4.
-///
-/// # Why it is drawn here at all
-///
-/// The line belongs to the non-client frame: `ui.ps1:431-433` draws it with a `WinBorder`
-/// pen along the bottom edge of the caption, and `chrome.ps1` does the same for the about
-/// window. This program does not paint its non-client area and — by the verdict of goal 4 of
-/// the E12 reconnaissance — is not going to: DWM owns those thirty-one rows, and there is no
-/// documented attribute that puts a line under them. So the line is imitated by the first
-/// row of the *client* area, which is ours, touches the caption with no gap, and costs one
-/// `FillRect`.
-///
-/// The colour is [`theme::Palette::field_border`] — 58,64,72 against the mock-ups' `WinBorder`
-/// 58,63,71, one level apart in two channels, a tolerance the stage's ТЗ accepted rather than
-/// let an eighteenth palette field be invented for a difference nobody can see.
-fn paint_caption_underline(dc: HDC, area: &RECT, colour: COLORREF) {
-    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
-    // below.
-    let brush = unsafe { CreateSolidBrush(colour) };
-
-    // NFR-13: examined — no brush, no line, and the window is short of one row of colour
-    // rather than short of a background.
-    if brush.is_invalid() {
-        return;
-    }
-
-    let line = RECT {
-        left: area.left,
-        top: area.top,
-        right: area.right,
-        bottom: area.top + 1,
-    };
-
-    // SAFETY: `dc` is painted into for the length of the call this is inside of, `line` is a
-    // live rectangle of this frame, and `brush` is the live brush just made. The answer is
-    // dropped for the NFR-13 reason the drawing paths of this file all state: a refused fill
-    // costs one row of colour and nothing else.
-    unsafe { FillRect(dc, &line, brush) };
-
-    // SAFETY: created above, handed to nobody, freed exactly once.
-    let _ = unsafe { DeleteObject(brush.into()) };
-}
 
 /// The background of the dialog as a finished picture, owned: memory DC and bitmap created
 /// together, freed together in `Drop` — NFR-13.
@@ -8378,84 +8159,8 @@ unsafe fn patch_list_corners(list: HWND) {
     );
 }
 
-/// Half-width of the chevron of a closed combo box, in mock-up pixels — the `±4` by `x` of
-/// `(PtF ($cx-4) …), (PtF $cx …), (PtF ($cx+4) …)` in the `'combo'` arm, п. 8 of T-11-16.
-///
-/// An arm and not the whole span since this task: the generator states the figure as three
-/// points around a centre, and building it out of a span and a drop of half the span put the
-/// apex 0,57 px below where the picture has it — the one place the old arithmetic fell outside
-/// the half-pixel the task allows.
-pub const COMBO_CHEVRON_ARM_X: i32 = 4;
-
-/// Half-height of the chevron, in mock-up pixels — the `∓2` by `y` of the same three points:
-/// the two arms stand this far above the middle of the field and the apex this far below it.
-pub const COMBO_CHEVRON_ARM_Y: i32 = 2;
-
-/// Distance from the right edge of the closed part to the **centre** of the chevron, in
-/// mock-up pixels — the `$cx = $px + $pw - 14` of the `'combo'` arm, п. 8 of T-11-16. It used
-/// to be a 16 read off `ui-03-fog.png` with the eye.
-pub const COMBO_CHEVRON_INSET_X: i32 = 14;
-
-/// Thickness of the chevron's stroke, in **tenths** of a mock-up pixel — the `[single]1.5` the
-/// generator makes its pen with. [`scaled_tenths`] turns it into the whole pixels GDI draws
-/// with.
-pub const COMBO_CHEVRON_PEN_TENTHS: i32 = 15;
-
 /// Air between the text of the closed part and the chevron, in mock-up pixels.
 pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
-
-/// The three points of the chevron of a closed combo box — FR-92а, task T-11-14, the pure
-/// half of its drawing, closed by a table test.
-///
-/// A chevron is one polyline through three points and therefore two strokes, which is exactly
-/// what the mock-ups show: two arms meeting at an apex below them. Since task T-11-16 the
-/// three points are built the way the generator builds them — one centre and two half-lengths,
-/// `±`[`COMBO_CHEVRON_ARM_X`] by `x` and `∓`[`COMBO_CHEVRON_ARM_Y`] by `y` — instead of a span
-/// halved twice, which rounded the apex a whole pixel low at 96 DPI. The centre sits on the
-/// vertical middle of the field it is given, so the figure follows the height of the control
-/// instead of a number written here.
-///
-/// Every length is a mock-up length put through [`scaled`], so the chevron grows with the DPI
-/// of the window like the radii and insets of task T-11-13.
-pub fn combo_chevron_points(area: &RECT, dpi: i32) -> [(i32, i32); 3] {
-    let arm_x = scaled(COMBO_CHEVRON_ARM_X, dpi).max(1);
-    let arm_y = scaled(COMBO_CHEVRON_ARM_Y, dpi).max(1);
-
-    let centre_x = area.right - scaled(COMBO_CHEVRON_INSET_X, dpi);
-    let centre_y = (area.top + area.bottom) / 2;
-
-    [
-        (centre_x - arm_x, centre_y - arm_y),
-        (centre_x, centre_y + arm_y),
-        (centre_x + arm_x, centre_y - arm_y),
-    ]
-}
-
-/// Strokes the chevron with a transient pen of `ink`, smoothed — the drawing half of
-/// [`combo_chevron_points`], smoothed whole by task T-11-17.
-///
-/// Two shallow diagonals are exactly the figure GDI draws worst: without smoothing the arms of
-/// the mock-up's chevron come out notched, which is the defect `zoom-pairs.png` shows on the
-/// `combo-source` row. The figure is a dozen pixels across, so it is enlarged whole — the
-/// cheap half of the cost rule; a refused surface or blit falls through to the aliased stroke
-/// of every task before this one (NFR-13: the field is still drawn, still opens on a click).
-fn draw_combo_chevron(dc: HDC, points: [(i32, i32); 3], ink: COLORREF, dpi: i32) {
-    let thickness = scaled_tenths(COMBO_CHEVRON_PEN_TENTHS, dpi);
-    let tile = stroke_bounds(&points, thickness);
-
-    let smoothed = Supersample::for_tile(tile.right - tile.left, tile.bottom - tile.top)
-        .is_some_and(|surface| {
-            surface.render(dc, &tile, thickness, |canvas| {
-                let enlarged = points.map(|(x, y)| canvas.point(x, y));
-
-                stroke_polyline(canvas.dc, &enlarged, ink, canvas.length(thickness));
-            })
-        });
-
-    if !smoothed {
-        stroke_polyline(dc, &points, ink, thickness);
-    }
-}
 
 /// The five input fields of the dialog — the ones [`set_field_margins`] gives the text inset
 /// of the mock-ups to.
@@ -9608,65 +9313,6 @@ pub fn check_cell(dpi: i32, row_height: i32) -> CheckCell {
     }
 }
 
-/// The order the two frames of the state image list of [`build_check_image_list`] stand in:
-/// frame 0 — снята, frame 1 — взведена.
-///
-/// This array is what couples the drawing to the participation bits of FR-31: a state image
-/// index is **one-based** — index 1 names frame 0 — so the frame at position `i` here answers
-/// the mask `(i + 1) << 12`, which is [`UNCHECKED_IMAGE`] for the first frame and
-/// [`CHECKED_IMAGE`] for the second, exactly the values [`set_row_check`] writes and
-/// [`read_cycle_checks`] reads. The system pair of `LVS_EX_CHECKBOXES` sits in the same
-/// order, which is why replacing the image list moves not a single state bit. A test holds
-/// the coupling.
-///
-/// Since task T-11-25 the two cells hold no picture — both are a hole edge to edge, and what
-/// the order names is the *meaning* of the two indices rather than two drawings. It is still
-/// this coupling the tick hangs from: [`on_notify`] reads the same bits and hands
-/// [`draw_cycle_row`] the `checked` the picture is chosen by.
-pub const CHECK_FRAME_ORDER: [bool; 2] = [false, true];
-
-/// Fill, frame and mark of one tick of the layout list — what [`check_frame_colors`]
-/// answers and the whole of what [`draw_check_glyph`] needs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CheckFrameColors {
-    /// What the whole 13×13 square is filled with.
-    pub fill: COLORREF,
-    /// The single-pixel frame — `None` for the checked frame the accent fill covers whole.
-    pub frame: Option<COLORREF>,
-    /// The two-stroke check mark — `None` while unchecked.
-    pub mark: Option<COLORREF>,
-}
-
-/// The colours of one tick of the layout list in one palette — FR-92а, task T-11-7: the pure
-/// half of the tick, closed by a table test over both states and both palettes.
-///
-/// Colours of the given palette rather than roles, unlike [`glyph_color_roles`] and its kin:
-/// the drawing this feeds answers no `WM_CTLCOLOR*` and asks for no brush of the dialog's own,
-/// so what it needs is the palette's own values — and the task words the function as
-/// «(взведена, палитра) → краски кадра». The table stays closed all the same: every answer is a
-/// field of `palette` and nothing else, so not a single colour number enters this module
-/// (§6.2).
-///
-/// The two rows quote the check-box cells of the glyph table of T-11-5b, so the ticks of the
-/// list match the ticks of the dialog:
-/// - **снята** — `field_bg` fill under the single-pixel `box_border` frame, no mark;
-/// - **взведена** — `accent_bg` fill edge to edge, no frame, `accent_fg` check mark.
-pub fn check_frame_colors(checked: bool, palette: &theme::Palette) -> CheckFrameColors {
-    if checked {
-        CheckFrameColors {
-            fill: palette.accent_bg,
-            frame: None,
-            mark: Some(palette.accent_fg),
-        }
-    } else {
-        CheckFrameColors {
-            fill: palette.field_bg,
-            frame: Some(palette.box_border),
-            mark: None,
-        }
-    }
-}
-
 /// Ground, ink and selection treatment of one row of the layout list — what
 /// [`cycle_row_paint`] answers and the whole of what the item prepaint of [`on_notify`]
 /// writes back.
@@ -9696,8 +9342,8 @@ pub struct CycleRowPaint {
 ///   carries `LVIS_SELECTED` wears the same muted paints as the rest rather than an active
 ///   selection.
 ///
-/// Colours of the given palette rather than roles, as [`check_frame_colors`] above and for
-/// the same reason; every answer is a field of `palette` and nothing else, so not a single
+/// Colours of the given palette rather than roles, as [`check_frame_colors`] of `theme` and
+/// for the same reason; every answer is a field of `palette` and nothing else, so not a single
 /// colour number enters this module (§6.2).
 pub fn cycle_row_paint(
     mode: LayoutMode,
