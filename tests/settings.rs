@@ -2611,7 +2611,7 @@ fn the_two_line_labels_keep_their_word_wrap() {
     const DT_WORDBREAK: u32 = 0x0000_0010;
     const DT_EXPANDTABS: u32 = 0x0000_0040;
 
-    let format = settings::LABEL_TEXT_FORMAT.0;
+    let format = theme::LABEL_TEXT_FORMAT.0;
 
     println!("LABEL_TEXT_FORMAT = {format:#010x}");
 
@@ -4563,7 +4563,10 @@ fn the_check_box_glyph_is_rounded_by_the_three_pixels_of_the_mock_ups() {
 /// которой не хватало, была именно отсутствием, и поймать её можно только так.
 #[test]
 fn every_owner_drawn_element_erases_its_ground_before_it_draws() {
-    let source = settings_module_source();
+    // T-14-7: the joined text of the drawing, because `paint_label` — the body of the label
+    // half — moved to `theme` with the third slice of finding 24. The five other bodies of the
+    // loop and both bodies of the second half are still `settings`'s own and are still found.
+    let source = drawing_source();
 
     // Пять тел `WM_DRAWITEM` и шестое — закрытая часть комбобокса, которая рисует себя по
     // `WM_PAINT` подкласса и потому тем более отвечает за весь свой прямоугольник.
@@ -8800,7 +8803,7 @@ fn the_list_subclass_is_one_pair_and_intercepts_nothing() {
 // Настоящие пиксели: подпись собственной отрисовкой — задача T-11-18, критерии 11 и 12
 // -----------------------------------------------------------------------------------------
 //
-// `settings::paint_label` needs a DC, a rectangle, a brush and an ink — no window, no message
+// `theme::paint_label` needs a DC, a rectangle, a brush and an ink — no window, no message
 // and no state — so the whole of this section runs in the memory bitmap of [`Sheet`] above:
 // no dialog is created, no message loop is pumped, and **the product is not started**.
 //
@@ -8826,7 +8829,7 @@ impl Sheet {
     }
 }
 
-/// Paints one caption into `area` of `sheet` through the product's own [`settings::paint_label`],
+/// Paints one caption into `area` of `sheet` through the product's own [`theme::paint_label`],
 /// with a brush this function makes and frees.
 fn paint_label_on(sheet: &Sheet, area: RECT, caption: &str) -> isize {
     let mut text: Vec<u16> = caption.encode_utf16().collect();
@@ -8836,8 +8839,7 @@ fn paint_label_on(sheet: &Sheet, area: RECT, caption: &str) -> isize {
 
     // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
     // frame, and `ground` is live for the whole call. `None` leaves the DC's own font in place.
-    let answer =
-        unsafe { settings::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, None) };
+    let answer = unsafe { theme::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, None) };
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(ground.into()) };
@@ -10291,7 +10293,7 @@ fn label_sheet() -> (Sheet, Face, TEXTMETRICW, i32) {
     (sheet, face, metrics, dpi)
 }
 
-/// Paints one caption through the product's own [`settings::paint_label`] with a given face.
+/// Paints one caption through the product's own [`theme::paint_label`] with a given face.
 fn paint_label_in_face(sheet: &Sheet, area: RECT, caption: &str, face: &Face) -> isize {
     let mut text: Vec<u16> = caption.encode_utf16().collect();
 
@@ -10300,9 +10302,8 @@ fn paint_label_in_face(sheet: &Sheet, area: RECT, caption: &str, face: &Face) ->
 
     // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
     // frame, and both `ground` and the face outlive the call.
-    let answer = unsafe {
-        settings::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, Some(face.0))
-    };
+    let answer =
+        unsafe { theme::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, Some(face.0)) };
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(ground.into()) };
@@ -10311,7 +10312,7 @@ fn paint_label_in_face(sheet: &Sheet, area: RECT, caption: &str, face: &Face) ->
 }
 
 /// Paints one caption the way the module painted **every** label before task T-12-12: ground,
-/// then one `DrawTextW` with [`settings::LABEL_TEXT_FORMAT`]. The reference the separating
+/// then one `DrawTextW` with [`theme::LABEL_TEXT_FORMAT`]. The reference the separating
 /// probe below compares against.
 fn paint_label_the_old_way(sheet: &Sheet, area: RECT, caption: &str, face: &Face) {
     let mut text: Vec<u16> = caption.encode_utf16().collect();
@@ -10331,7 +10332,7 @@ fn paint_label_the_old_way(sheet: &Sheet, area: RECT, caption: &str, face: &Face
             sheet.dc,
             &mut text,
             &raw mut text_rect,
-            settings::LABEL_TEXT_FORMAT,
+            theme::LABEL_TEXT_FORMAT,
         );
         SelectObject(sheet.dc, previous);
     }
@@ -10356,13 +10357,17 @@ fn pixels_of(sheet: &Sheet, area: &RECT) -> Vec<i32> {
 #[test]
 fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face() {
     assert_eq!(
-        settings::LABEL_LINE_PITCH,
+        theme::LABEL_LINE_PITCH,
         23,
         "the pitch of the mock-ups is 1,33 em of the generator's own face — 22,345 mock-up \
          pixels, whose whole steps are 22 and 23 and whose two lines of this label landed on 23"
     );
 
-    let source = settings_module_source();
+    // T-14-7: the source of `theme`, because the constant and its derivation moved there with
+    // the third slice of finding 24. Deliberately **not** `drawing_source()`: the assertion is
+    // that the chain is written **where the constant is**, and a haystack of both files would
+    // let a phrase in the other one answer for it.
+    let source = theme_module_source();
     let derivation = source
         .split_once("pub const LABEL_LINE_PITCH")
         .expect("the module must declare LABEL_LINE_PITCH")
@@ -10401,7 +10406,7 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
         em_tenths,
         pitch_tenths,
         theme::scaled(22, 96),
-        theme::scaled(settings::LABEL_LINE_PITCH, 96)
+        theme::scaled(theme::LABEL_LINE_PITCH, 96)
     );
 
     assert!(
@@ -10410,14 +10415,14 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
          {pitch_tenths} tenths, so the chain in the doc comment no longer holds"
     );
     assert_eq!(
-        theme::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(theme::LABEL_LINE_PITCH, 96),
         16,
         "решение В-6: 23 mock-up pixels are 16 pixels at 96 DPI, against the 15 `DrawTextW` \
          advances a line by on its own"
     );
     assert_eq!(
         theme::scaled(22, 96),
-        theme::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(theme::LABEL_LINE_PITCH, 96),
         "the whole-pixel rounding of the mock-up literal is not what decides the screen: 22 \
          and 23 mock-up pixels are the same 16 screen pixels, and the fraction between them \
          is the 15,96 the arithmetic asks for"
@@ -10425,8 +10430,7 @@ fn the_line_pitch_of_a_wrapped_label_is_the_line_spacing_of_the_generators_face(
 
     // And it scales with the DPI of the window, which is the second half of В-6.
     assert!(
-        theme::scaled(settings::LABEL_LINE_PITCH, 144)
-            > theme::scaled(settings::LABEL_LINE_PITCH, 96),
+        theme::scaled(theme::LABEL_LINE_PITCH, 144) > theme::scaled(theme::LABEL_LINE_PITCH, 96),
         "the pitch has to grow with the DPI of the window — it goes through `scaled` for that"
     );
 }
@@ -10509,13 +10513,13 @@ fn only_a_label_that_really_wrapped_takes_the_model_pitch() {
 /// **Criterion 7 of T-12-12, on real pixels** — a wrapped label's lines stand
 /// `scaled(LABEL_LINE_PITCH, dpi)` apart, and not the face's own `tmHeight`.
 ///
-/// The caption is painted through the product's own [`settings::paint_label`] with the
+/// The caption is painted through the product's own [`theme::paint_label`] with the
 /// template's own face, and the ink is read back band by band exactly as `inkrows.ps1` reads
 /// it off a screenshot of the stand.
 #[test]
 fn the_lines_of_a_wrapped_label_stand_the_model_pitch_apart() {
     let (sheet, face, metrics, dpi) = label_sheet();
-    let pitch = theme::scaled(settings::LABEL_LINE_PITCH, dpi);
+    let pitch = theme::scaled(theme::LABEL_LINE_PITCH, dpi);
 
     println!(
         "sheet at {dpi} DPI: tmHeight = {}, model pitch = {pitch}",
@@ -10594,7 +10598,7 @@ fn the_lines_of_a_wrapped_label_stand_the_model_pitch_apart() {
 /// The stand answers this with a diff of two screenshots; this answers it without a window, on
 /// every machine that runs the battery, and it is the probe that separates «fixed the line
 /// pitch» from «rewrote the label drawing». The same caption is painted twice into the same
-/// rectangle — once through [`settings::paint_label`] and once through the single plain
+/// rectangle — once through [`theme::paint_label`] and once through the single plain
 /// `DrawTextW` the module used before — and the two bitmaps must be identical.
 #[test]
 fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
@@ -10603,7 +10607,7 @@ fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
     println!(
         "sheet at {dpi} DPI: tmHeight = {}, model pitch = {}",
         metrics.tmHeight,
-        theme::scaled(settings::LABEL_LINE_PITCH, dpi)
+        theme::scaled(theme::LABEL_LINE_PITCH, dpi)
     );
 
     let area = RECT {
@@ -10662,7 +10666,7 @@ fn a_one_line_label_is_drawn_exactly_as_it_was_before_the_pitch() {
 #[test]
 fn drawing_a_wrapped_label_over_and_over_leaks_no_gdi_object() {
     let (sheet, face, metrics, dpi) = label_sheet();
-    let pitch = theme::scaled(settings::LABEL_LINE_PITCH, dpi);
+    let pitch = theme::scaled(theme::LABEL_LINE_PITCH, dpi);
 
     let area = RECT {
         left: 2,

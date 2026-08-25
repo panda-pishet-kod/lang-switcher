@@ -36,6 +36,18 @@
 //! that length in here — and that is the same back-reference the rule forbids, written the
 //! other way round.
 //!
+//! Task T-14-7 closed the move with the third slice: the painting of **one caption into one
+//! rectangle** — its ground, its face, the wrap `DrawTextW` itself decided and the band each
+//! line is laid in, with the two numbers only that painting reads. Both windows of the program
+//! share the one body. The three units the second slice named as candidates and could not take
+//! stayed where they were, each for a reason of the same rule: `settings::draw_check_glyph`
+//! reaches for the tick figure of *its* list (`settings::LIST_CHECK_MARK`, whose twin
+//! `tray::MENU_CHECK_MARK` lives with *its* menu — the instances belong to the owners of the
+//! windows, and only the figure itself is here); `settings::draw_cycle_row` reads a table over
+//! `layouts::LayoutMode` and calls two routines that stayed; and the pair of `LOGFONTW`
+//! derivations of the settings module divide by a percentage that a drawing of that module
+//! reads as well. What is left in `settings` and in `tray` is what knows whose window it is in.
+//!
 //! # The single owner of the palettes — FR-92а
 //!
 //! FR-92а names this module the single owner of the palettes: every colour of the theme is
@@ -73,10 +85,12 @@ use windows::Win32::Foundation::{COLORREF, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, COLORONCOLOR,
     CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen, CreateSolidBrush,
-    DIB_RGB_COLORS, DeleteDC, DeleteObject, Ellipse, ExcludeClipRect, FillRect, GdiFlush,
+    DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT, DT_SINGLELINE, DT_TOP,
+    DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse, ExcludeClipRect, FillRect, GdiFlush,
     GetDeviceCaps, GetStockObject, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect,
-    LOGFONTW, LOGPIXELSY, NULL_PEN, PS_SOLID, Polyline, RestoreDC, RoundRect, SRCCOPY, SaveDC,
-    SelectObject, SetStretchBltMode, StretchBlt,
+    LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, PS_SOLID, Polyline, RGN_ERROR, RestoreDC,
+    RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor,
+    StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::{PCWSTR, w};
@@ -2200,6 +2214,345 @@ pub(crate) unsafe fn restore_face(dc: HDC, previous: Option<HGDIOBJ>) {
 }
 
 // =========================================================================================
+// Подпись: земля, лицо и перенос строк — task T-14-7
+// =========================================================================================
+//
+// The third slice of the move of finding 24. Below is the painting of **one caption into one
+// rectangle**: the ground filled, the ink set, the face selected, `DrawTextW` asked how it
+// wrapped the words, and the lines laid down a band at a time. None of it can be told which
+// window the rectangle belongs to — both windows of the program hand it a DC, a rectangle, a
+// caption, a brush, an ink and a face, and the *choosing* of those six is what stays on the
+// other side of the line: `WM_CTLCOLOR*` names the brush, the identifier names the colour
+// role, the control itself holds the text. The two numbers travel with the figure by the rule
+// task T-14-5 wrote down — in the whole of `src\` nothing else reads either of them.
+
+/// The `DrawTextW` format of every owner-drawn label — FR-92а, task T-11-18.
+///
+/// Byte for byte what an `SS_LEFT` static drew these labels with before the task, which is the
+/// whole requirement: the smoothing changes and nothing else does.
+///
+/// - `DT_LEFT | DT_TOP` — the alignment of `SS_LEFT`: against the left edge, against the top,
+///   never centred. Both are zero, and both are written out because a format built out of
+///   silence is a format nobody can read.
+/// - **`DT_WORDBREAK`** — the one flag that is load-bearing rather than cosmetic. Two labels of
+///   the settings template are two lines high and their text does not fit on one: the note
+///   «вступит в силу после перезапуска» (`IDC_LANGUAGE_RESTART`, 70 × 18 dialog units) and the
+///   journal path (`IDC_LOG_DIR`, 186 × 16). A static wraps them; without this flag they would
+///   come back as one clipped line, and the wrap is a regression the task names by name.
+/// - `DT_EXPANDTABS` — also what the static did. No string of either locale carries a tab
+///   today, so it changes no pixel today; it is here so that one arriving tomorrow lands the
+///   same way it would have before the task.
+///
+/// No `DT_NOPREFIX`: `LTEXT` carries no `SS_NOPREFIX`, so an `&` in a label was an underscore
+/// before this task and stays one after it — the journal path is the one label a stray `&`
+/// could ever reach, and changing what it does there would be a change of behaviour smuggled
+/// in under a change of smoothing.
+pub const LABEL_TEXT_FORMAT: DRAW_TEXT_FORMAT =
+    DRAW_TEXT_FORMAT(DT_LEFT.0 | DT_TOP.0 | DT_WORDBREAK.0 | DT_EXPANDTABS.0);
+
+/// The step from one line of a **wrapped** owner-drawn label to the next, in the pixels of the
+/// mock-ups — решение **В-6** (`DECISIONS.md`, вопрос 56), task T-12-12.
+///
+/// # Where the 23 comes from: the generator's literals, not a picture
+///
+/// `DrawTextW` has no lever for line spacing at all — it advances a line by the natural
+/// `tmHeight` of the face, 15 px for Segoe UI 9 pt at 96 DPI. The mock-ups were not drawn with
+/// it. Their generator lays text with GDI+ `DrawString` **into a layout rectangle**, and GDI+
+/// advances a line by `Font.GetHeight()`, which is the face's own `GetLineSpacing` over its
+/// `GetEmHeight` — a different number from `tmHeight` and a larger one. Every value below is a
+/// literal of `scratchpad\ui.ps1` or a metric of the face that file names:
+///
+/// - line 7 — `$DPI = 1.4`: the mock-ups are drawn at 140 %, the same 1,4
+///   [`MOCKUP_SCALE_TENTHS`] already carries;
+/// - line 10 — `$FS = 9 * $DPI`: the dialog face at that scale is **12,6 pt**;
+/// - line 448 — `New-Object System.Drawing.Font('Segoe UI', $FS, [FontStyle]::Regular)`;
+/// - line 78 — `$g.DrawString($text, $font, $brush, $r, $sf)` with `$r` a **rectangle**, which
+///   is the overload that wraps and advances lines by itself;
+/// - Segoe UI regular: `GetEmHeight` = 2048, `GetLineSpacing` = 2724, so a line is
+///   2724 / 2048 = **1,330078125 em**.
+///
+/// 12,6 pt × 96 / 72 = **16,8 mock-up px** to the em, and 16,8 × 1,330078125 = **22,345
+/// mock-up px** to the line. A raster can put a line only on a whole row, so the whole steps
+/// come out 22 and 23 in turn — and the two lines of this very label landed on **23** in
+/// `ui-02-graphite.png` (x-height tops on rows 190 and 213). The picture *confirms* the
+/// number; the arithmetic above *produces* it.
+///
+/// ⚠ The rounding of the mock-up literal is not what decides the screen: [`scaled`] divides by
+/// the DPI of the mock-ups and **both** `scaled(22, 96)` and `scaled(23, 96)` are **16** — the
+/// 15,96 px the fraction asks for, against the 15 px `DrawTextW` gives on its own. В-6 sealed
+/// 23, and the pitch scales with the DPI of the window because it goes through [`scaled`].
+pub const LABEL_LINE_PITCH: i32 = 23;
+
+/// Paints one owner-drawn label: the ground it stands on, then its text in our own
+/// grey-antialiased face — FR-92а, task T-11-18. The drawing half `settings::draw_label` and
+/// `settings::draw_about_label` share, exactly as `settings::paint_push_button` is shared by
+/// the two windows' button paths (§6.2: one body, not a copy).
+///
+/// # Why the ground is filled here and not left to the system
+///
+/// ⚠ **An owner-drawn static is responsible for the whole of its rectangle.** A plain
+/// `SS_LEFT` static filled its client area with the brush `WM_CTLCOLORSTATIC` answered and
+/// wrote the text over it; `SS_OWNERDRAW` replaces that drawing outright, and whether the
+/// system still lays the brush down first is not something the documentation promises. Filling
+/// here is right under either behaviour — a second `FillRect` over the same colour is
+/// invisible — and skipping it is right under only one.
+///
+/// It is not a theoretical worry: the text of these labels **changes while the window is up**.
+/// `fill_layouts` writes `String::new()` into `IDC_LAYOUT_NOTE` the moment the two combo boxes
+/// name layouts the session has again, `show_hotkey` does the same to `IDC_HOTKEY_NOTE` after
+/// a capture, and every state line is rewritten with a shorter or longer sentence. Without the
+/// fill the old words would stay under the new ones, and a note that was cleared would never
+/// go away.
+///
+/// # The empty label
+///
+/// A caption of no characters is drawn as the ground and nothing else: no font is selected, no
+/// text colour is set, `DrawTextW` is not called. `IDC_HOTKEY_NOTE` and `IDC_LAYOUT_NOTE` are
+/// empty most of the time a person has the window open, and the three rows of the «Состояние»
+/// block and the journal path are empty in the template until `WM_INITDIALOG` fills them —
+/// so this is the ordinary case, not the corner one (NFR-13).
+///
+/// # Safety
+///
+/// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of: `dc` is
+/// owned by the sender for the length of the send, and `ground` and `face` are objects
+/// somebody else owns for longer than the drawing.
+pub unsafe fn paint_label(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    ground: HBRUSH,
+    ink: COLORREF,
+    face: Option<HFONT>,
+) -> isize {
+    // NFR-13, for the paint calls below: each answers a success flag or a previous value, and
+    // every answer is deliberately dropped for the reason `paint_push_button` gives for its
+    // own — the manager never hands a dead DC, only a forged message could (SEC-05), and the
+    // right reaction to a forgery is indifference.
+    //
+    // SAFETY: `dc` is the DC of the message and `rect` is a live local of the caller's frame;
+    // `ground` is a live brush somebody else owns.
+    unsafe { FillRect(dc, &rect, ground) };
+
+    if caption.is_empty() {
+        // TRUE — the label is drawn, and the ground is the whole of it.
+        return 1;
+    }
+
+    // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC and
+    // touch no memory of this process.
+    unsafe { SetBkMode(dc, TRANSPARENT) };
+    // SAFETY: as above.
+    unsafe { SetTextColor(dc, ink) };
+
+    // Our own face, grey-antialiased — task T-11-17, and the whole point of this one: the
+    // labels used to be the last text in the window still drawn on the manager's ClearType.
+    // `None` leaves the manager's own font in the DC, which is what a window whose faces could
+    // not be made draws in (NFR-13).
+    //
+    // SAFETY: `dc` is the DC of the message and `face` is a live font the window's state owns
+    // for longer than this call; the previous handle is put back below.
+    let previous_face = unsafe { select_face(dc, face) };
+
+    // How many lines the **system** made of this caption, and how tall one of them is — asked
+    // of `DrawTextW` itself, so the wrap cannot be a second opinion (task T-12-12).
+    //
+    // SAFETY: the face is selected into `dc` above, so the measuring reads the very face the
+    // drawing below will use; `caption` and the scratch rectangles are live locals.
+    let measured = unsafe { measure_label_lines(dc, rect, caption) };
+
+    // The model pitch of В-6, or `None` — «one plain call», which is the drawing of T-11-18
+    // byte for byte. [`label_model_pitch`] is the whole of the decision and is pure.
+    let model = measured.and_then(|(lines, natural)| {
+        label_model_pitch(lines, natural, scaled(LABEL_LINE_PITCH, dc_dpi(dc)))
+            .map(|pitch| (lines, natural, pitch))
+    });
+
+    // The line by line drawing, and how many lines it managed. A caption of one line, or a
+    // model pitch with nothing to give, is zero lines drawn without a call being made at all.
+    let painted = match model {
+        // SAFETY: see the caller — `dc` is the DC of the message and `rect` a live local of
+        // the caller's frame; `caption` is a live local of `draw_label`'s.
+        Some((lines, natural, pitch)) => unsafe {
+            paint_label_lines(dc, rect, caption, lines, natural, pitch)
+        },
+        None => 0,
+    };
+
+    if painted == 0 {
+        // The whole rectangle of the control, with no inset of its own — the very rectangle an
+        // `SS_LEFT` static drew into, so no caption moves by a pixel (T-11-16 and T-11-17
+        // settled the values and this task changes none of them).
+        let mut text_rect = rect;
+
+        // SAFETY: `caption` and `text_rect` are live locals of this frame and the caller's;
+        // the format has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the
+        // caption and writes only pixels of the DC.
+        unsafe { DrawTextW(dc, caption, &mut text_rect, LABEL_TEXT_FORMAT) };
+    }
+
+    // SAFETY: `previous_face` is what `select_face` answered for this same DC, and nothing
+    // between the two calls selected another font.
+    unsafe { restore_face(dc, previous_face) };
+
+    // TRUE — the label is drawn.
+    1
+}
+
+/// How many lines `DrawTextW` makes of `caption` inside `rect`, and how tall one line is —
+/// task T-12-12, and **the reason the wrap of this file cannot drift**.
+///
+/// Both numbers come out of `DrawTextW` with `DT_CALCRECT` and [`LABEL_TEXT_FORMAT`]: the
+/// first with the format whole, which wraps and answers the height of everything; the second
+/// with `DT_SINGLELINE` added, which answers the height of one line of the face in the DC.
+/// Their quotient is the number of lines. Nothing here decides *where* a line breaks — the
+/// system does, exactly as it did before the task, and [`paint_label_lines`] never asks either.
+///
+/// # NFR-13
+///
+/// `DrawTextW` answers zero when it refuses, and a height that is not a whole number of lines
+/// is an answer this arithmetic cannot read. Both are `None`, which the caller spends on the
+/// single plain call — the drawing of T-11-18 untouched.
+///
+/// # Safety
+///
+/// `dc` is a live DC with the face of the drawing already selected into it, and `caption` is a
+/// live slice. `DT_CALCRECT` writes the measured extent into the scratch rectangles of this
+/// frame and nowhere else; without `DT_MODIFYSTRING` the caption itself is only read.
+unsafe fn measure_label_lines(dc: HDC, rect: RECT, caption: &mut [u16]) -> Option<(i32, i32)> {
+    let mut wrapped = rect;
+
+    // SAFETY: see the contract above.
+    let whole = unsafe { DrawTextW(dc, caption, &mut wrapped, LABEL_TEXT_FORMAT | DT_CALCRECT) };
+
+    let mut single = rect;
+
+    // SAFETY: as above.
+    let one = unsafe {
+        DrawTextW(
+            dc,
+            caption,
+            &mut single,
+            LABEL_TEXT_FORMAT | DT_CALCRECT | DT_SINGLELINE,
+        )
+    };
+
+    if whole <= 0 || one <= 0 || whole % one != 0 {
+        return None;
+    }
+
+    Some((whole / one, one))
+}
+
+/// Draws a wrapped label one line at a time, each line in the band the model pitch puts it in
+/// — task T-12-12. Answers how many lines it painted.
+///
+/// # Why every pass draws the whole caption
+///
+/// The wrap has to stay the system's own: the captions come from the string tables of both
+/// locales (FR-94) and, in the case of the journal path, from whatever folder the person
+/// happens to have, so a hand-written line breaker would have to agree with `DT_WORDBREAK` on
+/// text that cannot be enumerated. Measured, it would not: `GetTextExtentPoint32W` makes
+/// `D:\папка с пробелом\Lang&Switcher\журнал` **250 px** wide and `DrawTextW` makes it **240**,
+/// because `DrawTextW` without `DT_NOPREFIX` eats the `&` as a prefix marker and the extent
+/// call measures it as a glyph — ten pixels, and the journal path is precisely the label a
+/// stray `&` can reach ([`LABEL_TEXT_FORMAT`] says so in its last paragraph).
+///
+/// So every pass calls the **same** `DrawTextW` with the **same** [`LABEL_TEXT_FORMAT`] on the
+/// **same** rectangle width, only shifted down the page, and a clip lets exactly one line of
+/// it through. Line `j` of pass `i` lands `(j − i) × natural` from the top of the band, so the
+/// band of `natural` pixels holds line `i` and no other — the arithmetic, not a promise.
+///
+/// # No GDI object is created, so none can leak
+///
+/// The clip is narrowed with `IntersectClipRect` between `SaveDC` and `RestoreDC`, which is
+/// the idiom [`paint_rounded`] already uses. There is no region handle to forget on an exit
+/// path because there is no region handle at all.
+///
+/// # NFR-13, and what each refusal costs
+///
+/// - `SaveDC` answering zero means the clip could not be put back, so it is not narrowed:
+///   the loop stops where it is rather than draw with a clip it cannot undo.
+/// - `IntersectClipRect` answering `RGN_ERROR` means the clip was not narrowed either, and a
+///   pass drawn under the caller's own clip would put every line of the caption on the page at
+///   once. The loop stops there too.
+/// - `NULLREGION` is not a refusal but the ordinary case of a partial repaint: the band is
+///   outside what the caller is redrawing, there is nothing to paint in it, and the line counts
+///   as done.
+///
+/// A stop at the very first line answers zero, and [`paint_label`] spends that on the single
+/// plain call — the picture of before this task, whole.
+///
+/// # Safety
+///
+/// Called from [`paint_label`] with values copied out of the `WM_DRAWITEM` message: `dc` is
+/// owned by the sender for the length of the send, and `caption` and `rect` are live locals.
+unsafe fn paint_label_lines(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    lines: i32,
+    natural: i32,
+    pitch: i32,
+) -> i32 {
+    let mut painted = 0;
+
+    for index in 0..lines {
+        // The band this line is to end up in, **clamped to the rectangle of the control**: an
+        // owner-drawn static answers for its own rectangle and for not one pixel outside it,
+        // and the pass below draws into a rectangle shifted down the page, so this clamp is
+        // what keeps the ink at home. A band that has fallen off the bottom entirely comes out
+        // empty here and `IntersectClipRect` answers `NULLREGION` for it — see below.
+        let top = (rect.top + index * pitch).min(rect.bottom);
+        let bottom = (top + natural).min(rect.bottom);
+
+        // SAFETY: `dc` is a handle passed by value; the call pushes the state of the device
+        // context onto its own stack and touches no memory of this process.
+        let saved = unsafe { SaveDC(dc) };
+
+        // NFR-13: examined — see the doc comment.
+        if saved == 0 {
+            break;
+        }
+
+        // SAFETY: `dc` is the live DC and the four numbers are plain values.
+        let narrowed = unsafe { IntersectClipRect(dc, rect.left, top, rect.right, bottom) };
+
+        // NFR-13: the region type is examined and each of the three outcomes is answered —
+        // see the doc comment. The `RestoreDC` below runs on all of them.
+        let drawable = narrowed != RGN_ERROR && narrowed != NULLREGION;
+
+        if drawable {
+            // The shift that puts line `index` at the top of its band: its natural place is
+            // `index × natural` from the top of the rectangle, its band is `index × pitch`.
+            let shift = index * (pitch - natural);
+
+            let mut text_rect = rect;
+            text_rect.top += shift;
+            text_rect.bottom += shift;
+
+            // SAFETY: `caption` and `text_rect` are live locals of this frame and the
+            // caller's; the format has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call
+            // reads the caption and writes only pixels of the DC — and only the pixels of the
+            // band, because of the clip narrowed just above.
+            unsafe { DrawTextW(dc, caption, &mut text_rect, LABEL_TEXT_FORMAT) };
+        }
+
+        // SAFETY: `saved` is the state this loop pushed a few lines above, and nothing between
+        // the two calls pushed another.
+        let _ = unsafe { RestoreDC(dc, saved) };
+
+        if narrowed == RGN_ERROR {
+            break;
+        }
+
+        painted += 1;
+    }
+
+    painted
+}
+
+// =========================================================================================
 // Чистая арифметика рисования: шаг строки, ширина знака, воздух рамки — task T-14-5
 // =========================================================================================
 //
@@ -2230,8 +2583,8 @@ const PANEL_CAPTION_BLANK_PERCENT: i32 = 28;
 /// The pitch a wrapped label is to be drawn at, or `None` for «leave it to the one plain
 /// call» — the whole decision of task T-12-12 as a pure function a table test can close.
 ///
-/// `lines` and `natural` are what `settings::measure_label_lines` answered and `model` is
-/// `settings::LABEL_LINE_PITCH` through [`scaled`]. Two questions, and either «no» is the
+/// `lines` and `natural` are what `measure_label_lines` answered and `model` is
+/// [`LABEL_LINE_PITCH`] through [`scaled`]. Two questions, and either «no» is the
 /// drawing of before this task:
 ///
 /// 1. **Does the caption wrap at all?** One line has no pitch, and seventeen of the eighteen
@@ -2250,7 +2603,7 @@ const PANEL_CAPTION_BLANK_PERCENT: i32 = 28;
 /// to get it («подпись, которая перенеслась бы, обязана получить модельный шаг»).
 ///
 /// Nothing is risked by leaving it out: an owner-drawn static may not paint outside its own
-/// rectangle, and that is enforced where it belongs — `settings::paint_label_lines` clamps
+/// rectangle, and that is enforced where it belongs — `paint_label_lines` clamps
 /// every band of its clip to the rectangle, so a line the control is too short for is cut off
 /// by the very same edge that cuts it off today, and no ink can reach a neighbour.
 pub fn label_model_pitch(lines: i32, natural: i32, model: i32) -> Option<i32> {
