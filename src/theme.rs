@@ -3021,6 +3021,36 @@ pub enum ButtonFaceRole {
     /// palettes, «Графит» 52,58,67 and «Туман» 234,238,242, and no new colour invented for
     /// it.
     HoverBg,
+    /// [`Palette::sel_fg`] — the face of the **accented** button while the cursor stands on
+    /// it and nothing is held down (task T-15-2).
+    ///
+    /// # Why the ink of a selected row is a face here, and why it is not a new colour
+    ///
+    /// The palette has no field called «the accent under the cursor», and inventing one is
+    /// forbidden — so the response had to be built out of what is already there. Two demands
+    /// decide which field: it must exist in **both** palettes, and it must move the accent in
+    /// **the same direction** an ordinary button moves on hover, or the two halves of one
+    /// dialog would answer the pointer in opposite ways. Exactly one field does both:
+    ///
+    /// | | «ОК» at rest (`accent_bg`) | under the cursor (`sel_fg`) | an ordinary button |
+    /// |---|---|---|---|
+    /// | «Графит» | 228,231,234 | 240,242,244 — lighter by 12/11/10 | lighter by 6/7/8 |
+    /// | «Туман» | 43,47,54 | 35,38,43 — darker by 8/9/11 | darker by 21/17/13 |
+    ///
+    /// The alternative — giving «ОК» the same `hover_bg` as everything else — was measured
+    /// and rejected on the picture it makes: in «Графите» an almost-white button turns
+    /// 52,58,67, which is the ground of the window, and in «Тумане» the near-black one turns
+    /// 234,238,242. That is not a highlight, it is the accent going out.
+    ///
+    /// ⚠ In «Тумане» this field carries the same number as [`Palette::text`] and
+    /// [`Palette::title_fg`] (35,38,43). That is a property of that one palette and not of
+    /// the roles — the same coincidence [`Palette::cap`] documents at length — and it is
+    /// still **the existing field**, not a new colour.
+    ///
+    /// The caption over this face stays [`ButtonTextRole::AccentFg`]: 27,30,35 on 240,242,244
+    /// and 245,246,247 on 35,38,43, so the pair the accent was designed with keeps its
+    /// contrast under the pointer.
+    SelFg,
 }
 
 /// The ink the button's caption is drawn with, named as the palette field.
@@ -3071,8 +3101,11 @@ pub struct ButtonColors {
     pub border: ButtonBorderRole,
 }
 
-/// One solid brush of [`Palette::hover_bg`], made for the length of a single drawing
-/// and freed with the value — FR-92а, task T-12-8.
+/// One solid brush of a colour the drawing needs **only while the cursor stands still on one
+/// control**, made for the length of a single drawing and freed with the value — FR-92а,
+/// task T-12-8 for [`Palette::hover_bg`] and task T-15-2 for [`Palette::sel_fg`], the face
+/// the accented «ОК» answers the pointer with. Neither field is in [`Brushes`], and the
+/// paragraph below is why neither belongs there.
 ///
 /// # Why this is not a brush of [`Brushes`]
 ///
@@ -3163,12 +3196,14 @@ pub(crate) fn resolve_button_colors(
     brushes: &Brushes,
     palette: &Palette,
 ) -> (ResolvedButtonColors, Option<HotBrush>) {
-    // The hot face is the one colour of this table the window's brush set does not hold —
-    // task T-12-8, see [`HotBrush`] for why it is made here instead of being owned there.
-    // A refused `CreateSolidBrush` leaves `None`, and the face below falls back to the quiet
-    // `button_bg`: the button then looks exactly as it did before this task (NFR-13).
+    // The two faces of this table the window's brush set does not hold — `hover_bg` since task
+    // T-12-8 and `sel_fg` since task T-15-2; see [`HotBrush`] for why they are made here
+    // instead of being owned there. A refused `CreateSolidBrush` leaves `None`, and the face
+    // below falls back to the quiet `button_bg`: the button then looks exactly as it did
+    // before those tasks (NFR-13).
     let hot = match colors.face {
         ButtonFaceRole::HoverBg => HotBrush::new(palette.hover_bg),
+        ButtonFaceRole::SelFg => HotBrush::new(palette.sel_fg),
         ButtonFaceRole::ButtonBg | ButtonFaceRole::AccentBg | ButtonFaceRole::SelBg => None,
     };
 
@@ -3176,7 +3211,7 @@ pub(crate) fn resolve_button_colors(
         ButtonFaceRole::ButtonBg => brushes.button_bg(),
         ButtonFaceRole::AccentBg => brushes.accent_bg(),
         ButtonFaceRole::SelBg => brushes.sel_bg(),
-        ButtonFaceRole::HoverBg => hot
+        ButtonFaceRole::HoverBg | ButtonFaceRole::SelFg => hot
             .as_ref()
             .map_or_else(|| brushes.button_bg(), HotBrush::brush),
     };
@@ -3198,6 +3233,7 @@ pub(crate) fn resolve_button_colors(
             ButtonFaceRole::AccentBg => palette.accent_bg,
             ButtonFaceRole::SelBg => palette.sel_bg,
             ButtonFaceRole::HoverBg => palette.hover_bg,
+            ButtonFaceRole::SelFg => palette.sel_fg,
         },
     };
 

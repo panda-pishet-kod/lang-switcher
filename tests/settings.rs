@@ -1219,14 +1219,28 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
     // ordinary face when disabled — a disabled button takes no Enter and must not
     // advertise itself as the default.
     //
-    // ⚠ And the accent **does not answer the cursor** in this wave (task T-12-8, п. 4): the
-    // palette holds no second accent to light «ОК» up with, inventing a colour is forbidden,
-    // and so the hot row of this half of the table is the row above it, character for
-    // character. The rows are here rather than absent on purpose — the day a wave gives the
-    // accent a hot face, this is the assertion that has to be edited for it.
+    // ⚠ **That day came — task T-15-2.** Until it, the hot row of this half of the table was
+    // the row above it character for character (task T-12-8, п. 4: the palette held no second
+    // accent to light «ОК» up with and inventing a colour is forbidden), and the note here
+    // said that the day a wave gave the accent a hot face, this assertion was the one that
+    // would have to be edited for it. The user reported the consequence — «только вспышка и
+    // никакой подсветки» — and the wave arrived: the accented button now answers the pointer
+    // with `sel_fg`, **a field the palette already had**, and the ink stays `accent_fg` on
+    // both faces. One row moved, and one only.
+    //
+    // The rest of this half is untouched on purpose, because the precedence is untouched:
+    // `disabled` > `pressed` > `hot` > обычное. A pressed «ОК» still shows the selection pair
+    // whether or not the cursor is on it, and a disabled one still shows the ordinary face and
+    // muted ink — the accent's own answer to the pointer sits **below** both of them.
+    //
+    // ⚠ Why `sel_fg` and not `hover_bg` — the face every ordinary button takes: `hover_bg` on
+    // the accent inverts it («Графит» 228,231,234 → 52,58,67, the ground of the window; «Туман»
+    // 43,47,54 → 234,238,242), and an accent that goes out is not a highlight. `sel_fg` moves
+    // it the way an ordinary button moves — lighter in the dark palette, darker in the light
+    // one. `theme::ButtonFaceRole::SelFg` carries the numbers and the reasoning.
     let default_states = [
         (false, false, false, Face::AccentBg, Ink::AccentFg),
-        (true, false, false, Face::AccentBg, Ink::AccentFg),
+        (true, false, false, Face::SelFg, Ink::AccentFg),
         (false, true, false, Face::SelBg, Ink::SelFg),
         (true, true, false, Face::SelBg, Ink::SelFg),
         (false, false, true, Face::ButtonBg, Ink::TextMuted),

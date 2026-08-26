@@ -3267,16 +3267,25 @@ pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 4] = [
 ///   and so does the hot face, which is what «нажата > горячая» means: a pressed button is
 ///   also hot (the cursor is on it while the button is held), and this arm standing above
 ///   the hot one is the whole of that precedence;
-/// - the accent itself is the *normal* state of «ОК» and nothing else — **including while
-///   the cursor stands on it**. Task T-12-8 deliberately leaves «ОК» without a response:
-///   the palette has no second accent to light it up with, and inventing a colour is
-///   forbidden. The wiring is there all the same (the button is subclassed and its hot flag
-///   is kept like every other), so a wave that names the accent's hot face makes it visible
-///   by adding one arm here and nothing else;
+/// - **акцент третьим, и он сам отвечает на курсор** — task T-15-2. «ОК» is the accented
+///   button, and the accent is what it wears both at rest and under the pointer; what the
+///   pointer moves is *which* accent. At rest the face is `accent_bg`; under the pointer it
+///   is `sel_fg`, and the ink stays `accent_fg` in both. Task T-12-8 had left this button
+///   deaf on purpose — the palette holds no field called «the accent under the cursor» and
+///   inventing a colour is forbidden — and the user reported the result as «только вспышка
+///   и никакой подсветки». `sel_fg` is what answers it **out of the fields the palette
+///   already has**: it is the one field of both palettes that moves the accent *the way an
+///   ordinary button moves on hover* — lighter in «Графите» (228,231,234 → 240,242,244)
+///   and darker in «Тумане» (43,47,54 → 35,38,43) — so the accent is strengthened rather
+///   than lost, and the caption keeps the contrast `accent_fg` was chosen for. Nothing else
+///   moves: the frame stays `button_border`, and the about window's «ОК» rides along by
+///   construction through [`about_button_colors`];
 /// - **горячая** — the cursor stands on an ordinary, enabled, unpressed button: the face
 ///   goes to `hover_bg` and **nothing else moves**. The frame stays `button_border` and the
 ///   caption stays `text`, exactly as at rest — the response is a change of ground, the way
-///   the tray menu (task T-11-21) makes it.
+///   the tray menu (task T-11-21) makes it. This arm stands **below** the accent one, which
+///   is what keeps `hover_bg` off «ОК»: an almost-white button turning almost the colour of
+///   the window is not a highlight, it is a disappearance.
 ///
 /// Focus is deliberately absent here: `ODS_FOCUS` changes no colour — it adds the dotted
 /// `DrawFocusRect` frame on top of whatever face this table chose, and that is the drawing
@@ -3303,7 +3312,11 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
 
     if control == OK_COMMAND {
         return ButtonColors {
-            face: ButtonFaceRole::AccentBg,
+            face: if hot {
+                ButtonFaceRole::SelFg
+            } else {
+                ButtonFaceRole::AccentBg
+            },
             text: ButtonTextRole::AccentFg,
             border,
         };
