@@ -5303,14 +5303,44 @@ unsafe fn draw_list_item(
     // NFR-13, for the paint calls below: every answer is deliberately dropped, for the reason
     // `draw_combo_item` states for its own.
 
-    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for the
-    // length of this send; `ground` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &rect, ground) };
+    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
+    // and the same cure task T-15-1 gave the push buttons. Measured on the стенд with a self-check
+    // raised by a click — the стимул a row's selection is raised by: an intermediate state reached
+    // the screen in **13 of 30** transitions in «Графите» and **9 of 30** in «Тумане», the stripe
+    // laid down with the label of the row **not yet on it**. ⚠ The instrument in `tools\` reported
+    // a zero here and refused to certify it (`THIS ZERO IS UNCONFIRMED`, exit code 4) because its
+    // self-check is raised by a press and this state by a click; the unconfirmed zero was hiding a
+    // real defect.
+    //
+    // ⚠ `rect` of a list row is **offset** inside the control — it is not a client rectangle
+    // starting at the origin — and the buffer is built for exactly that: it moves its own logical
+    // origin onto the corner of `rect`, so every step below names the same rectangles it named
+    // before.
+    //
+    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself and
+    // every step below paints where it painted before this task, flicker and all.
+    //
+    // SAFETY: `dc` is the DC of the message the caller is inside of; the buffer reads it for its
+    // colour depth and its face, writes to it only in the blit at the foot of this body, and frees
+    // its own DC and bitmap when this frame ends.
+    // ⚠ Named `surface` and not `buffer`, unlike the other bodies of this task: the text of a row
+    // is read into a `buffer` of its own a few lines below, and two `buffer`s in one body — one
+    // shadowing the other inside a block — is a thing to read twice and get wrong once.
+    let surface = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = surface.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
+    // ⚠ **Since task T-15-1б this erase also grounds the buffer** — the corner smoothing of the
+    // stripe below reads the ground of each corner back **out of** the DC it draws into, and the
+    // pixels of a fresh `CreateCompatibleBitmap` are undefined.
+    //
+    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message; `rect`
+    // is a value of the message; `ground` is a live brush of the dialog's state.
+    unsafe { FillRect(target, &rect, ground) };
 
     // The selection stripe of the mock-ups — the one figure both lists of the dialog wear
     // since task T-11-25, drawn by [`paint_selection_stripe`].
     if selected {
-        paint_selection_stripe(dc, &rect, fill_ink, fill, dpi);
+        paint_selection_stripe(target, &rect, fill_ink, fill, dpi);
     }
 
     // −1 — an empty list asking for the focus cue with no row to name.
@@ -5338,11 +5368,11 @@ unsafe fn draw_list_item(
             let copied = usize::try_from(copied).unwrap_or(0).min(length);
 
             if copied > 0 {
-                // SAFETY: `dc` is a handle passed by value; both calls write an attribute of
-                // the DC and touch no memory of this process.
-                unsafe { SetBkMode(dc, TRANSPARENT) };
+                // SAFETY: `target` is a handle passed by value; both calls write an attribute of
+                // that DC and touch no memory of this process.
+                unsafe { SetBkMode(target, TRANSPARENT) };
                 // SAFETY: as above.
-                unsafe { SetTextColor(dc, ink) };
+                unsafe { SetTextColor(target, ink) };
 
                 // `TxtPx $g $it $F $brFg ($px + 7) ($ry + 2)` of the `'lbox'` arm: seven
                 // mock-up pixels in from the left edge of the list, two below the top of the
@@ -5359,17 +5389,26 @@ unsafe fn draw_list_item(
 
                 // Our own face, grey-antialiased — task T-11-17.
                 //
-                // SAFETY: `dc` is the DC of the message and `face` is a live font the
-                // dialog's state owns for longer than this call.
-                let previous_face = unsafe { select_face(dc, face) };
+                // ⚠ Into `target` and never into `dc`: the face has to be selected into the very
+                // DC `DrawTextW` writes through. Selecting it into the DC of the message while
+                // drawing into the buffer left the buffer wearing the font the CONTROL was
+                // created with — and that font is `DEFAULT_QUALITY`, so the row came out in
+                // ClearType, with colour fringes on every glyph, against the grey antialiasing of
+                // the rest of the dialog. Caught by the 24 frames: `excl-dark` moved 197 levels
+                // on one row (task T-15-1б, and the reason that number is not allowed to be
+                // waved through as "one level on text").
+                //
+                // SAFETY: `target` is the buffer or the DC of the message and `face` is a live
+                // font the dialog's state owns for longer than this call.
+                let previous_face = unsafe { select_face(target, face) };
 
                 // SAFETY: the slice and `text_rect` are live locals of this frame; the format
                 // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
                 // and writes only pixels of the DC.
-                unsafe { DrawTextW(dc, &mut buffer[..copied], &mut text_rect, DT_SINGLELINE) };
+                unsafe { DrawTextW(target, &mut buffer[..copied], &mut text_rect, DT_SINGLELINE) };
 
                 // SAFETY: `previous_face` is what `select_face` answered for this same DC.
-                unsafe { restore_face(dc, previous_face) };
+                unsafe { restore_face(target, previous_face) };
             }
         }
     }
@@ -5377,9 +5416,22 @@ unsafe fn draw_list_item(
     if focused {
         // NFR-13: the `BOOL` is examined and deliberately dropped — see above.
         //
-        // SAFETY: `dc` is the DC of the message and `rect` is a live local of this frame;
-        // the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(dc, &rect) };
+        // SAFETY: `target` is the buffer or the DC of the message and `rect` is a live local of
+        // this frame; the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(target, &rect) };
+    }
+
+    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
+    // erase has touched the window, so what DWM can sample is the row as it was or the row as it
+    // now is, and there is no third state for the eye to catch.
+    //
+    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
+    // gives for its own blit.
+    //
+    // SAFETY: `dc` is the DC of the message, painted into for the length of this send; `surface`
+    // is this frame's own, and its DC and bitmap are freed as it goes out of scope on this line.
+    if let Some(surface) = surface {
+        let _ = unsafe { surface.blit(dc) };
     }
 
     // TRUE — the row is drawn.
@@ -5551,6 +5603,29 @@ unsafe fn draw_glyph_element(
 
     let dpi = dc_dpi(dc);
 
+    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
+    // and the same cure task T-15-1 gave the push buttons. Measured on the стенд with a self-check
+    // raised by a click, the стимул this element's own state is raised by: an intermediate state
+    // reached the screen in **22 of 30** transitions in «Графите» and **18 of 30** in «Тумане» —
+    // the ground erased and the caption **not yet drawn**, a line of the dialog standing blank for
+    // one frame. ⚠ The instrument in `tools\` reported a zero here and refused to certify it
+    // (`THIS ZERO IS UNCONFIRMED`, exit code 4) exactly because its self-check is raised by a
+    // press and this state by a click; the unconfirmed zero was hiding a real defect, which is the
+    // whole reason that refusal exists.
+    //
+    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself and
+    // every step below paints where it painted before this task, flicker and all.
+    //
+    // ⚠ `dpi` is taken one line above off the DC of the **message** and never off the buffer:
+    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and the
+    // glyph's radius, its square and its check mark are all scaled through it.
+    //
+    // SAFETY: `dc` is the DC of the message the caller is inside of; the buffer reads it for its
+    // colour depth and its face, writes to it only in the blit at the foot of this body, and frees
+    // its own DC and bitmap when this frame ends.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // ⚠ **The ground, before anything is drawn on it — task T-12-6.**
     //
     // An owner-drawn button is responsible for the whole of its rectangle, exactly as the
@@ -5576,9 +5651,16 @@ unsafe fn draw_glyph_element(
     // NFR-13: the answer is examined in words and deliberately dropped, for the reason the
     // block comment below the glyph rectangle gives for every other paint call here.
     //
-    // SAFETY: `dc` and `rect` are the values of the message this call is inside of; `ground` is
-    // a live brush the dialog's state owns for longer than this call.
-    unsafe { FillRect(dc, &rect, ground) };
+    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
+    // The corner smoothing of the glyph reads the ground of each corner back **out of** the DC it
+    // draws into, and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill,
+    // standing exactly where it stood, is what makes the buffer hold under the corners the same
+    // colour the screen held there.
+    //
+    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message; `rect`
+    // is a value of the message, and `ground` is a live brush the dialog's state owns for longer
+    // than this call.
+    unsafe { FillRect(target, &rect, ground) };
 
     // The glyph: at the left edge, centred vertically, [`GLYPH_SIZE`] mock-up pixels a side
     // through the scale — the `$bs = 17` of the generator, and `$by = $py + [int](($ph -
@@ -5606,7 +5688,7 @@ unsafe fn draw_glyph_element(
             // the pen, the interior with the brush — so the frameless cell of the closed
             // table is outlined in its own fill.
             paint_rounded(
-                dc,
+                target,
                 &glyph,
                 scaled(GLYPH_CORNER_RADIUS, dpi),
                 frame.unwrap_or(fill_ink),
@@ -5615,11 +5697,11 @@ unsafe fn draw_glyph_element(
             );
 
             if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
-                draw_check_mark(dc, &glyph, mark_ink, GLYPH_CHECK_MARK, dpi);
+                draw_check_mark(target, &glyph, mark_ink, GLYPH_CHECK_MARK, dpi);
             }
         }
         GlyphKind::RadioButton => {
-            paint_ellipse(dc, &glyph, frame, fill, dpi);
+            paint_ellipse(target, &glyph, frame, fill, dpi);
 
             if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
                 // The 4,6 mock-up pixels of the generator; the 7,8 of the dot's own diameter
@@ -5633,7 +5715,7 @@ unsafe fn draw_glyph_element(
                     bottom: glyph.bottom - dot_inset,
                 };
 
-                paint_ellipse(dc, &dot, None, dot_brush, dpi);
+                paint_ellipse(target, &dot, None, dot_brush, dpi);
             }
         }
     }
@@ -5643,11 +5725,11 @@ unsafe fn draw_glyph_element(
     let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
 
     if !caption.is_empty() {
-        // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the
+        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that
         // DC and touch no memory of this process.
-        unsafe { SetBkMode(dc, TRANSPARENT) };
+        unsafe { SetBkMode(target, TRANSPARENT) };
         // SAFETY: as above.
-        unsafe { SetTextColor(dc, ink) };
+        unsafe { SetTextColor(target, ink) };
 
         // Twelve dialog units from the **left edge of the element** — the `($c.x + 12)` of both
         // the `'check'` and the `'radio'` arm of the generator, task T-11-16. A refused
@@ -5669,14 +5751,21 @@ unsafe fn draw_glyph_element(
         // holds, and a cue measured in one face around a caption drawn in another would sit
         // wrong.
         //
-        // SAFETY: `dc` is the DC of the message and `face` is a live font the dialog's state
-        // owns for longer than this call; the previous handle is put back below.
-        let previous_face = unsafe { select_face(dc, face) };
+        // SAFETY: `target` is the buffer or the DC of the message and `face` is a live font the
+        // dialog's state owns for longer than this call; the previous handle is put back below.
+        let previous_face = unsafe { select_face(target, face) };
 
         // SAFETY: `caption` and `text_rect` are live locals of this frame; the format has
         // no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
         // writes only pixels of the DC.
-        unsafe { DrawTextW(dc, &mut caption, &mut text_rect, DT_VCENTER | DT_SINGLELINE) };
+        unsafe {
+            DrawTextW(
+                target,
+                &mut caption,
+                &mut text_rect,
+                DT_VCENTER | DT_SINGLELINE,
+            )
+        };
 
         if focused {
             // The dotted frame goes around the caption, not the glyph — as the native
@@ -5688,7 +5777,14 @@ unsafe fn draw_glyph_element(
 
             // SAFETY: as above — `DT_CALCRECT` writes the measured extent into
             // `measured`, a live local of this frame, and draws nothing.
-            unsafe { DrawTextW(dc, &mut caption, &mut measured, DT_CALCRECT | DT_SINGLELINE) };
+            unsafe {
+                DrawTextW(
+                    target,
+                    &mut caption,
+                    &mut measured,
+                    DT_CALCRECT | DT_SINGLELINE,
+                )
+            };
 
             let focus_rect = RECT {
                 left: text_rect.left - FOCUS_CUE_TEXT_INSET,
@@ -5700,14 +5796,29 @@ unsafe fn draw_glyph_element(
             // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
             // comment above the glyph painting.
             //
-            // SAFETY: `dc` is the DC of the message and `focus_rect` is a live local of
-            // this frame; the call keeps no pointer.
-            let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+            // SAFETY: `target` is the buffer or the DC of the message and `focus_rect` is a
+            // live local of this frame; the call keeps no pointer.
+            let _ = unsafe { DrawFocusRect(target, &focus_rect) };
         }
 
         // SAFETY: `previous_face` is what `select_face` answered for this same DC, and
         // nothing between the two calls selected another font.
-        unsafe { restore_face(dc, previous_face) };
+        unsafe { restore_face(target, previous_face) };
+    }
+
+    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
+    // erase has touched the window, so what DWM can sample is the element as it was or the element
+    // as it now is, and there is no third state for the eye to catch — in particular no frame in
+    // which the ground is erased and the caption is not yet on it.
+    //
+    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
+    // gives for its own blit. A refused blit leaves the element showing the picture the window
+    // already had there — its previous state and never a hole.
+    //
+    // SAFETY: `dc` is the DC of the message, painted into for the length of this send; `buffer` is
+    // this frame's own, and its DC and bitmap are freed as it goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
 
     // TRUE — the element is drawn.
@@ -7180,31 +7291,61 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
 
     let dpi = dc_dpi(dc);
 
+    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
+    // and the same cure task T-15-1 gave the push buttons: a string of separate GDI calls
+    // straight into the DC of a control is not atomic, and DWM samples the surface of a window
+    // sixty times a second. Measured on the стенд against the closed part of `IDC_THEME`, thirty
+    // hover transitions in each palette: an intermediate state reached the screen in **30 of 30**,
+    // its bounding box exactly this control's rectangle, holding the hot fill, the frame ink and
+    // **100 px of the ground of the panel** — the four 5×5 corner squares of raw ground standing
+    // where the smoothed arcs were not yet drawn. Off-screen there is no screen for that state to
+    // appear on, and the finished field crosses over in the single blit at the foot of this body.
+    //
+    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of this paint itself and
+    // every step below paints where it painted before this task, flicker and all: the honest
+    // degradation [`BackgroundCache`] answers a refusal with.
+    //
+    // ⚠ `dpi` is taken one line above off the DC of **this paint** and never off the buffer.
+    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and a
+    // radius scaled off the buffer would be wrong at every scale but 100 % with no test going red.
+    //
+    // SAFETY: `dc` is the DC `BeginPaint` answered for this window, owned until `EndPaint`; the
+    // buffer reads it for its colour depth and its face, writes to it only in the blit below, and
+    // frees its own DC and bitmap when this frame ends.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &area) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // 1. The ground, then the field on top of it. `WM_ERASEBKGND` deliberately erases
     // nothing (see `combo_box_proc`), so this is the one erase of the closed part — and it
     // is what the four corners the rounding cuts away are filled with. Without it those
     // corners would hold whatever the parent last painted there, which is right only for as
     // long as the dialog carries no `WS_CLIPCHILDREN`.
     //
-    // SAFETY: `dc` is the DC of this paint and `area` is a live local of this frame;
-    // `ground` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &area, ground) };
+    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
+    // The corner smoothing reads the ground of each corner back **out of** the DC it draws into,
+    // and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill, standing
+    // exactly where it stood, is what makes the buffer hold under the corners the same colour the
+    // screen held there, and the halftones of the arcs come out unmoved.
+    //
+    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of this paint;
+    // `area` is a live local of this frame; `ground` is a live brush of the dialog's state.
+    unsafe { FillRect(target, &area, ground) };
 
-    paint_rounded(dc, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
+    paint_rounded(target, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
 
     // 2. The chevron, in place of the system button.
     let chevron = combo_chevron_points(&area, dpi);
-    draw_combo_chevron(dc, chevron, chevron_ink, dpi);
+    draw_combo_chevron(target, chevron, chevron_ink, dpi);
 
     // 3. The chosen value, from the control by identifier — never from anywhere else.
     let mut value = combo_selected_text(dialog, control);
 
     if !value.is_empty() {
-        // SAFETY: `dc` is the DC of this paint; both calls write an attribute of the DC and
-        // touch no memory of this process.
-        unsafe { SetBkMode(dc, TRANSPARENT) };
+        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that DC
+        // and touch no memory of this process.
+        unsafe { SetBkMode(target, TRANSPARENT) };
         // SAFETY: as above.
-        unsafe { SetTextColor(dc, ink) };
+        unsafe { SetTextColor(target, ink) };
 
         // The face for the length of the drawing — see the doc comment. Since task T-11-17 it
         // is the dialog's own grey-antialiased face; the control's own font, which the manager
@@ -7220,10 +7361,10 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         let previous_font = if font.is_invalid() {
             None
         } else {
-            // SAFETY: `dc` is the DC of this paint and `font` is either a live face the
-            // dialog's state owns for longer than this call or the live font of the control,
-            // owned by the manager; the previous handle is put back below.
-            Some(unsafe { SelectObject(dc, font.into()) })
+            // SAFETY: `target` is the buffer or the DC of this paint, and `font` is either a live
+            // face the dialog's state owns for longer than this call or the live font of the
+            // control, owned by the manager; the previous handle is put back below.
+            Some(unsafe { SelectObject(target, font.into()) })
         };
 
         // Three dialog units from the left edge — the `($c.x + 3)` of the `'combo'` arm of the
@@ -7245,7 +7386,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         // pixels of the DC.
         unsafe {
             DrawTextW(
-                dc,
+                target,
                 &mut value,
                 &mut text_rect,
                 DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -7255,7 +7396,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
         if let Some(previous) = previous_font {
             // SAFETY: `previous` is the font that was in the DC a moment ago; putting it back
             // ends this function's use of it.
-            unsafe { SelectObject(dc, previous) };
+            unsafe { SelectObject(target, previous) };
         }
     }
 
@@ -7270,9 +7411,24 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
 
         // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
         //
-        // SAFETY: `dc` is the DC of this paint and `focus_rect` is a live local of this frame;
-        // the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+        // SAFETY: `target` is the buffer or the DC of this paint and `focus_rect` is a live local
+        // of this frame; the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(target, &focus_rect) };
+    }
+
+    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
+    // erase has touched the window, so what DWM can sample is the closed part as it was or as it
+    // now is, and there is no third state for the eye to catch.
+    //
+    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
+    // gives for its own blit. A refused blit leaves the control showing the picture the window
+    // already had there — its previous state and never a hole — and painting the body a second
+    // time into the DC of the paint is the very flicker this task removes.
+    //
+    // SAFETY: `dc` is the DC of this paint, owned until `EndPaint`; `buffer` is this frame's own,
+    // and its DC and bitmap are freed as it goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
 }
 

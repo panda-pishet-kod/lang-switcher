@@ -2189,11 +2189,44 @@ impl MenuPaint {
         // 100 % look, which `theme::dc_dpi` decides).
         let dpi = theme::dc_dpi(dc);
 
-        // SAFETY: `dc` and `rect` came with the message; while the gate is up they
-        // describe an entry of our menu being painted, and every call below only writes
-        // pixels into that DC — the most a forged message can buy is a drawing on its own
-        // DC. `self.window_bg` is a live brush this value owns.
-        let filled = unsafe { FillRect(dc, &rect, self.window_bg) };
+        // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn
+        // onto, and the same cure task T-15-1 gave the push buttons of the settings dialog. A
+        // string of separate GDI calls straight into the DC of the message is not atomic, and DWM
+        // samples the surface of a window sixty times a second. Measured on the стенд, thirty
+        // hover transitions between two entries in each palette: an intermediate state reached the
+        // screen in **30 of 30**, its bounding box inside this entry's own rectangle and holding
+        // the highlight stripe **already drawn with the label not yet on it** — a blank
+        // highlighted row for one frame, on the surface this program opens oftenest.
+        //
+        // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself
+        // and every step below paints where it painted before this task, flicker and all.
+        //
+        // ⚠ `dpi` is taken one line above off the DC of the **message** and never off the buffer:
+        // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and
+        // every mock-up length below goes through it.
+        //
+        // ⚠ `rcItem` of a menu entry is **offset** inside the menu window — it is not a client
+        // rectangle starting at the origin — and the buffer is built for exactly that: it moves
+        // its own logical origin onto the corner of `rect`, so every step below names the same
+        // rectangles and the same points it named before.
+        //
+        // SAFETY: `dc` came with the message and is painted into for the length of the send; the
+        // buffer reads it for its colour depth and its face, writes to it only in the blit at the
+        // foot of this body, and frees its own DC and bitmap when this frame ends.
+        let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+        let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
+        // ⚠ **Since task T-15-1б this erase carries a second duty: it is what grounds the buffer.**
+        // The corner smoothing of the highlight below reads the ground of each corner back **out
+        // of** the DC it draws into, and the pixels of a fresh `CreateCompatibleBitmap` are
+        // undefined — so this fill, standing exactly where it stood, is what makes the buffer hold
+        // under those corners the same colour the screen held there.
+        //
+        // SAFETY: `rect` came with the message; while the gate is up they describe an entry of our
+        // menu being painted, and every call below only writes pixels into `target` — the most a
+        // forged message can buy is a drawing on its own DC. `self.window_bg` is a live brush this
+        // value owns.
+        let filled = unsafe { FillRect(target, &rect, self.window_bg) };
 
         // NFR-13: examined in the only way available — a refused fill leaves the row
         // unpainted for one frame and nothing here can repair it.
@@ -2206,7 +2239,7 @@ impl MenuPaint {
         // outline is handed the fill's own colour, so the figure has a fill and no frame.
         if selected {
             theme::paint_rounded(
-                dc,
+                target,
                 &menu_hover_rect(&rect, dpi),
                 theme::scaled(theme::CORNER_RADIUS, dpi),
                 self.palette.hover_bg,
@@ -2216,11 +2249,11 @@ impl MenuPaint {
         }
 
         // SAFETY: `self.font` is live for the whole showing; the previous selection is
-        // restored at the end of this function, while the DC is still the message's.
-        let previous_font = unsafe { SelectObject(dc, self.font.into()) };
+        // restored at the end of this function, while `target` is still alive.
+        let previous_font = unsafe { SelectObject(target, self.font.into()) };
 
-        // SAFETY: a state call on the message's DC — a mode by value, no memory of ours.
-        let _ = unsafe { SetBkMode(dc, TRANSPARENT) };
+        // SAFETY: a state call on the DC being painted — a mode by value, no memory of ours.
+        let _ = unsafe { SetBkMode(target, TRANSPARENT) };
 
         // FR-92а, task T-12-9: **one ink for every entry, hot or not.** The mock-up hands
         // `$brFg` to every row it draws — `chrome.ps1:167` — and does not brighten the row
@@ -2245,7 +2278,7 @@ impl MenuPaint {
         };
 
         // SAFETY: as above — a colour by value.
-        let _ = unsafe { SetTextColor(dc, ink) };
+        let _ = unsafe { SetTextColor(target, ink) };
 
         let mut text_rect = RECT {
             left: rect.left + MENU_H_PAD + check_column() + MENU_CHECK_GAP,
@@ -2262,7 +2295,7 @@ impl MenuPaint {
         // that the next paint will not do better.
         let _ = unsafe {
             DrawTextW(
-                dc,
+                target,
                 &mut units,
                 &mut text_rect,
                 DT_SINGLELINE | DT_VCENTER | DT_NOCLIP,
@@ -2270,11 +2303,27 @@ impl MenuPaint {
         };
 
         if item.checked {
-            self.draw_check_mark(dc, &rect, dpi);
+            self.draw_check_mark(target, &rect, dpi);
         }
 
-        // SAFETY: restores the font that was selected when the message arrived.
-        let _ = unsafe { SelectObject(dc, previous_font) };
+        // SAFETY: restores the font that was selected into `target` above.
+        let _ = unsafe { SelectObject(target, previous_font) };
+
+        // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
+        // erase has touched the window, so what DWM can sample is the entry as it was or the entry
+        // as it now is, and there is no third state for the eye to catch.
+        //
+        // NFR-13: the answer is examined in words and dropped. A refused blit leaves the entry
+        // showing the picture the window already had there — its previous state and never a hole —
+        // and painting the body a second time into the DC of the message is the very flicker this
+        // task removes.
+        //
+        // SAFETY: `dc` came with the message and is painted into for the length of the send;
+        // `buffer` is this frame's own, and its DC and bitmap are freed as it goes out of scope on
+        // this line.
+        if let Some(buffer) = buffer {
+            let _ = unsafe { buffer.blit(dc) };
+        }
     }
 
     /// The check mark of FR-93 — the smoothed figure of the mock-up, task T-11-21.
