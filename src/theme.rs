@@ -84,13 +84,13 @@
 use windows::Win32::Foundation::{COLORREF, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, COLORONCOLOR,
-    CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen, CreateSolidBrush,
-    DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT, DT_SINGLELINE, DT_TOP,
-    DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse, ExcludeClipRect, FillRect, GdiFlush,
-    GetDeviceCaps, GetStockObject, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect,
-    LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, PS_SOLID, Polyline, RGN_ERROR, RestoreDC,
-    RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor,
-    StretchBlt, TRANSPARENT,
+    CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen,
+    CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT,
+    DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
+    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetStockObject, HBITMAP,
+    HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION,
+    OBJ_FONT, PS_SOLID, Polyline, RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject,
+    SetBkMode, SetStretchBltMode, SetTextColor, SetWindowOrgEx, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::{PCWSTR, w};
@@ -699,6 +699,259 @@ pub const CORNER_RADIUS: i32 = 6;
 /// the frame a pixel wide wherever the division would round it away, which is what the
 /// mock-ups show at every scale.
 pub const BORDER_THICKNESS: i32 = 1;
+
+// =========================================================================================
+// Кадр целиком: внеэкранный буфер одного элемента — FR-92а, task T-15-1
+// =========================================================================================
+//
+// A drawing made of a string of separate GDI calls **straight into the DC of a control** is not
+// atomic, and the defect that costs is the one the **user** found and no instrument of this
+// project could: «когда я навожу мышь на кнопку вместо плавной подсветки происходит резкое
+// переключение и я на мгновенье вижу впавшие прямоугольники по краям кнопок». DWM samples the
+// surface of a window sixty times a second and is free to show it **between any two** of those
+// calls, so every intermediate state a drawing body leaves behind is a state that can reach the
+// eye.
+//
+// ⚠ Measured and not reasoned. A burst at 60,0 frames a second over the стенд caught an
+// intermediate frame in **100 % of hover transitions**, in both palettes: the face already laid
+// down, the four corners still bare ground and the caption not yet drawn. The corner smoothing
+// makes the gap wider than a race usually is — it reads its ground back **out of** the DC it
+// draws into and calls `GdiFlush` to be allowed to, four forced flushes of the batch queue per
+// repaint, each one more room for a half-finished picture to be sampled in.
+//
+// The cure is the one the settings dialog already uses for its own background: build the picture
+// off-screen and hand it over in a single `BitBlt`. What the program had no piece for is the
+// same thing around **one element** — and that is this type. The element is drawn into a surface
+// of its own, where an intermediate state has no screen to appear on, and the finished element
+// crosses to the window in one blit; every state DWM can sample is either the element as it was
+// or the element as it now is, and there is no third.
+//
+// # Почему тела рисования не переписываются под новые координаты
+//
+// ⚠ A surface starts at its own `(0, 0)` while the element it stands for starts wherever the
+// message put it — the client rectangle of a control begins at the origin, a row of a list does
+// not, and this type is meant for both. Subtracting that corner in every line of a drawing body
+// would be a change to every line of it, and it would not even be enough: the smoothing above
+// **reads** through the very same DC, so it would have to be taught the same shift the other way
+// round.
+//
+// So nothing is subtracted anywhere. `SetWindowOrgEx` moves the **logical** origin of the
+// surface onto the top-left corner of the element, and from that call on a logical coordinate of
+// the surface means exactly what it means on the window — for the calls that write and for the
+// calls that read alike, because GDI puts both ends of a blit through the mapping. A body drawn
+// into this buffer names the same rectangles and the same points it named before, character for
+// character; the only thing that changes is which DC it hands them to.
+
+/// An off-screen surface exactly the size of one element, owned: memory DC and bitmap made
+/// together, freed together in `Drop` — NFR-13, the ownership pattern of [`Supersample`].
+///
+/// # Как этим пользуются
+///
+/// Three lines around a drawing body that is otherwise left exactly as it was:
+///
+/// ```text
+/// let dpi = dc_dpi(dc);                                     // ⚠ off the DC of the message
+/// let buffer = PaintBuffer::for_rect(dc, &rect);            // None on a refusal of GDI
+/// let target = buffer.as_ref().map_or(dc, PaintBuffer::dc);
+/// … the body exactly as it was, writing into `target` …
+/// if let Some(buffer) = buffer { buffer.blit(dc); }         // one BitBlt, and the only one
+/// ```
+///
+/// `None` on every refusal of GDI (NFR-13): `map_or` then hands the body the DC of the message,
+/// and the element is painted the way this program painted it before this task — flicker and
+/// all, which is degraded and alive rather than unpainted.
+///
+/// # ⚠ Два места, где буфер отвечает не про окно
+///
+/// **The DPI.** `GetDeviceCaps` of a memory surface answers for the memory and not for the
+/// window, which is the very reason [`paint_rounded`] takes its `dpi` as a parameter instead of
+/// reading it off the DC it paints on. A radius scaled off this buffer would be wrong at every
+/// scale that is not 100 %, and nothing would say so — no red test and no warning, just another
+/// figure. The DPI is read off the DC of the message, before the substitution.
+///
+/// **The ground.** [`Supersample::render`] reads the ground of a corner back **out of** the DC
+/// it is drawing into, so whatever lies under the four corners is what the smoothing blends the
+/// arc into. The contents of a fresh `CreateCompatibleBitmap` are undefined, so a body drawn
+/// into a buffer has to lay the ground of its whole rectangle down **first** — which is what an
+/// owner-drawn body does anyway, and for its own reason (task T-12-6). Get that wrong and the
+/// halftones of all four corners move: the figure is still drawn, and it is drawn differently.
+pub struct PaintBuffer {
+    /// The memory DC the element is drawn through, with `bitmap` selected and the logical
+    /// origin already moved onto `area` — see the section above.
+    dc: HDC,
+    /// The picture itself — compatible with the DC handed to [`PaintBuffer::for_rect`] and
+    /// never with `dc`: a bitmap compatible with a *memory* DC would be monochrome, the same
+    /// trap [`Supersample`] words for its own section.
+    bitmap: HBITMAP,
+    /// The bitmap the fresh memory DC was born with — put back in `Drop` before `bitmap` is
+    /// deleted, because a bitmap still selected into a DC cannot be freed.
+    previous: HGDIOBJ,
+    /// The rectangle of the window this surface stands for, in the coordinates the caller was
+    /// handed it in. Kept rather than asked for a second time, so that [`PaintBuffer::blit`]
+    /// cannot be given a rectangle other than the one that was drawn.
+    area: RECT,
+}
+
+impl PaintBuffer {
+    /// The surface for the element `area` covers, for the device `target` paints on.
+    ///
+    /// `target` is read — for its colour depth and for the face it carries — and never written
+    /// to: the picture crosses to it in [`PaintBuffer::blit`] and nowhere else.
+    ///
+    /// `None` for an empty rectangle and for every refusal of GDI (NFR-13), which the type's own
+    /// documentation says what the caller does about.
+    ///
+    /// # Safety
+    ///
+    /// `target` is a live DC — the one of the message the caller is inside of — read for the
+    /// length of this call and not kept.
+    pub unsafe fn for_rect(target: HDC, area: &RECT) -> Option<Self> {
+        let width = area.right - area.left;
+        let height = area.bottom - area.top;
+
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+
+        // SAFETY: a memory DC over the caller's; deleted in `Drop` and on every failing path
+        // below.
+        let dc = unsafe { CreateCompatibleDC(Some(target)) };
+
+        // NFR-13: examined — no DC, no buffer.
+        if dc.is_invalid() {
+            return None;
+        }
+
+        // SAFETY: compatible with the *caller's* DC — see the field's own ⚠ — and owned by this
+        // value until `Drop`.
+        let bitmap = unsafe { CreateCompatibleBitmap(target, width, height) };
+
+        // NFR-13: examined.
+        if bitmap.is_invalid() {
+            // SAFETY: deletes exactly the DC made above, once; nothing of ours is in it.
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // SAFETY: both handles are live and ours; the bitmap the memory DC was born with is
+        // kept and put back in `Drop`.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+
+        // NFR-13: examined — a refused selection would leave the drawing going nowhere.
+        if previous.is_invalid() {
+            // SAFETY: the bitmap is selected into nothing, so it is free to delete; each handle
+            // is freed exactly once.
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            let _ = unsafe { DeleteDC(dc) };
+            return None;
+        }
+
+        // From here on both handles belong to a live value, and every way out of this function
+        // runs its `Drop` — there is no second cleanup path to keep in step with the first.
+        let buffer = Self {
+            dc,
+            bitmap,
+            previous,
+            area: *area,
+        };
+
+        // The whole of the coordinate arrangement, and the reason the drawing bodies are left
+        // alone — see the section above this type.
+        //
+        // SAFETY: `buffer.dc` is the memory DC made a few lines above; the call writes an
+        // attribute of that DC, and the `None` means it is asked to write no previous origin
+        // anywhere.
+        let moved = unsafe { SetWindowOrgEx(buffer.dc, area.left, area.top, None) };
+
+        // NFR-13: examined, and this is the one refusal that must not be shrugged at. An origin
+        // that did not move leaves a surface whose `(0, 0)` is the corner of the *window*: an
+        // element at `(545, 714)` would be drawn past the edge of a bitmap that is 87 px wide,
+        // and the blit would hand the window a rectangle of undefined pixels. Refusing the
+        // buffer sends the caller back to painting straight into the DC of the message.
+        if !moved.as_bool() {
+            return None;
+        }
+
+        // The face the drawing would have found had it stayed in the DC of the message. A body
+        // with a face of its own selects it and puts it back ([`select_face`]), but one whose
+        // faces were refused at initialisation draws in whatever the DC already carried (NFR-13)
+        // — and a fresh memory DC carries the stock `SYSTEM_FONT`, which is neither the same
+        // face nor the same metrics. Carrying it over is what makes this a stand-in for the DC
+        // and not merely a rectangle of pixels.
+        //
+        // SAFETY: `target` is the caller's live DC; `GetCurrentObject` answers a handle owned by
+        // whoever selected it there, and selecting that handle into a second DC neither copies
+        // nor frees it.
+        let face = unsafe { GetCurrentObject(target, OBJ_FONT) };
+
+        // NFR-13: examined — a DC that would not name its face leaves the memory DC with the one
+        // it was born with, the same degraded-but-alive answer [`select_face`] gives a window
+        // whose fonts were refused.
+        if !face.is_invalid() {
+            // SAFETY: as above. The answer names the stock font this one-line-old DC was born
+            // with and is deliberately dropped: nothing of ours is being displaced, and
+            // `DeleteDC` frees no object that is merely selected into the DC it destroys.
+            unsafe { SelectObject(buffer.dc, face) };
+        }
+
+        Some(buffer)
+    }
+
+    /// The DC to draw into — the one thing a drawing body has to be told.
+    pub fn dc(&self) -> HDC {
+        self.dc
+    }
+
+    /// Hands the finished element over to `target` in one `BitBlt` — the whole point of the
+    /// type, and the single moment at which any of it becomes visible.
+    ///
+    /// ⚠ The source point is the top-left corner of the element and not `(0, 0)`, which is not a
+    /// slip: it is a **logical** point of a surface whose origin was moved onto that very
+    /// corner, so it names device `(0, 0)` of the bitmap. A literal `0, 0` here would read from
+    /// `area.left, area.top` pixels *into* the picture and hand the window a shifted element.
+    ///
+    /// Answers whether it went over. `false` (NFR-13) leaves the element showing what the window
+    /// already had there — its previous picture and never a hole — and the next repaint of it
+    /// tries again.
+    ///
+    /// # Safety
+    ///
+    /// `target` is a live DC, painted into for the length of the send the caller is inside of.
+    pub unsafe fn blit(&self, target: HDC) -> bool {
+        // SAFETY: both DCs are live — `target` is the caller's and `self.dc` holds this value's
+        // own bitmap. Neither end of the copy touches memory of this process.
+        unsafe {
+            BitBlt(
+                target,
+                self.area.left,
+                self.area.top,
+                self.area.right - self.area.left,
+                self.area.bottom - self.area.top,
+                Some(self.dc),
+                self.area.left,
+                self.area.top,
+                SRCCOPY,
+            )
+        }
+        .is_ok()
+    }
+}
+
+impl Drop for PaintBuffer {
+    fn drop(&mut self) {
+        // SAFETY: `self.previous` is the bitmap this DC was born with, kept since `for_rect`;
+        // putting it back frees `self.bitmap` to be deleted. The answer is dropped — there is
+        // nothing to put back if the DC is already gone, and this path carries no journal row
+        // for the reason [`Brushes`] gives for its own cleanup.
+        unsafe { SelectObject(self.dc, self.previous) };
+
+        // SAFETY: both came from the successful calls in `for_rect`, were handed to nobody, and
+        // are freed exactly once — the type is neither `Copy` nor `Clone`, its fields are private
+        // and never reassigned, and `drop` runs once.
+        let _ = unsafe { DeleteObject(self.bitmap.into()) };
+        let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
 
 // =========================================================================================
 // Своё сглаживание краёв: сверхдискретизация и уменьшение — FR-92а, task T-11-17

@@ -7648,10 +7648,17 @@ fn every_surface_picture_and_face_of_this_task_is_owned_and_freed_in_drop() {
 
     // The bitmap a memory DC was born with is kept and put back before ours is deleted — a
     // bitmap still selected into a DC cannot be freed.
+    //
+    // ⚠ Three since task T-15-1, not the two of T-11-17: `theme::PaintBuffer` — the off-screen
+    // surface one owner-drawn element is painted into so that no half-finished state of it can
+    // reach the screen — is the third owner of a bitmap, and it deselects exactly as the other
+    // two do. The count is a census of owners and the number moves when a legitimate owner is
+    // added; **the invariant this row states does not move**, and every one of the three has to
+    // go on taking its bitmap out of the DC before it frees it.
     assert_eq!(
         product_lines_with("unsafe { SelectObject(self.dc, self.previous) };").len(),
-        2,
-        "both owners of a bitmap must deselect before they delete"
+        3,
+        "all three owners of a bitmap must deselect before they delete"
     );
 
     // And the face that used to be made and deleted on every erase is an owned pair now.

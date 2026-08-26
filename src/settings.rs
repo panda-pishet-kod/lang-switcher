@@ -4775,6 +4775,20 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 ///
 /// The caption comes from the dialog's own control by identifier — never from the message.
 ///
+/// # Один кадр, а не череда — task T-15-1
+///
+/// ⚠ The steps below are drawn into an off-screen [`theme::PaintBuffer`] and handed to the
+/// window in a single `BitBlt` at the end. They are the same steps in the same order as before
+/// that task; what changed is only the DC they write into, and why they had to stop writing
+/// into the window's own is the defect the **user** found — «я на мгновенье вижу впавшие
+/// прямоугольники по краям кнопок». A body that paints a control call by call is sampled by DWM
+/// between the calls: measured on the стенд, an intermediate state reached the screen in **100 %
+/// of hover transitions**, the face already laid down and the four corners still bare ground.
+///
+/// A refused buffer (NFR-13) is not a refused button: `target` is then the DC of the message
+/// itself and this body paints exactly as it did before the task, flicker included, which is the
+/// degradation [`BackgroundCache`] answers a refusal of GDI with.
+///
 /// # Safety
 ///
 /// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of:
@@ -4801,6 +4815,27 @@ unsafe fn paint_push_button(
 
     let dpi = dc_dpi(dc);
 
+    // ⚠ **Один кадр вместо череды — task T-15-1.** The surface the steps below are drawn onto.
+    // Every one of them used to write straight into the DC of the message, and DWM samples the
+    // surface of a window sixty times a second: on the стенд an intermediate state reached the
+    // screen in **100 % of hover transitions**. Off-screen there is no screen for one to appear
+    // on, and the finished button crosses over in the single blit at the foot of this body.
+    //
+    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself
+    // and every step below paints where it painted before this task, flicker and all: the honest
+    // degradation, and the one [`BackgroundCache`] answers a refusal with.
+    //
+    // ⚠ `dpi` is taken one line above off the DC of the **message** and never off the buffer.
+    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window — the
+    // very reason the rounded figure is handed its DPI instead of reading it — and a radius
+    // scaled off the buffer would be wrong at every scale but 100 % with no test going red.
+    //
+    // SAFETY: `dc` is the DC of the message the caller is inside of; the buffer reads it for its
+    // colour depth and its face, writes to it only in the blit below, and frees its own DC and
+    // bitmap when this frame ends.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // ⚠ **The ground, before the face — task T-12-6.** The corners the rounding cuts away used
     // to be left standing on whatever `WM_CTLCOLORBTN` had erased with, and the measured answer
     // is that the system erases nothing before it hands an owner-drawn button its drawing: a
@@ -4811,12 +4846,20 @@ unsafe fn paint_push_button(
     // idempotent, which is what a repaint has to be; it is the same erase
     // [`draw_combo_closed_part`] does for the closed part of a combo box.
     //
+    // ⚠ **And since task T-15-1 the erase carries a second duty: it is what grounds the buffer.**
+    // The corner smoothing reads the ground of each corner back **out of** the DC it draws into,
+    // and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill, standing
+    // exactly where it stood, is what makes the buffer hold under the corners the same colour
+    // the screen held there, and the halftones of the arcs come out unmoved. Moving this line
+    // after the figure would not merely undo T-12-6, it would change the picture.
+    //
     // NFR-13: the answer is dropped with the rest of the paint calls, for the reason the block
     // comment above gives.
     //
-    // SAFETY: `dc` and `rect` are the values of the message the caller is inside of, and
-    // `colors.ground` is a live brush the window's state owns for longer than this call.
-    unsafe { FillRect(dc, &rect, colors.ground) };
+    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message;
+    // `rect` is a value of the message, and `colors.ground` is a live brush the window's state
+    // owns for longer than this call.
+    unsafe { FillRect(target, &rect, colors.ground) };
 
     // The face and the single-pixel frame in one figure — п. 2.2 of task T-11-13: the
     // buttons of the mock-ups have [`CORNER_RADIUS`] corners — the same radius as everything
@@ -4824,7 +4867,7 @@ unsafe fn paint_push_button(
     // `FrameRect` cannot have any. The corners the rounding cuts away show the erase above,
     // which is the ground the button stands on.
     paint_rounded(
-        dc,
+        target,
         &rect,
         scaled(CORNER_RADIUS, dpi),
         colors.border,
@@ -4832,28 +4875,31 @@ unsafe fn paint_push_button(
         dpi,
     );
 
-    // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC
+    // SAFETY: `target` is a handle passed by value; both calls write an attribute of the DC
     // and touch no memory of this process.
-    unsafe { SetBkMode(dc, TRANSPARENT) };
+    unsafe { SetBkMode(target, TRANSPARENT) };
     // SAFETY: as above.
-    unsafe { SetTextColor(dc, colors.ink) };
+    unsafe { SetTextColor(target, colors.ink) };
 
     if !caption.is_empty() {
         let mut text_rect = rect;
 
         // Our own face, grey-antialiased — task T-11-17. `None` leaves the manager's own font
-        // in the DC, which is what this drawing used before that task (NFR-13).
+        // in the DC, which is what this drawing used before that task (NFR-13) — and since task
+        // T-15-1 that font is in the buffer too, carried over from the DC of the message when
+        // the buffer was made, so a window whose faces were refused still draws in the face the
+        // dialog manager gave the control and not in the stock face of a fresh memory DC.
         //
-        // SAFETY: `dc` is the DC of the message and `face` is a live font the window's state
-        // owns for longer than this call; the previous handle is put back below.
-        let previous_face = unsafe { select_face(dc, face) };
+        // SAFETY: `target` is the buffer or the DC of the message and `face` is a live font the
+        // window's state owns for longer than this call; the previous handle is put back below.
+        let previous_face = unsafe { select_face(target, face) };
 
         // SAFETY: `caption` and `text_rect` are live locals of this frame; the format
         // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption
         // and writes only pixels of the DC.
         unsafe {
             DrawTextW(
-                dc,
+                target,
                 &mut caption,
                 &mut text_rect,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
@@ -4862,7 +4908,7 @@ unsafe fn paint_push_button(
 
         // SAFETY: `previous_face` is what `select_face` answered for this same DC, and
         // nothing between the two calls selected another font.
-        unsafe { restore_face(dc, previous_face) };
+        unsafe { restore_face(target, previous_face) };
     }
 
     if focused {
@@ -4877,9 +4923,25 @@ unsafe fn paint_push_button(
         // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
         // comment above the paint calls.
         //
-        // SAFETY: `dc` is the DC of the message and `focus_rect` is a live local of
-        // this frame; the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(dc, &focus_rect) };
+        // SAFETY: `target` is the buffer or the DC of the message and `focus_rect` is a live
+        // local of this frame; the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(target, &focus_rect) };
+    }
+
+    // ⚠ **The one moment any of the above becomes visible — task T-15-1.** Nothing since the
+    // erase has touched the window, so what DWM can sample is the button as it was or the button
+    // as it now is, and there is no third state for the eye to catch.
+    //
+    // NFR-13: the answer is examined in words and dropped, for the reason the block comment at
+    // the head of this body gives — and with one addition of its own. A refused blit leaves the
+    // button showing the picture the window already had there, which is its previous state and
+    // never a hole; there is no slower road worth taking, because painting the whole body a
+    // second time into the DC of the message is the very flicker this task removes.
+    //
+    // SAFETY: `dc` is the DC of the message, painted into for the length of this send; `buffer`
+    // is this frame's own, and its DC and bitmap are freed as it goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
 
     // TRUE — the button is drawn.

@@ -12,9 +12,16 @@
 //! `AppsUseLightTheme` and is deliberately not compared with anything.
 
 use lang_switcher::theme::{
-    Brushes, FOG, GRAPHITE, Palette, ThemeSetting, resolve, system_is_light,
+    Brushes, FOG, GRAPHITE, PaintBuffer, Palette, ThemeSetting, resolve, system_is_light,
 };
-use windows::Win32::Graphics::Gdi::{GetObjectW, HBRUSH, LOGBRUSH};
+use windows::Win32::Foundation::{COLORREF, RECT};
+use windows::Win32::Graphics::Gdi::{
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DeleteDC, DeleteObject,
+    FillRect, GetCurrentObject, GetDC, GetObjectW, GetPixel, GetStockObject, HBITMAP, HBRUSH, HDC,
+    HGDIOBJ, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT, ReleaseDC, SRCCOPY, SYSTEM_FONT, SelectObject,
+    SetPixel,
+};
+use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
 
 // =========================================================================================
 // The palettes — criterion 11, the BGR trap
@@ -343,4 +350,392 @@ fn a_brush_set_is_created_with_live_handles_that_carry_the_palette_and_drops_onc
         // borrowed copies without ownership, and `drop` runs once per value.
         drop(brushes);
     }
+}
+
+// =========================================================================================
+// Внеэкранный буфер одного элемента — task T-15-1
+// =========================================================================================
+//
+// The property these tests are about is the one the type exists for and the one a picture of a
+// finished button cannot show: a drawing body handed this buffer goes on naming **the coordinates
+// of the window** — for what it writes, for what it reads back out again, and for the blit that
+// carries the result over. The reading half is not decoration. The corner smoothing of this very
+// module blits the ground of each corner **out of** the DC it is drawing into, so a buffer that
+// moved only the writes would blend four arcs into the wrong pixels and shift the halftones of
+// every rounded figure in the program, with nothing to say so.
+//
+// The surfaces below stand in for the DC of a window: a memory DC over the **screen** DC and a
+// bitmap compatible with the screen, which is the colour depth a window has. A bitmap made
+// compatible with a memory DC would be monochrome — the trap the module words twice — and these
+// tests would then be measuring one bit per pixel.
+
+/// The ground every surface below starts from, so that «nothing was written here» is an
+/// assertion against a known colour and not against the undefined pixels of a fresh bitmap.
+const GROUND: u32 = expected_colorref(16, 32, 48);
+
+/// What a drawing body lays down inside its own rectangle.
+const INK: u32 = expected_colorref(200, 216, 232);
+
+/// One pixel of a third colour, so that a picture that arrived whole but a pixel askew is told
+/// apart from one that arrived where it belongs.
+const MARK: u32 = expected_colorref(248, 8, 128);
+
+/// A colour surface of `width` × `height`, standing in for the DC of a window.
+struct Surface {
+    dc: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+}
+
+impl Surface {
+    /// Makes the surface and grounds all of it with [`GROUND`].
+    fn new(width: i32, height: i32) -> Self {
+        // SAFETY: `None` asks for the DC of the whole screen, which every process may have; it
+        // is released a few lines below and never kept.
+        let screen = unsafe { GetDC(None) };
+        assert!(!screen.is_invalid(), "the screen DC must be obtainable");
+
+        // SAFETY: a memory DC over the screen's, deleted in `Drop`.
+        let dc = unsafe { CreateCompatibleDC(Some(screen)) };
+
+        // SAFETY: compatible with the *screen* DC — so a colour bitmap and not a monochrome
+        // one — and deleted in `Drop`.
+        let bitmap = unsafe { CreateCompatibleBitmap(screen, width, height) };
+
+        // SAFETY: `screen` is the handle `GetDC` answered, released exactly once.
+        unsafe { ReleaseDC(None, screen) };
+
+        assert!(!dc.is_invalid(), "the memory DC must be creatable");
+        assert!(!bitmap.is_invalid(), "the colour bitmap must be creatable");
+
+        // SAFETY: both handles are live and ours; what the DC was born with is put back in
+        // `Drop`, before the bitmap is deleted.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+        assert!(!previous.is_invalid(), "the bitmap must be selectable");
+
+        let surface = Self {
+            dc,
+            bitmap,
+            previous,
+        };
+
+        fill(
+            surface.dc,
+            &RECT {
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height,
+            },
+            GROUND,
+        );
+
+        surface
+    }
+
+    /// One pixel of the surface, as a `COLORREF` number.
+    fn pixel(&self, x: i32, y: i32) -> u32 {
+        // SAFETY: `self.dc` is this value's live memory DC; the call reads one pixel of the
+        // bitmap selected into it and touches no memory of ours.
+        unsafe { GetPixel(self.dc, x, y) }.0
+    }
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        // SAFETY: the bitmap the DC was born with goes back first, which frees ours to be
+        // deleted; both handles then go exactly once, and `drop` runs once.
+        unsafe { SelectObject(self.dc, self.previous) };
+        let _ = unsafe { DeleteObject(self.bitmap.into()) };
+        let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
+
+/// Fills `area` of `dc` with one solid colour, brush made and freed on this frame.
+fn fill(dc: HDC, area: &RECT, color: u32) {
+    // SAFETY: a plain solid brush, deleted a few lines below and handed to nobody else.
+    let brush = unsafe { CreateSolidBrush(COLORREF(color)) };
+    assert!(!brush.is_invalid(), "the brush must be creatable");
+
+    // SAFETY: `dc` is a live DC of the caller, `area` a live local of this frame, and `brush`
+    // the live brush of the line above.
+    let painted = unsafe { FillRect(dc, area, brush) };
+    assert_ne!(painted, 0, "the fill must succeed");
+
+    // SAFETY: the brush is selected into nothing and is freed exactly once.
+    let _ = unsafe { DeleteObject(brush.into()) };
+}
+
+/// The rectangle these tests use: **not** at the origin, because a row of a list is not, and a
+/// buffer that quietly assumed the client corner would pass every test placed at `(0, 0)`.
+const OFFSET_AREA: RECT = RECT {
+    left: 7,
+    top: 5,
+    right: 22,
+    bottom: 18,
+};
+
+#[test]
+fn a_rectangle_with_nothing_in_it_gets_no_buffer() {
+    let surface = Surface::new(40, 30);
+
+    let empty = [
+        (
+            "no width",
+            RECT {
+                left: 7,
+                top: 5,
+                right: 7,
+                bottom: 18,
+            },
+        ),
+        (
+            "no height",
+            RECT {
+                left: 7,
+                top: 5,
+                right: 22,
+                bottom: 5,
+            },
+        ),
+        (
+            "inverted",
+            RECT {
+                left: 22,
+                top: 18,
+                right: 7,
+                bottom: 5,
+            },
+        ),
+    ];
+
+    for (name, area) in empty {
+        // SAFETY: `surface.dc` is a live memory DC of this frame, read and not written.
+        let buffer = unsafe { PaintBuffer::for_rect(surface.dc, &area) };
+
+        assert!(
+            buffer.is_none(),
+            "a rectangle with {name} has no picture to hold and must get no surface"
+        );
+    }
+}
+
+/// **The coordinate arrangement of T-15-1, the writing half.** A body drawn into the buffer
+/// names the rectangle it was handed, and the picture arrives on the window at that very
+/// rectangle — not at the origin, not a pixel off, and not one pixel outside it.
+#[test]
+fn a_buffer_takes_the_callers_own_coordinates_and_hands_the_picture_back_unmoved() {
+    let surface = Surface::new(40, 30);
+    let area = OFFSET_AREA;
+
+    // SAFETY: `surface.dc` is a live memory DC of this frame; the buffer reads it and writes to
+    // it only in the blit below.
+    let buffer = unsafe { PaintBuffer::for_rect(surface.dc, &area) }
+        .expect("a buffer for a non-empty rectangle must be creatable");
+
+    // The body: the caller's own coordinates, written exactly as they would be on the window.
+    fill(buffer.dc(), &area, INK);
+
+    // SAFETY: `buffer.dc()` is the live memory DC of the buffer; the call writes one pixel of
+    // the bitmap selected into it.
+    unsafe { SetPixel(buffer.dc(), area.left, area.top, COLORREF(MARK)) };
+
+    // SAFETY: `surface.dc` is the live DC the buffer was made for.
+    assert!(
+        unsafe { buffer.blit(surface.dc) },
+        "a one-to-one blit between two compatible surfaces must succeed"
+    );
+
+    drop(buffer);
+
+    // The corner the mark was put on — the whole test in one pixel: a picture that arrived at
+    // the origin, or a row too high, or a column too far left, misses it.
+    assert_eq!(
+        surface.pixel(area.left, area.top),
+        MARK,
+        "the marked pixel must land on the very corner of the rectangle the buffer was made for"
+    );
+
+    // Every edge of the rectangle, inside and out. `right` and `bottom` are exclusive, so the
+    // last painted pixel is one short of each and the first untouched one is exactly on them.
+    let inside = [
+        (area.left + 1, area.top),
+        (area.left, area.top + 1),
+        (area.right - 1, area.top),
+        (area.left, area.bottom - 1),
+        (area.right - 1, area.bottom - 1),
+    ];
+
+    for (x, y) in inside {
+        assert_eq!(
+            surface.pixel(x, y),
+            INK,
+            "({x}, {y}) is inside the rectangle and must carry what the body drew"
+        );
+    }
+
+    let outside = [
+        (area.left - 1, area.top),
+        (area.left, area.top - 1),
+        (area.right, area.top),
+        (area.left, area.bottom),
+        (area.right, area.bottom),
+        (0, 0),
+    ];
+
+    for (x, y) in outside {
+        assert_eq!(
+            surface.pixel(x, y),
+            GROUND,
+            "({x}, {y}) is outside the rectangle and must be untouched — an element may not \
+             write past the rectangle the message gave it"
+        );
+    }
+}
+
+/// **The coordinate arrangement of T-15-1, the reading half — and the trap of the whole task.**
+///
+/// `Supersample::render` blits the ground of a corner **out of** the DC the figure is being drawn
+/// into, at the corner's own coordinates on the window. So the mapping has to act on reads as
+/// well as on writes: this is the test that says it does, and a buffer that only shifted the
+/// writes would move the halftones of every rounded corner in the program while every picture
+/// still looked plausible.
+#[test]
+fn a_read_out_of_a_buffer_goes_through_the_same_coordinates_as_a_write() {
+    let surface = Surface::new(40, 30);
+    let area = OFFSET_AREA;
+
+    // SAFETY: as in the test above.
+    let buffer = unsafe { PaintBuffer::for_rect(surface.dc, &area) }
+        .expect("a buffer for a non-empty rectangle must be creatable");
+
+    fill(buffer.dc(), &area, INK);
+
+    let (mark_x, mark_y) = (area.left + 2, area.top + 3);
+
+    // SAFETY: `buffer.dc()` is the live memory DC of the buffer.
+    unsafe { SetPixel(buffer.dc(), mark_x, mark_y, COLORREF(MARK)) };
+
+    // A read through the DC, at the coordinate of the window — what `GetPixel` and a blit both
+    // put through the mapping.
+    // SAFETY: as above.
+    assert_eq!(
+        unsafe { GetPixel(buffer.dc(), mark_x, mark_y) }.0,
+        MARK,
+        "a pixel read at the coordinate it was written at must be the pixel that was written"
+    );
+
+    // And the read the smoothing actually performs: one pixel blitted **out of** the buffer at
+    // the coordinate the corner has on the window.
+    let scratch = Surface::new(4, 4);
+
+    // SAFETY: both DCs are live memory DCs of this frame; the source point is a logical point of
+    // the buffer, which is what a blit takes.
+    unsafe {
+        BitBlt(
+            scratch.dc,
+            0,
+            0,
+            1,
+            1,
+            Some(buffer.dc()),
+            mark_x,
+            mark_y,
+            SRCCOPY,
+        )
+    }
+    .expect("the read-back blit must succeed");
+
+    assert_eq!(
+        scratch.pixel(0, 0),
+        MARK,
+        "a blit out of the buffer at the coordinate of the window must read the pixel that is \
+         there — this is the ground the corner smoothing blends its arcs into"
+    );
+}
+
+/// **NFR-13, the degraded path that would otherwise change the picture.** A body whose own face
+/// was refused draws in whatever face the DC already carried; a fresh memory DC carries the stock
+/// `SYSTEM_FONT`, which is neither the same face nor the same metrics. The buffer therefore
+/// arrives wearing the face of the DC it stands in for.
+#[test]
+fn a_buffer_carries_over_the_face_the_dc_it_stands_in_for_was_wearing() {
+    let surface = Surface::new(40, 30);
+
+    // SAFETY: stock objects are owned by the system, are never deleted by a process, and may be
+    // selected into any DC.
+    let fixed = unsafe { GetStockObject(OEM_FIXED_FONT) };
+    // SAFETY: as above — the face a fresh memory DC is born with, kept for the contrast below.
+    let stock = unsafe { GetStockObject(SYSTEM_FONT) };
+
+    assert!(
+        !fixed.is_invalid() && !stock.is_invalid(),
+        "stock faces exist"
+    );
+    assert_ne!(
+        fixed, stock,
+        "the two stock faces must be different handles"
+    );
+
+    // SAFETY: `surface.dc` is a live memory DC of this frame and `fixed` a stock object; nothing
+    // of ours is displaced and nothing is deleted.
+    unsafe { SelectObject(surface.dc, fixed) };
+
+    // SAFETY: `surface.dc` is live and is read, not written.
+    let buffer = unsafe { PaintBuffer::for_rect(surface.dc, &OFFSET_AREA) }
+        .expect("a buffer for a non-empty rectangle must be creatable");
+
+    // SAFETY: `buffer.dc()` is the buffer's live memory DC; the call reads an attribute of it.
+    let carried = unsafe { GetCurrentObject(buffer.dc(), OBJ_FONT) };
+
+    assert_eq!(
+        carried, fixed,
+        "the buffer must wear the face of the DC it stands in for, not the one a fresh memory \
+         DC is born with"
+    );
+    assert_ne!(
+        carried, stock,
+        "and that face must actually differ from the stock one, or this test proves nothing"
+    );
+}
+
+/// **§5.6 of the task — a leaked GDI object gives neither an error nor a red test.** So it is
+/// counted: two objects per buffer, two hundred buffers made and dropped, and the process must
+/// end holding no more of them than it started with.
+#[test]
+fn buffers_made_and_dropped_leave_no_gdi_object_behind() {
+    let surface = Surface::new(40, 30);
+
+    // One buffer first, so that whatever GDI allocates once for this process is already
+    // allocated when the baseline is taken.
+    // SAFETY: `surface.dc` is a live memory DC of this frame.
+    drop(unsafe { PaintBuffer::for_rect(surface.dc, &OFFSET_AREA) });
+
+    let count = || {
+        // SAFETY: `GetCurrentProcess` answers a pseudo-handle that needs no closing, and the
+        // call reads a counter of this process.
+        unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+    };
+
+    let before = count();
+
+    for _ in 0..200 {
+        // SAFETY: as above.
+        let buffer = unsafe { PaintBuffer::for_rect(surface.dc, &OFFSET_AREA) }
+            .expect("a buffer for a non-empty rectangle must be creatable");
+
+        fill(buffer.dc(), &OFFSET_AREA, INK);
+    }
+
+    let after = count();
+
+    println!("GDI objects of this process: {before} before, {after} after 200 buffers");
+
+    // Two hundred leaked buffers would be four hundred objects; the small slack is for whatever
+    // else the process may allocate while the loop runs, and is two orders below the leak.
+    assert!(
+        after <= before + 8,
+        "buffers must free their DC and their bitmap on every path: {before} objects before the \
+         loop, {after} after it"
+    );
 }
