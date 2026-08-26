@@ -254,8 +254,30 @@ pub struct Palette {
     pub sel_bg: COLORREF,
     /// Text of the selected row of a list.
     pub sel_fg: COLORREF,
-    /// Highlight of a menu item under the cursor.
+    /// Highlight of a push button and of the closed part of a combo box under the cursor.
+    ///
+    /// ⚠ **The tray menu no longer lights with this field** — it has [`Palette::menu_hover_bg`]
+    /// of its own since the wave below. The name is kept because task T-12-8 chose it and the
+    /// dialog's own two users have not changed.
     pub hover_bg: COLORREF,
+    /// Highlight of a menu item under the cursor.
+    ///
+    /// # Почему у меню своё поле, а не общее с кнопкой
+    ///
+    /// Until this field the menu lit with [`Palette::hover_bg`], the very field the button
+    /// lights with — the same number, byte for byte. It looked nothing alike, and the reason is
+    /// the ground and not the colour: a button stands on [`Palette::button_bg`] and a menu entry
+    /// on [`Palette::window_bg`]. In «Туман» that is 255,255,255 against 237,239,242, so one
+    /// and the same 234,238,242 reads as a highlight on the button and vanishes on the menu —
+    /// **3/1/0 levels of difference, measured.**
+    ///
+    /// So the two are given different numbers **in order to look the same**: this field stands
+    /// off the ground of the menu by 21/17/13, exactly as far as the face of a hot button
+    /// stands off its own rest. In «Графит» the ground is dark, the old value already stood off
+    /// by 20/23/26, and nothing had to move — the two fields hold the same number there, the
+    /// way [`Palette::panel_bg`], [`Palette::field_bg`] and [`Palette::button_bg`] already do
+    /// in «Туман».
+    pub menu_hover_bg: COLORREF,
 }
 
 /// The dark palette — «Графит» of FR-92а.
@@ -278,6 +300,9 @@ pub static GRAPHITE: Palette = Palette {
     sel_bg: rgb(60, 66, 76),
     sel_fg: rgb(240, 242, 244),
     hover_bg: rgb(52, 58, 67),
+    // Тот же номер, что и `hover_bg`, и это не описка: на тёмной земле меню
+    // (`window_bg` 32,35,41) он уже отстоит на 20/23/26 — двигать было нечего.
+    menu_hover_bg: rgb(52, 58, 67),
 };
 
 /// The light palette — «Туман» of FR-92а.
@@ -300,6 +325,10 @@ pub static FOG: Palette = Palette {
     sel_bg: rgb(228, 232, 237),
     sel_fg: rgb(35, 38, 43),
     hover_bg: rgb(234, 238, 242),
+    // Отстоит от земли меню (`window_bg` 237,239,242) на 21/17/13 — ровно настолько,
+    // насколько лицо горячей кнопки отстоит от её покоя `button_bg` 255,255,255.
+    // Прежнее общее значение давало здесь 3/1/0, то есть полосы не было видно вовсе.
+    menu_hover_bg: rgb(216, 222, 229),
 };
 
 // =========================================================================================

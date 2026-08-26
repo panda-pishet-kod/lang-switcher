@@ -1313,15 +1313,20 @@ fn the_about_button_is_the_same_table_without_a_frame() {
 /// The role tables above say «`hover_bg`»; this says what that field *is*, and that it is a
 /// field of the palette rather than a number invented for this task. The two literals are the
 /// ones the mock-up generator carries (`scratchpad-Э11\ui.ps1`: `Hover=(Col 52 58 67)` for
-/// «Графит» and `Hover=(Col 234 238 242)` for «Туман»), and they are also the very numbers the
-/// tray menu has been drawing its own response with since task T-11-21 — the reference this
-/// wave copies.
+/// «Графит» and `Hover=(Col 234 238 242)` for «Туман»).
+///
+/// ⚠ **Раньше здесь стояло «и это те же числа, которыми светится меню трея».** Больше это
+/// не так: у меню есть своё `menu_hover_bg`, и в «Тумане» оно намеренно другое — 216,222,229.
+/// Причина не в цвете, а в земле: кнопка стоит на `button_bg` 255,255,255, запись меню —
+/// на `window_bg` 237,239,242, и общий номер отстоял от первой на 21/17/13, а от второй
+/// на 3/1/0. Разные числа взяты ради того, чтобы вид совпал. В «Графите» поля держат один
+/// и тот же номер, потому что на тёмной земле двигать было нечего.
 ///
 /// The second half is the part that makes the measurement mean anything: `hover_bg` is
 /// **distinct from every other field of its palette**, so a shot of a hot button cannot be
 /// confused with a shot of a pressed one, a quiet one or a selected row.
 #[test]
-fn the_hot_face_is_the_palette_field_the_tray_menu_already_lights_with() {
+fn the_hot_face_of_a_button_is_a_field_of_the_palette_and_not_a_colour_of_its_own() {
     for (palette, name, expected) in [
         (&GRAPHITE, "Графит", (52u8, 58u8, 67u8)),
         (&FOG, "Туман", (234, 238, 242)),
@@ -1354,6 +1359,11 @@ fn the_hot_face_is_the_palette_field_the_tray_menu_already_lights_with() {
             (palette.box_border, "box_border"),
             (palette.sel_bg, "sel_bg"),
             (palette.sel_fg, "sel_fg"),
+            // ⛔ `menu_hover_bg` в списке нет намеренно, и это единственное исключение.
+            // Это тот же отклик на курсор, только в другом месте и на другой земле;
+            // в «Графите» он держит ровно тот же номер, и запрет на совпадение сделал бы
+            // красным то, что верно по замыслу. Прочие семнадцать полей — иные роли,
+            // и совпадение с ними по-прежнему дефект.
         ] {
             assert_ne!(
                 other.0, palette.hover_bg.0,

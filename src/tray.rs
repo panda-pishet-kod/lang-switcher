@@ -1860,8 +1860,14 @@ struct MenuPaint {
     /// [`set_menu_background`] hands to `SetMenuInfo`, so the ground under the entries and
     /// the ground between them are one brush and not two.
     window_bg: HBRUSH,
-    /// Brush of [`theme::Palette::hover_bg`] — the fill of the rounded stripe under the
+    /// Brush of [`theme::Palette::menu_hover_bg`] — the fill of the rounded stripe under the
     /// entry the cursor is on (`ODS_SELECTED`).
+    ///
+    /// ⚠ **Не [`theme::Palette::hover_bg`], которым светится кнопка.** У меню своё поле
+    /// потому, что земля под ним другая: кнопка стоит на `button_bg`, запись меню — на
+    /// `window_bg`, и в «Тумане» один и тот же цвет отстоял там на 21/17/13, а здесь
+    /// на 3/1/0 — полосы попросту не было видно. Разные числа взяты, чтобы вид совпал;
+    /// разбор — у самого поля в [`theme`].
     hover_bg: HBRUSH,
     /// Brush of [`theme::Palette::panel_border`] — the line of a rule, task T-11-22.
     panel_border: HBRUSH,
@@ -1991,7 +1997,7 @@ impl MenuPaint {
         let (window_bg, hover_bg, panel_border) = unsafe {
             (
                 CreateSolidBrush(palette.window_bg),
-                CreateSolidBrush(palette.hover_bg),
+                CreateSolidBrush(palette.menu_hover_bg),
                 CreateSolidBrush(palette.panel_border),
             )
         };
@@ -2170,7 +2176,7 @@ impl MenuPaint {
     }
 
     /// Paints one entry — the drawing half of `WM_DRAWITEM`. FR-92а: the ground is
-    /// `window_bg`, and the entry under the cursor carries the rounded `hover_bg` stripe of
+    /// `window_bg`, and the entry under the cursor carries the rounded `menu_hover_bg` stripe of
     /// [`menu_hover_rect`] over it; the text is `text` **whether the cursor is on the entry
     /// or not** (task T-12-9 — the stripe is the whole of what marks a hot row, as it is in
     /// the mock-up); the check mark is [`MenuPaint::draw_check_mark`]. There are no disabled
@@ -2242,7 +2248,7 @@ impl MenuPaint {
                 target,
                 &menu_hover_rect(&rect, dpi),
                 theme::scaled(theme::CORNER_RADIUS, dpi),
-                self.palette.hover_bg,
+                self.palette.menu_hover_bg,
                 self.hover_bg,
                 dpi,
             );

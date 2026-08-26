@@ -40,7 +40,7 @@ const fn expected_colorref(r: u32, g: u32, b: u32) -> u32 {
 /// written out for both palettes even though «Графит» spells the same number as
 /// `text_muted`, and that duplication is the point: the equality belongs to the dark palette
 /// alone, and the light one puts twelve levels between the two roles.
-fn fields_of(palette: &Palette) -> [(&'static str, u32); 18] {
+fn fields_of(palette: &Palette) -> [(&'static str, u32); 19] {
     [
         ("window_bg", palette.window_bg.0),
         ("title_bg", palette.title_bg.0),
@@ -60,11 +60,15 @@ fn fields_of(palette: &Palette) -> [(&'static str, u32); 18] {
         ("sel_bg", palette.sel_bg.0),
         ("sel_fg", palette.sel_fg.0),
         ("hover_bg", palette.hover_bg.0),
+        // ⚠ Последним, и это обязательно: сверка идёт `zip`-ом с таблицами триплетов
+        // и первым делом сличает имена. Вставка в середину одной стороны без другой
+        // роняет проверку на «the field order of the test tables must match `fields_of`».
+        ("menu_hover_bg", palette.menu_hover_bg.0),
     ]
 }
 
 /// The R,G,B triples of the task's table, column «Графит», copied as written.
-const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
+const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 19] = [
     ("window_bg", (32, 35, 41)),
     ("title_bg", (26, 29, 34)),
     // `ui.ps1:177` — `TitleFg=(Col 232 234 236)`, four levels above `text` on that same
@@ -86,10 +90,13 @@ const GRAPHITE_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
     ("sel_bg", (60, 66, 76)),
     ("sel_fg", (240, 242, 244)),
     ("hover_bg", (52, 58, 67)),
+    // Тот же номер, что и строкой выше: на тёмной земле меню полоса уже отстояла
+    // на 20/23/26, и двигать её было нечего. Совпадение намеренное.
+    ("menu_hover_bg", (52, 58, 67)),
 ];
 
 /// The R,G,B triples of the task's table, column «Туман», copied as written.
-const FOG_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
+const FOG_TRIPLES: [(&str, (u32, u32, u32)); 19] = [
     ("window_bg", (237, 239, 242)),
     ("title_bg", (247, 248, 250)),
     // `ui.ps1:188` — `TitleFg=(Col 35 38 43)`. The number `text` also carries in this
@@ -112,13 +119,17 @@ const FOG_TRIPLES: [(&str, (u32, u32, u32)); 18] = [
     ("sel_bg", (228, 232, 237)),
     ("sel_fg", (35, 38, 43)),
     ("hover_bg", (234, 238, 242)),
+    // Отличается от строки выше намеренно и ради того, чтобы вид СОВПАЛ: земля меню
+    // здесь `window_bg` 237,239,242, а не белая `button_bg`, и общий номер давал
+    // 3/1/0 — полосы не было видно. Это число отстоит на 21/17/13, как у кнопки.
+    ("menu_hover_bg", (216, 222, 229)),
 ];
 
 /// Checks one palette against one column of the task's table, field by field.
 fn assert_palette_matches(
     palette_name: &str,
     palette: &Palette,
-    triples: &[(&str, (u32, u32, u32)); 18],
+    triples: &[(&str, (u32, u32, u32)); 19],
 ) {
     for ((field, actual), (expected_field, (r, g, b))) in fields_of(palette).iter().zip(triples) {
         // The rows travel in the order of the task's table on both sides; a mismatch here
