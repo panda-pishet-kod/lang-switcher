@@ -3261,6 +3261,17 @@ pub(crate) fn resolve_button_colors(
             ButtonFaceRole::ButtonBg => palette.button_bg,
             ButtonFaceRole::AccentBg => palette.accent_bg,
             ButtonFaceRole::SelBg => palette.sel_bg,
+            // ⚠ **Это сочетание сегодня недостижимо, и ветвь всё равно написана верно.**
+            // `FaceItself` ставится единственным местом — `about_button_colors`, то есть
+            // только для кнопок окна «О программе»; а `HoverBg` рождается в
+            // `button_color_roles` ниже ворот `if control == OK_COMMAND`, куда «ОК» этого
+            // окна не доходит. Пара «безрамочная кнопка под курсором» не возникает.
+            //
+            // ⛔ Не удалять и не сливать с соседом: соседнее плечо `SelFg` было ровно таким
+            // же мёртвым до задачи T-15-2 и ожило от одной правки таблицы ролей. День, когда
+            // безрамочной кнопке дадут отклик на наведение, оживит и это — а слитая или
+            // выброшенная ветвь молча покрасит рамку не тем цветом. `unreachable!()` тоже
+            // нельзя: паника внутри `WM_DRAWITEM` — прямое нарушение NFR-13.
             ButtonFaceRole::HoverBg => palette.hover_bg,
             ButtonFaceRole::SelFg => palette.sel_fg,
         },

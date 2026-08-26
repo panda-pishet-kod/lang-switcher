@@ -7639,12 +7639,13 @@ const PUSH_BUTTONS: [i32; 9] = [
 
 /// The one owner-drawn push button of the about window — task T-12-8.
 ///
-/// It is «ОК», and [`button_color_roles`] answers the accent for it in every state but the
-/// pressed one, **including the hot one**: this wave deliberately leaves the accented button
-/// without a response, because the palette holds no second accent and inventing a colour is
-/// forbidden. It is subclassed all the same, and that is not waste but the point: the wiring is
-/// uniform, the flag is kept for it exactly as for the other nine, and the day the accent gets
-/// a hot face of its own it appears here by one arm of the colour table and by nothing else.
+/// It is «ОК», and [`button_color_roles`] answers the accent for it at rest and
+/// [`Palette::sel_fg`] under the cursor — **task T-15-2 gave the accented button its response**,
+/// and the day it did, the flag this subclass keeps stopped being a spare and became load
+/// bearing. ⚠ Until that task the doc here said the opposite, and said it for a good reason:
+/// the palette held no second accent and inventing a colour is forbidden. The way out was not
+/// a new colour but an existing field — which is why the wiring was kept uniform all along,
+/// and why the response appeared by one arm of the colour table and by nothing else.
 /// The repaint the flag asks for costs nothing visible — a push button has drawn itself
 /// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
 /// that were there.
@@ -11107,9 +11108,10 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 
     // Task T-12-8: the same fourth state as in the settings dialog, read the same way — this
     // program's own record, compared against the window of the message and never followed. The
-    // colour table answers the accent for «ОК» whether it is hot or not, so this button paints
-    // itself the same either way in this wave; the flag is asked for all the same, because the
-    // table is the one place that decision lives.
+    // colour table answers the accent for «ОК» at rest and `sel_fg` under the cursor since task
+    // T-15-2, so this flag is **load bearing**: the button paints itself differently hot and
+    // cold, and dropping the read would take the response away. ⚠ Until that task the comment
+    // here said the button painted itself the same either way — true then, false now.
     let hot = is_hot(item_window);
 
     // The colour choice, split from the painting — the borrow ends before the DC is
