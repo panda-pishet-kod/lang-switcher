@@ -256,27 +256,6 @@ pub struct Palette {
     pub sel_fg: COLORREF,
     /// Highlight of a menu item under the cursor.
     pub hover_bg: COLORREF,
-    /// Face of a push button while the cursor stands on it — the button's own response,
-    /// kept apart from [`Palette::hover_bg`] since task T-16-1.
-    ///
-    /// # Why the button stopped sharing `hover_bg`
-    ///
-    /// It shared it until this task, and the user could barely see the difference: in
-    /// «Графите» the quiet `button_bg` 46,51,59 and `hover_bg` 52,58,67 stand six, seven and
-    /// eight levels apart out of 256. Widening `hover_bg` itself was the obvious repair and
-    /// the user refused it after looking at the result: that same field also lights the
-    /// closed part of the combo box and the band under a tray menu item, and those two are
-    /// to stay exactly as they were. So the button gets a field of its own, and the other
-    /// two carriers keep theirs untouched.
-    ///
-    /// ⚠ **In «Графите» this face is lighter than the button's own frame** — 70,79,91
-    /// against `button_border` 63,69,78 — and that is chosen, not overlooked. The greys of
-    /// the dark palette climb in steps of about seven all the way from `window_bg` 32,35,41
-    /// to `button_border` 63,69,78, so there is no room below the frame for anything; the
-    /// one free rung of that ladder is between the frame and `box_border` 86,96,112, and
-    /// this field takes it. A hot button therefore reads as a lit face inside a darker
-    /// outline — an ordinary look, and a different one from what stood here before.
-    pub button_hover_bg: COLORREF,
 }
 
 /// The dark palette — «Графит» of FR-92а.
@@ -299,7 +278,6 @@ pub static GRAPHITE: Palette = Palette {
     sel_bg: rgb(60, 66, 76),
     sel_fg: rgb(240, 242, 244),
     hover_bg: rgb(52, 58, 67),
-    button_hover_bg: rgb(70, 79, 91),
 };
 
 /// The light palette — «Туман» of FR-92а.
@@ -322,7 +300,6 @@ pub static FOG: Palette = Palette {
     sel_bg: rgb(228, 232, 237),
     sel_fg: rgb(35, 38, 43),
     hover_bg: rgb(234, 238, 242),
-    button_hover_bg: rgb(221, 227, 234),
 };
 
 // =========================================================================================
@@ -3219,17 +3196,13 @@ pub(crate) fn resolve_button_colors(
     brushes: &Brushes,
     palette: &Palette,
 ) -> (ResolvedButtonColors, Option<HotBrush>) {
-    // The two faces of this table the window's brush set does not hold — the hot face since
-    // task T-12-8 and `sel_fg` since task T-15-2; see [`HotBrush`] for why they are made here
+    // The two faces of this table the window's brush set does not hold — `hover_bg` since task
+    // T-12-8 and `sel_fg` since task T-15-2; see [`HotBrush`] for why they are made here
     // instead of being owned there. A refused `CreateSolidBrush` leaves `None`, and the face
     // below falls back to the quiet `button_bg`: the button then looks exactly as it did
     // before those tasks (NFR-13).
-    //
-    // ⚠ Task T-16-1: the hot face is cut from `button_hover_bg` and no longer from the shared
-    // `hover_bg`. Only the button moved; the closed combo box (`settings.rs`) and the tray
-    // menu band (`tray.rs`) still read `hover_bg` and are to keep reading it.
     let hot = match colors.face {
-        ButtonFaceRole::HoverBg => HotBrush::new(palette.button_hover_bg),
+        ButtonFaceRole::HoverBg => HotBrush::new(palette.hover_bg),
         ButtonFaceRole::SelFg => HotBrush::new(palette.sel_fg),
         ButtonFaceRole::ButtonBg | ButtonFaceRole::AccentBg | ButtonFaceRole::SelBg => None,
     };
@@ -3259,7 +3232,7 @@ pub(crate) fn resolve_button_colors(
             ButtonFaceRole::ButtonBg => palette.button_bg,
             ButtonFaceRole::AccentBg => palette.accent_bg,
             ButtonFaceRole::SelBg => palette.sel_bg,
-            ButtonFaceRole::HoverBg => palette.button_hover_bg,
+            ButtonFaceRole::HoverBg => palette.hover_bg,
             ButtonFaceRole::SelFg => palette.sel_fg,
         },
     };
