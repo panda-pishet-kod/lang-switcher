@@ -418,6 +418,24 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // of the configuration file, which is state of the process, and this is the kind the five
     // configuration rows of task T-13-6 already take.
     ("configuration field clamped to its ceiling", Kind::Process),
+    // A selection too big to read — finding №7 of the audit of 2026-08-31, decision 77 of the
+    // user. Step 4 of FR-61 had no ceiling while the snapshot of FR-64 had one, so a selection of
+    // any size at all was copied off the clipboard and decoded twice more on the way to step 6.
+    // `selection::read_unicode_text` now asks `read_refuses_size` before it copies anything, and
+    // a read that found a block above the four megabytes of FR-64 says so here. One row, appended
+    // at the end so that no index above it moves: a slot already written carries a number, and
+    // renumbering the table would change what a dump of an earlier run means.
+    //
+    // ⚠ **A fact and no value at all (SEC-01, SEC-07).** It says that a read found a block over
+    // the ceiling and copied nothing. It does not say how big the block was, what the ceiling is,
+    // which format it was in, or a single byte of what stood there — and there is no branch
+    // through which any of those could reach the ring, because the caller passes no number at
+    // all. The code beside it is always [`OsCode::NONE`]: this is a decision of the program, not
+    // the failure of a Win32 call.
+    //
+    // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
+    // `Kind`**, the rule every note above follows.
+    ("clipboard read oversized", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

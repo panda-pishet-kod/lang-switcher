@@ -1399,6 +1399,54 @@ fn note_restore_skipped() {
 // Reading and writing text — steps 4 and 6 of FR-61 as primitives
 // ---------------------------------------------------------------------------------------
 
+/// Is a `CF_UNICODETEXT` block too big to read — the ceiling of step 4, symmetrical to FR-64.
+///
+/// # The finding, and why the number is not a new one
+///
+/// The audit of 2026-08-31 (№7) found step 4 unbounded: FR-64 gives the *snapshot* a budget of
+/// four megabytes and says so, while the read of the selection had none at all — a selection of
+/// any size was copied off the clipboard by [`read_block`], decoded into a second copy by
+/// [`decode_utf16`] and recoded into a third on the way to step 6. Decision 77 of the user is
+/// symmetry: **the same four megabytes**, and the same constant — [`SNAPSHOT_BUDGET_BYTES`],
+/// named once, because two spellings of one number are two numbers as soon as one of them is
+/// edited.
+///
+/// # What it decides, and what it does not
+///
+/// A block over the ceiling is treated as **«there is no text»**: [`read_unicode_text`] answers
+/// `Ok(None)`, step 4 turns that into [`Refusal::NoText`], and the snapshot taken at step 1 goes
+/// back through the refusal path of Э18 — `Owed::StepEight` was armed the moment the probe
+/// changed the clipboard, and nothing here disarms it. It is not an error: an error would say
+/// «the clipboard could not be read», and the clipboard was read perfectly well — it holds more
+/// than this program is willing to copy, which is a decision and not a failure.
+///
+/// A pure function of one number, so that the boundary is driven by unit tests rather than by
+/// whatever is on somebody's clipboard, and so that a mutation of the comparison fails a test
+/// instead of passing quietly. Exactly the budget is allowed: the ceiling is the largest block
+/// that is read, not the smallest that is refused.
+pub const fn read_refuses_size(size: usize) -> bool {
+    size > SNAPSHOT_BUDGET_BYTES
+}
+
+/// Puts the journal entry an oversized read of step 4 leaves behind.
+///
+/// # SEC-01, SEC-07 — what this entry can and cannot say
+///
+/// «clipboard read oversized» is a fact about **a decision of this program**: step 4 found a
+/// block above the ceiling of [`read_refuses_size`] and copied nothing. The string is chosen at
+/// compile time and is a row of the closed table of module `diag`. It does not carry the size it
+/// refused, the ceiling it compared against, the format, or a single byte of what was there —
+/// and there is no branch here through which any of those could reach the ring, because the
+/// caller passes no number at all. [`crate::diag::OsCode::NONE`] goes with it for the reason
+/// [`note_truncation`] passes it: no Win32 call failed, and a number built from a measurement
+/// would be a shape of somebody's contents.
+fn note_read_oversized() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard read oversized"),
+        crate::diag::OsCode::NONE,
+    );
+}
+
 /// Reads `CF_UNICODETEXT`, or `None` when the clipboard has no text — step 4 of FR-61.
 ///
 /// The block is UTF-16 terminated by a null; the terminator is dropped and everything after it
@@ -1421,6 +1469,18 @@ pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> 
 
     // SAFETY: `handle` is a live block borrowed from the open clipboard.
     let size = unsafe { GlobalSize(handle) };
+
+    // ⚠ **The ceiling of step 4 — finding №7 of the audit of 2026-08-31, decision 77.** Asked
+    // here and not a line lower, because `GlobalSize` reads a header and copies nothing while
+    // `read_block` allocates a vector of exactly this many bytes: a ceiling asked after the copy
+    // would refuse the text and still have made the copy it exists to avoid. Over it the answer
+    // is `Ok(None)` — «there is no text» — which step 4 turns into `Refusal::NoText` and step 8
+    // of Э18 answers by putting the snapshot back. See [`read_refuses_size`].
+    if read_refuses_size(size) {
+        note_read_oversized();
+
+        return Ok(None);
+    }
 
     let Some(mut bytes) = read_block(handle, size) else {
         return Ok(None);
@@ -3223,6 +3283,21 @@ mod tests {
     fn the_budget_is_the_four_megabytes_of_fr64() {
         assert_eq!(SNAPSHOT_BUDGET_BYTES, 4 * 1024 * 1024);
         assert_eq!(SNAPSHOT_BUDGET_BYTES, 4_194_304);
+    }
+
+    /// The ceiling of step 4 — finding №7 of the audit of 2026-08-31, decision 77.
+    ///
+    /// Both sides of the boundary, so that `>` turning into `>=`, or the budget being replaced by
+    /// a number of this function's own, fails here rather than passing quietly.
+    #[test]
+    fn the_read_refuses_only_what_is_over_the_budget_of_fr64() {
+        assert!(!read_refuses_size(0));
+        assert!(!read_refuses_size(1));
+        assert!(!read_refuses_size(SNAPSHOT_BUDGET_BYTES - 1));
+        // Exactly the budget is read: the ceiling is the largest block allowed through.
+        assert!(!read_refuses_size(SNAPSHOT_BUDGET_BYTES));
+        assert!(read_refuses_size(SNAPSHOT_BUDGET_BYTES + 1));
+        assert!(read_refuses_size(usize::MAX));
     }
 
     #[test]

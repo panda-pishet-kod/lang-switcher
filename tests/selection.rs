@@ -50,6 +50,7 @@ use std::time::{Duration, Instant};
 use std::{fs, path::Path};
 
 use lang_switcher::convert;
+use lang_switcher::diag::{Kind, Operation};
 use lang_switcher::inject::{self, Dispatched, Modifiers};
 use lang_switcher::layouts::{Cycle, LayoutId, LayoutMap};
 use lang_switcher::selection::{
@@ -863,11 +864,54 @@ fn a_clipboard_over_the_budget_keeps_the_text_and_says_so() {
     assert_eq!(restored.placed, 1);
     assert_eq!(restored.refused, 0);
 
-    let back = selection::read_unicode_text(window.0)
-        .expect("the read")
-        .expect("text is there");
+    // ⚠ Read back with the **raw** oracle and not with the module that wrote it — the doctrine
+    // of every other check in this file, and here it is also a necessity: since the ceiling of
+    // step 4 (finding №7 of the audit of 2026-08-31, decision 77) `read_unicode_text` refuses a
+    // block this big by design, so it can no longer serve as the witness that the restore worked.
+    let back = raw_read(window.0, CF_UNICODETEXT).expect("the text is back on the clipboard");
 
-    assert_eq!(back.len(), big_text.len());
+    assert_eq!(
+        back.len(),
+        (big_text.len() + 1) * 2,
+        "the whole of the text came back, terminator included"
+    );
+
+    // And the ceiling itself, on a real clipboard of a real size — the honest live half of
+    // `the_ceiling_of_step_four_is_the_four_megabytes_of_fr64_and_not_a_second_number`. Over the
+    // budget the read behaves exactly as «there is no text»: `Ok(None)`, and not an error, so
+    // step 4 lands on `Refusal::NoText` and the snapshot goes back by the path of Э18.
+    assert!(
+        big_text.len() * 2 > SNAPSHOT_BUDGET_BYTES,
+        "the block really is over the ceiling"
+    );
+
+    let journal_before_read = lang_switcher::diag::recorded();
+
+    // ⚠ Asserted with `is_none` and not with `assert_eq!(…, None)`: the failure message of the
+    // latter prints the value it found, and the value here is five megabytes of clipboard. The
+    // doctrine of the module is that nothing of the clipboard reaches a log, and a test that
+    // breaks it on its way to red breaks it all the same.
+    assert!(
+        selection::read_unicode_text(window.0)
+            .expect("the read is not an error")
+            .is_none(),
+        "⚠ a selection over the ceiling reads as «there is no text» — and nothing was copied"
+    );
+    assert!(
+        lang_switcher::diag::recorded() > journal_before_read,
+        "the refusal left its row in the journal"
+    );
+
+    // The control that keeps the assertion above from passing for the wrong reason: the same
+    // clipboard, a block comfortably under the ceiling, still reads.
+    let small = "ghbdtn привет";
+
+    assert!(raw_write(window.0, &[(CF_UNICODETEXT, text_block(small))]));
+    assert_eq!(
+        selection::read_unicode_text(window.0).expect("the read"),
+        Some(small.to_owned()),
+        "a block under the ceiling is read as it always was"
+    );
 }
 
 /// **Behavioural point 25.** The clipboard held by **another process**: the retries run, the
@@ -3383,4 +3427,113 @@ fn the_number_of_our_own_write_is_taken_the_instant_the_clipboard_is_released() 
             close[0].0
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// The ceiling of step 4 — finding №7 of the audit of 2026-08-31, decision 77
+// ---------------------------------------------------------------------------------------
+
+/// **The ceiling of step 4 is the ceiling of FR-64, and it is one number and not two.**
+///
+/// The snapshot of FR-64 has a budget; the read of step 4 had none, so a selection of any size at
+/// all was copied out of the clipboard, decoded into a second copy and recoded into a third. The
+/// decision of question 77 is symmetry: the same four megabytes, and the constant shared rather
+/// than spelt again — «не два разных 4 МБ в двух местах».
+///
+/// The boundaries are asserted on both sides of the ceiling so that a mutation of the comparison
+/// (`>` against `>=`, or a ceiling of its own) fails here rather than passing quietly: exactly the
+/// budget is allowed through, one byte more is not.
+#[test]
+fn the_ceiling_of_step_four_is_the_four_megabytes_of_fr64_and_not_a_second_number() {
+    assert_eq!(SNAPSHOT_BUDGET_BYTES, 4 * 1024 * 1024);
+
+    assert!(
+        !selection::read_refuses_size(0),
+        "an empty block is not oversized"
+    );
+    assert!(
+        !selection::read_refuses_size(SNAPSHOT_BUDGET_BYTES - 1),
+        "one byte under the budget is read"
+    );
+    assert!(
+        !selection::read_refuses_size(SNAPSHOT_BUDGET_BYTES),
+        "exactly the budget is read — the ceiling is a ceiling, not a wall one byte short of it"
+    );
+    assert!(
+        selection::read_refuses_size(SNAPSHOT_BUDGET_BYTES + 1),
+        "one byte over the budget is refused"
+    );
+    assert!(
+        selection::read_refuses_size(usize::MAX),
+        "and so is anything above it"
+    );
+}
+
+/// **The ceiling is asked before the copy, and a block over it behaves as «there is no text».**
+///
+/// Two halves, and they are asserted apart because they can fail apart.
+///
+/// The first is the one the finding is about: `GlobalSize` reads a header and copies nothing, so
+/// the size is known **before** `read_block` allocates a vector of it. A ceiling asked after the
+/// copy would refuse the text and still have made the copy the refusal exists to avoid — the
+/// sweep therefore pins the order of the two lines rather than merely their presence.
+///
+/// The second is the coupling to step 8 of Э18: over the ceiling the read answers `Ok(None)`, and
+/// `Ok(None)` is what step 4 already turns into [`Refusal::NoText`] — on which the snapshot goes
+/// back, because `Owed::StepEight` was armed the moment the probe changed the clipboard. That
+/// half works today and is asserted so that it cannot stop working under a path that now reaches
+/// it for a second reason.
+#[test]
+fn an_oversized_block_is_refused_before_the_copy_and_lands_on_no_text_with_the_snapshot_back() {
+    let source = source_of("selection.rs");
+
+    let body = body_after(&source, "pub fn read_unicode_text");
+
+    let sized = code_lines_with(&body, "GlobalSize(handle)");
+    let refused = code_lines_with(&body, "read_refuses_size(");
+    let copied = code_lines_with(&body, "read_block(handle");
+
+    assert_eq!(sized.len(), 1, "the size is taken once: {sized:?}");
+    assert_eq!(
+        refused.len(),
+        1,
+        "the ceiling is asked exactly once: {refused:?}"
+    );
+    assert_eq!(copied.len(), 1, "the block is copied once: {copied:?}");
+
+    assert!(
+        sized[0].0 < refused[0].0,
+        "the ceiling is asked after the size is known — line {} against line {}",
+        refused[0].0,
+        sized[0].0
+    );
+    assert!(
+        refused[0].0 < copied[0].0,
+        "⚠ the ceiling is asked BEFORE the copy — it is line {} against line {}, so the copy the \
+         refusal exists to avoid is made anyway",
+        refused[0].0,
+        copied[0].0
+    );
+
+    // SEC-01, SEC-07: what the journal is told is a row of the closed table and carries no size,
+    // no format and no byte of anybody's clipboard.
+    let operation = Operation::from_name("clipboard read oversized");
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "the journal line of the refusal is a named row, not an unlisted code"
+    );
+    assert_eq!(operation.kind(), Kind::Selection);
+
+    // The other half: `Ok(None)` out of step 4 is `NoText`, and the snapshot comes back.
+    let mut bench = Bench::with_selection("");
+    let outcome = selection::run(&mut bench, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(outcome, Outcome::Refused(Refusal::NoText));
+    assert!(
+        bench.ran(Step::RestoreClipboard),
+        "the snapshot goes back on the refusal path of Э18: {:?}",
+        bench.steps
+    );
 }
