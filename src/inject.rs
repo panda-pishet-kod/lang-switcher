@@ -490,19 +490,34 @@ impl OnScreen {
 /// **Which layout's injection is standing on the screen right now** — the other half of the
 /// `N` of FR-41 from the second press onwards (audit of 2026-08-31, finding №5, stage Э20).
 ///
-/// `None` at position zero: the run has never been replaced, so the screen holds what the user
-/// typed and [`OnScreen::as_typed`] is the count. At position `p` the screen holds the
-/// injection of the press that moved the counter *to* `p`, and that press rendered the strokes
-/// into `Cycle::target(origin, p)`.
+/// `None` only while the run has **never been replaced**: then the screen holds what the user
+/// typed and [`OnScreen::as_typed`] is the count. Once it has been replaced, the screen holds
+/// the injection of the press that moved the counter *to* `position`, and that press rendered
+/// the strokes into `Cycle::target(origin, position)`.
 ///
-/// ⚠ **`p`, not `p + 1`.** `p + 1` is the target of the press being prepared right now — what
-/// is *about* to go on the screen, not what is on it. Reading the counter one step forward
-/// would erase the length of a text that has not been typed yet, and on a run whose lengths
-/// differ from step to step — any run with a dead key in it — that is the wrong number every
-/// time. It is a single `+ 1` and it has no other guard, which is why it is a function with a
-/// name instead of an expression inside [`take_press`].
-pub fn showing(cycle: &layouts::Cycle, origin: LayoutId, position: usize) -> Option<LayoutId> {
-    if position == 0 {
+/// ⚠ **`replaced` and not `position == 0`** — the live experiment of 2026-08-31, taken by the
+/// user after the first repair of this stage and against it. Position zero has *two* meanings:
+/// no press yet, and a circle that has come all the way round to the origin. They are the same
+/// number and they are not the same screen. The rollback press renders the same strokes into
+/// the layout they were typed under, and with a dead key in the run **that is not what the user
+/// typed**: `café` was typed as four characters, the rollback puts `caf'e` — five — because
+/// `KEYEVENTF_UNICODE` composes nothing. Treating the closed circle as "the typing" erased four
+/// where five stood, and one character of the run survived every lap: the person watched
+/// `12345 cсфа'у` and then `12345 ccсфа'у` accumulate in front of the word.
+///
+/// So the question is not what the counter says but whether a conversion session is open, which
+/// is exactly what `Recorder::in_conversion` answers — FR-10's last row opens it on a
+/// replacement and the next ordinary key closes it.
+///
+/// ⚠ **`position`, not `position + 1`.** `position + 1` is the target of the press being
+/// prepared right now — what is *about* to go on the screen, not what is on it.
+pub fn showing(
+    cycle: &layouts::Cycle,
+    origin: LayoutId,
+    position: usize,
+    replaced: bool,
+) -> Option<LayoutId> {
+    if !replaced {
         return None;
     }
 
@@ -2142,7 +2157,7 @@ fn take_press() -> Option<Press> {
         // system between two presses) falls back to the typed count rather than refusing the
         // press: that is the behaviour of every build before this one, and a hotkey that goes
         // quiet is worse than a count that is one out on a run nobody is in the middle of.
-        let on_screen = showing(&cycle, origin, position)
+        let on_screen = showing(&cycle, origin, position, recorder.in_conversion())
             .and_then(|previous| cache.get(previous))
             .map_or_else(
                 || OnScreen::as_typed(&strokes),
