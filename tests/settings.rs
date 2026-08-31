@@ -2234,6 +2234,62 @@ fn the_resource_script_declares_the_utf8_code_page() {
     );
 }
 
+/// **The user's finding П-1, task T-21-4: neither window had a button on the task bar.**
+///
+/// «Когда открыто окно настроек или окно о программе, визуально не вижу значка запущенного
+/// приложения на панели задач.» The cause is not in these windows but in their owner: the
+/// program's UI window is a top-level `WS_POPUP` carrying `WS_EX_TOOLWINDOW` by decision R-20
+/// point 2 — deliberately and correctly, because it exists only to receive the broadcast of
+/// FR-81 and must never be shown. An owned window inherits that absence: the shell gives no
+/// button to a window whose owner has none.
+///
+/// `WS_EX_APPWINDOW` is the documented answer — «forces a top-level window onto the taskbar
+/// when the window is visible» — and it is put in the **template**, not on the live window,
+/// because the field is read when the window is created and the shell looks once, when it is
+/// first shown. Modality and the owner are unchanged: `DialogBoxParamW` still runs its own loop
+/// and the dialog still belongs to the UI window.
+///
+/// Measured on the bench before it was written, with the owner the product really passes
+/// (`scratchpad-Э21\stand21`, a `WS_EX_TOOLWINDOW` owner as in `app.rs`): both windows raised,
+/// **zero** new buttons on the task bar. ⚠ And measured with a negative control that caught a
+/// broken instrument first — the stand's own console window put a button up on its own, which
+/// made the first reading say «the button is there» in a mode that raises no dialog at all.
+///
+/// The hidden windows of the program are not touched by any of this and must not be: the sweep
+/// below is about these two templates only.
+#[test]
+fn both_windows_of_fr_92_ask_the_task_bar_for_a_button_of_their_own() {
+    // `WS_EX_APPWINDOW` and `WS_EX_TOOLWINDOW`, spelled numerically for the reason `app.rc`
+    // spells its own constants numerically — the script includes no `windows.h`.
+    const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+    const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+
+    let product = ProductImage::open();
+
+    for (id, what) in [
+        (IDD_SETTINGS, "the settings window of FR-92"),
+        (IDD_ABOUT, "the «О программе» window of FR-92а"),
+    ] {
+        let template = DialogTemplate::parse(&product.resource(RT_DIALOG, id));
+
+        println!("{what}: dwExtendedStyle = 0x{:08X}", template.ex_style);
+
+        assert!(
+            template.ex_style & WS_EX_APPWINDOW != 0,
+            "⚠ {what} asks for no button of its own, so it inherits the absence of its \
+             WS_EX_TOOLWINDOW owner and the user sees nothing on the task bar — П-1. \
+             dwExtendedStyle is 0x{:08X}",
+            template.ex_style
+        );
+        assert_eq!(
+            template.ex_style & WS_EX_TOOLWINDOW,
+            0,
+            "{what} must not be a tool window itself — that is the owner's role, not this \
+             window's, and the two styles together are a contradiction"
+        );
+    }
+}
+
 #[test]
 fn the_dialog_template_carries_the_russian_of_fr_92() {
     let product = ProductImage::open();
@@ -6094,6 +6150,14 @@ struct DialogTemplate {
     /// module sets its own text in: the numbers have to be the window's own, and the window's
     /// own font is what these five fields say.
     font: Option<TemplateFont>,
+    /// `dwExtendedStyle` of the header — task T-21-4, the user's finding П-1.
+    ///
+    /// The window is owned by the program's hidden UI window, which carries `WS_EX_TOOLWINDOW`
+    /// by decision R-20 point 2, and an owned window inherits its owner's absence from the task
+    /// bar. `WS_EX_APPWINDOW` in this field is what gives it a button of its own, and it is read
+    /// here rather than off the live window because this is the field that decides it: the style
+    /// is in place before the window is ever shown, which is the only moment the shell looks.
+    ex_style: u32,
 }
 
 /// The `DS_SETFONT` declaration of a dialog template — what the dialog manager builds a
@@ -6125,7 +6189,10 @@ impl DialogTemplate {
         );
 
         let _help_id = read_u32(bytes, &mut at);
-        let _ex_style = read_u32(bytes, &mut at);
+        // `dwExtendedStyle` of the header — read out rather than discarded since task T-21-4,
+        // the user's finding П-1: whether the window gets a button of its own on the task bar
+        // is decided by `WS_EX_APPWINDOW` in this very field, before the window exists.
+        let ex_style = read_u32(bytes, &mut at);
         let style = read_u32(bytes, &mut at);
         let items = read_u16(bytes, &mut at);
 
@@ -6210,6 +6277,7 @@ impl DialogTemplate {
             bounds,
             classes,
             font,
+            ex_style,
         }
     }
 

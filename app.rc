@@ -295,6 +295,14 @@ END
 // grid. Two columns, 200 units wide each, at x = 7 and x = 213.
 IDD_SETTINGS DIALOGEX 0, 0, 420, 385
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+// 0x00040000 = WS_EX_APPWINDOW, spelled numerically like every other constant here — task
+// T-21-4, the user's finding П-1: with the window open there was no button on the task bar.
+// The owner is the program's hidden UI window, a WS_EX_TOOLWINDOW popup by decision R-20
+// point 2, and an owned window inherits its owner's absence from the bar. WS_EX_APPWINDOW
+// "forces a top-level window onto the taskbar when the window is visible", and it belongs in
+// the template rather than on the live window because the shell reads the style when the
+// window is first shown. Modality and the owner are untouched.
+EXSTYLE 0x00040000
 CAPTION "Lang Switcher — настройки"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
@@ -500,6 +508,10 @@ END
 // the 335,7 × 178,6 of scratchpad-Э11\chrome.ps1 (A-01).
 IDD_ABOUT DIALOGEX 0, 0, 191, 79
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+// 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
+// «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
+// from the task bar. Both windows of FR-92 are fixed, because the user named both.
+EXSTYLE 0x00040000
 CAPTION "О программе"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
