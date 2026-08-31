@@ -244,6 +244,17 @@ pub fn shutdown_requested() -> bool {
     SHUTDOWN_REQUESTED.load(Ordering::Acquire)
 }
 
+/// Puts the shutdown flag back to its start-up value — tests of this module only.
+///
+/// The flag is a `static` of the process and the test binary is one process, so a test that
+/// observes the *transition* to "requested" has to be able to start from "not requested" and
+/// has to leave the binary as it found it. There is no production caller and there must never
+/// be one: nothing in a running program may unsay a shutdown somebody asked for.
+#[cfg(test)]
+fn clear_shutdown_request() {
+    SHUTDOWN_REQUESTED.store(false, Ordering::Release);
+}
+
 /// How many times the layout cache of FR-20 failed to build and the hardwired table of FR-25
 /// was used instead — see [`LAYOUT_CACHE_FAILURES`].
 ///
@@ -605,17 +616,60 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
     }
 }
 
-/// Starts the three threads of section 6.1.
-///
-/// On failure the threads already started are brought down before returning, rather than
-/// detached: a detached thread would keep pumping and the process would never exit.
+/// Starts the three threads of section 6.1, each running [`thread_body`] for its role.
 fn spawn_threads() -> std::io::Result<Vec<JoinHandle<WinResult<()>>>> {
+    spawn_threads_with(thread_body)
+}
+
+/// The wiring behind [`spawn_threads`], with the body of a thread as a parameter.
+///
+/// **Task T-19-1, finding 3 of the audit of 2026-08-31.** The `request_shutdown` below is the
+/// repair, and this split is what makes it checkable: the real [`thread_body`] creates a
+/// window, enters a COM apartment and pumps messages, so the guarantee "a thread that ends
+/// takes the process with it" could not be driven from a test without it.
+///
+/// Nothing else about the loop changed. On failure the threads already started are brought
+/// down before returning, rather than detached: a detached thread would keep pumping and the
+/// process would never exit.
+fn spawn_threads_with<F>(body: F) -> std::io::Result<Vec<JoinHandle<WinResult<()>>>>
+where
+    F: Fn(Role) -> WinResult<()> + Clone + Send + 'static,
+{
     let mut threads = Vec::with_capacity(THREAD_COUNT);
 
     for role in [Role::Input, Role::Ui, Role::Watcher] {
+        let body = body.clone();
+
         let spawned = thread::Builder::new()
             .name(role.thread_name().to_owned())
-            .spawn(move || thread_body(role));
+            .spawn(move || {
+                let outcome = body(role);
+
+                // **The repair of task T-19-1.** Whichever thread this is and however its body
+                // ended, the process is on its way out: ask the rest to stop as well, here, on
+                // the thread that is leaving, rather than leaving it to whoever gets round to
+                // joining this handle.
+                //
+                // Until this line the only place that asked was `join_all`, which joins in
+                // order and so does not look at the UI or the watcher handle until the input
+                // thread — the one that in a normal session pumps to the very end — has
+                // returned. A watcher that failed to create its window, to enter its apartment
+                // or to subscribe `watchdog::watch` therefore left the process running for the
+                // rest of the session with no password probe of SEC-06 and no flush of FR-10;
+                // a UI thread that failed left it with no tray icon and no way out. A panic
+                // was covered — the hook of FR-98 asks — an ordinary `Err` was not.
+                //
+                // It is also what wakes the main thread of a debug build, which spends the
+                // session parked on the FR-97 deadline and not in `join_all` at all:
+                // `request_shutdown` unparks it.
+                //
+                // Idempotent and safe from any thread, so the second request `join_all` makes
+                // costs an atomic store. A body that panics does not reach this line and does
+                // not need to: the panic hook has already asked.
+                request_shutdown();
+
+                outcome
+            });
 
         match spawned {
             Ok(handle) => threads.push(handle),
@@ -650,9 +704,10 @@ fn join_all(threads: Vec<JoinHandle<WinResult<()>>>) -> bool {
             }
         }
 
-        // Whichever thread came down first, the process is on its way out: ask the rest to
-        // stop as well. Without this a thread that ended on its own — a failed window
-        // creation, a panic — would leave the others pumping and the process alive.
+        // A second, unconditional request, kept after task T-19-1 moved the first one onto the
+        // thread that is leaving. It costs an atomic store and it covers the one caller that
+        // does not come through `spawn_threads_with`: the failure path of that function, which
+        // joins the handles it did manage to start.
         request_shutdown();
     }
 
@@ -2829,6 +2884,9 @@ pub(crate) fn report_non_critical(operation: &str, error: &WinError) {
 /// recorder one test installs is invisible to the next.
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::{Duration, Instant};
+
     use super::*;
     use crate::buffer::{self, Recorder};
     use crate::hook::{Edge, KeyEvent};
@@ -3139,5 +3197,99 @@ mod tests {
         // A thread that owns no buffer owns no cache either, so there is nothing to rebuild.
         assert!(!layout_refresh_needed(other, None));
         assert!(!layout_refresh_needed(LayoutId::default(), None));
+    }
+
+    /// **Task T-19-1, finding 3 of the audit of 2026-08-31.** A thread of section 6.1 whose
+    /// body returns `Err` asks the process to come down — whichever of the three it is, and
+    /// while the other two are still pumping.
+    ///
+    /// The situation is exactly the production one: the three threads are started through the
+    /// very wiring `spawn_threads` uses, and the main thread is parked inside `join_all` on the
+    /// input handle, which is where a Release build spends the whole session. The bodies are
+    /// substitutes — the real [`thread_body`] wants a window, a COM apartment and a message
+    /// queue — and the two that are not failing park, because "still pumping" is the state that
+    /// made this a defect.
+    ///
+    /// All three roles are one test on purpose: [`SHUTDOWN_REQUESTED`] is a `static` of the
+    /// process, and two tests asserting on it would be asserting on each other's timing. The
+    /// input case is the positive control — it was green before the repair as well, because
+    /// `join_all` reaches its own request as soon as the handle at index 0 returns.
+    #[test]
+    fn a_thread_that_ends_with_an_error_asks_the_process_to_come_down() {
+        // Collected rather than asserted case by case, so that one run names every role and
+        // the positive control is visible in the same output as the failure.
+        let mut asked_by = Vec::new();
+
+        for failing in [Role::Watcher, Role::Ui, Role::Input] {
+            clear_shutdown_request();
+
+            let gate = Arc::new((Mutex::new(false), Condvar::new()));
+            let body_gate = Arc::clone(&gate);
+
+            let body = move |role: Role| -> WinResult<()> {
+                if role == failing {
+                    // A refused CreateWindowExW, CoInitializeEx or watchdog::watch: an
+                    // ordinary `Err`, not a panic. The panic path was covered by FR-98 all
+                    // along; this one was not.
+                    return Err(WinError::from_thread());
+                }
+
+                let (lock, awake) = &*body_gate;
+                let mut open = lock.lock().expect("gate");
+                while !*open {
+                    open = awake.wait(open).expect("gate");
+                }
+                Ok(())
+            };
+
+            let threads = spawn_threads_with(body).expect("three threads start");
+
+            // `join_all` on its own thread because it blocks, exactly as the main thread of a
+            // Release build blocks: on the input handle, first in the vector.
+            let joiner = thread::spawn(move || join_all(threads));
+
+            let asked = shutdown_requested_within(Duration::from_secs(2));
+
+            // Whatever the verdict, let the parked bodies out and collect every thread, so
+            // that a failure of this test leaves nothing running behind it.
+            {
+                let (lock, awake) = &*gate;
+                *lock.lock().expect("gate") = true;
+                awake.notify_all();
+            }
+            let _ = joiner.join();
+
+            asked_by.push((failing, asked));
+        }
+
+        // Left as it was found: the rest of this binary must not inherit a requested shutdown.
+        clear_shutdown_request();
+
+        let silent: Vec<Role> = asked_by
+            .iter()
+            .filter(|(_, asked)| !asked)
+            .map(|(role, _)| *role)
+            .collect();
+
+        assert!(
+            silent.is_empty(),
+            "threads that ended with Err without asking the process to come down: {silent:?} \
+             (all three roles: {asked_by:?})"
+        );
+    }
+
+    /// Whether shutdown is requested within `within`. Polled, because the request is made by
+    /// another thread and there is nothing to park on.
+    fn shutdown_requested_within(within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+
+        while Instant::now() < deadline {
+            if shutdown_requested() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        shutdown_requested()
     }
 }
