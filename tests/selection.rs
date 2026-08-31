@@ -528,7 +528,7 @@ fn nothing_that_can_block_runs_on_the_thread_that_owns_the_hook() {
         Err(ClipboardError::WrongThread)
     ));
     assert!(matches!(
-        selection::restore_after(window.0, &Snapshot::empty(), Duration::from_millis(200)),
+        selection::restore_after(window.0, &Snapshot::empty(), Duration::from_millis(200), 0),
         Err(ClipboardError::WrongThread)
     ));
     assert_eq!(
@@ -1066,7 +1066,9 @@ fn the_delayed_restore_waits_the_configured_time() {
     selection::write_unicode_text(window.0, "during the pause").expect("our own write");
 
     let started = Instant::now();
-    let restored = selection::restore_after(window.0, &snapshot, delay).expect("the restore");
+    // The probe number is the "nothing was answered" value: this test is about the delay and
+    // about the own-write path, which is the arm `is_own_change` decides. Task Т-18-1.
+    let restored = selection::restore_after(window.0, &snapshot, delay, 0).expect("the restore");
     let elapsed = started.elapsed();
 
     assert!(restored.placed >= 1);
@@ -1077,6 +1079,64 @@ fn the_delayed_restore_waits_the_configured_time() {
             .expect("the read")
             .as_deref(),
         Some("before the pause")
+    );
+}
+
+/// **И-1 of Э18 — the failure paths put the clipboard back, on the machine's real clipboard.**
+///
+/// The one test in this file that reproduces the whole of the defect the audit of 2026-08-31
+/// found, and it needs no window and no keystroke: the three things that decide step 8 are a
+/// snapshot, a clipboard the *application* changed in answer to the probe, and the sequence
+/// number of that change.
+///
+/// `raw_write` is what makes it honest. It does not go through the module under test, so nothing
+/// marks the change it makes as this program's own — which is exactly what an application
+/// answering `Ctrl+C` looks like from here. Before this task, the gate of decision П-5 asked
+/// [`selection::is_own_change`] alone, found no mark, and threw the user's clipboard away while
+/// journalling it as a lawful П-5 skip.
+#[test]
+#[ignore = "writes to the machine's clipboard; run with --ignored --test-threads=1"]
+fn the_snapshot_goes_back_when_the_path_refused_before_it_ever_wrote() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    // What the user had. Step 1 of FR-61 takes it.
+    assert!(raw_write(
+        window.0,
+        &[(CF_UNICODETEXT, text_block("метка-до — Э18"))]
+    ));
+
+    let before = raw_read(window.0, CF_UNICODETEXT).expect("the mark is on the clipboard");
+    let snapshot = selection::snapshot(window.0).expect("the snapshot of step 1");
+
+    // Steps 2 and 3: the probe goes out and the application answers it. Not our write — the
+    // ring of FR-63 is silent for it, and that silence is the whole defect.
+    assert!(raw_write(
+        window.0,
+        &[(CF_UNICODETEXT, text_block("C:\\selected\\picture.png"))]
+    ));
+
+    let probe = selection::sequence_number();
+
+    assert!(
+        !selection::is_own_change(probe),
+        "the answer to the probe is not a write of ours, and nothing here pretends it is"
+    );
+
+    // Steps 4 to 7 refuse — no text, no direction, no write. Step 8 runs through the one door,
+    // carrying the number step 3 saw. That number is the whole of the repair.
+    let restored = selection::restore_after(window.0, &snapshot, Duration::ZERO, probe)
+        .expect("step 8 answers");
+
+    assert_eq!(
+        raw_read(window.0, CF_UNICODETEXT),
+        Some(before),
+        "the user's clipboard came back"
+    );
+    assert!(
+        restored.placed >= 1,
+        "and it came back through the restore rather than by accident: {restored:?}"
     );
 }
 
@@ -1513,6 +1573,14 @@ enum Step {
     Reclaim,
 }
 
+/// The sequence number the clipboard takes when the application answers the probe of step 2.
+///
+/// Any number other than the baseline of a bench, which is `Snapshot::empty().sequence()` — zero.
+/// It was written as a bare `1` inside `Bench::with_selection` until task Т-18-1 made it a thing
+/// the tests have to name: it is what step 8 must be handed, and what the gate of decision П-5
+/// must accept as this pass's own doing.
+const PROBE_ANSWER: u32 = 1;
+
 /// The eight steps with the outside world replaced by a tape recorder.
 struct Bench {
     /// Every call, in the order it was made. This *is* the assertion of acceptance point 9.
@@ -1533,6 +1601,14 @@ struct Bench {
     sequence_probes: u32,
     /// The baseline step 3 was given — acceptance point 11.
     baseline_seen: Option<u32>,
+    /// The probe number step 8 was handed through [`SelectionPath::restore_clipboard`].
+    ///
+    /// **Not a [`Step`]** for the same reason `sequence_probes` is not one, and the single most
+    /// load-bearing field of this bench since task Т-18-1: the tape says step 8's door opened,
+    /// and this says whether what came through it lets the gate of П-5 open too. Before Т-18-1
+    /// the first was true on every failure path and the second was false, and the user's
+    /// clipboard was the difference.
+    restore_probe: Option<u32>,
     /// What step 4 answers.
     reads: Option<String>,
     /// What step 6 wrote.
@@ -1549,12 +1625,13 @@ impl Bench {
             fail_at: None,
             panic_at: None,
             wait: Wait::Changed {
-                sequence: 1,
+                sequence: PROBE_ANSWER,
                 waited: Duration::from_millis(7),
             },
             sequence_now: Snapshot::empty().sequence(),
             sequence_probes: 0,
             baseline_seen: None,
+            restore_probe: None,
             reads: Some(text.to_owned()),
             written: None,
             switched: None,
@@ -1690,8 +1767,9 @@ impl SelectionPath for Bench {
         Modifiers::NONE
     }
 
-    fn restore_clipboard(&mut self, _snapshot: &Snapshot) {
+    fn restore_clipboard(&mut self, _snapshot: &Snapshot, probe: u32) {
         self.note(Step::RestoreClipboard);
+        self.restore_probe = Some(probe);
     }
 
     fn reclaim_clipboard(&mut self, _snapshot: &Snapshot) {
@@ -1805,6 +1883,92 @@ fn step_eight_runs_however_steps_four_to_seven_end() {
     let outcome = selection::run(&mut undecidable, &pair_plan(LayoutId::default()));
     assert!(undecidable.ran(Step::RestoreClipboard));
     assert_eq!(outcome, Outcome::Refused(Refusal::NoDirection));
+}
+
+/// **И-1 and И-4 of Э18 — what comes through step 8's door, and not merely that it opened.**
+///
+/// The test above proves the door opens on every failure path. It proved that before the audit of
+/// 2026-08-31 as well, and the user's clipboard was lost all the same: behind the door stands the
+/// gate of decision П-5, and on these four paths this program has written nothing for the ring of
+/// FR-63 to recognise. The door and the number are therefore asserted apart, because that is how
+/// they failed — one right, one missing, and nothing red anywhere.
+///
+/// [`PROBE_ANSWER`] is the number step 3 answered with. Handing it to step 8 is what lets the
+/// gate tell the answer to this program's own probe from a stranger's copy two hundred
+/// milliseconds later; what the gate then does with it is
+/// `selection::tests::the_answer_to_the_probe_opens_the_gate_and_a_third_writer_shuts_it`, a unit
+/// test, because the gate is private and the decision belongs inside the module.
+///
+/// The last row is И-4: the happy path hands the same number, and on it the gate has two reasons
+/// to open rather than one — step 6's own mark is in the ring as it always was.
+#[test]
+fn every_failure_path_hands_step_eight_the_number_step_three_saw() {
+    let cases: Vec<(&str, Bench, LayoutId, Outcome)> = vec![
+        (
+            "step 4 found no text — a picture or a file list was selected",
+            Bench::with_selection(""),
+            convert::FALLBACK_US,
+            Outcome::Refused(Refusal::NoText),
+        ),
+        (
+            "step 4 could not read the clipboard",
+            Bench::with_selection("ghbdtn").failing_at(Step::Read),
+            convert::FALLBACK_US,
+            Outcome::Refused(Refusal::Clipboard),
+        ),
+        (
+            "step 5 could not decide a direction",
+            Bench::with_selection("123"),
+            LayoutId::default(),
+            Outcome::Refused(Refusal::NoDirection),
+        ),
+        (
+            "step 6 could not write",
+            Bench::with_selection("ghbdtn").failing_at(Step::Write),
+            convert::FALLBACK_US,
+            Outcome::Refused(Refusal::Clipboard),
+        ),
+        (
+            "nothing failed — И-4, the happy path is what it was",
+            Bench::with_selection("ghbdtn"),
+            convert::FALLBACK_US,
+            Outcome::Converted {
+                mapped: 6,
+                carried: 0,
+            },
+        ),
+    ];
+
+    for (what, mut bench, foreground, expected) in cases {
+        let outcome = selection::run(&mut bench, &pair_plan(foreground));
+
+        assert_eq!(outcome, expected, "{what}");
+        assert!(
+            bench.ran(Step::RestoreClipboard),
+            "{what}: step 8's door opened: {:?}",
+            bench.steps
+        );
+        assert_eq!(
+            bench.restore_probe,
+            Some(PROBE_ANSWER),
+            "{what}: and step 8 was handed the number step 3 answered with"
+        );
+    }
+
+    // And the path that owes nothing hands nothing. Step 3 said the clipboard never moved, so it
+    // is still exactly what the user left there and step 8 must not run at all — `Owed::Nothing`,
+    // the reason the restore is armed at step 3 rather than at step 1.
+    let mut quiet = Bench::without_selection();
+
+    assert_eq!(
+        selection::run(&mut quiet, &pair_plan(convert::FALLBACK_US)),
+        Outcome::NoSelection
+    );
+    assert!(!quiet.ran(Step::RestoreClipboard));
+    assert_eq!(
+        quiet.restore_probe, None,
+        "no probe was answered, so there is no number and no step 8"
+    );
 }
 
 /// **Acceptance point 10, the hardest path.** A panic between steps 4 and 7 still restores.
@@ -1937,9 +2101,14 @@ fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
     let sleeps = body
         .find("sleep(delay)")
         .expect("the delay of step 8 is waited out");
+    // ⚠ Т-18-1 moved this needle, and it is worth saying why rather than letting a reader think
+    // the sweep was loosened. It used to read `restore_is_due(sequence_number())`. The gate now
+    // takes a second argument — the number step 3 saw — and the needle names it, so the sweep
+    // still fails if the question stops being asked, and now fails as well if it is asked
+    // without the number that makes it answerable on the failure paths.
     let asks = body
-        .find("restore_is_due(sequence_number())")
-        .expect("П-5: the sequence number is asked once more");
+        .find("restore_is_due(sequence_number(), probe)")
+        .expect("П-5: the sequence number is asked once more, against the probe of step 3");
     let puts = body
         .find("restore(owner, snapshot)")
         .expect("the restore itself is still here");
@@ -3089,5 +3258,48 @@ fn the_three_transit_buffers_of_the_clipboard_path_are_zeroed_as_well() {
     assert!(
         zeroing < unwrap,
         "the block is zeroed before the failure is propagated"
+    );
+}
+
+/// **И-3 of Э18 — `empty` succeeded, `put` refused, and the clipboard is empty because of us.**
+///
+/// The worst shape of the defect the audit of 2026-08-31 found, and the only one that ends with
+/// the user holding **nothing at all**: `EmptyClipboard` moves the window station's counter by
+/// itself, so a refused `SetClipboardData` leaves a clipboard this program emptied and did not
+/// fill. The mark of FR-63 used to stand after the `?` that propagates that failure, so the
+/// change went unmarked, the gate of П-5 read it as a stranger's, and step 8 — the one restore
+/// that could have undone it — was skipped.
+///
+/// A sweep rather than a run, and deliberately: making `SetClipboardData` refuse while
+/// `EmptyClipboard` succeeds needs a fault injected below the seam [`SelectionPath`] provides,
+/// and there is no honest way to reach it from here. What can be checked exactly is the shape
+/// the fix has — the mark hangs on **having emptied**, and it is put **before** the failure
+/// leaves the function.
+#[test]
+fn the_write_marks_the_clipboard_as_ours_whenever_it_emptied_it() {
+    let source = source_of("selection.rs");
+    let body = body_after(&source, "pub fn write_unicode_text");
+
+    let emptied = body
+        .find("emptied = true;")
+        .expect("the fact that the clipboard was emptied is remembered");
+    let guard = body
+        .find("if emptied {")
+        .expect("and the mark of FR-63 is hung on it");
+    let mark = body
+        .find("note_own_write();")
+        .expect("the write is still marked as ours — FR-63");
+    let unwrap = body
+        .find("outcome?")
+        .expect("the failure is still propagated");
+
+    assert!(
+        emptied < guard && guard < mark,
+        "the mark follows the change, not the success"
+    );
+    assert!(
+        mark < unwrap,
+        "И-3: the mark is put before the failure leaves the function, or a refused `put` \
+         after a successful `empty` costs the user their clipboard for good"
     );
 }
