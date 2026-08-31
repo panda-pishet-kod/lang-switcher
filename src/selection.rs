@@ -143,8 +143,8 @@ use std::time::Instant;
 use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, EmptyClipboard, EnumClipboardFormats,
-    GetClipboardData, GetClipboardSequenceNumber, OpenClipboard, RemoveClipboardFormatListener,
-    SetClipboardData,
+    GetClipboardData, GetClipboardOwner, GetClipboardSequenceNumber, OpenClipboard,
+    RemoveClipboardFormatListener, SetClipboardData,
 };
 use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
@@ -1236,8 +1236,13 @@ pub fn restore(owner: HWND, snapshot: &Snapshot) -> Result<Restored, ClipboardEr
     }
 
     drop(clipboard);
+    let sequence = own_change_number(owner);
 
-    note_own_write();
+    // Task T-19-3. `None` means the clipboard is not ours any more and the number standing now
+    // is a stranger's — see [`own_change_number`].
+    if let Some(sequence) = sequence {
+        note_own_write(sequence);
+    }
 
     Ok(restored)
 }
@@ -1497,6 +1502,7 @@ fn encode_utf16(text: &str) -> Vec<u8> {
 pub fn write_unicode_text(owner: HWND, text: &str) -> Result<(), ClipboardError> {
     let mut bytes = encode_utf16(text);
     let mut emptied = false;
+    let mut sequence = None;
 
     let outcome = Clipboard::open(owner).and_then(|clipboard| {
         clipboard.empty()?;
@@ -1504,21 +1510,27 @@ pub fn write_unicode_text(owner: HWND, text: &str) -> Result<(), ClipboardError>
         // Past this line the clipboard is not what the user left there, whatever happens next.
         emptied = true;
 
-        clipboard.put(CF_UNICODETEXT, &bytes)?;
+        // ⭐ **Task T-19-3, Э18-Д-1.** `put` is not behind a `?` any more, and the reason is the
+        // two lines after it: a `?` here would leave through the closure and take the number of
+        // our own change with it, past the O(n) zeroing below. The result is carried out
+        // instead, so both outcomes of `put` leave through the same close and the same read.
+        let put = clipboard.put(CF_UNICODETEXT, &bytes);
 
         // Closed before the write is announced, as it always was: the listener of FR-63 can see
         // the change the moment the clipboard is released.
         drop(clipboard);
+        sequence = own_change_number(owner);
 
-        Ok(())
+        put.map_err(ClipboardError::from)
     });
 
     crate::buffer::zero_slice(&mut bytes);
 
-    // After the guard is gone on both paths — the success drops it above, the failure drops it
-    // at the `?` — so the number read here is the one the closed clipboard settled on.
-    if emptied {
-        note_own_write();
+    // `None` is the clipboard having changed hands between the close and the read — see
+    // [`own_change_number`]. Nothing is marked then, because the number now standing belongs to
+    // somebody else and storing it is exactly the harm decision П-5 forbids.
+    if emptied && let Some(sequence) = sequence {
+        note_own_write(sequence);
     }
 
     outcome?;
@@ -1592,7 +1604,77 @@ pub fn wait_for_change(baseline: u32, timeout: Duration) -> Wait {
     }
 }
 
+/// The number of the change this frame has just made, or `None` if the clipboard is not this
+/// process's any more — **task T-19-3, Э18-Д-1, finding 6 of the audit of 2026-08-31**.
+///
+/// # Why the number cannot be taken any earlier — measured, not reasoned
+///
+/// The audit asked for the number to be read **under the open clipboard**, the way [`snapshot`]
+/// reads its baseline. That is impossible on a path that *writes*, and the measurement says so
+/// plainly. One `OpenClipboard`, `EmptyClipboard`, `SetClipboardData`, `CloseClipboard` on the
+/// machine's real clipboard, with `GetClipboardSequenceNumber` between every pair:
+///
+/// ```text
+/// before_open=1025  after_open=1025  after_empty=1026  after_put=1027  after_close=1030
+/// ```
+///
+/// The counter moves once for `EmptyClipboard`, once for `SetClipboardData` — and **three more
+/// times on `CloseClipboard`**, where the window station synthesises `CF_TEXT`, `CF_OEMTEXT` and
+/// `CF_LOCALE` out of the `CF_UNICODETEXT` that went up. The number a `WM_CLIPBOARDUPDATE`
+/// handler later reads is the one after the close, so a number read under the open clipboard is
+/// guaranteed to be the wrong one: the first attempt at this repair took it there and
+/// `our_own_change_is_recognised_and_a_foreign_one_is_not` went red on the spot. [`snapshot`] is
+/// not a counter-example — it only reads, so it moves nothing and its baseline is exact.
+///
+/// # What is done instead
+///
+/// The earliest instant the number exists at all is immediately after `CloseClipboard`, and that
+/// is where both callers read it, with nothing whatever in between. That alone is most of the
+/// repair: the read used to stand after the O(n) volatile zeroing of a block that can be
+/// megabytes — milliseconds of window on a large selection — and now stands one instruction
+/// after the close.
+///
+/// One instruction is still not none, so the owner is asked as well, and **after** the number,
+/// never before. A process that wrote in between leaves an owner that is not ours; the number is
+/// thrown away and nothing is marked. Asked the other way round, that same process would have had
+/// its number stored as this program's own — which is finding 6 exactly: step 8 would then read a
+/// stranger's copy as ours and overwrite it with the snapshot, the one thing decision П-5 exists
+/// to forbid. So the classification is now sound in the direction that costs the user something:
+/// a foreign number can no longer enter the ring at all. The price is the other direction — a
+/// change of ours can go unmarked if somebody wrote in that instant — and that is the direction
+/// [`note_own_write`] has always called the safe one.
+///
+/// `GetClipboardOwner` answers the window that last emptied the clipboard, which is `owner`
+/// itself: [`Clipboard::open`] opens with it and `EmptyClipboard` makes it the owner. A process
+/// cannot put anything on the clipboard without taking ownership the same way, so a stranger's
+/// write is exactly what this notices.
+fn own_change_number(owner: HWND) -> Option<u32> {
+    let sequence = sequence_number();
+
+    // SAFETY: takes no arguments and dereferences nothing; it reads a window station value and
+    // is callable from any thread with or without the clipboard open. The `HWND` it answers is
+    // compared and never used, so a window that has since been destroyed is harmless here.
+    let current = unsafe { GetClipboardOwner() }.ok();
+
+    (current == Some(owner)).then_some(sequence)
+}
+
 /// Remembers the sequence number this process's own write just produced — FR-63.
+///
+/// # The number is handed in, never fetched here — task T-19-3, Э18-Д-1
+///
+/// ⭐ **This function used to read `GetClipboardSequenceNumber` itself, and that was the defect.**
+/// It is called after the clipboard guard is gone, and in [`write_unicode_text`] it used to be
+/// called after the O(n) volatile zeroing of a block that can be megabytes. Anything that changed
+/// the clipboard inside that window put **its** number here: a clipboard manager answering
+/// `WM_CLIPBOARDUPDATE`, or a `Ctrl+C` of the user's. The ring of FR-63 then held a stranger's
+/// number, [`is_own_change`] answered "ours" for the stranger's change, and step 8 overwrote it
+/// with the snapshot — the one thing decision П-5 exists to forbid.
+///
+/// The number now arrives from [`own_change_number`], which reads it one instruction after the
+/// close and throws it away if the clipboard changed hands. There are two callers,
+/// [`write_unicode_text`] and [`restore`], and the sweep
+/// `the_number_of_our_own_write_is_taken_the_instant_the_clipboard_is_released` holds both to it.
 ///
 /// # Why the sequence number and not a marker format
 ///
@@ -1605,15 +1687,19 @@ pub fn wait_for_change(baseline: u32, timeout: Duration) -> Wait {
 /// # What it can and cannot tell apart
 ///
 /// `WM_CLIPBOARDUPDATE` says *that* the clipboard changed, never *which* change it was; the
-/// handler can only ask what the sequence number is **now**. So the recognition is exact when
-/// our message is taken before the next change and inexact when it is not: if a foreign write
-/// lands between our write and our reading of the queue, both changes look foreign. That
-/// mis-classification is one-directional and it is the safe direction — a change of ours read as
-/// the user's makes the program consider a clipboard it may treat as new, whereas the reverse
-/// would make it ignore a real user action. The window in which it can happen is the few
-/// microseconds between `CloseClipboard` and the next `GetMessage`.
-pub fn note_own_write() {
-    let sequence = sequence_number();
+/// handler can only ask what the sequence number is **now**. So the recognition is exact when our
+/// message is taken before the next change and inexact when it is not: if a foreign write lands
+/// between our write and our reading of the queue, both changes look foreign.
+///
+/// ⚠ **That the mis-classification is one-directional is a property of the ring holding our own
+/// number, and until task T-19-3 the ring did not always hold it.** With the number fetched here,
+/// after the close and after the zeroing, a foreign write in that window was recorded as ours and
+/// the program went on to overwrite the user's copy — the unsafe direction, and the audit of
+/// 2026-08-31 found it. [`own_change_number`] is what makes the sentence true again: a number
+/// taken while the clipboard has already changed hands never reaches this function, so the only
+/// inexactness left is a change of ours read as the user's, which makes the program consider a
+/// clipboard it may treat as new, whereas the reverse would make it ignore a real user action.
+pub fn note_own_write(sequence: u32) {
     let index = OWN_NEXT.fetch_add(1, Ordering::Relaxed) % OWN_MARKS;
 
     OWN_MARK[index].store(sequence, Ordering::Release);

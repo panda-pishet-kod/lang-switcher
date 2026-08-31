@@ -3275,6 +3275,12 @@ fn the_three_transit_buffers_of_the_clipboard_path_are_zeroed_as_well() {
 /// and there is no honest way to reach it from here. What can be checked exactly is the shape
 /// the fix has — the mark hangs on **having emptied**, and it is put **before** the failure
 /// leaves the function.
+///
+/// ⚠ The needle for the mark carries the argument task **T-19-3** gave `note_own_write`: the
+/// number is now read under the open clipboard and handed in, so the call reads
+/// `note_own_write(sequence)`. What this sweep is about did not change — only the spelling of
+/// the line it looks for, and the guard that carries the mark now names the number as well. See
+/// `the_number_of_our_own_write_is_taken_the_instant_the_clipboard_is_released`.
 #[test]
 fn the_write_marks_the_clipboard_as_ours_whenever_it_emptied_it() {
     let source = source_of("selection.rs");
@@ -3284,10 +3290,10 @@ fn the_write_marks_the_clipboard_as_ours_whenever_it_emptied_it() {
         .find("emptied = true;")
         .expect("the fact that the clipboard was emptied is remembered");
     let guard = body
-        .find("if emptied {")
+        .find("if emptied")
         .expect("and the mark of FR-63 is hung on it");
     let mark = body
-        .find("note_own_write();")
+        .find("note_own_write(sequence);")
         .expect("the write is still marked as ours — FR-63");
     let unwrap = body
         .find("outcome?")
@@ -3302,4 +3308,79 @@ fn the_write_marks_the_clipboard_as_ours_whenever_it_emptied_it() {
         "И-3: the mark is put before the failure leaves the function, or a refused `put` \
          after a successful `empty` costs the user their clipboard for good"
     );
+}
+
+/// **Э18-Д-1, finding 6 of the audit of 2026-08-31 — the number of our own write is taken the
+/// instant the clipboard is released, and thrown away if it is not ours any more.**
+///
+/// `note_own_write` used to read `GetClipboardSequenceNumber` **inside itself**, and it is called
+/// after the guard is gone — in `write_unicode_text`, after the O(n) zeroing of a block that can
+/// be megabytes. Anything that changed the clipboard in that window — a clipboard manager
+/// answering `WM_CLIPBOARDUPDATE`, a `Ctrl+C` of the user's — put **its** number into the ring of
+/// FR-63. Step 8 then read that stranger's change as ours and overwrote it with the snapshot,
+/// which is precisely what decision П-5 forbids.
+///
+/// ⚠ **The audit asked for the number to be read under the open clipboard, and that is
+/// impossible.** Measured on the machine's own clipboard: `after_open=1025 after_empty=1026
+/// after_put=1027 after_close=1030` — the counter finishes moving on `CloseClipboard`, where the
+/// station synthesises `CF_TEXT`, `CF_OEMTEXT` and `CF_LOCALE`. A number read under the open
+/// clipboard is therefore guaranteed to be the wrong one, and taking it there turned
+/// `our_own_change_is_recognised_and_a_foreign_one_is_not` red on the spot. `selection::snapshot`
+/// is no counter-example: it only reads, so it moves nothing and its baseline is exact.
+///
+/// A sweep rather than a run: the window is now a single instruction wide and no test can be made
+/// to land inside it on purpose. What can be checked exactly is the shape — the marking function
+/// is **handed** a number instead of fetching one, the fetch is the statement immediately after
+/// the release, and the owner is asked after the number rather than before it.
+#[test]
+fn the_number_of_our_own_write_is_taken_the_instant_the_clipboard_is_released() {
+    let source = source_of("selection.rs");
+
+    assert_eq!(
+        code_lines_with(&source, "pub fn note_own_write(sequence: u32)").len(),
+        1,
+        "the mark of FR-63 is handed the number it stores; a function that fetched one itself \
+         could only ever fetch it too late"
+    );
+
+    // Both orders compile and only one of them is safe, so the order is pinned here.
+    let helper = body_after(&source, "fn own_change_number(owner: HWND) -> Option<u32>");
+    let number = helper
+        .find("let sequence = sequence_number();")
+        .expect("the helper reads the number");
+    let asked = helper
+        .find("unsafe { GetClipboardOwner() }")
+        .expect("the helper asks who owns the clipboard");
+
+    assert!(
+        number < asked,
+        "the number is read before the owner is asked, or a stranger who wrote between the two \
+         would have their number stored as ours — П-5"
+    );
+
+    for signature in ["pub fn write_unicode_text", "pub fn restore("] {
+        let body = body_after(&source, signature);
+
+        let close = code_lines_with(&body, "drop(clipboard)");
+        let read = code_lines_with(&body, "own_change_number(owner)");
+
+        assert_eq!(
+            close.len(),
+            1,
+            "{signature} releases the clipboard exactly once"
+        );
+        assert_eq!(
+            read.len(),
+            1,
+            "{signature} takes the number of its own change exactly once"
+        );
+        assert_eq!(
+            read[0].0,
+            close[0].0 + 1,
+            "{signature} must take the number on the very next line after the release — it is \
+             line {} against line {} — П-5, Э18-Д-1",
+            read[0].0,
+            close[0].0
+        );
+    }
 }
