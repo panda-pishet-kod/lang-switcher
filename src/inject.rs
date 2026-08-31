@@ -382,13 +382,45 @@ pub const fn replacement_events(erase: usize, units: usize) -> usize {
     erase * 2 + units * EVENTS_PER_UNIT
 }
 
-/// **`N` of FR-41: how many characters the recorded strokes put on the screen.**
+/// **`N` of FR-41: how many characters the recorded strokes put on the screen as the user
+/// typed them.**
 ///
 /// Counted over the characters the keys *produced* and not over the keys themselves, which is
 /// the whole point of the requirement: a ligature is one keystroke and several characters, and
-/// erasing it with one `Backspace` would leave the rest of it on the screen. A dead key that
-/// produced nothing yet contributes nothing, and a key the layout has no character for
-/// contributes nothing either (FR-23) — in both cases there is nothing on the screen to erase.
+/// erasing it with one `Backspace` would leave the rest of it on the screen. A key the layout
+/// has no character for contributes nothing (FR-23) — there is nothing of its own on the
+/// screen to erase.
+///
+/// ⚠ **A dead key contributes nothing either, and that is a statement about the screen rather
+/// than about the buffer** — audit of 2026-08-31, finding №5, stage Э20. The stroke itself is
+/// kept with its flag and its accent, exactly as FR-24 asks (`layouts::KeyMapping::dead`), so
+/// `produced()` here is *not* empty; what it is not is a character standing on the screen on
+/// its own. The prose that used to be here said "a dead key that produced nothing yet
+/// contributes nothing" while the code counted its accent as one, and the two had never been
+/// compared against the machine.
+///
+/// The measurement they were finally compared against — probe `deadkeys`, layout
+/// `00020409` "United States-International", journal `scratchpad-Э20\замер-композиции.txt`:
+///
+/// | keys | on the screen | chars | strokes recorded |
+/// |---|---|---|---|
+/// | `' e` dead + a letter it composes with | `é` | **1** | 2 |
+/// | `' t` dead + a letter it does not | `'t` | 2 | 2 |
+/// | `' '` dead + dead | `''` | 2 | 2 |
+/// | `' ␣` dead + space | `'` | **1** | 2 |
+/// | `'` dead with nothing after it | *(nothing)* | **0** | 1 |
+/// | `c a f ' e` | `café` | **4** | 5 |
+///
+/// **Why one rule and not the exact one.** Telling row 1 from row 2 means asking the OS with
+/// the dead-key state *accumulating*, and that is what FR-06 forbids: this program decodes
+/// with `TO_UNICODE_NO_STATE` precisely so that a sweep of its own never leaves an accent
+/// hanging over every other application in the session. So a single rule has to serve all six
+/// rows, and it can only err one way. Counting the dead stroke as **0** is exact for rows 1,
+/// 4, 5 and 6 and one short for rows 2 and 3 — an accent left standing on the screen, which
+/// the person can see and remove. Counting it as **1**, which is what the code did, is one too
+/// many for rows 1, 4, 5 and 6 — and one `Backspace` too many silently eats the character
+/// *before* the run, which belongs to somebody else's text. Sealed as **DECISIONS question
+/// 75** together with the reading of `N` this whole function rests on.
 ///
 /// Counted in Unicode scalar values and not in UTF-16 code units. The two differ only for a
 /// character outside the BMP, and there the scalar value is the right unit: one `Backspace`
@@ -397,8 +429,84 @@ pub const fn replacement_events(erase: usize, units: usize) -> usize {
 pub fn typed_chars(strokes: &[Keystroke]) -> usize {
     strokes
         .iter()
-        .map(|stroke| chars_in(stroke.produced().units()))
+        .map(|stroke| {
+            if stroke.is_dead() {
+                0
+            } else {
+                chars_in(stroke.produced().units())
+            }
+        })
         .sum()
+}
+
+/// **How many characters a *previous step of the cycle* left on the screen** — FR-41 for the
+/// second press onwards, audit of 2026-08-31 finding №5, stage Э20.
+///
+/// From the second press on, what stands on the screen is not what the user typed: it is what
+/// this program injected last time, rendered into `previous`. The two lengths are equal only
+/// while every stroke converts one character to one character, and a dead key breaks that on
+/// the very first press — `convert_stroke` carries a dead stroke over unchanged (FR-24), and
+/// `KEYEVENTF_UNICODE` composes nothing, so the accent that the OS had folded into `é` while
+/// the user typed comes back out as a character of its own.
+///
+/// Measured live on `00020409`: `c a f ' e` typed as `café` is **four** characters, and the
+/// same strokes injected into Russian stand as `сфа'у` — **five**. Same strokes, two different
+/// `N`, which is why this count exists separately from [`typed_chars`] and why a dead stroke is
+/// **1** here and **0** there. Nothing is composed on this side, so every unit that went out is
+/// a character standing on the screen.
+fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
+    strokes
+        .iter()
+        .map(|&stroke| chars_in(convert::convert_stroke(stroke, previous).units()))
+        .sum()
+}
+
+/// **The `N` of FR-41 — how many characters of this run are on the screen right now.**
+///
+/// A type and not a bare `usize` for one reason: there are two right answers and they differ,
+/// so a number passed by hand is a number that can be the wrong one. The only two ways to build
+/// it are the two the program actually has, and both are named after the thing on the screen
+/// they describe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnScreen(usize);
+
+impl OnScreen {
+    /// The run as the **user typed it** — the OS composed the dead keys, see [`typed_chars`].
+    pub fn as_typed(strokes: &[Keystroke]) -> Self {
+        Self(typed_chars(strokes))
+    }
+
+    /// The run as a **previous step of the cycle injected it** — see [`injected_chars`].
+    pub fn as_injected(strokes: &[Keystroke], previous: &LayoutMap) -> Self {
+        Self(injected_chars(strokes, previous))
+    }
+
+    /// The count itself.
+    pub const fn count(self) -> usize {
+        self.0
+    }
+}
+
+/// **Which layout's injection is standing on the screen right now** — the other half of the
+/// `N` of FR-41 from the second press onwards (audit of 2026-08-31, finding №5, stage Э20).
+///
+/// `None` at position zero: the run has never been replaced, so the screen holds what the user
+/// typed and [`OnScreen::as_typed`] is the count. At position `p` the screen holds the
+/// injection of the press that moved the counter *to* `p`, and that press rendered the strokes
+/// into `Cycle::target(origin, p)`.
+///
+/// ⚠ **`p`, not `p + 1`.** `p + 1` is the target of the press being prepared right now — what
+/// is *about* to go on the screen, not what is on it. Reading the counter one step forward
+/// would erase the length of a text that has not been typed yet, and on a run whose lengths
+/// differ from step to step — any run with a dead key in it — that is the wrong number every
+/// time. It is a single `+ 1` and it has no other guard, which is why it is a function with a
+/// name instead of an expression inside [`take_press`].
+pub fn showing(cycle: &layouts::Cycle, origin: LayoutId, position: usize) -> Option<LayoutId> {
+    if position == 0 {
+        return None;
+    }
+
+    cycle.target(origin, position).ok()
 }
 
 /// How many characters a run of UTF-16 code units is.
@@ -454,12 +562,15 @@ fn distinct_units(packet: &[INPUT]) -> usize {
 ///
 /// # What it compares, and why those are the two sides
 ///
-/// The product knows two texts here and only two. One is what it believes it is taking off the
-/// screen: the characters each recorded stroke produced when it was pressed,
-/// `Keystroke::produced` — the same quantity [`typed_chars`] counts to get the `N` of FR-41. The
-/// other is `inserted`, the conversion of those same strokes into the target layout, as
-/// [`crate::convert::convert_strokes`] wrote it. Their concatenations are compared, and the
-/// answer is one bit.
+/// The product knows two texts here and only two. One is what the strokes produced when they
+/// were pressed, `Keystroke::produced`. The other is `inserted`, the conversion of those same
+/// strokes into the target layout, as [`crate::convert::convert_strokes`] wrote it. Their
+/// concatenations are compared, and the answer is one bit.
+///
+/// ⚠ It is a comparison of **texts**, and it is deliberately not the `N` of FR-41 — Э20. `N` is
+/// a count of what stands on the screen and has two forms ([`OnScreen`]); this has one job, to
+/// say whether the two sides of one press differ at all, and the strokes' own characters are the
+/// right side of it on every press of the cycle.
 ///
 /// Walked stroke by stroke against a shrinking tail rather than assembled into a second buffer:
 /// this is a comparison, so it needs no copy of the user's text, and building one would be a
@@ -634,9 +745,9 @@ pub const fn selection_events(erase: usize, units: usize) -> usize {
 /// `4N` events instead of `2N + 2` for the same selection, and every application that watches
 /// modifier transitions would see `N` of them where the user made one.
 ///
-/// `N` is the same `N` as in FR-41 — [`typed_chars`], the number of **characters** the strokes
-/// put on the screen and not the number of keys pressed — so a ligature is selected whole,
-/// exactly as it is erased whole in the other mode.
+/// `N` is the same `N` as in FR-41 — [`OnScreen`], the number of **characters** standing on the
+/// screen and not the number of keys pressed — so a ligature is selected whole, exactly as it is
+/// erased whole in the other mode.
 ///
 /// The insertion is the same `KEYEVENTF_UNICODE` run [`build_replacement`] ends with, and it is
 /// what FR-42 means by "выделение заменяется одним событием": the first character event replaces
@@ -1522,11 +1633,14 @@ fn sleep_ms(delay_ms: u32) {
 /// What one replacement did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Replaced {
-    /// Characters taken off the screen — the `N` of FR-41, by [`typed_chars`].
+    /// Characters taken off the screen — the `N` of FR-41, as [`OnScreen`] counted it.
     ///
     /// The same number in both modes and counted the same way: erased by `N` backspaces in the
     /// `backspace` mode, selected by `N` × `Shift+Left` and replaced by the insertion in the
     /// compatibility mode of FR-42.
+    ///
+    /// Which of the two counts of [`OnScreen`] it is depends on the press: the typing on the
+    /// first, the previous injection from the second on — Э20, see [`OnScreen`].
     pub erased: usize,
     /// UTF-16 code units typed back.
     pub typed: usize,
@@ -1636,7 +1750,14 @@ pub fn replace_in(
     target: &LayoutMap,
     delay_ms: u32,
 ) -> Result<Replaced, InjectError> {
-    replace_in_with(env, strokes, target, delay_ms, ReplacementMethod::Backspace)
+    replace_in_with(
+        env,
+        strokes,
+        target,
+        OnScreen::as_typed(strokes),
+        delay_ms,
+        ReplacementMethod::Backspace,
+    )
 }
 
 /// **FR-40, steps 3 to 6, in the mode of `method`** — the `backspace` packet of FR-41 or the
@@ -1654,6 +1775,7 @@ pub fn replace_in(
 pub fn replace_with(
     strokes: &[Keystroke],
     target: &LayoutMap,
+    on_screen: OnScreen,
     delay_ms: u32,
     method: ReplacementMethod,
 ) -> Result<Replaced, InjectError> {
@@ -1662,6 +1784,7 @@ pub fn replace_with(
         &mut System::for_target(target.layout()),
         strokes,
         target,
+        on_screen,
         delay_ms,
         method,
     )
@@ -1672,12 +1795,20 @@ pub fn replace_in_with(
     env: &mut impl Environment,
     strokes: &[Keystroke],
     target: &LayoutMap,
+    on_screen: OnScreen,
     delay_ms: u32,
     method: ReplacementMethod,
 ) -> Result<Replaced, InjectError> {
-    // FR-41 and FR-42: `N` is the number of characters on the screen, not the number of keys
-    // pressed, and it is the same `N` in both modes.
-    let erased = typed_chars(strokes);
+    // FR-41 and FR-42: `N` is the number of characters **on the screen**, not the number of
+    // keys pressed, and it is the same `N` in both modes.
+    //
+    // ⚠ It is handed in rather than computed here — audit of 2026-08-31 finding №5, stage Э20.
+    // What stands on the screen is what the user typed only on the *first* press of a run; from
+    // the second on it is what the previous step of the cycle injected, and with a dead key in
+    // the run the two lengths differ (`café` typed is four characters, the same strokes
+    // injected are five). Only the caller knows which press this is — `take_press` reads the
+    // position counter of FR-32 — so only the caller can pick the right count. See [`OnScreen`].
+    let erased = on_screen.count();
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
     // FR-43. `max_units` is the length no conversion of these strokes can exceed, so the
@@ -1840,6 +1971,7 @@ pub fn on_hotkey() -> Option<Replaced> {
     let Press {
         mut strokes,
         target,
+        on_screen,
         cycle_len,
     } = take_press()?;
 
@@ -1856,7 +1988,7 @@ pub fn on_hotkey() -> Option<Replaced> {
     #[cfg(feature = "testing")]
     crate::control::note_replacement_method(method);
 
-    let outcome = replace_with(&strokes, &target, inter_event_delay_ms(), method).ok();
+    let outcome = replace_with(&strokes, &target, on_screen, inter_event_delay_ms(), method).ok();
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02, with
     // the volatile write of `crate::buffer::zero_slice` so that the store in front of the `drop`
@@ -1921,6 +2053,9 @@ struct Press {
     strokes: Vec<Keystroke>,
     /// The layout they are to be rendered into on this press — section 4.4.
     target: LayoutMap,
+    /// How many characters of this run stand on the screen — the `N` of FR-41, chosen by
+    /// [`take_press`] from the position counter of FR-32.
+    on_screen: OnScreen,
     /// How many layouts the cycle walks, so that the counter can be advanced by the same number
     /// the target was chosen with.
     cycle_len: usize,
@@ -1990,12 +2125,34 @@ fn take_press() -> Option<Press> {
         // The step this press moves to. The counter is *read* here and advanced only once the
         // replacement has really been sent, so a press that ends in a refusal below leaves the
         // buffer and the counter exactly as it found them.
-        let step = recorder.cycle_position() + 1;
+        let position = recorder.cycle_position();
+        let step = position + 1;
         let target = cycle.target(origin, step).ok()?;
+
+        // **What is on the screen right now** — the `N` of FR-41, and the one thing only this
+        // function can answer, because only here is the position counter of FR-32 readable
+        // (audit of 2026-08-31, finding №5, stage Э20).
+        //
+        // At position zero the run has never been replaced and the screen holds what the user
+        // typed, dead keys composed by the OS. From position one on it holds what the previous
+        // press injected — the same strokes rendered into `target(origin, position)`, with
+        // nothing composed, because `KEYEVENTF_UNICODE` carries a character literally.
+        //
+        // A previous target the cache can no longer answer for (a layout removed from the
+        // system between two presses) falls back to the typed count rather than refusing the
+        // press: that is the behaviour of every build before this one, and a hotkey that goes
+        // quiet is worse than a count that is one out on a run nobody is in the middle of.
+        let on_screen = showing(&cycle, origin, position)
+            .and_then(|previous| cache.get(previous))
+            .map_or_else(
+                || OnScreen::as_typed(&strokes),
+                |previous| OnScreen::as_injected(&strokes, previous),
+            );
 
         Some(Press {
             strokes,
             target: cache.get(target)?.clone(),
+            on_screen,
             cycle_len: cycle.len(),
         })
     })

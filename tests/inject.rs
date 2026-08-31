@@ -630,9 +630,15 @@ fn n_counts_characters_so_a_ligature_is_erased_whole() {
 
 /// The keys that put nothing on the screen contribute nothing to `N`.
 ///
-/// A dead key that has not composed yet (FR-24) and a key the layout has no character for
-/// (FR-23) are both recorded as strokes and both erase nothing, because there is nothing of
-/// theirs to erase.
+/// A key the layout has no character for (FR-23) is recorded as a stroke and erases nothing,
+/// because there is nothing of its own to erase.
+///
+/// ⚠ **This test never covered the dead key its prose used to claim** — audit of 2026-08-31,
+/// finding №5. It said "a dead key that has not composed yet erases nothing" and then built a
+/// `KeyMapping::EMPTY`, which is a key with no character at all; a real dead mapping carries
+/// its accent (FR-24) and was counted as one for as long as the sentence stood. The dead key
+/// has its own checks now, built from `KeyMapping::dead` and measured against a live layout —
+/// see [`a_composed_pair_is_one_character_on_the_screen`] and the block below it.
 #[test]
 fn a_stroke_that_produced_no_character_erases_nothing() {
     let nothing = Keystroke::new(
@@ -648,6 +654,271 @@ fn a_stroke_that_produced_no_character_erases_nothing() {
 
     // And a real run of six ordinary keys is six characters, not six of something else.
     assert_eq!(inject::typed_chars(&ghbdtn()), 6);
+}
+
+// ---------------------------------------------------------------------------------------
+// Э20 — мёртвые клавиши. Находка №5 аудита 2026-08-31, решение — DECISIONS вопрос 75.
+//
+// Числа сняты прибором `<dev>\sandbox\probes\deadkeys` на настоящей раскладке
+// «США (международная)» (KLID 00020409, HKL F0010409) и подтверждены живым опытом
+// пользователя в Блокноте; журналы — `scratchpad-Э20\замер-композиции.txt` и
+// `красное-до-живое.txt`. Раскладка здесь строится синтетически (`KeyMapping::dead`),
+// чтобы эти проверки жили в батарее и на машине, где стоят ровно две раскладки.
+// ---------------------------------------------------------------------------------------
+
+/// Мёртвый символ раскладки `00020409` — сам апостроф `U+0027`, не `U+00B4`.
+///
+/// Снято прибором (столбец «В БУФЕРЕ»: «caf'e») и подтверждено живым опытом: после замены
+/// на экране стояло «сфа'у» — апостроф на месте четвёртого штриха.
+const DEAD_ACUTE: char = '\u{0027}';
+
+/// Штрихи слова `café`, как их записал бы буфер под «США (международной)».
+///
+/// Пять штрихов: `c`, `a`, `f`, мёртвый акут и `e`. Продукт зовёт `ToUnicodeEx` с
+/// `TO_UNICODE_NO_STATE` (FR-06), поэтому состояние мёртвой клавиши не копится и акут
+/// с буквой остаются двумя независимыми штрихами — ровно то, что прибор снял на живой
+/// раскладке.
+fn cafe_under_us_international() -> Vec<Keystroke> {
+    let source = us_international();
+
+    [0x2E, 0x1E, 0x21, 0x28, 0x12]
+        .iter()
+        .map(|&scan| Keystroke::recorded_in(&source, scan, false, Mods::NONE))
+        .collect()
+}
+
+/// Синтетическая «США (международная)»: пять клавиш слова `café`, четвёртая — мёртвая.
+fn us_international() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0409_0409));
+    builder.set(0x2E, false, Mods::NONE, KeyMapping::from_char('c'));
+    builder.set(0x1E, false, Mods::NONE, KeyMapping::from_char('a'));
+    builder.set(0x21, false, Mods::NONE, KeyMapping::from_char('f'));
+    builder.set(0x28, false, Mods::NONE, KeyMapping::dead(DEAD_ACUTE));
+    builder.set(0x12, false, Mods::NONE, KeyMapping::from_char('e'));
+    builder.finish()
+}
+
+/// Цель первого шага цикла: те же клавиши по-русски. На мёртвой клавише цели нет ничего —
+/// штрих проходит насквозь по FR-24.
+fn russian_for_cafe() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0419_0419));
+    builder.set(0x2E, false, Mods::NONE, KeyMapping::from_char('с'));
+    builder.set(0x1E, false, Mods::NONE, KeyMapping::from_char('ф'));
+    builder.set(0x21, false, Mods::NONE, KeyMapping::from_char('а'));
+    builder.set(0x12, false, Mods::NONE, KeyMapping::from_char('у'));
+    builder.finish()
+}
+
+/// **FR-24 не тронут: мёртвый штрих по-прежнему хранится с флагом и со своим акцентом.**
+///
+/// Ремонт Э20 менял только *счёт* стираемого, и это проверка на то, что он не «починил»
+/// дефект, опустошив отображение: пустой мёртвый штрих тоже дал бы ноль на экране, но
+/// сломал бы FR-24 и перенос «без изменений».
+#[test]
+fn a_dead_stroke_is_still_recorded_with_its_flag_and_its_accent() {
+    let strokes = cafe_under_us_international();
+    let dead = strokes[3];
+
+    assert!(dead.is_dead(), "FR-24: штрих несёт флаг мёртвой клавиши");
+    assert_eq!(
+        dead.produced().units(),
+        &utf16("'")[..],
+        "FR-24: акцент хранится в штрихе как был — не опустошён"
+    );
+}
+
+/// **FR-41 после Э20: `N` — это символы НА ЭКРАНЕ, и скомпонованная пара их даёт один.**
+///
+/// Замер на живой «США (международной)»: `c a f ' e` кладёт на экран **`café` — четыре
+/// символа** (`ToUnicodeEx` вернул `-1` на акут и `1` на `e`, отдав скомпонованное `é`),
+/// а в буфер — **пять штрихов**. Считать пять значит послать пятый `Backspace` и съесть
+/// символ **перед** словом — чужой текст. Живой опыт 2026-08-31 это и показал: из
+/// «12345 café» вышло «12345сфа'у», пробел съеден.
+#[test]
+fn a_composed_pair_is_one_character_on_the_screen() {
+    let strokes = cafe_under_us_international();
+
+    assert_eq!(strokes.len(), 5, "в буфере пять штрихов");
+    assert_eq!(
+        inject::typed_chars(&strokes),
+        4,
+        "на экране «café» — четыре символа (прибор deadkeys, строка «слово целиком»)"
+    );
+}
+
+/// **Хвостовая мёртвая клавиша: на экране ещё ничего.**
+///
+/// Замер: одна мёртвая клавиша без продолжения кладёт на экран **ноль** символов
+/// (`ToUnicodeEx` вернул `-1`, акцент подвешен и готовым символом ещё не стал),
+/// а в буфере это один штрих с флагом.
+#[test]
+fn a_trailing_dead_key_is_nothing_on_the_screen_yet() {
+    let source = us_international();
+    let dead = [Keystroke::recorded_in(&source, 0x28, false, Mods::NONE)];
+
+    assert!(dead[0].is_dead(), "FR-24: штрих хранится с флагом");
+    assert_eq!(
+        inject::typed_chars(&dead),
+        0,
+        "на экране ещё ничего (прибор deadkeys, «dead последним, без продолжения»)"
+    );
+}
+
+/// **Цена выбранного правила, названная вслух** — DECISIONS вопрос 75.
+///
+/// Продукт не может отличить `' e` (компонуется, один символ) от `' t` (не компонуется,
+/// два), не спросив ОС с накоплением состояния, а это запрещает FR-06. Правило «мёртвый
+/// штрих вносит ноль» ошибается на несоставляющей паре **в меньшую сторону**: на экране
+/// два символа, сотрётся один, лишний акцент останется стоять. Это осознанный выбор —
+/// недостереть значит оставить свой видимый символ, перестереть значит молча съесть чужой
+/// текст. Тест держит эту цену на виду, чтобы её нельзя было изменить не заметив.
+#[test]
+fn the_chosen_rule_is_one_short_on_a_pair_that_does_not_compose() {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0409_0409));
+    builder.set(0x28, false, Mods::NONE, KeyMapping::dead(DEAD_ACUTE));
+    builder.set(0x14, false, Mods::NONE, KeyMapping::from_char('t'));
+    let source = builder.finish();
+
+    let strokes: Vec<Keystroke> = [0x28, 0x14]
+        .iter()
+        .map(|&scan| Keystroke::recorded_in(&source, scan, false, Mods::NONE))
+        .collect();
+
+    // Прибор: на экране «'t» — два символа. Правило отвечает один, и это известно.
+    assert_eq!(
+        inject::typed_chars(&strokes),
+        1,
+        "правило вносит ноль за мёртвую: один вместо двух — недостирание, безопасная сторона"
+    );
+}
+
+/// **Соседний текст цел: замена стирает ровно слово** — инвариант И-1 этапа Э20.
+///
+/// Тот же путь, что прошёл живой опыт, только через стенд: пять штрихов `café`, цель —
+/// русская. Четыре `Backspace`, а не пять; пятый забрал бы символ, стоящий перед словом.
+#[test]
+fn a_word_with_a_dead_key_is_erased_without_touching_its_neighbour() {
+    let strokes = cafe_under_us_international();
+
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in(&mut bench, &strokes, &russian_for_cafe(), 0)
+        .expect("пакет размерен по длинам, которыми построен");
+
+    assert_eq!(
+        outcome.erased, 4,
+        "FR-41: на экране «café» четыре символа — четыре Backspace, сосед не тронут"
+    );
+    assert_eq!(
+        outcome.typed, 5,
+        "инжекция кладёт «сфа'у» — мёртвый штрих проходит насквозь по FR-24 и композиции \
+         при KEYEVENTF_UNICODE нет"
+    );
+
+    // Четыре символа — восемь событий: FR-41 просит Backspace вниз и вверх.
+    let replacement = &bench.sent()[0];
+    assert_eq!(
+        replacement.iter().filter(|e| e.vk == VK_BACK.0).count(),
+        8,
+        "четыре Backspace, каждый вниз и вверх"
+    );
+}
+
+/// **Шаг цикла ≥ 2 стирает то, что стоит на экране** — инвариант И-2 этапа Э20.
+///
+/// На втором шаге на экране стоит **предыдущая инжекция**, а не то, что набрал человек.
+/// С мёртвой клавишей числа расходятся уже на первом шаге: `café` набрано — четыре
+/// символа, те же штрихи вложены по-русски — «сфа'у», пять, потому что композиции при
+/// `KEYEVENTF_UNICODE` нет. Это и снял живой опыт 2026-08-31.
+#[test]
+fn the_second_step_erases_what_the_first_one_injected() {
+    let strokes = cafe_under_us_international();
+    let first_target = russian_for_cafe();
+
+    let mut bench = Bench::new();
+    let first = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &first_target,
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("пакет размерен");
+
+    assert_eq!(first.erased, 4, "первый шаг стирает набранное — «café»");
+    assert_eq!(first.typed, 5, "и кладёт на экран пять символов — «сфа'у»");
+
+    // Второй шаг: те же штрихи (FR-32 буфер не переписывает), другая цель. Считать надо
+    // по тому, что стоит на экране сейчас, — по предыдущей инжекции.
+    let second = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us_international(),
+        inject::OnScreen::as_injected(&strokes, &first_target),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("пакет размерен");
+
+    assert_eq!(
+        second.erased, 5,
+        "на экране стоит предыдущая инжекция — пять символов, а не четыре набранных"
+    );
+}
+
+/// **Лигатура на шаге цикла ≥ 2 — та же нога, вторым родом отображения.**
+///
+/// Лигатур (отображение len>1) не нашлось ни на одной раскладке машины — прибор `deadkeys`
+/// ответил «лигатур: НЕТ» на всех трёх, и это записано прямо: живой лигатурой нога не
+/// меряется. Синтетикой — меряется, и здесь она измерена.
+#[test]
+fn the_second_step_erases_a_ligature_the_first_one_injected() {
+    let source = layout_with(
+        LayoutId::from_raw(0x0409_0409),
+        0x16,
+        KeyMapping::from_char('u'),
+    );
+    let strokes = [Keystroke::recorded_in(&source, 0x16, false, Mods::NONE)];
+
+    let ligature = KeyMapping::from_to_unicode(2, &utf16("ij"));
+    let first_target = layout_with(LayoutId::from_raw(0x0413_0413), 0x16, ligature);
+
+    let mut bench = Bench::new();
+    let first = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &first_target,
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("пакет размерен");
+
+    assert_eq!(
+        first.erased, 1,
+        "на экране был один символ — то, что набрали"
+    );
+    assert_eq!(first.typed, 2, "инжекция положила на экран два символа");
+
+    let second_target = layout_with(
+        LayoutId::from_raw(0x0419_0419),
+        0x16,
+        KeyMapping::from_char('г'),
+    );
+    let second = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &second_target,
+        inject::OnScreen::as_injected(&strokes, &first_target),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("пакет размерен");
+
+    assert_eq!(
+        second.erased, 2,
+        "на экране стоит предыдущая инжекция — два символа, а не один исходный штрих"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1331,6 +1602,7 @@ fn selection_run(bench: &mut Bench) -> lang_switcher::inject::Replaced {
         bench,
         &ghbdtn(),
         &russian(),
+        inject::OnScreen::as_typed(&ghbdtn()),
         0,
         ReplacementMethod::Selection,
     )
@@ -1481,6 +1753,7 @@ fn n_counts_characters_in_the_compatibility_mode_so_a_ligature_is_selected_whole
         &mut bench,
         &strokes,
         &russian(),
+        inject::OnScreen::as_typed(&strokes),
         0,
         ReplacementMethod::Selection,
     )
@@ -1515,6 +1788,7 @@ fn a_stroke_that_produced_no_character_selects_nothing() {
         &mut bench,
         &nothing_but(&nothing),
         &russian(),
+        inject::OnScreen::as_typed(&nothing_but(&nothing)),
         0,
         ReplacementMethod::Selection,
     )
@@ -1827,6 +2101,7 @@ fn a_character_outside_the_bmp_leaves_the_compatibility_mode_as_two_adjacent_inp
         &mut bench,
         &strokes,
         &target,
+        inject::OnScreen::as_typed(&strokes),
         0,
         ReplacementMethod::Selection,
     )
@@ -1912,6 +2187,7 @@ fn the_default_of_section_7_is_auto_and_replace_in_still_runs_the_backspace_pack
         &mut chosen,
         &ghbdtn(),
         &russian(),
+        inject::OnScreen::as_typed(&ghbdtn()),
         0,
         ReplacementMethod::Backspace,
     )
@@ -2398,6 +2674,7 @@ fn a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks() {
         &mut bench,
         &ghbdtn(),
         &russian(),
+        inject::OnScreen::as_typed(&ghbdtn()),
         ceiling,
         ReplacementMethod::Selection,
     )

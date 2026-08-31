@@ -2490,6 +2490,7 @@ fn the_two_replacement_outcome_keys_of_t_10_17_read_both_ways() {
         &mut Silent,
         &strokes,
         &fallback_russian(),
+        inject::OnScreen::as_typed(&strokes),
         0,
         ReplacementMethod::Backspace,
     )
@@ -2510,6 +2511,11 @@ fn the_two_replacement_outcome_keys_of_t_10_17_read_both_ways() {
         &mut Silent,
         &strokes,
         &fallback_us(),
+        // The rollback press is a *second* press: what stands on the screen is what circle 1
+        // injected, so the count comes from the layout it was rendered into — Э20, finding №5.
+        // For a run without dead keys the two counts agree, and the reading below is the same
+        // six it always was.
+        inject::OnScreen::as_injected(&strokes, &fallback_russian()),
         0,
         ReplacementMethod::Backspace,
     )
