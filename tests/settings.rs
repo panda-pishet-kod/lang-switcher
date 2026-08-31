@@ -398,6 +398,71 @@ fn file_from_a_newer_schema_is_recognised_and_left_intact() {
     assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
 }
 
+/// **Finding 9 of the audit of 2026-08-31, task T-19-4.** A file from a newer schema is
+/// recognised by its stamp, and not by whether the rest of it happens to parse.
+///
+/// The three enumerated fields of section 7 are closed on purpose — "a value outside it must not
+/// pass silently" — so **one new value of an existing field** is all a later schema needs in
+/// order to refuse the strict parse of this build. Until this task that refusal came first:
+/// `toml::from_str` ran before anybody looked at `schema_version`, the file became
+/// [`ConfigError::Malformed`], and [`SavePolicy::for_read`] answered `QuarantineFirst` — a `.bad`
+/// copy that keeps exactly one file, and a newer configuration replaced by the defaults of this
+/// schema. That is the opposite of what `ReadOutcome::FromNewerSchema` promises in words: "this
+/// build is not required to understand such a file, but it is required not to damage it".
+///
+/// The criterion 19 test above covers added **keys** only, which serde ignores by construction,
+/// so it could never have caught this.
+///
+/// The control below is the other half of the promise, and it must not move: a file of the
+/// **current** schema that will not parse is still damaged, and still quarantined.
+#[test]
+fn a_newer_schema_is_recognised_even_when_this_build_cannot_parse_it() {
+    let dir = TestDir::new("from_future_unparsable");
+
+    // A value the current schema has no name for, in a field that is closed.
+    let original = "schema_version = 99\n\
+                    \n\
+                    [general]\n\
+                    enabled = false\n\
+                    \n\
+                    [replacement]\n\
+                    method = \"smart\"\n";
+    let path = write_file(&dir, original);
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: 99 }),
+        "the stamp decides, not the parser"
+    );
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Forbidden);
+
+    // The version is carried, so nothing later can mistake this session for a current one.
+    assert_eq!(config.schema_version, 99);
+
+    // Nothing was quarantined and nothing was rewritten: the bytes are exactly as they were.
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original
+    );
+    assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
+
+    // --- the control: the current schema, and a value it does not admit --------------------
+    let current = TestDir::new("current_unparsable");
+    let broken = write_file(
+        &current,
+        "schema_version = 2\n\n[replacement]\nmethod = \"smart\"\n",
+    );
+    let (_, outcome) = settings::read_or_default(&broken);
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Malformed { .. })),
+        "a file of this schema that will not parse is damaged, exactly as it was before"
+    );
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::QuarantineFirst);
+}
+
 // -----------------------------------------------------------------------------------------
 // Task T-13-6 — the outcome of the read decides the fate of the file
 //

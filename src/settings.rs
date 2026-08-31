@@ -702,12 +702,56 @@ impl Config {
     /// Unknown fields are ignored and missing ones are filled from the defaults, both by
     /// construction rather than by extra code. An empty document therefore parses into
     /// exactly [`Config::default`].
+    ///
+    /// # A file from a newer schema is recognised even when it will not parse — task T-19-4
+    ///
+    /// ⭐ **Finding 9 of the audit of 2026-08-31.** Serde ignores fields it has no name for, so
+    /// a later schema that only *adds* keys parses here without complaint and reaches
+    /// [`Config::migrate`], which stamps it [`ReadOutcome::FromNewerSchema`] and so
+    /// [`SavePolicy::Forbidden`]. A later schema that adds one **value** to a field does not:
+    /// the three enumerated fields of section 7 are closed on purpose — "a value outside it
+    /// must not pass silently" — and the strict parse below refuses the whole document.
+    ///
+    /// Until this task that refusal came first and `schema_version` was never read at all. The
+    /// file became [`ConfigError::Malformed`], `for_read` answered
+    /// [`SavePolicy::QuarantineFirst`], and a configuration written by a newer build was moved
+    /// into the single `.bad` slot and replaced by the defaults of this schema — the exact
+    /// damage `FromNewerSchema` exists to prevent, done to the file the promise names.
+    ///
+    /// So a refused parse is asked one more question before it is called damage: what schema
+    /// does the document claim? The strict parse still runs **first**, and every file of this
+    /// schema or older takes exactly the path it always took — a version at or below
+    /// [`CURRENT_SCHEMA_VERSION`] is `Malformed` as before, and a newer file that *does* parse
+    /// still keeps every field this build understood, which an early return could not have
+    /// given it.
     pub fn from_toml_str(text: &str) -> Result<(Self, ReadOutcome), ConfigError> {
-        let mut config: Self = toml::from_str(text).map_err(|err| ConfigError::Malformed {
-            at: err.span().map(|span| line_and_column(text, span.start)),
-        })?;
-        let outcome = config.migrate();
-        Ok((config, outcome))
+        let error = match toml::from_str::<Self>(text) {
+            Ok(mut config) => {
+                let outcome = config.migrate();
+                return Ok((config, outcome));
+            }
+            Err(error) => error,
+        };
+
+        // The parser refused. If the document names a schema this build is too old for, that
+        // refusal is the expected answer to a file from the future and not a verdict on it.
+        if let Some(version) = claimed_schema_version(text)
+            && version > CURRENT_SCHEMA_VERSION
+        {
+            // The defaults of section 7, carrying the version the file claims. Nothing of the
+            // file itself is kept — none of it was understood — and nothing of it is lost
+            // either: `FromNewerSchema` forbids the write, so the bytes stay where they are.
+            let config = Self {
+                schema_version: version,
+                ..Self::default()
+            };
+
+            return Ok((config, ReadOutcome::FromNewerSchema { version }));
+        }
+
+        Err(ConfigError::Malformed {
+            at: error.span().map(|span| line_and_column(text, span.start)),
+        })
     }
 
     /// Renders the configuration as a TOML document holding every section of section 7.
@@ -742,6 +786,25 @@ impl Config {
         }
         ReadOutcome::Migrated { from }
     }
+}
+
+/// The `schema_version` a document claims, read without the schema of this build — task
+/// **T-19-4**.
+///
+/// Deliberately weak, and every way it can answer nothing is a way of saying "not a file from
+/// the future": a document that is not TOML at all, one with no `schema_version`, one whose
+/// stamp is not an integer, one whose stamp will not fit a `u32`. Each of those is a file this
+/// build cannot read *and* cannot excuse, so each falls through to [`ConfigError::Malformed`]
+/// and its quarantine, which is exactly where it belongs.
+///
+/// The document is parsed a second time here rather than once into a [`toml::Table`] and then
+/// deserialised out of it. This runs on the failure path only — once per session, on a file that
+/// is already refused — and the strict parse above stays the plain, obvious call it has always
+/// been.
+fn claimed_schema_version(text: &str) -> Option<u32> {
+    let document = text.parse::<toml::Table>().ok()?;
+
+    u32::try_from(document.get("schema_version")?.as_integer()?).ok()
 }
 
 /// Raises a file from the pre-versioning form to schema 1.
