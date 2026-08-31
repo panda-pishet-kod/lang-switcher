@@ -776,18 +776,28 @@ pub(crate) fn zero_slice<T: Copy + Default>(slice: &mut [T]) {
 // ---------------------------------------------------------------------------------------
 
 /// Which modifier a virtual key is.
+///
+/// ⭐ **Task T-19-2, finding 4 of the audit of 2026-08-31: every held modifier is sided.** Until
+/// that task `Shift`, `Ctrl` and `Win` had one variant each while `Alt` had two, and the
+/// asymmetry was the defect rather than a simplification — see [`Held::apply`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
-    /// Either `Shift`.
-    Shift,
-    /// Either `Ctrl`, including the one the keyboard fakes in front of `AltGr`.
-    Ctrl,
+    /// The left `Shift`.
+    ShiftLeft,
+    /// The right `Shift`.
+    ShiftRight,
+    /// The left `Ctrl`, including the one the keyboard fakes in front of `AltGr`.
+    CtrlLeft,
+    /// The right `Ctrl`.
+    CtrlRight,
     /// The left `Alt` — a command modifier and nothing else.
     AltLeft,
     /// The right `Alt` — half of `AltGr` when `Ctrl` is down with it.
     AltRight,
-    /// Either `Win`.
-    Win,
+    /// The left `Win`.
+    WinLeft,
+    /// The right `Win`.
+    WinRight,
     /// `CapsLock`, a toggle rather than a held key.
     Caps,
 }
@@ -795,17 +805,23 @@ enum Role {
 /// Which modifier `vk` is, if it is one.
 ///
 /// `WH_KEYBOARD_LL` reports the sided codes — `VK_LSHIFT` rather than `VK_SHIFT` — which is
-/// what makes `AltGr` recognisable at all. The neutral codes are accepted as well and the
-/// neutral `Alt` is read as the *left* one, which is the conservative reading: a stroke that
-/// might be `AltGr` and might be a command is treated as a command, and FR-10 flushes. Losing
-/// a buffer is recoverable; converting a menu accelerator into text is not.
+/// what makes `AltGr` recognisable at all, and since task T-19-2 it is what every one of these
+/// rows is built on. The neutral codes are accepted as well and each of them is read as the
+/// *left* key, which is the conservative reading in the one place it can matter: a stroke that
+/// might be `AltGr` and might be a command is treated as a command, and FR-10 flushes. Losing a
+/// buffer is recoverable; converting a menu accelerator into text is not. For the other three
+/// the side carries no meaning of its own — what the sides exist for is the pair — and reading
+/// the neutral code as the left key keeps one arbitrary rule instead of three.
 const fn modifier_role(vk: u16) -> Option<Role> {
     match vk {
-        v if v == VK_SHIFT.0 || v == VK_LSHIFT.0 || v == VK_RSHIFT.0 => Some(Role::Shift),
-        v if v == VK_CONTROL.0 || v == VK_LCONTROL.0 || v == VK_RCONTROL.0 => Some(Role::Ctrl),
+        v if v == VK_SHIFT.0 || v == VK_LSHIFT.0 => Some(Role::ShiftLeft),
+        v if v == VK_RSHIFT.0 => Some(Role::ShiftRight),
+        v if v == VK_CONTROL.0 || v == VK_LCONTROL.0 => Some(Role::CtrlLeft),
+        v if v == VK_RCONTROL.0 => Some(Role::CtrlRight),
         v if v == VK_MENU.0 || v == VK_LMENU.0 => Some(Role::AltLeft),
         v if v == VK_RMENU.0 => Some(Role::AltRight),
-        v if v == VK_LWIN.0 || v == VK_RWIN.0 => Some(Role::Win),
+        v if v == VK_LWIN.0 => Some(Role::WinLeft),
+        v if v == VK_RWIN.0 => Some(Role::WinRight),
         v if v == VK_CAPITAL.0 => Some(Role::Caps),
         _ => None,
     }
@@ -832,25 +848,42 @@ const fn modifier_role(vk: u16) -> Option<Role> {
 /// is what that costs — see [`Held::reconcile`] and the comment inside [`Recorder::record`].
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Held {
-    shift: bool,
-    ctrl: bool,
+    shift_left: bool,
+    shift_right: bool,
+    ctrl_left: bool,
+    ctrl_right: bool,
     alt_left: bool,
     alt_right: bool,
-    win: bool,
+    win_left: bool,
+    win_right: bool,
     caps: bool,
 }
 
 impl Held {
     /// Applies one modifier key event.
+    ///
+    /// ⭐ **Task T-19-2, finding 4 of the audit of 2026-08-31.** One bit per *side*, because the
+    /// assignment is unconditional and the hook stream is sided. With one bit for the pair,
+    /// `LShift` down, `RShift` down, `LShift` up left the tracker saying "no Shift is held"
+    /// while the user was still holding one: the buffer then recorded the unshifted character
+    /// for what the screen showed shifted, and the bit-for-bit rollback of FR-32 restored the
+    /// wrong case. `Ctrl` was worse — a `Ctrl+V` in that state was recorded into the ring as
+    /// text instead of taking the command row of FR-10 and flushing it.
+    ///
+    /// The fix is not "ignore the release when the other side is down", which would be a guess
+    /// about a key nothing observed; it is one bit per key, which is what the events are.
     fn apply(&mut self, role: Role, edge: Edge) {
         let down = matches!(edge, Edge::Down);
 
         match role {
-            Role::Shift => self.shift = down,
-            Role::Ctrl => self.ctrl = down,
+            Role::ShiftLeft => self.shift_left = down,
+            Role::ShiftRight => self.shift_right = down,
+            Role::CtrlLeft => self.ctrl_left = down,
+            Role::CtrlRight => self.ctrl_right = down,
             Role::AltLeft => self.alt_left = down,
             Role::AltRight => self.alt_right = down,
-            Role::Win => self.win = down,
+            Role::WinLeft => self.win_left = down,
+            Role::WinRight => self.win_right = down,
             // A toggle: it flips on the press and does nothing on the release. Auto-repeat of
             // a held `CapsLock` would flip it once per repeat, which is what the keyboard does
             // to the light as well.
@@ -862,9 +895,24 @@ impl Held {
         }
     }
 
+    /// Whether either `Shift` is down.
+    const fn shift(self) -> bool {
+        self.shift_left || self.shift_right
+    }
+
+    /// Whether either `Ctrl` is down.
+    const fn ctrl(self) -> bool {
+        self.ctrl_left || self.ctrl_right
+    }
+
     /// Whether either `Alt` is down.
     const fn alt(self) -> bool {
         self.alt_left || self.alt_right
+    }
+
+    /// Whether either `Win` is down.
+    const fn win(self) -> bool {
+        self.win_left || self.win_right
     }
 
     /// Whether this is `AltGr` — the right `Alt` with `Ctrl`, which is how the keyboard
@@ -874,7 +922,7 @@ impl Held {
     /// German layout and must reach the buffer; `Ctrl+Alt+E` is an accelerator and must flush
     /// it (FR-10).
     const fn altgr(self) -> bool {
-        self.ctrl && self.alt_right
+        self.ctrl() && self.alt_right
     }
 
     /// Drops every command modifier the system says is **not** physically down, and answers
@@ -903,13 +951,27 @@ impl Held {
     /// `Shift` and `CapsLock` are not touched: neither appears in the command row, so neither
     /// can latch the defect, and `CapsLock` is a toggle whose "physical state" means something
     /// else entirely.
+    ///
+    /// # Sides — task T-19-2
+    ///
+    /// [`Physical`] carries one bit for `Ctrl` and one for `Win`, because that is what
+    /// `GetAsyncKeyState(VK_CONTROL)` answers, and it is the same shape
+    /// [`crate::hook::physical_modifiers`] has always produced. Each *side* of the belief is
+    /// masked with it, so a side comes down only when the system says no `Ctrl` — or no `Win` —
+    /// is down at all. That is exactly the behaviour of the single bit this replaced:
+    /// `(left && p) || (right && p)` is `(left || right) && p`, so [`Held::ctrl`] and
+    /// [`Held::win`] answer after reconciliation precisely as they did before, and no side is
+    /// ever lowered while the system says the key is held. The two `Alt` bits keep the sided
+    /// probe they already had.
     fn reconcile(&mut self, physical: Physical) -> bool {
         let before = *self;
 
-        self.ctrl &= physical.ctrl;
+        self.ctrl_left &= physical.ctrl;
+        self.ctrl_right &= physical.ctrl;
         self.alt_left &= physical.alt_left;
         self.alt_right &= physical.alt_right;
-        self.win &= physical.win;
+        self.win_left &= physical.win;
+        self.win_right &= physical.win;
 
         *self != before
     }
@@ -1503,7 +1565,7 @@ impl Recorder {
         // of its `if` by task T-10-12 so that the check below can be gated on it without
         // evaluating it twice. Moving it changes nothing: the only statement between here and
         // the row is the conversion-session flush, which touches neither `held` nor `mods`.
-        let mut command = (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr();
+        let mut command = (mods.ctrl() || mods.alt() || self.held.win()) && !mods.altgr();
 
         // ---------------------------------------------------------------------------------
         // ⭐ **Defect D — the repair.** Task T-10-12.
@@ -1515,7 +1577,7 @@ impl Recorder {
         // outright — every keystroke thrown away, in every application, for six and a half
         // minutes, until a human pressed and released `Win` and it recovered in the same
         // second. The release of that `Win+E` never reached the callback at all. One missed
-        // release, and `held.win` stays raised for the life of the process.
+        // release, and the `Win` bit of `held` stays raised for the life of the process.
         //
         // What makes it the worst kind of defect is that nothing shows: the callback is alive
         // and counting, no flush counter moves — the ring is cleared *here*, on a path that
@@ -1529,9 +1591,9 @@ impl Recorder {
         // system call only once the answer is "yes".
         //
         // **The exception of FR-11 is covered by the same gate**, and deliberately so. A
-        // believed `Win+Space` implies `command`: `held.win` alone puts the row true, and
+        // believed `Win+Space` implies `command`: `held.win()` alone puts the row true, and
         // `altgr` cannot be set without `Ctrl`, which `Win+Space` does not have. So the
-        // reconciliation below happens *before* the FR-11 test reads `held.win`, and both rows
+        // reconciliation below happens *before* the FR-11 test reads `held.win()`, and both rows
         // decide on the same corrected belief rather than on two different ones.
         //
         // ⚠ **This does not touch FR-10 or FR-11 themselves** (decision Р-44, the user's
@@ -1550,7 +1612,7 @@ impl Recorder {
             && self.held.reconcile(probe())
         {
             mods = self.mods_now(key.flags);
-            command = (mods.ctrl() || mods.alt() || self.held.win) && !mods.altgr();
+            command = (mods.ctrl() || mods.alt() || self.held.win()) && !mods.altgr();
         }
 
         // ⚠ **FR-11, and it stands in front of every flush row below — decision Р-44.**
@@ -1584,7 +1646,7 @@ impl Recorder {
         // conversion of FR-22 produce a character the user never typed. The position counter of
         // FR-32 stays where it was for the same reason the strokes do — a layout change is not a
         // flush, so FR-34 has nothing to say about it.
-        if key.vk == VK_SPACE.0 && self.held.win && !mods.ctrl() && !mods.alt() {
+        if key.vk == VK_SPACE.0 && self.held.win() && !mods.ctrl() && !mods.alt() {
             return Recorded::Ignored;
         }
 
@@ -1890,10 +1952,10 @@ impl Recorder {
     fn mods_now(&self, flags: u32) -> StrokeMods {
         let mut mods = StrokeMods::NONE;
 
-        if self.held.shift {
+        if self.held.shift() {
             mods = mods.with(StrokeMods::SHIFT);
         }
-        if self.held.ctrl {
+        if self.held.ctrl() {
             mods = mods.with(StrokeMods::CTRL);
         }
         // `LLKHF_ALTDOWN` is the system's own answer for this very event, so it is believed

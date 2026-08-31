@@ -241,7 +241,9 @@ const VK_DOWN: u16 = 0x28;
 const VK_INSERT: u16 = 0x2D;
 const VK_DELETE: u16 = 0x2E;
 const VK_LSHIFT: u16 = 0xA0;
+const VK_RSHIFT: u16 = 0xA1;
 const VK_LCONTROL: u16 = 0xA2;
+const VK_RCONTROL: u16 = 0xA3;
 const VK_LMENU: u16 = 0xA4;
 const VK_RMENU: u16 = 0xA5;
 const VK_LWIN: u16 = 0x5B;
@@ -852,6 +854,75 @@ fn everything_but_win_plus_space_flushes_exactly_as_it_did() {
         "the right Win switches the layout too"
     );
     assert_eq!(recorder.len(), 3);
+}
+
+// ---------------------------------------------------------------------------------------
+// Finding 4 of the audit of 2026-08-31 — one bit per side, task T-19-2
+// ---------------------------------------------------------------------------------------
+
+/// **A modifier held on both sides survives the release of one of them.**
+///
+/// `WH_KEYBOARD_LL` delivers the sided virtual keys, so `LShift` down, `RShift` down, `LShift`
+/// up is three separate events. Until task T-19-2 the tracker kept one boolean per role and
+/// assigned it unconditionally, so the third event said "no Shift is held" while the user was
+/// still holding one. Everything downstream believed it: the buffer took a lower-case letter
+/// for what the screen showed in upper case, and the bit-for-bit rollback of FR-32 then
+/// restored the wrong case. For `Ctrl` the same three events turned `Ctrl+V` into text in the
+/// ring instead of the command that flushes it (FR-10).
+///
+/// `Alt` was sided already — it had to be, because `AltGr` is the right one — and is the model
+/// this follows. The second half of each case is the other direction: once both sides are up
+/// the belief really does go down, so the repair did not simply latch the bit.
+#[test]
+fn releasing_one_side_of_a_modifier_leaves_the_other_side_held() {
+    // `Shift`: the case of the letter is what carries the belief out of the tracker.
+    let mut recorder = fresh();
+
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(hold(&mut recorder, VK_RSHIFT), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        typed(&recorder),
+        "A",
+        "the right Shift is still down, so this is the shifted row of the cache"
+    );
+
+    assert_eq!(release(&mut recorder, VK_RSHIFT), Recorded::Modifier);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(typed(&recorder), "Aa", "both sides are up now");
+
+    // `Ctrl` and `Win`: the command row of FR-10 is what carries the belief out.
+    for (left, right) in [(VK_LCONTROL, VK_RCONTROL), (VK_LWIN, VK_RWIN)] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+
+        assert_eq!(hold(&mut recorder, left), Recorded::Modifier);
+        assert_eq!(hold(&mut recorder, right), Recorded::Modifier);
+        assert_eq!(release(&mut recorder, left), Recorded::Modifier);
+
+        assert_eq!(
+            press(&mut recorder, VK_A, SCAN_A),
+            Recorded::Flushed,
+            "modifier {right:#04x} is still down, so this is a command"
+        );
+        assert_eq!(recorder.len(), 0, "modifier {right:#04x}");
+
+        // And with both sides up the same key is ordinary text again.
+        let mut recorder = fresh();
+
+        assert_eq!(hold(&mut recorder, left), Recorded::Modifier);
+        assert_eq!(hold(&mut recorder, right), Recorded::Modifier);
+        assert_eq!(release(&mut recorder, left), Recorded::Modifier);
+        assert_eq!(release(&mut recorder, right), Recorded::Modifier);
+
+        assert_eq!(
+            press(&mut recorder, VK_A, SCAN_A),
+            Recorded::Stored,
+            "modifier {right:#04x} released on both sides is no command"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------
