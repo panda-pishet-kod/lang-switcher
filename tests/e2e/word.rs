@@ -13,7 +13,7 @@
 //! | 5. `Stop-Process` poisons the next launch | never called — see [`quit`] |
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
 
 use windows::Win32::UI::Accessibility::UIA_DocumentControlTypeId;
 
@@ -153,37 +153,123 @@ pub fn quit() -> Result<String, String> {
 /// Checked after the run and reported. ⚠ The task is explicit that this key must be **not
 /// created** rather than cleaned up, so this only reads.
 pub fn resiliency_disabled_items() -> String {
-    // ⚠ The marker the script prints is **ASCII on purpose**. PowerShell hands its output back
-    // in the console code page, not UTF-8, so a Cyrillic answer arrives as mojibake — which is
-    // exactly what the first protocol of position 2 recorded, turning the one line that proves
-    // rake 5 was avoided into unreadable bytes. The Russian wording is added on this side.
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            r"$p='HKCU:\Software\Microsoft\Office\16.0\Word\Resiliency'; \
-              if (Test-Path $p) { \
-                $d = Get-ChildItem $p -ErrorAction SilentlyContinue | \
-                     Where-Object { $_.PSChildName -eq 'DisabledItems' }; \
-                if ($d) { 'DISABLEDITEMS_PRESENT' } else { 'RESILIENCY_ONLY' } \
-              } else { 'NO_RESILIENCY' }",
-        ])
-        .output();
-
-    let marker = match output {
+    let marker = match resiliency_output() {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_owned(),
         Err(error) => return format!("не удалось проверить: {error}"),
     };
 
     match marker.as_str() {
-        "NO_RESILIENCY" => "ключа Resiliency нет вовсе — DisabledItems не появился".to_owned(),
-        "RESILIENCY_ONLY" => {
-            "Resiliency есть, DisabledItems НЕТ — грабля 5 не наступила".to_owned()
-        }
-        "DISABLEDITEMS_PRESENT" => {
-            "⚠ DisabledItems ЕСТЬ — Word был снят принудительно, грабля 5".to_owned()
-        }
+        "NO_RESILIENCY" => SAID_NO_RESILIENCY.to_owned(),
+        "RESILIENCY_ONLY" => SAID_RESILIENCY_ONLY.to_owned(),
+        "DISABLEDITEMS_PRESENT" => SAID_DISABLEDITEMS_PRESENT.to_owned(),
         other => format!("непонятный ответ проверки: {other:?}"),
+    }
+}
+
+/// Asks the registry the one question rake 5 is about, and hands back everything PowerShell
+/// said — task **T-19-6**, finding 12 of the audit of 2026-08-31.
+///
+/// ⚠ **The marker the script prints is ASCII on purpose.** PowerShell hands its output back in
+/// the console code page, not UTF-8, so a Cyrillic answer arrives as mojibake — which is exactly
+/// what the first protocol of position 2 recorded, turning the one line that proves rake 5 was
+/// avoided into unreadable bytes. The Russian wording is added on the Rust side.
+///
+/// # Why there is not a `\` in sight
+///
+/// Until this task every line of the script ended in `\`, as though `\` continued a line. It
+/// does not: in PowerShell the continuation is a backtick, and a lone `\` is a command name.
+/// Measured on this machine, the script therefore ran with **five**
+/// `CommandNotFoundException`s on stderr and left with exit code 1.
+///
+/// ⭐ The audit expected stdout to be empty and the check to answer "непонятный ответ" every
+/// time. It is not, and it did not: PowerShell recovered after each bad token and the `if`
+/// blocks still evaluated, so the marker came back correctly — `RESILIENCY_ONLY` — and the
+/// protocol's line was right by luck of the parser rather than by construction. What was really
+/// lost was the ability to tell a working check from a broken one: with five errors on stderr
+/// and a failing status, no reader could say whether the answer meant anything.
+///
+/// No continuation character is needed at all. A `{` block and a trailing `|` already carry a
+/// PowerShell statement onto the next line, and those are the only two places this script breaks.
+///
+/// The `Output` is returned whole rather than reduced here, so that the check of this module can
+/// hold the script to leaving **nothing** on stderr and to a clean exit. Neither the markers nor
+/// what the bench's protocol does with them is touched.
+fn resiliency_output() -> std::io::Result<Output> {
+    Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r"$p='HKCU:\Software\Microsoft\Office\16.0\Word\Resiliency'
+              if (Test-Path $p) {
+                $d = Get-ChildItem $p -ErrorAction SilentlyContinue |
+                     Where-Object { $_.PSChildName -eq 'DisabledItems' }
+                if ($d) { 'DISABLEDITEMS_PRESENT' } else { 'RESILIENCY_ONLY' }
+              } else { 'NO_RESILIENCY' }",
+        ])
+        .output()
+}
+
+/// The three lawful answers of [`resiliency_disabled_items`], one per marker.
+///
+/// Named rather than written inline since task **T-19-6**, so that the check below asserts on
+/// the same words the protocol prints and cannot drift away from them. The wording and the
+/// markers themselves are untouched — the protocol of the bench reads exactly what it always
+/// read.
+const SAID_NO_RESILIENCY: &str = "ключа Resiliency нет вовсе — DisabledItems не появился";
+const SAID_RESILIENCY_ONLY: &str = "Resiliency есть, DisabledItems НЕТ — грабля 5 не наступила";
+const SAID_DISABLEDITEMS_PRESENT: &str =
+    "⚠ DisabledItems ЕСТЬ — Word был снят принудительно, грабля 5";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Finding 12 of the audit of 2026-08-31, task T-19-6 — the instrument of rake 5 can
+    /// answer at all.**
+    ///
+    /// The command was handed to `powershell -Command` with a `\` at the end of every line, as
+    /// though `\` continued a line. In PowerShell the continuation is a backtick; the parser
+    /// answered "Unexpected token", stdout came back empty, and the check returned "непонятный
+    /// ответ" every single time. The line "Word был снят принудительно" or its absence — the
+    /// evidence that rake 5 was avoided, printed in the protocol of every full run — had in
+    /// fact been missing since the check was written.
+    ///
+    /// Reads the registry and nothing else: no Word, no window, no keystroke, and nothing is
+    /// created or removed. Which of the three answers comes back depends on the machine, and
+    /// that is why the assertion is "one of the three" — an instrument that cannot fail is not
+    /// an instrument, and this one fails on exactly the shape the finding is about.
+    #[test]
+    fn the_resiliency_check_runs_clean_and_gives_one_of_its_three_lawful_answers() {
+        let out = resiliency_output().expect("powershell runs");
+
+        // The half that was red before task T-19-6. Five `CommandNotFoundException`s, one per
+        // `\`, and an exit code of 1: the script was answering by accident of the parser, and
+        // no reader of the protocol could tell a working check from a broken one.
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            "",
+            "the script of rake 5 must say nothing at all on stderr"
+        );
+        assert!(
+            out.status.success(),
+            "the script of rake 5 must leave cleanly, and it left with {:?}",
+            out.status.code()
+        );
+
+        // The half that was green before as well, and is the positive control: whatever else
+        // was wrong, the marker itself did come back and the protocol's wording was right.
+        let said = resiliency_disabled_items();
+
+        assert!(
+            [
+                SAID_NO_RESILIENCY,
+                SAID_RESILIENCY_ONLY,
+                SAID_DISABLEDITEMS_PRESENT
+            ]
+            .contains(&said.as_str()),
+            "the check of Resiliency\\DisabledItems answered {said:?}, which is none of its \
+             three lawful answers"
+        );
     }
 }
