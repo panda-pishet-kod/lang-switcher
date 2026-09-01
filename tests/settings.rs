@@ -7190,7 +7190,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 71] = [
+const FR_94_STRINGS: [(u16, &str, &str); 72] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7215,7 +7215,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 71] = [
     (settings::IDS_GROUP_HOTKEY, "Горячая клавиша", "Hotkey"),
     (settings::IDS_HOTKEY_LABEL, "Клавиша:", "Key:"),
     (settings::IDS_HOTKEY_SET, "Задать", "Set"),
-    (settings::IDS_HOTKEY_STOP, "Отменить", "Cancel"),
+    // ⚠ «Отмена» and not «Отменить» since task Т-23-5: the mock-up of решение 82.6 draws that
+    // word on the button, and the user accepted it as drawn.
+    (settings::IDS_HOTKEY_STOP, "Отмена", "Cancel"),
     (settings::IDS_GROUP_LAYOUTS, "Раскладки", "Layouts"),
     (settings::IDS_MODE_PAIR, "Пара", "Pair"),
     (
@@ -7276,9 +7278,11 @@ const FR_94_STRINGS: [(u16, &str, &str); 71] = [
         "The key name is not recognised — the default key, Pause, is in force.",
     ),
     (
+        // ⚠ Task Т-23-5: the invitation moved into the **field** and lost its second half.
+        // «Esc — отмена» became a line of its own under the field — `IDS_CAPTURE_HINT`.
         settings::IDS_CAPTURE_PROMPT,
-        "Нажмите клавишу. Esc — отмена.",
-        "Press a key. Esc cancels.",
+        "Нажмите клавишу…",
+        "Press a key…",
     ),
     (
         settings::IDS_CAPTURE_MODIFIER,
@@ -7405,6 +7409,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 71] = [
     // two orders are asserted equal by
     // `the_two_tables_hold_exactly_the_identifiers_the_crate_publishes`.
     (settings::IDS_SOUND, "Звуковой отклик", "Sound feedback"),
+    // FR-94, task Т-23-5, решение 82.6 — the way out of a capture, said under the field while
+    // the field itself holds the invitation.
+    (
+        settings::IDS_CAPTURE_HINT,
+        "Esc или клик мимо — отмена",
+        "Esc or a click elsewhere cancels",
+    ),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -7615,20 +7626,38 @@ fn a_press_with_nothing_held_becomes_the_hotkey() {
         settings::Capture::Taken("Pause".to_owned())
     );
 
-    // A text key is taken and *warned about* — FR-92 asks for the warning, not for a refusal.
+    // ⭐ **A text key is refused since task Т-23-5, решение 82.6** — and it used to be *taken*
+    // and warned about afterwards. The user asked for the other order in as many words:
+    // «текстовая клавиша — предупреждение и захват НЕ гаснет». A press that was an accident no
+    // longer becomes the hotkey; the warning is the same one FR-92 always asked for.
     assert_eq!(
         settings::capture(0x41, BARE),
-        settings::Capture::Taken("A".to_owned())
+        settings::Capture::Refused(settings::Refusal::Text)
     );
+    assert_eq!(
+        settings::Refusal::Text.string_id(),
+        settings::IDS_NOTE_TEXT_KEY,
+        "the refusal says the warning FR-92 already has, not a sentence of its own"
+    );
+
+    // ⚠ And **the file's side is untouched**: a text key named by hand is still a hotkey and
+    // still carries the warning of FR-95. What Т-23-5 closed is the one road that assigned one
+    // without asking.
     assert_eq!(
         settings::hotkey_note("A"),
         Some(settings::IDS_NOTE_TEXT_KEY)
+    );
+    assert_eq!(
+        settings::effective_hotkey_name("A"),
+        "A",
+        "a text key in the file acts, and the help of FR-92а names it"
     );
 }
 
 #[test]
 fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
-    // **Criterion 16.** Five refusals, each with a sentence of its own in both locales.
+    // **Criterion 16.** Six refusals since task Т-23-5, each with a sentence of its own in both
+    // locales — five until решение 82.6 made a text key a refusal instead of an assignment.
     let product = ProductImage::shared();
 
     let cases = [
@@ -7655,8 +7684,14 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         // A key section 7 has no name for: it could not be written to the file.
         (0x08, BARE, settings::Refusal::Nameless, "Backspace"),
         (0x0D, BARE, settings::Refusal::Nameless, "Enter"),
-        (0x20, BARE, settings::Refusal::Nameless, "Space"),
-        (0xBA, BARE, settings::Refusal::Nameless, "OEM 1"),
+        // ⭐ A key that types a character — task Т-23-5, решение 82.6. Every letter, every
+        // digit, the space, the numeric pad and the OEM keys: `is_text_key`'s own list.
+        // ⚠ The space and the OEM keys answered `Nameless` until that task — both true, and
+        // «эта клавиша участвует в наборе» is the one of the two a person can act on.
+        (0x41, BARE, settings::Refusal::Text, "буква A"),
+        (0x30, BARE, settings::Refusal::Text, "цифра 0"),
+        (0x20, BARE, settings::Refusal::Text, "Space"),
+        (0xBA, BARE, settings::Refusal::Text, "OEM 1"),
     ];
 
     for (vk, modifiers, expected, what) in cases {
@@ -7680,6 +7715,7 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         settings::Refusal::Combination,
         settings::Refusal::Emergency,
         settings::Refusal::Reserved,
+        settings::Refusal::Text,
         settings::Refusal::Nameless,
     ] {
         for language in [settings::Language::Ru, settings::Language::En] {
@@ -7692,6 +7728,275 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
             );
         }
     }
+}
+
+// -----------------------------------------------------------------------------------------
+// Т-23-5, решение 82.6 — машина захвата: вход, клавиша, отказ, Esc, клик мимо
+// -----------------------------------------------------------------------------------------
+//
+// The user's complaint, word for word: «выделяется Pause белым цветом на тёмном фоне…
+// начинает моргать вертикальная линия… юзабилити сильно страдает». The диагноз is that the
+// field pretended to be a text field while the capture waited — a caret and a selection are a
+// **false affordance** in a control nothing is typed into — and решение 82.6 accepted the live
+// mock-up that takes both away.
+//
+// What can be closed without a window is the **decision**: `settings::capture_step` is the
+// whole machine as a pure function of the armed flag and one event, and the window procedures
+// keep exactly two jobs — turning a message into an event, and carrying out the answer. The
+// look is the user's half, at контрольная точка К-2.
+
+/// No modifiers held — the ordinary case, written out here like the other capture tests.
+const NOTHING_HELD: settings::Modifiers = settings::Modifiers {
+    ctrl: false,
+    alt: false,
+    shift: false,
+    win: false,
+};
+
+#[test]
+fn a_capture_that_is_not_armed_answers_nothing_to_any_event() {
+    // The gate, and it is the one that makes every other arm safe to write: with no capture
+    // armed, a key, a lost focus and a click on the window's ground are all somebody else's
+    // business. `Esc` especially — the dialog manager closes the window with it, and a machine
+    // that answered `Cancel` here would swallow that.
+    for event in [
+        settings::CaptureEvent::KeyDown(0x1B, NOTHING_HELD),
+        settings::CaptureEvent::KeyDown(0x13, NOTHING_HELD),
+        settings::CaptureEvent::FocusLost {
+            to_capture_button: false,
+        },
+        settings::CaptureEvent::FocusLost {
+            to_capture_button: true,
+        },
+        settings::CaptureEvent::ClickBeside,
+    ] {
+        assert_eq!(
+            settings::capture_step(false, event),
+            settings::CaptureStep::Ignore,
+            "{event:?} must do nothing while no capture is armed"
+        );
+    }
+}
+
+#[test]
+fn an_armed_capture_takes_a_key_and_stays_armed_through_a_refusal() {
+    // A key section 7 can name ends the capture with that name — the same answer
+    // `settings::capture` gives, carried through unchanged.
+    assert_eq!(
+        settings::capture_step(true, settings::CaptureEvent::KeyDown(0x13, NOTHING_HELD)),
+        settings::CaptureStep::Take("Pause".to_owned()),
+        "a named key is taken"
+    );
+    assert_eq!(
+        settings::capture_step(true, settings::CaptureEvent::KeyDown(0x77, NOTHING_HELD)),
+        settings::CaptureStep::Take("F8".to_owned()),
+        "so is a function key"
+    );
+
+    // ⚠ **п. 4 of решение 82.6, and it is the arm that keeps a person from being thrown out
+    // of the capture for pressing the wrong thing**: a refusal is «not that one», not an end
+    // to the question. Every one of the five refusals answers `Refuse` and none of them
+    // answers `Cancel`.
+    for (vk, held, expected, what) in [
+        (0x41u16, NOTHING_HELD, settings::Refusal::Text, "буква A"),
+        (0x20, NOTHING_HELD, settings::Refusal::Text, "пробел"),
+        (0x08, NOTHING_HELD, settings::Refusal::Nameless, "Backspace"),
+        (
+            0x11,
+            NOTHING_HELD,
+            settings::Refusal::Modifier,
+            "модификатор",
+        ),
+        (
+            0x5B,
+            NOTHING_HELD,
+            settings::Refusal::Reserved,
+            "клавиша Win",
+        ),
+        (
+            0x13,
+            settings::Modifiers {
+                ctrl: true,
+                alt: false,
+                shift: false,
+                win: false,
+            },
+            settings::Refusal::Combination,
+            "Ctrl+Pause",
+        ),
+    ] {
+        let step = settings::capture_step(true, settings::CaptureEvent::KeyDown(vk, held));
+
+        println!("{what}: {step:?}");
+
+        assert_eq!(
+            step,
+            settings::CaptureStep::Refuse(expected),
+            "{what} must be refused and the capture must stay armed"
+        );
+    }
+}
+
+#[test]
+fn an_armed_capture_is_cancelled_by_escape_by_a_click_beside_and_by_a_lost_focus() {
+    // Escape — the way out, and therefore the one key a capture cannot assign. It stays
+    // assignable by hand: `hook::vk_from_name` reads `Escape` and `Esc` out of the file.
+    assert_eq!(
+        settings::capture_step(true, settings::CaptureEvent::KeyDown(0x1B, NOTHING_HELD)),
+        settings::CaptureStep::Cancel,
+        "Esc cancels"
+    );
+
+    // A press on the window's own ground — the half `WM_KILLFOCUS` cannot see, because the
+    // statics of this dialog take no focus and a click on them moves nothing.
+    assert_eq!(
+        settings::capture_step(true, settings::CaptureEvent::ClickBeside),
+        settings::CaptureStep::Cancel,
+        "a click beside the field cancels — решение 82.6 п. 3"
+    );
+
+    // The focus going anywhere else — another control, or another window taking the whole
+    // dialog's activation.
+    assert_eq!(
+        settings::capture_step(
+            true,
+            settings::CaptureEvent::FocusLost {
+                to_capture_button: false
+            }
+        ),
+        settings::CaptureStep::Cancel,
+        "a lost focus cancels"
+    );
+
+    // ⚠ …except the capture button itself. It is about to report that it was clicked, and
+    // cancelling here would turn that click into a fresh arming — the button would then never
+    // cancel anything, which is the whole of what it is for while a capture is on.
+    assert_eq!(
+        settings::capture_step(
+            true,
+            settings::CaptureEvent::FocusLost {
+                to_capture_button: true
+            }
+        ),
+        settings::CaptureStep::Ignore,
+        "the capture button may take the focus without ending the capture"
+    );
+}
+
+/// **Т-23-5, решение 82.6** — the field does not pretend to be a text field.
+///
+/// The two artefacts the user named — the caret and the selection — are both made by the edit
+/// control's own `WM_SETFOCUS` handler, and the cure is that the message never reaches it
+/// while a capture is armed. Read off `src\settings.rs`: what a window procedure forwards is
+/// the shape of the file and not something a test can press a key at.
+#[test]
+fn the_field_shows_no_caret_and_no_selection_while_a_capture_is_armed() {
+    let source = settings_module_source();
+    let field = function_body(&source, "unsafe extern \"system\" fn hotkey_field_proc(");
+
+    assert!(
+        field.contains("WM_SETFOCUS => return LRESULT(0),"),
+        "the field's procedure must swallow WM_SETFOCUS while armed — the edit's own handler \
+         is what makes the caret and selects the whole text"
+    );
+
+    // And nothing anywhere in the module unselects after the fact: a selection removed by a
+    // message has already been painted once, and `EM_SETSEL` is the message that would do it.
+    //
+    // ⚠ **The comment lines are stripped first, and that is the whole reason this is not a
+    // bare `contains`.** `src\settings.rs` explains at the arm above why it does *not* send
+    // that message, and a probe looking for the name in a file that spells the name in its own
+    // prose would be measuring itself and passing for ever.
+    let sending: Vec<&str> = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("EM_SETSEL"))
+        .collect();
+
+    println!("строки кода с EM_SETSEL: {sending:?}");
+
+    assert!(
+        sending.is_empty(),
+        "no EM_SETSEL is sent: the selection is never made, so there is nothing to unmake"
+    );
+
+    // The control of the probe above, in one line: the prose the strip removes really is
+    // there, so a green answer means «no call site» and not «no such word in the file».
+    assert!(
+        source.contains("EM_SETSEL"),
+        "the module must go on saying why it sends no EM_SETSEL — otherwise the sweep above \
+         is measuring an absence nobody wrote down"
+    );
+
+    // The invitation stands in the field and the way out under it — the two halves of the
+    // mock-up, in the one function that arms a capture.
+    let arm = function_body(&source, "fn arm_capture(");
+
+    assert!(
+        arm.contains("set_text(hwnd, IDC_HOTKEY, &text(IDS_CAPTURE_PROMPT));"),
+        "the field must show the invitation while the capture waits"
+    );
+    assert!(
+        arm.contains("show_capture_note(hwnd, None);"),
+        "and the note under it must show the way out"
+    );
+    assert!(
+        arm.contains("set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));"),
+        "and the button must offer to take it back"
+    );
+    assert!(
+        !arm.contains("focus_control("),
+        "the focus is moved by `toggle_capture` **after** the borrow ends — a `SetFocus` from \
+         inside it sends WM_SETFOCUS while the state cannot be read, and the field would then \
+         hand the message to the edit control"
+    );
+
+    // ⭐ **Находка Т-23-5** — the note is invalidated the moment it is written.
+    //
+    // `SetDlgItemTextW` on an `SS_OWNERDRAW` static moves the text the control stores and not
+    // one pixel of the screen: this module draws that control out of a `WM_DRAWITEM`, and
+    // nothing asks for one until the control is invalidated. Every note of the capture went
+    // through that call alone, so on a **raised** window the five refusals of FR-94 were
+    // written and never shown — as old as task T-11-18 and found by looking at the stand.
+    //
+    // The one place the note is written is `set_note`, and the invalidation lives there beside
+    // the write, exactly as it does in `set_check` for an owner-drawn button.
+    let note = function_body(&source, "fn set_note(");
+
+    assert!(
+        note.contains("set_text(hwnd, IDC_HOTKEY_NOTE, note);"),
+        "`set_note` must write the note"
+    );
+    assert!(
+        note.contains("repaint_control(hwnd, IDC_HOTKEY_NOTE);"),
+        "…and invalidate it, or the text it wrote stays invisible on a raised window"
+    );
+
+    // And nowhere else writes that control: a second `set_text` on it would be a second place
+    // for the defect to come back.
+    let writers: Vec<&str> = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("IDC_HOTKEY_NOTE,") && line.contains("set_text"))
+        .collect();
+
+    println!("места записи заметки: {writers:?}");
+
+    assert_eq!(
+        writers.len(),
+        1,
+        "the note must be written in one place — `set_note` — and repainted there"
+    );
+
+    // The frame and the ink, the two colours the capture moves.
+    assert!(
+        function_body(&source, "unsafe fn on_erase_background(").contains("palette.box_border"),
+        "the frame of the field must go to `box_border` while a capture is armed"
+    );
+    assert!(
+        function_body(&source, "unsafe fn on_ctl_color(").contains("palette.text_muted"),
+        "the invitation must be written in the quiet ink"
+    );
 }
 
 #[test]
@@ -8148,7 +8453,7 @@ fn the_about_window_answers_the_nudge_by_re_reading_the_system() {
         // The caption of the window: the one shared road (п. 3), not a second DWM path.
         "apply_title_bar_theme(hwnd, fresh);",
         // And the visible half.
-        "repaint_after_palette_change(hwnd);",
+        "repaint_whole_window(hwnd);",
     ] {
         assert!(
             refresh.contains(line),
@@ -8667,15 +8972,21 @@ fn the_background_is_a_cached_picture_rebuilt_on_a_palette_change() {
         "the picture must be handed over by a blit, not repainted"
     );
 
-    // The two halves of «still the right picture»: the client size, and the palette by
+    // The three halves of «still the right picture»: the client size, the palette by
     // identity — `theme::resolve` answers `&'static`, and `refresh_palette` is the one place
-    // the answer can change.
-    assert!(
-        source.contains(
-            "self.width == width && self.height == height && std::ptr::eq(self.palette, palette)"
-        ),
-        "the picture must be compared against both the size and the palette it was painted in"
-    );
+    // the answer can change — and, since task Т-23-5, the colour the hotkey field's frame was
+    // painted with, which is the one colour of this picture an armed capture moves.
+    for line in [
+        "self.width == width",
+        "&& self.height == height",
+        "&& std::ptr::eq(self.palette, palette)",
+        "&& self.hotkey_frame == hotkey_frame",
+    ] {
+        assert!(
+            source.contains(line),
+            "the picture must be compared against `{line}`"
+        );
+    }
 
     // Rebuilt whole and never repainted in place: the assignment drops the stale picture.
     assert!(

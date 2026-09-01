@@ -124,8 +124,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
     WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
     WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
-    WM_QUERYUISTATE, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY,
+    WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -1402,7 +1403,12 @@ pub const IDS_APPLY: u16 = 3036;
 pub const IDS_NOTE_TEXT_KEY: u16 = 3037;
 /// The warning for a key name this build does not know.
 pub const IDS_NOTE_UNKNOWN_KEY: u16 = 3038;
-/// What the note says while a capture is armed.
+/// What the **field** says while a capture is armed — «Нажмите клавишу…».
+///
+/// It stood in the note under the field until task Т-23-5 and read «Нажмите клавишу. Esc —
+/// отмена.» Решение 82.6 moved the invitation into the field itself, where the key name would
+/// otherwise sit looking editable, and split the «Esc — отмена» half off into
+/// [`IDS_CAPTURE_HINT`].
 pub const IDS_CAPTURE_PROMPT: u16 = 3039;
 /// [`Refusal::Modifier`].
 pub const IDS_CAPTURE_MODIFIER: u16 = 3040;
@@ -1498,6 +1504,12 @@ pub const IDS_MENU_ABOUT: u16 = 3076;
 pub const IDS_MENU_EXIT: u16 = 3077;
 /// The caption of the sound switch of FR-100 — task Т-21-5.
 pub const IDS_SOUND: u16 = 3078;
+/// The hint under the field while a capture is armed — «Esc или клик мимо — отмена», task
+/// Т-23-5, решение 82.6.
+///
+/// Appended after [`IDS_SOUND`] for the reason that one was appended, and it costs no new
+/// block: 3072..3087 is the block the menu opened and 3079 is inside it.
+pub const IDS_CAPTURE_HINT: u16 = 3079;
 
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
@@ -1505,7 +1517,7 @@ pub const IDS_SOUND: u16 = 3078;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 71] = [
+pub const INTERFACE_STRINGS: [u16; 72] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1577,6 +1589,7 @@ pub const INTERFACE_STRINGS: [u16; 71] = [
     IDS_MENU_ABOUT,
     IDS_MENU_EXIT,
     IDS_SOUND,
+    IDS_CAPTURE_HINT,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -1813,6 +1826,23 @@ pub enum Refusal {
     Emergency,
     /// A key the system owns and an application never gets as a plain key.
     Reserved,
+    /// ⭐ **A key that types a character** — task Т-23-5, решение 82.6.
+    ///
+    /// Until that task a text key was **taken**: the capture ended, the file got `Q`, and the
+    /// note under the field carried the warning of FR-95 afterwards. The user asked for the
+    /// other order — «текстовая клавиша — предупреждение и захват НЕ гаснет» — and accepted
+    /// the live mock-up that behaves that way: the press is refused, the warning appears, and
+    /// the capture goes on waiting for the next key instead of quietly assigning the one that
+    /// was pressed by accident.
+    ///
+    /// ⚠ **A text key remains a legal hotkey** and FR-95 is untouched: `[hotkey] key = "Q"`
+    /// written by hand is read, published and warned about exactly as before. What changed is
+    /// the one road that used to assign one without asking — the capture.
+    ///
+    /// It says the FR-92 warning and not a sentence of its own ([`IDS_NOTE_TEXT_KEY`]): the
+    /// warning already says the true and useful thing — while the program is active that key
+    /// stops typing its character.
+    Text,
     /// A key section 7 has no name for, so it could not be written to the file and read back.
     Nameless,
 }
@@ -1825,6 +1855,9 @@ impl Refusal {
             Self::Combination => IDS_CAPTURE_COMBINATION,
             Self::Emergency => IDS_CAPTURE_EMERGENCY,
             Self::Reserved => IDS_CAPTURE_RESERVED,
+            // Task Т-23-5: the warning FR-92 already asks for, said at the moment of the
+            // press instead of after it.
+            Self::Text => IDS_NOTE_TEXT_KEY,
             Self::Nameless => IDS_CAPTURE_NAMELESS,
         }
     }
@@ -1838,6 +1871,76 @@ pub enum Capture {
     Taken(String),
     /// The press cannot be the hotkey. The capture stays armed and the reason is shown.
     Refused(Refusal),
+}
+
+/// One thing that can happen to an armed capture — task Т-23-5, решение 82.6.
+///
+/// The three events the window procedures of the dialog can see, named apart from the Win32
+/// messages that carry them so that the machine below can be exercised without a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureEvent {
+    /// A key went down while the field held the focus — the virtual code and the modifiers
+    /// held with it.
+    KeyDown(u16, Modifiers),
+    /// The field lost the keyboard focus. The flag says whether it went to the capture button
+    /// itself, which is the one window that may take it without ending the capture: that
+    /// button is about to report a click, and ending here would turn the click into a fresh
+    /// arming.
+    FocusLost { to_capture_button: bool },
+    /// A press landed on the dialog's own ground — not on the field, not on the button, and
+    /// not on any control that takes the focus (those arrive as [`Self::FocusLost`]).
+    ClickBeside,
+}
+
+/// What one event does to the capture — task Т-23-5, решение 82.6.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureStep {
+    /// Nothing at all: no capture is armed, or the event is one the machine deliberately
+    /// lets pass.
+    Ignore,
+    /// The capture ends and the name that stood in the field before it comes back.
+    Cancel,
+    /// The press is the hotkey; the value is the name section 7 stores.
+    Take(String),
+    /// The press cannot be the hotkey. **The capture stays armed** — a refusal is «not that
+    /// one», not an end to the question — and the note says which of the five reasons it was.
+    Refuse(Refusal),
+}
+
+/// The whole decision of the capture, as a function of the state and one event — task Т-23-5.
+///
+/// Split out of the window procedures for the reason [`capture`] itself is split out of them:
+/// what a program does is worth closing without a window, and a machine spread over a
+/// `WM_KEYDOWN` arm, a `WM_KILLFOCUS` arm and a `WM_LBUTTONDOWN` arm is a machine no test can
+/// see whole. The procedures keep exactly two jobs — turning a message into a
+/// [`CaptureEvent`], and carrying out the [`CaptureStep`] this function answers.
+///
+/// ⚠ **Escape is the way out and is therefore the one key a capture cannot assign.** It stays
+/// assignable by hand: `hook::vk_from_name` still reads `Escape` and `Esc` out of the file, and
+/// the dialog shows whatever it finds there.
+pub fn capture_step(armed: bool, event: CaptureEvent) -> CaptureStep {
+    if !armed {
+        return CaptureStep::Ignore;
+    }
+
+    match event {
+        CaptureEvent::KeyDown(vk, _) if vk == VK_ESCAPE.0 => CaptureStep::Cancel,
+
+        CaptureEvent::KeyDown(vk, modifiers) => match capture(vk, modifiers) {
+            Capture::Taken(name) => CaptureStep::Take(name),
+            Capture::Refused(refusal) => CaptureStep::Refuse(refusal),
+        },
+
+        CaptureEvent::FocusLost { to_capture_button } => {
+            if to_capture_button {
+                CaptureStep::Ignore
+            } else {
+                CaptureStep::Cancel
+            }
+        }
+
+        CaptureEvent::ClickBeside => CaptureStep::Cancel,
+    }
 }
 
 /// The keys an application never receives as a plain key, because the shell takes them first.
@@ -1897,6 +2000,15 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
 
     if modifiers.any() {
         return Capture::Refused(Refusal::Combination);
+    }
+
+    // ⭐ Task Т-23-5, решение 82.6. Before this line a letter, a digit or an OEM key was taken
+    // and the warning of FR-95 followed the assignment; the user asked for the warning to come
+    // *instead* of it, so that a stray press cannot quietly become the hotkey. See
+    // [`Refusal::Text`] for what did **not** change: a text key written into the file by hand
+    // is still a hotkey, and FR-95 still suppresses it.
+    if is_text_key(vk) {
+        return Capture::Refused(Refusal::Text);
     }
 
     match key_name(vk) {
@@ -3160,6 +3272,28 @@ unsafe extern "system" fn dialog_proc(
             1
         }
 
+        // FR-94, task Т-23-5, решение 82.6 — «клик мимо — отмена», the half `WM_KILLFOCUS`
+        // cannot see.
+        //
+        // A click on another *control* moves the keyboard focus and the field's own procedure
+        // ends the capture there. A click on the window's own ground moves nothing: the
+        // statics of this dialog take no focus and answer `HTTRANSPARENT`, so the press
+        // arrives here, at the dialog, and the capture would otherwise stay armed under a
+        // person who has plainly stopped looking at it.
+        //
+        // SEC-05: nothing is taken out of the message at all — not the coordinates, not the
+        // button state. Reaching this arm *is* the whole of the information, because the
+        // manager sends it to the dialog only for a press that landed on no child that wanted
+        // it. A forged message therefore buys its sender one cancelled capture, which is the
+        // safe direction: the conversion path comes back on.
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
+            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
+            // alive for the whole of this modal call.
+            unsafe { run_capture_step(hwnd, CaptureEvent::ClickBeside) };
+
+            0
+        }
+
         // FR-92а, task T-11-4: the five colour questions the dialog manager asks while the
         // window and its controls are painted. Answered with the brushes of the resolved
         // palette; zero — the system colours — when there is nothing to answer with.
@@ -4034,10 +4168,17 @@ impl Drop for CaptionIcons {
     }
 }
 
-/// Repaints a window of this module and every child in it — the visible half of a palette
-/// change. Called by [`refresh_palette`] for the settings dialog and by
-/// [`refresh_about_palette`] for the about window (task T-13-17): one body, two windows.
-fn repaint_after_palette_change(hwnd: HWND) {
+/// Repaints a window of this module and every child in it, background included.
+///
+/// Two occasions, one body. **A palette change** — [`refresh_palette`] for the settings dialog
+/// and [`refresh_about_palette`] for the about window (task T-13-17) — and, since task Т-23-5,
+/// **arming or ending a capture**: the frame of the hotkey field is drawn by the window's own
+/// background and changes colour with the capture, and that background is a cached picture
+/// which has to be painted again for the change to be seen.
+///
+/// Named for what it does rather than for the first reason it was written: it was
+/// `repaint_after_palette_change` until the second caller arrived.
+fn repaint_whole_window(hwnd: HWND) {
     // NFR-13: both answers are examined in words and deliberately dropped. Either call
     // refuses only for a window that is not alive, and `hwnd` is the dialog whose
     // procedure is running; there is nothing to do about a refused invalidation beyond the
@@ -4136,7 +4277,15 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
                     StaticColorRole::Label => (Some(palette.text), None, ground),
                     StaticColorRole::Muted => (Some(palette.text_muted), None, ground),
                     StaticColorRole::Field => (
-                        Some(palette.text),
+                        // Task Т-23-5, решение 82.6: while a capture is armed this field holds
+                        // the invitation «Нажмите клавишу…» and not a value, so it is written
+                        // in the quiet ink every other invitation of this window is written
+                        // in. `IDC_HOTKEY` is the only control this role ever answers for.
+                        Some(if state.capture.is_some() {
+                            palette.text_muted
+                        } else {
+                            palette.text
+                        }),
                         Some(palette.field_bg),
                         brushes.field_bg(),
                     ),
@@ -6438,6 +6587,15 @@ struct BackgroundColors {
     panel_border: COLORREF,
     /// [`theme::Palette::field_border`] — the single-pixel frame of a field.
     field_border: COLORREF,
+    /// The frame of **the hotkey field alone** — task Т-23-5, решение 82.6.
+    ///
+    /// [`theme::Palette::field_border`] like every other field at rest, and
+    /// [`theme::Palette::box_border`] while a capture is armed: the frame is what shows the
+    /// state of the capture on the window, and it is the one thing the mock-up changes about
+    /// the field besides its text. A field of its own colour and not a flag, because the
+    /// picture this value paints is cached and keyed on the colours it was painted with —
+    /// see [`BackgroundCache::shows`].
+    hotkey_frame: COLORREF,
     /// [`theme::Palette::cap`] — the ink of a panel caption since task T-12-11.
     caption: COLORREF,
 }
@@ -6513,10 +6671,19 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
             // the size, because the window may have moved to a screen at another scale, and
             // the palette by identity, because `theme::resolve` answers `&'static` and
             // [`refresh_palette`] is the one place it can change.
+            // Task Т-23-5, решение 82.6: the one frame of this window that is not a function
+            // of the palette alone. An armed capture draws it in `box_border`, which is what
+            // shows on the window that the program is waiting for a key.
+            let hotkey_frame = if state.capture.is_some() {
+                palette.box_border
+            } else {
+                palette.field_border
+            };
+
             let ready = state
                 .background
                 .as_ref()
-                .is_some_and(|picture| picture.shows(width, height, palette));
+                .is_some_and(|picture| picture.shows(width, height, palette, hotkey_frame));
 
             Some((
                 BackgroundColors {
@@ -6525,6 +6692,7 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
                     field: brushes.field_bg(),
                     panel_border: palette.panel_border,
                     field_border: palette.field_border,
+                    hotkey_frame,
                     caption: palette.cap,
                 },
                 ready,
@@ -6689,7 +6857,14 @@ unsafe fn paint_background(
             dc,
             &frame,
             scaled(CORNER_RADIUS, dpi),
-            colors.field_border,
+            // Task Т-23-5: every field of this window wears `field_border`, and the hotkey
+            // field wears whatever the capture says — the two colours are the same until a
+            // capture is armed, and the caller is the one place that decides.
+            if *control == IDC_HOTKEY {
+                colors.hotkey_frame
+            } else {
+                colors.field_border
+            },
             colors.field,
             dpi,
         );
@@ -6717,15 +6892,19 @@ unsafe fn paint_background(
 ///
 /// Never repainted in place — rebuilt whole, exactly as `theme::Brushes` is, and for the same
 /// reason: a half-updated picture is worse than an old one. [`BackgroundCache::shows`] is the
-/// whole test, and it has two halves:
+/// whole test, and it has three halves — two until task Т-23-5 added the third:
 ///
 /// * the **client size**, because a window that moved to a screen at another scale has other
 ///   lengths in it and a picture of the old size would be stretched or clipped;
 /// * the **palette**, by identity — `theme::resolve` answers `&'static`, and
 ///   [`refresh_palette`] is the one place in this file the answer can change. A pressed
 ///   «Применить» and the system switch flipping under `theme = "system"` both go through it,
-///   both end in [`repaint_after_palette_change`], and the erase that follows finds the
-///   picture painted in the previous palette and builds a new one.
+///   both end in [`repaint_whole_window`], and the erase that follows finds the
+///   picture painted in the previous palette and builds a new one;
+/// * the **frame colour of the hotkey field**, since task Т-23-5: an armed capture draws that
+///   one frame in `box_border` instead of `field_border`, and the frame is part of this
+///   picture like every other. `toggle_capture` and `run_capture_step` end in the same repaint
+///   the palette change does, and the erase then finds a picture painted for the other state.
 ///
 /// The interface language is deliberately **not** part of the test: the captions come from the
 /// hidden panels ([`draw_panel_caption`] → [`get_text`]), those are written exactly once by
@@ -6747,6 +6926,10 @@ struct BackgroundCache {
     /// The palette the picture was painted in — compared by identity, see the type's own
     /// documentation.
     palette: &'static theme::Palette,
+    /// The colour the frame of the hotkey field was painted with — task Т-23-5. The one
+    /// colour of this picture the palette does not settle on its own: an armed capture asks
+    /// for `box_border` where the resting window asks for `field_border`.
+    hotkey_frame: COLORREF,
 }
 
 impl BackgroundCache {
@@ -6814,6 +6997,9 @@ impl BackgroundCache {
             width,
             height,
             palette,
+            // Task Т-23-5: remembered from the colours it is about to be painted with, so the
+            // test in `shows` compares like with like and no third source of the number exists.
+            hotkey_frame: colors.hotkey_frame,
         };
 
         let area = RECT {
@@ -6830,9 +7016,19 @@ impl BackgroundCache {
         Some(picture)
     }
 
-    /// Whether this picture is still a picture of a window this size in this palette.
-    fn shows(&self, width: i32, height: i32, palette: &theme::Palette) -> bool {
-        self.width == width && self.height == height && std::ptr::eq(self.palette, palette)
+    /// Whether this picture is still a picture of a window this size, in this palette, with
+    /// the hotkey field's frame in this colour.
+    fn shows(
+        &self,
+        width: i32,
+        height: i32,
+        palette: &theme::Palette,
+        hotkey_frame: COLORREF,
+    ) -> bool {
+        self.width == width
+            && self.height == height
+            && std::ptr::eq(self.palette, palette)
+            && self.hotkey_frame == hotkey_frame
     }
 
     /// Hands the picture to `dc` — the whole of what a repaint costs once the picture exists.
@@ -8869,7 +9065,7 @@ fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
         // repaint by `draw_cycle_row`.
         paint_cycle_list(hwnd, fresh);
 
-        repaint_after_palette_change(hwnd);
+        repaint_whole_window(hwnd);
     }
 }
 
@@ -9045,11 +9241,25 @@ thread_local! {
 /// Puts the key name and the note that belongs to it into the two controls of the section.
 fn show_hotkey(hwnd: HWND, key: &str) {
     set_text(hwnd, IDC_HOTKEY, key);
-    set_text(
-        hwnd,
-        IDC_HOTKEY_NOTE,
-        &hotkey_note(key).map_or_else(String::new, text),
-    );
+    set_note(hwnd, &hotkey_note(key).map_or_else(String::new, text));
+}
+
+/// Puts one line into the note under the hotkey field **and makes it appear**.
+///
+/// ⭐ **Находка Т-23-5, снятая глазом на стенде и никаким тестом.** `SetDlgItemTextW` on an
+/// `SS_OWNERDRAW` static changes the text the control stores and **not one pixel on the
+/// screen**: the control is drawn by this module out of a `WM_DRAWITEM`, and nothing asks for
+/// one until somebody invalidates the control. Every note of the capture went through that
+/// call and through nothing else, so on a live window the five refusals of FR-94 were written
+/// and never shown — a person pressed a letter and the dialog looked as if it had not noticed.
+///
+/// The defect is as old as task T-11-18, which made these labels owner-drawn; Т-23-5 is the
+/// first task to exercise the path on a raised window instead of on a template. The cure is
+/// the one [`set_check`] already applies to an owner-drawn *button* for the same reason —
+/// «writing a store changes no pixels by itself» — and it is a single invalidation.
+fn set_note(hwnd: HWND, note: &str) {
+    set_text(hwnd, IDC_HOTKEY_NOTE, note);
+    repaint_control(hwnd, IDC_HOTKEY_NOTE);
 }
 
 /// Puts this module's window procedure in front of the hotkey field's own.
@@ -9134,6 +9344,23 @@ unsafe extern "system" fn hotkey_field_proc(
             // Escape, Enter and the arrows for itself and the capture never sees them.
             WM_GETDLGCODE => return LRESULT(DLGC_WANTALLKEYS as isize),
 
+            // ⚠ **Не передаётся дальше** — task Т-23-5, решение 82.6, and this one line is
+            // half of what the user complained about. The edit control's own `WM_SETFOCUS`
+            // handler is what creates the blinking caret and selects the whole of its text in
+            // the system's selection colours — «выделяется Pause белым цветом на тёмном
+            // фоне… начинает моргать вертикальная линия». Both are a **false affordance**:
+            // there is nothing to edit in this field, the key is captured and not typed.
+            //
+            // Swallowing the message costs the capture nothing. The control still holds the
+            // focus as far as the window manager is concerned — which is all that matters,
+            // because every key message is answered above and none of them ever reaches the
+            // edit. What the edit loses is its own idea that it is focused, and the caret and
+            // the selection are exactly what that idea is for.
+            //
+            // No `EM_SETSEL` anywhere: unselecting after the fact would still let the
+            // selection flash for one paint, and a test sweeps this module for the message.
+            WM_SETFOCUS => return LRESULT(0),
+
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 // `wparam` of a key message is the virtual-key code, which is the whole of what
                 // the capture reads. **SEC-01:** no character is asked for, no layout is
@@ -9141,7 +9368,12 @@ unsafe extern "system" fn hotkey_field_proc(
                 // not looked at.
                 //
                 // SAFETY: as above.
-                unsafe { on_capture_key(dialog, wparam.0 as u16) };
+                unsafe {
+                    run_capture_step(
+                        dialog,
+                        CaptureEvent::KeyDown(wparam.0 as u16, Modifiers::held_now()),
+                    )
+                };
 
                 return LRESULT(0);
             }
@@ -9152,17 +9384,20 @@ unsafe extern "system" fn hotkey_field_proc(
             WM_KEYUP | WM_SYSKEYUP | WM_CHAR | WM_SYSCHAR => return LRESULT(0),
 
             // Clicking somewhere else abandons the capture, because a capture nobody can see is
-            // a program with its conversion switched off for no visible reason. The one window
-            // that may take the focus without cancelling is the capture button itself: it is
-            // about to report that it was clicked, and cancelling here would turn that click
-            // into a fresh arming.
+            // a program with its conversion switched off for no visible reason. The window the
+            // focus goes to decides, and the decision itself is [`capture_step`]'s.
             WM_KILLFOCUS => {
                 let taking = HWND(std::ptr::without_provenance_mut(wparam.0));
 
-                if !is_capture_button(dialog, taking) {
-                    // SAFETY: as above.
-                    unsafe { with_state(dialog, |state| cancel_capture(dialog, state)) };
-                }
+                // SAFETY: as above.
+                unsafe {
+                    run_capture_step(
+                        dialog,
+                        CaptureEvent::FocusLost {
+                            to_capture_button: is_capture_button(dialog, taking),
+                        },
+                    )
+                };
             }
 
             _ => {}
@@ -9197,24 +9432,70 @@ fn is_capture_button(dialog: HWND, window: HWND) -> bool {
 /// Called from [`dialog_proc`] only, with the `hwnd` of the dialog it belongs to.
 unsafe fn toggle_capture(hwnd: HWND) {
     // SAFETY: see the caller.
-    unsafe {
+    let armed = unsafe {
         with_state(hwnd, |state| {
             if state.capture.is_some() {
                 cancel_capture(hwnd, state);
+                false
             } else {
                 arm_capture(hwnd, state);
+                true
             }
         })
-    };
+    }
+    .unwrap_or(false);
+
+    // ⚠ **Outside the borrow, and that is load-bearing** — task Т-23-5. `SetFocus` sends
+    // `WM_SETFOCUS` *synchronously*, the field's own procedure answers it, and the first thing
+    // that procedure does is ask the state whether a capture is armed. Asked from inside this
+    // borrow the question comes back «нет» — `with_state` refuses a nested borrow and the
+    // caller reads the refusal as «not armed» — and the field would then hand the message to
+    // the edit control, which is precisely the caret and the selection решение 82.6 is against.
+    if armed {
+        focus_control(hwnd, IDC_HOTKEY);
+    }
+
+    // The frame of the field is drawn by the window's own background, and the background is a
+    // cached picture: arming changes the colour that picture is painted with, so the picture
+    // has to be built again. Both directions — the frame goes to `box_border` on arming and
+    // back to `field_border` on cancelling.
+    repaint_whole_window(hwnd);
 }
 
-/// Arms a capture: the conversion path stops, the note says what to do, the field takes focus.
+/// Arms a capture: the conversion path stops, the field shows the invitation, the note shows
+/// the way out, and the button offers to take it back.
+///
+/// ⚠ The field is **not** focused here — [`toggle_capture`] does that after this borrow ends;
+/// see the ⚠ there.
 fn arm_capture(hwnd: HWND, state: &mut DialogState<'_>) {
     state.capture = Some(CaptureSession::arm(state.working.hotkey.key.clone()));
 
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));
-    set_text(hwnd, IDC_HOTKEY_NOTE, &text(IDS_CAPTURE_PROMPT));
-    focus_control(hwnd, IDC_HOTKEY);
+    // Решение 82.6: the invitation stands **in the field**, where the key name was — the field
+    // has nothing to show while the capture waits, and a name left there looks like a value
+    // that could be edited. The ink is `text_muted` (`on_ctl_color`), the frame `box_border`
+    // (`on_erase_background`).
+    set_text(hwnd, IDC_HOTKEY, &text(IDS_CAPTURE_PROMPT));
+    show_capture_note(hwnd, None);
+}
+
+/// The note under the field while a capture is armed — the hint, or the reason the last press
+/// was refused.
+///
+/// ⚠ **One line and not two, and the reason is geometry.** The mock-up of решение 82.6 draws
+/// the warning and the hint one under the other; this static is `IDC_HOTKEY_NOTE`, sixteen
+/// dialog units — two lines of text — and every refusal of [`Refusal`] takes both of them on
+/// its own. A second static would grow the «Горячая клавиша» block, and with it the left
+/// column and the window, which is the geometry the user chose by eye at контрольная точка К-1
+/// (решение 83) and this task has no business moving. So the two share the line: the hint
+/// while the capture is simply waiting, the refusal the moment there is one to tell.
+fn show_capture_note(hwnd: HWND, refusal: Option<Refusal>) {
+    let note = match refusal {
+        Some(refusal) => text(refusal.string_id()),
+        None => text(IDS_CAPTURE_HINT),
+    };
+
+    set_note(hwnd, &note);
 }
 
 /// Abandons the capture and puts back the key that stood there before it was armed.
@@ -9253,35 +9534,41 @@ fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, name: String) {
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
-/// One key pressed while a capture is armed.
+/// Carries out what [`capture_step`] decides about one event — task Т-23-5.
+///
+/// The decision is taken **before** the borrow and the borrow only performs it: the machine is
+/// a pure function of the armed flag and the event, and everything Win32 about it lives here.
 ///
 /// # Safety
 ///
-/// Called from [`hotkey_field_proc`] only, with the `hwnd` of the dialog the field belongs to.
-unsafe fn on_capture_key(dialog: HWND, vk: u16) {
-    // Escape is the way out of the capture and is therefore the one key a capture cannot
-    // assign. It stays assignable by hand: `hook::vk_from_name` still reads `Escape` and `Esc`
-    // out of the file, and the dialog shows whatever it finds there.
-    if vk == VK_ESCAPE.0 {
-        // SAFETY: see the caller.
-        unsafe { with_state(dialog, |state| cancel_capture(dialog, state)) };
-        return;
-    }
+/// Called from [`hotkey_field_proc`] and [`dialog_proc`] only, with the `hwnd` of the dialog
+/// the field belongs to.
+unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
+    // SAFETY: see the caller.
+    let armed = unsafe { with_state(dialog, |state| state.capture.is_some()) }.unwrap_or(false);
 
-    let outcome = capture(vk, Modifiers::held_now());
+    let step = capture_step(armed, event);
+
+    // The frame of the field is part of the window's cached background, so the two steps that
+    // end a capture have to make the picture again — see `toggle_capture`.
+    let ends = matches!(step, CaptureStep::Cancel | CaptureStep::Take(_));
 
     // SAFETY: see the caller.
     unsafe {
-        with_state(dialog, |state| match outcome {
-            Capture::Taken(name) => accept_capture(dialog, state, name),
+        with_state(dialog, |state| match step {
+            CaptureStep::Ignore => {}
+            CaptureStep::Cancel => cancel_capture(dialog, state),
+            CaptureStep::Take(name) => accept_capture(dialog, state, name),
 
             // The capture stays armed: a refusal is a "not that one", not an end to the
-            // question. The note says which of the five reasons it was.
-            Capture::Refused(refusal) => {
-                set_text(dialog, IDC_HOTKEY_NOTE, &text(refusal.string_id()));
-            }
+            // question. The note says which of the five reasons it was, in place of the hint.
+            CaptureStep::Refuse(refusal) => show_capture_note(dialog, Some(refusal)),
         })
     };
+
+    if ends {
+        repaint_whole_window(dialog);
+    }
 }
 
 /// Moves the keyboard focus to one control of the dialog.
@@ -11058,7 +11345,7 @@ fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
 
         apply_title_bar_theme(hwnd, fresh);
 
-        repaint_after_palette_change(hwnd);
+        repaint_whole_window(hwnd);
     }
 }
 

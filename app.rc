@@ -444,8 +444,13 @@ BEGIN
     // y is therefore two units lower than the box it stands in: the box, not the control, is
     // what the eye sees and what the mock-up places.
     LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 120, 32, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_HOTKEY, 48, 120, 64, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
-    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 117, 46, 14, BS_OWNERDRAW
+    // ⚠ 100 units wide and not the 64 it was until task Т-23-5, and the button stands at the
+    // right edge of the block instead of beside the field. Решение 82.6 puts the invitation
+    // «Нажмите клавишу…» **into this field**, and at 64 units that sentence ran into its own
+    // frame — measured on the raised window, not predicted. The mock-up draws the same shape:
+    // a field that takes the width and a button at the end of the row.
+    EDITTEXT        IDC_HOTKEY, 48, 120, 100, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 154, 117, 46, 14, BS_OWNERDRAW
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 134, 186, 16, SS_OWNERDRAW
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
@@ -749,6 +754,12 @@ END
 // tables that use it: rc.exe reads the script top to bottom and an identifier used before it
 // is defined is `error RC2104`, measured.
 #define IDS_SOUND               3078
+// FR-94, task Т-23-5, решение 82.6 — the hint the capture shows under the field: «Esc или
+// клик мимо — отмена». The **number** is 3079, appended after IDS_SOUND for the reason
+// IDS_SOUND itself was appended, and it costs no new block: 3072..3087 is the block the menu
+// already opened, and 3079 is inside it. The **definition** stands here for the same reason
+// IDS_SOUND's does — above the tables that use it, or `error RC2104`.
+#define IDS_CAPTURE_HINT        3079
 // The about dialog of FR-92а, task T-11-11: the caption, the version line, the two
 // description lines and its «ОК». They continue the sixteen-string block 3056 opened,
 // contiguously — no gap, so no empty block between. «ОК» takes a row of its own rather
@@ -805,7 +816,7 @@ BEGIN
     IDS_GROUP_HOTKEY        "Горячая клавиша"
     IDS_HOTKEY_LABEL        "Клавиша:"
     IDS_HOTKEY_SET          "Задать"
-    IDS_HOTKEY_STOP         "Отменить"
+    IDS_HOTKEY_STOP         "Отмена"
     IDS_GROUP_LAYOUTS       "Раскладки"
     IDS_MODE_PAIR           "Пара"
     IDS_MODE_CYCLE          "Несколько раскладок"
@@ -829,7 +840,7 @@ BEGIN
     IDS_APPLY               "Применить"
     IDS_NOTE_TEXT_KEY       "Это текстовая клавиша: пока программа активна, она перестанет вводить символ."
     IDS_NOTE_UNKNOWN_KEY    "Имя клавиши не распознано — действует клавиша по умолчанию, Pause."
-    IDS_CAPTURE_PROMPT      "Нажмите клавишу. Esc — отмена."
+    IDS_CAPTURE_PROMPT      "Нажмите клавишу…"
     IDS_CAPTURE_MODIFIER    "Модификатор сам по себе горячей клавишей быть не может."
     IDS_CAPTURE_COMBINATION "Сочетания с модификаторами не поддерживаются: в файле настроек хранится одна клавиша."
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварийный выход, эта комбинация не назначается."
@@ -862,6 +873,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Выделите текст и нажмите {0} — конвертируется выделенное."
     IDS_ABOUT_HELP_4        "Пауза, настройки и выход — в значке в трее."
     IDS_ABOUT_HELP_5        "Сменить клавишу: Настройки → Горячая клавиша."
+    IDS_CAPTURE_HINT        "Esc или клик мимо — отмена"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -910,7 +922,7 @@ BEGIN
     IDS_APPLY               "Apply"
     IDS_NOTE_TEXT_KEY       "This is a text key: while the program is active it will stop typing its character."
     IDS_NOTE_UNKNOWN_KEY    "The key name is not recognised — the default key, Pause, is in force."
-    IDS_CAPTURE_PROMPT      "Press a key. Esc cancels."
+    IDS_CAPTURE_PROMPT      "Press a key…"
     IDS_CAPTURE_MODIFIER    "A modifier on its own cannot be a hotkey."
     IDS_CAPTURE_COMBINATION "Combinations with modifiers are not supported: the settings file holds a single key."
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 is the emergency exit; it cannot be assigned."
@@ -943,6 +955,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Select text and press {0} — the selection is converted."
     IDS_ABOUT_HELP_4        "Suspend, settings and exit are in the tray icon."
     IDS_ABOUT_HELP_5        "To change the key: Settings → Hotkey."
+    IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
 END
 
 // ---------------------------------------------------------------------------------------
