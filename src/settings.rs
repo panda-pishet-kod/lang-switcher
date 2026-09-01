@@ -8428,11 +8428,16 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     };
     check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, mode);
 
+    // Both combo boxes show the session in the session's own order, so the labels are built
+    // once for the two: the rule of решение 82.1 is a property of the list, and two lists
+    // built apart could in principle disagree about a collision.
+    let labels = layout_labels(&state.session, &state.session);
+
     for control in [IDC_PAIR_SOURCE, IDC_PAIR_TARGET] {
         send_to(hwnd, control, CB_RESETCONTENT, 0, 0);
 
-        for layout in &state.session {
-            combo_add(hwnd, control, &layout_label(*layout));
+        for label in &labels {
+            combo_add(hwnd, control, label);
         }
     }
 
@@ -8473,7 +8478,7 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     paint_cycle_list(hwnd, state.palette);
     install_check_images(hwnd);
 
-    fill_cycle_list(hwnd, &state.rows, 0);
+    fill_cycle_list(hwnd, &state.rows, &state.session, 0);
     enable_by_mode(hwnd, state.working.layouts.mode);
 }
 
@@ -8910,7 +8915,7 @@ unsafe fn move_cycle_row(hwnd: HWND, step: i32) {
             }
 
             state.rows.swap(from, to);
-            fill_cycle_list(hwnd, &state.rows, to);
+            fill_cycle_list(hwnd, &state.rows, &state.session, to);
         })
     };
 }
@@ -9924,11 +9929,18 @@ fn fit_cycle_column(hwnd: HWND) {
 }
 
 /// Fills the list view from the rows and selects `focus`.
-fn fill_cycle_list(hwnd: HWND, rows: &[LayoutRow], focus: usize) {
+///
+/// `session` is here for [`layout_labels`] and for nothing else: the rows are the session in
+/// the user's own order, and the identifier section 7 stores for a layout must not depend on
+/// where in that order the layout happens to stand.
+fn fill_cycle_list(hwnd: HWND, rows: &[LayoutRow], session: &[LayoutId], focus: usize) {
     send_to(hwnd, IDC_CYCLE_LIST, LVM_DELETEALLITEMS, 0, 0);
 
+    let ordered: Vec<LayoutId> = rows.iter().map(|row| row.layout).collect();
+    let labels = layout_labels(&ordered, session);
+
     for (index, row) in rows.iter().enumerate() {
-        let mut label = wide(&layout_label(row.layout));
+        let mut label = wide(&labels[index]);
 
         let item = LVITEMW {
             mask: LVIF_TEXT,
@@ -10065,17 +10077,78 @@ fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
 // Layout names
 // -----------------------------------------------------------------------------------------
 
-/// What one layout is called in the list and in the two combo boxes.
+/// What a whole list of layouts is called in the cycle list and in the two combo boxes.
 ///
-/// The localised name of the language, from the system, with the identifier after it: two
-/// layouts of the same language are otherwise indistinguishable, and the identifier is the
-/// thing section 7 stores. A system that will not name the language leaves the identifier
-/// alone, which is still an answer the user can act on.
-fn layout_label(layout: LayoutId) -> String {
-    match language_name(layout) {
-        Some(name) => format!("{name} — 0x{:08X}", layout.raw()),
-        None => format!("0x{:08X}", layout.raw()),
-    }
+/// A list and not one label at a time, and that is the substance rather than the shape: the
+/// rule of решение 82.1 cannot be applied to a layout on its own — whether a name needs an
+/// identifier behind it is a property of the **list** the name stands in.
+///
+/// `session` is what section 7 numbers a layout against, and it is passed apart from
+/// `layouts` because the cycle list shows the session in the user's own order: the same set,
+/// a different sequence, and the identifier must not change with the sequence.
+pub fn layout_labels(layouts: &[LayoutId], session: &[LayoutId]) -> Vec<String> {
+    let rows: Vec<(Option<String>, String)> = layouts
+        .iter()
+        .map(|layout| {
+            let name = language_name(*layout);
+
+            // The tail of a **named** layout is what section 7 stores for it, so a person who
+            // reads it off the window finds the same characters in `config.toml`. A nameless
+            // one keeps the raw handle it has always shown: nothing about that case changed
+            // in Т-23-3, and `spec_text` would have printed a different number for it.
+            let tail = match name {
+                Some(_) => spec_text(*layout, session),
+                None => format!("0x{:08X}", layout.raw()),
+            };
+
+            (name, tail)
+        })
+        .collect();
+
+    disambiguated_labels(&rows)
+}
+
+/// The rule of решение 82.1 — **вариант В, «различитель по требованию»** — over
+/// `(имя, различитель)` pairs, and nothing else.
+///
+/// A name that no other row of the list wears is shown bare: `Русский (Россия)`. A name two
+/// or more rows wear is shown with its discriminator behind it — **on every one of them**,
+/// because a tail on one of a pair says nothing about which one the reader is looking at. A
+/// row the system would not name at all falls back to the bare identifier, exactly as it did
+/// before this task.
+///
+/// ⚠ **The discriminator is a hexadecimal identifier and not the registry name of the
+/// layout, and that is a deliberate choice rather than an omission.** Windows shows
+/// `Win+Space` the name it keeps under
+/// `HKLM\SYSTEM\CurrentControlSet\Control\Keyboard Layouts\<KLID>\Layout Text`, which would
+/// read «Русская (машинопись)» where this shows a number. That road was examined and turned
+/// down at вопрос 82: reaching it means mapping an `HKL` to a `KLID` by a convention
+/// Microsoft documents nowhere — the low word is a language identifier only for the layouts
+/// loaded under their own default, and the `0xF0xx` handles of a second layout of one
+/// language are precisely the case this discriminator exists for. The price of the
+/// undocumented convention was judged higher than the price of a number the user sees only
+/// when two names actually collide, which on most machines is never.
+///
+/// Pure, and public for that reason: `tests\settings.rs` closes the rule on names no system
+/// produced, without a window and without a locale service.
+pub fn disambiguated_labels(rows: &[(Option<String>, String)]) -> Vec<String> {
+    rows.iter()
+        .map(|(name, tail)| match name {
+            None => tail.clone(),
+            Some(name) => {
+                let alike = rows
+                    .iter()
+                    .filter(|(other, _)| other.as_deref() == Some(name.as_str()))
+                    .count();
+
+                if alike > 1 {
+                    format!("{name} — {tail}")
+                } else {
+                    name.clone()
+                }
+            }
+        })
+        .collect()
 }
 
 /// The localised display name of the language a layout serves, asked of the system.

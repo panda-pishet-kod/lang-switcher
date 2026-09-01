@@ -5818,6 +5818,168 @@ fn one_layout_per_language_is_written_in_the_language_form() {
     );
 }
 
+// -----------------------------------------------------------------------------------------
+// Т-23-3, решение 82.1 — вариант В: имя раскладки чистое, различитель только при коллизии
+// -----------------------------------------------------------------------------------------
+//
+// The user's complaint was the tail: «Русский (Россия) — 0x04190419» in three places of the
+// window, where the number means nothing to the person reading it and the name alone is
+// what tells the two layouts apart — until it is not. Вариант В shows the name bare and adds
+// the identifier back **only to the strings that would otherwise be identical**.
+//
+// Two halves. The rule itself is pure — it is a count of equal names over a list of pairs and
+// nothing else — and is closed here on synthetic names no system produced. The wiring is
+// closed on the layout identifiers the other tests of this file already use: `EN` and
+// `EN_SECOND` share a language identifier, so the system gives them one and the same display
+// name, which is exactly the collision the rule is for.
+
+#[test]
+fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
+    // No collision: three different names, three bare labels, not a hexadecimal digit in
+    // sight — and the discriminators are present and deliberately unused.
+    let apart = settings::disambiguated_labels(&[
+        (Some("Английский (США)".to_owned()), "0x00000409".to_owned()),
+        (Some("Русский (Россия)".to_owned()), "0x00000419".to_owned()),
+        (
+            Some("Немецкий (Германия)".to_owned()),
+            "0x00000407".to_owned(),
+        ),
+    ]);
+
+    println!("{apart:?}");
+
+    assert_eq!(
+        apart,
+        vec![
+            "Английский (США)",
+            "Русский (Россия)",
+            "Немецкий (Германия)"
+        ],
+        "a name nobody else wears is shown as it is — решение 82.1"
+    );
+
+    // A collision of two: **both** get the tail, not just the second. A discriminator on one
+    // of a pair tells the reader nothing about which one they are looking at.
+    let together = settings::disambiguated_labels(&[
+        (Some("Английский (США)".to_owned()), "0x04090409".to_owned()),
+        (Some("Русский (Россия)".to_owned()), "0x00000419".to_owned()),
+        (Some("Английский (США)".to_owned()), "0xF0010409".to_owned()),
+    ]);
+
+    println!("{together:?}");
+
+    assert_eq!(
+        together,
+        vec![
+            "Английский (США) — 0x04090409",
+            "Русский (Россия)",
+            "Английский (США) — 0xF0010409"
+        ],
+        "both of the pair carry the identifier, and the third name is left alone"
+    );
+
+    // A name the system would not give: the bare identifier, exactly as before Т-23-3. A
+    // nameless row is not a collision — it has no name to collide with — and two of them come
+    // out different because their identifiers are.
+    let nameless = settings::disambiguated_labels(&[
+        (None, "0x04090409".to_owned()),
+        (None, "0xF0010409".to_owned()),
+        (Some("Русский (Россия)".to_owned()), "0x00000419".to_owned()),
+    ]);
+
+    println!("{nameless:?}");
+
+    assert_eq!(
+        nameless,
+        vec!["0x04090409", "0xF0010409", "Русский (Россия)"],
+        "the fallback of a nameless layout is the bare identifier it always was"
+    );
+}
+
+/// **Т-23-3, решение 82.1 — the wiring, on this machine's own locale service.**
+///
+/// The names come from `LCIDToLocaleName` + `GetLocaleInfoEx`, so what they *say* depends on
+/// the Windows the test runs on and is deliberately not asserted. What is asserted is the
+/// shape, and it is machine-independent: a language nobody shares is shown without a tail, a
+/// language two layouts share is shown with one, and the tail is **character for character
+/// what section 7 would store for that layout** — the string `spec_text` produces, so a person
+/// who reads the identifier off the window can find it in `config.toml`.
+#[test]
+fn the_discriminator_appears_on_a_collision_and_is_the_identifier_section_7_stores() {
+    // One layout per language: no collision anywhere, so no label carries an identifier.
+    let apart = settings::layout_labels(&[EN, RU], &[EN, RU]);
+
+    println!("две раскладки разных языков: {apart:?}");
+
+    for label in &apart {
+        assert!(
+            !label.is_empty(),
+            "a layout with no label at all would be a row the user cannot choose"
+        );
+        assert!(
+            !label.contains("0x"),
+            "«{label}» still carries an identifier nobody needs — решение 82.1"
+        );
+    }
+
+    // Two layouts of one language: the system gives both the same display name, so both — and
+    // only they — take the tail.
+    let session = [EN, EN_SECOND, RU];
+    let together = settings::layout_labels(&session, &session);
+
+    println!("две раскладки одного языка: {together:?}");
+
+    for (index, layout) in session.iter().enumerate() {
+        let expected_tail = format!(" — {}", settings::spec_text(*layout, &session));
+        let collides = index < 2;
+
+        assert_eq!(
+            together[index].ends_with(&expected_tail),
+            collides,
+            "«{}» must {} the tail «{expected_tail}»",
+            together[index],
+            if collides { "carry" } else { "not carry" }
+        );
+    }
+
+    // And the name in front of the tail is the same name the third row wears bare — the tail
+    // is added to a label, it does not replace one.
+    assert_eq!(
+        together[0].trim_end_matches(&format!(" — {}", settings::spec_text(EN, &session))),
+        together[1].trim_end_matches(&format!(" — {}", settings::spec_text(EN_SECOND, &session))),
+        "the two colliding rows show one and the same name"
+    );
+    assert_eq!(
+        together[2], apart[1],
+        "the row that collides with nobody reads the same in both sessions"
+    );
+}
+
+/// **Т-23-3** — all three places the user sees a layout name go through one function.
+///
+/// The two combo boxes are filled together in `fill_layouts` and the cycle list in
+/// `fill_cycle_list`; a fourth place that built a label of its own would be a place where the
+/// rule of решение 82.1 could quietly not hold. Read off `src\settings.rs` — the sweep looks
+/// for the batch function and for the absence of the per-layout one it replaced.
+#[test]
+fn every_place_that_shows_a_layout_name_asks_the_one_function() {
+    let source = settings_module_source();
+
+    for signature in ["fn fill_layouts(", "fn fill_cycle_list("] {
+        assert!(
+            function_body(&source, signature).contains("layout_labels("),
+            "`{signature}` must take its labels from `layout_labels`, which is where the \
+             collision rule of решение 82.1 lives"
+        );
+    }
+
+    assert!(
+        !source.contains("fn layout_label("),
+        "`layout_label` built one label out of one layout and could not see a collision at \
+         all — Т-23-3 replaced it with `layout_labels`"
+    );
+}
+
 // ⚠ `a_millisecond_field_reads_as_a_number_and_never_as_a_guess` stood here until task
 // Т-23-2. It closed `settings::parse_ms`, which turned the text of a millisecond field back
 // into a number; решение 81 took all three millisecond fields out of the dialog, so the
