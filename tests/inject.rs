@@ -328,6 +328,63 @@ fn ghbdtn() -> Vec<Keystroke> {
         .collect()
 }
 
+/// The scan code of the space bar — the soft boundary of FR-10, task **Т-24-3**.
+const SCAN_SPACE: u16 = 0x39;
+
+/// The six keys of `ghbdtn` **and the space bar**, as a live cache of FR-20 carries them.
+///
+/// ⚠ **Not [`us`] and [`russian`], and the difference is a finding of stage Э24.** The hardwired
+/// table of FR-25 has 47 rows of the main block and the space bar is not one of them, so a space
+/// decoded through it carries no character at all — measured by
+/// `the_space_bar_is_absent_from_the_hardwired_table_of_fr25` below. The live cache built by
+/// `ToUnicodeEx` over VK `0x08..0xFF` always carries it — measured on this machine by
+/// `tests\layouts.rs::the_live_cache_of_fr20_carries_the_space_bar`. The mainline claim of task
+/// Т-24-3 is about the product's normal state, so it is asserted on a map that has the key.
+fn ghbdtn_layout(layout: LayoutId, characters: [char; 6]) -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(layout);
+
+    for (&scan, &character) in GHBDTN.iter().zip(characters.iter()) {
+        builder.set(scan, false, Mods::NONE, KeyMapping::from_char(character));
+    }
+
+    builder.set(SCAN_SPACE, false, Mods::NONE, KeyMapping::from_char(' '));
+    builder.finish()
+}
+
+/// The English half of the pair above.
+fn us_with_space() -> LayoutMap {
+    ghbdtn_layout(
+        LayoutId::from_raw(0x0409_0409),
+        ['g', 'h', 'b', 'd', 't', 'n'],
+    )
+}
+
+/// The Russian half of the pair above.
+fn russian_with_space() -> LayoutMap {
+    ghbdtn_layout(
+        LayoutId::from_raw(0x0419_0419),
+        ['п', 'р', 'и', 'в', 'е', 'т'],
+    )
+}
+
+/// The six strokes of `ghbdtn` with `spaces` presses of the space bar after them.
+///
+/// «слово + хвост», the state the soft boundary of FR-10 leaves in the ring since task Т-24-2.
+/// The tail is decoded through the same layout the word is, because that is where it comes from:
+/// the recorder puts the space bar through the cache like any other key.
+fn ghbdtn_with_tail(spaces: usize) -> Vec<Keystroke> {
+    let source = us_with_space();
+
+    let mut strokes: Vec<Keystroke> = GHBDTN
+        .iter()
+        .map(|&scan| Keystroke::recorded_in(&source, scan, false, Mods::NONE))
+        .collect();
+
+    let space = Keystroke::recorded_in(&source, SCAN_SPACE, false, Mods::NONE);
+    strokes.extend(std::iter::repeat_n(space, spaces));
+    strokes
+}
+
 /// A one-key layout in which `scan` produces `mapping`.
 fn layout_with(layout: LayoutId, scan: u16, mapping: KeyMapping) -> LayoutMap {
     let mut builder = LayoutMapBuilder::new(layout);
@@ -789,6 +846,97 @@ fn the_chosen_rule_is_one_short_on_a_pair_that_does_not_compose() {
         inject::typed_chars(&strokes),
         1,
         "правило вносит ноль за мёртвую: один вместо двух — недостирание, безопасная сторона"
+    );
+}
+
+/// **Хвост мягкой границы стирается и печатается наравне со словом** — задача Т-24-3.
+///
+/// `N` из FR-41 — число символов на экране, и с задачи Т-24-2 прогон может кончаться
+/// пробелами: пробел стоит на экране обычным символом, стирается обычным `Backspace` и
+/// кладётся обратно обычным `KEYEVENTF_UNICODE`. Ни одной оговорки под хвост в механике счёта
+/// не заводится — она считает единицы отображения, а у пробела их ровно одна.
+///
+/// Второй счёт, `as_injected`, снят здесь же: со второго шага цикла на экране стоит
+/// предыдущая инжекция (Э20), и у неё та же ширина — пробел отображается в пробел в обеих
+/// раскладках пары.
+#[test]
+fn a_word_with_a_tail_of_spaces_is_erased_and_retyped_whole() {
+    let strokes = ghbdtn_with_tail(1);
+
+    assert_eq!(
+        inject::OnScreen::as_typed(&strokes).count(),
+        7,
+        "FR-41: «ghbdtn » стоит на экране семью символами — шесть букв и хвост"
+    );
+
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in(&mut bench, &strokes, &russian_with_space(), 0)
+        .expect("пакет размерен по длинам, которыми построен");
+
+    assert_eq!(
+        outcome.erased, 7,
+        "стирается всё, что этот прогон поставил на экран, — вместе с хвостом"
+    );
+    assert_eq!(
+        outcome.typed, 7,
+        "и кладётся «привет » — столько же, сколько стёрто"
+    );
+
+    assert_eq!(
+        inject::OnScreen::as_injected(&strokes, &russian_with_space()).count(),
+        7,
+        "со второго шага цикла считается предыдущая инжекция, и она той же ширины"
+    );
+
+    // Хвост из двух пробелов — то же самое и на единицу шире с каждой стороны.
+    let longer = ghbdtn_with_tail(2);
+
+    assert_eq!(inject::OnScreen::as_typed(&longer).count(), 8);
+    assert_eq!(
+        inject::OnScreen::as_injected(&longer, &russian_with_space()).count(),
+        8
+    );
+}
+
+/// ⚠ **Находка м-Э24-1: в жёстко зашитой таблице FR-25 пробела нет.** Измерено, не выведено.
+///
+/// [`FALLBACK_KEYS`] — 47 клавиш основного блока; клавиша пробела в их число не входит, и её
+/// отсутствие было безразлично ровно до задачи Т-24-2: пробел в буфер не попадал. Теперь
+/// попадает, и в аварийном режиме FR-25 (динамический кэш FR-20 не построился) штрих пробела
+/// не несёт ни одной единицы отображения. Следствие для FR-41 — счёт на экране короче
+/// действительного на длину хвоста: «ghbdtn » будет стёрто шестью `Backspace` из семи нужных.
+///
+/// **Сторона ошибки — та же, что у мёртвой клавиши** (Э20): недостирание, а не перестирание.
+/// Лишний символ остаётся на экране видимым и правится рукой человека; чужой текст не
+/// съедается. Этим она и отличается от порчи.
+///
+/// **Здесь она закреплена числом, а не починена.** Починка — одна строка в таблице FR-25, но
+/// вместе с ней двигаются четыре рукописные строки перекрёстной проверки в `src\convert.rs` и
+/// три числа `47` в `tests\convert.rs`; довод самой таблицы против клавиатуры («читается
+/// одинаково в обеих раскладках — конвертации она ничего не даёт») с приходом счёта FR-41
+/// перестал быть полным, и это вопрос пользователю, а не правка исполнителя. Отчёт этапа Э24,
+/// плохие новости.
+#[test]
+fn the_space_bar_is_absent_from_the_hardwired_table_of_fr25() {
+    let fallback = us();
+    let space = Keystroke::recorded_in(&fallback, SCAN_SPACE, false, Mods::NONE);
+
+    assert!(
+        space.produced().units().is_empty(),
+        "таблица FR-25 не отдаёт пробел: если отдаёт — находка закрыта и этот тест снимается"
+    );
+
+    // И вот чем это оборачивается для счёта FR-41 на аварийном пути.
+    let mut strokes: Vec<Keystroke> = GHBDTN
+        .iter()
+        .map(|&scan| Keystroke::recorded_in(&fallback, scan, false, Mods::NONE))
+        .collect();
+    strokes.push(space);
+
+    assert_eq!(
+        inject::OnScreen::as_typed(&strokes).count(),
+        6,
+        "шесть вместо семи — недостирание на длину хвоста, безопасная сторона"
     );
 }
 

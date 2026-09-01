@@ -322,6 +322,52 @@ fn a_failed_build_is_distinguishable_from_an_empty_cache() {
     assert!(built.maps().iter().any(|map| !map.is_empty()));
 }
 
+// -- task Т-24-3, the foundation of the soft boundary of FR-10 -----------------------------
+
+/// **The live cache of FR-20 carries the space bar, in every layout of this session.**
+///
+/// The whole of the soft boundary rests on this and on nothing else: since task Т-24-2 the space
+/// is an ordinary stroke of the ring, so FR-22 converts it by the physical key like any other,
+/// and FR-41 counts what it put on the screen. Both readings come from the cache, and a cache
+/// without the space bar would give a stroke that converts to nothing and is counted as nothing.
+///
+/// Measured rather than assumed, and measured on the machine: `LayoutCache::build` is the
+/// product's own `ToUnicodeEx` sweep of VK `0x08..0xFF`, so what this test reads is what the
+/// running program reads. Every layout of the session is walked, not only the pair — a third
+/// layout that answered otherwise would be worth knowing about.
+///
+/// ⚠ Its counterpart in the other direction is the hardwired reserve of FR-25, which does
+/// **not** carry the key: `tests\inject.rs::the_space_bar_is_absent_from_the_hardwired_table_of_fr25`,
+/// finding м-Э24-1 of stage Э24.
+#[test]
+fn the_live_cache_of_fr20_carries_the_space_bar() {
+    /// Scan code of the space bar on a set 1 keyboard.
+    const SCAN_SPACE: u16 = 0x39;
+
+    let cache = cache();
+
+    for map in cache.maps() {
+        let plain = map.lookup(SCAN_SPACE, MAIN_BLOCK, Mods::NONE);
+        println!("layout {}: space bar -> {:?}", map.layout(), plain.kind());
+
+        assert_eq!(
+            char_at(map, SCAN_SPACE, MAIN_BLOCK, Mods::NONE),
+            ' ',
+            "layout {}: the space bar must produce a space",
+            map.layout()
+        );
+
+        // With `Shift` too: a tail typed with a finger still on `Shift` is a tail all the same,
+        // and the mask of FR-04 keeps the combination on the stroke.
+        assert_eq!(
+            char_at(map, SCAN_SPACE, MAIN_BLOCK, Mods::SHIFT),
+            ' ',
+            "layout {}: Shift+Space is a space as well",
+            map.layout()
+        );
+    }
+}
+
 // -- task T-02-1a, the extended key in the cache key ---------------------------------------
 
 #[test]

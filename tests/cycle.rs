@@ -89,7 +89,18 @@ const IN_THE_THIRD: &str = "γρβδτν";
 /// A key of the main block: the `LLKHF_EXTENDED` of FR-05 is clear.
 const MAIN_BLOCK: bool = false;
 
-/// Builds the map of one layout over the six keys.
+/// The space bar — task **Т-24-3**, the soft boundary of FR-10.
+///
+/// `(virtual key, scan code)`, in the same shape as [`KEYS`]. It is not one of the six: the six
+/// are the word, and this is what follows it.
+const SPACE: (u16, u16) = (0x20, 0x39);
+
+/// Builds the map of one layout over the six keys — and over the space bar.
+///
+/// The space is in **every** layout with the same character, which is not decoration: FR-22
+/// converts by the physical key, so the tail of the soft boundary is carried through a
+/// conversion by the ordinary rule and not by an exception. A synthetic layout that left the
+/// space bar blank would have made the whole of task Т-24-3 vacuous.
 fn map_of(layout: LayoutId, characters: [char; 6]) -> LayoutMap {
     let mut builder = LayoutMapBuilder::new(layout);
 
@@ -101,6 +112,8 @@ fn map_of(layout: LayoutId, characters: [char; 6]) -> LayoutMap {
             KeyMapping::from_char(character),
         );
     }
+
+    builder.set(SPACE.1, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char(' '));
 
     builder.finish()
 }
@@ -131,6 +144,28 @@ fn typed_in_english(layouts: &[LayoutId]) -> Recorder {
             edge: Edge::Down,
             extra_info: 0,
             scan,
+            flags: 0,
+            time: 1_000,
+        });
+    }
+
+    recorder
+}
+
+/// The same recorder, with `spaces` presses of the space bar after the word — task **Т-24-3**.
+///
+/// This is the state the soft boundary of FR-10 leaves behind: «слово + хвост». The strokes go
+/// in through [`Recorder::record`] like every other, which is the point — the tail is the ring's
+/// own content and not a second buffer beside it.
+fn typed_in_english_with_tail(layouts: &[LayoutId], spaces: usize) -> Recorder {
+    let mut recorder = typed_in_english(layouts);
+
+    for _ in 0..spaces {
+        recorder.record(KeyEvent {
+            vk: SPACE.0,
+            edge: Edge::Down,
+            extra_info: 0,
+            scan: SPACE.1,
             flags: 0,
             time: 1_000,
         });
@@ -361,6 +396,109 @@ fn the_rollback_does_not_depend_on_the_layout_the_switch_left_behind() {
     recorder.set_active_layout(EN);
 
     assert_eq!(press(&mut recorder, settings), CONVERTED);
+}
+
+// -------------------------------------------------------------------------------------
+// Task Т-24-3 — the soft boundary of FR-10: the word converts with its tail
+// -------------------------------------------------------------------------------------
+
+/// **The whole of what the user asked for, at the level where the text is made.**
+///
+/// The complaint, word for word (question 82): «часто набираю слово, потом ставлю пробел, а
+/// только потом вижу что выбрана не та раскладка и нажимаю `Pause`, но переключения уже не
+/// происходит». Since task Т-24-2 the space leaves «слово + хвост» in the ring instead of an
+/// empty buffer, and this is what the hotkey then makes of it: the word is converted and the
+/// tail is carried over untouched, because FR-22 converts by the physical key and the space bar
+/// gives a space in the target layout too.
+#[test]
+fn the_tail_of_the_soft_boundary_is_converted_with_the_word() {
+    let mut recorder = typed_in_english_with_tail(&[EN, RU], 1);
+    let settings = configured(
+        LayoutMode::Pair,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    );
+
+    assert_eq!(recorder.len(), 7, "six keys of the word and the tail");
+    assert_eq!(recorded_text(&recorder), "ghbdtn ");
+
+    assert_eq!(
+        press(&mut recorder, settings),
+        "привет ",
+        "the word is converted and the trailing space is still there"
+    );
+}
+
+/// **The rollback of FR-32 works with the tail exactly as it works without one.**
+///
+/// The second press gives back the word **and** the spaces, code unit for code unit, and the
+/// buffer is still holding the strokes the user made — which is the property the whole cycle
+/// rests on. Position 26 of the matrix of §11.3 is this test with a human's hands.
+#[test]
+fn the_rollback_gives_the_word_and_its_tail_back_bit_for_bit() {
+    let mut recorder = typed_in_english_with_tail(&[EN, RU], 1);
+    let settings = configured(
+        LayoutMode::Pair,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419"],
+    );
+
+    let before = strokes_of(&recorder);
+
+    assert_eq!(press(&mut recorder, settings), "привет ");
+    assert_eq!(press(&mut recorder, settings), "ghbdtn ");
+
+    // Bit for bit, and not merely "looks the same".
+    let restored: Vec<u16> = "ghbdtn ".encode_utf16().collect();
+    let round_trip: Vec<u16> = {
+        press(&mut recorder, settings);
+        press(&mut recorder, settings).encode_utf16().collect()
+    };
+    assert_eq!(
+        round_trip, restored,
+        "FR-32: побитово точный возврат с хвостом"
+    );
+
+    // FR-32 again, from the other end: the ring still holds what was typed, tail included.
+    let now = strokes_of(&recorder);
+    assert_eq!(now.len(), before.len());
+    assert!(
+        now.iter().zip(&before).all(|(now, before)| now == before),
+        "FR-32: a conversion adds and removes nothing, and the tail is no exception"
+    );
+    assert_eq!(recorded_text(&recorder), "ghbdtn ");
+}
+
+/// **A tail of several spaces goes round the whole cycle, and every step keeps its length.**
+///
+/// Rule 2 of the soft boundary: the spaces pile up. Three layouts, three presses, and the tail
+/// is two characters wide at every one of them — which is also what keeps the erasure of FR-41
+/// exact, since the count of what stands on the screen is a count of these same units.
+#[test]
+fn a_tail_of_several_spaces_is_carried_round_the_whole_cycle() {
+    let mut recorder = typed_in_english_with_tail(&[EN, RU, EL], 2);
+    let settings = configured(
+        LayoutMode::Cycle,
+        ["0x00000409", "0x00000419"],
+        &["0x00000409", "0x00000419", "0x00000408"],
+    );
+
+    assert_eq!(
+        recorder.len(),
+        8,
+        "six keys of the word and two of the tail"
+    );
+
+    for expected in ["привет  ", "γρβδτν  ", "ghbdtn  "] {
+        let shown = press(&mut recorder, settings);
+
+        assert_eq!(shown, expected);
+        assert_eq!(
+            shown.chars().count(),
+            8,
+            "every step of the cycle stands eight characters wide: {shown:?}"
+        );
+    }
 }
 
 // -------------------------------------------------------------------------------------
