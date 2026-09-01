@@ -58,6 +58,9 @@
 #define IDC_LANGUAGE           1002
 // The appearance combo box of FR-92а, task T-11-3. Continues the block of the «Общие» group.
 #define IDC_THEME              1003
+// The sound switch of FR-100, task Т-21-5. Continues the same block: `[feedback] sound` is a
+// program-wide behaviour, which is what «Общие» holds — autostart, language, appearance.
+#define IDC_SOUND              1004
 #define IDC_HOTKEY             1010
 #define IDC_HOTKEY_NOTE        1011
 // The button that arms the capture of FR-94, task T-08-2. Next to the field it fills.
@@ -360,6 +363,15 @@ BEGIN
     // y = 32 is where the generator of the mock-ups puts it (ui.ps1: x=132, y=32, w=70, h=18),
     // level with the language row it belongs to.
     LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 32, 70, 18, SS_OWNERDRAW
+    // FR-100, task Т-21-5 — the sound switch, in the last free strip of «Общие».
+    //
+    // ⚠ **Nine units tall and not the ten every other check box has, and the number was
+    // measured rather than chosen.** The stand of stage Э21 read the live window back in dialog
+    // units: the appearance combo ends at y = 64.0 and the panel of «Общие» at y = 73.1, so the
+    // strip left is nine. Ten would have meant moving «Горячая клавиша» and «Раскладки» down,
+    // and the air under «Раскладки» is 53 units of the accepted mock-ups — a number a test
+    // asserts and this task has no mandate to change.
+    CONTROL         "Звуковой отклик", IDC_SOUND, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 64, 186, 9
 
     // -- Горячая клавиша -----------------------------------------------------------------
     //
@@ -634,6 +646,13 @@ END
 #define IDS_THEME_SYSTEM        3058
 #define IDS_THEME_LIGHT         3059
 #define IDS_THEME_DARK          3060
+
+// FR-100, task Т-21-5 — the caption of the sound switch. The **number** is 3078, appended
+// after the last one in use (IDS_MENU_EXIT), because a string identifier that moved would
+// change what an installed build shows. The **definition** stands here, above the string
+// tables that use it: rc.exe reads the script top to bottom and an identifier used before it
+// is defined is `error RC2104`, measured.
+#define IDS_SOUND               3078
 // The about dialog of FR-92а, task T-11-11: the caption, the version line, the two
 // description lines and its «ОК». They continue the sixteen-string block 3056 opened,
 // contiguously — no gap, so no empty block between. «ОК» takes a row of its own rather
@@ -726,6 +745,7 @@ BEGIN
     IDS_THEME_SYSTEM        "Как в системе"
     IDS_THEME_LIGHT         "Светлое"
     IDS_THEME_DARK          "Тёмное"
+    IDS_SOUND               "Звуковой отклик"
     IDS_ABOUT_CAPTION       "О программе"
     IDS_ABOUT_VERSION       "версия {0}"
     IDS_ABOUT_LINE_1        "Исправляет текст, набранный в неверной раскладке."
@@ -808,6 +828,7 @@ BEGIN
     IDS_THEME_SYSTEM        "Match system"
     IDS_THEME_LIGHT         "Light"
     IDS_THEME_DARK          "Dark"
+    IDS_SOUND               "Sound feedback"
     IDS_ABOUT_CAPTION       "About"
     IDS_ABOUT_VERSION       "version {0}"
     IDS_ABOUT_LINE_1        "Fixes text typed in the wrong keyboard layout."

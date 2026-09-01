@@ -132,10 +132,16 @@ use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 // is what let four repairs of defect E go past both. See [`foreground_layout`].
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
-    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    MB_ICONHAND, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MESSAGEBOX_STYLE, MSG, MessageBoxW,
+    PostMessageW, PostQuitMessage, RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
+// FR-100, task Т-21-5. `MessageBeep` is declared in `winuser.h` and exported by `user32.dll`,
+// but the `windows` crate puts it under `Win32::System::Diagnostics::Debug` — hence the import
+// standing apart from the rest of `WindowsAndMessaging` above, and the feature of the same name
+// in `Cargo.toml`. It is a feature of a crate that was already there: `cargo tree` is 83 lines
+// before and after, and `Cargo.lock` is byte for byte the same file (measured, stage Э21).
+use windows::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
 use crate::layouts::{LayoutCache, LayoutError, LayoutId};
@@ -314,6 +320,125 @@ const WM_APP_WAKE: u32 = WM_APP + 1;
 /// nothing at all unless the buffer it finds is of the wrong size, so an unsolicited post buys
 /// the sender one comparison.
 const WM_APP_CONFIGURED: u32 = WM_APP + 5;
+
+// ---------------------------------------------------------------------------------------
+// FR-100 — the sound of a press. Task Т-21-5, finding №10 of the audit of 2026-08-31
+// ---------------------------------------------------------------------------------------
+
+/// Posted to the UI thread when a press **replaced** text — FR-100.
+///
+/// `WM_APP + 17`, the first number free above `watchdog::WM_APP_WIPE`.
+///
+/// **Two messages and not one with a `wparam`**, which is the shape [`post_to`] already has:
+/// it posts zero in both parameters and its `SAFETY` note rests on that. The same choice the
+/// selection path made when it needed a second meaning — `WM_APP_BUFFER_PATH` is a message of
+/// its own rather than a re-post of `WM_APP_HOTKEY`.
+///
+/// SEC-05: any process at the same integrity level can post this, and what it buys the sender
+/// is one system sound — precisely what it could have had by calling `MessageBeep` itself. No
+/// state of this program is read, changed or decided by the handler.
+pub const WM_APP_SOUND_DONE: u32 = WM_APP + 17;
+
+/// Posted to the UI thread when a press was **idle** — FR-100. See [`WM_APP_SOUND_DONE`].
+pub const WM_APP_SOUND_IDLE: u32 = WM_APP + 18;
+
+/// The tone of a press that replaced text — FR-100.
+///
+/// `MB_OK` is the system's «default beep», the quietest of the family and the one Windows
+/// itself uses for an ordinary acknowledgement. Which two tones these are is a decision of the
+/// ear (acceptance К-2 of stage Э21) and not of the code: the constants are named here so that
+/// changing them is one edit in one place.
+pub const TONE_REPLACED: u32 = MB_OK.0;
+
+/// The tone of a press that was suppressed and replaced nothing — FR-100.
+///
+/// `MB_ICONHAND`, the system's «critical stop». Deliberately unlike [`TONE_REPLACED`]: the whole
+/// value of two tones is that the user need not look at the screen to tell which happened.
+pub const TONE_IDLE: u32 = MB_ICONHAND.0;
+
+/// `[feedback] sound` as the UI thread last published it — FR-100.
+///
+/// An atomic for the reason every published setting is one (section 6.3): the value is written
+/// by [`publish_configuration`] on the UI thread and read where the sound is made. Starts `true`,
+/// which is the default of section 7, so a press before the first publication is not silent.
+static SOUND_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Publishes `[feedback] sound` — FR-100. Called only from [`publish_configuration`].
+pub fn set_sound_enabled(on: bool) {
+    SOUND_ENABLED.store(on, Ordering::Relaxed);
+}
+
+/// What [`set_sound_enabled`] last published — FR-100. For the dump of `control` and the tests.
+pub fn sound_enabled() -> bool {
+    SOUND_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Where a tone goes — the seam FR-100 is tested through.
+///
+/// One method and one argument. The production implementation is [`SystemBeeper`] and calls
+/// `MessageBeep`; the tests implement it with a `Vec`, which is what makes «one press, one tone»
+/// an assertion instead of a hope. The same shape `selection::Path` gives the eight steps of
+/// FR-61 and `inject::Environment` gives the packet of FR-44.
+pub trait Beeper {
+    /// Makes the tone, or writes it down.
+    fn beep(&mut self, tone: u32);
+}
+
+/// The [`Beeper`] of the running program: one `MessageBeep` and nothing else.
+struct SystemBeeper;
+
+impl Beeper for SystemBeeper {
+    fn beep(&mut self, tone: u32) {
+        // SAFETY: `MessageBeep` takes a plain integer, dereferences nothing, and returns at once
+        // — it queues the sound with the audio service rather than waiting for it to finish.
+        // The result says whether a sound could be played at all; there is nothing this program
+        // could do about «no», and a journal entry per press would be an entry per keystroke,
+        // which is the very thing NFR-01…05 and the ceiling note of T-13-13 argue against.
+        let _ = unsafe { MessageBeep(MESSAGEBOX_STYLE(tone)) };
+    }
+}
+
+/// Which tone a press earns, or `None` when `[feedback] sound` is off — the whole of FR-100.
+///
+/// A pure function of two booleans, so the rule can be read in one line and driven by unit tests
+/// rather than by the machine's speakers.
+///
+/// ⚠ **One rule for every idle press, and the password field is not an exception** — decision of
+/// the user, question 77. A sound in a password field says the program is there; but silence
+/// where every other idle press sounds says exactly the same thing, and louder, because it is a
+/// *difference*. A branch on the password field would buy nothing and would create the one thing
+/// SEC-06 is about: behaviour that changes when a password field has the focus.
+pub const fn tone_for(replaced: bool, enabled: bool) -> Option<u32> {
+    if !enabled {
+        return None;
+    }
+
+    Some(if replaced { TONE_REPLACED } else { TONE_IDLE })
+}
+
+/// Answers one press with its tone — FR-100, through the seam.
+///
+/// # Where this runs — NFR-01…NFR-05
+///
+/// **On the UI thread, after the outcome of the press is known, and nowhere else.** Not in the
+/// hook callback, which returns a verdict to the system and owes it microseconds; not on the
+/// input thread either, whose budget NFR-09 puts at thirty milliseconds for the whole of a
+/// replacement. The input thread learns the outcome and *posts* it — [`WM_APP_SOUND_DONE`] or
+/// [`WM_APP_SOUND_IDLE`] — and `PostMessageW` queues and returns. The selection path already
+/// runs here and calls this directly.
+pub fn answer_press<B: Beeper>(beeper: &mut B, replaced: bool, enabled: bool) {
+    if let Some(tone) = tone_for(replaced, enabled) {
+        beeper.beep(tone);
+    }
+}
+
+/// Answers one press with the system's own voice — [`answer_press`] with [`SystemBeeper`].
+///
+/// The one line of the program that is allowed to make a sound, and the only caller of the
+/// production [`Beeper`]. Reached from the UI thread's window procedure and from nowhere else.
+fn sound_press(replaced: bool) {
+    answer_press(&mut SystemBeeper, replaced, sound_enabled());
+}
 
 /// The one and only shutdown flag of the process.
 ///
@@ -1694,6 +1819,13 @@ pub fn publish_configuration(config: &settings::Config) {
 
     crate::hook::set_active(config.general.enabled);
 
+    // **Section `[feedback]` of section 7 — FR-100, task Т-21-5.** One store into an atomic of
+    // this module, by the rule every publication above and below it follows: the configuration
+    // belongs to the UI thread (section 6.1), and the sound is made on the UI thread, so this is
+    // the shortest publication in the function. Nothing is applied to anything already built —
+    // the next press reads whatever stands here at that moment.
+    set_sound_enabled(config.feedback.sound);
+
     // A name this program does not know leaves the default of section 7 in place — `Pause`.
     // A resident utility whose hotkey silently ceased to exist because of a typo in a file
     // would be a worse answer than one that keeps answering to the documented default. The
@@ -2230,7 +2362,28 @@ unsafe extern "system" fn window_proc(
                 && crate::buffer::is_installed()
                 && !(hotkey && crate::selection::wants_selection_path())
             {
-                let _ = crate::inject::on_hotkey();
+                // ⚠ **FR-100, task Т-21-5 — the answer is not made here.** This is the input
+                // thread, whose budget NFR-09 puts at thirty milliseconds for the whole of a
+                // replacement, and section 6.1 gives the process's slow work to the UI thread.
+                // So the outcome travels: `post_to` is one atomic load and one `PostMessageW`,
+                // which queues and returns without blocking (NFR-04). The hook callback is
+                // further away still — it returned to the system long before `WM_APP_HOTKEY`
+                // reached this loop.
+                //
+                // `Some(_)` is a replacement the user can see, `None` is a press that was
+                // swallowed and produced nothing — an empty buffer in a console, a password
+                // field, an excluded process, no direction. One rule for all of them, question
+                // 77; see `tone_for`.
+                let replaced = crate::inject::on_hotkey().is_some();
+
+                post_to(
+                    Role::Ui,
+                    if replaced {
+                        WM_APP_SOUND_DONE
+                    } else {
+                        WM_APP_SOUND_IDLE
+                    },
+                );
             }
 
             // ⛔ **There was an arm for `switch::WM_APP_SWITCH` here until task Т-14-4**, and
@@ -2346,10 +2499,30 @@ unsafe extern "system" fn window_proc(
             // this process writes, so a forged `WM_APP_SELECTION` finds no plan and is refused
             // before the clipboard is opened. SEC-01, SEC-07 — what crosses here is an outcome
             // out of three and two counts, never a character.
-            if let Some(outcome) = crate::selection::handle_selection_message(hwnd, message)
-                && outcome.falls_back()
-            {
-                post_to(Role::Input, crate::selection::WM_APP_BUFFER_PATH);
+            if let Some(outcome) = crate::selection::handle_selection_message(hwnd, message) {
+                if outcome.falls_back() {
+                    post_to(Role::Input, crate::selection::WM_APP_BUFFER_PATH);
+                } else {
+                    // **FR-100, task Т-21-5.** A conversion of the selection path is the one
+                    // outcome that does *not* travel on to the typing-buffer path, so it is the
+                    // one this branch has to answer itself. Everything that falls back is
+                    // answered by the input thread's branch above, after `on_hotkey` has said
+                    // what it did — which is why exactly one tone comes out of one press.
+                    //
+                    // Sounded straight rather than posted: this already **is** the UI thread.
+                    sound_press(true);
+                }
+            }
+
+            // **FR-100, task Т-21-5 — the far end of the input thread's post.** The one place in
+            // the program where a sound is made, and it is on the UI thread by construction:
+            // these two messages are posted to the UI window and nothing else answers them.
+            //
+            // SEC-05: a process at the same integrity level can post either of these. What it
+            // buys the sender is one system sound — which it could have had by calling
+            // `MessageBeep` itself — and nothing of this program is read or changed by it.
+            if message == WM_APP_SOUND_DONE || message == WM_APP_SOUND_IDLE {
+                sound_press(message == WM_APP_SOUND_DONE);
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
@@ -2899,6 +3072,68 @@ mod tests {
     /// A layout no cache in this file contains — the lookup then answers "no characters",
     /// which is an outcome and not an error (FR-23).
     const SOME_LAYOUT: LayoutId = LayoutId::from_raw(0x0409_0409);
+
+    /// A [`Beeper`] that writes down what it was asked for instead of making a sound —
+    /// **FR-100, task Т-21-5**.
+    ///
+    /// The seam exists for one reason: the sound is a side effect on the machine, and a test
+    /// that made real sounds could only assert that it did not crash. Behind the seam the whole
+    /// of FR-100 is a function of two booleans, which is what the tests below drive.
+    #[derive(Default)]
+    struct Bench {
+        /// Every tone asked for, in order.
+        tones: Vec<u32>,
+    }
+
+    impl Beeper for Bench {
+        fn beep(&mut self, tone: u32) {
+            self.tones.push(tone);
+        }
+    }
+
+    /// **FR-100 — one press, one tone, and the two tones are not the same tone.**
+    #[test]
+    fn a_press_answers_with_the_tone_its_outcome_earned() {
+        let mut bench = Bench::default();
+
+        answer_press(&mut bench, true, true);
+        answer_press(&mut bench, false, true);
+
+        assert_eq!(
+            bench.tones,
+            vec![TONE_REPLACED, TONE_IDLE],
+            "a replacement and an idle press are told apart by ear or not at all"
+        );
+        assert_ne!(
+            TONE_REPLACED, TONE_IDLE,
+            "two tones the user cannot tell apart are one tone"
+        );
+    }
+
+    /// **The switch of `[feedback] sound`, and it is the whole of «off».**
+    #[test]
+    fn the_switch_of_the_setting_silences_both_tones() {
+        let mut bench = Bench::default();
+
+        answer_press(&mut bench, true, false);
+        answer_press(&mut bench, false, false);
+
+        assert!(
+            bench.tones.is_empty(),
+            "with the setting off nothing is sounded at all: {:?}",
+            bench.tones
+        );
+    }
+
+    /// The rule apart from the calling of it — the form every other decision of this program
+    /// takes, and what lets the two above be about the wiring rather than about the arithmetic.
+    #[test]
+    fn the_tone_of_a_press_is_a_function_of_the_outcome_and_the_setting() {
+        assert_eq!(tone_for(true, true), Some(TONE_REPLACED));
+        assert_eq!(tone_for(false, true), Some(TONE_IDLE));
+        assert_eq!(tone_for(true, false), None);
+        assert_eq!(tone_for(false, false), None);
+    }
 
     /// Types one ordinary key into the buffer of this thread.
     fn press() {

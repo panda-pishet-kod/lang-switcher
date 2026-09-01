@@ -158,7 +158,11 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// Version 2 arrived with FR-42а: the default of `[replacement] method` moved from
 /// `backspace` to `auto`, and [`step_1_to_2`] carries the files of the old default over to
 /// the new one.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+///
+/// Version 3 arrived with FR-100 and task Т-21-5: the section `[feedback]` and its one field.
+/// [`step_2_to_3`] carries the files of schema 2 over, and carries nothing but the stamp — see
+/// the rung for why that is the whole of it.
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -434,6 +438,28 @@ pub struct Exclusions {
     pub processes: Vec<String>,
 }
 
+/// Section `[feedback]` of section 7 — **FR-100**, the sound of a press.
+///
+/// The user asked for it (question 77, finding №10 of the audit of 2026-08-31): a press that
+/// does nothing is indistinguishable from a press that worked, because the program's whole
+/// output is text somebody else's window draws. One sound says the replacement happened and
+/// another says the press was idle.
+///
+/// Default **on**, which is not the default of `bool` — hence `default_true`, exactly as
+/// `[selection] enabled` does it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    /// Whether a press answers with a system sound. Default `true`.
+    #[serde(default = "default_true")]
+    pub sound: bool,
+}
+
+impl Default for Feedback {
+    fn default() -> Self {
+        Self { sound: true }
+    }
+}
+
 /// Section `[diagnostics]` of section 7.
 ///
 /// The default of section 7 — logging off — coincides with the default of the field type,
@@ -488,6 +514,9 @@ pub struct Config {
     /// Section `[exclusions]`.
     #[serde(default)]
     pub exclusions: Exclusions,
+    /// Section `[feedback]` — FR-100.
+    #[serde(default)]
+    pub feedback: Feedback,
     /// Section `[diagnostics]`.
     #[serde(default)]
     pub diagnostics: Diagnostics,
@@ -505,6 +534,7 @@ impl Default for Config {
             selection: Selection::default(),
             buffer: Buffer::default(),
             exclusions: Exclusions::default(),
+            feedback: Feedback::default(),
             diagnostics: Diagnostics::default(),
         }
     }
@@ -784,6 +814,9 @@ impl Config {
         if self.schema_version < 2 {
             step_1_to_2(self);
         }
+        if self.schema_version < 3 {
+            step_2_to_3(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -837,6 +870,21 @@ fn step_1_to_2(config: &mut Config) {
         config.replacement.method = ReplacementMethod::Auto;
     }
     config.schema_version = 2;
+}
+
+/// Raises a file from schema 2 to schema 3 — **FR-100**, the section `[feedback]`.
+///
+/// **The stamp and nothing else, and that is the whole decision rather than an omission.** A
+/// schema 2 file was written by a build that had never heard of `[feedback]`, so it carries no
+/// such section — and the serde default of the one field it would carry is `true`, the same
+/// value a fresh configuration of this build gets. There is therefore nothing to raise: the
+/// absence of the section already means exactly what the new default means.
+///
+/// Contrast [`step_1_to_2`], which does have surgery to do: `backspace` in an old file was the
+/// value the *program* had put there, so it had to be told apart from a decision a person made.
+/// A section that never existed carries no decision of anybody's to preserve.
+fn step_2_to_3(config: &mut Config) {
+    config.schema_version = 3;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -1441,6 +1489,8 @@ pub const IDS_MENU_AUTOSTART: u16 = 3075;
 pub const IDS_MENU_ABOUT: u16 = 3076;
 /// Fifth item of FR-91.
 pub const IDS_MENU_EXIT: u16 = 3077;
+/// The caption of the sound switch of FR-100 — task Т-21-5.
+pub const IDS_SOUND: u16 = 3078;
 
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
@@ -1448,7 +1498,7 @@ pub const IDS_MENU_EXIT: u16 = 3077;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 72] = [
+pub const INTERFACE_STRINGS: [u16; 73] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1521,6 +1571,7 @@ pub const INTERFACE_STRINGS: [u16; 72] = [
     IDS_MENU_AUTOSTART,
     IDS_MENU_ABOUT,
     IDS_MENU_EXIT,
+    IDS_SOUND,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -2004,6 +2055,10 @@ pub const IDD_ABOUT: u16 = 201;
 const IDC_AUTOSTART: i32 = 1001;
 const IDC_LANGUAGE: i32 = 1002;
 const IDC_THEME: i32 = 1003;
+
+/// The sound switch of FR-100 — task Т-21-5. Kept equal to `app.rc` by hand, like every
+/// identifier around it.
+const IDC_SOUND: i32 = 1004;
 const IDC_HOTKEY: i32 = 1010;
 const IDC_HOTKEY_NOTE: i32 = 1011;
 const IDC_HOTKEY_CAPTURE: i32 = 1012;
@@ -2118,6 +2173,7 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_LANGUAGE_LABEL, IDS_LANGUAGE_LABEL),
     (IDC_THEME_LABEL, IDS_THEME_LABEL),
     (IDC_LANGUAGE_RESTART, IDS_LANGUAGE_RESTART),
+    (IDC_SOUND, IDS_SOUND),
     (IDC_GROUP_HOTKEY, IDS_GROUP_HOTKEY),
     (IDC_HOTKEY_LABEL, IDS_HOTKEY_LABEL),
     (IDC_HOTKEY_CAPTURE, IDS_HOTKEY_SET),
@@ -2745,14 +2801,17 @@ fn post_system_theme(hwnd: HWND) {
     }
 }
 
-/// The eight owner-drawn check boxes and radio buttons whose check state the dialog keeps
+/// The nine owner-drawn check boxes and radio buttons whose check state the dialog keeps
 /// itself — FR-92а, task T-11-5b-2. The storage-side list, beside the drawing-side list of
-/// [`glyph_kind`]: both name the same eight controls of the template.
+/// [`glyph_kind`]: both name the same nine controls of the template.
+///
+/// Eight until task Т-21-5 added the sound switch of FR-100.
 ///
 /// Public for the same reason the colour tables are: `tests\settings.rs` exercises the
 /// store over these very identifiers, without a live window.
-pub const GLYPH_CHECK_CONTROLS: [i32; 8] = [
+pub const GLYPH_CHECK_CONTROLS: [i32; 9] = [
     IDC_AUTOSTART,
+    IDC_SOUND,
     IDC_MODE_PAIR,
     IDC_MODE_CYCLE,
     IDC_METHOD_AUTO,
@@ -2786,7 +2845,7 @@ pub const GLYPH_CHECK_CONTROLS: [i32; 8] = [
 /// `None`, and [`is_checked`] turns that into «снят».
 pub struct GlyphChecks {
     /// The pairs, in template order. The identifier column never changes after [`Self::new`].
-    entries: [(i32, Cell<bool>); 8],
+    entries: [(i32, Cell<bool>); 9],
 }
 
 impl GlyphChecks {
@@ -3420,13 +3479,16 @@ pub fn about_button_colors(control: i32, hot: bool, pressed: bool, disabled: boo
 }
 
 /// The glyph kind of one control identifier, `None` for everything that is not one of the
-/// eight owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
+/// nine owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
 ///
-/// The single place the eight are listed on the drawing side; the `WM_DRAWITEM` handler
-/// branches on this before its push-button path.
+/// The single place the nine are listed on the drawing side; the `WM_DRAWITEM` handler
+/// branches on this before its push-button path. Eight until task Т-21-5 added the sound
+/// switch of FR-100.
 fn glyph_kind(control: i32) -> Option<GlyphKind> {
     match control {
-        IDC_AUTOSTART | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED => Some(GlyphKind::CheckBox),
+        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED => {
+            Some(GlyphKind::CheckBox)
+        }
         IDC_MODE_PAIR | IDC_MODE_CYCLE | IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE
         | IDC_METHOD_SELECTION => Some(GlyphKind::RadioButton),
         _ => None,
@@ -8307,6 +8369,8 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 
     // Section «Общие» of FR-92.
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
+    // FR-100, task Т-21-5.
+    set_check(hwnd, IDC_SOUND, state.working.feedback.sound);
     send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
     combo_add(hwnd, IDC_LANGUAGE, "Русский");
     combo_add(hwnd, IDC_LANGUAGE, "English");
@@ -8516,6 +8580,8 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
 /// round trip untouched. That is not a detail: writing the file replaces it whole.
 fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.general.autostart = is_checked(hwnd, IDC_AUTOSTART);
+    // FR-100, task Т-21-5.
+    state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
     state.working.general.language = match send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0) {
         1 => Language::En,
         _ => Language::Ru,
@@ -8616,7 +8682,7 @@ fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
     let radio_checks = clicked || (notification == BN_SETFOCUS && arrow_key_is_down());
 
     match control {
-        IDC_AUTOSTART | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED if clicked => {
+        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED if clicked => {
             set_check(hwnd, control, !is_checked(hwnd, control));
         }
 

@@ -112,9 +112,11 @@ fn a_thoroughly_customised_config() -> Config {
 fn defaults_match_section_7_field_by_field() {
     let config = Config::default();
 
-    // Schema 2 — FR-42а moved the default of `[replacement] method` to `auto`.
-    assert_eq!(config.schema_version, 2);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 2);
+    // Schema 3 — FR-100 (task Т-21-5) added the section `[feedback]`. Schema 2 was FR-42а
+    // moving the default of `[replacement] method` to `auto`; both rungs are still on the
+    // ladder and both are asserted by the migration tests below.
+    assert_eq!(config.schema_version, 3);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 3);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -169,7 +171,7 @@ fn unknown_fields_are_ignored_and_the_rest_is_read() {
     let dir = TestDir::new("unknown_fields");
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          unknown_top_level = 42\n\
          \n\
          [general]\n\
@@ -200,7 +202,7 @@ fn missing_field_falls_back_to_its_default() {
     let dir = TestDir::new("missing_field");
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          \n\
          [selection]\n\
          clipboard_timeout_ms = 500\n",
@@ -219,7 +221,7 @@ fn missing_section_falls_back_to_its_defaults() {
     let dir = TestDir::new("missing_section");
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          \n\
          [general]\n\
          enabled = false\n",
@@ -452,7 +454,7 @@ fn a_newer_schema_is_recognised_even_when_this_build_cannot_parse_it() {
     let current = TestDir::new("current_unparsable");
     let broken = write_file(
         &current,
-        "schema_version = 2\n\n[replacement]\nmethod = \"smart\"\n",
+        "schema_version = 3\n\n[replacement]\nmethod = \"smart\"\n",
     );
     let (_, outcome) = settings::read_or_default(&broken);
 
@@ -494,7 +496,7 @@ fn each_read_outcome_names_what_may_be_done_to_the_file() {
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
 
     // A current file: read whole, so writing the memory back loses none of it.
-    let current = write_file(&dir, "schema_version = 2\n\n[general]\nenabled = false\n");
+    let current = write_file(&dir, "schema_version = 3\n\n[general]\nenabled = false\n");
     let (_, outcome) = settings::read_or_default(&current);
     assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
@@ -510,7 +512,7 @@ fn each_read_outcome_names_what_may_be_done_to_the_file() {
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
 
     // Malformed: the bytes are somebody's text and this build did not understand them.
-    let broken = write_file(&dir, "schema_version = 2\n\n[general\nenabled = = true\n");
+    let broken = write_file(&dir, "schema_version = 3\n\n[general\nenabled = = true\n");
     let (_, outcome) = settings::read_or_default(&broken);
     assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::QuarantineFirst);
@@ -570,7 +572,7 @@ fn a_kept_configuration_is_the_original_bytes_and_nothing_else() {
 
     // CRLF, a comment, non-ASCII in a value, and a section the parser never reaches because
     // of the bracket above it — every one of them a thing a rewrite would lose.
-    let original = "schema_version = 2\r\n\
+    let original = "schema_version = 3\r\n\
                     # моя правка\r\n\
                     \r\n\
                     [general\r\n\
@@ -754,7 +756,7 @@ fn backspace_in_a_current_file_is_an_explicit_override_and_stays() {
     let dir = TestDir::new("current_backspace");
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          \n\
          [replacement]\n\
          method = \"backspace\"\n",
@@ -779,7 +781,7 @@ fn auto_is_the_word_section_7_spells_it() {
     let dir = TestDir::new("auto_word");
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          \n\
          [replacement]\n\
          method = \"auto\"\n",
@@ -791,6 +793,108 @@ fn auto_is_the_word_section_7_spells_it() {
 
     let text = config.to_toml_string().expect("serialises");
     assert!(text.contains("method = \"auto\""));
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-100 — the sound of a press, and the schema 3 it costs. Task Т-21-5, decision 77
+// ---------------------------------------------------------------------------------------
+
+/// The user asked for the sound switched **on**, so that is what a fresh configuration says and
+/// what the file carries — and the round trip is asserted because a field that reads back as
+/// something else is a setting the dialog cannot keep.
+#[test]
+fn the_sound_of_fr_100_is_on_by_default_and_survives_the_round_trip() {
+    assert!(
+        Config::default().feedback.sound,
+        "FR-100: «по умолчанию включён» — the user asked for it on"
+    );
+
+    let dir = TestDir::new("feedback_round_trip");
+
+    for wanted in [false, true] {
+        let mut config = Config::default();
+        config.feedback.sound = wanted;
+
+        let text = config.to_toml_string().expect("serialises");
+
+        assert!(
+            text.contains(&format!("sound = {wanted}")),
+            "the file has to carry the field: {text}"
+        );
+
+        let path = write_file(&dir, &text);
+        let (back, outcome) = settings::read_from(&path).expect("a current file must be read");
+
+        assert_eq!(outcome, ReadOutcome::Current);
+        assert_eq!(
+            back.feedback.sound, wanted,
+            "the round trip kept the switch"
+        );
+    }
+}
+
+/// **The rung of the ladder, and what it deliberately does not do.**
+///
+/// A schema 2 file was written by a build that had never heard of `[feedback]`, so it carries no
+/// section at all — and the serde default of the field is the same `true` a fresh configuration
+/// gets. The rung therefore stamps the version and touches nothing: the user asked for the sound
+/// on by default, and «on» is what an existing installation gets too.
+///
+/// The `[general]` line is there to prove the rest of the file survives the rung untouched.
+#[test]
+fn a_file_of_schema_two_is_raised_to_three_with_the_sound_on() {
+    let dir = TestDir::new("feedback_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 2\n\
+         \n\
+         [general]\n\
+         enabled = false\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 2 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 2 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert!(
+        config.feedback.sound,
+        "an existing installation gets the sound the user asked for"
+    );
+    assert!(
+        !config.general.enabled,
+        "and everything the file did carry came through the rung untouched"
+    );
+}
+
+/// **Task T-19-4 through the bump: the file of a schema this build does not know is refused.**
+///
+/// Written against `CURRENT_SCHEMA_VERSION + 1` rather than a fixed number, because that is the
+/// case the bump creates in the world: the build that goes out with schema 3 writes files an
+/// installed schema 2 build will meet. Its answer must be [`SavePolicy::Forbidden`] — read what
+/// can be read, and **never write**, or the fields it does not understand are gone.
+#[test]
+fn a_file_of_the_next_schema_is_forbidden_to_be_written_back() {
+    let dir = TestDir::new("feedback_downgrade");
+    let newer = CURRENT_SCHEMA_VERSION + 1;
+    let path = write_file(
+        &dir,
+        &format!(
+            "schema_version = {newer}\n\
+             \n\
+             [general]\n\
+             enabled = false\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: newer }),
+        "the stamp decides, not the parser"
+    );
+    assert_eq!(config.schema_version, newer, "the stamp is left as it was");
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Forbidden);
 }
 
 // Criterion 20. The write is atomic, and no temporary file is left behind by it.
@@ -918,7 +1022,7 @@ fn written_file_carries_every_section_of_section_7() {
         .to_toml_string()
         .expect("the defaults must serialise");
 
-    assert!(text.contains("schema_version = 2"));
+    assert!(text.contains("schema_version = 3"));
     assert!(text.contains("method = \"auto\""));
     for section in [
         "[general]",
@@ -928,6 +1032,8 @@ fn written_file_carries_every_section_of_section_7() {
         "[selection]",
         "[buffer]",
         "[exclusions]",
+        // FR-100, task Т-21-5 — the section schema 3 added.
+        "[feedback]",
         "[diagnostics]",
     ] {
         assert!(text.contains(section), "section {section} was not written");
@@ -963,7 +1069,7 @@ fn each_of_the_three_theme_words_reads_as_its_setting() {
     ] {
         let path = write_file(
             &dir,
-            &format!("schema_version = 2\n\n[general]\ntheme = \"{word}\"\n"),
+            &format!("schema_version = 3\n\n[general]\ntheme = \"{word}\"\n"),
         );
         let (config, outcome) =
             settings::read_from(&path).expect("a theme word of section 7 must be readable");
@@ -981,7 +1087,7 @@ fn a_missing_or_unknown_theme_reads_as_system_and_fails_nothing() {
     let dir = TestDir::new("theme_default");
 
     // No `theme` key at all: the theme is the default, the field beside it is read.
-    let path = write_file(&dir, "schema_version = 2\n\n[general]\nenabled = false\n");
+    let path = write_file(&dir, "schema_version = 3\n\n[general]\nenabled = false\n");
     let (config, outcome) =
         settings::read_from(&path).expect("a file without the key must be readable");
     assert_eq!(config.general.theme, ThemeSetting::System);
@@ -992,7 +1098,7 @@ fn a_missing_or_unknown_theme_reads_as_system_and_fails_nothing() {
     // arrives — so it was the word that was ignored, not the file.
     let path = write_file(
         &dir,
-        "schema_version = 2\n\n[general]\nenabled = false\ntheme = \"midnight\"\n",
+        "schema_version = 3\n\n[general]\nenabled = false\ntheme = \"midnight\"\n",
     );
     let (config, outcome) =
         settings::read_from(&path).expect("an unknown theme word must not fail the file");
@@ -1037,7 +1143,7 @@ fn a_file_without_the_key_gains_an_explicit_system_and_loses_nothing() {
     // are present are deliberately not the defaults, so damage would show.
     let path = write_file(
         &dir,
-        "schema_version = 2\n\
+        "schema_version = 3\n\
          \n\
          [general]\n\
          enabled = false\n\
@@ -1587,8 +1693,10 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 
 use lang_switcher::settings::{GLYPH_CHECK_CONTROLS, GlyphChecks};
 
-/// The eight identifiers by name, mirrored from `app.rc` exactly as the style test's list.
+/// The nine identifiers by name, mirrored from `app.rc` exactly as the style test's list.
+/// Eight until task Т-21-5 added the sound switch of FR-100.
 const GLYPH_AUTOSTART: i32 = 1001;
+const GLYPH_SOUND: i32 = 1004;
 const GLYPH_MODE_PAIR: i32 = 1020;
 const GLYPH_MODE_CYCLE: i32 = 1021;
 const GLYPH_METHOD_AUTO: i32 = 1029;
@@ -1603,6 +1711,7 @@ fn the_store_lists_the_eight_template_identifiers_and_starts_all_unchecked() {
         GLYPH_CHECK_CONTROLS,
         [
             GLYPH_AUTOSTART,
+            GLYPH_SOUND,
             GLYPH_MODE_PAIR,
             GLYPH_MODE_CYCLE,
             GLYPH_METHOD_AUTO,
@@ -1611,7 +1720,7 @@ fn the_store_lists_the_eight_template_identifiers_and_starts_all_unchecked() {
             GLYPH_SELECTION_ENABLED,
             GLYPH_LOG_ENABLED,
         ],
-        "the storage side must list the same eight controls the template carries"
+        "the storage side must list the same nine controls the template carries"
     );
 
     let checks = GlyphChecks::new();
@@ -2106,7 +2215,7 @@ const FR_92_SECTIONS: [&str; 8] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 37] = [
+const TEMPLATE_TEXT: [&str; 38] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -2114,6 +2223,8 @@ const TEMPLATE_TEXT: [&str; 37] = [
     // its own combo carries no text in the template — the items are added by the dialog.
     "Оформление:",
     "вступит в силу после перезапуска",
+    // The sound switch of FR-100, task Т-21-5 — the last row of «Общие».
+    "Звуковой отклик",
     "Горячая клавиша",
     "Клавиша:",
     // Task T-08-2 replaced «Пока меняется только в файле настроек.» with the button that arms
@@ -5658,7 +5769,7 @@ fn a_file_asking_for_u32_max_publishes_the_ceilings_and_is_left_byte_for_byte() 
     let path = write_file(
         &dir,
         &format!(
-            "schema_version = 2\n\n\
+            "schema_version = 3\n\n\
              [replacement]\n\
              inter_event_delay_ms = {max}\n\n\
              [selection]\n\
@@ -6391,7 +6502,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 72] = [
+const FR_94_STRINGS: [(u16, &str, &str); 73] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -6596,6 +6707,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 72] = [
     ),
     (settings::IDS_MENU_ABOUT, "О программе", "About"),
     (settings::IDS_MENU_EXIT, "Выход", "Exit"),
+    // FR-100, task Т-21-5. Last in the list because it is last in `INTERFACE_STRINGS`, and the
+    // two orders are asserted equal by
+    // `the_two_tables_hold_exactly_the_identifiers_the_crate_publishes`.
+    (settings::IDS_SOUND, "Звуковой отклик", "Sound feedback"),
 ];
 
 /// Serialises the tests that publish an interface locale.

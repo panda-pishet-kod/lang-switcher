@@ -2567,6 +2567,55 @@ fn the_zeroing_is_nowhere_near_the_hook_callback() {
     );
 }
 
+/// **FR-100, task Т-21-5 — the sound is made nowhere near the path of a keystroke.**
+///
+/// NFR-01…NFR-05 and NFR-09 are the whole of why this test exists. The hook callback owes the
+/// system an answer in microseconds and the input thread has thirty milliseconds for a whole
+/// replacement; a sound is neither thread's work, whatever `MessageBeep` costs on the day.
+///
+/// Three assertions, and they are three because the sound could arrive on the wrong thread in
+/// three different ways:
+///
+/// * `hook.rs` — the callback and the module that owns it — must not name the sound at all;
+/// * `inject.rs` — the replacement itself, on the input thread — must not either;
+/// * in `app.rs`, where both ends live, `MessageBeep` must be reached from exactly one place.
+///   The input thread's branch *posts* (`WM_APP_SOUND_DONE` / `WM_APP_SOUND_IDLE`) and the UI
+///   thread's window procedure is what answers, so a second caller appearing later would be a
+///   sound made on whichever thread happened to run it.
+#[test]
+fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
+    for module in ["hook.rs", "inject.rs"] {
+        let source = source_of(module);
+
+        for forbidden in ["MessageBeep", "sound_press", "answer_press", "TONE_"] {
+            assert!(
+                code_lines_with(&source, forbidden).is_empty(),
+                "{module} must not name {forbidden}: the sound of FR-100 is the UI thread's"
+            );
+        }
+    }
+
+    let app = source_of("app.rs");
+    let product = app.split("mod tests {").next().unwrap_or(&app);
+
+    let beeps = code_lines_with(product, "MessageBeep(");
+
+    assert_eq!(
+        beeps.len(),
+        1,
+        "exactly one line of the program makes a sound: {beeps:?}"
+    );
+
+    let callers = code_lines_with(product, "sound_press(");
+
+    assert_eq!(
+        callers.len(),
+        3,
+        "the production beeper is reached from its definition and from the two arms of the UI \
+         thread's window procedure, and from nowhere else: {callers:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-13 — the ceiling of `[replacement] inter_event_delay_ms`, measured on the packet
 // ---------------------------------------------------------------------------------------
