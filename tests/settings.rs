@@ -2900,12 +2900,26 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
     (1072, "Состояние: автозапуск в реестре"),
 ];
 
-/// Every `LTEXT` of the about template. The `ICON` is not one of them — see above.
-const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 4] = [
+/// Every `LTEXT` of the about template. The `ICON` is not one of them — see above; neither is
+/// the panel 1125, which is a `Button` exactly as the six panels of the settings dialog are.
+///
+/// Four until task Т-23-4 (решение 82.5) added the «Как пользоваться» block: five numerals and
+/// five rows.
+const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 14] = [
     (1121, "О программе: имя"),
     (1122, "О программе: версия"),
     (1123, "О программе: первая строка"),
     (1124, "О программе: вторая строка"),
+    (1126, "Как пользоваться: номер 1"),
+    (1131, "Как пользоваться: строка 1"),
+    (1127, "Как пользоваться: номер 2"),
+    (1132, "Как пользоваться: строка 2"),
+    (1128, "Как пользоваться: номер 3"),
+    (1133, "Как пользоваться: строка 3"),
+    (1129, "Как пользоваться: номер 4"),
+    (1134, "Как пользоваться: строка 4"),
+    (1130, "Как пользоваться: номер 5"),
+    (1135, "Как пользоваться: строка 5"),
 ];
 
 /// **Criterion 9 of T-11-18** — read out of the **built** `LangSwitcher.exe`, exactly as the
@@ -5559,14 +5573,25 @@ fn the_about_dialog_template_carries_its_elements() {
     );
 
     // Every element the task names: the icon, the name row, the version row, the two
-    // description lines and the one button. One row per element, so a lost control is a
-    // failing test and not a smaller window.
-    const ABOUT_CONTROLS: [(u32, &str); 6] = [
+    // description lines, the «Как пользоваться» block of task Т-23-4 and the one button. One
+    // row per element, so a lost control is a failing test and not a smaller window.
+    const ABOUT_CONTROLS: [(u32, &str); 17] = [
         (1120, "иконка программы"),
         (1121, "имя программы"),
         (1122, "строка версии"),
         (1123, "первая строка описания"),
         (1124, "вторая строка описания"),
+        (1125, "Как пользоваться: панель"),
+        (1126, "Как пользоваться: номер 1"),
+        (1127, "Как пользоваться: номер 2"),
+        (1128, "Как пользоваться: номер 3"),
+        (1129, "Как пользоваться: номер 4"),
+        (1130, "Как пользоваться: номер 5"),
+        (1131, "Как пользоваться: строка 1"),
+        (1132, "Как пользоваться: строка 2"),
+        (1133, "Как пользоваться: строка 3"),
+        (1134, "Как пользоваться: строка 4"),
+        (1135, "Как пользоваться: строка 5"),
         (1, "кнопка «ОК»"),
     ];
 
@@ -5580,22 +5605,136 @@ fn the_about_dialog_template_carries_its_elements() {
     assert_eq!(
         template.controls.len(),
         ABOUT_CONTROLS.len(),
-        "the about dialog carries exactly its six controls and nothing else"
+        "the about dialog carries exactly its seventeen controls and nothing else"
     );
 
     // The visible literals, in template order. The version row is empty on purpose — it is
-    // composed at run time from the version resource — and the icon control carries an
-    // ordinal, not a text, so neither appears here.
+    // composed at run time from the version resource — the five help rows are empty for the
+    // same reason (the key name is substituted into them), and the icon control carries an
+    // ordinal, not a text, so none of them appears here. The five numerals do: a digit is a
+    // template literal with no string row, exactly as «Lang Switcher» is.
     assert_eq!(
         template.text,
         [
             "Lang Switcher",
             "Исправляет текст, набранный в неверной раскладке.",
             "Перекодировка — по нажатию одной клавиши.",
+            "Как пользоваться",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
             "ОК",
         ],
         "the visible strings of the about dialog came out of rc.exe wrong"
     );
+}
+
+/// **Т-23-4, решение 82.5** — the «Как пользоваться» panel, in the numbers of the built
+/// template.
+///
+/// The block is drawn from the rectangle of a hidden control, the way the six panels of the
+/// settings dialog are, so «is this label on the panel» is arithmetic on the template and
+/// needs no window. Three facts: the window grew to the height the rows really need, the
+/// panel is not a visible element, and every one of the ten statics lies inside it.
+#[test]
+fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    println!("IDD_ABOUT: {:?} dialog units", template.size);
+
+    // ⚠ 233 and not the «≈175» of the mock-up: the estimate assumed one line per row, and the
+    // rows measured on the raised window need ten lines between them, not five. The width is
+    // the 191 it has always been — решение 82.5 says the window grows downwards only.
+    assert_eq!(
+        template.size,
+        (191, 233),
+        "the about window of решение 82.5 is 191 × 233 dialog units"
+    );
+
+    // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
+    // button type. The same two facts the six panels of the settings dialog are held to, and
+    // for the same reason — an invisible window takes no click and paints nothing.
+    let panel_style = template.style_of(1125, "Как пользоваться: панель");
+
+    println!("панель (1125): style {panel_style:#010x}");
+
+    assert_eq!(
+        panel_style & 0x0F,
+        0x0B,
+        "the panel must carry BS_OWNERDRAW as its button type; the style is {panel_style:#010x}"
+    );
+    assert_eq!(
+        panel_style & WS_VISIBLE,
+        0,
+        "the panel must not be a visible element; the style is {panel_style:#010x}"
+    );
+    assert_eq!(
+        panel_style & 0x0001_0000,
+        0,
+        "a panel takes no focus and must not gain WS_TABSTOP; the style is {panel_style:#010x}"
+    );
+
+    let (pl, pt, pr, pb) = template.rect_of(1125);
+
+    println!("панель (1125): {pl},{pt}..{pr},{pb}");
+
+    // The ten statics of the block, every one inside the panel — and the panel itself inside
+    // the window, which is what makes «inside» mean anything.
+    assert!(
+        pl >= 0 && pt >= 0 && pr <= template.size.0 && pb <= template.size.1,
+        "the panel must lie inside the window"
+    );
+
+    for (id, what) in OWNER_DRAWN_ABOUT_LABELS.iter().skip(4) {
+        let (left, top, right, bottom) = template.rect_of(*id);
+
+        println!("«{what}» ({id}): {left},{top}..{right},{bottom}");
+
+        assert!(
+            left >= pl && top >= pt && right <= pr && bottom <= pb,
+            "«{what}» ({id}) sticks out of the panel it is drawn on"
+        );
+    }
+
+    // And the list the drawing reads is the list the template declares: a label on the panel
+    // is filled with the panel's colour, and one left out of `ABOUT_LABELS_ON_THE_PANEL` would
+    // cut a window-coloured hole in the block.
+    let mut declared: Vec<i32> = OWNER_DRAWN_ABOUT_LABELS
+        .iter()
+        .skip(4)
+        .map(|(id, _)| *id as i32)
+        .collect();
+    let mut listed = settings::ABOUT_LABELS_ON_THE_PANEL.to_vec();
+    declared.sort_unstable();
+    listed.sort_unstable();
+
+    assert_eq!(
+        listed, declared,
+        "the module's list of labels on the panel and the template's have parted"
+    );
+
+    // Every rectangle of this template is disjoint from every other, and it is load-bearing:
+    // an SS_OWNERDRAW static fills its whole rectangle before it writes a word, so two
+    // overlapping ones erase each other on every repaint. The panel is excluded — it *is* the
+    // ground the ten stand on, and its own drawing runs before theirs.
+    for (first, x1, y1, cx1, cy1) in &template.bounds {
+        for (second, x2, y2, cx2, cy2) in &template.bounds {
+            if first >= second || *first == 1125 || *second == 1125 {
+                continue;
+            }
+
+            let apart = x1 + cx1 <= *x2 || x2 + cx2 <= *x1 || y1 + cy1 <= *y2 || y2 + cy2 <= *y1;
+
+            assert!(
+                apart,
+                "controls {first} and {second} overlap — one of them erases the other on \
+                 every repaint"
+            );
+        }
+    }
 }
 
 // The same ⚠ as for the nine buttons of the settings dialog: `BS_OWNERDRAW` (0x0B) is a
@@ -5653,6 +5792,11 @@ fn the_about_template_says_what_the_russian_table_says() {
             settings::IDS_ABOUT_LINE_2,
         ),
         ("ОК", settings::IDS_ABOUT_OK),
+        // Task Т-23-4: the caption of the «Как пользоваться» panel is a template literal like
+        // the rest — the window stays readable if a string fails to load — and FR-94 replaces
+        // it on the very control the block is drawn from. The five rows below it are **not**
+        // here: they are empty in the template, because the key name is substituted into them.
+        ("Как пользоваться", settings::IDS_ABOUT_HELP),
     ] {
         assert_eq!(
             product.string(settings::Language::Ru, id),
@@ -5679,6 +5823,136 @@ fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
 
     // And the row they continue ends right in front of them.
     assert_eq!(settings::IDS_THEME_DARK, 3060);
+
+    // Task Т-23-4 — the six rows of the «Как пользоваться» panel take the rest of the block
+    // 3056 opened, contiguously with the five above and stopping right in front of the menu.
+    assert_eq!(settings::IDS_ABOUT_HELP, 3066);
+    assert_eq!(settings::IDS_ABOUT_HELP_1, 3067);
+    assert_eq!(settings::IDS_ABOUT_HELP_2, 3068);
+    assert_eq!(settings::IDS_ABOUT_HELP_3, 3069);
+    assert_eq!(settings::IDS_ABOUT_HELP_4, 3070);
+    assert_eq!(settings::IDS_ABOUT_HELP_5, 3071);
+    assert_eq!(
+        settings::IDS_MENU_SUSPEND,
+        3072,
+        "the menu block starts at 3072 and the help must stop in front of it"
+    );
+}
+
+/// **Т-23-4** — the panel of the about window is drawn where a block is drawn, and its caption
+/// comes off its own control.
+///
+/// The same road the six panels of the settings dialog take, and the same reason for taking
+/// it: a block is the *background* of what stands on it, so it is laid by the window's erase
+/// and never by a `WM_DRAWITEM` that could arrive after its children have painted. Read off
+/// `src\settings.rs` — the shape of the two functions, not their output.
+#[test]
+fn the_help_panel_is_drawn_by_the_windows_own_erase_and_reads_its_caption_off_its_control() {
+    let source = settings_module_source();
+    let erase = function_body(&source, "unsafe fn on_about_erase_background(");
+
+    assert!(
+        erase.contains("IDC_ABOUT_HELP"),
+        "the about window's erase must draw the panel of решение 82.5"
+    );
+    assert!(
+        erase.contains("paint_rounded("),
+        "the panel is the same rounded figure the six panels of the settings dialog are"
+    );
+    assert!(
+        erase.contains("draw_panel_caption(hwnd, IDC_ABOUT_HELP"),
+        "the caption must be read off the panel's own control, so FR-94 reaches it by the \
+         one road it reaches every other piece of text"
+    );
+
+    // And no second road: a `WM_DRAWITEM` that painted the block would paint it over the
+    // labels standing on it, which is the very defect task T-11-13 closed in the other window.
+    let draw = function_body(&source, "unsafe fn on_about_draw_item(");
+
+    assert!(
+        !draw.contains("IDC_ABOUT_HELP,"),
+        "the panel must not be drawn from a WM_DRAWITEM — see task T-11-13"
+    );
+}
+
+/// **Т-23-4, решение 82.5** — the help names the key that is really in force.
+///
+/// `[hotkey] key` is a name in a text file, and a name this build does not know leaves the
+/// default of section 7 acting (`app::publish_configuration` says so, and the settings window
+/// puts a note under the field). A help panel that repeated the file's word would name a key
+/// that does nothing at all — the one thing решение 82.5 is against.
+#[test]
+fn the_help_of_the_about_window_names_the_key_that_is_really_in_force() {
+    // A key this build knows is shown as the file spells it.
+    assert_eq!(settings::effective_hotkey_name("Pause"), "Pause");
+    assert_eq!(settings::effective_hotkey_name("ScrollLock"), "ScrollLock");
+    assert_eq!(settings::effective_hotkey_name("F9"), "F9");
+
+    // A name nobody knows falls back to the default of section 7 — the key that really acts.
+    assert_eq!(settings::effective_hotkey_name("Хрюкозябра"), "Pause");
+    assert_eq!(settings::effective_hotkey_name(""), "Pause");
+
+    // ⚠ A **text** key is deliberately not replaced: `Q` really is the hotkey when the file
+    // says so — FR-95 warns about it in the settings window, and the help telling the truth
+    // about the user's own configuration is the point.
+    assert_eq!(settings::effective_hotkey_name("Q"), "Q");
+
+    // And the fallback is the default of section 7 itself, not a second copy of the word.
+    assert_eq!(
+        Config::default().hotkey.key,
+        settings::effective_hotkey_name("нет такой клавиши"),
+        "the fallback of the help is the default of section 7"
+    );
+}
+
+/// **Т-23-4** — the five rows of the help substitute the key name, and only the first three
+/// have a place for it.
+///
+/// The `{0}` is filled by `settings::format_text`, the same substitution the version line uses
+/// — so this test reads the rows out of the **built** binary and does the substitution the
+/// window does, in both locales.
+#[test]
+fn the_help_rows_substitute_the_key_name_where_the_mock_up_names_a_key() {
+    let _guard = with_product_strings();
+
+    for language in [settings::Language::Ru, settings::Language::En] {
+        settings::set_ui_language(language);
+
+        let rows: Vec<String> = [
+            settings::IDS_ABOUT_HELP_1,
+            settings::IDS_ABOUT_HELP_2,
+            settings::IDS_ABOUT_HELP_3,
+            settings::IDS_ABOUT_HELP_4,
+            settings::IDS_ABOUT_HELP_5,
+        ]
+        .iter()
+        .map(|id| settings::format_text(*id, &["ScrollLock"]))
+        .collect();
+
+        println!("{language:?}: {rows:#?}");
+
+        for (index, row) in rows.iter().enumerate() {
+            assert!(!row.is_empty(), "row {index} of the help is empty");
+            assert!(
+                !row.contains("{0}"),
+                "row {index} kept its placeholder: «{row}»"
+            );
+            assert_eq!(
+                row.contains("ScrollLock"),
+                index < 3,
+                "row {index} must {} the key name: «{row}»",
+                if index < 3 { "carry" } else { "not carry" }
+            );
+            // The mock-up's own word: no row of the help spells a key of its own, or the
+            // window would tell a person about a key their program does not answer to.
+            assert!(
+                !row.contains("Pause"),
+                "row {index} spells a key name of its own: «{row}»"
+            );
+        }
+    }
+
+    settings::set_ui_language(settings::Language::Ru);
 }
 
 #[test]
@@ -5730,12 +6004,26 @@ fn the_about_static_colour_roles_follow_their_table() {
     // the mock-up paints the paragraph under the name with the muted brush (`chrome.ps1:196`
     // draws it with `$brMu`, while line 194 draws the name with `$brFg`), and решение В-2 says
     // in as many words that the description stays «в колонке имени и приглушённым цветом».
+    //
+    // ⚠ Task Т-23-4 added the ten statics of «Как пользоваться», and they split: the numeral
+    // of a row is the mock-up's `.key` — muted — and the sentence beside it is the row text,
+    // which the mock-up leaves in the full-strength ink.
     let cases = [
         (1120, theme::StaticColorRole::Label, "иконка"),
         (1121, theme::StaticColorRole::Label, "имя"),
         (1122, theme::StaticColorRole::Muted, "строка версии"),
         (1123, theme::StaticColorRole::Muted, "описание, строка 1"),
         (1124, theme::StaticColorRole::Muted, "описание, строка 2"),
+        (1126, theme::StaticColorRole::Muted, "справка: номер 1"),
+        (1127, theme::StaticColorRole::Muted, "справка: номер 2"),
+        (1128, theme::StaticColorRole::Muted, "справка: номер 3"),
+        (1129, theme::StaticColorRole::Muted, "справка: номер 4"),
+        (1130, theme::StaticColorRole::Muted, "справка: номер 5"),
+        (1131, theme::StaticColorRole::Label, "справка: строка 1"),
+        (1132, theme::StaticColorRole::Label, "справка: строка 2"),
+        (1133, theme::StaticColorRole::Label, "справка: строка 3"),
+        (1134, theme::StaticColorRole::Label, "справка: строка 4"),
+        (1135, theme::StaticColorRole::Label, "справка: строка 5"),
     ];
 
     for (control, expected, what) in cases {
@@ -6902,7 +7190,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 65] = [
+const FR_94_STRINGS: [(u16, &str, &str); 71] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7069,6 +7357,40 @@ const FR_94_STRINGS: [(u16, &str, &str); 65] = [
         "Conversion takes a single key press.",
     ),
     (settings::IDS_ABOUT_OK, "ОК", "OK"),
+    // The «Как пользоваться» panel of task Т-23-4, решение 82.5 — the caption and the five
+    // rows the accepted mock-up writes. The `{0}` of the first three is the hotkey name and
+    // is deliberately part of the literal: what a wrong code page would destroy is the text
+    // around it, and the placeholder is what the substitution of `format_text` looks for.
+    (
+        settings::IDS_ABOUT_HELP,
+        "Как пользоваться",
+        "How to use it",
+    ),
+    (
+        settings::IDS_ABOUT_HELP_1,
+        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится.",
+        "You typed a word in the wrong layout — press {0}: the word is converted and the layout switches.",
+    ),
+    (
+        settings::IDS_ABOUT_HELP_2,
+        "Повторное нажатие {0} возвращает исходный текст.",
+        "Pressing {0} again brings the original text back.",
+    ),
+    (
+        settings::IDS_ABOUT_HELP_3,
+        "Выделите текст и нажмите {0} — конвертируется выделенное.",
+        "Select text and press {0} — the selection is converted.",
+    ),
+    (
+        settings::IDS_ABOUT_HELP_4,
+        "Пауза, настройки и выход — в значке в трее.",
+        "Suspend, settings and exit are in the tray icon.",
+    ),
+    (
+        settings::IDS_ABOUT_HELP_5,
+        "Сменить клавишу: Настройки → Горячая клавиша.",
+        "To change the key: Settings → Hotkey.",
+    ),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
     (settings::IDS_MENU_SETTINGS, "Настройки…", "Settings…"),

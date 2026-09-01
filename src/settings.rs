@@ -1465,6 +1465,25 @@ pub const IDS_ABOUT_LINE_2: u16 = 3064;
 /// row belongs to the settings dialog, and a shared row would make a rewording of one
 /// window silently reword the other.
 pub const IDS_ABOUT_OK: u16 = 3065;
+/// Caption of the «Как пользоваться» panel — FR-92а, task Т-23-4, решение 82.5.
+///
+/// The six rows 3066–3071 are the whole of what was left of the sixteen-string block 3056
+/// opened, and they take it: a string put after the menu block would open a block of its own
+/// for six strings and leave ten empty rows behind it.
+pub const IDS_ABOUT_HELP: u16 = 3066;
+/// First row of the help: the word typed in the wrong layout. Carries a `{0}` — **the name of
+/// the hotkey**, substituted by [`format_text`] out of `[hotkey] key` of the running
+/// configuration ([`effective_hotkey_name`]), so the help names the key this user's program
+/// actually answers to and not a literal written down twice.
+pub const IDS_ABOUT_HELP_1: u16 = 3067;
+/// Second row: the second press puts the original text back. Carries the same `{0}`.
+pub const IDS_ABOUT_HELP_2: u16 = 3068;
+/// Third row: the selection of FR-61. Carries the same `{0}`.
+pub const IDS_ABOUT_HELP_3: u16 = 3069;
+/// Fourth row: what the tray icon holds — FR-91. No `{0}`: no key is named.
+pub const IDS_ABOUT_HELP_4: u16 = 3070;
+/// Fifth row: where the key is changed. No `{0}` either — it points at the field, not at a key.
+pub const IDS_ABOUT_HELP_5: u16 = 3071;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -1486,7 +1505,7 @@ pub const IDS_SOUND: u16 = 3078;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 65] = [
+pub const INTERFACE_STRINGS: [u16; 71] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1545,6 +1564,12 @@ pub const INTERFACE_STRINGS: [u16; 65] = [
     IDS_ABOUT_LINE_1,
     IDS_ABOUT_LINE_2,
     IDS_ABOUT_OK,
+    IDS_ABOUT_HELP,
+    IDS_ABOUT_HELP_1,
+    IDS_ABOUT_HELP_2,
+    IDS_ABOUT_HELP_3,
+    IDS_ABOUT_HELP_4,
+    IDS_ABOUT_HELP_5,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
     IDS_MENU_SETTINGS,
@@ -2097,6 +2122,34 @@ const IDC_ABOUT_NAME: i32 = 1121;
 const IDC_ABOUT_VERSION: i32 = 1122;
 const IDC_ABOUT_LINE_1: i32 = 1123;
 const IDC_ABOUT_LINE_2: i32 = 1124;
+// The «Как пользоваться» panel of FR-92а — task Т-23-4, решение 82.5. The panel itself, then
+// five numerals and five rows, in one contiguous run; mirrored by hand in `app.rc`.
+const IDC_ABOUT_HELP: i32 = 1125;
+const IDC_ABOUT_HELP_N1: i32 = 1126;
+const IDC_ABOUT_HELP_N2: i32 = 1127;
+const IDC_ABOUT_HELP_N3: i32 = 1128;
+const IDC_ABOUT_HELP_N4: i32 = 1129;
+const IDC_ABOUT_HELP_N5: i32 = 1130;
+const IDC_ABOUT_HELP_1: i32 = 1131;
+const IDC_ABOUT_HELP_2: i32 = 1132;
+const IDC_ABOUT_HELP_3: i32 = 1133;
+const IDC_ABOUT_HELP_4: i32 = 1134;
+const IDC_ABOUT_HELP_5: i32 = 1135;
+
+/// The rows of the «Как пользоваться» panel: the numeral, the text and the string row each
+/// text is set from — FR-92а, task Т-23-4.
+///
+/// One table and not fifteen calls, for the reason [`LOCALISED_CONTROLS`] gives for its own:
+/// this is the list a reader wants in one place and the list a test has to walk. The numerals
+/// are **not** in it — they are template literals with no string row, because a digit reads
+/// the same in both locales.
+const ABOUT_HELP_ROWS: [(i32, i32, u16); 5] = [
+    (IDC_ABOUT_HELP_N1, IDC_ABOUT_HELP_1, IDS_ABOUT_HELP_1),
+    (IDC_ABOUT_HELP_N2, IDC_ABOUT_HELP_2, IDS_ABOUT_HELP_2),
+    (IDC_ABOUT_HELP_N3, IDC_ABOUT_HELP_3, IDS_ABOUT_HELP_3),
+    (IDC_ABOUT_HELP_N4, IDC_ABOUT_HELP_4, IDS_ABOUT_HELP_4),
+    (IDC_ABOUT_HELP_N5, IDC_ABOUT_HELP_5, IDS_ABOUT_HELP_5),
+];
 
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
 ///
@@ -2369,6 +2422,27 @@ pub fn hotkey_note(key: &str) -> Option<u16> {
         None => Some(IDS_NOTE_UNKNOWN_KEY),
         Some(vk) if is_text_key(vk) => Some(IDS_NOTE_TEXT_KEY),
         Some(_) => None,
+    }
+}
+
+/// The name of the key the program **actually answers to** — task Т-23-4, решение 82.5.
+///
+/// `[hotkey] key` is a name in a text file and a person can write anything in it. A name this
+/// build does not know leaves the default of section 7 in force — `app::publish_configuration`
+/// says so and the settings dialog puts [`IDS_NOTE_UNKNOWN_KEY`] under the field — so a help
+/// panel that repeated the file's word would name a key that does nothing. The same reader
+/// [`hotkey_note`] asks is asked here, and the answer decides between the file's name and the
+/// default that is really acting.
+///
+/// A *text* key is a different case and is deliberately **not** substituted: `Q` really is the
+/// hotkey when the file says so, FR-95 warns about it in the settings window, and the help
+/// telling a person the truth about their own configuration is the point.
+///
+/// Public so a test can call the very function the window calls.
+pub fn effective_hotkey_name(key: &str) -> String {
+    match crate::hook::vk_from_name(key) {
+        Some(_) => key.to_owned(),
+        None => default_hotkey_key(),
     }
 }
 
@@ -3359,11 +3433,45 @@ pub const OWNER_DRAWN_LABELS: [i32; 15] = [
 /// `IDC_ABOUT_ICON` is deliberately absent: it is an `SS_ICON` static, the type that loads the
 /// 32 px frame of the `.ico`, it draws no text at all, and owner drawing it would only lose
 /// the icon.
-pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 4] = [
+///
+/// Four until task Т-23-4 (решение 82.5) added the ten statics of the «Как пользоваться»
+/// panel: five numerals and five rows.
+pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 14] = [
     IDC_ABOUT_NAME,
     IDC_ABOUT_VERSION,
     IDC_ABOUT_LINE_1,
     IDC_ABOUT_LINE_2,
+    IDC_ABOUT_HELP_N1,
+    IDC_ABOUT_HELP_1,
+    IDC_ABOUT_HELP_N2,
+    IDC_ABOUT_HELP_2,
+    IDC_ABOUT_HELP_N3,
+    IDC_ABOUT_HELP_3,
+    IDC_ABOUT_HELP_N4,
+    IDC_ABOUT_HELP_4,
+    IDC_ABOUT_HELP_N5,
+    IDC_ABOUT_HELP_5,
+];
+
+/// The ten statics that stand **inside** the «Как пользоваться» panel — task Т-23-4.
+///
+/// An `SS_OWNERDRAW` static fills the whole of its own rectangle before it writes a word, so
+/// a label on a panel has to be filled with the panel's own colour or it cuts a hole in the
+/// block. The settings dialog answers the same question with [`controls_on_panels`], which
+/// works out containment from the rectangles; this window has one panel and ten labels on it,
+/// so the list is written down instead of computed — and a test holds it against the
+/// containment the template actually declares.
+pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 10] = [
+    IDC_ABOUT_HELP_N1,
+    IDC_ABOUT_HELP_1,
+    IDC_ABOUT_HELP_N2,
+    IDC_ABOUT_HELP_2,
+    IDC_ABOUT_HELP_N3,
+    IDC_ABOUT_HELP_3,
+    IDC_ABOUT_HELP_N4,
+    IDC_ABOUT_HELP_4,
+    IDC_ABOUT_HELP_N5,
+    IDC_ABOUT_HELP_5,
 ];
 
 /// The colour roles of one button in one state — FR-92а, task T-11-5a, widened by the
@@ -10508,6 +10616,14 @@ struct AboutState {
     /// executable, read by the caller the same way the old box read it
     /// (`tray::file_version`). `None` — no resource — shows as a dash, not as an error.
     version: Option<(u16, u16, u16, u16)>,
+    /// The name of the hotkey the help panel of FR-92а names — task Т-23-4, решение 82.5.
+    ///
+    /// Copied out of the configuration by the caller at the moment of opening, on exactly the
+    /// terms `setting` above is copied on, and passed through [`effective_hotkey_name`] so
+    /// that a file naming a key this build does not know shows the default that is really in
+    /// force rather than the name that is not. This window changes nothing, so the value never
+    /// moves after it is stored.
+    hotkey: String,
     /// The face this window sets the caption of its own «ОК» in — FR-92а, task T-11-17.
     ///
     /// The same owner the settings dialog keeps, for the same reason and with the same
@@ -10662,6 +10778,7 @@ pub fn show_about_dialog(
     instance: HINSTANCE,
     setting: ThemeSetting,
     version: Option<(u16, u16, u16, u16)>,
+    hotkey: &str,
 ) -> windows::core::Result<()> {
     // FR-92а, task T-13-17. Taken here and released however this function leaves, the `-1`
     // return below and a panic on the way through included — see [`AboutSession`]. The
@@ -10678,6 +10795,9 @@ pub fn show_about_dialog(
         palette,
         brushes: theme::Brushes::new(palette),
         version,
+        // FR-92а, task Т-23-4: the key the help names, resolved here — once, at the moment of
+        // opening — for the reason the palette is resolved here.
+        hotkey: effective_hotkey_name(hotkey),
         // `None` until `WM_INITDIALOG` — see the field.
         fonts: None,
         // FR-92а, task T-12-1: loaded before the window exists — see [`CaptionIcons`].
@@ -10751,7 +10871,7 @@ unsafe extern "system" fn about_proc(
             // frame of `show_about_dialog`, which outlives this modal call.
             unsafe {
                 with_about_state(hwnd, |state| {
-                    fill_about(hwnd, state.version);
+                    fill_about(hwnd, state.version, &state.hotkey);
 
                     // FR-92а, task T-11-17: the face the caption of «ОК» is set in, made out
                     // of the font the manager gave the window — the same call, and the same
@@ -10946,8 +11066,15 @@ fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
 /// the version line out of the `VERSIONINFO` the caller read.
 ///
 /// The name row is deliberately not set: «Lang Switcher» is not translated — decision on
-/// question 7 — and the template literal already is the name.
-fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
+/// question 7 — and the template literal already is the name. The five numerals of the help
+/// panel are not set either, for the same kind of reason: a digit is a digit in both locales.
+///
+/// `key` is the name of the hotkey **as it acts** — [`effective_hotkey_name`] of the running
+/// configuration — and it is what the first three rows of the help substitute into their
+/// `{0}`. It arrives as an argument rather than being read here, because this module does not
+/// own the configuration: section 6.3 gives that to the caller, and the caller copies the
+/// field out of it exactly as it copies the theme setting.
+fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>, key: &str) {
     let caption = wide(&text(IDS_ABOUT_CAPTION));
 
     // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer
@@ -10960,6 +11087,21 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
     set_text(hwnd, IDC_ABOUT_VERSION, &about_version_line(version));
     set_text(hwnd, IDC_ABOUT_LINE_1, &text(IDS_ABOUT_LINE_1));
     set_text(hwnd, IDC_ABOUT_LINE_2, &text(IDS_ABOUT_LINE_2));
+
+    // FR-92а, task Т-23-4, решение 82.5 — the «Как пользоваться» panel.
+    //
+    // The caption goes on the hidden control the block is drawn from: the window's own
+    // background reads it back off that control with `GetDlgItemTextW`, exactly as the
+    // settings dialog reads the captions of its six panels, so FR-94 reaches a panel heading
+    // by the same one road it reaches every other piece of text.
+    set_text(hwnd, IDC_ABOUT_HELP, &text(IDS_ABOUT_HELP));
+
+    // The numerals are already on their controls — template literals, the same in both
+    // locales — so only the five sentences are set here, each with the key name substituted.
+    for (_, row, string) in ABOUT_HELP_ROWS {
+        set_text(hwnd, row, &format_text(string, &[key]));
+    }
+
     set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
 }
 
@@ -11029,11 +11171,20 @@ unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
             // `None` — the brushes were refused at initialisation (NFR-13).
             let brushes = state.brushes.as_ref()?;
 
-            Some((brushes.window_bg(), state.palette.field_border))
+            Some((
+                brushes.window_bg(),
+                state.palette.field_border,
+                // Task Т-23-4 — the panel of the «Как пользоваться» block, in the colours the
+                // six panels of the settings dialog are drawn in.
+                brushes.panel_bg(),
+                state.palette.panel_border,
+                state.palette.cap,
+                state.fonts.as_ref().map(DialogFonts::caption),
+            ))
         })
     };
 
-    let Some(Some((ground, line))) = choice else {
+    let Some(Some((ground, line, panel, panel_border, caption, caption_face))) = choice else {
         return 0;
     };
 
@@ -11042,6 +11193,39 @@ unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
     unsafe { FillRect(dc, &client, ground) };
 
     paint_caption_underline(dc, &client, line);
+
+    // Task Т-23-4, решение 82.5 — the one panel of this window, drawn here for the reason the
+    // six panels of the settings dialog are drawn in *its* erase: a block is the background of
+    // what stands on it, so it is laid before the children paint and never over them. The
+    // rectangle is the hidden control's own, exactly as there.
+    //
+    // NFR-13: no rectangle for the control — a template that lost it — leaves the window
+    // without its block and with everything else intact, which is what a missing panel has
+    // always cost here.
+    if let Some(rect) = child_rects_in_client(hwnd)
+        .into_iter()
+        .find(|(control, _)| *control == IDC_ABOUT_HELP)
+        .map(|(_, rect)| rect)
+    {
+        // NFR-13 one level down: `dc_dpi` answers 96 for a DC that will not say, which is the
+        // 100 % size and a legal one.
+        let dpi = dc_dpi(dc);
+
+        paint_rounded(
+            dc,
+            &rect,
+            scaled(CORNER_RADIUS, dpi),
+            panel_border,
+            panel,
+            dpi,
+        );
+
+        if let Some(face) = caption_face {
+            // SAFETY: `dc` is the caller's; `face` is a live font this window's state owns for
+            // longer than the call, and `draw_panel_caption` puts the previous one back.
+            unsafe { draw_panel_caption(hwnd, IDC_ABOUT_HELP, dc, rect, caption, dpi, face) };
+        }
+    }
 
     // TRUE — the background is drawn; the manager must not erase over it.
     1
@@ -11067,6 +11251,12 @@ unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
 pub fn about_static_color_role(control: i32) -> StaticColorRole {
     match control {
         IDC_ABOUT_VERSION | IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => StaticColorRole::Muted,
+        // Task Т-23-4: the numeral of a help row is the mock-up's `.key` — muted, so the
+        // column of digits does not compete with the sentences beside it. The sentences
+        // themselves are the full-strength ink of the mock-up's row text and fall to the
+        // catch-all below with the name.
+        IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
+        | IDC_ABOUT_HELP_N5 => StaticColorRole::Muted,
         // Spelled out rather than swallowed by the catch-all, so the mirrored identifiers
         // of the template stay load-bearing in exactly one function.
         IDC_ABOUT_ICON | IDC_ABOUT_NAME => StaticColorRole::Label,
@@ -11159,7 +11349,14 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
             let brushes = state.brushes.as_ref()?;
 
             Some((
-                brushes.window_bg(),
+                // Task Т-23-4: a label standing on the «Как пользоваться» panel is filled
+                // with the panel's own colour. It fills its whole rectangle before it writes
+                // a word, so a window-coloured fill there would cut ten holes in the block.
+                if ABOUT_LABELS_ON_THE_PANEL.contains(&control) {
+                    brushes.panel_bg()
+                } else {
+                    brushes.window_bg()
+                },
                 label_ink(about_static_color_role(control), state.palette),
                 // Finding A-05, task T-12-4: **one** row of this window is set in the second
                 // face — the name. Everything else here (the version line and the two

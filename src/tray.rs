@@ -3353,8 +3353,9 @@ fn toggle_autostart() {
 // The about box
 // ---------------------------------------------------------------------------------------
 
-/// Shows the "О программе" window: the name, the version, two lines of description and an
-/// «ОК» — and nothing else. FR-92а, task T-11-11: the window is the own-drawn dialog
+/// Shows the "О программе" window: the name, the version, two lines of description, the
+/// «Как пользоваться» panel of task Т-23-4 and an «ОК» — and nothing else. FR-92а, task
+/// T-11-11: the window is the own-drawn dialog
 /// `IDD_ABOUT` of [`crate::settings`], shown in the resolved palette, because the
 /// `MessageBoxW` this function used to call cannot be repainted by any documented means.
 ///
@@ -3364,7 +3365,15 @@ fn toggle_autostart() {
 /// documentation). The theme setting is *copied* out of the tray first, in a borrow that
 /// ends before the modal call begins — the same shape [`open_settings`] has.
 fn show_about(hwnd: HWND) {
-    let Some(setting) = with_tray(|tray| tray.config().general.theme) else {
+    // FR-92а, task Т-23-4: the help panel of решение 82.5 names the hotkey, so the key travels
+    // beside the theme setting — copied out of the tray in **one** borrow that ends before the
+    // modal call begins, exactly as the setting alone used to be.
+    let Some((setting, key)) = with_tray(|tray| {
+        (
+            tray.config().general.theme,
+            tray.config().hotkey.key.clone(),
+        )
+    }) else {
         return;
     };
 
@@ -3383,7 +3392,7 @@ fn show_about(hwnd: HWND) {
     // The version travels the same road it always did: out of the `VERSIONINFO` resource
     // of the running executable by [`file_version`], never out of a literal.
     if let Err(error) =
-        settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version())
+        settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version(), &key)
     {
         // NFR-13. The dialog either came up or it did not, and if it did not the user is
         // told by the absence of a window; the reason goes to the journal.

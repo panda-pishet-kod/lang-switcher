@@ -131,6 +131,22 @@
 #define IDC_ABOUT_VERSION      1122
 #define IDC_ABOUT_LINE_1       1123
 #define IDC_ABOUT_LINE_2       1124
+// The «Как пользоваться» panel of FR-92а — task Т-23-4, решение 82.5, by the mock-up the user
+// accepted with his own eye (scratchpad-Э23\макет-справка-о-программе.html). The panel itself
+// is a hidden CONTROL exactly as the six of the settings dialog are: the block is drawn by the
+// window's own background, and the control is there to carry the caption and the rectangle.
+// Eleven numbers in one contiguous run — the panel, five numerals and five rows.
+#define IDC_ABOUT_HELP         1125
+#define IDC_ABOUT_HELP_N1      1126
+#define IDC_ABOUT_HELP_N2      1127
+#define IDC_ABOUT_HELP_N3      1128
+#define IDC_ABOUT_HELP_N4      1129
+#define IDC_ABOUT_HELP_N5      1130
+#define IDC_ABOUT_HELP_1       1131
+#define IDC_ABOUT_HELP_2       1132
+#define IDC_ABOUT_HELP_3       1133
+#define IDC_ABOUT_HELP_4       1134
+#define IDC_ABOUT_HELP_5       1135
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -551,7 +567,18 @@ END
 // The units are the mock-up's numbers through MulDiv(dlu, 7|15, 4|8) with the rounding the
 // dialog manager does: 191 × 79 DLU is 334 × 148 client px — 336 × 180 with the frame, against
 // the 335,7 × 178,6 of scratchpad-Э11\chrome.ps1 (A-01).
-IDD_ABOUT DIALOGEX 0, 0, 191, 79
+// ⚠ **233 units tall and not the 79 of every build up to e25** — task Т-23-4, решение 82.5.
+// The window gains the panel «Как пользоваться» of the accepted mock-up: five numbered rows,
+// «ОК» moves down under them, the width 191 does not move at all.
+//
+// The height is **measured on the raised window, not the ≈175 the mock-up estimated**, and the
+// difference is one honest number. The estimate assumed every row takes one line; four of the
+// ten lines the two locales really need come from rows that wrap. The text column is 142 units
+// — 249 px at 96 DPI — and the counts, read off the window in both locales
+// (`scratchpad-Э23\Т-23-4-опрограмме-*.png`), are 3, 2, 2, 1, 2 in Russian and 3, 2, 2, 1, 1
+// in English. A template has one set of rectangles for the two languages, so every row is
+// given the taller of its two.
+IDD_ABOUT DIALOGEX 0, 0, 191, 233
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -565,7 +592,45 @@ BEGIN
     LTEXT           "", IDC_ABOUT_VERSION, 42, 24, 141, 8, SS_OWNERDRAW
     LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 32, 101, 17, SS_OWNERDRAW
     LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 49, 101, 24, SS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 144, 58, 39, 14, BS_OWNERDRAW
+
+    // -- «Как пользоваться»: FR-92а, task Т-23-4, решение 82.5 ----------------------------
+    //
+    // The panel is a hidden CONTROL on the terms the six panels of the settings dialog are on
+    // (`NOT WS_VISIBLE`, BS_OWNERDRAW as a *type*): it takes no click, paints nothing and
+    // carries two things the drawing needs — the caption, which FR-94 replaces on it like any
+    // other control's text, and the rectangle, which is the block. The panel is drawn by the
+    // window's own WM_ERASEBKGND in `src\settings.rs`, in the very style the groups of the
+    // settings dialog are drawn in: panel_bg inside, panel_border round, the caption in cap.
+    //
+    // ⚠ Every rectangle below is disjoint from every other, and that is load-bearing for the
+    // same reason it is in the settings template: an SS_OWNERDRAW static fills the whole of
+    // its own rectangle before it writes a word, so two overlapping statics erase each other.
+    //
+    // The numerals are template literals with no string row of their own: a digit reads the
+    // same in both locales, exactly as «Lang Switcher» does. They are muted, the rows beside
+    // them are not — the mock-up's `.key` against its row text — and the split lives in
+    // `about_static_color_role`.
+    //
+    // The rows' own heights are the line counts **read off the raised window in both
+    // locales** — `scratchpad-Э23\Т-23-4-опрограмме-*.png` — and each row is given the taller
+    // of its two: 3, 2, 2, 1, 2 lines of 9 units. ⚠ Not the counts `MeasureString` predicted:
+    // that instrument answered two lines for the fourth row in both locales and the window
+    // draws one, so the prediction cost a row nine units of air until it was measured on the
+    // real thing. The first line of every row stands level with its numeral; a numeral is one
+    // line tall and needs no more.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 79, 167, 127
+    LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 93, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_1, 30, 93, 142, 27, SS_OWNERDRAW
+    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 124, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_2, 30, 124, 142, 18, SS_OWNERDRAW
+    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 146, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_3, 30, 146, 142, 18, SS_OWNERDRAW
+    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 168, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_4, 30, 168, 142, 9, SS_OWNERDRAW
+    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 181, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_5, 30, 181, 142, 18, SS_OWNERDRAW
+
+    PUSHBUTTON      "ОК", IDOK, 144, 212, 39, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -697,6 +762,23 @@ END
 #define IDS_ABOUT_LINE_1        3063
 #define IDS_ABOUT_LINE_2        3064
 #define IDS_ABOUT_OK            3065
+// The «Как пользоваться» panel of FR-92а — task Т-23-4, решение 82.5. Six rows: the caption
+// of the panel and its five numbered lines. **3066..3071 and not 3079**, because those six
+// numbers are the whole of what is left of the sixteen-string block 3056 opened and they are
+// contiguous with the five above — a string put at 3079 would open a block of its own for six
+// strings and leave ten empty rows behind it.
+//
+// ⚠ The first three carry a `{0}`: the **name of the hotkey**, substituted by
+// `settings::format_text` out of `[hotkey] key` of the running configuration — the same field
+// FR-92 shows in its own window. Never spelled here: a second copy of the key name is a second
+// place for it to be wrong, and the whole point of решение 82.5 is that the help tells a person
+// which key *their* program answers to.
+#define IDS_ABOUT_HELP          3066
+#define IDS_ABOUT_HELP_1        3067
+#define IDS_ABOUT_HELP_2        3068
+#define IDS_ABOUT_HELP_3        3069
+#define IDS_ABOUT_HELP_4        3070
+#define IDS_ABOUT_HELP_5        3071
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -774,6 +856,12 @@ BEGIN
     IDS_ABOUT_LINE_1        "Исправляет текст, набранный в неверной раскладке."
     IDS_ABOUT_LINE_2        "Перекодировка — по нажатию одной клавиши."
     IDS_ABOUT_OK            "ОК"
+    IDS_ABOUT_HELP          "Как пользоваться"
+    IDS_ABOUT_HELP_1        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится."
+    IDS_ABOUT_HELP_2        "Повторное нажатие {0} возвращает исходный текст."
+    IDS_ABOUT_HELP_3        "Выделите текст и нажмите {0} — конвертируется выделенное."
+    IDS_ABOUT_HELP_4        "Пауза, настройки и выход — в значке в трее."
+    IDS_ABOUT_HELP_5        "Сменить клавишу: Настройки → Горячая клавиша."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -849,6 +937,12 @@ BEGIN
     IDS_ABOUT_LINE_1        "Fixes text typed in the wrong keyboard layout."
     IDS_ABOUT_LINE_2        "Conversion takes a single key press."
     IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "How to use it"
+    IDS_ABOUT_HELP_1        "You typed a word in the wrong layout — press {0}: the word is converted and the layout switches."
+    IDS_ABOUT_HELP_2        "Pressing {0} again brings the original text back."
+    IDS_ABOUT_HELP_3        "Select text and press {0} — the selection is converted."
+    IDS_ABOUT_HELP_4        "Suspend, settings and exit are in the tray icon."
+    IDS_ABOUT_HELP_5        "To change the key: Settings → Hotkey."
 END
 
 // ---------------------------------------------------------------------------------------
