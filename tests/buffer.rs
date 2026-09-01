@@ -185,6 +185,16 @@ fn english() -> LayoutMap {
                 Mods::NONE,
                 KeyMapping::from_to_unicode(MAX_UNITS as i32, &LIGATURE),
             ),
+            // The space bar — task **Т-24-2**. It carries a character in every real layout
+            // there is, and since the soft boundary of FR-10 puts its stroke into the ring, a
+            // synthetic layout that left it blank would make «слово + хвост» invisible to
+            // [`typed`] and the conversion of the tail vacuous.
+            (
+                SCAN_SPACE,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char(' '),
+            ),
         ],
     )
 }
@@ -203,6 +213,16 @@ fn russian() -> LayoutMap {
                 MAIN_BLOCK,
                 Mods::NONE,
                 KeyMapping::from_char('.'),
+            ),
+            // The space bar, and the same character as in English — task **Т-24-2**. That is
+            // what makes the tail of FR-10 survive a conversion unchanged: the same physical
+            // key gives a space in the target layout too, so `convert_stroke` maps it to
+            // itself and the hotkey renders «слово␣» as «перевод␣».
+            (
+                SCAN_SPACE,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char(' '),
             ),
         ],
     )
@@ -526,12 +546,21 @@ fn overflow_evicts_the_oldest_stroke() {
 }
 
 // -------------------------------------------------------------------------------------
-// Point 13 — FR-10: `Space`, `Tab`, `Enter`, `Esc` flush the whole buffer
+// Point 13 — FR-10: `Tab`, `Enter`, `Esc` flush the whole buffer at once
 // -------------------------------------------------------------------------------------
 
+/// The **hard** boundaries of the first row, and the regression sentinel of task Т-24-2.
+///
+/// `Space` left this loop when the user's decision on question 82 made it the one **soft**
+/// boundary of the table (see the section below). The other three did not move, and the
+/// requirement says why: after `Enter` the text has usually been sent already, so a deferred
+/// erasure would land in somebody else's text, and `Tab` takes the focus away, where the flush
+/// of the focus change would eat the buffer before any softness could apply.
+///
+/// This test is green before task Т-24-2 and green after it. That is its whole purpose.
 #[test]
-fn space_tab_enter_and_escape_flush_the_whole_buffer() {
-    for vk in [VK_SPACE, VK_TAB, VK_RETURN, VK_ESCAPE] {
+fn tab_enter_and_escape_flush_the_whole_buffer() {
+    for vk in [VK_TAB, VK_RETURN, VK_ESCAPE] {
         let mut recorder = fresh();
         fill(&mut recorder, 3);
 
@@ -543,6 +572,249 @@ fn space_tab_enter_and_escape_flush_the_whole_buffer() {
         assert_eq!(recorder.len(), 0, "vk {vk:#04x}");
         assert!(recorder.is_empty());
     }
+}
+
+// -------------------------------------------------------------------------------------
+// FR-10, the soft boundary — task Т-24-2, the user's decision on question 82
+// -------------------------------------------------------------------------------------
+
+/// **Rule 1 of the soft boundary: a space ends the word and keeps it.**
+///
+/// The complaint the user made, word for word: «часто набираю слово, потом ставлю пробел, а
+/// только потом вижу что выбрана не та раскладка и нажимаю `Pause`, но переключения уже не
+/// происходит». It could not happen: the space threw the word away before the hotkey was ever
+/// pressed. FR-10 now writes the stroke of the space into the ring like any other and leaves
+/// the buffer standing in «слово + хвост».
+#[test]
+fn a_space_ends_the_word_without_throwing_it_away() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Stored,
+        "the space is a stroke of the ring now, not a flush"
+    );
+    assert_eq!(
+        recorder.len(),
+        4,
+        "the word is still there and the space is with it"
+    );
+    assert_eq!(typed(&recorder), "aaa ");
+    assert_eq!(
+        recorder.stroke(3).expect("the tail").vk(),
+        VK_SPACE,
+        "and the last stroke is the space itself — that is the whole of the state"
+    );
+}
+
+/// **Rule 2: the spaces pile up into the tail.**
+#[test]
+fn the_spaces_after_a_word_pile_up_into_a_tail() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    for expected in 4..=6 {
+        assert_eq!(
+            press(&mut recorder, VK_SPACE, SCAN_SPACE),
+            Recorded::Stored,
+            "space number {} of the tail",
+            expected - 3
+        );
+        assert_eq!(recorder.len(), expected);
+    }
+
+    assert_eq!(typed(&recorder), "aaa   ", "«слово + N пробелов»");
+}
+
+/// **Rule 3: the first key that writes and is not a space buries the old word first.**
+///
+/// The deferred flush is a flush like every other, which is what the second half of this test
+/// is about: SEC-02 says the memory is «явно перезаписывается нулями, а не просто помечается
+/// пустым», and a flush that happens one keystroke later is not excused from it.
+#[test]
+fn the_first_key_after_the_tail_buries_the_old_word_and_starts_a_new_one() {
+    let mut recorder = fresh_of(8);
+    fill(&mut recorder, 3);
+    press(&mut recorder, VK_SPACE, SCAN_SPACE);
+
+    assert_eq!(press(&mut recorder, VK_2, SCAN_2), Recorded::Stored);
+    assert_eq!(recorder.len(), 1, "the old word and its tail are gone");
+    assert_eq!(
+        typed(&recorder),
+        "2",
+        "and the key that ended them is the first stroke of the new word"
+    );
+
+    assert_eq!(
+        non_zero_slots(&recorder),
+        1,
+        "SEC-02: the deferred flush zeroed the array, and the new stroke is all that is in it"
+    );
+    assert!(
+        !recorder.slots().iter().any(|slot| slot.vk() == VK_SPACE),
+        "SEC-02: the tail is nowhere in the backing array either"
+    );
+}
+
+/// **`Backspace` in the tail state takes the space out, exactly as it takes any stroke out.**
+///
+/// «слово␣» + `Backspace` = «слово», and the letter that follows then goes on with the word
+/// instead of burying it: the tail is closed, because the last stroke is a letter again. The
+/// buffer follows the screen, which is the one property that makes `Backspace` the exception of
+/// the FR-10 table in the first place.
+#[test]
+fn backspace_takes_the_tail_space_out_and_leaves_the_word() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    press(&mut recorder, VK_SPACE, SCAN_SPACE);
+    assert_eq!(typed(&recorder), "aaa ");
+
+    assert_eq!(press(&mut recorder, VK_BACK, 0x0E), Recorded::Popped);
+    assert_eq!(recorder.len(), 3);
+    assert_eq!(typed(&recorder), "aaa");
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        typed(&recorder),
+        "aaaa",
+        "with the tail gone the word simply goes on"
+    );
+}
+
+/// **No hard boundary leaves the tail state behind it** — the softness is one key wide.
+///
+/// Green before task Т-24-2 and after it: before, the space had already emptied the ring, so
+/// the hard key found nothing; after, it finds «слово + хвост» and empties it. Either way the
+/// buffer is empty and the answer is a flush, which is what a sentinel is for.
+#[test]
+fn every_hard_boundary_ends_the_tail_state_at_once() {
+    for vk in [
+        VK_TAB, VK_RETURN, VK_ESCAPE, VK_DELETE, VK_LEFT, VK_HOME, VK_INSERT,
+    ] {
+        let mut recorder = fresh();
+        fill(&mut recorder, 3);
+        press(&mut recorder, VK_SPACE, SCAN_SPACE);
+
+        assert_eq!(
+            press(&mut recorder, vk, SCAN_A),
+            Recorded::Flushed,
+            "vk {vk:#04x} is a hard boundary and answers at once"
+        );
+        assert_eq!(recorder.len(), 0, "vk {vk:#04x}");
+        assert_eq!(
+            non_zero_slots(&recorder),
+            0,
+            "SEC-02 after the hard boundary, vk {vk:#04x}"
+        );
+    }
+
+    // The command row, and the asynchronous sources of the table through the one entry point
+    // they all reach.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    press(&mut recorder, VK_SPACE, SCAN_SPACE);
+    hold(&mut recorder, VK_LCONTROL);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Flushed);
+    assert_eq!(recorder.len(), 0, "Ctrl+A is a command, tail or no tail");
+    release(&mut recorder, VK_LCONTROL);
+
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    press(&mut recorder, VK_SPACE, SCAN_SPACE);
+    recorder.reset();
+
+    assert_eq!(
+        recorder.len(),
+        0,
+        "the click, the focus and the wipe of the table"
+    );
+    assert_eq!(non_zero_slots(&recorder), 0, "SEC-02 after the reset");
+}
+
+/// **The tail lives in the ring of FR-07 and has no allowance of its own.**
+///
+/// A full ring evicts its oldest stroke to take the space, exactly as it would to take a
+/// letter: the tail is not a second buffer and carries no limit of its own.
+#[test]
+fn the_tail_lives_in_the_ring_of_fr07_and_evicts_like_any_stroke() {
+    let mut recorder = fresh_of(4);
+    fill(&mut recorder, 4);
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Evicted,
+        "FR-07: the ring is full, so the oldest stroke goes"
+    );
+    assert_eq!(recorder.len(), 4, "and the ring does not grow for a tail");
+    assert_eq!(typed(&recorder), "aaa ");
+    assert_eq!(
+        recorder.stroke(3).expect("the tail").vk(),
+        VK_SPACE,
+        "eviction takes the oldest stroke, so the tail is untouched by it"
+    );
+}
+
+/// **An empty buffer knows no soft boundary** — there is nothing to hold, and nothing is held.
+///
+/// The second half is how the product actually reaches this case: the last row of FR-10 empties
+/// the ring on the first key after a conversion, and the space then finds nothing to open a
+/// tail over. Green before task Т-24-2 and after it.
+#[test]
+fn a_space_on_an_empty_buffer_flushes_as_it_always_did() {
+    let mut recorder = fresh();
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed
+    );
+    assert_eq!(recorder.len(), 0);
+
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed,
+        "the key after a conversion is a full reset, space or not"
+    );
+    assert_eq!(
+        recorder.len(),
+        0,
+        "and it opens no tail over what it emptied"
+    );
+    assert!(!recorder.in_conversion(), "the session is over");
+}
+
+/// **The layout switch of FR-11 opens no tail either.**
+///
+/// `Win+Space` stores nothing — the system consumes the switch and puts no space into the text
+/// — so there is no tail to open, and the letter that follows goes on with the word instead of
+/// burying it. Green before task Т-24-2 and after it: the sentinel is that the soft boundary
+/// did not leak into the exception.
+#[test]
+fn the_layout_switch_of_fr11_opens_no_tail() {
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+
+    hold(&mut recorder, VK_LWIN);
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Ignored,
+        "FR-11: the switch is neither text nor a boundary"
+    );
+    release(&mut recorder, VK_LWIN);
+    assert_eq!(recorder.len(), 3);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        recorder.len(),
+        4,
+        "the word goes on: no tail was ever opened"
+    );
+    assert_eq!(typed(&recorder), "aaaa");
 }
 
 // -------------------------------------------------------------------------------------
@@ -666,7 +938,8 @@ fn ctrl_alt_and_win_combinations_are_commands_and_flush() {
 ///
 /// `Space` remains a boundary key of FR-10 in its own right, which is what the last block
 /// records and why the exception in [`Recorder::record`] is written as narrowly as it is: with
-/// no `Win` held, the very same key still answers [`Recorded::Flushed`].
+/// no `Win` held, the very same key still takes its own row — the **soft** boundary since task
+/// Т-24-2, so the answer there is [`Recorded::Stored`] and the word is kept.
 ///
 /// Nothing here is a defect. FR-11 says a layout change must not flush the buffer, and the two
 /// switchers that leave it untouched are FR-11 working exactly as written. The test exists so
@@ -717,17 +990,22 @@ fn only_one_of_the_three_layout_switchers_reaches_the_command_row_of_fr10() {
     assert_eq!(recorder.len(), 3, "FR-11: a layout switch keeps the buffer");
     release(&mut recorder, VK_LWIN);
 
-    // And `Space` alone still flushes, from the boundary-key row instead — the row FR-11 says
-    // nothing about, and the reason the exception above is written as narrowly as it is.
+    // And `Space` alone takes the boundary-key row instead — the row FR-11 says nothing about,
+    // and the reason the exception above is written as narrowly as it is. ⚠ Since task Т-24-2
+    // that row is the **soft** boundary: the stroke is stored and the word is kept. What this
+    // test is about is untouched by that — the two rows are still different rows, and the
+    // difference is still visible from here: the switch stores nothing, the boundary stores the
+    // space.
     let mut recorder = fresh();
     fill(&mut recorder, 3);
 
     assert_eq!(
         press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed,
-        "a bare Space is a flush, exactly as it was"
+        Recorded::Stored,
+        "a bare Space is the soft boundary of FR-10 and not the switch of FR-11"
     );
-    assert_eq!(recorder.len(), 0);
+    assert_eq!(recorder.len(), 4);
+    assert_eq!(typed(&recorder), "aaa ");
 }
 
 // -------------------------------------------------------------------------------------
@@ -793,19 +1071,22 @@ fn a_layout_switch_with_win_and_space_keeps_everything_typed_before_it() {
 /// and neither `Ctrl` nor `Alt` is — `Ctrl+Win+Space` and `Alt+Win+Space` switch no layout on
 /// this system and stay commands.
 ///
-/// The `Space` row of the table ("`Space`, `Tab`, `Enter`, `Esc` — полный сброс") is the one
-/// this could most easily have damaged, and the first case below is it: with no modifier held
-/// the very same key flushes exactly as it always did.
+/// The `Space` row of the table is the one this could most easily have damaged, and the first
+/// case below is it: with no modifier held the very same key takes its own row and not the
+/// exception. ⚠ **Since task Т-24-2 that row is the soft boundary** — the user's decision on
+/// question 82 — so the answer there is `Stored` and not `Flushed`; the exception of FR-11 is
+/// exactly as wide as it was, which is what this test measures.
 #[test]
 fn everything_but_win_plus_space_flushes_exactly_as_it_did() {
-    // `Space` with nothing held — the boundary-key row of FR-10, untouched.
+    // `Space` with nothing held — the boundary-key row of FR-10, soft since task Т-24-2.
     let mut recorder = fresh();
     fill(&mut recorder, 3);
+    assert_eq!(press(&mut recorder, VK_SPACE, SCAN_SPACE), Recorded::Stored);
     assert_eq!(
-        press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed
+        recorder.len(),
+        4,
+        "a bare Space is the soft boundary and keeps the word"
     );
-    assert_eq!(recorder.len(), 0, "a bare Space still flushes");
 
     // `Win` plus a key that is not `Space` — the command row, untouched.
     let mut recorder = fresh();
@@ -1022,11 +1303,19 @@ fn a_win_release_that_never_arrived_does_not_silence_the_buffer_for_ever() {
 
     // The belief itself has been put right, not merely stepped around once per keystroke: with
     // `held.win` genuinely down, `Space` is the boundary key of the first row of FR-10 again,
-    // and not the layout switch of FR-11 that a raised `Win` would have made of it.
+    // and not the layout switch of FR-11 that a raised `Win` would have made of it. ⚠ Since
+    // task Т-24-2 the two answers are `Stored` and `Ignored` rather than `Flushed` and
+    // `Ignored`; the boundary stores the space, the switch stores nothing, and the pair still
+    // tells the latch apart from its absence.
     assert_eq!(
         press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed,
+        Recorded::Stored,
         "the latch is down, not merely bypassed"
+    );
+    assert_eq!(
+        recorder.stroke(recorder.len() - 1).expect("the tail").vk(),
+        VK_SPACE,
+        "the space went into the ring, which the switch of FR-11 never does"
     );
 }
 
@@ -1116,12 +1405,16 @@ fn the_physical_check_leaves_fr10_and_fr11_alone_when_the_key_really_is_held() {
     assert!(recorder.stroke(0).expect("stored").mods().altgr());
 }
 
-/// A bare `Space` after a latched `Win` flushes, which is the row of FR-10 it belongs to.
+/// A bare `Space` after a latched `Win` takes the boundary row of FR-10 it belongs to.
 ///
 /// The interesting half of the repair: the exception of FR-11 is read off `held.win` as well, so
 /// a latched `Win` did not merely swallow letters — it also turned every `Space` into a silent
 /// no-op instead of the boundary key of the first row of FR-10. Putting the belief right fixes
 /// both, and this pins the second one so that a later change cannot quietly re-introduce it.
+///
+/// ⚠ Since task Т-24-2 that boundary is the **soft** one, so what the corrected belief buys is a
+/// `Stored` space rather than a `Flushed` buffer. The distinction the test exists for is the same
+/// one: the switch of FR-11 stores nothing at all.
 #[test]
 fn a_bare_space_after_a_lost_win_release_is_the_boundary_key_it_should_be() {
     let mut recorder = fresh();
@@ -1133,10 +1426,11 @@ fn a_bare_space_after_a_lost_win_release_is_the_boundary_key_it_should_be() {
 
     assert_eq!(
         press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed,
+        Recorded::Stored,
         "with no `Win` actually held, `Space` is the boundary key of FR-10 and not the switch of FR-11"
     );
-    assert_eq!(recorder.len(), 0);
+    assert_eq!(recorder.len(), 4, "the soft boundary keeps the word");
+    assert_eq!(typed(&recorder), "aaa ");
 }
 
 #[test]
@@ -1300,12 +1594,27 @@ fn a_flush_overwrites_the_backing_array_with_zeroes() {
         );
     }
 
-    // Every flush, not only the explicit one: the rules of FR-10 zero the same way.
+    // Every flush, not only the explicit one: the rules of FR-10 zero the same way. ⚠ The key
+    // here used to be `Space`, and since task Т-24-2 that one is the soft boundary of the
+    // table, which flushes a keystroke later; `Enter` is the hard boundary of the same row and
+    // is what this assertion was always about.
     let mut recorder = fresh_of(8);
     fill(&mut recorder, 5);
-    press(&mut recorder, VK_SPACE, SCAN_A);
+    press(&mut recorder, VK_RETURN, SCAN_A);
 
     assert_eq!(non_zero_slots(&recorder), 0, "SEC-02 after a FR-10 flush");
+
+    // And the deferred one zeroes as well, on the keystroke that ends the tail — task Т-24-2.
+    let mut recorder = fresh_of(8);
+    fill(&mut recorder, 5);
+    press(&mut recorder, VK_SPACE, SCAN_SPACE);
+    press(&mut recorder, VK_2, SCAN_2);
+
+    assert_eq!(
+        non_zero_slots(&recorder),
+        1,
+        "SEC-02 after the deferred flush: only the stroke that ended the tail is left"
+    );
 }
 
 #[test]
@@ -2047,8 +2356,8 @@ fn the_position_counter_walks_the_cycle_and_stays_inside_it() {
 /// counter stays where it is, and that is asserted too.
 #[test]
 fn every_flush_rule_of_fr10_zeroes_the_position_counter() {
-    // Row 1 of the table: `Space`, `Tab`, `Enter`, `Esc`.
-    for vk in [VK_SPACE, VK_TAB, VK_RETURN, VK_ESCAPE] {
+    // Row 1 of the table, the hard half: `Tab`, `Enter`, `Esc`.
+    for vk in [VK_TAB, VK_RETURN, VK_ESCAPE] {
         let mut recorder = fresh();
         fill(&mut recorder, 3);
         counter_at_three(&mut recorder);
@@ -2061,6 +2370,48 @@ fn every_flush_rule_of_fr10_zeroes_the_position_counter() {
             "FR-34: the counter goes with the buffer"
         );
     }
+
+    // Row 1, the soft half — task Т-24-2. The space is not a flush rule any more, so FR-34 has
+    // nothing to say about it, exactly as it has nothing to say about `Backspace`; what zeroes
+    // the counter is the deferred flush, when the next word starts.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    counter_at_three(&mut recorder);
+
+    assert_eq!(press(&mut recorder, VK_SPACE, SCAN_SPACE), Recorded::Stored);
+    assert_eq!(recorder.len(), 4);
+    assert_eq!(
+        recorder.cycle_position(),
+        3,
+        "the soft boundary empties nothing, so it zeroes nothing"
+    );
+
+    assert_eq!(press(&mut recorder, VK_2, SCAN_2), Recorded::Stored);
+    assert_eq!(
+        recorder.len(),
+        1,
+        "the deferred flush ran and the new word began"
+    );
+    assert_eq!(
+        recorder.cycle_position(),
+        0,
+        "FR-34: the deferred flush is a flush, and the counter goes with the buffer"
+    );
+
+    // ⚠ The state above is reachable in this file and **not** in the product: the counter is off
+    // zero only inside a conversion session, and the last row of the table ends that session on
+    // the very same keystroke — which is the case below, and there the space finds an empty ring.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    assert_eq!(
+        press(&mut recorder, VK_SPACE, SCAN_SPACE),
+        Recorded::Flushed
+    );
+    assert_eq!(recorder.len(), 0);
+    assert_eq!(recorder.cycle_position(), 0, "FR-34 through the last row");
 
     // Row 3: `Delete`, the arrows, `Home`/`End`/`PgUp`/`PgDn`, `Insert`.
     for vk in [
@@ -2437,9 +2788,16 @@ fn a_word_is_recorded_under_the_layout_really_active_and_not_under_a_stale_stamp
 /// so that a later edit which moves the call out of its branch fails here instead of quietly
 /// putting a system call on every keystroke in the machine.
 ///
-/// The second half is the boundary key: `Space` empties the ring (FR-10), so the next letter is
-/// a first stroke again and asks again. That is the property that makes the repair cover the
+/// The second half is the boundary key: `Space` ends the word (FR-10), so the next letter is a
+/// first stroke again and asks again. That is the property that makes the repair cover the
 /// household case at all — a person switches the layout between words.
+///
+/// ⚠ **Task Т-24-2 moved where the ring is emptied and not whether it is.** The space itself is
+/// stored now and empties nothing, so it asks for no probe of its own — the ring is not empty
+/// when it arrives. The letter after it carries the deferred flush, and the flush runs **before**
+/// the read: the ring is empty by the time the question is asked, so the count below is the same
+/// 2 it always was. Had the flush been put after the read instead, the second word would have
+/// been decoded through the layout of the first, and this counter is what says so.
 #[test]
 fn the_layout_is_read_once_per_word_and_not_once_per_stroke() {
     use core::sync::atomic::Ordering;
@@ -2465,12 +2823,17 @@ fn the_layout_is_read_once_per_word_and_not_once_per_stroke() {
         "NFR-01: the rest of the word does not ask again"
     );
 
-    // FR-10, the boundary-key row: the ring is emptied, so the next letter starts a word.
+    // FR-10, the boundary-key row: the word ends here and the ring is emptied on the next
+    // keystroke, so that keystroke starts a word.
+    assert_eq!(press(&mut recorder, VK_SPACE, SCAN_SPACE), Recorded::Stored);
     assert_eq!(
-        press(&mut recorder, VK_SPACE, SCAN_SPACE),
-        Recorded::Flushed
+        PROBE_CALLS.load(Ordering::Relaxed),
+        1,
+        "the space is not the first stroke of a word and asks for nothing"
     );
+
     assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(recorder.len(), 1, "the deferred flush ran before the read");
     assert_eq!(
         PROBE_CALLS.load(Ordering::Relaxed),
         2,

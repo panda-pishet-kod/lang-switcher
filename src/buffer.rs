@@ -1091,8 +1091,19 @@ pub type CapsProbe = fn() -> bool;
 // The flush rules of FR-10 — the LL-hook rows only
 // ---------------------------------------------------------------------------------------
 
-/// Row 1 of the FR-10 table: the keys that end a word or a field.
-const BOUNDARY_KEYS: [u16; 4] = [VK_SPACE.0, VK_TAB.0, VK_RETURN.0, VK_ESCAPE.0];
+/// Row 1 of the FR-10 table: the keys that end a word or a field **at once**.
+///
+/// ⭐ **`Space` left this list in task Т-24-2** — the user's decision on question 82. It is still
+/// a boundary of row 1 and it is now the **soft** one: the stroke goes into the ring and the
+/// buffer stands in «слово + хвост» until the next key that writes. The rule is not a list, so it
+/// lives in [`Recorder::record`] beside the others rather than here; see the soft-boundary block
+/// there for the whole of it.
+///
+/// The three that are left did not move, and FR-10 says why: after `Enter` the text has usually
+/// been sent already, so a deferred erasure would land in a text that is not the one it was
+/// recorded from, and `Tab` takes the focus away, where the flush of the focus change would empty
+/// the ring before any softness could apply.
+const BOUNDARY_KEYS: [u16; 3] = [VK_TAB.0, VK_RETURN.0, VK_ESCAPE.0];
 
 /// Row 3 of the FR-10 table: editing and navigation.
 ///
@@ -1683,7 +1694,8 @@ impl Recorder {
         // with neither `Ctrl` nor `Alt` in the combination — `Ctrl+Win+Space` and `Alt+Win+Space`
         // switch no layout and remain commands. Everything else keeps the behaviour it had:
         // `Win+R` is a command and flushes, and a bare `Space` with no modifier at all is the
-        // boundary key of the first row of the FR-10 table and flushes as well, further down.
+        // boundary key of the first row of the FR-10 table — the soft one since task Т-24-2,
+        // answered further down and not here.
         //
         // Nothing is recorded either, and the conversion session is left open. The return is
         // `Ignored` and not a fall-through, because the stroke is a switch the system consumes:
@@ -1715,6 +1727,10 @@ impl Recorder {
 
         // FR-10: `Backspace` takes one element out and does **not** flush. It is the one key in
         // the table whose effect on the text the buffer can follow exactly.
+        //
+        // ⭐ **It is the tail's exception too, and by construction rather than by a branch** —
+        // task Т-24-2. «слово␣» + `Backspace` is «слово»: the pop takes the space out, the last
+        // stroke is a letter again, and the state below is closed without anybody closing it.
         if key.vk == VK_BACK.0 {
             return if self.ring.pop() {
                 Recorded::Popped
@@ -1726,6 +1742,62 @@ impl Recorder {
         if flushes(key.vk) {
             self.clear_ring();
             return Recorded::Flushed;
+        }
+
+        // ---------------------------------------------------------------------------------
+        // ⭐ **The soft boundary of FR-10** — task Т-24-2, the user's decision on question 82.
+        //
+        // The complaint, word for word: «часто набираю слово, потом ставлю пробел, а только
+        // потом вижу что выбрана не та раскладка и нажимаю `Pause`, но переключения уже не
+        // происходит». It could not happen. `Space` sat in [`BOUNDARY_KEYS`] and the line above
+        // threw the word away on it, so by the time the hotkey was pressed there was nothing
+        // left to convert — and a word is noticed to be in the wrong layout **after** it has
+        // been separated from the next one far more often than before.
+        //
+        // FR-10 now divides the boundaries in two. The three hard ones flush above. `Space` is
+        // the one soft boundary, and the whole of it is these two arms:
+        //
+        // * **it writes.** The stroke falls through to the recording below and becomes an
+        //   ordinary member of the ring, so the buffer stands in «слово + хвост» and the hotkey
+        //   converts both — the space bar gives a space in the target layout too, so FR-22
+        //   carries the tail over by the ordinary rule and no exception is needed anywhere on
+        //   the conversion path. Further spaces fall through the same way and pile up;
+        // * **the next key that writes and is not a space flushes first, then records.** That
+        //   is the `else if` below, and it is the deferred half of the boundary: the old word
+        //   dies exactly when a new one begins.
+        //
+        // **An empty ring knows no tail.** With nothing to hold, the first arm keeps the
+        // behaviour the key always had — the flush, and the zeroing that goes with it. It
+        // matters more than it looks: the last row of the table empties the ring on the first
+        // key after a conversion, so a space pressed there finds an empty ring and opens no
+        // state over what it has just emptied.
+        //
+        // **Why the state is read off the ring and not kept in a flag.** A flag would be a
+        // second copy of something the ring already knows, and every flush in this file would
+        // have to remember to clear it — `clear_ring`, `reset_up_to`, the pop of `Backspace`,
+        // the eviction of FR-07, `app::park_buffer` across the FR-70 gate. The reading below
+        // cannot fall out of step with any of them: a hard flush empties the ring, and an empty
+        // ring has no last stroke; `Backspace` takes the space out and the answer changes with
+        // it; eviction drops the **oldest** stroke and never touches the newest. The state of
+        // the soft boundary is therefore not state at all, which is what keeps SEC-02 and FR-12
+        // exactly where task Т-13-7 and task T-03-4 left them.
+        //
+        // ⚠ **A stroke of `VK_SPACE` can only have come from here.** The `Win+Space` of FR-11
+        // returns `Ignored` above and stores nothing, and `Ctrl`/`Alt`+`Space` is a command and
+        // flushes above; this is the one path by which a space reaches the ring at all, which is
+        // what makes reading the last stroke a sound test for «хвост открыт».
+        //
+        // **NFR-01 and NFR-02.** One comparison for every key that is not a space, and for the
+        // key that ends a tail, the flush that was going to happen on the previous keystroke
+        // anyway. Nothing is added to the path of an ordinary letter but the comparison.
+        // ---------------------------------------------------------------------------------
+        if key.vk == VK_SPACE.0 {
+            if self.ring.len() == 0 {
+                self.clear_ring();
+                return Recorded::Flushed;
+            }
+        } else if self.tail_is_open() {
+            self.clear_ring();
         }
 
         // ---------------------------------------------------------------------------------
@@ -1789,6 +1861,25 @@ impl Recorder {
         } else {
             Recorded::Stored
         }
+    }
+
+    /// Whether the buffer stands in «слово + хвост» — the soft boundary of FR-10, task Т-24-2.
+    ///
+    /// The whole of that state, and it is a question asked of the ring rather than a field kept
+    /// beside it: the tail is open exactly while the newest stroke is a space. See the
+    /// soft-boundary block of [`Recorder::record`] for why it is read and not remembered, and
+    /// for why a space in the ring can only ever be one this boundary put there.
+    ///
+    /// One comparison and one array read, on the path of every key that is not a space — the
+    /// same budget the rest of the function keeps (NFR-01, NFR-02).
+    fn tail_is_open(&self) -> bool {
+        let len = self.ring.len();
+
+        len != 0
+            && self
+                .ring
+                .get(len - 1)
+                .is_some_and(|stroke| stroke.vk() == VK_SPACE.0)
     }
 
     /// Flushes the buffer and overwrites it with zeroes — FR-10, SEC-02.

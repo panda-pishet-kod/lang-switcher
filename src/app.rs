@@ -2576,7 +2576,7 @@ unsafe extern "system" fn window_proc(
             // nothing. The rehook message carries nothing: the reason travels in an atomic of
             // this process, and a forged message that finds it empty does nothing at all. What a
             // forged `WM_APP_WIPE` buys is one reset of our own typing buffer, which is what
-            // every `Space` the user types already does; it is refused outright at the UI and
+            // every `Enter` the user types already does; it is refused outright at the UI and
             // watcher windows, where a ring does not exist in the first place.
             if let Some(result) = crate::watchdog::handle_watchdog_message(hwnd, message, wparam) {
                 return result;

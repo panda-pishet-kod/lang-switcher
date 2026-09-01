@@ -281,7 +281,7 @@
 //!   `guard::PROBE_BUDGET_MS` at 1550 ms in the worst case.
 //!
 //!   So what a forged one buys is: one reset of **our own** typing buffer, over memory the sender
-//!   can read neither before nor after — the operation every `Space` the user types already
+//!   can read neither before nor after — the operation every `Enter` the user types already
 //!   performs — and one reading of the system's own answer about the window that already has the
 //!   focus. Not one action is privileged, not one result is a state the sender can observe, and
 //!   the conclusion of SEC-05 stands exactly as it did; only the argument for it was false. The
@@ -302,7 +302,7 @@
 //! * `WM_TIMER` is answered only for [`LIVENESS_TIMER_ID`] and only on the thread that owns the
 //!   buffer, so a forged one aimed at another window of ours falls through to `DefWindowProcW`;
 //! * a forged [`WM_APP_WIPE`] (task Т-13-7) buys the sender one reset of **our own** typing
-//!   buffer — the operation every `Space` the user types already performs, over memory of this
+//!   buffer — the operation every `Enter` the user types already performs, over memory of this
 //!   process that the sender cannot read either before or after. There is nothing in it to
 //!   forge: it carries no timestamp, no reason and no cell to consume, so unlike the two above
 //!   it needs no emptiness to find. It is answered on the input window and on no other, which
@@ -443,7 +443,7 @@ pub const WM_APP_REHOOK: u32 = WM_APP + 9;
 ///
 /// It carries nothing at all — no timestamp, no reason and no cell to consume — so there is no
 /// emptiness for a forgery to find, and none is needed: what a forged one buys is one reset of
-/// this process's **own** ring, which is the operation every `Space` the user types already
+/// this process's **own** ring, which is the operation every `Enter` the user types already
 /// performs. The gate is therefore the role of the window alone — [`is_input_window`] — and a copy
 /// aimed at the UI or the watcher window falls through to `DefWindowProcW` and does nothing at
 /// all.
