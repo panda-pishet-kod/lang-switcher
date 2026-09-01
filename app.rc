@@ -73,16 +73,19 @@
 #define IDC_CYCLE_UP           1025
 #define IDC_CYCLE_DOWN         1026
 #define IDC_LAYOUT_NOTE        1027
-// 1029 and not 1033: CheckRadioButton walks the identifier range it is given, so the three
-// method radios must be contiguous -- and 1032 is already the delay field. Mirrored by hand
-// in src\settings.rs, like every identifier in this file.
-#define IDC_METHOD_AUTO        1029
-#define IDC_METHOD_BACKSPACE   1030
-#define IDC_METHOD_SELECTION   1031
-#define IDC_DELAY              1032
+// ⚠ **Eleven identifiers are retired here and below, not freed** — task Т-23-2, решения 81
+// и 82. The user asked for the replacement method and the three millisecond fields to leave
+// the dialog, and the two groups that held them went with them: 1029, 1030, 1031 (the method
+// radios of FR-42а), 1032 (the delay of FR-44), 1041, 1042 (the two timings of §4.7) and the
+// five statics 1099..1103 that captioned them. **The settings themselves did not go
+// anywhere** — they live on in `config.toml`, section 7 spells them, `publish_configuration`
+// reads them and the ceilings of task T-13-13 still clamp them; what left is their half of
+// the window (решение 81 п. 2, «Оставить в файле»).
+//
+// A number that once meant a control must not come to mean another one: a build installed
+// today and a build built tomorrow would then disagree about what a `WM_COMMAND` names. A new
+// control takes a new number. `tests\settings.rs` holds the eleven as a list of absences.
 #define IDC_SELECTION_ENABLED  1040
-#define IDC_CLIPBOARD_TIMEOUT  1041
-#define IDC_CLIPBOARD_RESTORE  1042
 #define IDC_EXCLUSIONS         1050
 #define IDC_EXCLUSION_NAME     1051
 #define IDC_EXCLUSION_ADD      1052
@@ -109,11 +112,8 @@
 #define IDC_PAIR_SOURCE_LABEL  1096
 #define IDC_PAIR_TARGET_LABEL  1097
 #define IDC_CYCLE_HINT         1098
-#define IDC_GROUP_REPLACEMENT  1099
-#define IDC_DELAY_LABEL        1100
-#define IDC_GROUP_SELECTION    1101
-#define IDC_CLIP_TIMEOUT_LABEL 1102
-#define IDC_CLIP_RESTORE_LABEL 1103
+// 1099..1103 — the five statics of «Замена» and «Выделение», retired by task Т-23-2 with the
+// six controls above; see the note there.
 #define IDC_GROUP_EXCLUSIONS   1104
 #define IDC_EXCLUSION_HINT     1105
 #define IDC_GROUP_DIAGNOSTICS  1106
@@ -296,7 +296,23 @@ END
 //
 // Coordinates are dialog units, so the layout follows the system font instead of a pixel
 // grid. Two columns, 200 units wide each, at x = 7 and x = 213.
-IDD_SETTINGS DIALOGEX 0, 0, 420, 385
+//
+// ⚠ **364 units tall and not the 385 of every build up to e25** — task Т-23-2, решение 83,
+// which is the user's own choice at control point К-1 off four candidate layouts rendered on
+// a stand (`scratchpad-Э23\К-1-*.png`). Removing «Замена» and dissolving «Выделение» freed
+// 144 units in the right column and cost the left one 14 — the selection switch moved into
+// «Общие» — so the arithmetic of the window changed on both sides at once:
+//
+//   left  column: «Общие» 7..101, «Горячая клавиша» 105..153, «Раскладки» 157..289;
+//   right column: «Исключения» 7..211, «Диагностика» 215..289 — level with the left;
+//   «Состояние» 293..337, the buttons at 343, the window ends at 364.
+//
+// The two numbers the user decided by eye, and neither is arbitrary: the freed space in the
+// right column goes to the **exclusions list** (43 units to 163, four rows to fifteen) so
+// that the columns end level and the window carries no hole; and «Состояние» stands **four**
+// units under the columns — the gap every other pair of groups here has — where the mock-up
+// first shown had 25. Cutting that gap is what took the window from 385 to 364.
+IDD_SETTINGS DIALOGEX 0, 0, 420, 364
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, spelled numerically like every other constant here — task
 // T-21-4, the user's finding П-1: with the window open there was no button on the task bar.
@@ -318,16 +334,18 @@ BEGIN
     // locale in force, in that order. The order is the contract: item index 0 is `system`,
     // 1 is `light`, 2 is `dark`, and src\settings.rs holds the pair of functions that own
     // this mapping. This element only stores the choice; painting arrives with T-11-4.
-    // ⚠ The three check boxes and five radio buttons of this dialog are CONTROL statements
+    // ⚠ The four check boxes and two radio buttons of this dialog are CONTROL statements
     // with BS_OWNERDRAW since task T-11-5b (FR-92а): the system glyph is not repainted by
     // any documented means, so the dialog paints the whole element itself (WM_DRAWITEM in
     // src\settings.rs). BS_OWNERDRAW is a button *type* and displaces BS_AUTOCHECKBOX /
     // BS_AUTORADIOBUTTON, which kills the self-switching on clicks and arrow keys — the
     // dialog procedure returns that behaviour by hand (BN_CLICKED, BN_SETFOCUS; the latter
-    // is why every one of the eight carries BS_NOTIFY). Coordinates are byte for byte what
-    // the AUTO* statements had, and WS_GROUP stays on exactly the elements that had it —
-    // the CheckRadioButton ranges and the arrow-key runs in src\settings.rs depend on it.
-    // ⚠ The eight former GROUPBOX statements are CONTROL statements that are **not visible
+    // is why every one of the six carries BS_NOTIFY). WS_GROUP stays on exactly the elements
+    // that had it — the CheckRadioButton range and the arrow-key run in src\settings.rs
+    // depend on it — and after task Т-23-2 there is one such run left, the layout mode: the
+    // three method radios of «Замена» carried the other, and it went out of the window with
+    // its group.
+    // ⚠ The six former GROUPBOX statements are CONTROL statements that are **not visible
     // elements at all** since task T-11-13 (FR-92а). They were owner-drawn buttons from
     // T-11-5c until the defect T-11-13 opened on: a button that covers the whole area of
     // its block takes every click on the block's empty ground, redraws itself on the click,
@@ -345,13 +363,16 @@ BEGIN
     // BS_OWNERDRAW stays for the same reason — the type is what keeps the system from ever
     // drawing a group frame — even though no WM_DRAWITEM can now reach them. No WS_TABSTOP
     // was on any group and none appears: a panel takes no focus.
-    // ⚠ 80 units and not the 66 of decision В-1 (question 55). В-1 legitimised the growth the
-    // «Оформление» row of FR-92а cost and wrote 66 down as the canon of that moment; the sound
-    // switch of FR-100 is one more row and costs 14 more, by the user's own word of 2026-09-01
-    // («место под расширение вниз модуля общие более чем достаточно»). The window itself is
-    // NOT re-cut — 420×385 stands, exactly as В-1 has it: the fourteen units come out of the
-    // 53 of air under «Раскладки», which leaves 39 there.
-    CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 7, 200, 80
+    // ⚠ 94 units. The block has grown twice by the same rule and neither growth was free:
+    // decision В-1 (question 55) wrote 66 down as the canon of the moment the «Оформление»
+    // row of FR-92а cost; the sound switch of FR-100 made it 80 by the user's own word of
+    // 2026-09-01 («место под расширение вниз модуля общие более чем достаточно»); and task
+    // Т-23-2, решение 82.2, brings the selection switch of FR-61 here — one more row of 14 —
+    // because its own group was left holding nothing else once the two clipboard timings went
+    // into the file. The units come, as they did the last time, out of the air under
+    // «Раскладки»; unlike the last time the window itself IS re-cut, and the number that
+    // moved is not this one but the gap over «Состояние» — see the header of the template.
+    CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 7, 200, 94
     CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9, SS_OWNERDRAW
     COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
@@ -376,8 +397,18 @@ BEGIN
     // the old bottom edge of the panel. That was the wrong trade and the user said so: the
     // panel had room to grow because the left column carries 53 units of air under
     // «Раскладки». Ten units like every other check box, four units of air under the combo,
-    // nine units of padding under it — the spacing «Замена» and «Выделение» already have.
+    // nine units of padding under it — the spacing the other groups already had.
     CONTROL         "Звуковой отклик", IDC_SOUND, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 68, 186, 10
+    // FR-61, FR-65 — the selection switch, and since task Т-23-2 (решение 82.2) a row of
+    // «Общие» like the three above it.
+    //
+    // It stood in a group of its own, «Выделение», together with the two clipboard timings of
+    // §4.7. Решение 81 sent those two into the file, and a group of one check box is not a
+    // group: the switch is a program-wide behaviour like autostart and sound, so it joins its
+    // sisters here and the group is gone. Ten units and fourteen below the row above — the
+    // step every check box of this block keeps; nine units of padding under it — the same
+    // padding the sound switch had when it was last.
+    CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 82, 186, 10
 
     // -- Горячая клавиша -----------------------------------------------------------------
     //
@@ -385,8 +416,8 @@ BEGIN
     // task T-08-2. The button next to it arms the capture, the field then shows the name of
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
-    CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 91, 200, 48
-    // ⚠ The five EDITTEXT of this template are 8 units tall since task T-12-3, and not the 12
+    CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 105, 200, 48
+    // ⚠ The two EDITTEXT of this template are 8 units tall since task T-12-3, and not the 12
     // of the box the mock-ups draw round them. Eight vertical units are one height of the
     // dialog font by the definition of the unit, so the control is exactly the em box of its
     // own text: a single-line EDIT lays that text along the top of its client area and no
@@ -396,87 +427,83 @@ BEGIN
     // src\settings.rs), which puts the surplus above and below the text in equal halves. Each
     // y is therefore two units lower than the box it stands in: the box, not the control, is
     // what the eye sees and what the mock-up places.
-    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 106, 32, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_HOTKEY, 48, 106, 64, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
-    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 103, 46, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_HOTKEY_NOTE, 14, 120, 186, 16, SS_OWNERDRAW
+    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 120, 32, 9, SS_OWNERDRAW
+    EDITTEXT        IDC_HOTKEY, 48, 120, 64, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 118, 117, 46, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_HOTKEY_NOTE, 14, 134, 186, 16, SS_OWNERDRAW
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
-    CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 143, 200, 132
-    CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 155, 60, 10
-    CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 155, 122, 10
-    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 171, 38, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_PAIR_SOURCE, 54, 169, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 187, 38, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_PAIR_TARGET, 54, 185, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 202, 186, 9, SS_OWNERDRAW
+    CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 157, 200, 132
+    CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 169, 60, 10
+    CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 169, 122, 10
+    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 185, 38, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_PAIR_SOURCE, 54, 183, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 201, 38, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_PAIR_TARGET, 54, 199, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 216, 186, 9, SS_OWNERDRAW
     // ⚠ No WS_BORDER since task T-11-13: the system border is a sunken rectangle drawn by
     // the system in the system's colours, and the mock-ups ask for a rounded field_border
     // frame. The frame is drawn by the dialog's own background drawing, one pixel outside
     // this rectangle — see src\settings.rs.
-    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 213, 142, 44
-    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 213, 40, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 230, 40, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LAYOUT_NOTE, 14, 260, 186, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 227, 142, 44
+    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 227, 40, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 244, 40, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LAYOUT_NOTE, 14, 274, 186, 10, SS_OWNERDRAW
 
-    // -- Замена: FR-41, FR-42, FR-42а, FR-44 ---------------------------------------------
+    // -- Исключения: FR-84 — первая группа правой колонки с задачи Т-23-2 -----------------
     //
-    // «Автоматически» stands first and carries WS_GROUP: it is the default of section 7 and
-    // the first thing the group shows. The whole right column below this group sits 13 units
-    // lower than it did before FR-42а, which is the height of the row the third radio added.
-    CONTROL         "Замена", IDC_GROUP_REPLACEMENT, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 7, 200, 71
-    CONTROL         "Автоматически (рекомендуется)", IDC_METHOD_AUTO, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 220, 19, 180, 10
-    CONTROL         "Backspace", IDC_METHOD_BACKSPACE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 32, 180, 10
-    CONTROL         "Выделение (совместимость)", IDC_METHOD_SELECTION, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 45, 180, 10
-    LTEXT           "Задержка между событиями, мс:", IDC_DELAY_LABEL, 220, 61, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_DELAY, 334, 61, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
-
-    // -- Выделение: FR-61, FR-65 ---------------------------------------------------------
-    CONTROL         "Выделение", IDC_GROUP_SELECTION, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 82, 200, 62
-    CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 94, 186, 10
-    LTEXT           "Таймаут буфера обмена, мс:", IDC_CLIP_TIMEOUT_LABEL, 220, 110, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_CLIPBOARD_TIMEOUT, 334, 110, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
-    LTEXT           "Задержка восстановления, мс:", IDC_CLIP_RESTORE_LABEL, 220, 126, 110, 9, SS_OWNERDRAW
-    EDITTEXT        IDC_CLIPBOARD_RESTORE, 334, 126, 40, 8, ES_AUTOHSCROLL | ES_NUMBER | NOT WS_BORDER
-
-    // -- Исключения: FR-84 ---------------------------------------------------------------
-    CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 148, 200, 84
+    // ⚠ The group is 204 units and its list 163, against the 84 and 43 they were up to e25 —
+    // решение 83 п. 1, the user's choice at К-1. This is where the 120 units «Замена» and
+    // «Выделение» left behind went: an exclusion list is the one thing in this window that
+    // genuinely grows with use, and the alternative candidate — both groups at their present
+    // height, the bottom of the right column left empty — is the one the user turned down.
+    // Four rows of names became fifteen, and the two columns now end level, both at 289.
+    CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 7, 200, 204
     // ⚠ The list stands one unit below the button beside it, and its own frame then lands on
     // the same row as the button's: the frame of a list is drawn LIST_FIRST_ROW_TOP above the
     // control (2 px at 96 DPI, the air of the mock-ups before the first row, task T-11-16),
     // where a button frames its own rectangle. Declared level, they came out 2 px apart, which
-    // was defect Д-3; the height goes 44 to 43 so that the bottom of the box does not move.
-    LISTBOX         IDC_EXCLUSIONS, 220, 161, 120, 43, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
-    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 160, 60, 14, BS_OWNERDRAW
-    EDITTEXT        IDC_EXCLUSION_NAME, 220, 209, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
-    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 206, 60, 14, BS_OWNERDRAW
-    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 221, 186, 9, SS_OWNERDRAW
+    // was defect Д-3; the height is one unit short of the box so that its bottom does not move.
+    LISTBOX         IDC_EXCLUSIONS, 220, 20, 120, 163, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 19, 60, 14, BS_OWNERDRAW
+    EDITTEXT        IDC_EXCLUSION_NAME, 220, 188, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 185, 60, 14, BS_OWNERDRAW
+    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 200, 186, 9, SS_OWNERDRAW
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
-    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 236, 200, 74
-    CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 248, 90, 10
-    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 246, 86, 14, BS_OWNERDRAW
-    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 264, 60, 9, SS_OWNERDRAW
+    //
+    // Unchanged in every number but its origin: 74 units as it always was, and its bottom
+    // edge is what makes the right column end level with the left (215 + 74 = 289).
+    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 215, 200, 74
+    CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 227, 90, 10
+    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 225, 86, 14, BS_OWNERDRAW
+    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 243, 60, 9, SS_OWNERDRAW
     // ⚠ The second two-line label — 16 units for a path that does not fit on one line. Its
     // DT_WORDBREAK is load-bearing exactly as IDC_LANGUAGE_RESTART's is; task T-11-18.
-    // y = 273 is the generator's own number (ui.ps1: x=220, y=273, w=186, h=16); the 275 it
-    // carried until task T-12-3 put the path two units low.
-    LTEXT           "", IDC_LOG_DIR, 220, 273, 186, 16, SS_OWNERDRAW
+    // Nine units under its own caption, which is the generator's own step (ui.ps1: y = 264
+    // and y = 273 in the numbering of the window this group had before Т-23-2).
+    LTEXT           "", IDC_LOG_DIR, 220, 252, 186, 16, SS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
-    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 314, 406, 44
-    LTEXT           "", IDC_STATE_HOOK, 14, 326, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_LAYOUTS, 14, 337, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_AUTOSTART, 14, 348, 392, 9, SS_OWNERDRAW
+    //
+    // ⚠ Four units under the columns — решение 83 п. 3, the user's word at К-1 («расстояние
+    // между блоком состояние и верхними уменьшить до стандартной величины»). Four is that
+    // standard: it is the gap between «Общие» and «Горячей клавишей», between «Горячей
+    // клавишей» and «Раскладками», and between «Исключениями» и «Диагностикой». It was 25 in
+    // the candidate first shown and 39 in every build up to e25.
+    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 293, 406, 44
+    LTEXT           "", IDC_STATE_HOOK, 14, 305, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_LAYOUTS, 14, 316, 392, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_AUTOSTART, 14, 327, 392, 9, SS_OWNERDRAW
 
     // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
     // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
     // survive owner drawing. The behaviour survives by the documented replacement: the dialog
     // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
     // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
-    PUSHBUTTON      "ОК", IDOK, 253, 364, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Отмена", IDCANCEL, 307, 364, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Применить", IDC_APPLY, 361, 364, 52, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 253, 343, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 307, 343, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 361, 343, 52, 14, BS_OWNERDRAW
 END
 
 // ---------------------------------------------------------------------------------------
@@ -599,14 +626,14 @@ END
 #define IDS_CYCLE_HINT          3014
 #define IDS_CYCLE_UP            3015
 #define IDS_CYCLE_DOWN          3016
-#define IDS_GROUP_REPLACEMENT   3017
-#define IDS_METHOD_BACKSPACE    3018
-#define IDS_METHOD_SELECTION    3019
-#define IDS_DELAY_LABEL         3020
-#define IDS_GROUP_SELECTION     3021
+// ⚠ **3017..3021, 3023, 3024 and 3056 are retired, not free** — task Т-23-2, решения 81 и
+// 82. They were «Замена», «Backspace», «Выделение (совместимость)», «Задержка между
+// событиями, мс:», «Выделение», «Таймаут буфера обмена, мс:», «Задержка восстановления,
+// мс:» and «Автоматически (рекомендуется)»: the captions of the two groups that left the
+// dialog. The rows are gone from both tables below and the holes stay — a string identifier
+// that moved would change what an **installed** build shows, which is the same rule
+// IDS_SOUND was numbered by. A new string takes a new number.
 #define IDS_SELECTION_ENABLED   3022
-#define IDS_CLIPBOARD_TIMEOUT   3023
-#define IDS_CLIPBOARD_RESTORE   3024
 #define IDS_GROUP_EXCLUSIONS    3025
 #define IDS_EXCLUSION_REMOVE    3026
 #define IDS_EXCLUSION_ADD       3027
@@ -638,11 +665,9 @@ END
 #define IDS_LAYOUT_WORD_SOURCE  3053
 #define IDS_LAYOUT_WORD_TARGET  3054
 #define IDS_LOG_DIR_MISSING     3055
-// The third radio of the «Замена» group -- FR-42а. Appended to the numbering rather than
-// renumbering the two methods above: every identifier here is mirrored by hand in
-// src\settings.rs, and a renumbering is a silent mismatch waiting to happen. 3056 opens the
-// next sixteen-string block, contiguously -- no gap, so no empty block between.
-#define IDS_METHOD_AUTO         3056
+// 3056 was IDS_METHOD_AUTO, the third radio of the «Замена» group of FR-42а — retired by
+// task Т-23-2 with the group; see the note at 3017 above. The number opened the block the
+// four rows below stand in and the block is still opened by them, so nothing here moves.
 // The appearance row of FR-92а, task T-11-3: the label and the three items of the combo
 // box. They continue the sixteen-string block 3056 opened, contiguously, so no empty block
 // appears. The order of the three items is a contract: the dialog adds them to the combo in
@@ -707,14 +732,7 @@ BEGIN
     IDS_CYCLE_HINT          "Цикл: галочка — участие, кнопки — порядок"
     IDS_CYCLE_UP            "Выше"
     IDS_CYCLE_DOWN          "Ниже"
-    IDS_GROUP_REPLACEMENT   "Замена"
-    IDS_METHOD_BACKSPACE    "Backspace"
-    IDS_METHOD_SELECTION    "Выделение (совместимость)"
-    IDS_DELAY_LABEL         "Задержка между событиями, мс:"
-    IDS_GROUP_SELECTION     "Выделение"
     IDS_SELECTION_ENABLED   "Конвертировать выделенный текст"
-    IDS_CLIPBOARD_TIMEOUT   "Таймаут буфера обмена, мс:"
-    IDS_CLIPBOARD_RESTORE   "Задержка восстановления, мс:"
     IDS_GROUP_EXCLUSIONS    "Исключения"
     IDS_EXCLUSION_REMOVE    "Удалить"
     IDS_EXCLUSION_ADD       "Добавить"
@@ -746,7 +764,6 @@ BEGIN
     IDS_LAYOUT_WORD_SOURCE  "источник"
     IDS_LAYOUT_WORD_TARGET  "цель"
     IDS_LOG_DIR_MISSING     "%APPDATA% не задан — журнал писать некуда"
-    IDS_METHOD_AUTO         "Автоматически (рекомендуется)"
     IDS_THEME_LABEL         "Оформление:"
     IDS_THEME_SYSTEM        "Как в системе"
     IDS_THEME_LIGHT         "Светлое"
@@ -790,14 +807,7 @@ BEGIN
     IDS_CYCLE_HINT          "Cycle: the tick takes part, the buttons set the order"
     IDS_CYCLE_UP            "Up"
     IDS_CYCLE_DOWN          "Down"
-    IDS_GROUP_REPLACEMENT   "Replacement"
-    IDS_METHOD_BACKSPACE    "Backspace"
-    IDS_METHOD_SELECTION    "Selection (compatibility)"
-    IDS_DELAY_LABEL         "Delay between events, ms:"
-    IDS_GROUP_SELECTION     "Selection"
     IDS_SELECTION_ENABLED   "Convert the selected text"
-    IDS_CLIPBOARD_TIMEOUT   "Clipboard timeout, ms:"
-    IDS_CLIPBOARD_RESTORE   "Restore delay, ms:"
     IDS_GROUP_EXCLUSIONS    "Exclusions"
     IDS_EXCLUSION_REMOVE    "Remove"
     IDS_EXCLUSION_ADD       "Add"
@@ -829,7 +839,6 @@ BEGIN
     IDS_LAYOUT_WORD_SOURCE  "source"
     IDS_LAYOUT_WORD_TARGET  "target"
     IDS_LOG_DIR_MISSING     "%APPDATA% is not set — there is nowhere to write the journal"
-    IDS_METHOD_AUTO         "Automatic (recommended)"
     IDS_THEME_LABEL         "Appearance:"
     IDS_THEME_SYSTEM        "Match system"
     IDS_THEME_LIGHT         "Light"

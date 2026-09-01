@@ -1368,23 +1368,13 @@ pub const IDS_CYCLE_HINT: u16 = 3014;
 pub const IDS_CYCLE_UP: u16 = 3015;
 /// The «down» button of the cycle order.
 pub const IDS_CYCLE_DOWN: u16 = 3016;
-/// «Замена» — the fourth group of FR-92.
-pub const IDS_GROUP_REPLACEMENT: u16 = 3017;
-/// The `Backspace` method of FR-41.
-pub const IDS_METHOD_BACKSPACE: u16 = 3018;
-/// The selection method of FR-42.
-pub const IDS_METHOD_SELECTION: u16 = 3019;
-/// The label of the inter-event delay field of FR-44.
-pub const IDS_DELAY_LABEL: u16 = 3020;
-/// «Выделение» — the fifth group of FR-92.
-pub const IDS_GROUP_SELECTION: u16 = 3021;
-/// The tick of FR-65.
+// ⚠ **3017..3021, 3023, 3024 and 3056 are retired, not free** — task Т-23-2, решения 81 и
+// 82. They were the captions of «Замена» and «Выделение» and of everything those two groups
+// held. The rows are gone from both tables of `app.rc` and the holes stay: a string
+// identifier that moved would change what an **installed** build shows.
+/// The tick of FR-65 — a row of «Общие» since task Т-23-2, решение 82.2.
 pub const IDS_SELECTION_ENABLED: u16 = 3022;
-/// The label of the clipboard timeout field.
-pub const IDS_CLIPBOARD_TIMEOUT: u16 = 3023;
-/// The label of the clipboard restore delay field.
-pub const IDS_CLIPBOARD_RESTORE: u16 = 3024;
-/// «Исключения» — the sixth group of FR-92.
+/// «Исключения» — the fourth group of FR-92 since task Т-23-2.
 pub const IDS_GROUP_EXCLUSIONS: u16 = 3025;
 /// The button that takes a process name out of the list of FR-84.
 pub const IDS_EXCLUSION_REMOVE: u16 = 3026;
@@ -1446,11 +1436,9 @@ pub const IDS_LAYOUT_WORD_SOURCE: u16 = 3053;
 pub const IDS_LAYOUT_WORD_TARGET: u16 = 3054;
 /// What the journal folder line says when `%APPDATA%` is not set.
 pub const IDS_LOG_DIR_MISSING: u16 = 3055;
-/// The automatic method of FR-42а — the third radio button of the «Замена» group, and the
-/// recommended one. Appended to the block rather than renumbering the two methods above:
-/// every identifier here is mirrored by hand in `app.rc`, and a renumbering would be a
-/// silent mismatch waiting to happen.
-pub const IDS_METHOD_AUTO: u16 = 3056;
+// 3056 was `IDS_METHOD_AUTO`, the automatic method of FR-42а — retired by task Т-23-2 with
+// its group; see the note at 3017 above. It opened the sixteen-string block the four rows
+// below stand in, and they go on opening it, so nothing here moves.
 /// The label of the appearance combo box — FR-92а, task T-11-3.
 pub const IDS_THEME_LABEL: u16 = 3057;
 /// The «Как в системе» item of the appearance combo box. The three items 3058–3060 are a
@@ -1498,7 +1486,7 @@ pub const IDS_SOUND: u16 = 3078;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 73] = [
+pub const INTERFACE_STRINGS: [u16; 65] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -1516,14 +1504,7 @@ pub const INTERFACE_STRINGS: [u16; 73] = [
     IDS_CYCLE_HINT,
     IDS_CYCLE_UP,
     IDS_CYCLE_DOWN,
-    IDS_GROUP_REPLACEMENT,
-    IDS_METHOD_BACKSPACE,
-    IDS_METHOD_SELECTION,
-    IDS_DELAY_LABEL,
-    IDS_GROUP_SELECTION,
     IDS_SELECTION_ENABLED,
-    IDS_CLIPBOARD_TIMEOUT,
-    IDS_CLIPBOARD_RESTORE,
     IDS_GROUP_EXCLUSIONS,
     IDS_EXCLUSION_REMOVE,
     IDS_EXCLUSION_ADD,
@@ -1555,7 +1536,6 @@ pub const INTERFACE_STRINGS: [u16; 73] = [
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,
     IDS_LOG_DIR_MISSING,
-    IDS_METHOD_AUTO,
     IDS_THEME_LABEL,
     IDS_THEME_SYSTEM,
     IDS_THEME_LIGHT,
@@ -2070,17 +2050,14 @@ const IDC_CYCLE_LIST: i32 = 1024;
 const IDC_CYCLE_UP: i32 = 1025;
 const IDC_CYCLE_DOWN: i32 = 1026;
 const IDC_LAYOUT_NOTE: i32 = 1027;
-// 1029 and not 1033: `check_radio` walks the identifier range it is given, so the three
-// method radios have to be contiguous — and 1032 is already the delay field. `auto` sits in
-// front of `backspace` because it is the default of section 7 and the first thing the group
-// shows, and the free number in front happened to be there. Mirrored in `app.rc` by hand.
-const IDC_METHOD_AUTO: i32 = 1029;
-const IDC_METHOD_BACKSPACE: i32 = 1030;
-const IDC_METHOD_SELECTION: i32 = 1031;
-const IDC_DELAY: i32 = 1032;
+// ⚠ **Eleven identifiers are retired here and below, not freed** — task Т-23-2, решения 81
+// и 82: 1029, 1030, 1031 (the method radios of FR-42а), 1032 (the delay of FR-44), 1041,
+// 1042 (the two timings of §4.7) and the five statics 1099..1103 that captioned them. The
+// settings themselves stay in `config.toml` — section 7 spells them, `publish_configuration`
+// reads them, the ceilings of T-13-13 clamp them; only the controls left. A new control
+// takes a new number, for the reason `app.rc` writes down at the same place: a number that
+// changed meaning would make an installed build and a new one disagree about a `WM_COMMAND`.
 const IDC_SELECTION_ENABLED: i32 = 1040;
-const IDC_CLIPBOARD_TIMEOUT: i32 = 1041;
-const IDC_CLIPBOARD_RESTORE: i32 = 1042;
 const IDC_EXCLUSIONS: i32 = 1050;
 const IDC_EXCLUSION_NAME: i32 = 1051;
 const IDC_EXCLUSION_ADD: i32 = 1052;
@@ -2104,11 +2081,8 @@ const IDC_GROUP_LAYOUTS: i32 = 1095;
 const IDC_PAIR_SOURCE_LABEL: i32 = 1096;
 const IDC_PAIR_TARGET_LABEL: i32 = 1097;
 const IDC_CYCLE_HINT: i32 = 1098;
-const IDC_GROUP_REPLACEMENT: i32 = 1099;
-const IDC_DELAY_LABEL: i32 = 1100;
-const IDC_GROUP_SELECTION: i32 = 1101;
-const IDC_CLIP_TIMEOUT_LABEL: i32 = 1102;
-const IDC_CLIP_RESTORE_LABEL: i32 = 1103;
+// 1099..1103 — the five statics of «Замена» and «Выделение», retired by task Т-23-2 together
+// with the six controls above; see the note there.
 const IDC_GROUP_EXCLUSIONS: i32 = 1104;
 const IDC_EXCLUSION_HINT: i32 = 1105;
 const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
@@ -2159,7 +2133,7 @@ pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
 /// Every control of the dialog whose text is a fixed string of the interface, and the string
 /// that belongs in it — FR-94.
 ///
-/// A table and not thirty-eight calls, because this is exactly the list a reader wants to see
+/// A table and not thirty calls, because this is exactly the list a reader wants to see
 /// in one place and exactly the list a test has to walk: `tests\settings.rs` checks that every
 /// control named here exists in the template of the built binary and that every string named
 /// here exists in **both** tables of it.
@@ -2174,6 +2148,9 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_THEME_LABEL, IDS_THEME_LABEL),
     (IDC_LANGUAGE_RESTART, IDS_LANGUAGE_RESTART),
     (IDC_SOUND, IDS_SOUND),
+    // A row of «Общие» since task Т-23-2, решение 82.2 — the group «Выделение» it used to
+    // belong to is gone, and the table follows the window.
+    (IDC_SELECTION_ENABLED, IDS_SELECTION_ENABLED),
     (IDC_GROUP_HOTKEY, IDS_GROUP_HOTKEY),
     (IDC_HOTKEY_LABEL, IDS_HOTKEY_LABEL),
     (IDC_HOTKEY_CAPTURE, IDS_HOTKEY_SET),
@@ -2185,15 +2162,6 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_CYCLE_HINT, IDS_CYCLE_HINT),
     (IDC_CYCLE_UP, IDS_CYCLE_UP),
     (IDC_CYCLE_DOWN, IDS_CYCLE_DOWN),
-    (IDC_GROUP_REPLACEMENT, IDS_GROUP_REPLACEMENT),
-    (IDC_METHOD_AUTO, IDS_METHOD_AUTO),
-    (IDC_METHOD_BACKSPACE, IDS_METHOD_BACKSPACE),
-    (IDC_METHOD_SELECTION, IDS_METHOD_SELECTION),
-    (IDC_DELAY_LABEL, IDS_DELAY_LABEL),
-    (IDC_GROUP_SELECTION, IDS_GROUP_SELECTION),
-    (IDC_SELECTION_ENABLED, IDS_SELECTION_ENABLED),
-    (IDC_CLIP_TIMEOUT_LABEL, IDS_CLIPBOARD_TIMEOUT),
-    (IDC_CLIP_RESTORE_LABEL, IDS_CLIPBOARD_RESTORE),
     (IDC_GROUP_EXCLUSIONS, IDS_GROUP_EXCLUSIONS),
     (IDC_EXCLUSION_REMOVE, IDS_EXCLUSION_REMOVE),
     (IDC_EXCLUSION_ADD, IDS_EXCLUSION_ADD),
@@ -2219,8 +2187,10 @@ const OK_COMMAND: i32 = IDOK.0;
 /// presses `Esc` or closes the window, which is why «Отмена» needs no separate handling.
 const CANCEL_COMMAND: i32 = IDCANCEL.0;
 
-/// Digits a millisecond field accepts, so that [`parse_ms`] cannot meet a number that overflows.
-const MS_FIELD_DIGITS: usize = 9;
+// `MS_FIELD_DIGITS` — nine, the digits a millisecond field accepted — stood here until task
+// Т-23-2. Решение 81 took all three millisecond fields off the window, so there is no field
+// left to limit; the numbers are typed into `config.toml` by hand and bounded where they
+// have always really been bounded, by the ceilings of task T-13-13 in `publish_configuration`.
 
 /// The most bytes of UTF-8 that one **UTF-16 code unit** can become.
 ///
@@ -2358,22 +2328,11 @@ pub fn spec_text(layout: LayoutId, session: &[LayoutId]) -> String {
     }
 }
 
-/// Reads a millisecond field.
-///
-/// An empty field is zero, which is the documented default of `inter_event_delay_ms` and a
-/// value the user may legitimately want. Anything the parser refuses keeps `fallback`, the
-/// value that was there before — the field is limited to [`MS_FIELD_DIGITS`] digits and
-/// `ES_NUMBER` admits nothing but digits, so that branch is unreachable through the dialog and
-/// exists to keep the function total.
-pub fn parse_ms(text: &str, fallback: u32) -> u32 {
-    let trimmed = text.trim();
-
-    if trimmed.is_empty() {
-        return 0;
-    }
-
-    trimmed.parse::<u32>().unwrap_or(fallback)
-}
+// `parse_ms` — the reader of a millisecond field, which turned the text of an `ES_NUMBER`
+// edit back into a number and kept the old value for anything it refused — stood here until
+// task Т-23-2. Решение 81 took the three fields it read off the window, and a parser with no
+// field to parse is dead weight; the values are read out of `config.toml` by serde now, and
+// bounded by the ceilings of task T-13-13.
 
 /// Whether a virtual key produces text, which FR-92 asks to warn about.
 ///
@@ -2839,36 +2798,35 @@ fn post_system_theme(hwnd: HWND) {
     }
 }
 
-/// The nine owner-drawn check boxes and radio buttons whose check state the dialog keeps
+/// The six owner-drawn check boxes and radio buttons whose check state the dialog keeps
 /// itself — FR-92а, task T-11-5b-2. The storage-side list, beside the drawing-side list of
-/// [`glyph_kind`]: both name the same nine controls of the template.
+/// [`glyph_kind`]: both name the same six controls of the template.
 ///
-/// Eight until task Т-21-5 added the sound switch of FR-100.
+/// Eight until task Т-21-5 added the sound switch of FR-100, nine with it, and six since
+/// task Т-23-2 took the three method radios of «Замена» off the window. In template order:
+/// the three check boxes of «Общие», the one radio run that is left, and the journal switch.
 ///
 /// Public for the same reason the colour tables are: `tests\settings.rs` exercises the
 /// store over these very identifiers, without a live window.
-pub const GLYPH_CHECK_CONTROLS: [i32; 9] = [
+pub const GLYPH_CHECK_CONTROLS: [i32; 6] = [
     IDC_AUTOSTART,
     IDC_SOUND,
+    IDC_SELECTION_ENABLED,
     IDC_MODE_PAIR,
     IDC_MODE_CYCLE,
-    IDC_METHOD_AUTO,
-    IDC_METHOD_BACKSPACE,
-    IDC_METHOD_SELECTION,
-    IDC_SELECTION_ENABLED,
     IDC_LOG_ENABLED,
 ];
 
-/// The check state of the eight owner-drawn check boxes and radio buttons — FR-92а,
+/// The check state of the six owner-drawn check boxes and radio buttons — FR-92а,
 /// task T-11-5b-2.
 ///
 /// A button of type `BS_OWNERDRAW` keeps no check state of its own: the button-message
 /// pair that stores and answers it for the automatic types ignores the write and answers
 /// «снят» for an owner-drawn one — which the final sweep of the live acceptance saw as
-/// all eight glyphs drawn unchecked whatever the configuration said. This store is that
+/// all the glyphs drawn unchecked whatever the configuration said. This store is that
 /// state, kept by the dialog itself: a fixed array of «идентификатор → взведён» pairs —
-/// the elements are eight and known, so no map — and it is the *only* truth about the
-/// eight: nothing asks the controls, so nothing can quietly disagree with it.
+/// the elements are six and known, so no map — and it is the *only* truth about the
+/// six: nothing asks the controls, so nothing can quietly disagree with it.
 ///
 /// The flag sits in a [`Cell`] so that a shared reference reads and writes it, and that
 /// interior mutability is load-bearing, not convenience: `fill_dialog` writes the store
@@ -2883,11 +2841,11 @@ pub const GLYPH_CHECK_CONTROLS: [i32; 9] = [
 /// `None`, and [`is_checked`] turns that into «снят».
 pub struct GlyphChecks {
     /// The pairs, in template order. The identifier column never changes after [`Self::new`].
-    entries: [(i32, Cell<bool>); 9],
+    entries: [(i32, Cell<bool>); 6],
 }
 
 impl GlyphChecks {
-    /// The eight known identifiers, every one «снят» — the state of the dialog before
+    /// The six known identifiers, every one «снят» — the state of the dialog before
     /// `fill_dialog` writes the configuration in.
     pub fn new() -> Self {
         Self {
@@ -2895,7 +2853,7 @@ impl GlyphChecks {
         }
     }
 
-    /// Writes one element's state. An identifier outside the eight is dropped — see the
+    /// Writes one element's state. An identifier outside the six is dropped — see the
     /// type's own documentation.
     pub fn set(&self, control: i32, on: bool) {
         if let Some((_, cell)) = self.entries.iter().find(|(id, _)| *id == control) {
@@ -2903,7 +2861,7 @@ impl GlyphChecks {
         }
     }
 
-    /// Reads one element's state; «снят» for an identifier outside the eight.
+    /// Reads one element's state; «снят» for an identifier outside the six.
     pub fn get(&self, control: i32) -> bool {
         self.entries
             .iter()
@@ -3367,15 +3325,18 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
 
 /// The `SS_OWNERDRAW` labels of the settings template — FR-92а, task T-11-18.
 ///
-/// The single place the eighteen are listed on the drawing side, and the identifier gate the
+/// The single place the fifteen are listed on the drawing side, and the identifier gate the
 /// last sentence of SEC-05 asks for: a `WM_DRAWITEM` naming `ODT_STATIC` and anything else is
 /// refused before a DC is touched. Mirrored by hand from the `LTEXT` rows of `app.rc`, exactly
 /// as [`GROUP_BOXES`] and [`COMBO_BOXES`] are, and a test compares this list against the
 /// statics of the **built** template so the two cannot drift apart.
 ///
+/// Eighteen until task Т-23-2 took the three millisecond captions off the window with their
+/// fields.
+///
 /// ⚠ This is a list of *controls*, not of colours: the colour role of every one of them comes
 /// from [`static_color_role`], which task T-11-4 wrote and this task reuses unchanged.
-pub const OWNER_DRAWN_LABELS: [i32; 18] = [
+pub const OWNER_DRAWN_LABELS: [i32; 15] = [
     IDC_LANGUAGE_LABEL,
     IDC_THEME_LABEL,
     IDC_LANGUAGE_RESTART,
@@ -3385,9 +3346,6 @@ pub const OWNER_DRAWN_LABELS: [i32; 18] = [
     IDC_PAIR_TARGET_LABEL,
     IDC_CYCLE_HINT,
     IDC_LAYOUT_NOTE,
-    IDC_DELAY_LABEL,
-    IDC_CLIP_TIMEOUT_LABEL,
-    IDC_CLIP_RESTORE_LABEL,
     IDC_EXCLUSION_HINT,
     IDC_LOG_DIR_LABEL,
     IDC_LOG_DIR,
@@ -3517,36 +3475,37 @@ pub fn about_button_colors(control: i32, hot: bool, pressed: bool, disabled: boo
 }
 
 /// The glyph kind of one control identifier, `None` for everything that is not one of the
-/// nine owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
+/// six owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
 ///
-/// The single place the nine are listed on the drawing side; the `WM_DRAWITEM` handler
+/// The single place the six are listed on the drawing side; the `WM_DRAWITEM` handler
 /// branches on this before its push-button path. Eight until task Т-21-5 added the sound
-/// switch of FR-100.
+/// switch of FR-100, nine with it, six since task Т-23-2 took the method radios of «Замена»
+/// off the window — the layout mode is the one radio run the dialog has left.
 fn glyph_kind(control: i32) -> Option<GlyphKind> {
     match control {
         IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED => {
             Some(GlyphKind::CheckBox)
         }
-        IDC_MODE_PAIR | IDC_MODE_CYCLE | IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE
-        | IDC_METHOD_SELECTION => Some(GlyphKind::RadioButton),
+        IDC_MODE_PAIR | IDC_MODE_CYCLE => Some(GlyphKind::RadioButton),
         _ => None,
     }
 }
 
-/// The eight group panels of FR-92 — FR-92а, tasks T-11-5c and T-11-13.
+/// The six group panels of FR-92 — FR-92а, tasks T-11-5c and T-11-13.
 ///
-/// The single place the eight are listed. Since task T-11-13 they are not visible elements
+/// The single place the six are listed. Since task T-11-13 they are not visible elements
 /// at all (`NOT WS_VISIBLE` in `app.rc`) and no `WM_DRAWITEM` can reach them: what reads
 /// this list now is [`background_figure`], which tells the dialog's own background drawing
 /// that the rectangle of one of these controls is a panel — and [`collect_panel_children`],
 /// which reads it to split the dialog's children into the panels and the controls that may
 /// lie on one.
-pub const GROUP_BOXES: [i32; 8] = [
+///
+/// Eight until task Т-23-2: «Замена» left the dialog whole and «Выделение» was dissolved
+/// into «Общие» (решения 81 и 82).
+pub const GROUP_BOXES: [i32; 6] = [
     IDC_GROUP_GENERAL,
     IDC_GROUP_HOTKEY,
     IDC_GROUP_LAYOUTS,
-    IDC_GROUP_REPLACEMENT,
-    IDC_GROUP_SELECTION,
     IDC_GROUP_EXCLUSIONS,
     IDC_GROUP_DIAGNOSTICS,
     IDC_GROUP_STATE,
@@ -6306,18 +6265,17 @@ pub fn background_figure(control: i32) -> Option<BackgroundFigure> {
     None
 }
 
-/// The five input fields and two lists that lost `WS_BORDER` in task T-11-13 — п. 2.3.
+/// The two input fields and two lists that lost `WS_BORDER` in task T-11-13 — п. 2.3.
 ///
-/// The system border was a sunken rectangle in the system's colours; these seven now carry
+/// The system border was a sunken rectangle in the system's colours; these four now carry
 /// the rounded [`theme::Palette::field_border`] frame the mock-ups show, drawn by the
 /// dialog's background one pixel outside each rectangle. The list is what
-/// [`background_figure`] answers `Field` for, and a test reads the same seven identifiers
+/// [`background_figure`] answers `Field` for, and a test reads the same four identifiers
 /// out of the built binary to check that not one of them kept `WS_BORDER`.
-pub const FRAMED_FIELDS: [i32; 7] = [
+///
+/// Seven until task Т-23-2 took the three `ES_NUMBER` millisecond fields off the window.
+pub const FRAMED_FIELDS: [i32; 4] = [
     IDC_HOTKEY,
-    IDC_DELAY,
-    IDC_CLIPBOARD_TIMEOUT,
-    IDC_CLIPBOARD_RESTORE,
     IDC_EXCLUSION_NAME,
     IDC_EXCLUSIONS,
     IDC_CYCLE_LIST,
@@ -8229,19 +8187,14 @@ unsafe fn patch_list_corners(list: HWND) {
 /// Air between the text of the closed part and the chevron, in mock-up pixels.
 pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
 
-/// The five input fields of the dialog — the ones [`set_field_margins`] gives the text inset
+/// The two input fields of the dialog — the ones [`set_field_margins`] gives the text inset
 /// of the mock-ups to.
 ///
-/// All five are `EDITTEXT` of the template and all five are drawn by the dialog's own
-/// background as a rounded field (task T-11-13), so all five put their text where this file
-/// says and not where a native edit would.
-const TEXT_FIELDS: [i32; 5] = [
-    IDC_HOTKEY,
-    IDC_DELAY,
-    IDC_CLIPBOARD_TIMEOUT,
-    IDC_CLIPBOARD_RESTORE,
-    IDC_EXCLUSION_NAME,
-];
+/// Both are `EDITTEXT` of the template and both are drawn by the dialog's own background as
+/// a rounded field (task T-11-13), so both put their text where this file says and not where
+/// a native edit would. Five until task Т-23-2 took the three millisecond fields off the
+/// window.
+const TEXT_FIELDS: [i32; 2] = [IDC_HOTKEY, IDC_EXCLUSION_NAME];
 
 /// Puts [`FIELD_TEXT_INSET_DLU`] dialog units of air on both sides of the text of every input
 /// field — п. 2 of task T-11-16, the first of the three places that inset lives.
@@ -8281,27 +8234,21 @@ fn set_field_margins(hwnd: HWND) {
     }
 }
 
-/// The six controls that draw their **own** text and are therefore the only ones a face has to
-/// be handed to — the five input fields of [`TEXT_FIELDS`] and the layout list.
+/// The three controls that draw their **own** text and are therefore the only ones a face has
+/// to be handed to — the two input fields of [`TEXT_FIELDS`] and the layout list.
 ///
 /// Everything else in this window is drawn by this file, which selects the face into the DC of
-/// the message; these six never see that DC. See the ⚠ of the antialiasing section for why the
-/// two kinds cannot be treated the same way.
+/// the message; these three never see that DC. See the ⚠ of the antialiasing section for why
+/// the two kinds cannot be treated the same way.
 ///
 /// Public for the reason [`FRAMED_FIELDS`] is: `tests\settings.rs` reads the classes of the
 /// template and asserts that this list is **exactly** the controls of the window that draw
 /// their own text — every `EDIT` of the template and the one `SysListView32` — so a control
 /// added to the template later cannot quietly stay behind on the manager's ClearType.
-pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] = [
-    IDC_HOTKEY,
-    IDC_DELAY,
-    IDC_CLIPBOARD_TIMEOUT,
-    IDC_CLIPBOARD_RESTORE,
-    IDC_EXCLUSION_NAME,
-    IDC_CYCLE_LIST,
-];
+pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] =
+    [IDC_HOTKEY, IDC_EXCLUSION_NAME, IDC_CYCLE_LIST];
 
-/// Hands [`DialogFonts::text`] to the six controls of [`CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`] —
+/// Hands [`DialogFonts::text`] to the three controls of [`CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`] —
 /// FR-92а, task T-11-20, the last text of the window still set on the manager's ClearType.
 ///
 /// # Why this is not a change of metrics — the measurement, not the argument
@@ -8327,7 +8274,7 @@ pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] = [
 /// on the screen, so the repaint it asks for costs nothing; asking for it is what keeps the
 /// call correct if it is ever made again while the window is visible.
 ///
-/// `None` — the faces could not be made — hands over nothing and leaves all six on the
+/// `None` — the faces could not be made — hands over nothing and leaves all three on the
 /// manager's own face, which is what they were on before this task (NFR-13).
 fn hand_our_face_to_the_controls_that_draw_their_own_text(hwnd: HWND, face: Option<HFONT>) {
     let Some(face) = face else {
@@ -8409,6 +8356,9 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
     // FR-100, task Т-21-5.
     set_check(hwnd, IDC_SOUND, state.working.feedback.sound);
+    // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
+    // timings that stood beside it are in `config.toml` and on no control (решение 81).
+    set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
     send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
     combo_add(hwnd, IDC_LANGUAGE, "Русский");
     combo_add(hwnd, IDC_LANGUAGE, "English");
@@ -8448,39 +8398,6 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 
     // Section «Раскладки» of FR-92 — FR-30, FR-31, FR-35.
     fill_layouts(hwnd, state);
-
-    // Section «Замена» of FR-92 — FR-41, FR-42, FR-42а, FR-44.
-    let method = match state.working.replacement.method {
-        ReplacementMethod::Auto => IDC_METHOD_AUTO,
-        ReplacementMethod::Backspace => IDC_METHOD_BACKSPACE,
-        ReplacementMethod::Selection => IDC_METHOD_SELECTION,
-    };
-    check_radio(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION, method);
-    limit_text(hwnd, IDC_DELAY, MS_FIELD_DIGITS);
-    set_text(
-        hwnd,
-        IDC_DELAY,
-        &state.working.replacement.inter_event_delay_ms.to_string(),
-    );
-
-    // Section «Выделение» of FR-92 — FR-61 and FR-65.
-    set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
-    limit_text(hwnd, IDC_CLIPBOARD_TIMEOUT, MS_FIELD_DIGITS);
-    limit_text(hwnd, IDC_CLIPBOARD_RESTORE, MS_FIELD_DIGITS);
-    set_text(
-        hwnd,
-        IDC_CLIPBOARD_TIMEOUT,
-        &state.working.selection.clipboard_timeout_ms.to_string(),
-    );
-    set_text(
-        hwnd,
-        IDC_CLIPBOARD_RESTORE,
-        &state
-            .working
-            .selection
-            .clipboard_restore_delay_ms
-            .to_string(),
-    );
 
     // Section «Исключения» of FR-92 — FR-84.
     send_to(hwnd, IDC_EXCLUSIONS, LB_RESETCONTENT, 0, 0);
@@ -8614,12 +8531,24 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
 /// Reads every control back into the working configuration.
 ///
 /// The configuration it writes into is the one the dialog was opened with, so a field FR-92
-/// does not show — `general.enabled`, `[buffer] capacity`, `schema_version` — survives the
-/// round trip untouched. That is not a detail: writing the file replaces it whole.
+/// does not show survives the round trip untouched. That is not a detail: writing the file
+/// replaces it whole.
+///
+/// The family used to be three — `general.enabled`, `[buffer] capacity`, `schema_version` —
+/// and task Т-23-2 (решения 81 и 82) made it seven: `[replacement] method` of FR-42/FR-42а,
+/// `[replacement] inter_event_delay_ms` of FR-44 and the two timings of §4.7,
+/// `[selection] clipboard_timeout_ms` and `clipboard_restore_delay_ms`, are now edited in
+/// `config.toml` and shown on no control. They are safe here precisely because **this
+/// function does not name them**: an absent control answers «снят» to `is_checked` and an
+/// empty string to `get_text`, so a line left behind would quietly write a default over the
+/// user's own number on the first press of «ОК». `tests\settings.rs` sweeps this function's
+/// body for the four names for that reason.
 fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.general.autostart = is_checked(hwnd, IDC_AUTOSTART);
     // FR-100, task Т-21-5.
     state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
+    // FR-61, FR-65 — a row of «Общие» since task Т-23-2.
+    state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
     state.working.general.language = match send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0) {
         1 => Language::En,
         _ => Language::Ru,
@@ -8647,31 +8576,6 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     read_cycle_checks(hwnd, &mut state.rows);
     state.working.layouts.cycle = cycle_from_rows(&state.rows, &state.session);
 
-    // Three radios, one value. The fallback of the last arm is `Auto` and not `Backspace`,
-    // because `auto` is the default of section 7: a dialog where somehow none of the three is
-    // ticked reads back as the default rather than as a manual override nobody chose.
-    state.working.replacement.method = if is_checked(hwnd, IDC_METHOD_SELECTION) {
-        ReplacementMethod::Selection
-    } else if is_checked(hwnd, IDC_METHOD_BACKSPACE) {
-        ReplacementMethod::Backspace
-    } else {
-        ReplacementMethod::Auto
-    };
-    state.working.replacement.inter_event_delay_ms = parse_ms(
-        &get_text(hwnd, IDC_DELAY),
-        state.working.replacement.inter_event_delay_ms,
-    );
-
-    state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
-    state.working.selection.clipboard_timeout_ms = parse_ms(
-        &get_text(hwnd, IDC_CLIPBOARD_TIMEOUT),
-        state.working.selection.clipboard_timeout_ms,
-    );
-    state.working.selection.clipboard_restore_delay_ms = parse_ms(
-        &get_text(hwnd, IDC_CLIPBOARD_RESTORE),
-        state.working.selection.clipboard_restore_delay_ms,
-    );
-
     state.working.exclusions.processes = list_items(hwnd, IDC_EXCLUSIONS);
 
     state.working.diagnostics.log_enabled = is_checked(hwnd, IDC_LOG_ENABLED);
@@ -8691,10 +8595,11 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 ///   presses with a toggle — dropping one would make a fast double click flip the box and
 ///   leave it flipped;
 /// - **a radio button checks itself and unchecks its group**: [`check_radio`] over the
-///   very ranges the rest of the dialog already uses — `IDC_MODE_PAIR..IDC_MODE_CYCLE`
-///   and `IDC_METHOD_AUTO..IDC_METHOD_SELECTION`, the template's `WS_GROUP` runs — which
-///   quenches the run in the store, arms the chosen one and repaints the whole range: the
-///   neighbour that just lost the dot must lose it on the same message;
+///   very range the rest of the dialog already uses — `IDC_MODE_PAIR..IDC_MODE_CYCLE`, the
+///   template's one remaining `WS_GROUP` run since task Т-23-2 took the method radios of
+///   «Замена» off the window — which quenches the run in the store, arms the chosen one and
+///   repaints the whole range: the neighbour that just lost the dot must lose it on the
+///   same message;
 /// - **`BN_SETFOCUS` is the arrow keys**: the dialog manager answers an arrow key inside
 ///   a `WS_GROUP` run by moving the focus, and an automatic radio button then checked
 ///   itself on arrival — `BS_NOTIFY` in the template is what makes the arrival audible
@@ -8707,7 +8612,7 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 /// The check state lives in the dialog's own [`GlyphChecks`] store — task T-11-5b-2. An
 /// owner-drawn button keeps none of its own: the button-message pair that serves the
 /// automatic types ignores the write and answers «снят» for a `BS_OWNERDRAW` one, which
-/// the final sweep of the live acceptance saw as eight glyphs drawn unchecked. So
+/// the final sweep of the live acceptance saw as every glyph drawn unchecked. So
 /// [`set_check`], [`is_checked`] and [`check_radio`] — their signatures untouched — write
 /// and read the store, and everything that reads the dialog keeps reading the one truth.
 fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
@@ -8726,10 +8631,6 @@ fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
 
         IDC_MODE_PAIR | IDC_MODE_CYCLE if radio_checks => {
             check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, control);
-        }
-
-        IDC_METHOD_AUTO | IDC_METHOD_BACKSPACE | IDC_METHOD_SELECTION if radio_checks => {
-            check_radio(hwnd, IDC_METHOD_AUTO, IDC_METHOD_SELECTION, control);
         }
 
         _ => {}

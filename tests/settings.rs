@@ -165,6 +165,108 @@ fn round_trip_through_a_file_preserves_every_field() {
     assert_eq!(outcome, ReadOutcome::Current);
 }
 
+/// The four settings задача Т-23-2 took out of the dialog and left in the file — решение 81
+/// п. 2, «Оставить в файле».
+///
+/// The column is the field's own name as `src\settings.rs` spells it, because that is what
+/// the sweep below looks for in the two functions that talk to the window.
+const SETTINGS_THE_DIALOG_NO_LONGER_SHOWS: [(&str, &str); 4] = [
+    ("replacement.method", "метод замены — FR-42/FR-42а"),
+    ("inter_event_delay_ms", "задержка между событиями — FR-44"),
+    ("clipboard_timeout_ms", "таймаут буфера обмена — §4.7"),
+    (
+        "clipboard_restore_delay_ms",
+        "задержка восстановления — §4.7",
+    ),
+];
+
+/// **Т-23-2, решение 81 п. 2** — the four settings that left the dialog survive the dialog.
+///
+/// The family they joined is `buffer.capacity`, `general.enabled` and `schema_version`: fields
+/// FR-92 never showed, which the window must carry through untouched because pressing «ОК»
+/// **replaces the file whole**. A field the dialog neither fills nor reads is a field whose
+/// value comes out of the file and goes back into it unchanged — and a field the dialog
+/// *reads* would come back as whatever an absent control answers, which for a check box is
+/// «снят» and for a text field is an empty string.
+///
+/// Two halves, and both are needed. The value half runs the trip a press of «ОК» makes —
+/// hand-written file → `read_from` → `write_to` → `read_from` — over hand-set values none of
+/// which is the default, so a field quietly replaced by its default is caught. The shape half
+/// is what makes the value half hold in the future: the two functions that talk to the window
+/// must not mention these fields at all.
+///
+/// ⚠ The shape half reads `src\settings.rs` and not this file: a probe that looked for a
+/// string in a file that itself contains that string would be measuring itself.
+#[test]
+fn the_four_settings_the_dialog_no_longer_shows_survive_the_round_trip() {
+    let dir = TestDir::new("not_shown_round_trip");
+
+    // Hand-written, the way the user of решение 81 edits it, and not one value is a default:
+    // the method is `selection` (default `auto`), the delay 13 (default 0), the timeout 987
+    // (default 300), the restore delay 654 (default 200). `[buffer] capacity` and
+    // `[general] enabled` ride along as the family this joins.
+    let path = write_file(
+        &dir,
+        "schema_version = 3\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         \n\
+         [replacement]\n\
+         method = \"selection\"\n\
+         inter_event_delay_ms = 13\n\
+         \n\
+         [selection]\n\
+         clipboard_timeout_ms = 987\n\
+         clipboard_restore_delay_ms = 654\n\
+         \n\
+         [buffer]\n\
+         capacity = 64\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("the hand-written file reads");
+    assert_eq!(outcome, ReadOutcome::Current);
+
+    // What «ОК» does: the working configuration — the one the file was read into — is written
+    // back whole. Read it again and every hand-set value must still be there.
+    settings::write_to(&path, &config).expect("writing the configuration back must succeed");
+    let (back, _) = settings::read_from(&path).expect("rereading must succeed");
+
+    assert_eq!(back, config, "the whole configuration survives the press");
+    assert_eq!(back.replacement.method, ReplacementMethod::Selection);
+    assert_eq!(back.replacement.inter_event_delay_ms, 13);
+    assert_eq!(back.selection.clipboard_timeout_ms, 987);
+    assert_eq!(back.selection.clipboard_restore_delay_ms, 654);
+    // The two older members of the family, so that the trip is the same trip.
+    assert!(!back.general.enabled);
+    assert_eq!(back.buffer.capacity, 64);
+
+    // The shape half: neither of the two functions that talk to the window names any of the
+    // four. `fill_dialog` naming one would put a value on a control that is not there;
+    // `read_dialog` naming one would take the answer of a control that is not there and
+    // write it into the configuration the press then saves.
+    let source = settings_module_source();
+
+    for signature in ["fn fill_dialog(", "fn read_dialog("] {
+        let body = function_body(&source, signature);
+
+        for (field, what) in SETTINGS_THE_DIALOG_NO_LONGER_SHOWS {
+            assert!(
+                !body.contains(field),
+                "`{signature}` still names `{field}` — {what}; решение 81 left that setting \
+                 in config.toml and took its control off the window"
+            );
+        }
+    }
+
+    // And the switch that stayed is still wired, or the sweep above would pass for a dialog
+    // that had lost the selection section altogether.
+    assert!(
+        function_body(&source, "fn read_dialog(").contains("selection.enabled"),
+        "`[selection] enabled` is the one field of its section the dialog still shows"
+    );
+}
+
 // Criterion 11. An unknown field does not fail the read, and the fields around it are read.
 #[test]
 fn unknown_fields_are_ignored_and_the_rest_is_read() {
@@ -1274,9 +1376,6 @@ fn the_static_colour_roles_follow_the_table_of_fr_92a() {
         (1094, "IDC_HOTKEY_LABEL"),
         (1096, "IDC_PAIR_SOURCE_LABEL"),
         (1097, "IDC_PAIR_TARGET_LABEL"),
-        (1100, "IDC_DELAY_LABEL"),
-        (1102, "IDC_CLIP_TIMEOUT_LABEL"),
-        (1103, "IDC_CLIP_RESTORE_LABEL"),
         (1107, "IDC_LOG_DIR_LABEL"),
         (1070, "IDC_STATE_HOOK"),
         (1071, "IDC_STATE_LAYOUTS"),
@@ -1680,7 +1779,7 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 }
 
 // =========================================================================================
-// FR-92а — the check-state store of the eight glyph elements. Task T-11-5b-2.
+// FR-92а — the check-state store of the six glyph elements. Task T-11-5b-2.
 // =========================================================================================
 //
 // Criterion 9 — the substance of the defect: a `BS_OWNERDRAW` button keeps no check state
@@ -1688,39 +1787,43 @@ fn the_glyph_colour_roles_follow_the_closed_2x2x2_table_of_fr_92a() {
 // without a live window. The configuration goes in the way `fill_dialog` writes it and
 // comes back out the way `read_dialog` reads it; a click's flip inverts exactly the
 // element clicked; a radio walk quenches the neighbours of its own range and no one else.
-// The identifiers are the template's own — the same eight the style test below reads out
+// The identifiers are the template's own — the same six the style test below reads out
 // of the built binary.
+//
+// ⚠ **Six since task Т-23-2** (решения 81 и 82): the three method radios of «Замена» left
+// the dialog with their group. The one radio run that is left is the layout mode, and the
+// four check boxes are the three of «Общие» — autostart, sound, and the selection switch
+// that moved here — plus the journal switch of «Диагностика».
 
 use lang_switcher::settings::{GLYPH_CHECK_CONTROLS, GlyphChecks};
 
-/// The nine identifiers by name, mirrored from `app.rc` exactly as the style test's list.
-/// Eight until task Т-21-5 added the sound switch of FR-100.
+/// The six identifiers by name, mirrored from `app.rc` exactly as the style test's list, and
+/// **in template order**: «Общие» first, then the mode run of «Раскладки», then
+/// «Диагностика».
+///
+/// Eight until task Т-21-5 added the sound switch of FR-100, nine with it, six since task
+/// Т-23-2 removed the «Замена» group.
 const GLYPH_AUTOSTART: i32 = 1001;
 const GLYPH_SOUND: i32 = 1004;
+const GLYPH_SELECTION_ENABLED: i32 = 1040;
 const GLYPH_MODE_PAIR: i32 = 1020;
 const GLYPH_MODE_CYCLE: i32 = 1021;
-const GLYPH_METHOD_AUTO: i32 = 1029;
-const GLYPH_METHOD_BACKSPACE: i32 = 1030;
-const GLYPH_METHOD_SELECTION: i32 = 1031;
-const GLYPH_SELECTION_ENABLED: i32 = 1040;
 const GLYPH_LOG_ENABLED: i32 = 1060;
 
 #[test]
-fn the_store_lists_the_eight_template_identifiers_and_starts_all_unchecked() {
+fn the_store_lists_the_six_template_identifiers_and_starts_all_unchecked() {
     assert_eq!(
-        GLYPH_CHECK_CONTROLS,
+        GLYPH_CHECK_CONTROLS.as_slice(),
         [
             GLYPH_AUTOSTART,
             GLYPH_SOUND,
+            GLYPH_SELECTION_ENABLED,
             GLYPH_MODE_PAIR,
             GLYPH_MODE_CYCLE,
-            GLYPH_METHOD_AUTO,
-            GLYPH_METHOD_BACKSPACE,
-            GLYPH_METHOD_SELECTION,
-            GLYPH_SELECTION_ENABLED,
             GLYPH_LOG_ENABLED,
-        ],
-        "the storage side must list the same nine controls the template carries"
+        ]
+        .as_slice(),
+        "the storage side must list the same six controls the template carries"
     );
 
     let checks = GlyphChecks::new();
@@ -1736,22 +1839,23 @@ fn the_store_lists_the_eight_template_identifiers_and_starts_all_unchecked() {
 
 #[test]
 fn what_the_configuration_wrote_into_the_store_is_what_reads_back_out() {
-    // Every combination of the five configuration facts the eight elements carry: the
-    // three check boxes and the two radio groups. 2 × 2 × 2 × 2 × 3 = 48 round trips.
+    // Every combination of the five configuration facts the six elements carry: the four
+    // check boxes and the one radio group. 2 × 2 × 2 × 2 × 2 = 32 round trips.
+    //
+    // ⚠ Т-23-2: the method run is gone with its group, and the sound switch of FR-100 —
+    // absent from this sweep since Т-21-5 put it in the store — takes the freed dimension.
     for autostart in [false, true] {
-        for selection in [false, true] {
-            for log in [false, true] {
-                for mode in [LayoutMode::Pair, LayoutMode::Cycle] {
-                    for method in [
-                        ReplacementMethod::Auto,
-                        ReplacementMethod::Backspace,
-                        ReplacementMethod::Selection,
-                    ] {
+        for sound in [false, true] {
+            for selection in [false, true] {
+                for log in [false, true] {
+                    for mode in [LayoutMode::Pair, LayoutMode::Cycle] {
                         let checks = GlyphChecks::new();
 
-                        // The write half, exactly the calls `fill_dialog` makes: three
-                        // set calls and two radio walks.
+                        // The write half, exactly the calls `fill_dialog` makes: four
+                        // set calls and one radio walk.
                         checks.set(GLYPH_AUTOSTART, autostart);
+                        checks.set(GLYPH_SOUND, sound);
+                        checks.set(GLYPH_SELECTION_ENABLED, selection);
                         checks.check_radio(
                             GLYPH_MODE_PAIR,
                             GLYPH_MODE_CYCLE,
@@ -1760,20 +1864,11 @@ fn what_the_configuration_wrote_into_the_store_is_what_reads_back_out() {
                                 LayoutMode::Cycle => GLYPH_MODE_CYCLE,
                             },
                         );
-                        checks.check_radio(
-                            GLYPH_METHOD_AUTO,
-                            GLYPH_METHOD_SELECTION,
-                            match method {
-                                ReplacementMethod::Auto => GLYPH_METHOD_AUTO,
-                                ReplacementMethod::Backspace => GLYPH_METHOD_BACKSPACE,
-                                ReplacementMethod::Selection => GLYPH_METHOD_SELECTION,
-                            },
-                        );
-                        checks.set(GLYPH_SELECTION_ENABLED, selection);
                         checks.set(GLYPH_LOG_ENABLED, log);
 
                         // The read half, exactly the reads `read_dialog` performs.
                         assert_eq!(checks.get(GLYPH_AUTOSTART), autostart);
+                        assert_eq!(checks.get(GLYPH_SOUND), sound);
                         assert_eq!(checks.get(GLYPH_SELECTION_ENABLED), selection);
                         assert_eq!(checks.get(GLYPH_LOG_ENABLED), log);
 
@@ -1783,18 +1878,6 @@ fn what_the_configuration_wrote_into_the_store_is_what_reads_back_out() {
                             LayoutMode::Pair
                         };
                         assert_eq!(mode_back, mode, "the mode must survive the round trip");
-
-                        let method_back = if checks.get(GLYPH_METHOD_SELECTION) {
-                            ReplacementMethod::Selection
-                        } else if checks.get(GLYPH_METHOD_BACKSPACE) {
-                            ReplacementMethod::Backspace
-                        } else {
-                            ReplacementMethod::Auto
-                        };
-                        assert_eq!(
-                            method_back, method,
-                            "the replacement method must survive the round trip"
-                        );
                     }
                 }
             }
@@ -1830,42 +1913,25 @@ fn a_clicks_flip_inverts_exactly_the_element_clicked() {
 
 #[test]
 fn a_radio_walk_arms_the_chosen_and_quenches_the_neighbours_of_its_range_alone() {
+    // ⚠ Т-23-2: one radio run is left, so «and no one else» is now measured against the four
+    // check boxes rather than against a second run. The identifier range of the walk is what
+    // bounds it, and the four boxes stand on **both** sides of that range — 1001 and 1004
+    // below it, 1040 and 1060 above it — which is what makes the bound measurable at all.
     let checks = GlyphChecks::new();
 
     checks.set(GLYPH_AUTOSTART, true);
+    checks.set(GLYPH_SOUND, true);
+    checks.set(GLYPH_SELECTION_ENABLED, true);
+    checks.set(GLYPH_LOG_ENABLED, true);
     checks.check_radio(GLYPH_MODE_PAIR, GLYPH_MODE_CYCLE, GLYPH_MODE_PAIR);
-    checks.check_radio(GLYPH_METHOD_AUTO, GLYPH_METHOD_SELECTION, GLYPH_METHOD_AUTO);
 
-    // Choosing Backspace quenches Auto — and leaves the mode run and the check boxes
-    // alone: the walk is bounded by its own identifier range.
-    checks.check_radio(
-        GLYPH_METHOD_AUTO,
-        GLYPH_METHOD_SELECTION,
-        GLYPH_METHOD_BACKSPACE,
+    assert!(checks.get(GLYPH_MODE_PAIR), "the chosen radio is armed");
+    assert!(
+        !checks.get(GLYPH_MODE_CYCLE),
+        "its neighbour of the same run is quenched"
     );
 
-    assert!(
-        checks.get(GLYPH_METHOD_BACKSPACE),
-        "the chosen radio is armed"
-    );
-    assert!(
-        !checks.get(GLYPH_METHOD_AUTO),
-        "its former neighbour is quenched"
-    );
-    assert!(
-        !checks.get(GLYPH_METHOD_SELECTION),
-        "the third of the run stays quenched"
-    );
-    assert!(
-        checks.get(GLYPH_MODE_PAIR),
-        "the other radio run must not move"
-    );
-    assert!(
-        checks.get(GLYPH_AUTOSTART),
-        "a check box is not part of any radio run"
-    );
-
-    // And the other way round: switching the mode leaves the method run alone.
+    // Switching the mode quenches the neighbour and leaves every check box alone.
     checks.check_radio(GLYPH_MODE_PAIR, GLYPH_MODE_CYCLE, GLYPH_MODE_CYCLE);
 
     assert!(checks.get(GLYPH_MODE_CYCLE), "the new mode is armed");
@@ -1873,22 +1939,31 @@ fn a_radio_walk_arms_the_chosen_and_quenches_the_neighbours_of_its_range_alone()
         !checks.get(GLYPH_MODE_PAIR),
         "the old mode is quenched on the same walk"
     );
-    assert!(
-        checks.get(GLYPH_METHOD_BACKSPACE),
-        "the method run must not move when the mode run walks"
-    );
+
+    for (control, name) in [
+        (GLYPH_AUTOSTART, "автозапуск"),
+        (GLYPH_SOUND, "звуковой отклик"),
+        (GLYPH_SELECTION_ENABLED, "конвертировать выделенное"),
+        (GLYPH_LOG_ENABLED, "вести журнал"),
+    ] {
+        assert!(
+            checks.get(control),
+            "«{name}» ({control}) is a check box and not part of any radio run"
+        );
+    }
 }
 
 #[test]
-fn an_identifier_outside_the_eight_reads_unchecked_and_stores_nothing() {
+fn an_identifier_outside_the_six_reads_unchecked_and_stores_nothing() {
     let checks = GlyphChecks::new();
 
-    // 1032 is the delay field — a control of the dialog, but not a glyph element.
-    checks.set(1032, true);
+    // 1010 is the hotkey field — a control of the dialog, but not a glyph element. It was
+    // 1032, the delay field, until task Т-23-2 took that control out of the template.
+    checks.set(1010, true);
 
     assert!(
-        !checks.get(1032),
-        "an identifier outside the eight must read «снят» (NFR-13)"
+        !checks.get(1010),
+        "an identifier outside the six must read «снят» (NFR-13)"
     );
 
     for control in GLYPH_CHECK_CONTROLS {
@@ -2200,12 +2275,13 @@ const DIALOG_CAPTION: &str = "Lang Switcher — настройки";
 
 /// Every section of the table of FR-92, in the order the requirement prints them, plus the
 /// state group this task adds. These are the group box captions the template must carry.
-const FR_92_SECTIONS: [&str; 8] = [
+/// ⚠ **Six since task Т-23-2** (решения 81 и 82): «Замена» left the dialog whole, and
+/// «Выделение» — a group of one check box after its two spin fields went — was dissolved
+/// into «Общие». Both settings stay in `config.toml`; what left is the dialog's half.
+const FR_92_SECTIONS: [&str; 6] = [
     "Общие",
     "Горячая клавиша",
     "Раскладки",
-    "Замена",
-    "Выделение",
     "Исключения",
     "Диагностика",
     "Состояние",
@@ -2215,7 +2291,7 @@ const FR_92_SECTIONS: [&str; 8] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 38] = [
+const TEMPLATE_TEXT: [&str; 30] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -2223,8 +2299,12 @@ const TEMPLATE_TEXT: [&str; 38] = [
     // its own combo carries no text in the template — the items are added by the dialog.
     "Оформление:",
     "вступит в силу после перезапуска",
-    // The sound switch of FR-100, task Т-21-5 — the last row of «Общие».
+    // The sound switch of FR-100, task Т-21-5.
     "Звуковой отклик",
+    // ⚠ Т-23-2, решение 82.2: the selection switch of FR-61 is the **last row of «Общие»**
+    // now. Its group of one was dissolved when the two spin fields beside it left the
+    // dialog, and it moved here to its sister check boxes.
+    "Конвертировать выделенный текст",
     "Горячая клавиша",
     "Клавиша:",
     // Task T-08-2 replaced «Пока меняется только в файле настроек.» with the button that arms
@@ -2238,16 +2318,6 @@ const TEMPLATE_TEXT: [&str; 38] = [
     "Цикл: галочка — участие, кнопки — порядок",
     "Выше",
     "Ниже",
-    "Замена",
-    // The third method of FR-42а stands first in its group: it is the default of section 7.
-    "Автоматически (рекомендуется)",
-    "Backspace",
-    "Выделение (совместимость)",
-    "Задержка между событиями, мс:",
-    "Выделение",
-    "Конвертировать выделенный текст",
-    "Таймаут буфера обмена, мс:",
-    "Задержка восстановления, мс:",
     "Исключения",
     "Удалить",
     "Добавить",
@@ -2264,10 +2334,23 @@ const TEMPLATE_TEXT: [&str; 38] = [
 
 /// Identifiers `app.rc` gives the controls, and what each of them is for. One row per element
 /// FR-92 names, so that a section losing a control is a failing test and not a smaller window.
-const TEMPLATE_CONTROLS: [(u32, &str); 48] = [
+///
+/// ⚠ **Thirty-eight since task Т-23-2**: eleven controls left the window with the groups
+/// «Замена» and «Выделение» — the three method radios of FR-42а, the three millisecond
+/// fields of FR-44 and §4.7, and the five statics that captioned them. Their identifiers —
+/// 1029, 1030, 1031, 1032, 1041, 1042, 1099, 1100, 1101, 1102, 1103 — are **retired, not
+/// freed**: a new control must take a new number, or an installed build and a new one would
+/// disagree about what a number means.
+///
+/// ⚠ And one control **arrived**: 1004, the sound switch task Т-21-5 added to «Общие» and
+/// never wrote into this list. A row missing here is a control whose disappearance no test
+/// notices, which is the whole point of the list; found while rewriting it for Т-23-2.
+const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1003, "Общие: оформление — FR-92а"),
+    (1004, "Общие: звуковой отклик — FR-100"),
+    (1040, "Общие: конвертировать выделенное — FR-61"),
     (1010, "Горячая клавиша: поле клавиши"),
     (1011, "Горячая клавиша: предупреждение"),
     (1012, "Горячая клавиша: кнопка захвата — FR-94"),
@@ -2279,13 +2362,6 @@ const TEMPLATE_CONTROLS: [(u32, &str); 48] = [
     (1025, "Раскладки: порядок вверх"),
     (1026, "Раскладки: порядок вниз"),
     (1027, "Раскладки: замечание о ненайденной раскладке"),
-    (1029, "Замена: метод «Автоматически» — FR-42а"),
-    (1030, "Замена: метод Backspace"),
-    (1031, "Замена: метод выделения"),
-    (1032, "Замена: задержка между событиями"),
-    (1040, "Выделение: конвертировать выделенное"),
-    (1041, "Выделение: таймаут буфера обмена"),
-    (1042, "Выделение: задержка восстановления"),
     (1050, "Исключения: список процессов"),
     (1051, "Исключения: имя процесса"),
     (1052, "Исключения: добавить"),
@@ -2305,11 +2381,6 @@ const TEMPLATE_CONTROLS: [(u32, &str); 48] = [
     (1096, "Раскладки: подпись «Источник»"),
     (1097, "Раскладки: подпись «Цель»"),
     (1098, "Раскладки: пояснение к списку цикла"),
-    (1099, "Замена: заголовок группы"),
-    (1100, "Замена: подпись задержки"),
-    (1101, "Выделение: заголовок группы"),
-    (1102, "Выделение: подпись таймаута буфера обмена"),
-    (1103, "Выделение: подпись задержки восстановления"),
     (1104, "Исключения: заголовок группы"),
     (1105, "Исключения: пояснение об имени процесса"),
     (1106, "Диагностика: заголовок группы"),
@@ -2457,6 +2528,172 @@ fn every_element_of_fr_92_has_its_control_in_the_template() {
     }
 }
 
+/// The eleven identifiers that left the window with «Замена» and «Выделение» — task Т-23-2,
+/// решения 81 и 82.
+///
+/// A list of *absences*, and it is the sharper half of the pair above: `TEMPLATE_CONTROLS`
+/// catches a control that disappeared, this one catches a control that came back. The
+/// numbers are retired rather than freed — a new control takes a new number — so this list
+/// never shrinks and the assertion never weakens.
+const RETIRED_CONTROLS: [(u32, &str); 11] = [
+    (1029, "Замена: метод «Автоматически» — FR-42а"),
+    (1030, "Замена: метод Backspace"),
+    (1031, "Замена: метод выделения"),
+    (1032, "Замена: задержка между событиями — FR-44"),
+    (1041, "Выделение: таймаут буфера обмена — §4.7"),
+    (1042, "Выделение: задержка восстановления — §4.7"),
+    (1099, "Замена: заголовок группы"),
+    (1100, "Замена: подпись задержки"),
+    (1101, "Выделение: заголовок группы"),
+    (1102, "Выделение: подпись таймаута буфера обмена"),
+    (1103, "Выделение: подпись задержки восстановления"),
+];
+
+/// **Т-23-2, решения 81 и 82** — the two groups the user asked to be taken out of the dialog
+/// are out of the **built** template, control by control.
+#[test]
+fn the_eleven_controls_of_the_two_removed_groups_are_gone_from_the_template() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    for (id, what) in RETIRED_CONTROLS {
+        assert!(
+            !template.controls.contains(&id),
+            "control {id} — {what} — is back in the dialog; решение 81 took it out and left \
+             the setting in config.toml"
+        );
+    }
+
+    // And their captions are off the window with them: a control removed while its string
+    // row stayed would be invisible here but visible to `localise_dialog`.
+    for gone in [
+        "Замена",
+        "Автоматически (рекомендуется)",
+        "Backspace",
+        "Выделение (совместимость)",
+        "Задержка между событиями, мс:",
+        "Выделение",
+        "Таймаут буфера обмена, мс:",
+        "Задержка восстановления, мс:",
+    ] {
+        assert!(
+            !template.text.iter().any(|text| text == gone),
+            "«{gone}» is still written on the window"
+        );
+    }
+}
+
+/// **Т-23-2, решение 82.2** — the selection switch of FR-61 stands inside «Общие».
+///
+/// Containment of rectangles and nothing else: the group panels of this dialog are hidden
+/// controls whose rectangles *are* the blocks (task T-11-13), so «which group is this control
+/// in» is arithmetic on the template and needs no window. Checked both ways — inside the
+/// «Общие» rectangle and inside no other panel — because a control that lies in two panels at
+/// once is a template that has drifted, not a control that moved.
+#[test]
+fn the_selection_switch_stands_in_the_general_panel() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let (sx, sy, scx, scy) = template
+        .bounds
+        .iter()
+        .find(|(id, ..)| *id == 1040)
+        .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+        .expect("the dialog must still carry the selection switch (1040)");
+
+    for (panel, what) in PANELS {
+        let (px, py, pcx, pcy) = template
+            .bounds
+            .iter()
+            .find(|(id, ..)| *id == panel)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+            .unwrap_or_else(|| panic!("the dialog must carry panel {panel} — «{what}»"));
+
+        let inside = sx >= px && sy >= py && sx + scx <= px + pcx && sy + scy <= py + pcy;
+
+        println!("«{what}» ({panel}) {px},{py} {pcx}x{pcy}: selection switch inside = {inside}");
+
+        assert_eq!(
+            inside,
+            panel == 1090,
+            "«Конвертировать выделенный текст» (1040) must lie in «Общие» (1090) and in no \
+             other panel — решение 82.2"
+        );
+    }
+}
+
+/// **Т-23-2, решение 83 п. 3** — the geometry the user chose at К-1, in the numbers of the
+/// built template.
+///
+/// Three facts, and every one of them is a number the user looked at on the stand:
+/// the window is 420 × 364 dialog units (it was 420 × 385); the two columns end level with
+/// one another; and «Состояние» stands **four** units under them — the gap every other pair
+/// of groups in this dialog has, and the one the user asked for by name («уменьшить до
+/// стандартной величины»).
+#[test]
+fn the_window_carries_the_geometry_chosen_at_the_control_point() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    println!("window: {:?} dialog units", template.size);
+
+    assert_eq!(
+        template.size,
+        (420, 364),
+        "the window of решение 83 is 420 × 364 dialog units"
+    );
+
+    let bottom = |panel: u32| -> i32 {
+        template
+            .bounds
+            .iter()
+            .find(|(id, ..)| *id == panel)
+            .map(|(_, _, y, _, cy)| y + cy)
+            .unwrap_or_else(|| panic!("the dialog must carry panel {panel}"))
+    };
+    let top = |panel: u32| -> i32 {
+        template
+            .bounds
+            .iter()
+            .find(|(id, ..)| *id == panel)
+            .map(|(_, _, y, ..)| *y)
+            .unwrap_or_else(|| panic!("the dialog must carry panel {panel}"))
+    };
+
+    let layouts = bottom(1095);
+    let diagnostics = bottom(1106);
+    let state = top(1108);
+
+    println!(
+        "«Раскладки» ends at {layouts}, «Диагностика» at {diagnostics}, «Состояние» \
+              starts at {state}"
+    );
+
+    assert_eq!(
+        layouts, diagnostics,
+        "решение 83 п. 1: the two columns end level — that is what «вровень» means"
+    );
+
+    // The standard gap of this dialog, measured on a pair the task did not touch: «Общие»
+    // and «Горячая клавиша». Read rather than written down, so that a re-cut of the whole
+    // layout moves the expectation with it instead of leaving this number behind.
+    let standard = top(1093) - bottom(1090);
+
+    println!("standard gap between two groups: {standard} units");
+
+    assert_eq!(
+        standard, 4,
+        "the groups of this dialog stand four units apart"
+    );
+    assert_eq!(
+        state - layouts,
+        standard,
+        "решение 83 п. 3: «Состояние» must stand the standard gap under the columns, not \
+         the 25 units of the mock-up the user rejected"
+    );
+}
+
 // Criterion 10 of T-11-5a — read out of the **built** `LangSwitcher.exe`, like everything
 // else about the template. ⚠ `BS_OWNERDRAW` (0x0B) is a button *type*, not a flag: types
 // live in the low nibble of the style and replace one another, so the check is equality of
@@ -2514,21 +2751,23 @@ fn the_nine_buttons_of_the_dialog_are_owner_drawn() {
 // former types were `BS_AUTOCHECKBOX` (0x03) and `BS_AUTORADIOBUTTON` (0x09), both of
 // which a bit test against 0x0B would also pass.
 #[test]
-fn the_eight_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
+fn the_six_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
-    // The three check boxes and five radio buttons of FR-92, by their actual identifiers;
+    // The four check boxes and two radio buttons of FR-92, by their actual identifiers;
     // the third column says which of them open a WS_GROUP run. The list-view ticks of the
     // cycle list are not here — they belong to task T-11-7.
-    const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 8] = [
+    //
+    // ⚠ Six since task Т-23-2: the three method radios of «Замена» left the window. And
+    // 1004 — the sound switch of FR-100 — is here for the first time: task Т-21-5 added the
+    // control and left this list at eight, so nothing checked its button type at all.
+    const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 6] = [
         (1001, "Запускать при входе в систему", false),
+        (1004, "Звуковой отклик", false),
+        (1040, "Конвертировать выделенный текст", false),
         (1020, "Пара", true),
         (1021, "Несколько раскладок", false),
-        (1029, "Автоматически (рекомендуется)", true),
-        (1030, "Backspace", false),
-        (1031, "Выделение (совместимость)", false),
-        (1040, "Конвертировать выделенный текст", false),
         (1060, "Вести журнал", false),
     ];
 
@@ -2579,23 +2818,22 @@ fn the_eight_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
 }
 
 // Criterion 9 of T-11-5c — read out of the **built** `LangSwitcher.exe`, exactly as the
-// nine buttons and the eight glyphs above. The same ⚠ applies: `BS_OWNERDRAW` (0x0B) is a
+// nine buttons and the six glyphs above. The same ⚠ applies: `BS_OWNERDRAW` (0x0B) is a
 // button *type* in the low nibble, so the check is equality of the nibble and not a bit
 // test — the former type here was `BS_GROUPBOX` (0x07), which a bit test would also let
 // through (0x07 & 0x0B is 0x03, not zero).
 #[test]
-fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
+fn the_six_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
-    // The eight groups of the dialog — the seven sections of the FR-92 table plus
-    // «Состояние» — by their actual identifiers.
-    const OWNER_DRAWN_GROUPS: [(u32, &str); 8] = [
+    // The six groups of the dialog — the five sections of the FR-92 table plus
+    // «Состояние» — by their actual identifiers. Eight until task Т-23-2 removed «Замена»
+    // and dissolved «Выделение».
+    const OWNER_DRAWN_GROUPS: [(u32, &str); 6] = [
         (1090, "Общие"),
         (1093, "Горячая клавиша"),
         (1095, "Раскладки"),
-        (1099, "Замена"),
-        (1101, "Выделение"),
         (1104, "Исключения"),
         (1106, "Диагностика"),
         (1108, "Состояние"),
@@ -2644,7 +2882,7 @@ fn the_eight_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
 // `SS_ICON` is the type that loads the 32 px frame of the `.ico`, and it draws no text.
 
 /// Every `LTEXT` of the settings template, by identifier and by what it says on the window.
-const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
+const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
     (1091, "Общие: подпись «Язык интерфейса»"),
     (1109, "Общие: подпись «Оформление»"),
     (1092, "Общие: «вступит в силу после перезапуска»"),
@@ -2654,9 +2892,6 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
     (1097, "Раскладки: подпись «Цель»"),
     (1098, "Раскладки: пояснение к списку цикла"),
     (1027, "Раскладки: замечание о ненайденной раскладке"),
-    (1100, "Замена: подпись задержки"),
-    (1102, "Выделение: подпись таймаута буфера обмена"),
-    (1103, "Выделение: подпись задержки восстановления"),
     (1105, "Исключения: пояснение об имени процесса"),
     (1107, "Диагностика: подпись «Папка журнала»"),
     (1062, "Диагностика: путь папки журнала"),
@@ -2937,26 +3172,36 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
         template.size.0, template.size.1
     );
 
-    // Width untouched — two columns 200 units wide at x = 7 and x = 213 — and the height is
-    // the 369 of before plus the 16 the appearance row cost.
+    // Width untouched — two columns 200 units wide at x = 7 and x = 213.
+    //
+    // ⚠ **364, and it was 385 from task T-11-19 to delivery e25.** T-11-19 gave the window
+    // sixteen units so the air in front of «Состояние» would be the mock-ups' 53 again; that
+    // air was spent twice afterwards — fourteen units on the sound row of FR-100 — and решение
+    // 83 spent what was left: the user looked at the candidate on the stand and said the gap
+    // over «Состояние» was too big, «уменьшить до стандартной величины». The standard is four
+    // units, the same gap every other pair of groups keeps, and cutting 25 to 4 took 21 units
+    // off the window. What T-11-19 was really about — that the rhythm below the last block is
+    // a decided number and not a leftover — is what this test still holds; the number is now
+    // 4 and the decision is 83 rather than В-1.
     assert_eq!(
         template.size,
-        (420, 385),
-        "the settings dialog has to be 420 x 385 dialog units — task T-11-19"
+        (420, 364),
+        "the settings dialog has to be 420 x 364 dialog units — решение 83 п. 3"
     );
 
     // The eight rectangles that moved, in full: a `y` alone would say nothing about a width
-    // or a height that drifted with it. «Диагностика» is the one that grew rather than
-    // moved — the 16 units go on at its bottom edge and its children stay where they were.
+    // or a height that drifted with it. «Диагностика» moved up with the rest of the right
+    // column when «Замена» and «Выделение» left it (task Т-23-2), and its children moved
+    // with it — the panel keeps its own 74 units.
     const MOVED: [(u32, &str, i32, i32, i32, i32); 8] = [
-        (1106, "Диагностика: панель", 213, 236, 200, 74),
-        (1108, "Состояние: панель", 7, 314, 406, 44),
-        (1070, "Состояние: перехватчик", 14, 326, 392, 9),
-        (1071, "Состояние: раскладки", 14, 337, 392, 9),
-        (1072, "Состояние: автозапуск", 14, 348, 392, 9),
-        (1, "ОК", 253, 364, 50, 14),
-        (2, "Отмена", 307, 364, 50, 14),
-        (1080, "Применить", 361, 364, 52, 14),
+        (1106, "Диагностика: панель", 213, 215, 200, 74),
+        (1108, "Состояние: панель", 7, 293, 406, 44),
+        (1070, "Состояние: перехватчик", 14, 305, 392, 9),
+        (1071, "Состояние: раскладки", 14, 316, 392, 9),
+        (1072, "Состояние: автозапуск", 14, 327, 392, 9),
+        (1, "ОК", 253, 343, 50, 14),
+        (2, "Отмена", 307, 343, 50, 14),
+        (1080, "Применить", 361, 343, 52, 14),
     ];
 
     for (id, what, x, y, cx, cy) in MOVED {
@@ -2971,28 +3216,22 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
         );
     }
 
-    // The children of «Диагностика» did **not** move by the 16 units: the panel grew
-    // downwards. Their own rectangles are the witness — the growth is at the bottom edge or it
-    // is not this task.
-    //
-    // ⚠ «путь к папке журнала» is 289 and not the 291 this test held until task T-12-3. It
-    // moved, and *upwards by two units*, which is the opposite direction from the sixteen this
-    // test is about: `IDC_LOG_DIR` stood at y = 275 where the generator of the mock-ups writes
-    // 273 (defect Д-4 of the Э12 comparison), and T-12-3 gave it the generator's number back.
-    // The statement of T-11-19 is untouched by that — the number is asserted, not relaxed, and
-    // the three rows beside it are the ones that prove the 16 units went on below.
+    // The children of «Диагностика» moved by exactly what the panel moved by — 21 units up,
+    // task Т-23-2 — and by nothing else: the panel is the same 74 units it always was, and the
+    // four rows inside it keep their own steps. Asserted as absolute numbers rather than as a
+    // delta, because a delta would pass for a block that had been re-cut and shifted back.
     for (id, what, bottom) in [
-        (1060u32, "Вести журнал", 258i32),
-        (1061, "Открыть папку журнала", 260),
-        (1107, "Папка журнала:", 273),
-        (1062, "путь к папке журнала", 289),
+        (1060u32, "Вести журнал", 237i32),
+        (1061, "Открыть папку журнала", 239),
+        (1107, "Папка журнала:", 252),
+        (1062, "путь к папке журнала", 268),
     ] {
         let (_, _, _, measured) = template.rect_of(id);
 
         assert_eq!(
             measured, bottom,
-            "«{what}» ({id}) moved; the 16 units of task T-11-19 go on below the children of \
-             «Диагностика», not through them"
+            "«{what}» ({id}) is not where the move of task Т-23-2 puts it — the panel moved \
+             as a whole, its children did not drift inside it"
         );
     }
 
@@ -3013,16 +3252,16 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
          перед кнопками {air_buttons}, поле снизу {margin}"
     );
 
-    // ⚠ **39, and it was 53 until 2026-09-01.** The 53 were the mock-ups' own air and the whole
-    // point of task T-11-19 — but they were *air*, not structure, and the user spent fourteen of
-    // them on the sound row of FR-100: «под модулями горячая клавиша и раскладки места более чем
-    // достаточно». What T-11-19 really fixed is asserted above and below this line and is
-    // untouched: the window is 420×385, «Диагностика» keeps its 4 units, the buttons keep their
-    // 6 and the margin its 7.
+    // ⚠ **4, and it was 53 at task T-11-19 and 39 after the sound row of FR-100 took fourteen
+    // of them.** Решение 83 п. 3 spent the rest: «расстояние между блоком состояние и верхними
+    // уменьшить до стандартной величины». The left column is no longer the odd one — both
+    // columns now end at 289 and both stand four units over «Состояние», which is the gap
+    // between every other pair of groups in this window. What T-11-19 really fixed is asserted
+    // above and below this line and is untouched: the rhythm below the last block is a decided
+    // number, the buttons keep their 6 and the margin its 7.
     assert_eq!(
-        air_left, 39,
-        "the air under «Раскладки» is the 53 of task T-11-19 less the 14 the sound row of \
-         FR-100 took, by the user's word of 2026-09-01"
+        air_left, 4,
+        "the air under «Раскладки» is the standard gap of this dialog — решение 83 п. 3"
     );
     assert_eq!(
         air_right, 4,
@@ -3044,7 +3283,7 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
 
 /// `WS_VISIBLE`. rc.exe ORs it into every control statement of a dialog whatever the style
 /// expression says; the only way to take it back off is the `NOT` operator of the
-/// expression, which is what `app.rc` now does for the eight panels.
+/// expression, which is what `app.rc` now does for the six panels.
 const WS_VISIBLE: u32 = 0x1000_0000;
 
 /// `WS_BORDER` — the sunken system rectangle. rc.exe adds this one to `EDITTEXT` and
@@ -3055,15 +3294,13 @@ const WS_BORDER: u32 = 0x0080_0000;
 /// of this template has ever carried it; see the test below.
 const WS_CLIPSIBLINGS: u32 = 0x0400_0000;
 
-/// The eight group panels, by identifier and caption — the same eight
+/// The six group panels, by identifier and caption — the same six
 /// `settings::GROUP_BOXES` lists, written out as literals by the rule the other template
-/// tests follow.
-const PANELS: [(u32, &str); 8] = [
+/// tests follow. Eight until task Т-23-2.
+const PANELS: [(u32, &str); 6] = [
     (1090, "Общие"),
     (1093, "Горячая клавиша"),
     (1095, "Раскладки"),
-    (1099, "Замена"),
-    (1101, "Выделение"),
     (1104, "Исключения"),
     (1106, "Диагностика"),
     (1108, "Состояние"),
@@ -3183,13 +3420,11 @@ fn no_field_or_list_of_the_dialog_carries_the_system_border() {
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
-    // The seven of `settings::FRAMED_FIELDS`, by their actual identifiers; the third column
-    // is the bit that must still be there next to the border that must not.
-    const FIELDS: [(u32, &str, u32, &str); 7] = [
+    // The four of `settings::FRAMED_FIELDS`, by their actual identifiers; the third column
+    // is the bit that must still be there next to the border that must not. Seven until
+    // task Т-23-2 took the three `ES_NUMBER` millisecond fields out of the window.
+    const FIELDS: [(u32, &str, u32, &str); 4] = [
         (1010, "поле горячей клавиши", 0x0001_0000, "WS_TABSTOP"),
-        (1032, "задержка между событиями", 0x2000, "ES_NUMBER"),
-        (1041, "таймаут буфера обмена", 0x2000, "ES_NUMBER"),
-        (1042, "задержка восстановления", 0x2000, "ES_NUMBER"),
         (1051, "имя процесса", 0x0080, "ES_AUTOHSCROLL"),
         (1050, "список исключений", 0x0020_0000, "WS_VSCROLL"),
         (1024, "список раскладок", 0x0001, "LVS_REPORT"),
@@ -3233,20 +3468,19 @@ fn no_field_or_list_of_the_dialog_carries_the_system_border() {
 /// the control's text, and the space inside a caption survives the trip to the pen.
 #[test]
 fn a_panel_caption_is_the_upper_case_of_the_control_text() {
-    // The eight captions of the dialog, in both locales — the strings FR-94 puts on the
-    // eight controls, and what the background drawing must make of them.
+    // The six captions of the dialog, in both locales — the strings FR-94 puts on the
+    // six controls, and what the background drawing must make of them. Eight until task
+    // Т-23-2 took «Замена» and «Выделение» off the window.
     for (source, expected) in [
         ("Общие", "ОБЩИЕ"),
         ("Горячая клавиша", "ГОРЯЧАЯ КЛАВИША"),
         ("Раскладки", "РАСКЛАДКИ"),
-        ("Замена", "ЗАМЕНА"),
-        ("Выделение", "ВЫДЕЛЕНИЕ"),
         ("Исключения", "ИСКЛЮЧЕНИЯ"),
         ("Диагностика", "ДИАГНОСТИКА"),
         ("Состояние", "СОСТОЯНИЕ"),
         ("General", "GENERAL"),
         ("Hotkey", "HOTKEY"),
-        ("Replacement", "REPLACEMENT"),
+        ("Diagnostics", "DIAGNOSTICS"),
         ("", ""),
     ] {
         assert_eq!(
@@ -5584,17 +5818,13 @@ fn one_layout_per_language_is_written_in_the_language_form() {
     );
 }
 
-#[test]
-fn a_millisecond_field_reads_as_a_number_and_never_as_a_guess() {
-    assert_eq!(settings::parse_ms("300", 7), 300);
-    assert_eq!(settings::parse_ms("  42 ", 7), 42);
-    // An empty field is zero, which section 7 allows for the delay of FR-44.
-    assert_eq!(settings::parse_ms("", 7), 0);
-    // Nothing the dialog can produce, because the field takes digits only and is limited in
-    // length — and if it ever did, the value that was there before is kept.
-    assert_eq!(settings::parse_ms("99999999999999", 7), 7);
-    assert_eq!(settings::parse_ms("nonsense", 7), 7);
-}
+// ⚠ `a_millisecond_field_reads_as_a_number_and_never_as_a_guess` stood here until task
+// Т-23-2. It closed `settings::parse_ms`, which turned the text of a millisecond field back
+// into a number; решение 81 took all three millisecond fields out of the dialog, so the
+// function has no caller and no field to parse and left with them. The **values** did not:
+// `replacement.inter_event_delay_ms` and the two timings of §4.7 stay in `config.toml`,
+// where serde reads them, and their ceilings are `selection`'s and `inject`'s own — closed
+// by the tests of those modules, not by this one.
 
 #[test]
 fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
@@ -5849,9 +6079,11 @@ fn a_file_asking_for_u32_max_publishes_the_ceilings_and_is_left_byte_for_byte() 
 /// **Criterion 6 of task T-13-13.** A value above the ceiling is clamped, and the journal says so
 /// **once per publication** — not once per session and not once per press.
 ///
-/// Nine digits is what the dialog of FR-92 can produce: `parse_ms` bounds the field by its length
-/// and by nothing else, so 999 999 999 ms — about eleven and a half days — is reachable without
-/// ever opening the file by hand.
+/// Nine digits was what the dialog of FR-92 could produce while the three millisecond fields stood
+/// in it. Since task Т-23-2 (решение 81) the fields are gone and the numbers are typed into
+/// `config.toml` by hand, where nothing bounds them at all — so 999 999 999 ms, about eleven and a
+/// half days, is **more** reachable than before, not less, and this ceiling is the only thing
+/// between it and the product.
 #[test]
 fn a_value_above_the_ceiling_is_clamped_and_journalled_once_for_each_publication() {
     let _publishing = publishing();
@@ -6508,7 +6740,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 73] = [
+const FR_94_STRINGS: [(u16, &str, &str); 65] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -6550,33 +6782,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 73] = [
     ),
     (settings::IDS_CYCLE_UP, "Выше", "Up"),
     (settings::IDS_CYCLE_DOWN, "Ниже", "Down"),
-    (settings::IDS_GROUP_REPLACEMENT, "Замена", "Replacement"),
-    (settings::IDS_METHOD_BACKSPACE, "Backspace", "Backspace"),
-    (
-        settings::IDS_METHOD_SELECTION,
-        "Выделение (совместимость)",
-        "Selection (compatibility)",
-    ),
-    (
-        settings::IDS_DELAY_LABEL,
-        "Задержка между событиями, мс:",
-        "Delay between events, ms:",
-    ),
-    (settings::IDS_GROUP_SELECTION, "Выделение", "Selection"),
     (
         settings::IDS_SELECTION_ENABLED,
         "Конвертировать выделенный текст",
         "Convert the selected text",
-    ),
-    (
-        settings::IDS_CLIPBOARD_TIMEOUT,
-        "Таймаут буфера обмена, мс:",
-        "Clipboard timeout, ms:",
-    ),
-    (
-        settings::IDS_CLIPBOARD_RESTORE,
-        "Задержка восстановления, мс:",
-        "Restore delay, ms:",
     ),
     (settings::IDS_GROUP_EXCLUSIONS, "Исключения", "Exclusions"),
     (settings::IDS_EXCLUSION_REMOVE, "Удалить", "Remove"),
@@ -6676,11 +6885,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 73] = [
         settings::IDS_LOG_DIR_MISSING,
         "%APPDATA% не задан — журнал писать некуда",
         "%APPDATA% is not set — there is nowhere to write the journal",
-    ),
-    (
-        settings::IDS_METHOD_AUTO,
-        "Автоматически (рекомендуется)",
-        "Automatic (recommended)",
     ),
     (settings::IDS_THEME_LABEL, "Оформление:", "Appearance:"),
     (settings::IDS_THEME_SYSTEM, "Как в системе", "Match system"),
@@ -9661,8 +9865,9 @@ fn the_face_goes_to_every_control_of_the_template_that_draws_its_own_text_and_to
 
     assert_eq!(
         handed.len(),
-        6,
-        "the five EDITTEXT fields and the layout list — the remainder task T-11-20 names"
+        3,
+        "the two EDITTEXT fields and the layout list — the remainder task T-11-20 names, three \
+         since task Т-23-2 took the three millisecond fields off the window"
     );
 }
 
@@ -10250,15 +10455,13 @@ fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
 // on one pure function — no window is created and the product is not started. What the pixels
 // then do is the controller's half, on the stand.
 
-/// The five input fields of `IDD_SETTINGS`, by identifier.
+/// The two input fields of `IDD_SETTINGS`, by identifier.
 ///
-/// The same five `EDITTEXT` rows `settings::FRAMED_FIELDS` names minus the two lists — the
-/// controls a `12`-unit box is drawn round and whose own rectangle is one font height.
-const INPUT_FIELDS: [(u32, &str); 5] = [
+/// The same two `EDITTEXT` rows `settings::FRAMED_FIELDS` names minus the two lists — the
+/// controls a `12`-unit box is drawn round and whose own rectangle is one font height. Five
+/// until task Т-23-2 took the three millisecond fields out of the window.
+const INPUT_FIELDS: [(u32, &str); 2] = [
     (1010, "Горячая клавиша: поле клавиши"),
-    (1032, "Замена: задержка между событиями"),
-    (1041, "Выделение: таймаут буфера обмена"),
-    (1042, "Выделение: задержка восстановления"),
     (1051, "Исключения: имя процесса"),
 ];
 
@@ -10440,18 +10643,22 @@ fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
 
     // And the row still fits the panel «Общие».
     //
-    // ⚠ **80 units, and it was 66 until 2026-09-01.** Decision В-1 (question 55) legitimised the
-    // growth the «Оформление» row of FR-92а cost and wrote 66 down as the canon *of that
-    // moment*; it did not make 66 a principle. The sound switch of FR-100 is one more row and
-    // cost 14 more units, by the user's own word: «место под расширение вниз модуля общие более
-    // чем достаточно». The window is not re-cut — 420×385 stands, which is the half of В-1 that
-    // really was a principle.
+    // ⚠ **94 units, and it was 66 until 2026-09-01 and 80 for the length of one delivery.**
+    // Decision В-1 (question 55) legitimised the growth the «Оформление» row of FR-92а cost and
+    // wrote 66 down as the canon *of that moment*; it did not make 66 a principle. The sound
+    // switch of FR-100 is one more row and cost 14 more units, by the user's own word: «место
+    // под расширение вниз модуля общие более чем достаточно». Решение 82.2 brings the selection
+    // switch of FR-61 here from the group that was dissolved around it — one more row, 14 more
+    // units, and the same word covers it. The window IS re-cut this time, but not by this
+    // block: решение 83 cut the gap over «Состояние», and the window came out shorter, not
+    // taller.
     let (_, panel_top, _, panel_bottom) = template.rect_of(1090);
 
     assert_eq!(
         (panel_top, panel_bottom),
-        (7, 87),
-        "«Общие» is 7..87 dialog units — В-1 plus the sound row of FR-100"
+        (7, 101),
+        "«Общие» is 7..101 dialog units — В-1, the sound row of FR-100 and the selection row \
+         of решение 82.2"
     );
 
     let base = vertical_base_unit();
@@ -10510,12 +10717,27 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
          its own rectangle — declared level they come out apart, which is defect Д-3"
     );
 
-    // And the bottom of the list did not move: 44 units at y = 160 and 43 at y = 161 end on
-    // the same row.
+    // And the shape of the cure, which is what survived the re-layout of task Т-23-2: the
+    // list stands **one unit** below the button and gives that unit back out of its own
+    // height, so its bottom is where a list declared level with the button would have ended.
+    // The absolute numbers moved with the group — 161/43 became 20/163 when «Исключения» went
+    // to the top of the column and grew (решение 83 п. 1) — but the one unit did not, and it
+    // is the whole of Д-3.
     assert_eq!(
-        vertical_units(list_top, base) + vertical_units(list_bottom - list_top, base),
-        vertical_units(160, base) + vertical_units(44, base),
-        "the bottom of the list has to stay where it was — only its top moved"
+        list_top - button_top,
+        1,
+        "the list stands one unit below the button, which is what puts their frames on one row"
+    );
+    assert_eq!(
+        list_bottom,
+        button_top + 1 + (list_bottom - list_top),
+        "the unit the list gave up at the top it takes back nowhere else"
+    );
+    assert_eq!(
+        (list_top, list_bottom),
+        (20, 183),
+        "«Исключения» stands at the top of the right column and its list is 163 units — \
+         решение 83 п. 1, the user's choice at К-1"
     );
 }
 
@@ -10526,14 +10748,25 @@ fn the_journal_path_stands_where_the_generator_puts_it() {
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
     let (left, top, right, bottom) = template.rect_of(1062);
+    let (_, caption_top, _, _) = template.rect_of(1107);
 
-    println!("путь журнала (1062): {left},{top}..{right},{bottom}");
+    println!("путь журнала (1062): {left},{top}..{right},{bottom}; подпись (1107) y={caption_top}");
 
+    // ⚠ The defect was a **step**, not an address: `IDC_LOG_DIR` stood eleven units under its
+    // own caption where the generator writes nine (ui.ps1: y = 264 and y = 273), and the path
+    // came out two units low. Task Т-23-2 moved the whole «Диагностика» group 21 units up when
+    // the right column was re-cut, so the generator's absolute y is no longer where the group
+    // is — the nine units between the caption and the path are, and they are what Д-4 was.
     assert_eq!(
-        (left, top, right - left, bottom - top),
-        (220, 273, 186, 16),
-        "ui.ps1 writes the journal path at x = 220, y = 273, w = 186, h = 16; the 275 it stood \
-         at was two units low"
+        top - caption_top,
+        9,
+        "ui.ps1 puts the journal path nine units under its caption (y = 264 → y = 273); the \
+         eleven it stood at were defect Д-4"
+    );
+    assert_eq!(
+        (left, right - left, bottom - top),
+        (220, 186, 16),
+        "and the path keeps the generator's x, width and its two lines of height"
     );
 }
 
