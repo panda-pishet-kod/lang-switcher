@@ -43,7 +43,7 @@ use lang_switcher::convert::{Keystroke, convert_strokes, max_units};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts::{
     Configured, KeyMapping, LayoutCache, LayoutId, LayoutMap, LayoutMapBuilder, MAX_CYCLE, Mods,
-    cycle_for,
+    Session, cycle_for,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -191,7 +191,12 @@ fn press(recorder: &mut Recorder, settings: Configured) -> String {
         let mut available = [LayoutId::default(); MAX_CYCLE];
         let count = cache.layouts(&mut available);
 
-        let cycle = cycle_for(settings, &available[..count]).expect("a usable cycle");
+        let cycle = cycle_for(
+            settings,
+            &available[..count],
+            Session::of(count, cache.len()),
+        )
+        .expect("a usable cycle");
 
         let mut strokes = vec![Keystroke::default(); recorder.len()];
         let live = recorder.keystrokes(&mut strokes).expect("sized from len()");
@@ -384,6 +389,7 @@ fn pair_and_cycle_are_the_same_mechanism_with_a_different_list() {
             &["0x00000409", "0x00000419"],
         ),
         &available,
+        Session::Whole,
     )
     .expect("the pair of decision 19");
 
@@ -394,6 +400,7 @@ fn pair_and_cycle_are_the_same_mechanism_with_a_different_list() {
             &["0x00000409", "0x00000419"],
         ),
         &available,
+        Session::Whole,
     )
     .expect("the same two layouts as a cycle");
 
@@ -1007,6 +1014,7 @@ fn the_screen_shows_the_step_already_taken_and_not_the_one_being_prepared() {
             &["0x00000409", "0x00000419", "0x00000408"],
         ),
         &available,
+        Session::Whole,
     )
     .expect("три раскладки — годный цикл");
 
@@ -1061,6 +1069,7 @@ fn a_closed_circle_still_shows_an_injection_and_not_the_typing() {
             &["0x00000409", "0x00000419"],
         ),
         &available,
+        Session::Whole,
     )
     .expect("две раскладки — годный цикл");
 

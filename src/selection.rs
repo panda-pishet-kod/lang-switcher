@@ -2421,8 +2421,13 @@ fn plan_for_press() -> Option<Plan> {
         let mut available = [LayoutId::default(); crate::layouts::MAX_CYCLE];
         let count = cache.layouts(&mut available);
 
+        // **Task Т-22-5**, as in `inject::take_press`: whether the array above holds the session
+        // or only the front of it. See `layouts::Session`.
+        let session = crate::layouts::Session::of(count, cache.len());
+
         let cycle =
-            crate::layouts::cycle_for(crate::layouts::published(), &available[..count]).ok()?;
+            crate::layouts::cycle_for(crate::layouts::published(), &available[..count], session)
+                .ok()?;
 
         let mut maps = Vec::with_capacity(cycle.len());
         for &layout in cycle.layouts() {

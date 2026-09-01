@@ -980,6 +980,7 @@ fn render_counters(out: &mut String) {
     row_u32(out, "layouts.ime_layout", selection.ime_layout);
     row_u32(out, "layouts.no_layouts", selection.no_layouts);
     row_u32(out, "layouts.origin_outside", selection.origin_outside);
+    row_u32(out, "layouts.too_many_layouts", selection.too_many_layouts);
 
     let (send_mismatches, events_lost) = crate::inject::send_mismatches();
 

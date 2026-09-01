@@ -2123,7 +2123,12 @@ fn take_press() -> Option<Press> {
         let mut available = [LayoutId::default(); layouts::MAX_CYCLE];
         let count = cache.layouts(&mut available);
 
-        let cycle = layouts::cycle_for(layouts::published(), &available[..count]).ok()?;
+        // **Task Т-22-5.** Whether the array above holds the session or only the front of it. A
+        // pair that resolves against nothing means two opposite things in the two cases, and only
+        // the caller knows which list it handed over.
+        let session = layouts::Session::of(count, cache.len());
+
+        let cycle = layouts::cycle_for(layouts::published(), &available[..count], session).ok()?;
 
         // **FR-26: the direction comes from the HKL recorded with the stroke**, and never from
         // the layout that happens to be active now. The difference is the whole of FR-33: step 5

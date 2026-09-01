@@ -18,7 +18,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use lang_switcher::layouts::{
     Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
     LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MappingKind, Mods, REBUILD_MESSAGES, SelectionError,
-    cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures,
+    Session, cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -645,7 +645,8 @@ fn two_layouts_in_the_session_choose_the_target_without_any_configuration() {
     // published and nothing is read: `Configured::default` is what the input thread sees
     // before the UI thread has said anything at all.
     let session = [US, RUSSIAN];
-    let cycle = cycle_for(Configured::default(), &session).expect("two layouts are a pair");
+    let cycle =
+        cycle_for(Configured::default(), &session, Session::Whole).expect("two layouts are a pair");
 
     assert_eq!(cycle.layouts(), session);
     assert_eq!(
@@ -667,7 +668,8 @@ fn two_layouts_in_the_session_choose_the_target_without_any_configuration() {
         ["0x0000040C", "0x00000407"],
         &["0x0000040C"],
     );
-    let cycle = cycle_for(nonsense, &session).expect("two layouts are a pair regardless");
+    let cycle =
+        cycle_for(nonsense, &session, Session::Whole).expect("two layouts are a pair regardless");
 
     assert_eq!(cycle.layouts(), session);
     assert_eq!(cycle.target(US, 1).expect("the other one"), RUSSIAN);
@@ -683,7 +685,8 @@ fn three_layouts_in_pair_mode_walk_the_named_pair_and_ignore_the_rest() {
 
     // "Пользователь явно задаёт рабочую пару «источник ↔ цель». Остальные раскладки
     // игнорируются."
-    let cycle = cycle_for(the_pair_of_decision_19(), &session).expect("the named pair");
+    let cycle =
+        cycle_for(the_pair_of_decision_19(), &session, Session::Whole).expect("the named pair");
 
     assert_eq!(cycle.layouts(), [US, RUSSIAN]);
     assert!(!cycle.contains(GREEK), "the third layout takes no part");
@@ -706,7 +709,7 @@ fn three_layouts_in_pair_mode_walk_the_named_pair_and_ignore_the_rest() {
         ["0x00000419", "0x00000408"],
         &["0x00000409", "0x00000419"],
     );
-    let cycle = cycle_for(other_pair, &session).expect("the named pair");
+    let cycle = cycle_for(other_pair, &session, Session::Whole).expect("the named pair");
 
     assert_eq!(cycle.layouts(), [RUSSIAN, GREEK]);
     assert_eq!(cycle.target(RUSSIAN, 1).expect("the pair"), GREEK);
@@ -718,7 +721,7 @@ fn three_layouts_in_pair_mode_walk_the_named_pair_and_ignore_the_rest() {
         ["0x0000040C", "0x00000419"],
         &["0x00000409", "0x00000419"],
     );
-    let cycle = cycle_for(absent, &session).expect("the prefill of FR-30");
+    let cycle = cycle_for(absent, &session, Session::Whole).expect("the prefill of FR-30");
 
     assert_eq!(cycle.layouts(), [US, RUSSIAN]);
 }
@@ -741,7 +744,7 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
         &["0x00000409", "0x00000419", "0x00000408"],
     );
 
-    let cycle = cycle_for(three, &session).expect("the configured list");
+    let cycle = cycle_for(three, &session, Session::Whole).expect("the configured list");
 
     assert_eq!(cycle.layouts(), session);
 
@@ -758,7 +761,7 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
         ["0x00000409", "0x00000419"],
         &["0x00000409", "0x00000408", "0x00000419"],
     );
-    let cycle = cycle_for(reversed, &session).expect("the configured list");
+    let cycle = cycle_for(reversed, &session, Session::Whole).expect("the configured list");
 
     assert_eq!(cycle.layouts(), [US, GREEK, RUSSIAN]);
     assert_eq!(cycle.target(US, 1).expect("variant 2"), GREEK);
@@ -771,7 +774,7 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
         &["0x0000040C", "0x00000419", "0x00000409"],
     );
     assert_eq!(
-        cycle_for(partly_absent, &session)
+        cycle_for(partly_absent, &session, Session::Whole)
             .expect("what is left of the list")
             .layouts(),
         [RUSSIAN, US]
@@ -785,7 +788,7 @@ fn cycle_mode_walks_the_list_in_order_and_comes_back_to_the_start() {
         &["0x0000040C"],
     );
     assert_eq!(
-        cycle_for(all_absent, &session),
+        cycle_for(all_absent, &session, Session::Whole),
         Err(SelectionError::NoLayouts)
     );
 }
@@ -816,7 +819,8 @@ fn a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session
         ["0x00000409", "0x00000419"],
         &["0x00000409", "0x00000419"],
     );
-    let cycle = cycle_for(ticked, &[US, RUSSIAN, GREEK]).expect("both participants are present");
+    let cycle = cycle_for(ticked, &[US, RUSSIAN, GREEK], Session::Whole)
+        .expect("both participants are present");
 
     assert_eq!(cycle.layouts(), [US, RUSSIAN]);
     assert!(
@@ -830,7 +834,7 @@ fn a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session
     let before = selection_failures().no_layouts;
 
     assert_eq!(
-        cycle_for(ticked, &[US, GREEK]),
+        cycle_for(ticked, &[US, GREEK], Session::Whole),
         Err(SelectionError::NoLayouts),
         "one live participant is nothing to switch between, not a licence to walk the session"
     );
@@ -849,7 +853,7 @@ fn a_cycle_list_that_outlives_its_layouts_refuses_instead_of_walking_the_session
     );
 
     assert_eq!(
-        cycle_for(none_left, &[US, GREEK]),
+        cycle_for(none_left, &[US, GREEK], Session::Whole),
         Err(SelectionError::NoLayouts)
     );
 
@@ -881,17 +885,128 @@ fn the_pair_still_prefills_from_the_session_where_the_cycle_refuses() {
     );
 
     // The target of the named pair is not in this session, so the named pair is unusable.
-    let cycle = cycle_for(as_pair, &[US, GREEK, GERMAN]).expect("the prefill of FR-30");
+    let cycle =
+        cycle_for(as_pair, &[US, GREEK, GERMAN], Session::Whole).expect("the prefill of FR-30");
 
     assert_eq!(cycle.layouts(), [US, GREEK]);
     assert!(!cycle.contains(GERMAN), "the first two, as FR-30 words it");
 
     // And with exactly two layouts in the session the configuration is not consulted at all —
     // the first bullet of FR-30, which no change to the cycle branch may touch.
-    let cycle = cycle_for(as_pair, &session).expect("two layouts are a pair regardless");
+    let cycle =
+        cycle_for(as_pair, &session, Session::Whole).expect("two layouts are a pair regardless");
 
     assert_eq!(cycle.layouts(), session);
     assert_eq!(cycle.target(US, 1).expect("the other one"), GREEK);
+}
+
+/// ⭐ **Task Т-22-5, finding м5 of the audit of 2026-09-01 — nine layouts, and the pair the user
+/// configured quietly replaced by two others.**
+///
+/// [`LayoutCache::layouts`] copies into the caller's fixed array of [`MAX_CYCLE`] elements and
+/// answers how many it copied. A session with more layouts than that leaves the rest out — and the
+/// slice that comes back looks exactly like a whole session of eight. The pair branch of
+/// [`cycle_for`] then failed to resolve a member that is really in the session, fell into the
+/// prefill of FR-30, and converted between the first two layouts instead. Silently, and with the
+/// settings dialog showing the pair as perfectly valid, because the dialog checks it against the
+/// **full** list.
+///
+/// [`MAX_CYCLE`] is not widened by this task: the bound is what keeps a hand-edited file from
+/// becoming an unbounded array on the hotkey path. What changes is that a substitution this
+/// program cannot justify is refused instead of guessed.
+///
+/// # ⚠ What must survive the repair
+///
+/// The prefill of FR-30 itself. "The pair names a layout this session does not have" and "the pair
+/// names a layout this program did not look at" arrive as the same unresolved slice, and only the
+/// second is a defect — so both halves are driven here, from the same configuration.
+///
+/// ⚠ Moves the process-wide `too_many_layouts` counter. It takes no turn because nothing else in
+/// this binary raises it: [`SelectionError::TooManyLayouts`] is created in one place, the pair
+/// branch of `cycle_for`, and this is the only test that reaches it.
+#[test]
+fn a_pair_beyond_the_truncated_session_is_refused_and_not_quietly_replaced() {
+    /// The ninth layout of the session — Czech. Past [`MAX_CYCLE`], which is the whole premise.
+    const NINTH: LayoutId = LayoutId::from_raw(0x0405_0405);
+
+    /// One synthetic layout carrying one character, which is all [`LayoutCache::from_maps`]
+    /// requires of a map and all this test needs of one.
+    fn one_key(layout: LayoutId) -> LayoutMap {
+        let mut builder = LayoutMapBuilder::new(layout);
+        builder.set(SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
+        builder.finish()
+    }
+
+    // A session of nine, built the way the product builds one, so that the truncation under test
+    // is the real `LayoutCache::layouts` and not a slice this test cut by hand.
+    let session = [
+        US,
+        RUSSIAN,
+        GREEK,
+        LayoutId::from_raw(0x0407_0407),
+        LayoutId::from_raw(0x040C_040C),
+        LayoutId::from_raw(0x0410_0410),
+        LayoutId::from_raw(0x040A_040A),
+        LayoutId::from_raw(0x0415_0415),
+        NINTH,
+    ];
+
+    let cache = LayoutCache::from_maps(session.iter().copied().map(one_key).collect())
+        .expect("nine non-empty maps");
+
+    assert_eq!(cache.len(), 9);
+
+    let mut available = [LayoutId::default(); MAX_CYCLE];
+    let count = cache.layouts(&mut available);
+
+    assert_eq!(
+        count, MAX_CYCLE,
+        "the ninth layout did not fit, which is the whole premise of this test"
+    );
+    assert!(
+        !available.contains(&NINTH),
+        "and it is the ninth that was left out"
+    );
+
+    // The user's pair: the first layout of the session and the ninth. Valid — the dialog checks it
+    // against the full list and finds both.
+    let beyond = settings(LayoutMode::Pair, ["0x00000409", "0x00000405"], &[]);
+
+    let before = selection_failures().too_many_layouts;
+
+    assert_eq!(
+        cycle_for(beyond, &available[..count], Session::of(count, cache.len())),
+        Err(SelectionError::TooManyLayouts),
+        "Т-22-5: a pair this program did not look at must not be replaced by two it did"
+    );
+
+    assert_eq!(
+        selection_failures().too_many_layouts,
+        before + 1,
+        "and the refusal is counted, like every other"
+    );
+
+    // ⚠ The prefill of FR-30 where it is honest: the same unresolvable pair against a list that
+    // really is the whole session still prefills, and nothing is counted.
+    let prefilled = cycle_for(beyond, &[US, RUSSIAN, GREEK], Session::Whole)
+        .expect("the prefill of FR-30, where the list really is the session");
+
+    assert_eq!(prefilled.layouts(), [US, RUSSIAN]);
+    assert_eq!(
+        selection_failures().too_many_layouts,
+        before + 1,
+        "a prefill is not a refusal and must not be counted as one"
+    );
+
+    // And a pair that resolves inside the truncated list is answered as it always was: the rule is
+    // about what this program could not see, never about the length of the session.
+    let inside = settings(LayoutMode::Pair, ["0x00000409", "0x00000419"], &[]);
+
+    let cycle = cycle_for(inside, &available[..count], Session::of(count, cache.len()))
+        .expect("both members are inside the list this program was handed");
+
+    assert_eq!(cycle.layouts(), [US, RUSSIAN]);
+    assert_eq!(selection_failures().too_many_layouts, before + 1);
 }
 
 // -------------------------------------------------------------------------------------
@@ -909,7 +1024,7 @@ fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
     let before = selection_failures().ime_layout;
 
     assert_eq!(
-        cycle_for(the_pair_of_decision_19(), &[US, PINYIN]),
+        cycle_for(the_pair_of_decision_19(), &[US, PINYIN], Session::Whole),
         Err(SelectionError::ImeLayout)
     );
 
@@ -921,7 +1036,7 @@ fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
     );
 
     assert_eq!(
-        cycle_for(with_an_ime, &[US, PINYIN, RUSSIAN]),
+        cycle_for(with_an_ime, &[US, PINYIN, RUSSIAN], Session::Whole),
         Err(SelectionError::ImeLayout)
     );
 
@@ -931,7 +1046,8 @@ fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
     // `layouts::target_for`, which no product code called; the wrapper is gone and the test now
     // exercises the same two steps in the same order as the product.
     assert_eq!(
-        cycle_for(the_pair_of_decision_19(), &[US, PINYIN]).and_then(|cycle| cycle.target(US, 1)),
+        cycle_for(the_pair_of_decision_19(), &[US, PINYIN], Session::Whole)
+            .and_then(|cycle| cycle.target(US, 1)),
         Err(SelectionError::ImeLayout)
     );
 
@@ -944,8 +1060,12 @@ fn an_ime_layout_named_as_a_participant_is_refused_and_counted() {
 
     // An IME merely *present* in the session is not an error: FR-35 excludes it from the
     // participants, and a pair naming the other two is a pair.
-    let cycle = cycle_for(the_pair_of_decision_19(), &[US, PINYIN, RUSSIAN])
-        .expect("the named pair does not include the IME");
+    let cycle = cycle_for(
+        the_pair_of_decision_19(),
+        &[US, PINYIN, RUSSIAN],
+        Session::Whole,
+    )
+    .expect("the named pair does not include the IME");
 
     assert_eq!(cycle.layouts(), [US, RUSSIAN]);
 }
@@ -1097,7 +1217,7 @@ fn the_layouts_section_of_the_configuration_reaches_the_input_thread() {
     assert!(read_back.pair()[1].matches(RUSSIAN));
     assert_eq!(read_back.cycle().len(), 3);
     assert_eq!(
-        cycle_for(read_back, &[US, RUSSIAN, GREEK])
+        cycle_for(read_back, &[US, RUSSIAN, GREEK], Session::Whole)
             .expect("the published list")
             .layouts(),
         [RUSSIAN, GREEK, US]
@@ -1110,7 +1230,7 @@ fn the_layouts_section_of_the_configuration_reaches_the_input_thread() {
 
     assert_eq!(default.mode(), LayoutMode::Pair);
     assert_eq!(
-        cycle_for(default, &[US, RUSSIAN, GREEK])
+        cycle_for(default, &[US, RUSSIAN, GREEK], Session::Whole)
             .expect("the pair of decision 19")
             .layouts(),
         [US, RUSSIAN]

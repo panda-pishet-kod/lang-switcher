@@ -1204,6 +1204,22 @@ pub enum SelectionError {
     /// third is not this program's business: converting it would mean guessing a direction the
     /// user did not give.
     OriginOutside,
+    /// ⭐ **Task Т-22-5.** Mode `pair`, the configured pair resolved against nothing — and the
+    /// list it was resolved against was **not the whole session**: it had been cut short at
+    /// [`MAX_CYCLE`] by the caller's fixed array.
+    ///
+    /// The prefill of FR-30 is the answer when the session really does not have the layouts the
+    /// pair names. It is **not** an answer when this program simply did not look at them: the two
+    /// are the same slice and opposite facts, and guessing between them is how a user with nine
+    /// layouts got a silent conversion between the first two of them instead of the pair they
+    /// configured — with the settings dialog showing that pair as perfectly valid, because the
+    /// dialog checks against the full list.
+    ///
+    /// So the answer is a refusal that is counted like every other, and the press changes nothing
+    /// at all. [`MAX_CYCLE`] is not widened by this: eight is still more layouts than a session is
+    /// ever set up with, and a bound that a hand-edited file cannot turn into an unbounded array
+    /// on the hotkey path is the reason it exists.
+    TooManyLayouts,
 }
 
 impl fmt::Display for SelectionError {
@@ -1213,6 +1229,9 @@ impl fmt::Display for SelectionError {
             Self::ImeLayout => "an IME layout was named as a participant and FR-35 excludes it",
             Self::NoLayouts => "fewer than two layouts to switch between",
             Self::OriginOutside => "the layout in use is not one of the participants",
+            Self::TooManyLayouts => {
+                "the configured pair names no layout among the first eight of this session"
+            }
         };
         f.write_str(text)
     }
@@ -1234,19 +1253,22 @@ pub struct SelectionFailures {
     pub no_layouts: u32,
     /// [`SelectionError::OriginOutside`].
     pub origin_outside: u32,
+    /// [`SelectionError::TooManyLayouts`] — task Т-22-5.
+    pub too_many_layouts: u32,
 }
 
 static IME_LAYOUT: AtomicU32 = AtomicU32::new(0);
 static NO_LAYOUTS: AtomicU32 = AtomicU32::new(0);
 static ORIGIN_OUTSIDE: AtomicU32 = AtomicU32::new(0);
+static TOO_MANY_LAYOUTS: AtomicU32 = AtomicU32::new(0);
 
 /// Counts one refusal and hands it back, so that a refusal cannot be produced without being
 /// counted.
 ///
-/// The one place any of the three counters is raised, and it is reached from the two places a
-/// [`SelectionError`] is *created* — [`Cycle::from_layouts`] and [`Cycle::target`]. Everything
-/// above them propagates with `?` and counts nothing, which is what keeps one refusal from being
-/// counted twice.
+/// The one place any of the four counters is raised, and it is reached from the three places a
+/// [`SelectionError`] is *created* — [`Cycle::from_layouts`], [`Cycle::target`] and, since task
+/// Т-22-5, the pair branch of [`cycle_for`]. Everything above them propagates with `?` and counts
+/// nothing, which is what keeps one refusal from being counted twice.
 ///
 /// Relaxed: these are counters and nothing is ordered against them (NFR-04 — no lock anywhere on
 /// this path).
@@ -1255,6 +1277,7 @@ fn refuse(error: SelectionError) -> SelectionError {
         SelectionError::ImeLayout => &IME_LAYOUT,
         SelectionError::NoLayouts => &NO_LAYOUTS,
         SelectionError::OriginOutside => &ORIGIN_OUTSIDE,
+        SelectionError::TooManyLayouts => &TOO_MANY_LAYOUTS,
     };
 
     counter.fetch_add(1, Ordering::Relaxed);
@@ -1262,20 +1285,22 @@ fn refuse(error: SelectionError) -> SelectionError {
     error
 }
 
-/// What the three counters stand at.
+/// What the four counters stand at.
 pub fn selection_failures() -> SelectionFailures {
     SelectionFailures {
         ime_layout: IME_LAYOUT.load(Ordering::Relaxed),
         no_layouts: NO_LAYOUTS.load(Ordering::Relaxed),
         origin_outside: ORIGIN_OUTSIDE.load(Ordering::Relaxed),
+        too_many_layouts: TOO_MANY_LAYOUTS.load(Ordering::Relaxed),
     }
 }
 
-/// Zeroes the three counters. For tests; the product never calls it.
+/// Zeroes the four counters. For tests; the product never calls it.
 pub fn reset_selection_failures() {
     IME_LAYOUT.store(0, Ordering::Relaxed);
     NO_LAYOUTS.store(0, Ordering::Relaxed);
     ORIGIN_OUTSIDE.store(0, Ordering::Relaxed);
+    TOO_MANY_LAYOUTS.store(0, Ordering::Relaxed);
 }
 
 /// The ordered list of layouts one press of the hotkey steps along — **FR-30, FR-31, FR-33**.
@@ -1758,6 +1783,38 @@ mod seam {
 #[cfg(feature = "testing")]
 pub use seam::arm as interleave_next_read;
 
+/// Whether the list handed to [`cycle_for`] is the whole session — task **Т-22-5**.
+///
+/// [`LayoutCache::layouts`] copies into the caller's fixed array of [`MAX_CYCLE`] elements and
+/// answers how many it copied. A session with more layouts than that leaves the rest out, and the
+/// slice that comes back cannot say so: it looks exactly like a whole session of eight. This type
+/// is the caller saying which of the two it handed over, and it is a named value rather than a
+/// `bool` so that no call site can be read as the opposite of what it is.
+///
+/// The two product call sites — `inject::take_press` and `selection::plan_for_press` — build it by
+/// comparing what `layouts` copied with [`LayoutCache::len`], which is the whole session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Session {
+    /// Every layout the session has is in the list.
+    #[default]
+    Whole,
+    /// The session has more layouts than [`MAX_CYCLE`], and the list is the first [`MAX_CYCLE`] of
+    /// them in system order.
+    Truncated,
+}
+
+impl Session {
+    /// What a caller that copied `taken` layouts out of a cache holding `total` handed over.
+    #[must_use]
+    pub const fn of(taken: usize, total: usize) -> Self {
+        if taken < total {
+            Self::Truncated
+        } else {
+            Self::Whole
+        }
+    }
+}
+
 /// **The list the hotkey walks, for this configuration and this session — FR-30, FR-31, FR-33.**
 ///
 /// The one function both modes go through, and the only place the two of them differ at all:
@@ -1808,8 +1865,22 @@ pub use seam::arm as interleave_next_read;
 /// user nothing that FR-31 promised: [`SelectionError::NoLayouts`] is a defined answer of this
 /// module, it is counted like every other refusal, and the press then changes nothing at all.
 ///
+/// # ⭐ The prefill is not an answer to a question this program did not ask — task Т-22-5
+///
+/// `session` says whether `available` is the whole session or the first [`MAX_CYCLE`] of a longer
+/// one. It is consulted in exactly one place: the prefill above. "The pair names a layout this
+/// session does not have" and "the pair names a layout this program did not look at" produce the
+/// **same** unresolved slice and are opposite facts, and the prefill of FR-30 is an answer only to
+/// the first. Against a list cut short of the session the answer is
+/// [`SelectionError::TooManyLayouts`] — counted like every other refusal, and the press then
+/// changes nothing at all. See that variant for what the silent substitution cost.
+///
 /// Allocates nothing: both branches build the list in a fixed array.
-pub fn cycle_for(configured: Configured, available: &[LayoutId]) -> Result<Cycle, SelectionError> {
+pub fn cycle_for(
+    configured: Configured,
+    available: &[LayoutId],
+    session: Session,
+) -> Result<Cycle, SelectionError> {
     match configured.mode() {
         LayoutMode::Pair => {
             if available.len() == 2 {
@@ -1821,6 +1892,13 @@ pub fn cycle_for(configured: Configured, available: &[LayoutId]) -> Result<Cycle
                 (Some(source), Some(target)) if source != target => {
                     Cycle::from_layouts(&[source, target])
                 }
+                // ⭐ **Task Т-22-5.** The pair resolved against nothing, and the list it was
+                // resolved against is not the session — so "not there" is not a fact this program
+                // established. Refuse rather than substitute.
+                // ⭐ **Task Т-22-5.** The pair resolved against nothing, and the list it was
+                // resolved against is not the session — so "not there" is not a fact this program
+                // established. Refuse rather than substitute.
+                _ if session == Session::Truncated => Err(refuse(SelectionError::TooManyLayouts)),
                 _ => Cycle::from_layouts(available.get(..2).unwrap_or(available)),
             }
         }
