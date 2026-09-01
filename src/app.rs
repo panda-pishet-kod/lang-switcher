@@ -182,7 +182,13 @@ pub fn run() -> ExitCode {
     match SingleInstance::acquire() {
         Ok(Acquisition::Acquired(instance)) => run_as_first_instance(instance),
         Ok(Acquisition::AlreadyRunning) => {
-            notify_already_running();
+            // The notification of FR-82, unless this is a debug build on a bench — see
+            // `already_running_is_silent`, task Т-25-2. The exit code is the same either way:
+            // what is withheld is the window, not the refusal to start.
+            if !already_running_is_silent() {
+                notify_already_running();
+            }
+
             ExitCode::from(EXIT_ALREADY_RUNNING)
         }
         Err(error) => {
@@ -690,6 +696,43 @@ impl Drop for SingleInstance {
             report_non_critical("CloseHandle", &error);
         }
     }
+}
+
+/// Whether this second instance leaves **without** the notification of FR-82 — task Т-25-2,
+/// finding м-Э24-2, the user's decision 84.2.
+///
+/// # What this is for
+///
+/// The notification of FR-82 is a modal `MessageBoxW` and blocks until somebody closes it —
+/// decision R-20 point 1, and the right answer for a person who started the program twice. On a
+/// bench there is nobody in front of the screen. A second instance raised by a test that then
+/// fell over stands on that box for ever: the deadline of FR-97 cannot save it, because a second
+/// instance never reaches [`run_as_first_instance`] where the deadline is counted, and even if it
+/// did, a modal message loop is not a place a timer thread can reach. Stage Э24 measured the
+/// result — `pid 7624`, alive 358 seconds under a deadline of 45.
+///
+/// # The condition, and why it is this one
+///
+/// `LANGSW_DEBUG_TIMEOUT_SEC` being set at all. It is the variable every bench in this repository
+/// already sets on every launch of the product (decision Р-53: the same variable, no new one), it
+/// exists only in a debug build, and a person starting the program by hand does not have it. So
+/// "the deadline is armed" is the same fact as "nobody is looking at this window".
+///
+/// # Release
+///
+/// This function is `false` and nothing else, with no environment read in it at all. FR-82 is
+/// untouched in the shipped product: the same modal notification, the same exit code, the same
+/// requirement. The debug half lives inside [`debug_timeout`], so the name of the variable stays
+/// where acceptance point 13 of §13 expects to find it — behind `cfg(debug_assertions)`.
+#[cfg(debug_assertions)]
+fn already_running_is_silent() -> bool {
+    debug_timeout::notification_is_suppressed(debug_timeout::deadline_is_armed())
+}
+
+/// See the debug half above. In a Release build the notification of FR-82 is never withheld.
+#[cfg(not(debug_assertions))]
+fn already_running_is_silent() -> bool {
+    false
 }
 
 /// Tells the user that the program is already running — the "notification" half of FR-82.
@@ -2897,6 +2940,44 @@ mod debug_timeout {
         parse_timeout(std::env::var(TIMEOUT_ENV_VAR).ok().as_deref())
     }
 
+    /// Whether the FR-97 deadline was armed from the environment for this run — task Т-25-2.
+    ///
+    /// Presence and not value: an unusable value still gets a deadline (see [`parse_timeout`]),
+    /// and what the caller is asking about is not how long the process may live but whether it
+    /// was started by a bench. The variable is the mark of one.
+    pub fn deadline_is_armed() -> bool {
+        std::env::var_os(TIMEOUT_ENV_VAR).is_some()
+    }
+
+    /// The name this suppression files itself under in the journal of §6.2.
+    ///
+    /// A row of the closed table of `diag` — SEC-07: the journal carries an index into that
+    /// table, never a string a caller built.
+    const SUPPRESSED_OPERATION: &str = "FR-82 notification suppressed";
+
+    /// Withholds the FR-82 notification when the deadline is armed, and says so in the journal.
+    ///
+    /// The condition arrives as an argument rather than being read here, so that the decision
+    /// can be tested without touching the environment of the test process — the same split
+    /// [`parse_timeout`] uses, and for the same reason. [`super::already_running_is_silent`] is
+    /// the one caller and reads the environment for it.
+    ///
+    /// The journal line is what replaces the window. It costs one `diag::record`, which is
+    /// allocation-free and lock-free, and it carries a name out of the closed table and no code:
+    /// nothing failed here, a window was deliberately not shown.
+    pub fn notification_is_suppressed(armed: bool) -> bool {
+        if !armed {
+            return false;
+        }
+
+        crate::diag::record(
+            crate::diag::Operation::from_name(SUPPRESSED_OPERATION),
+            crate::diag::OsCode::NONE,
+        );
+
+        true
+    }
+
     /// Reads the deadline out of the raw value of the environment variable.
     ///
     /// Split out from [`configured_timeout`] so it can be tested without touching the
@@ -2939,6 +3020,47 @@ mod debug_timeout {
                     "unusable value {raw:?} must fall back to the default"
                 );
             }
+        }
+
+        /// **Task Т-25-2, the FR-82 half.** The notification is withheld exactly when the
+        /// deadline is armed, and the journal keeps the line that stands in for the window.
+        ///
+        /// Both halves of the decision are asserted in one test on purpose: the ring of §6.2 is
+        /// process-wide, and two tests asking about the same row could run at the same time and
+        /// read each other's entry. This is the only writer of that row in this binary.
+        #[test]
+        fn the_fr82_notification_is_withheld_only_when_the_deadline_is_armed() {
+            fn suppressions() -> usize {
+                crate::diag::snapshot()
+                    .iter()
+                    .filter(|event| event.operation.name() == SUPPRESSED_OPERATION)
+                    .count()
+            }
+
+            let before = suppressions();
+
+            // Nobody armed a deadline: this is a person who started the program twice, and
+            // FR-82 owes them a window.
+            assert!(
+                !notification_is_suppressed(false),
+                "without the deadline the notification of FR-82 stands"
+            );
+            assert_eq!(
+                suppressions(),
+                before,
+                "and nothing is written down, because nothing happened"
+            );
+
+            // A bench: the window would block a process nobody can close it for.
+            assert!(
+                notification_is_suppressed(true),
+                "with the deadline armed the notification is withheld"
+            );
+            assert_eq!(
+                suppressions(),
+                before + 1,
+                "and the journal carries the line that replaces it"
+            );
         }
     }
 }

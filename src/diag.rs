@@ -475,6 +475,24 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `Kind::Process` — the group every other configuration event of this program is in — and
     // **no new `Kind`**, the rule every note above follows.
     ("configuration write failed", Kind::Process),
+    // ⭐ **Task Т-25-2, finding м-Э24-2 of stage Э24** — a second instance found the mutex of
+    // FR-82 taken and left **without** putting up the modal notification, because the deadline of
+    // FR-97 was armed and therefore nobody was in front of the screen. One row, appended at the
+    // end so that no index above it moves.
+    //
+    // ⚠ **Not a failure, and it must never be read as one.** Every other name in this table
+    // records something that refused or went wrong; this one records a window deliberately not
+    // shown, and it carries no code at all — no system call was made and none failed. It is the
+    // line that replaces the window: the only trace a bench has that this launch was a second
+    // instance rather than a start that never happened.
+    //
+    // ⚠ **Debug only.** Its one writer, `app::debug_timeout::notification_is_suppressed`, lives
+    // behind `cfg(debug_assertions)`, so this row can never be written in the shipped product —
+    // the row itself is harmless there, being a `&str` in a table the whole program shares.
+    //
+    // `Kind::Process` — the group `CreateMutexW` and the rest of the FR-82 path are already in —
+    // and **no new `Kind`**, the rule every note above follows.
+    ("FR-82 notification suppressed", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

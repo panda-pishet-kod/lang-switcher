@@ -1898,10 +1898,17 @@ mod own_window {
         assert_eq!(sent, 1, "SendInput refused a keystroke of the scenario");
     }
 
-    /// The product, started for the run and stopped at the end of it.
+    /// The product, started for the run and stopped when this value goes away.
     ///
     /// ⚠ Decision R-42: this is the **only** process this test may end, and it ends only this
     /// one, by the handle `Command::spawn` answered with.
+    ///
+    /// ⭐ **Task Т-25-2, finding м-Э24-2: the stop lives in [`Drop`] and not in [`Product::stop`]
+    /// alone.** A panic in the body of a behavioural test walks past every remaining line of it,
+    /// `stop()` included, and used to leave the process running for ever — measured at stage Э24
+    /// (`pid 7624`, alive 358 seconds under a 45-second deadline). Unwinding does run `Drop`, so
+    /// this is where the guarantee belongs; `stop` stays as the explicit door. The twin of this
+    /// type in `tests\cycle.rs` carries the same repair and the test that proves it.
     pub struct Product {
         child: std::process::Child,
     }
@@ -1927,10 +1934,25 @@ mod own_window {
             self.child.id()
         }
 
-        /// Ends the process this test started, and no other.
-        pub fn stop(mut self) {
+        /// Ends the process this test started, and no other. Idempotent.
+        ///
+        /// `kill` on a child that has already been reaped answers `Err`, which is why the result
+        /// is dropped; `wait` caches the status it read, so a second call costs nothing and
+        /// cannot block. Both doors — [`Product::stop`] and [`Drop`] — come here.
+        fn end(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
+        }
+
+        /// Ends the product where the scenario says it ends, rather than where the value dies.
+        pub fn stop(mut self) {
+            self.end();
+        }
+    }
+
+    impl Drop for Product {
+        fn drop(&mut self) {
+            self.end();
         }
     }
 

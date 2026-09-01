@@ -696,6 +696,87 @@ fn behavioural_four_presses_alternate_and_restore_the_original_text() {
     product.stop();
 }
 
+// -------------------------------------------------------------------------------------
+// Task Т-25-2 — a behavioural test that falls over leaves no product behind
+// -------------------------------------------------------------------------------------
+
+/// **A panic after the product is up still takes the process with it** — finding м-Э24-2 of
+/// stage Э24, the user's decision 84.2.
+///
+/// # What went wrong and how it was measured
+///
+/// The behavioural test above starts the product on its first working line and ends it on its
+/// last. Every assertion in between can panic, and a panic walks past `product.stop()` exactly
+/// as it walks past everything else. Stage Э24 measured what that leaves: `pid 7624`, alive
+/// **358 seconds** under a deadline of 45, with the window title `Lang Switcher`. It is not the
+/// deadline of FR-97 failing — a second instance never reaches it. It is FR-82: the next launch
+/// finds the abandoned predecessor, puts up a modal notification and stands on it for ever,
+/// because a modal message loop is not a place a timer thread can reach.
+///
+/// # Why this stand and not a reading of the source
+///
+/// `Drop` running on the unwinding path is a property of the language, so a test that asserted
+/// the presence of an `impl Drop` would prove nothing about this program. This one takes the
+/// real product up, panics on purpose inside [`std::panic::catch_unwind`] — which unwinds, and
+/// therefore drops, exactly as a failing test does — and then asks the operating system whether
+/// the process is still there. Before task Т-25-2 it was.
+///
+/// ⚠ The default panic hook is silenced for the length of the `catch_unwind` and put back
+/// immediately: the panic here is the instrument, not a fault, and its message on the console
+/// would read as one. The hook is process-wide, which is one more reason this test belongs among
+/// the `#[ignore]`d ones that run one at a time.
+///
+/// ⚠ **It measures only when it really raised an instance, and says so otherwise.** If another
+/// copy of the product already holds the mutex of FR-82 — the installed one, say — this launch
+/// leaves of its own accord and there is nothing here to abandon; the stand prints `SKIPPED` and
+/// claims nothing, in the idiom the behavioural test above uses for a missing layout. Run it with
+/// no other copy of the product running and it measures.
+#[test]
+#[ignore = "starts the product with a live global hook and panics on purpose; run with --ignored"]
+fn a_panic_after_the_product_is_up_leaves_no_process_behind() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let raised = Arc::new(AtomicU32::new(0));
+    let inside = Arc::clone(&raised);
+
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let outcome = std::panic::catch_unwind(move || {
+        let product = own_window::Product::start();
+        let pid = product.id();
+        inside.store(pid, Ordering::Release);
+
+        // Nothing came up to be abandoned — the caller below reports it rather than panicking
+        // into a measurement that would be about an already dead process.
+        if !own_window::process_is_alive(pid) {
+            return;
+        }
+
+        panic!("нарочно: так падает поведенческий тест на середине");
+    });
+    std::panic::set_hook(previous);
+
+    let pid = raised.load(Ordering::Acquire);
+
+    if outcome.is_ok() {
+        println!(
+            "SKIPPED: экземпляр (pid {pid}) не встал — мьютекс FR-82 держит другая копия \
+             продукта; стенд ничего не мерил"
+        );
+        return;
+    }
+
+    println!("стенд: поднят pid {pid}, затем нарочная паника");
+
+    assert_ne!(pid, 0, "экземпляр не поднялся: мерить нечего");
+    assert!(
+        !own_window::process_is_alive(pid),
+        "pid {pid} пережил панику: брошенный экземпляр держит второй хук и файл на диске, \
+         а следующий запуск встаёт на модальном окне FR-82 — находка м-Э24-2"
+    );
+}
+
 /// A window this test owns, the product it starts, and the restoration of the layout it found.
 ///
 /// The same construction `tests\switch.rs` established for the behavioural checks of task
@@ -711,8 +792,11 @@ mod own_window {
 
     use lang_switcher::layouts::LayoutId;
     use lang_switcher::switch;
-    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
+    use windows::Win32::System::Threading::{
+        AttachThreadInput, GetCurrentThreadId, GetExitCodeProcess, OpenProcess,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
         MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, SetFocus, VIRTUAL_KEY, VK_SHIFT,
@@ -929,10 +1013,17 @@ mod own_window {
         assert_eq!(sent, 1, "SendInput refused a keystroke of the scenario");
     }
 
-    /// The product, started for the run and stopped at the end of it.
+    /// The product, started for the run and stopped when this value goes away.
     ///
     /// ⚠ Decision Р-42: this is the **only** process this test may end, and it ends only this
     /// one, by the handle `Command::spawn` answered with.
+    ///
+    /// ⭐ **Task Т-25-2, finding м-Э24-2: the stop lives in [`Drop`] and not in [`Product::stop`]
+    /// alone.** A panic in the body of a behavioural test walks past every remaining line of it,
+    /// `stop()` included, and used to leave the process running for ever — measured at stage Э24
+    /// (`pid 7624`, alive 358 seconds under a 45-second deadline). Unwinding does run `Drop`, so
+    /// this is where the guarantee belongs; `stop` stays as the explicit door for a test that
+    /// ends the product in the middle of its own body.
     pub struct Product {
         child: std::process::Child,
     }
@@ -958,11 +1049,66 @@ mod own_window {
             self.child.id()
         }
 
-        /// Ends the process this test started, and no other.
-        pub fn stop(mut self) {
+        /// Ends the process this test started, and no other. Idempotent.
+        ///
+        /// `kill` on a child that has already been reaped answers `Err`, which is why the result
+        /// is dropped; `wait` caches the status it read, so a second call costs nothing and
+        /// cannot block. Both doors — [`Product::stop`] and [`Drop`] — come here.
+        fn end(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
+
+        /// Ends the product where the scenario says it ends, rather than where the value dies.
+        pub fn stop(mut self) {
+            self.end();
+        }
+    }
+
+    impl Drop for Product {
+        fn drop(&mut self) {
+            self.end();
+        }
+    }
+
+    /// `STILL_ACTIVE` — what `GetExitCodeProcess` answers for a process that has not exited.
+    const STILL_ACTIVE: u32 = 259;
+
+    /// Whether the process with this id is still running — task Т-25-2.
+    ///
+    /// Asked of the operating system and of nothing else: the handle `Command::spawn` gave the
+    /// bench is gone by the time this is called, which is the whole point — the question is
+    /// whether the process outlived it. `OpenProcess` refuses an id nothing carries, and a
+    /// process that has exited but is still held open by somebody answers `GetExitCodeProcess`
+    /// with its code rather than with [`STILL_ACTIVE`]; both are "gone".
+    ///
+    /// The access asked for is `PROCESS_QUERY_LIMITED_INFORMATION`, which is the least that can
+    /// answer this question and grants nothing that could end anything — decision Р-42 is about
+    /// what this bench may kill, and this reads.
+    ///
+    /// ⚠ An id is only unique while its process lives, so a false "alive" would need Windows to
+    /// have handed the same number to something else in the microseconds between the kill and
+    /// this call. That is the known limit of asking by id, and it is the same limit every tool
+    /// that reports by pid works under.
+    pub fn process_is_alive(pid: u32) -> bool {
+        // SAFETY: takes an access mask, an inheritance flag and an id; it dereferences nothing
+        // of ours and returns either a handle this frame owns or an error.
+        let Ok(handle) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) })
+        else {
+            return false;
+        };
+
+        let mut code = 0u32;
+
+        // SAFETY: `handle` came from the successful call above and is still open; `code` is a
+        // live local this call writes one `u32` into. The result is examined below (NFR-13).
+        let read = unsafe { GetExitCodeProcess(handle, &raw mut code) };
+
+        // SAFETY: `handle` came from the successful `OpenProcess` above and is closed exactly
+        // once, here, on both paths out of this function.
+        let _ = unsafe { CloseHandle(handle) };
+
+        read.is_ok() && code == STILL_ACTIVE
     }
 
     /// A window created by this test, destroyed when the value is dropped.
