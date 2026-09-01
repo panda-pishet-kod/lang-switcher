@@ -706,6 +706,32 @@ pub fn init() {
 /// A writer that wraps onto a slot a reader is in the middle of does not wait for it — the reader
 /// loses the entry, the writer loses nothing. That trade is the right way round: the write path is
 /// the one with a deadline.
+///
+/// # ⚠ Two writers on one slot, and the price this program has agreed to pay — finding м8, task
+/// Т-22-10
+///
+/// The seqlock above is written for **one writer and many readers**, and this program has four or
+/// five threads that record. The ticket keeps them from choosing the same slot in the ordinary
+/// case — [`NEXT`] is a fetch-add, so no two writers ever get the same ordinal — but it does not
+/// keep two of them off one *slot*: a writer preempted between clearing the stamp and restoring it
+/// is a writer whose slot can be reached again by whoever wraps the whole ring of [`CAPACITY`]
+/// entries while it is stopped. The second writer's stamp then stands over a mixture of the two
+/// entries' fields, and a reader has no way to tell — the stamp it checks before and after is the
+/// same non-zero value, which is exactly what the canon says a whole entry looks like.
+///
+/// **The cost is accepted rather than repaired, by the user's decision of 2026-09-01 (question
+/// 80).** What it takes to reach: 1024 records — the whole ring — inside the window between two
+/// instructions of a preempted thread, and then a reader arriving before the ring turns again. The
+/// program records single-figure numbers of events in an ordinary session; the ring is a
+/// **diagnostic** journal that nothing in the product reads, no decision is taken from and no
+/// requirement rests on; and one mixed line in a file the user is asked to attach to a bug report
+/// is a smaller price than a lock on a path NFR-04 forbids to take one, or a second stamp on every
+/// entry paid by every record for ever.
+///
+/// So this is documented and not fixed, and the documentation is the point: a reader of a dump who
+/// meets an operation and a code that do not belong together has this paragraph to find, instead
+/// of a mystery. Nothing else in the module changed for it — the code below is exactly as task
+/// T-06-4 wrote it.
 pub fn record(operation: Operation, code: OsCode) {
     let at_ms = elapsed_ms();
 

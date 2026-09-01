@@ -408,11 +408,17 @@ fn the_pending_interval_is_bounded_by_the_budgets_of_the_levels() {
 /// contains a newline answers differently on the two — one thing for whoever just ran `cargo fmt`
 /// and another for whoever checks the work out.
 ///
-/// That is not hypothetical in this project. `tests\hook.rs` carries a sweep that looks for
-/// `"\n}\n"` and is **red** on the canonical tree for exactly this reason; the sweep in
+/// That is not hypothetical in this project. `tests\hook.rs` **carried** a sweep that looked for
+/// `"\n}\n"` and **was red** on the canonical tree for exactly this reason; the sweep in
 /// `the_winevent_callback_names_nothing_of_module_guard_and_the_probe_has_one_dispatch_site`
-/// below was **green** for exactly this reason, which is worse — a red sweep is visible, and a
+/// below **was green** for exactly this reason, which is worse — a red sweep is visible, and a
 /// sweep that has silently stopped bounding what it reads is not.
+///
+/// ⚠ **Past tense since task Т-22-10** (finding м17 of the audit of 2026-09-01): both of those
+/// sweeps have been normalised — `tests\hook.rs` by task T-13-9, which says so in its own
+/// documentation and in the past tense, and this file by the cure below. The paragraph is kept
+/// because the reason it names is still the reason this function exists; what it may not do is go
+/// on describing a red test that has been green for nine stages.
 ///
 /// The cure is to normalise once, at the only place a source file is read, so that everything
 /// downstream sees `\n` whatever is on the disk, and the line-ending style of the working tree

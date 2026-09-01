@@ -1517,8 +1517,11 @@ fn layout_refresh_needed(observed: LayoutId, recorded: Option<LayoutId>) -> bool
 ///
 /// A zero answer is not an error and is returned as [`LayoutId::default`], which no cache
 /// contains: the buffer then records strokes with their scan codes and no characters, which is
-/// the same outcome as a key the layouts have nothing on, and FR-23 carries such a stroke
-/// through conversion unchanged.
+/// the same outcome as a key the layouts have nothing on. FR-23 converts such a stroke from its
+/// **scan code**, which is what survived — task Т-22-10 corrected the sentence that used to stand
+/// here: [`crate::convert::convert_stroke`] guards on the candidate, so the stroke comes through
+/// unchanged only when the target layout is silent on that key too, and takes the target's own
+/// character otherwise. See the module documentation of [`crate::buffer`].
 fn foreground_layout() -> LayoutId {
     crate::switch::current()
 }

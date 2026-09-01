@@ -270,7 +270,22 @@
 //! * a forged `WM_INPUT` carries a handle `GetRawInputData` rejects, and a rejected read is an
 //!   early return;
 //! * a forged [`WM_APP_FLUSH`] finds no pending request — the timestamp travels in an atomic of
-//!   this process and never in the message — and does nothing at all;
+//!   this process and never in the message — so [`apply_flush`] does nothing at all.
+//!
+//!   ⚠ **The message as a whole is not nothing, and task Т-22-10 rewrote this line to say so**
+//!   (finding м1 of the audit of 2026-09-01: the code was right and this analysis was wrong).
+//!   `app::window_proc` answers `WM_APP_FLUSH` on the input window with two more things, and
+//!   neither of them consults [`PENDING_FLUSH`]: an **unconditional** `park_buffer` — the wipe
+//!   decision П-2 put on the focus change itself — and `guard::note_focus_moved`, which publishes
+//!   «no answer yet» and asks the watcher thread for one probe, bounded by
+//!   `guard::PROBE_BUDGET_MS` at 1550 ms in the worst case.
+//!
+//!   So what a forged one buys is: one reset of **our own** typing buffer, over memory the sender
+//!   can read neither before nor after — the operation every `Space` the user types already
+//!   performs — and one reading of the system's own answer about the window that already has the
+//!   focus. Not one action is privileged, not one result is a state the sender can observe, and
+//!   the conclusion of SEC-05 stands exactly as it did; only the argument for it was false. The
+//!   price is the same one the user's own focus change pays;
 //! * a forged [`WM_APP_LAYOUT`], `WM_DEVICECHANGE` or `WM_INPUT_DEVICE_CHANGE` buys the sender a
 //!   re-read of the system's own layout list into memory of ours, which is idempotent, and is the
 //!   same standing the wake-up message of [`crate::app`] has. The device notification of
@@ -342,8 +357,14 @@ use crate::buffer::{ResetOutcome, is_newer_than};
 /// configuration nudge of [`crate::app`].
 ///
 /// SEC-05: it carries nothing. The timestamp of the event travels in [`PENDING_FLUSH`], an
-/// atomic of this process no sender can reach, and the handler does nothing whatsoever when that
-/// atomic is empty.
+/// atomic of this process no sender can reach, and [`apply_flush`] does nothing whatsoever when
+/// that atomic is empty.
+///
+/// ⚠ **That sentence is about [`apply_flush`] and about nothing else** — task Т-22-10, finding м1.
+/// The same message also reaches `app::window_proc`, which answers it on the input window with an
+/// unconditional park of this program's own buffer and one focus probe, neither of which looks at
+/// [`PENDING_FLUSH`] at all. The module header sets out what that buys a forger and why the
+/// conclusion of SEC-05 is unchanged by it.
 pub const WM_APP_FLUSH: u32 = WM_APP + 6;
 
 /// The private message that asks the input thread to re-read the keyboard layout — the delivery
@@ -420,12 +441,19 @@ pub const WM_APP_REHOOK: u32 = WM_APP + 9;
 ///
 /// # SEC-05
 ///
-/// It carries nothing at all — no timestamp, no reason and no cell to consume — so unlike
-/// [`WM_APP_FLUSH`] and [`WM_APP_REHOOK`] there is no emptiness for a forgery to find, and none
-/// is needed: what a forged one buys is one reset of this process's **own** ring, which is the
-/// operation every `Space` the user types already performs. The gate is therefore the role of
-/// the window alone — [`is_input_window`] — and a copy aimed at the UI or the watcher window
-/// falls through to `DefWindowProcW` and does nothing at all.
+/// It carries nothing at all — no timestamp, no reason and no cell to consume — so there is no
+/// emptiness for a forgery to find, and none is needed: what a forged one buys is one reset of
+/// this process's **own** ring, which is the operation every `Space` the user types already
+/// performs. The gate is therefore the role of the window alone — [`is_input_window`] — and a copy
+/// aimed at the UI or the watcher window falls through to `DefWindowProcW` and does nothing at
+/// all.
+///
+/// ⚠ **The contrast this paragraph used to draw with [`WM_APP_FLUSH`] was false, and task Т-22-10
+/// struck it out** (finding м1). A forged `WM_APP_FLUSH` finds its cell empty and still parks the
+/// buffer unconditionally — the emptiness there protects the FR-12 timestamp and nothing else, so
+/// the two messages buy a forger the same reset of our own ring, not different things. The
+/// contrast that does hold is with [`WM_APP_REHOOK`], whose arm returns as a whole when
+/// [`PENDING_REASON`] is empty.
 pub const WM_APP_WIPE: u32 = WM_APP + 16;
 
 /// The `WM_WTSSESSION_CHANGE` subtypes that wipe the buffer — row 8 of the FR-10 table,

@@ -76,8 +76,15 @@
 //! that call with that flag; it does not say it must be done twice.
 //!
 //! A combination the cache has no answer for is an outcome and not an error: the stroke is
-//! stored with no characters and `len` zero, and FR-23 carries it through conversion
-//! unchanged.
+//! stored with no characters and `len` zero, and FR-23 is what decides what becomes of it.
+//!
+//! ⚠ **What FR-23 does with it is not "carries it through unchanged", and task Т-22-10 corrected
+//! this sentence** (finding м3 of the audit of 2026-09-01, which found the same claim in four
+//! places). [`crate::convert::convert_stroke`] guards on the **candidate**, not on the source: an
+//! empty stroke that is not a dead key is looked up in the target layout, and if that layout has
+//! a character on the key the candidate is what comes out. An empty stroke survives conversion
+//! unchanged only when the target is silent on that key as well — which is the ordinary case for
+//! a key no layout carries anything on, and is why the claim held up for as long as it did.
 //!
 //! # Threading — section 6.3
 //!
@@ -413,7 +420,11 @@ impl Stroke {
     /// Whether the key produced no characters at all.
     ///
     /// True for a key the layout has nothing on, and for one the cache had no answer for.
-    /// Not an error in either case: FR-23 carries such a stroke through conversion unchanged.
+    ///
+    /// Not an error in either case. What FR-23 then does with it is decided by the **target**
+    /// layout and not here — see the module documentation, task Т-22-10: such a stroke goes
+    /// through [`crate::convert::convert_stroke`] unchanged only if the target is silent on that
+    /// key too, and takes the target's own character otherwise.
     pub fn is_empty(self) -> bool {
         self.produced.units().is_empty()
     }
@@ -2019,7 +2030,11 @@ impl Recorder {
             Some(map) => map.lookup(scan, mods.extended(), mods.to_layout_mods()),
             // No cache yet, or the active layout is not one of the participating layouts of
             // FR-35. The stroke is kept with an empty `chars` and `len` zero: what was typed is
-            // still known by its scan code, and FR-23 carries it through unchanged.
+            // still known by its **scan code**, which is what FR-23 converts from — and which is
+            // why an empty `chars` costs nothing here. Task Т-22-10: what comes out of the
+            // conversion is the target layout's own character whenever that layout has one on the
+            // key, and the empty stroke unchanged only when it has not; see the module
+            // documentation.
             None => KeyMapping::EMPTY,
         }
     }
