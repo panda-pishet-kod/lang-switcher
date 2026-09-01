@@ -456,6 +456,25 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
     // `Kind`**, the rule every note above follows.
     ("clipboard restore failed", Kind::Selection),
+    // ⭐ **Task Т-22-9, finding м12 of the audit of 2026-09-01** — the save was allowed by
+    // `SavePolicy`, was attempted, and `config.toml` did not take it. The sixth configuration
+    // event and the last one to get a row: the other five have had theirs since task T-13-6, and
+    // this one — the only one that loses a choice the user has already been shown as applied —
+    // carried `TODO(T-06-4)` and `let _ = error` instead. One row, appended at the end so that no
+    // index above it moves.
+    //
+    // ⚠ **The name is the fact, and the code is the system's own number (SEC-01, SEC-07).** It
+    // does not say which setting was being written, what the file held, where the file is, or how
+    // far the write got. Unlike the five rows beside it this one **does** carry a code, and the
+    // code has one source: the Win32 number of the `io::Error` the write refused with, taken
+    // through `HRESULT::from_win32` and `OsCode::of`, with the error's text dropped unread. The
+    // one variant of `settings::ConfigError` that carries anything derived from the file's
+    // contents — the line and column of a parser — cannot arrive from a write and is answered
+    // with no number at all; `tray::os_code_of` is where that is written down.
+    //
+    // `Kind::Process` — the group every other configuration event of this program is in — and
+    // **no new `Kind`**, the rule every note above follows.
+    ("configuration write failed", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

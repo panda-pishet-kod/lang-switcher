@@ -157,7 +157,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL, WM_QUERYENDSESSION,
     WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
 };
-use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
+use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
 
 use crate::settings::{self, Config, Quarantined, SavePolicy};
 use crate::{APP_NAME, app, diag, theme};
@@ -1222,8 +1222,14 @@ impl Tray {
         if let Err(error) = settings::write_to(path, &self.config) {
             // A failed save must not take the process down: in the FR-83 case the program is
             // on its way out anyway, and in the toggle case the state is already right in
-            // memory and on the screen. TODO(T-06-4): this belongs in the ring journal.
-            let _ = error;
+            // memory and on the screen.
+            //
+            // ⭐ **Task Т-22-9 — the debt of task T-06-4 closed, finding м12 of the audit of
+            // 2026-09-01.** Not taking the process down is not the same as saying nothing: the
+            // user pressed «Применить», the dialog closed, the setting is right on the screen
+            // and wrong on the disk, and until this task the only configuration event of the
+            // six that left no trace was this one — the one that loses the user's choice.
+            note_configuration_failure(CONFIG_WRITE_FAILED, &error);
         }
     }
 }
@@ -1247,6 +1253,13 @@ const CONFIG_QUARANTINE_REFUSED: &str = "configuration file quarantine refused";
 /// A save was asked for and given up so that the file on the disk survives.
 const CONFIG_SAVE_SUPPRESSED: &str = "configuration save suppressed";
 
+/// ⭐ **Task Т-22-9.** The save was allowed, was attempted, and the file did not take it.
+///
+/// The sixth configuration event, and the last one to get a name: the other five have had rows
+/// since task T-13-6, and this — the only one that loses a choice the user has already been shown
+/// as applied — carried the open `TODO` of task T-06-4 and a dropped error instead.
+const CONFIG_WRITE_FAILED: &str = "configuration write failed";
+
 /// Puts one configuration event into the ring: the fact, and nothing of the file.
 ///
 /// **SEC-01, SEC-07.** The argument is one of the five literals above, chosen at compile time,
@@ -1260,6 +1273,54 @@ const CONFIG_SAVE_SUPPRESSED: &str = "configuration save suppressed";
 /// a Win32 call, and `OsCode` has no constructor that takes a number by design.
 fn note_configuration(operation: &'static str) {
     diag::record(diag::Operation::from_name(operation), diag::OsCode::NONE);
+}
+
+/// [`note_configuration`] for an event that has a **system error** behind it — task **Т-22-9**.
+///
+/// **SEC-01, SEC-07.** The name is one of the literals above and is narrowed by
+/// [`diag::Operation::from_name`] exactly as there. What is added is the code, and the code is the
+/// number the operating system gave and nothing else: [`os_code_of`] takes it from
+/// [`io::Error::raw_os_error`] and drops the error's text — which is the same line
+/// `diag::dump_on_shutdown` draws for the `io::Error` of a refused dump, and the same one
+/// [`crate::app::report_non_critical`] draws for a `windows::core::Error`.
+///
+/// A path never reaches here, in any form. Neither does the line and column of a parser, which is
+/// the one thing a [`settings::ConfigError`] carries that was derived from the file's contents —
+/// see [`os_code_of`], where that variant is answered with no number at all.
+fn note_configuration_failure(operation: &'static str, error: &settings::ConfigError) {
+    diag::record(diag::Operation::from_name(operation), os_code_of(error));
+}
+
+/// The system's own code for a failed configuration write — task **Т-22-9**.
+///
+/// [`diag::OsCode`] has no constructor that takes an integer by design (SEC-07), so the number
+/// travels the one road there is: an `io::Error` that came from a system call carries the Win32
+/// code, `HRESULT::from_win32` turns it into the same `HRESULT` every other failure in this
+/// program is journalled under, and [`diag::OsCode::of`] narrows that.
+///
+/// The two variants that are not system failures answer [`diag::OsCode::NONE`]:
+///
+/// * [`settings::ConfigError::Serialize`] — this program's own value refusing to become TOML.
+///   No call failed, and a number invented for it would be a claim about one that did;
+/// * [`settings::ConfigError::Malformed`] — cannot arrive from a write at all, and it is the one
+///   variant carrying something derived from the file's contents (the line and column a parser
+///   stopped at). It is answered with no number for both reasons, and the second is the one that
+///   would matter if the first ever stopped being true.
+///
+/// An `io::Error` with no `raw_os_error` — one this program's own code built — answers `NONE` for
+/// the same reason: there is no system number to report.
+fn os_code_of(error: &settings::ConfigError) -> diag::OsCode {
+    match error {
+        settings::ConfigError::Io(io) => io
+            .raw_os_error()
+            .and_then(|code| u32::try_from(code).ok())
+            .map_or(diag::OsCode::NONE, |code| {
+                diag::OsCode::of(&WinError::from_hresult(HRESULT::from_win32(code)))
+            }),
+        settings::ConfigError::Malformed { .. } | settings::ConfigError::Serialize => {
+            diag::OsCode::NONE
+        }
+    }
 }
 
 impl Drop for Tray {
@@ -3562,6 +3623,101 @@ mod tests {
         bytes.extend_from_slice(&most.to_le_bytes());
         bytes.extend_from_slice(&least.to_le_bytes());
         bytes
+    }
+
+    /// ⭐ **Task Т-22-9, finding м12 of the audit of 2026-09-01 — the refused save leaves the
+    /// system's own number and nothing else.**
+    ///
+    /// Every variant of [`settings::ConfigError`] is driven, because the mapping is where SEC-01
+    /// and SEC-07 are decided: one variant carries a Win32 code, which is a number the operating
+    /// system gave and is what the journal is for, and one carries the line and column a parser
+    /// stopped at — a value derived from the **contents** of somebody's file, which may not reach
+    /// the ring in any form.
+    #[test]
+    fn a_refused_write_reports_the_system_code_and_a_parser_position_reports_nothing() {
+        /// `ERROR_ACCESS_DENIED`, and the `HRESULT` Win32 codes are journalled under.
+        const ACCESS_DENIED: i32 = 5;
+        const AS_HRESULT: i32 = 0x8007_0005_u32 as i32;
+
+        let refused = settings::ConfigError::Io(std::io::Error::from_raw_os_error(ACCESS_DENIED));
+
+        assert_eq!(
+            os_code_of(&refused).raw(),
+            AS_HRESULT,
+            "the number the operating system gave, in the form every other failure is recorded in"
+        );
+
+        // An `io::Error` this program built itself carries no system number, and none is invented.
+        let ours = settings::ConfigError::Io(std::io::Error::other("no system call failed here"));
+
+        assert_eq!(os_code_of(&ours).raw(), diag::OsCode::NONE.raw());
+
+        // SEC-01, SEC-07: the position a parser stopped at is a fact about the file's contents.
+        for error in [
+            settings::ConfigError::Malformed { at: Some((12, 34)) },
+            settings::ConfigError::Malformed { at: None },
+            settings::ConfigError::Serialize,
+        ] {
+            assert_eq!(
+                os_code_of(&error).raw(),
+                diag::OsCode::NONE.raw(),
+                "{error:?} is not a system failure and must contribute no number"
+            );
+        }
+    }
+
+    /// ⭐ **Task Т-22-9.** A real refusal of the real writer reaches the ring under the row of the
+    /// closed table, carrying the system's code.
+    ///
+    /// # How the refusal is staged
+    ///
+    /// A file is created, and `settings::write_to` is then asked to write **inside** it. The
+    /// parent of the target is a file, so `create_dir_all` refuses before a single byte is
+    /// written and the answer is a real `ConfigError::Io` with a real Win32 code — which is what
+    /// distinguishes this from the mapping test above: nothing here is a value the test invented.
+    ///
+    /// The whole staging lives in this process's own temporary directory and is removed at the
+    /// end. `config.toml` of the user is not reachable from here and is not touched.
+    #[test]
+    fn a_refused_write_of_the_real_writer_lands_in_the_journal() {
+        let blocker = std::env::temp_dir().join(format!(
+            "langsw-t-22-9-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+
+        std::fs::write(&blocker, b"not a directory").expect("the temporary file must be creatable");
+
+        let target = blocker.join("config.toml");
+
+        let before = diag::recorded();
+
+        let error = settings::write_to(&target, &settings::Config::default())
+            .expect_err("a write inside a file cannot succeed");
+
+        note_configuration_failure(CONFIG_WRITE_FAILED, &error);
+
+        let _ = std::fs::remove_file(&blocker);
+
+        let named = diag::Operation::from_name(CONFIG_WRITE_FAILED);
+
+        assert_ne!(
+            named,
+            diag::Operation::UNLISTED,
+            "Т-22-9: the row must be in the closed table, or the event keeps none of its name"
+        );
+
+        let entry = diag::snapshot()
+            .into_iter()
+            .find(|event| event.ordinal >= before && event.operation == named)
+            .expect("the refusal must be in the ring");
+
+        assert_eq!(entry.kind(), diag::Kind::Process);
+        assert_ne!(
+            entry.code.raw(),
+            diag::OsCode::NONE.raw(),
+            "a write refused by the file system carries the system's own number"
+        );
     }
 
     #[test]

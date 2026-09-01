@@ -1572,6 +1572,68 @@ fn a_setting_change_naming_a_pointer_to_nothing_is_survived() {
 ///   function would be the finding again with a comment on top;
 /// * `setting_change_name` has exactly that one caller in the whole module.
 ///
+/// ⭐ **Task Т-22-9, finding м12 of the audit of 2026-09-01 — the last configuration event that
+/// left no trace now leaves one, and the `TODO` that stood for it is gone.**
+///
+/// # Why this test reads the source
+///
+/// The call site is inside `Tray::save_config`, and a `Tray` needs a live window, a shell to add
+/// an icon to and a `%APPDATA%` of its own; the unit tests in `src\tray.rs` drive the journalling
+/// itself — the mapping of the error onto a code, and a real refusal of the real writer reaching
+/// the ring — but they call the helper, not the save. What is left to check is that the save
+/// **calls** it, and that is a property of the shape of one function, which is also what a
+/// reviewer checks. `the_cheap_checks_stand_in_front_of_the_pointer_and_name_both_windows` below
+/// reads the source for the same reason and in the same way.
+///
+/// # What is asserted
+///
+/// That the write's failure branch names the journalling helper and the row, and that neither the
+/// `TODO(T-06-4)` that stood there for six stages nor the `let _ = error` beside it is left in the
+/// product half of the module. The `TODO` is checked over the **whole** file: a debt that is paid
+/// must not survive as a comment saying it is not.
+///
+/// Insensitive to line endings by construction, for the reason the test below gives.
+#[test]
+fn the_refused_configuration_write_is_journalled_and_the_todo_is_gone() {
+    let whole = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    assert!(
+        !whole.contains("TODO(T-06-4)"),
+        "Т-22-9: the debt is paid, and the comment claiming it is not may not outlive it"
+    );
+
+    // The product half. The module's own unit tests name the helper too, and counting their
+    // calls beside the product's would measure the suite instead of the program.
+    let at = whole
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("the unit-test module must be at the foot of this file");
+    let source = &whole[..at];
+
+    let save = source
+        .find("fn save_config(&mut self)")
+        .map(|start| &source[start..])
+        .expect("src\\tray.rs must define Tray::save_config");
+    let save = &save[..save
+        .find("\n    }\n")
+        .expect("a method closes at four spaces and a brace")];
+
+    assert!(
+        save.contains("note_configuration_failure(CONFIG_WRITE_FAILED, &error)"),
+        "Т-22-9: a save that the file refused is the one configuration event of the six that \
+         used to leave nothing behind"
+    );
+    assert!(
+        !save.contains("let _ = error"),
+        "and the line that dropped it is gone rather than kept beside the new one"
+    );
+}
+
 /// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
 /// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF, and a
 /// needle written with `\n` has to be matched against a text normalised to `\n`.
