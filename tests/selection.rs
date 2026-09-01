@@ -2187,6 +2187,114 @@ fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
     );
 }
 
+/// ⭐ **Task Т-22-6, finding м6 of the audit of 2026-09-01 — the boundary of the third exit.**
+///
+/// `EmptyClipboard` succeeded and not one format went back: the user's content is gone and this
+/// module put nothing in its place. That is the worst state it can produce and it used to leave no
+/// trace whatever — `Restored { placed: 0, .. }` is an `Ok`, and both callers drop the answer.
+///
+/// A pure function of two numbers so that the boundary is driven here rather than by whatever is
+/// on somebody's clipboard, which is why `read_refuses_size` is one too.
+#[test]
+fn a_restore_that_placed_nothing_is_told_from_one_that_had_nothing_to_place() {
+    // The failure: something to put back, nothing put back.
+    assert!(selection::restore_placed_nothing(0, 1));
+    assert!(selection::restore_placed_nothing(0, 7));
+
+    // Not a failure: the clipboard held nothing this module could keep, so putting nothing back is
+    // the whole of the correct behaviour. An empty snapshot must never raise the counter.
+    assert!(!selection::restore_placed_nothing(0, 0));
+
+    // And any format that did go back means the restore happened, however many were refused —
+    // FR-64, acceptance point 12: one format's refusal does not end the restore.
+    assert!(!selection::restore_placed_nothing(1, 7));
+    assert!(!selection::restore_placed_nothing(7, 7));
+}
+
+/// ⭐ **Task Т-22-6.** A restore that is owed, is attempted, and fails leaves a counter and a
+/// journal entry — and it is **not** counted as the lawful skip of decision П-5.
+///
+/// # How the failure is staged, and why nothing on the machine is touched
+///
+/// Through the module's own first gate. `Clipboard::open` begins with `require_blocking_thread`,
+/// and a thread that owns the typing buffer is by definition the input thread of section 6.1 —
+/// the one thread FR-80 and NFR-01 forbid to block. Installing a recorder here makes this thread
+/// that thread, so `restore` is refused **before** `OpenClipboard` is reached: no clipboard is
+/// opened, nothing is emptied, and the machine's clipboard is not touched at all. It is the
+/// open-refusal exit of the finding, driven through the product's own path.
+///
+/// The two counters are asserted together, because conflating them is the other half of the
+/// defect: a broken restore must not be able to hide behind a lawful refusal.
+#[test]
+fn a_failed_restore_leaves_a_counter_and_a_journal_entry_and_is_not_a_skip() {
+    use lang_switcher::buffer::{self, Recorder};
+    use lang_switcher::diag::Operation;
+
+    let _serialised = serialised();
+
+    let before = selection::counters();
+    let journal_before = lang_switcher::diag::recorded();
+
+    // This thread is now the input thread as far as `caller_may_block` is concerned.
+    buffer::install_recorder(Recorder::with_capacity(8));
+
+    let outcome = selection::restore(HWND::default(), &Snapshot::empty());
+
+    buffer::uninstall();
+
+    assert!(
+        matches!(outcome, Err(ClipboardError::WrongThread)),
+        "the restore must be refused before any clipboard call, and it was {outcome:?}"
+    );
+
+    let after = selection::counters();
+
+    assert_eq!(
+        after.restore_failures,
+        before.restore_failures + 1,
+        "Т-22-6: a restore that was owed and did not happen may not be invisible"
+    );
+    assert_eq!(
+        after.restore_skips, before.restore_skips,
+        "and it is not the lawful П-5 skip — those two must never be one number"
+    );
+
+    // The journal grew, and what it grew by is the named row and not `UNLISTED`.
+    assert!(lang_switcher::diag::recorded() > journal_before);
+
+    let named = Operation::from_name("clipboard restore failed");
+
+    assert!(
+        lang_switcher::diag::snapshot()
+            .iter()
+            .any(|event| event.ordinal >= journal_before && event.operation == named),
+        "the failure leaves the row of the closed table behind it"
+    );
+}
+
+/// **SEC-07.** The failed restore of task Т-22-6 has a name in the journal's closed vocabulary,
+/// and it is a **different** name from the lawful skip beside it.
+#[test]
+fn the_failed_restore_has_a_name_of_its_own_in_the_journal() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let failed = Operation::from_name("clipboard restore failed");
+
+    assert_ne!(
+        failed,
+        Operation::UNLISTED,
+        "the row task Т-22-6 added is in the table, so the entry is named rather than counted"
+    );
+    assert_eq!(failed.name(), "clipboard restore failed");
+    assert_eq!(failed.kind(), Kind::Selection);
+
+    assert_ne!(
+        failed,
+        Operation::from_name("clipboard restore skipped"),
+        "a failure and a lawful skip are opposite events and may not share a row"
+    );
+}
+
 /// **SEC-07.** The skipped restore of decision П-5 has a name in the journal's closed vocabulary.
 #[test]
 fn the_skipped_restore_has_a_name_in_the_journal() {

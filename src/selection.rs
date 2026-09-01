@@ -379,6 +379,25 @@ static LISTENER_REMOVE_FAILURES: AtomicU32 = AtomicU32::new(0);
 /// may not be is invisible — the same argument [`CLOSE_FAILURES`] is counted on.
 static RESTORE_SKIPS: AtomicU32 = AtomicU32::new(0);
 
+/// ⭐ **Task Т-22-6.** Restores that were **attempted and did not put the snapshot back**.
+///
+/// ⚠ **Not the same thing as [`RESTORE_SKIPS`], and deliberately not folded into it.** A П-5 skip
+/// is a decision of this program: step 8 was due, the clipboard had moved on, and the snapshot was
+/// withheld **on purpose** to protect somebody's new copy. This counter is the opposite — the
+/// restore was due, was not withheld, and failed anyway. Counting the two together would let a
+/// broken restore hide behind a lawful refusal, which is exactly the invisibility finding м6 is
+/// about.
+///
+/// The three ways in, all inside [`restore`]:
+///
+/// * [`Clipboard::open`] refused — a thread that may not block, or ten attempts of FR-62 against
+///   another process holding the lock;
+/// * `EmptyClipboard` refused — and the clipboard is then still the user's, untouched;
+/// * every `SetClipboardData` refused while the snapshot had something to place
+///   ([`restore_placed_nothing`]) — the clipboard **was** emptied and nothing went back into it,
+///   which is the worst outcome this module has and was the most silent.
+static RESTORE_FAILURES: AtomicU32 = AtomicU32::new(0);
+
 // ---------------------------------------------------------------------------------------
 // The public error and the outcome types
 // ---------------------------------------------------------------------------------------
@@ -504,6 +523,10 @@ pub struct Counters {
     /// clipboard**: it says how often somebody else's copy was left standing, and nothing about
     /// what either copy held.
     pub restore_skips: u32,
+    /// ⭐ **Task Т-22-6.** Restores that were attempted and did not put the snapshot back — see
+    /// [`RESTORE_FAILURES`] for the three ways in and for why this is **not** `restore_skips`.
+    /// A count of this program's own failures, and nothing about anybody's clipboard.
+    pub restore_failures: u32,
 }
 
 /// The counters as they stand.
@@ -523,6 +546,7 @@ pub fn counters() -> Counters {
         handle_formats: HANDLE_FORMATS_SEEN.load(Ordering::Relaxed),
         listener_remove_failures: LISTENER_REMOVE_FAILURES.load(Ordering::Relaxed),
         restore_skips: RESTORE_SKIPS.load(Ordering::Relaxed),
+        restore_failures: RESTORE_FAILURES.load(Ordering::Relaxed),
     }
 }
 
@@ -1217,9 +1241,21 @@ fn note_truncation() {
 /// raises is recognised by [`handle_clipboard_message`] as this program's own. See
 /// [`note_own_write`].
 pub fn restore(owner: HWND, snapshot: &Snapshot) -> Result<Restored, ClipboardError> {
-    let clipboard = Clipboard::open(owner)?;
+    // ⭐ **Task Т-22-6, finding м6 of the audit of 2026-09-01 — the three exits that left nothing
+    // behind.** Every one of them ends with the user's clipboard not holding what this module
+    // promised to put back, and until this task every one of them was silent: the callers of
+    // `restore` and `restore_after` drop the result (`let _ =`), so an `Err` here reached nobody
+    // at all, and `placed == 0` reached nobody even in the `Ok` case.
+    let clipboard = match Clipboard::open(owner) {
+        Ok(clipboard) => clipboard,
+        Err(error) => return Err(note_restore_failed(error)),
+    };
 
-    clipboard.empty()?;
+    if let Err(error) = clipboard.empty() {
+        // The clipboard is still the user's here — nothing was wiped — but the restore is over
+        // and did not happen, which is the fact that has to leave a trace.
+        return Err(note_restore_failed(ClipboardError::from(error)));
+    }
 
     let mut restored = Restored::default();
 
@@ -1233,6 +1269,16 @@ pub fn restore(owner: HWND, snapshot: &Snapshot) -> Result<Restored, ClipboardEr
                 restored.refused += 1;
             }
         }
+    }
+
+    // ⭐ **Task Т-22-6, the third exit and the worst of them.** `EmptyClipboard` succeeded, so the
+    // user's content is already gone, and not one format went back. This is an `Ok` — the calls
+    // this function makes all behaved — and it is the state the module exists to prevent, so it
+    // is counted and journalled like the two failures above.
+    if restore_placed_nothing(restored.placed, snapshot.captured.len()) {
+        // No Win32 call failed as such: every `put` refused one format of somebody's clipboard,
+        // and `Clipboard::put` has already dropped those errors for the reason above.
+        note_restore_failed_without_error();
     }
 
     drop(clipboard);
@@ -1391,6 +1437,67 @@ fn restore_is_due(current: u32, probe: u32) -> bool {
 fn note_restore_skipped() {
     crate::diag::record(
         crate::diag::Operation::from_name("clipboard restore skipped"),
+        crate::diag::OsCode::NONE,
+    );
+}
+
+/// ⭐ **Task Т-22-6.** Whether a restore emptied the clipboard and put nothing back.
+///
+/// `placed` is [`Restored::placed`], `captured` is how many entries the snapshot held. A pure
+/// function of two numbers, for the reason [`read_refuses_size`] is one: the boundary is then
+/// driven by a unit test rather than by whatever happens to be on somebody's clipboard, and a
+/// mutation of the comparison fails a test instead of passing quietly.
+///
+/// An **empty** snapshot placing nothing is not a failure and answers `false`: the clipboard held
+/// nothing this module could keep, so putting nothing back is the whole of the correct behaviour.
+/// The failure is the asymmetry — something to place, and nothing placed.
+#[must_use]
+pub const fn restore_placed_nothing(placed: usize, captured: usize) -> bool {
+    captured > 0 && placed == 0
+}
+
+/// ⭐ **Task Т-22-6.** Counts and journals a restore that did not put the snapshot back, and hands
+/// the error on so that the caller's `?` — or its `let _ =` — is unchanged.
+///
+/// # SEC-01, SEC-07 — what this entry can and cannot say
+///
+/// «clipboard restore failed» is a fact about **this program's own attempt**: step 8 was due, was
+/// not withheld, and did not happen. The string is chosen at compile time and is a row of the
+/// closed table of module `diag`. Nothing in it is derived from the clipboard — not the content
+/// that was lost, not its size, not its formats, not how many entries the snapshot held.
+///
+/// The code beside it is the `HRESULT` of the Win32 call that refused, and only that:
+/// [`ClipboardError::Os`] carries a `windows::core::Error`, whose `HRESULT` module `diag` takes
+/// and whose message it drops unread. The module's own two refusals carry no system error at all
+/// and go with [`crate::diag::OsCode::NONE`] — a number invented here would be a claim about a
+/// call nobody made.
+///
+/// ⚠ **Never reached by a П-5 skip.** A skip returns before [`restore`] is entered, so the two
+/// counters cannot be confused however the callers drop their results — which is what keeps
+/// [`Counters::restore_skips`] meaning "withheld on purpose" and this one meaning "tried and
+/// failed".
+fn note_restore_failed(error: ClipboardError) -> ClipboardError {
+    let code = match &error {
+        ClipboardError::Os(os) => crate::diag::OsCode::of(os),
+        ClipboardError::WrongThread | ClipboardError::Busy => crate::diag::OsCode::NONE,
+    };
+
+    RESTORE_FAILURES.fetch_add(1, Ordering::Relaxed);
+
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard restore failed"),
+        code,
+    );
+
+    error
+}
+
+/// [`note_restore_failed`] for the third exit, which has no error to carry — see [`restore`].
+fn note_restore_failed_without_error() {
+    RESTORE_FAILURES.fetch_add(1, Ordering::Relaxed);
+
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard restore failed"),
         crate::diag::OsCode::NONE,
     );
 }

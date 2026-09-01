@@ -436,6 +436,26 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
     // `Kind`**, the rule every note above follows.
     ("clipboard read oversized", Kind::Selection),
+    // ⭐ **Task Т-22-6, finding м6 of the audit of 2026-09-01** — step 8 of FR-61 was due, was
+    // **not** withheld by decision П-5, and did not put the snapshot back. One row, appended at
+    // the end so that no index above it moves: a slot already written carries a number, and
+    // renumbering the table would change what a dump of an earlier run means.
+    //
+    // ⚠ **This is the opposite of «clipboard restore skipped» above and must never be read as the
+    // same event.** A skip is a decision — the clipboard had moved on and somebody's new copy was
+    // protected on purpose. This is a failure: the restore was owed, was attempted, and the user's
+    // clipboard did not come back. `selection::note_restore_failed` is the only writer, and a skip
+    // returns before it can be reached.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07).** It says that a restore was attempted and did not
+    // happen. It does not say what was lost, how large it was, which formats it held, or how many
+    // entries the snapshot carried. The code beside it is the `HRESULT` of the Win32 call that
+    // refused, taken from the error and with its message dropped unread — or [`OsCode::NONE`] on
+    // the two paths where no system call failed at all.
+    //
+    // `Kind::Selection` — «the selection path and the clipboard, FR-60 to FR-65» — and **no new
+    // `Kind`**, the rule every note above follows.
+    ("clipboard restore failed", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
