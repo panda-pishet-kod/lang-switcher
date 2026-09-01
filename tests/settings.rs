@@ -3013,10 +3013,16 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
          перед кнопками {air_buttons}, поле снизу {margin}"
     );
 
+    // ⚠ **39, and it was 53 until 2026-09-01.** The 53 were the mock-ups' own air and the whole
+    // point of task T-11-19 — but they were *air*, not structure, and the user spent fourteen of
+    // them on the sound row of FR-100: «под модулями горячая клавиша и раскладки места более чем
+    // достаточно». What T-11-19 really fixed is asserted above and below this line and is
+    // untouched: the window is 420×385, «Диагностика» keeps its 4 units, the buttons keep their
+    // 6 and the margin its 7.
     assert_eq!(
-        air_left, 53,
-        "the air under «Раскладки» has to be the 53 units of the mock-ups; it is the whole \
-         point of task T-11-19"
+        air_left, 39,
+        "the air under «Раскладки» is the 53 of task T-11-19 less the 14 the sound row of \
+         FR-100 took, by the user's word of 2026-09-01"
     );
     assert_eq!(
         air_right, 4,
@@ -10432,14 +10438,20 @@ fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
         combo_top - hint_bottom
     );
 
-    // And the row still fits the panel «Общие», whose 66 units are a decision of the user
-    // (В-1) and not a number this task may move.
+    // And the row still fits the panel «Общие».
+    //
+    // ⚠ **80 units, and it was 66 until 2026-09-01.** Decision В-1 (question 55) legitimised the
+    // growth the «Оформление» row of FR-92а cost and wrote 66 down as the canon *of that
+    // moment*; it did not make 66 a principle. The sound switch of FR-100 is one more row and
+    // cost 14 more units, by the user's own word: «место под расширение вниз модуля общие более
+    // чем достаточно». The window is not re-cut — 420×385 stands, which is the half of В-1 that
+    // really was a principle.
     let (_, panel_top, _, panel_bottom) = template.rect_of(1090);
 
     assert_eq!(
         (panel_top, panel_bottom),
-        (7, 73),
-        "«Общие» is 7..73 dialog units — decision В-1, canon"
+        (7, 87),
+        "«Общие» is 7..87 dialog units — В-1 plus the sound row of FR-100"
     );
 
     let base = vertical_base_unit();
