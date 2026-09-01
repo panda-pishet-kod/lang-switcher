@@ -3,11 +3,20 @@
 
     THE ORDER MATTERS AND IS THE POINT OF THIS FILE.
 
-        rebuild the shipping configuration
-          -> verify-criterion8.ps1 passes
-            -> copy to <dev>\artifacts\LangSwitcher.exe
-              -> sign the copy
-                -> signtool verify /pa
+        verify-version.ps1 passes                          (task T-22-11)
+          -> rebuild the shipping configuration
+            -> verify-criterion8.ps1 passes
+              -> copy to <dev>\artifacts\LangSwitcher.exe
+                -> sign the copy
+                  -> signtool verify /pa
+                    -> verify-perimeter.ps1 passes         (task T-22-11)
+
+    The two gates task T-22-11 added stand where the thing they are about exists. The version
+    check is FIRST, because a tree whose nine version values disagree must not be compiled at
+    all; the NFR-07 and criterion 4 gate is LAST, because NFR-07 is about the SIGNED file and
+    the signature is appended to it. Before that task neither was checked by anything: the
+    size was printed as information beside the artifact, and the dependency list was compared
+    only by its line count.
 
     Both build configurations write the same LangSwitcher.exe (fact 8 of section 9 of
     STATE.md), so "sign whatever is on disk" is a way to ship the build WITH the `testing`
@@ -34,8 +43,10 @@
     page, and the parse dies on the first Russian word. Decision R-05.
     Windows PowerShell 5.1, not 7.x: no `&&`, no `??`, no ternary operator.
 
-    Exit code: 0 only if the build succeeded, criterion 8 passed, the copy was made, and --
-    unless -SkipSign was given -- the signature was applied and verified.
+    Exit code: 0 only if the nine version values agree, the build succeeded, criterion 8
+    passed, the copy was made, -- unless -SkipSign was given -- the signature was applied and
+    verified, and NFR-07 and criterion 4 both hold. 8 is the version gate, 9 the perimeter
+    gate; 1 to 7 are as they were.
 
     Examples:
       .\release.ps1
@@ -94,6 +105,20 @@ Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Artifact   {0}" -f $Artifact)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 if ($SkipSign) { Write-Host 'Signing     SKIPPED by -SkipSign' }
+
+# --- 0. One version, nine places -------------------------------------------------------------
+# Task T-22-11, finding 18. In front of the build and not behind it: a tree whose VERSIONINFO,
+# installer and assembly identity disagree must not be compiled at all, because everything
+# after this point is a file that would have to be thrown away. The About window reads its
+# number out of the VERSIONINFO resource, so a disagreement is something the user is shown.
+Write-Section 'Step 0: one version, nine places'
+& (Join-Path $ScriptDir 'verify-version.ps1')
+$versions = $LASTEXITCODE
+if ($versions -ne 0) {
+    Write-Host ''
+    Write-Host ("FAIL: verify-version.ps1 returned {0}. Nothing was built." -f $versions)
+    exit 8
+}
 
 # --- 1. Build the shipping configuration ---------------------------------------------------
 Write-Section 'Step 1: build the shipping configuration'
@@ -182,7 +207,26 @@ if ($SkipSign) {
     }
 }
 
-# --- 6. Summary -----------------------------------------------------------------------------
+# --- 6. NFR-07 and criterion 4 ----------------------------------------------------------------
+# Task T-22-11, finding 19. Behind the signature and not in front of it: NFR-07 is about the
+# file the user runs, a signature is appended to that file, and the unsigned build is therefore
+# the easier case. Under -SkipSign the artifact is unsigned and the gate says so rather than
+# pretending the measurement was the right one.
+Write-Section 'Step 6: NFR-07 and criterion 4 of section 13'
+if ($SkipSign) {
+    Write-Host '  NOTE: -SkipSign was given, so the file measured below is UNSIGNED and is'
+    Write-Host '  smaller than the product will be. The gate is informative on this run.'
+}
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $Artifact
+$perimeter = $LASTEXITCODE
+if ($perimeter -ne 0) {
+    Write-Host ''
+    Write-Host ("FAIL: verify-perimeter.ps1 returned {0}. The artifact exists and is signed," -f $perimeter)
+    Write-Host '      and it must not be shipped: see the gate that failed above.'
+    exit 9
+}
+
+# --- 7. Summary -----------------------------------------------------------------------------
 Write-Section 'Result'
 $finalHash = Show-Binary -Path $Artifact -Label 'shipping artifact:'
 Write-Host ''
