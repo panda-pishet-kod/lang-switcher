@@ -793,6 +793,28 @@ pub fn install(notify: HWND, instance: HINSTANCE) -> WinResult<Installed> {
     // NFR-01 to NFR-05: this is `install`, not the callback. Nothing was added to the callback.
     crate::buffer::set_caps_lock(caps_lock_on);
 
+    // **Task Т-22-1 — the other half of the same absence, finding м2 of the mini-audit of
+    // 2026-09-01.** The seed above repairs what the program believes about `CapsLock` after a
+    // stretch without a hook; this repairs what it believes about the hotkey itself.
+    //
+    // FR-08 answers "is this press a press or an auto-repeat?" out of one thread-local bit, and
+    // the bit is cleared by a release the callback sees. A release made while the hook was off
+    // is a release the callback never saw, so a reinstallation used to bring the program back
+    // convinced the hotkey was still held: the next real press was read as a repeat, suppressed
+    // by FR-95 and handed off to nobody. One conversion lost per lost release, with nothing to
+    // show for it.
+    //
+    // The same thread and the same reasoning as the seed: this is the input thread — `install`
+    // is only ever called from it, at start-up by `app::serve_window` and afterwards by
+    // `watchdog::reinstall_hook` — so the thread-local written here is the one the callback
+    // reads. At start-up it is already `false` and this is a no-op; after a reinstallation it is
+    // the whole repair.
+    //
+    // Placed after the hook is registered, not before: a failed installation leaves the program
+    // with no hook at all, and clearing a belief about a keyboard nobody is watching would be a
+    // guess rather than a fact.
+    HOTKEY_STATE.set(HotkeyState::default());
+
     Ok(Installed {
         _not_send: PhantomData,
     })

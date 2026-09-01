@@ -1690,6 +1690,188 @@ fn drain_the_queue() {
     }
 }
 
+/// Pumps this thread's queue for `patience`, answering nothing in particular — the shape
+/// `drain_the_queue` has, given time for input that has not arrived yet.
+#[cfg(test)]
+fn pump_for(patience: Duration) {
+    let deadline = Instant::now() + patience;
+
+    loop {
+        drain_the_queue();
+
+        if Instant::now() >= deadline {
+            return;
+        }
+
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Pumps this thread's queue until module `hook` has handed off `target` presses or patience runs
+/// out, and answers with the count reached.
+///
+/// `WM_APP_HOTKEY` is handed to `hook::handle_input_message` rather than dispatched, because that
+/// is what `app::window_proc` does with it on the input thread and it is what moves
+/// `hotkey_handoffs`. The window this file creates is a `STATIC`, whose procedure knows nothing
+/// of this program's private messages.
+#[cfg(test)]
+fn pump_until_handoffs(target: u32, patience: Duration) -> u32 {
+    let deadline = Instant::now() + patience;
+    let mut message = MSG::default();
+
+    loop {
+        // SAFETY: as in `drain_the_queue` above — a live `MSG` of this frame, no window filter
+        // and no message filter.
+        while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+            if lang_switcher::hook::handle_input_message(
+                message.message,
+                message.wParam,
+                message.lParam,
+            )
+            .is_none()
+            {
+                // SAFETY: `message` was just filled by `PeekMessageW` and is passed unchanged.
+                unsafe { DispatchMessageW(&message) };
+            }
+        }
+
+        let handoffs = lang_switcher::hook::hotkey_handoffs();
+
+        if handoffs >= target || Instant::now() >= deadline {
+            return handoffs;
+        }
+
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// One synthetic edge of the hotkey, delivered to the machine's input stream the way a keyboard
+/// delivers one.
+///
+/// `dwExtraInfo` is zero and deliberately not `INJECTED_SIGNATURE`: FR-03 has to take this for
+/// the user's own hand, which is the whole point of the stroke. ⚠ Decision Р-42: it is sent only
+/// while this file's hook is installed and armed, so FR-95 suppresses it and no window on the
+/// machine ever sees a `Pause`.
+#[cfg(test)]
+fn send_pause(edge: Edge) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+        VIRTUAL_KEY,
+    };
+
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(lang_switcher::hook::DEFAULT_HOTKEY_VK),
+                wScan: 0,
+                dwFlags: match edge {
+                    Edge::Down => KEYBD_EVENT_FLAGS(0),
+                    Edge::Up => KEYEVENTF_KEYUP,
+                },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    // SAFETY: one live `INPUT` of this frame, described by its own size — which is all
+    // `SendInput` reads. The return is the number of events queued and is examined (NFR-13).
+    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+
+    assert_eq!(
+        sent, 1,
+        "the synthetic {edge:?} must reach the input stream"
+    );
+}
+
+/// ⭐ **Task Т-22-1 — finding м2 of the mini-audit of 2026-09-01.**
+///
+/// The down/up state of FR-08 is the input thread's memory of one key, and a reinstallation is
+/// exactly the moment that memory can be wrong: `uninstall` takes the hook off, a release made
+/// while it is off is seen by nobody, and `install` used to bring the program back still
+/// believing the hotkey was held. The next real press was then read as auto-repeat — suppressed
+/// by FR-95 but handed off to nobody — so the user pressed `Pause` and nothing happened, once
+/// per lost release, silently.
+///
+/// The staging is the defect's own: press, take the hook away and put it back through the FR-80
+/// door, press again. The second press has to hand off too. The release is never sent — it does
+/// not have to be, because the state a lost release leaves behind is precisely "we still think
+/// it is down", and that is the state the first press already put here.
+///
+/// ⚠ `#[ignore]`d, and named to sort after `the_gap_without_a_hook_is_microseconds`, for the
+/// reasons that test states: it installs a **live global `WH_KEYBOARD_LL` hook**, and it moves
+/// `recoveries` by one.
+#[test]
+#[ignore = "installs a live global WH_KEYBOARD_LL hook and sends synthetic Pause; run deliberately with --ignored --test-threads=1"]
+fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
+    let _turn = notice_turn();
+
+    // SAFETY: `None` asks for the handle of the running executable, which cannot be unloaded
+    // under us.
+    let module = unsafe { GetModuleHandleW(PCWSTR::null()) }.expect("the module handle");
+    let instance = HINSTANCE(module.0);
+
+    let window = TestWindow::new();
+
+    // The mode the callback will read, written out rather than assumed: both of these are
+    // published values that another test in this binary is free to have moved.
+    lang_switcher::hook::set_hotkey_vk(lang_switcher::hook::DEFAULT_HOTKEY_VK);
+    lang_switcher::hook::set_active(true);
+    assert!(
+        !lang_switcher::hook::fail_safe(),
+        "FR-99 must not have disarmed the program before this test"
+    );
+
+    let installed =
+        lang_switcher::hook::install(window.handle, instance).expect("the hook must install");
+
+    let before = lang_switcher::hook::hotkey_handoffs();
+
+    // Act 1 — a press the hook sees. FR-08 remembers it as down.
+    send_pause(Edge::Down);
+
+    let after_first = pump_until_handoffs(before + 1, Duration::from_secs(2));
+
+    assert_eq!(
+        after_first,
+        before + 1,
+        "the first press must reach the far end of the handoff"
+    );
+
+    // Act 2 — the gap of FR-80, through the door the watchdog uses.
+    assert!(
+        watchdog::reinstall_hook(window.handle, watchdog::Reason::Timer),
+        "the reinstallation must end with a hook"
+    );
+
+    drain_the_queue();
+
+    // Act 3 — the next press. It is the first press of a program that has just started seeing
+    // the keyboard again, and FR-08 has to read it as one.
+    send_pause(Edge::Down);
+
+    let after_second = pump_until_handoffs(after_first + 1, Duration::from_secs(2));
+
+    // The release, now that there is a hook to eat it: the machine must not be left with `Pause`
+    // held down. Sent before the assertion, so that a red test leaves the keyboard as it found
+    // it.
+    send_pause(Edge::Up);
+    pump_for(Duration::from_millis(200));
+
+    drop(installed);
+    drain_the_queue();
+
+    assert!(!lang_switcher::hook::is_installed());
+
+    assert_eq!(
+        after_second,
+        after_first + 1,
+        "Т-22-1: a reinstallation must forget the FR-08 down state, or the first press after it \
+         is read as auto-repeat and handed off to nobody"
+    );
+}
+
 /// ⭐ **Task Т-13-3, the whole of the repair.** With the typing buffer parked, the liveness tick
 /// of FR-80 **and** the rehook request both reach `reinstall_hook`, and a foreign window still
 /// reaches nothing.
