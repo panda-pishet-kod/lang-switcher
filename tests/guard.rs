@@ -1070,6 +1070,81 @@ fn the_published_list_recognises_this_process_by_its_own_name() {
     );
 }
 
+/// ⭐ **Task Т-22-8, finding м9 of the audit of 2026-09-01 — the two ceilings agree, and a name
+/// the field accepts is never dropped by `guard`.**
+///
+/// The exclusion name field of the settings dialog limits what the user may type with
+/// `EM_LIMITTEXT`, which counts **UTF-16 units**; [`guard::publish_exclusions`] refuses a name
+/// over [`guard::MAX_EXCLUSION_NAME_BYTES`] **bytes of UTF-8** and does not truncate it. The two
+/// numbers were chosen independently — sixty-four against a hundred and twenty-eight — on the
+/// belief that a character costs at most two bytes. It costs three: every character from `U+0800`
+/// to `U+FFFF` is one UTF-16 unit and three bytes, so forty-three of them passed the field, went
+/// into the list, were written to `config.toml` and were dropped here, leaving nothing but a
+/// number in `exclusions_refused`. The user saw the name in the list they had just applied, and
+/// the program went on recording in the process they had excluded.
+///
+/// # Why the test is written from the field's side
+///
+/// Because the invariant is the field's promise, not `guard`'s: `guard` was always entitled to
+/// refuse an over-long name, and the defect is a dialog that hands it one. So this fills the field
+/// to its exact ceiling with the worst characters there are and asks `guard` — through its own
+/// door, not through arithmetic — whether it kept the name.
+///
+/// ⚠ Writes the process-global exclusion table; takes [`GLOBAL_STATE`] and puts section 7's
+/// default back, exactly as the test above does.
+#[test]
+fn a_name_the_exclusion_field_accepts_is_never_dropped_by_the_guard() {
+    use lang_switcher::settings::EXCLUSION_NAME_CHARS;
+
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    // The worst a UTF-16 unit can cost: a BMP character, one unit, three bytes of UTF-8. Not a
+    // character outside the basic plane — four bytes, but **two** units, which is two per unit.
+    let worst = '\u{0800}';
+
+    assert_eq!(worst.len_utf8(), 3);
+    assert_eq!(worst.encode_utf16(&mut [0u16; 2]).len(), 1);
+
+    let full: String = std::iter::repeat_n(worst, EXCLUSION_NAME_CHARS).collect();
+
+    assert_eq!(
+        full.encode_utf16().count(),
+        EXCLUSION_NAME_CHARS,
+        "a full field, measured in the unit EM_LIMITTEXT counts"
+    );
+
+    assert_eq!(guard::publish_exclusions(&[]), 0);
+
+    assert_eq!(
+        guard::publish_exclusions(std::slice::from_ref(&full)),
+        1,
+        "Т-22-8: {} bytes is what a full field weighs, and the ceiling of guard is {}",
+        full.len(),
+        guard::MAX_EXCLUSION_NAME_BYTES
+    );
+    assert!(
+        guard::is_excluded_name(&full),
+        "and the name the user typed is the name that matches"
+    );
+
+    // One unit more than the field allows is the name that used to slip through it. `guard` still
+    // refuses it — that half was never wrong — and now nothing can hand it one.
+    let over: String = std::iter::repeat_n(worst, EXCLUSION_NAME_CHARS + 1).collect();
+
+    assert!(over.len() > guard::MAX_EXCLUSION_NAME_BYTES);
+    assert_eq!(
+        guard::publish_exclusions(std::slice::from_ref(&over)),
+        0,
+        "guard refuses a name over its ceiling rather than truncating it"
+    );
+    assert!(!guard::is_excluded_name(&over));
+
+    // Section 7's default put back — process-global state, and the rest of the run must see the
+    // program as it starts.
+    assert_eq!(guard::publish_exclusions(&[]), 0);
+    assert!(!guard::is_excluded_name(&full));
+}
+
 // ---------------------------------------------------------------------------------------
 // The key of SEC-04a — condition 2, a flag and not the content
 // ---------------------------------------------------------------------------------------

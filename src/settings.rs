@@ -2222,12 +2222,50 @@ const CANCEL_COMMAND: i32 = IDCANCEL.0;
 /// Digits a millisecond field accepts, so that [`parse_ms`] cannot meet a number that overflows.
 const MS_FIELD_DIGITS: usize = 9;
 
-/// Characters the exclusion name field accepts.
+/// The most bytes of UTF-8 that one **UTF-16 code unit** can become.
 ///
-/// Sixty-four, against the hundred and twenty-eight **bytes** `guard::MAX_EXCLUSION_NAME_BYTES`
-/// publishes: the worst case is two bytes per character, and a name longer than this is refused
-/// by `guard` rather than truncated, so the field stops it where the user can see it happening.
-const EXCLUSION_NAME_CHARS: usize = 64;
+/// Three, and the number is not the familiar four: four bytes of UTF-8 are a character outside the
+/// basic plane, and such a character is **two** UTF-16 units — two bytes per unit. The worst case
+/// per unit is a BMP character from `U+0800` to `U+FFFF`, which is one unit and three bytes. See
+/// [`EXCLUSION_NAME_CHARS`], which is the one place this matters.
+const MAX_UTF8_PER_UTF16_UNIT: usize = 3;
+
+/// Characters the exclusion name field accepts — **UTF-16 units**, which is what `EM_LIMITTEXT`
+/// counts.
+///
+/// ⭐ **Task Т-22-8, finding м9 of the audit of 2026-09-01.** The number used to be sixty-four,
+/// chosen by hand, and the comment beside it said "the worst case is two bytes per character".
+/// That is the worst case for the characters people usually have in mind and not for the unit the
+/// field actually counts: sixty-four units of `U+0800..U+FFFF` are **192 bytes** against the 128
+/// of [`crate::guard::MAX_EXCLUSION_NAME_BYTES`]. A name of forty-three such characters therefore
+/// passed the field, went into the list, was saved to `config.toml` — and was dropped by
+/// [`crate::guard::publish_exclusions`], which refuses a name over its ceiling rather than
+/// truncating it. The only trace was a number in `exclusions_refused`. The user saw the name in
+/// the list they had just applied and the program went on recording in the process they had
+/// excluded.
+///
+/// The ceiling is now **derived** from the one `guard` publishes, and the derivation is asserted
+/// below rather than trusted: whatever a name the field accepts is made of, it cannot come out
+/// over `guard`'s ceiling, so `guard` has nothing to refuse silently.
+///
+/// The price is names of 43 to 64 characters, which the field no longer accepts. That is a
+/// deliberate trade of the option `guard` never had: a Windows process name — which is what FR-84
+/// matches on, an executable file name after [`crate::guard::fold_process_name`] — has no
+/// business being longer than forty-two characters, and a program that quietly ignored the
+/// exclusion was the worse of the two answers.
+pub const EXCLUSION_NAME_CHARS: usize =
+    crate::guard::MAX_EXCLUSION_NAME_BYTES / MAX_UTF8_PER_UTF16_UNIT;
+
+/// **The invariant of task Т-22-8, checked at compile time**: a name the field accepts is never
+/// refused by `guard`.
+///
+/// Written out rather than left to the division above, so that an edit of either ceiling — this
+/// one, [`MAX_UTF8_PER_UTF16_UNIT`], or [`crate::guard::MAX_EXCLUSION_NAME_BYTES`] — has to meet
+/// the rule instead of quietly re-opening the gap. The same device, for the same reason, as the
+/// two `const _: () = assert!` lines in `src\guard.rs`.
+const _: () = assert!(
+    EXCLUSION_NAME_CHARS * MAX_UTF8_PER_UTF16_UNIT <= crate::guard::MAX_EXCLUSION_NAME_BYTES
+);
 
 /// State image index of a ticked checkbox in a list view, in the form the item state carries it.
 ///
