@@ -269,6 +269,83 @@ fn a_probe_that_was_not_asked_for_does_nothing() {
     );
 }
 
+/// ⭐ **Task Т-22-2 — the race of finding №13, staged.**
+///
+/// `request_probe` used to read the flag before the post and write it back after, so a request
+/// the other caller had made **and had accepted** in between was overwritten by a value that
+/// predated both: the probe was cancelled, `Pending` stayed published, and buffering stayed off
+/// until the next focus change. The comment above the function promised the opposite in as many
+/// words.
+///
+/// # Why this is staged and not raced
+///
+/// The window is two instructions wide and belongs to two threads a test process does not have —
+/// section 6.1 puts the configuration on the UI thread and the focus on the input one. Waiting for
+/// it would be a test that is green because it lost. The interleaving is raised on purpose
+/// instead, through `guard::stage` — feature `testing`, absent from the Release configuration —
+/// at exactly the instruction it can happen at.
+///
+/// The failing half comes free: a test process has no watcher window, so every request made here
+/// finds its post refused, which is the path the undo lives on.
+///
+/// # What is asserted, and what is deliberately not run
+///
+/// That a probe is **still wanted** afterwards. Not that the counter reads exactly one: when the
+/// exchange finds the counter moved it declines to undo at all, so the refused caller's own step
+/// is left standing beside the accepted one. That is deliberate and invisible — the only reader
+/// of the counter is `run_pending_probe`, which asks "did anybody want a probe" and takes the
+/// whole thing to nought in one swap, so one and two are the same answer.
+///
+/// The probe itself is **not** run: entering `run_pending_probe` is entering the three levels of
+/// FR-72 against whatever window the machine happens to have in the foreground, which is a state
+/// of the room and not of the code — the header of this file says why level 3 is out of scope
+/// here. The property under test is the protocol, and the protocol is the counter.
+///
+/// ⚠ Writes the process-global probe counter; takes [`GLOBAL_STATE`] like the two tests above.
+#[cfg(feature = "testing")]
+#[test]
+fn a_refused_probe_request_does_not_cancel_one_that_was_accepted() {
+    use lang_switcher::guard::stage;
+
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    stage::clear_probe_requests();
+
+    assert_eq!(
+        stage::probe_requests(),
+        0,
+        "the baseline both callers start from: nobody is waiting"
+    );
+
+    // The other caller's request lands between this one's refused post and its undo — the one
+    // ordering that used to lose.
+    stage::arm_one_accepted_request_under_the_next_refusal();
+
+    guard::note_focus_moved();
+
+    let standing = stage::probe_requests();
+
+    assert!(
+        standing > 0,
+        "Т-22-2: a refused request must not cancel the accepted one; the counter says {standing}"
+    );
+
+    // The other half of the same rule, and the one the old code did get right: with nobody
+    // underneath it, a request nobody can deliver leaves nothing behind. SEC-05 — a request left
+    // waiting for nobody is a request a forged `WM_APP_PROBE` could spend.
+    stage::clear_probe_requests();
+
+    guard::note_focus_moved();
+
+    assert_eq!(
+        stage::probe_requests(),
+        0,
+        "SEC-05: a refused request with nobody underneath it takes itself back"
+    );
+
+    stage::clear_probe_requests();
+}
+
 /// The four states and the two answers, as the rest of the program sees them.
 #[test]
 fn the_flag_of_sec04a_is_one_bit_and_follows_the_state() {

@@ -236,7 +236,7 @@
 //! concerned, and a UI Automation call that fails is [`Field::Undetermined`], which FR-73 fixes
 //! the meaning of. Every `unsafe` block carries a `// SAFETY:` comment.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
 use std::cell::RefCell;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
@@ -724,15 +724,32 @@ const _: () = assert!(Field::Pending as u8 == 0);
 /// complete decode and the generation can never reach the reader's `match`. Task **T-13-12**.
 const _: () = assert!(EXCLUDED_BIT as u32 | FIELD_MASK as u32 == GENERATION_STEP - 1);
 
-/// Whether a probe has been asked for and not yet run.
+/// Whether a probe has been asked for and not yet run — **nought is "nobody is waiting"**, and
+/// every other value is "yes".
 ///
-/// SEC-05: this is why [`WM_APP_PROBE`] carries nothing. A forged message finds this `false` and
+/// SEC-05: this is why [`WM_APP_PROBE`] carries nothing. A forged message finds this nought and
 /// the handler returns without touching UI Automation.
 ///
 /// It also coalesces: two focus changes that arrive before the watcher thread has drained its
 /// queue are one probe, and the probe reads the focus that is current when it runs rather than
-/// the one that caused it.
-static PROBE_PENDING: AtomicBool = AtomicBool::new(false);
+/// the one that caused it. [`run_pending_probe`] therefore takes the whole counter to nought in
+/// one swap rather than subtracting one — the question it asks is "did anybody want a probe",
+/// never "how many".
+///
+/// # ⚠ Why this is a counter and not the boolean it was until task Т-22-2
+///
+/// A boolean cannot tell one writer's `true` from another's, and [`request_probe`] has to undo
+/// **its own** request when the post fails without touching a request somebody else made in the
+/// meantime. Finding м2 of the audit of 2026-09-01 (finding №13 of the audit of 2026-08-31) is
+/// exactly that: the input thread raised the flag, the post failed, the UI thread raised it again
+/// and got its post accepted, and the input thread then wrote back the `false` it had read before
+/// either of them started — cancelling a probe that had been accepted, and leaving buffering off
+/// until the next focus change.
+///
+/// A ticket makes the two distinguishable: the undo is a compare-and-exchange from the value this
+/// caller's own increment produced, so it can only ever take back its own step and never
+/// somebody else's.
+static PROBE_PENDING: AtomicU32 = AtomicU32::new(0);
 
 /// Focus changes seen — see [`Counters`].
 static FOCUS_CHANGES: AtomicU32 = AtomicU32::new(0);
@@ -877,21 +894,116 @@ fn enter_pending() -> u32 {
 /// replaced — and both need the same care on failure, which is why the request is one function and
 /// not two copies of four lines.
 ///
-/// ⚠ **A failed request restores the flag rather than clearing it.** The two callers run on
-/// different threads (section 6.1 puts the configuration on the UI thread and the focus on the
-/// input thread), so one of them finding no watcher window must not cancel a probe the other has
-/// already asked for and had accepted. SEC-05 is why it is put back at all rather than simply left
-/// set: [`WM_APP_PROBE`] carries nothing, and a flag left standing for nobody is a flag a forged
-/// message could spend.
+/// ⚠ **A failed request takes back its own step and nothing else** — task **Т-22-2**. The two
+/// callers run on different threads (section 6.1 puts the configuration on the UI thread and the
+/// focus on the input thread), so one of them finding no watcher window must not cancel a probe
+/// the other has already asked for and had accepted. SEC-05 is why the step is taken back at all
+/// rather than simply left standing: [`WM_APP_PROBE`] carries nothing, and a request left waiting
+/// for nobody is a request a forged message could spend.
+///
+/// # The protocol, and the interleaving it is written against
+///
+/// Until task Т-22-2 the two lines were `swap(true)` and, on failure, `store(previous)` — and the
+/// comment above them promised precisely the property they did not have. `previous` is read
+/// **before** the post is attempted, so a request accepted by the other thread in between was
+/// overwritten by a value that predated it:
+///
+/// ```text
+///   input thread                     UI thread
+///   ------------                     ---------
+///   swap(true) -> previous = false
+///                                    swap(true) -> previous = true
+///                                    post accepted, returns true
+///   post refused
+///   store(false)                     <- the accepted probe is gone
+/// ```
+///
+/// The counter makes the two steps distinguishable. `fetch_add` answers with the value this
+/// caller's own increment produced, and the undo is a `compare_exchange` from exactly that value:
+/// if anybody — the other caller, or [`run_pending_probe`] draining the counter — has moved it
+/// since, the exchange fails and the request stays where the other thread put it. In the trace
+/// above the input thread would now find `2` where it expects `1`, decline to undo, and leave the
+/// UI thread's accepted probe alone.
+///
+/// Declining to undo leaves this caller's own step standing beside the accepted one, and that is
+/// deliberate rather than tolerated: the only reader of the counter is [`run_pending_probe`],
+/// which asks "did anybody want a probe" and takes the whole counter to nought in one swap, so
+/// one and two are the same answer to the only question anybody asks. Subtracting unconditionally
+/// instead would be the old defect wearing a different arithmetic — a drain that happened in
+/// between would be turned into a wrap to `u32::MAX`, and the program would believe a probe was
+/// wanted for ever.
+///
+/// The counter can only run away if the post fails four billion times in a row while every single
+/// undo loses its exchange, and even then the wrap lands on nought — "no probe wanted", the same
+/// safe state a refused request ends in today.
 fn request_probe() -> bool {
-    let previous = PROBE_PENDING.swap(true, Ordering::Relaxed);
+    let ticket = PROBE_PENDING
+        .fetch_add(1, Ordering::Relaxed)
+        .wrapping_add(1);
 
     if crate::app::post_to_watcher_thread(WM_APP_PROBE) {
         return true;
     }
 
-    PROBE_PENDING.store(previous, Ordering::Relaxed);
+    // SEC-04a, feature `testing`, absent from the Release configuration: the one interleaving
+    // this protocol is about, raised on purpose here instead of waited for. See [`stage`].
+    #[cfg(feature = "testing")]
+    stage::interleave();
+
+    // An `Err` is not a failure and is deliberately not examined further (NFR-13 asks that a
+    // return be *used*, and this one is — as the condition of the whole undo). It says that the
+    // counter no longer holds this caller's own step, which is the one case in which the step
+    // must be left exactly where it is.
+    let _ = PROBE_PENDING.compare_exchange(
+        ticket,
+        ticket.wrapping_sub(1),
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
+
     false
+}
+
+/// **SEC-04a, feature `testing`, absent from the Release configuration.** What `tests\guard.rs`
+/// needs to raise the interleaving of task Т-22-2 on purpose, instead of running two threads and
+/// hoping to lose a race that is two instructions wide.
+///
+/// The same shape, and the same reason, as `hook::fault`: a staging point compiled out of every
+/// build that does not ask for the feature, and acceptance criterion 8 of section 13 checks that
+/// the shipped binary carries no trace of it.
+#[cfg(feature = "testing")]
+pub mod stage {
+    use super::{Ordering, PROBE_PENDING};
+    use core::sync::atomic::AtomicBool;
+
+    /// Whether the next refused request must find another one accepted underneath it.
+    static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// Arms one interleaving: the next post that `request_probe` finds refused will see a request
+    /// accepted by "the other thread" between the refusal and its own undo.
+    pub fn arm_one_accepted_request_under_the_next_refusal() {
+        ARMED.store(true, Ordering::Relaxed);
+    }
+
+    /// What the counter holds right now. Nought is "nobody is waiting".
+    pub fn probe_requests() -> u32 {
+        PROBE_PENDING.load(Ordering::Relaxed)
+    }
+
+    /// Back to "nobody is waiting", so that one test cannot bias the next.
+    pub fn clear_probe_requests() {
+        PROBE_PENDING.store(0, Ordering::Relaxed);
+        ARMED.store(false, Ordering::Relaxed);
+    }
+
+    /// Called by [`super::request_probe`] between a refused post and the undoing of its own step —
+    /// the one point where the interleaving matters. Fires at most once per arming.
+    pub(super) fn interleave() {
+        if ARMED.swap(false, Ordering::Relaxed) {
+            // Exactly what a `request_probe` that got its post accepted leaves behind.
+            PROBE_PENDING.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -926,7 +1038,11 @@ struct Probe {
 /// Answers whether a probe really was pending. SEC-05: a forged [`WM_APP_PROBE`] finds it was
 /// not and returns having touched nothing.
 pub fn run_pending_probe() -> bool {
-    if !PROBE_PENDING.swap(false, Ordering::Relaxed) {
+    // The whole counter to nought in one swap, however many requests it holds: the question is
+    // "did anybody want a probe", never "how many", and the probe reads the focus that is current
+    // when it runs rather than the one that caused it. That is the coalescing [`PROBE_PENDING`]
+    // describes, unchanged by task Т-22-2 — only the type under it changed.
+    if PROBE_PENDING.swap(0, Ordering::Relaxed) == 0 {
         return false;
     }
 
