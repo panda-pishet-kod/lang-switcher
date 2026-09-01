@@ -330,10 +330,10 @@ type FallbackRow = (u16, [char; 2], [char; 2]);
 /// The hardwired RU/EN correspondence of FR-25, by physical key.
 ///
 /// Every row is one key of the main block of a set 1 keyboard, in the order the keys sit on
-/// it: the number row, then the three letter rows. The two pairs are the two readings of that
-/// one key, so the table is a correspondence between *keys*, not between characters — FR-22
-/// holds for the fallback exactly as it holds for the live cache, and adding a third layout
-/// would mean adding a column, not writing a new table.
+/// it: the number row, then the three letter rows, then the space bar under them. The two
+/// pairs are the two readings of that one key, so the table is a correspondence between
+/// *keys*, not between characters — FR-22 holds for the fallback exactly as it holds for the
+/// live cache, and adding a third layout would mean adding a column, not writing a new table.
 ///
 /// Coverage matches what section 11.1 of SPEC asks conversion to be tested on: every letter
 /// of both alphabets in both cases, the digit row with and without `Shift`, the punctuation
@@ -346,7 +346,16 @@ type FallbackRow = (u16, [char; 2], [char; 2]);
 /// the keypad reads alike in both layouts — a row for it would add nothing a conversion
 /// could use. Rule 3 of [`convert_stroke`] covers those keys: absent from the target, the
 /// stroke keeps its own character.
-const FALLBACK_KEYS: [FallbackRow; 47] = [
+///
+/// ⭐ **The space bar is the one key that argument does not cover — task Т-25-1, finding
+/// м-Э24-1, the user's decision 84.1.** It too reads alike in both layouts, so as long as a
+/// row was worth having only for what it converts, it was rightly absent. Task Т-20-1 changed
+/// the terms: FR-41 counts the display units of the recorded strokes to decide how many
+/// `Backspace` a replacement sends, and task Т-24-2 put the space bar into the ring as the
+/// soft boundary of FR-10. A key that carries no character is not counted, so on the fallback
+/// path «ghbdtn » came out six units wide instead of seven and the tail survived the erase. A
+/// row is needed here not because it converts anything but because it **counts**.
+const FALLBACK_KEYS: [FallbackRow; 48] = [
     (0x29, ['`', '~'], ['ё', 'Ё']),
     (0x02, ['1', '!'], ['1', '!']),
     (0x03, ['2', '@'], ['2', '"']),
@@ -394,6 +403,11 @@ const FALLBACK_KEYS: [FallbackRow; 47] = [
     (0x33, [',', '<'], ['б', 'Б']),
     (0x34, ['.', '>'], ['ю', 'Ю']),
     (0x35, ['/', '?'], ['.', ',']),
+    // The space bar, under the three letter rows and last for that reason. Both readings are
+    // the same character in both layouts, which is exactly what the live cache of FR-20
+    // reports for it — measured on this machine by
+    // `tests\layouts.rs::the_live_cache_of_fr20_carries_the_space_bar`, `Shift` included.
+    (0x39, [' ', ' '], [' ', ' ']),
 ];
 
 /// Builds one half of the fallback table.
@@ -464,7 +478,7 @@ pub fn fallback_cache() -> LayoutCache {
         build_fallback(FALLBACK_US, false),
     ];
     // `from_maps` rejects exactly two shapes, no maps at all and no characters in any of
-    // them. Both maps above come from a constant table of 47 keys, so neither shape is
+    // them. Both maps above come from a constant table of 48 keys, so neither shape is
     // reachable; `the_fallback_cache_carries_both_layouts` pins that.
     LayoutCache::from_maps(maps).expect("the hardwired FR-25 table is never empty")
 }
@@ -478,20 +492,25 @@ mod tests {
     use super::*;
     use crate::layouts::MappingKind;
 
-    /// The 47 keys of the fallback table read off an English keyboard, unshifted.
+    /// The 48 keys of the fallback table read off an English keyboard, unshifted.
     ///
     /// Written out here as text rather than derived from [`FALLBACK_KEYS`] on purpose: a test
     /// that builds its expectation from the table it is testing proves only that the table
     /// equals itself. These four constants are the independent statement of what the RU/EN
     /// correspondence is, and each pair is aligned character by character — the *n*-th
     /// character of one is what the *n*-th of the other becomes.
-    const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
-    /// The same 47 keys in the Russian layout, unshifted.
-    const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
-    /// The same 47 keys in the English layout, with `Shift`.
-    const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
-    /// The same 47 keys in the Russian layout, with `Shift`.
-    const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+    ///
+    /// ⚠ **The last character of all four is a space, and it is the space bar** — task Т-25-1.
+    /// It is the one character here that cannot be seen, so it is named: the four strings were
+    /// extended by hand along with the table, exactly as the paragraph above requires, and none
+    /// of them is one character shorter than it looks.
+    const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./ ";
+    /// The same 48 keys in the Russian layout, unshifted.
+    const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю. ";
+    /// The same 48 keys in the English layout, with `Shift`.
+    const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>? ";
+    /// The same 48 keys in the Russian layout, with `Shift`.
+    const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ, ";
 
     /// Scan codes for the synthetic layouts below. Arbitrary but stable.
     const SCANS: [u16; 3] = [0x10, 0x11, 0x12];
@@ -568,7 +587,8 @@ mod tests {
         let (us, ru) = (us(), ru());
 
         // Every letter of both alphabets, the digit row with and without Shift, the
-        // punctuation keys and `ё`/`~` — 47 keys times two readings, both directions.
+        // punctuation keys, `ё`/`~` and the space bar — 48 keys times two readings, both
+        // directions.
         assert_eq!(render(&type_text(&us, EN_LOWER), &ru), RU_LOWER);
         assert_eq!(render(&type_text(&ru, RU_LOWER), &us), EN_LOWER);
         assert_eq!(render(&type_text(&us, EN_UPPER), &ru), RU_UPPER);
@@ -830,7 +850,7 @@ mod tests {
             .expect("the fallback cache must carry US");
         assert!(!ru.is_empty() && !us.is_empty());
 
-        // Four modifier combinations on 47 keys.
+        // Four modifier combinations on 48 keys.
         assert_eq!(ru.len(), FALLBACK_KEYS.len() * 4);
         assert_eq!(us.len(), FALLBACK_KEYS.len() * 4);
 

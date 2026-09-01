@@ -333,13 +333,13 @@ const SCAN_SPACE: u16 = 0x39;
 
 /// The six keys of `ghbdtn` **and the space bar**, as a live cache of FR-20 carries them.
 ///
-/// ⚠ **Not [`us`] and [`russian`], and the difference is a finding of stage Э24.** The hardwired
-/// table of FR-25 has 47 rows of the main block and the space bar is not one of them, so a space
-/// decoded through it carries no character at all — measured by
-/// `the_space_bar_is_absent_from_the_hardwired_table_of_fr25` below. The live cache built by
-/// `ToUnicodeEx` over VK `0x08..0xFF` always carries it — measured on this machine by
-/// `tests\layouts.rs::the_live_cache_of_fr20_carries_the_space_bar`. The mainline claim of task
-/// Т-24-3 is about the product's normal state, so it is asserted on a map that has the key.
+/// Not [`us`] and [`russian`], and that used to matter: the hardwired table of FR-25 had 47 rows
+/// of the main block, the space bar was not one of them, and a space decoded through it carried
+/// no character at all — finding м-Э24-1. Task Т-25-1 closed it, so the two would answer alike
+/// today; this pair is kept because the mainline claim of task Т-24-3 is about the product's
+/// normal state, and a six-key synthetic layout says so with nothing else in it. The two maps
+/// that carry the correspondence are checked against each other elsewhere:
+/// `tests\convert.rs::the_fallback_table_converts_exactly_as_the_live_cache_does`.
 fn ghbdtn_layout(layout: LayoutId, characters: [char; 6]) -> LayoutMap {
     let mut builder = LayoutMapBuilder::new(layout);
 
@@ -898,32 +898,38 @@ fn a_word_with_a_tail_of_spaces_is_erased_and_retyped_whole() {
     );
 }
 
-/// ⚠ **Находка м-Э24-1: в жёстко зашитой таблице FR-25 пробела нет.** Измерено, не выведено.
+/// **Хвост считается и в аварийном режиме: семь из семи** — находка м-Э24-1 закрыта, задача
+/// **Т-25-1** (решение пользователя 84.1).
 ///
-/// [`FALLBACK_KEYS`] — 47 клавиш основного блока; клавиша пробела в их число не входит, и её
-/// отсутствие было безразлично ровно до задачи Т-24-2: пробел в буфер не попадал. Теперь
-/// попадает, и в аварийном режиме FR-25 (динамический кэш FR-20 не построился) штрих пробела
-/// не несёт ни одной единицы отображения. Следствие для FR-41 — счёт на экране короче
-/// действительного на длину хвоста: «ghbdtn » будет стёрто шестью `Backspace` из семи нужных.
+/// Этот тест — перевёрнутый: до задачи Т-25-1 он стоял здесь под именем
+/// `the_space_bar_is_absent_from_the_hardwired_table_of_fr25` и утверждал измеренную нехватку —
+/// клавиши пробела среди 47 строк [`FALLBACK_KEYS`] не было, штрих пробела не нёс ни одной
+/// единицы отображения, и счёт FR-41 на аварийном пути выходил короче действительного на длину
+/// хвоста: «ghbdtn » стиралось шестью `Backspace` из семи нужных. Безразлично это было ровно до
+/// задачи Т-24-2, которая начала класть пробел в кольцо.
 ///
-/// **Сторона ошибки — та же, что у мёртвой клавиши** (Э20): недостирание, а не перестирание.
-/// Лишний символ остаётся на экране видимым и правится рукой человека; чужой текст не
-/// съедается. Этим она и отличается от порчи.
-///
-/// **Здесь она закреплена числом, а не починена.** Починка — одна строка в таблице FR-25, но
-/// вместе с ней двигаются четыре рукописные строки перекрёстной проверки в `src\convert.rs` и
-/// три числа `47` в `tests\convert.rs`; довод самой таблицы против клавиатуры («читается
-/// одинаково в обеих раскладках — конвертации она ничего не даёт») с приходом счёта FR-41
-/// перестал быть полным, и это вопрос пользователю, а не правка исполнителя. Отчёт этапа Э24,
-/// плохие новости.
+/// Теперь строка `(0x39, [' ', ' '], [' ', ' '])` в таблице есть, и здесь утверждается
+/// присутствие: аварийная таблица отдаёт пробел обеими половинами, конвертация переносит его как
+/// есть (FR-23 — клавиша читается одинаково в обеих раскладках), и счёт стирания совпадает с тем,
+/// что стоит на экране. Живой кэш FR-20 пробел отдавал всегда — `tests\layouts.rs`,
+/// `the_live_cache_of_fr20_carries_the_space_bar`; с этой правкой аварийный резерв отвечает как
+/// он, что и делает его резервом, а не второй, тихо иной программой.
 #[test]
-fn the_space_bar_is_absent_from_the_hardwired_table_of_fr25() {
-    let fallback = us();
+fn the_space_bar_is_in_the_hardwired_table_of_fr25_and_the_tail_is_counted() {
+    let (fallback, target) = (us(), russian());
     let space = Keystroke::recorded_in(&fallback, SCAN_SPACE, false, Mods::NONE);
 
-    assert!(
-        space.produced().units().is_empty(),
-        "таблица FR-25 не отдаёт пробел: если отдаёт — находка закрыта и этот тест снимается"
+    assert_eq!(
+        space.produced().single_char(),
+        Some(' '),
+        "аварийная таблица FR-25 обязана отдавать пробел: без него счёт FR-41 короче экрана"
+    );
+    assert_eq!(
+        Keystroke::recorded_in(&target, SCAN_SPACE, false, Mods::NONE)
+            .produced()
+            .single_char(),
+        Some(' '),
+        "обе половины таблицы — это одна клавиша, а не одна из двух"
     );
 
     // И вот чем это оборачивается для счёта FR-41 на аварийном пути.
@@ -935,8 +941,13 @@ fn the_space_bar_is_absent_from_the_hardwired_table_of_fr25() {
 
     assert_eq!(
         inject::OnScreen::as_typed(&strokes).count(),
-        6,
-        "шесть вместо семи — недостирание на длину хвоста, безопасная сторона"
+        7,
+        "семь из семи: «ghbdtn » стирается целиком, хвост считается вместе со словом"
+    );
+    assert_eq!(
+        inject::OnScreen::as_injected(&strokes, &target).count(),
+        7,
+        "и то, что кладётся взамен, той же ширины — хвост переносится как есть"
     );
 }
 

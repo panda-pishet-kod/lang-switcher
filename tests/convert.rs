@@ -51,17 +51,22 @@ const MAIN_BLOCK: bool = false;
 /// See [`MAIN_BLOCK`].
 const KEYPAD: bool = true;
 
-/// The 47 keys of the main block, unshifted in the English layout.
+/// The 48 keys of the main block, unshifted in the English layout.
 ///
 /// Aligned character by character with [`RU_LOWER`]: the *n*-th character is what the *n*-th
 /// of the other becomes when the same physical key is read in the other layout.
-const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
+///
+/// ⚠ **The last character of all four is a space, and it is the space bar** — task Т-25-1,
+/// the user's decision 84.1. It is the one character here that cannot be seen, so it is named;
+/// the four strings were extended by hand, like their twins in `src\convert.rs`, and none of
+/// them is one character shorter than it looks.
+const EN_LOWER: &str = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./ ";
 /// The same keys in the Russian layout, unshifted.
-const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю.";
+const RU_LOWER: &str = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю. ";
 /// The same keys in the English layout, with `Shift`.
-const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
+const EN_UPPER: &str = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>? ";
 /// The same keys in the Russian layout, with `Shift`.
-const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,";
+const RU_UPPER: &str = "Ё!\"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ, ";
 
 /// The live mapping cache, or a failure naming the reason.
 fn cache() -> LayoutCache {
@@ -107,16 +112,23 @@ fn a_full_ru_en_traversal_on_the_live_cache_converts_every_key_in_both_cases() {
     let (us, ru) = (map_of(&cache, US), map_of(&cache, RUSSIAN));
 
     // Every letter of both alphabets in both cases, the digit row with and without `Shift`,
-    // the punctuation keys and `ё`/`~` — both directions, on layouts decoded from the OS.
+    // the punctuation keys, `ё`/`~` and the space bar — both directions, on layouts decoded
+    // from the OS.
     assert_eq!(render(&type_text(us, EN_LOWER), ru), RU_LOWER);
     assert_eq!(render(&type_text(ru, RU_LOWER), us), EN_LOWER);
     assert_eq!(render(&type_text(us, EN_UPPER), ru), RU_UPPER);
     assert_eq!(render(&type_text(ru, RU_UPPER), us), EN_UPPER);
 
     // The constants are aligned key by key, so the assertions above are the claim they look
-    // like and not an accident of two strings of unequal length. All 47 keys of the main
+    // like and not an accident of two strings of unequal length. All 48 keys of the main
     // block, the `/?` key included since task T-02-1a.
-    assert_eq!(EN_LOWER.chars().count(), 47);
+    //
+    // ⭐ **48 and not 47 — the number moved by the user's decision, question 84 point 1, task
+    // Т-25-1.** It had been 47 since task T-02-1a and was pinned by three tests; the row added
+    // to `FALLBACK_KEYS` is the space bar, which FR-41 has to count since task Т-24-2 put it
+    // into the ring. A number legitimised by tests moves by a question to the user, never by an
+    // executor squeezing past it.
+    assert_eq!(EN_LOWER.chars().count(), 48);
     assert_eq!(EN_LOWER.chars().count(), RU_LOWER.chars().count());
     assert_eq!(EN_UPPER.chars().count(), RU_UPPER.chars().count());
     assert_eq!(EN_LOWER.chars().count(), EN_UPPER.chars().count());
@@ -210,11 +222,14 @@ fn the_fallback_table_converts_exactly_as_the_live_cache_does() {
         }
     }
 
-    // All 47 keys of the table, four modifier combinations each. Stated as a number so that a
+    // All 48 keys of the table, four modifier combinations each. Stated as a number so that a
     // table that quietly lost half its rows cannot pass this test by comparing nothing. It
     // was 46 before task T-02-1a: the key of `SHARED_WITH_KEYPAD` had to be skipped because
-    // the live cache answered it with the keypad.
-    assert_eq!(compared, 47 * 4);
+    // the live cache answered it with the keypad. It was 47 until task Т-25-1, which added the
+    // space bar by the user's decision, question 84 point 1 — and this assertion is where the
+    // hardwired space is checked against the one the OS reports, in all four combinations and
+    // in both directions.
+    assert_eq!(compared, 48 * 4);
 
     // And the letters and digits section 11.1 names, end to end through both.
     assert_eq!(

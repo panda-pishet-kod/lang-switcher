@@ -336,9 +336,11 @@ fn a_failed_build_is_distinguishable_from_an_empty_cache() {
 /// running program reads. Every layout of the session is walked, not only the pair — a third
 /// layout that answered otherwise would be worth knowing about.
 ///
-/// ⚠ Its counterpart in the other direction is the hardwired reserve of FR-25, which does
-/// **not** carry the key: `tests\inject.rs::the_space_bar_is_absent_from_the_hardwired_table_of_fr25`,
-/// finding м-Э24-1 of stage Э24.
+/// Its counterpart is the hardwired reserve of FR-25, which carries the key since task Т-25-1:
+/// `tests\inject.rs::the_space_bar_is_in_the_hardwired_table_of_fr25_and_the_tail_is_counted`.
+/// Until then it did not, and the gap was finding м-Э24-1 of stage Э24 — the emergency path
+/// counted «ghbdtn » six units wide instead of seven. This measurement is what said the live
+/// cache was the half that had it right.
 #[test]
 fn the_live_cache_of_fr20_carries_the_space_bar() {
     /// Scan code of the space bar on a set 1 keyboard.
