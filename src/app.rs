@@ -132,16 +132,16 @@ use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 // is what let four repairs of defect E go past both. See [`foreground_layout`].
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    MB_ICONHAND, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MESSAGEBOX_STYLE, MSG, MessageBoxW,
-    PostMessageW, PostQuitMessage, RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
+    RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
+    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-// FR-100, task Т-21-5. `MessageBeep` is declared in `winuser.h` and exported by `user32.dll`,
-// but the `windows` crate puts it under `Win32::System::Diagnostics::Debug` — hence the import
-// standing apart from the rest of `WindowsAndMessaging` above, and the feature of the same name
-// in `Cargo.toml`. It is a feature of a crate that was already there: `cargo tree` is 83 lines
+// FR-100, task Т-21-5 and the tuning after the acceptance by ear. `PlaySoundW` is exported by
+// `winmm.dll`; the `windows` crate puts it under `Win32::Media::Audio` — hence the import
+// standing apart from `WindowsAndMessaging` above, and the feature of the same name in
+// `Cargo.toml`. It is a feature of a crate that was already there: `cargo tree` is 83 lines
 // before and after, and `Cargo.lock` is byte for byte the same file (measured, stage Э21).
-use windows::Win32::System::Diagnostics::Debug::MessageBeep;
+use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
 use crate::layouts::{LayoutCache, LayoutError, LayoutId};
@@ -335,26 +335,71 @@ const WM_APP_CONFIGURED: u32 = WM_APP + 5;
 /// its own rather than a re-post of `WM_APP_HOTKEY`.
 ///
 /// SEC-05: any process at the same integrity level can post this, and what it buys the sender
-/// is one system sound — precisely what it could have had by calling `MessageBeep` itself. No
-/// state of this program is read, changed or decided by the handler.
+/// is one playback of a click — a sound any process may make for itself, and one that says
+/// nothing about what this program is doing. No state of this program is read, changed or
+/// decided by the handler; the setting of FR-100 is still obeyed, so a posted message on a
+/// machine with the sound switched off is silent exactly as a real press would be.
 pub const WM_APP_SOUND_DONE: u32 = WM_APP + 17;
 
 /// Posted to the UI thread when a press was **idle** — FR-100. See [`WM_APP_SOUND_DONE`].
 pub const WM_APP_SOUND_IDLE: u32 = WM_APP + 18;
 
-/// The tone of a press that replaced text — FR-100.
+/// The sound of a press that replaced text — FR-100, «чк-чк».
 ///
-/// `MB_OK` is the system's «default beep», the quietest of the family and the one Windows
-/// itself uses for an ordinary acknowledgement. Which two tones these are is a decision of the
-/// ear (acceptance К-2 of stage Э21) and not of the code: the constants are named here so that
-/// changing them is one edit in one place.
-pub const TONE_REPLACED: u32 = MB_OK.0;
+/// # Why the sound is the program's own and not the system's
+///
+/// It was `MessageBeep(MB_OK)` until the acceptance by ear of stage Э21. The user heard both
+/// tones, accepted that the feature works, and rejected the tones themselves: what a switch
+/// should sound like is a **switch** — two clicks when the layout changed and one when it did
+/// not — and no member of the `MessageBeep` family is a click. The system tones are also the
+/// user's own property: they are what a message box, an error and a notification sound like on
+/// this machine, and borrowing them makes a keystroke sound like an error dialog.
+///
+/// # Why it is embedded and not a file
+///
+/// `include_bytes!` puts the whole `.wav` in the image's read-only data. Nothing is installed
+/// beside the executable, nothing can be missing at run time, nothing has to be found on disk —
+/// and the requirement's «без звуковых файлов» survives the change of mechanism: there are no
+/// sound files anywhere on the user's machine, only bytes inside the program. It also makes the
+/// `'static` lifetime `SND_ASYNC` needs true by construction — see [`SystemBeeper::beep`].
+///
+/// The waveform is a click of one 2 kHz mode over a short filtered noise burst, 26 ms, and this
+/// one is that click twice, 70 ms apart. Synthesised for this program (the generator and the
+/// thirty-one candidates that lost are in `scratchpad-Э21`), so nothing here is anybody's
+/// property but this project's.
+pub const SOUND_REPLACED: &[u8] = include_bytes!("../res/sound-replaced.wav");
 
-/// The tone of a press that was suppressed and replaced nothing — FR-100.
+/// The sound of a press that was suppressed and replaced nothing — FR-100, «чк».
 ///
-/// `MB_ICONHAND`, the system's «critical stop». Deliberately unlike [`TONE_REPLACED`]: the whole
-/// value of two tones is that the user need not look at the screen to tell which happened.
-pub const TONE_IDLE: u32 = MB_ICONHAND.0;
+/// The **same** click as [`SOUND_REPLACED`], once instead of twice. Deliberately the same
+/// mechanism: two different noises would be two different objects, while one switch clicking
+/// once or twice is a single object saying two things — which is what makes the pair legible
+/// without looking at the screen.
+pub const SOUND_IDLE: &[u8] = include_bytes!("../res/sound-idle.wav");
+
+/// Which of the two sounds a press earned — FR-100.
+///
+/// An enum and not the raw bytes, because the decision and the playing of it are different
+/// jobs: [`tone_for`] is a pure function that answers this, and only [`SystemBeeper`] turns it
+/// into a sound. The test bench records these values, which is what makes «one press, one
+/// tone» an assertion instead of a hope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// The replacement happened — «чк-чк».
+    Replaced,
+    /// The press was suppressed and produced nothing — «чк».
+    Idle,
+}
+
+impl Tone {
+    /// The bytes this tone is, ready for `SND_MEMORY`.
+    pub const fn wave(self) -> &'static [u8] {
+        match self {
+            Self::Replaced => SOUND_REPLACED,
+            Self::Idle => SOUND_IDLE,
+        }
+    }
+}
 
 /// `[feedback] sound` as the UI thread last published it — FR-100.
 ///
@@ -376,25 +421,50 @@ pub fn sound_enabled() -> bool {
 /// Where a tone goes — the seam FR-100 is tested through.
 ///
 /// One method and one argument. The production implementation is [`SystemBeeper`] and calls
-/// `MessageBeep`; the tests implement it with a `Vec`, which is what makes «one press, one tone»
+/// `PlaySoundW`; the tests implement it with a `Vec`, which is what makes «one press, one tone»
 /// an assertion instead of a hope. The same shape `selection::Path` gives the eight steps of
 /// FR-61 and `inject::Environment` gives the packet of FR-44.
 pub trait Beeper {
     /// Makes the tone, or writes it down.
-    fn beep(&mut self, tone: u32);
+    fn beep(&mut self, tone: Tone);
 }
 
-/// The [`Beeper`] of the running program: one `MessageBeep` and nothing else.
+/// The [`Beeper`] of the running program: one `PlaySoundW` and nothing else.
 struct SystemBeeper;
 
 impl Beeper for SystemBeeper {
-    fn beep(&mut self, tone: u32) {
-        // SAFETY: `MessageBeep` takes a plain integer, dereferences nothing, and returns at once
-        // — it queues the sound with the audio service rather than waiting for it to finish.
-        // The result says whether a sound could be played at all; there is nothing this program
-        // could do about «no», and a journal entry per press would be an entry per keystroke,
-        // which is the very thing NFR-01…05 and the ceiling note of T-13-13 argue against.
-        let _ = unsafe { MessageBeep(MESSAGEBOX_STYLE(tone)) };
+    fn beep(&mut self, tone: Tone) {
+        let wave = tone.wave();
+
+        // SAFETY: three things, and the third is the one that is easy to get wrong.
+        //
+        // The pointer. With `SND_MEMORY` the first parameter is not a string at all — it is the
+        // address of a `.wav` image in memory, which the signature spells `PCWSTR` because the
+        // parameter is overloaded by the flags. `wave` is a slice of the executable's read-only
+        // data, so the address is valid and the bytes behind it are a complete RIFF file.
+        //
+        // The module handle. `None` is correct and required: a handle is read only under
+        // `SND_RESOURCE`, and this is `SND_MEMORY`.
+        //
+        // ⚠ The lifetime. With `SND_ASYNC` the call returns while the sound is still playing,
+        // and the documentation requires the buffer to stay alive until it finishes. It does,
+        // by construction rather than by care: `include_bytes!` makes these bytes `'static`
+        // data of the image, so there is no frame for them to be freed with — which is the
+        // whole reason the sound is embedded rather than read into a `Vec` at start-up.
+        //
+        // `SND_NODEFAULT` so that a machine which cannot play this falls silent instead of
+        // substituting the system beep, which is precisely the sound the user rejected.
+        //
+        // The result says whether anything was played; there is nothing this program could do
+        // about «no», and a journal entry per press would be an entry per keystroke — the very
+        // thing NFR-01…05 and the ceiling note of T-13-13 argue against.
+        let _ = unsafe {
+            PlaySoundW(
+                PCWSTR(wave.as_ptr().cast()),
+                None,
+                SND_MEMORY | SND_ASYNC | SND_NODEFAULT,
+            )
+        };
     }
 }
 
@@ -408,12 +478,12 @@ impl Beeper for SystemBeeper {
 /// where every other idle press sounds says exactly the same thing, and louder, because it is a
 /// *difference*. A branch on the password field would buy nothing and would create the one thing
 /// SEC-06 is about: behaviour that changes when a password field has the focus.
-pub const fn tone_for(replaced: bool, enabled: bool) -> Option<u32> {
+pub const fn tone_for(replaced: bool, enabled: bool) -> Option<Tone> {
     if !enabled {
         return None;
     }
 
-    Some(if replaced { TONE_REPLACED } else { TONE_IDLE })
+    Some(if replaced { Tone::Replaced } else { Tone::Idle })
 }
 
 /// Answers one press with its tone — FR-100, through the seam.
@@ -2519,8 +2589,9 @@ unsafe extern "system" fn window_proc(
             // these two messages are posted to the UI window and nothing else answers them.
             //
             // SEC-05: a process at the same integrity level can post either of these. What it
-            // buys the sender is one system sound — which it could have had by calling
-            // `MessageBeep` itself — and nothing of this program is read or changed by it.
+            // buys the sender is one playback of a click — a sound any process may make for
+            // itself — and nothing of this program is read or changed by it. The setting of
+            // FR-100 still holds: with the sound off, a posted message is as silent as a press.
             if message == WM_APP_SOUND_DONE || message == WM_APP_SOUND_IDLE {
                 sound_press(message == WM_APP_SOUND_DONE);
             }
@@ -3082,13 +3153,82 @@ mod tests {
     #[derive(Default)]
     struct Bench {
         /// Every tone asked for, in order.
-        tones: Vec<u32>,
+        tones: Vec<Tone>,
     }
 
     impl Beeper for Bench {
-        fn beep(&mut self, tone: u32) {
+        fn beep(&mut self, tone: Tone) {
             self.tones.push(tone);
         }
+    }
+
+    /// **The two sounds are real, complete `.wav` files, and they are not the same sound.**
+    ///
+    /// The bytes reach the audio service through `SND_MEMORY`, which parses them as a RIFF image
+    /// — a truncated or mis-typed file is not a build error and not a panic, it is silence on
+    /// the user's machine. So the header is read here, by hand, out of the very slices the
+    /// program plays: `RIFF`/`WAVE`, format 1 (PCM), 16 bits, and a `data` chunk with something
+    /// in it.
+    ///
+    /// The last assertion is the one the tuning of stage Э21 is about: «чк-чк» and «чк» must be
+    /// two different sounds. Pointing both constants at one file would leave every other test in
+    /// this module green.
+    #[test]
+    fn both_sounds_are_complete_wav_images_and_differ_from_each_other() {
+        for (what, wave) in [("replaced", SOUND_REPLACED), ("idle", SOUND_IDLE)] {
+            assert!(
+                wave.len() > 44,
+                "{what}: a RIFF header alone is 44 bytes, this is {}",
+                wave.len()
+            );
+            assert!(
+                wave.len() < 64 * 1024,
+                "{what}: a click is milliseconds long; {} bytes is something else",
+                wave.len()
+            );
+            assert_eq!(&wave[0..4], b"RIFF", "{what}: not a RIFF file");
+            assert_eq!(&wave[8..12], b"WAVE", "{what}: not a WAVE file");
+            assert_eq!(&wave[12..16], b"fmt ", "{what}: no format chunk first");
+
+            let format = u16::from_le_bytes([wave[20], wave[21]]);
+            let bits = u16::from_le_bytes([wave[34], wave[35]]);
+
+            assert_eq!(
+                format, 1,
+                "{what}: only uncompressed PCM is asked of the mixer"
+            );
+            assert_eq!(bits, 16, "{what}: 16 bits per sample");
+            assert_eq!(
+                &wave[36..40],
+                b"data",
+                "{what}: no data chunk where one is due"
+            );
+
+            let data = u32::from_le_bytes([wave[40], wave[41], wave[42], wave[43]]) as usize;
+
+            assert!(data > 0, "{what}: the data chunk is empty");
+            assert_eq!(
+                44 + data,
+                wave.len(),
+                "{what}: the data chunk and the file disagree about the length"
+            );
+        }
+
+        assert_ne!(
+            SOUND_REPLACED, SOUND_IDLE,
+            "«чк-чк» and «чк» have to be two different sounds — that is the whole feature"
+        );
+        assert!(
+            SOUND_REPLACED.len() > SOUND_IDLE.len(),
+            "the answer that says «done» is the longer of the two: one click against two"
+        );
+    }
+
+    /// Each tone names its own bytes and nobody else's.
+    #[test]
+    fn each_tone_carries_the_wave_that_belongs_to_it() {
+        assert_eq!(Tone::Replaced.wave(), SOUND_REPLACED);
+        assert_eq!(Tone::Idle.wave(), SOUND_IDLE);
     }
 
     /// **FR-100 — one press, one tone, and the two tones are not the same tone.**
@@ -3101,12 +3241,8 @@ mod tests {
 
         assert_eq!(
             bench.tones,
-            vec![TONE_REPLACED, TONE_IDLE],
+            vec![Tone::Replaced, Tone::Idle],
             "a replacement and an idle press are told apart by ear or not at all"
-        );
-        assert_ne!(
-            TONE_REPLACED, TONE_IDLE,
-            "two tones the user cannot tell apart are one tone"
         );
     }
 
@@ -3129,8 +3265,8 @@ mod tests {
     /// takes, and what lets the two above be about the wiring rather than about the arithmetic.
     #[test]
     fn the_tone_of_a_press_is_a_function_of_the_outcome_and_the_setting() {
-        assert_eq!(tone_for(true, true), Some(TONE_REPLACED));
-        assert_eq!(tone_for(false, true), Some(TONE_IDLE));
+        assert_eq!(tone_for(true, true), Some(Tone::Replaced));
+        assert_eq!(tone_for(false, true), Some(Tone::Idle));
         assert_eq!(tone_for(true, false), None);
         assert_eq!(tone_for(false, false), None);
     }

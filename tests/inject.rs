@@ -2587,7 +2587,13 @@ fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
     for module in ["hook.rs", "inject.rs"] {
         let source = source_of(module);
 
-        for forbidden in ["MessageBeep", "sound_press", "answer_press", "TONE_"] {
+        for forbidden in [
+            "PlaySound",
+            "MessageBeep",
+            "sound_press",
+            "answer_press",
+            "SOUND_",
+        ] {
             assert!(
                 code_lines_with(&source, forbidden).is_empty(),
                 "{module} must not name {forbidden}: the sound of FR-100 is the UI thread's"
@@ -2598,12 +2604,22 @@ fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
     let app = source_of("app.rs");
     let product = app.split("mod tests {").next().unwrap_or(&app);
 
-    let beeps = code_lines_with(product, "MessageBeep(");
+    let beeps = code_lines_with(product, "PlaySoundW(");
 
     assert_eq!(
         beeps.len(),
         1,
         "exactly one line of the program makes a sound: {beeps:?}"
+    );
+
+    // ⚠ And the sound is the program's own. `MessageBeep` was the mechanism until the acceptance
+    // by ear of stage Э21, and the user rejected the system tones: borrowing them makes a
+    // keystroke sound like an error dialog. A return to them would be a return of the defect.
+    let system = code_lines_with(product, "MessageBeep");
+
+    assert!(
+        system.is_empty(),
+        "the system beep is not the sound of this program any more: {system:?}"
     );
 
     let callers = code_lines_with(product, "sound_press(");
