@@ -130,7 +130,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{LPARAM, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
 use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW,
@@ -415,8 +415,43 @@ pub fn reading_thread(foreground_thread: u32, focus: FocusThread) -> u32 {
 /// outside this module — `app::refresh_layout_and_cache`, `buffer::Recorder::restamp`, the
 /// selection path — is unchanged by the addendum: they ask what the layout is, and the answer is
 /// the same one FR-52 has always given.
+/// The foreground window one [`read`] was taken of — **task Т-22-4**.
+///
+/// A number and not an `HWND`, for the reason [`LayoutId`] is a number and not an `HKL`: it makes
+/// [`Reading`] a plain value that `tests\switch.rs` can build by hand, compare, hash and print
+/// without a window manager anywhere near it. The handle is rebuilt at the one place that posts.
+///
+/// [`Window::default`] is "there was no foreground window", which is the same `0` the system
+/// answers with and is refused wherever it matters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Window(usize);
+
+impl Window {
+    /// The window a handle names.
+    #[must_use]
+    pub const fn from_raw(raw: usize) -> Self {
+        Self(raw)
+    }
+
+    /// The number the handle is.
+    #[must_use]
+    pub const fn raw(self) -> usize {
+        self.0
+    }
+
+    /// Whether this names no window at all.
+    #[must_use]
+    pub const fn is_none(self) -> bool {
+        self.0 == 0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Reading {
+    /// **Task Т-22-4.** The foreground window this reading was taken of, so that the request of
+    /// FR-50 can be sent to the window the verdict is about rather than to whatever is in front
+    /// by the time it is sent. See [`to_in`] and [`post_request`].
+    pub window: Window,
     /// What FR-52 answers, its own fallback included. [`LayoutId::default`] means there is no
     /// foreground window, or that nothing could be read of the one there is.
     pub layout: LayoutId,
@@ -511,6 +546,10 @@ pub fn read() -> Reading {
     let layout = unsafe { GetKeyboardLayout(thread) };
 
     Reading {
+        // **Task Т-22-4.** The window this whole reading is about, carried out with it. Every
+        // number below was derived from this handle and from nothing else, so a caller that posts
+        // to anything else is posting to a window no part of this answer describes.
+        window: Window::from_raw(foreground.0 as usize),
         layout: LayoutId::from_raw(layout.0 as usize),
         // FR-52's addendum, question 63: a refusal means no verdict is possible about this
         // window, whatever number the fallback produced.
@@ -625,7 +664,14 @@ pub trait Machine {
     /// Answers whether the message was **queued**, which NFR-13 requires to be examined and
     /// which decision R-32 forbids to be believed. A `false` is counted and the verification runs
     /// either way.
-    fn post_request(&mut self, target: LayoutId) -> bool;
+    ///
+    /// ⭐ **`window` is a parameter since task Т-22-4, and that is the whole of the repair.** It
+    /// is the window [`read`](Machine::read) answered about, carried here unchanged, so the
+    /// request goes to the window the verdict was taken of. Until then this method read the
+    /// foreground **again** for itself, and everything decided upstairs — "no foreground",
+    /// "already on the target", "the judge is blind" — was decided about a window that no longer
+    /// had to be the one receiving the message.
+    fn post_request(&mut self, window: Window, target: LayoutId) -> bool;
 
     /// Waits up to `ms` milliseconds and answers **how long it really waited**.
     ///
@@ -647,8 +693,8 @@ impl Machine for System {
         read()
     }
 
-    fn post_request(&mut self, target: LayoutId) -> bool {
-        post_request(target)
+    fn post_request(&mut self, window: Window, target: LayoutId) -> bool {
+        post_request(window, target)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
@@ -683,7 +729,10 @@ pub fn to(target: LayoutId) -> Result<Outcome, SwitchError> {
 /// # The order, and what ends it
 ///
 /// 1. the refusals that need no machine at all: an IME target (FR-35), the zero handle;
-/// 2. **FR-52 is read once, before anything is attempted**;
+/// 2. **FR-52 is read once, before anything is attempted** — and since task **Т-22-4** that
+///    sentence is true of the *address* as well as of the verdict: the window the reading was
+///    taken of travels out with it in [`Reading::window`] and is what the message is posted to,
+///    so no step below can be decided about one window and acted on against another;
 /// 3. ⭐ if that reading is **blind** — FR-52's addendum, the classic console window — the message
 ///    is posted and the call ends there with [`Outcome::Sent`]. No wait is performed, because
 ///    there is nothing that waiting could reveal: the judge answers the same `0` for ever;
@@ -724,7 +773,7 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
         // The message goes out exactly as it would anywhere else. What does not happen is the
         // wait: `settled` would re-read the same blind `0` twenty times and end in a failure that
         // says nothing about the machine, which is the ~95 ms per press Т-14-2 measured.
-        if !machine.post_request(target) {
+        if !machine.post_request(before.window, target) {
             // NFR-13: examined and counted, here as everywhere.
             POST_REJECTED.fetch_add(1, Ordering::Relaxed);
         }
@@ -746,7 +795,7 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
     }
 
     // ---- the one method of FR-50 --------------------------------------------------------
-    if !machine.post_request(target) {
+    if !machine.post_request(before.window, target) {
         // NFR-13: the return value is examined and its failure is counted. R-32: it is not, and
         // must never become, the thing the next line branches on.
         POST_REJECTED.fetch_add(1, Ordering::Relaxed);
@@ -905,23 +954,42 @@ fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
 /// — 110 µs even against a window whose thread has stopped pumping, measured by Т-14-2 — whereas
 /// the `ActivateKeyboardLayout` of the old method 2 hung there without limit, 60 times out of 60.
 /// That measurement is why this is the only call left here.
-fn post_request(target: LayoutId) -> bool {
-    // SAFETY: takes no arguments, returns a handle by value, touches no memory of ours.
-    let foreground = unsafe { GetForegroundWindow() };
-
-    if foreground.is_invalid() {
-        // NFR-13: examined. Posting to a null window would be posting to a thread queue, which
-        // is a different operation with a different meaning.
+///
+/// # ⭐ Why the window is a parameter — task Т-22-4, finding м4 of the audit of 2026-09-01
+///
+/// It used to call `GetForegroundWindow` for itself. That is one reading of the foreground for the
+/// **verdict** — [`to_in`] takes it through [`Machine::read`] — and a second, later one for the
+/// **message**, with the whole of `to_in`'s reasoning in between. Nothing holds the foreground
+/// still across that gap: a window appearing, a taskbar click, an installer stealing focus, and
+/// the message of FR-50 went to a window nobody had asked a single question about. What it cost,
+/// depending on which way the gap fell: the new window switched instead of the one the user was
+/// typing in; or the switch was silently skipped because the *old* window was found already on
+/// the target; or `settled` spent the whole [`VERIFY_BUDGET_MS`] on the input thread waiting for
+/// a window that was never sent anything to change its mind.
+///
+/// The reading now carries the window it was taken of ([`Reading::window`]) and it is that window
+/// this posts to. The window dying in the gap is unchanged and still handled where it always was:
+/// `PostMessageW` refuses, the refusal is examined, counted and reported, and the verification
+/// runs either way (decision R-32).
+fn post_request(window: Window, target: LayoutId) -> bool {
+    if window.is_none() {
+        // Posting to a null window would be posting to a thread queue, which is a different
+        // operation with a different meaning.
         return false;
     }
+
+    let foreground = HWND(window.raw() as *mut c_void);
 
     // `wparam` is zero, as FR-50 writes it; `lparam` carries the `HKL`. Nothing here is a
     // pointer into memory of ours, so the receiving process cannot be handed anything.
     //
-    // SAFETY: `foreground` is the handle the call above returned and was checked non-null.
-    // `PostMessageW` only queues the message and returns; it dereferences neither `wparam` nor
-    // `lparam`, and the `HKL` in `lparam` is a handle the OS owns, not a pointer of ours. It
-    // does not block, which is what keeps the input thread off the FR-80 timeout.
+    // SAFETY: `foreground` is the handle `read` obtained from `GetForegroundWindow`, carried here
+    // in `Reading::window` and checked non-null above. A window handle is not a pointer this
+    // program dereferences, and a handle that has since gone stale is exactly what `PostMessageW`
+    // answers `Err` to — which is examined below. `PostMessageW` only queues the message and
+    // returns; it dereferences neither `wparam` nor `lparam`, and the `HKL` in `lparam` is a
+    // handle the OS owns, not a pointer of ours. It does not block, which is what keeps the input
+    // thread off the FR-80 timeout.
     let posted = unsafe {
         PostMessageW(
             Some(foreground),

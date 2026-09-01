@@ -46,7 +46,7 @@ use lang_switcher::inject;
 use lang_switcher::layouts::LayoutId;
 use lang_switcher::switch::{
     self, Failures, FocusThread, Machine, Outcome, Reading, Scope, SwitchError, VERIFY_BUDGET_MS,
-    VERIFY_POLL_MS,
+    VERIFY_POLL_MS, Window,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -75,6 +75,14 @@ const US: LayoutId = LayoutId::from_raw(0x0409_0409);
 
 /// Russian, `0x04190419`.
 const RU: LayoutId = LayoutId::from_raw(0x0419_0419);
+
+/// **Task Т-22-4.** The window in front when the verdict is taken. A number and nothing more —
+/// [`Window`] is a plain value precisely so that this file needs no window manager.
+const IN_FRONT: Window = Window::from_raw(0x0001_1111);
+
+/// **Task Т-22-4.** The window that takes the foreground in the gap between the verdict and the
+/// message — a notification, a taskbar click, an installer.
+const AFTER_THE_VERDICT: Window = Window::from_raw(0x0002_2222);
 
 /// Chinese Simplified, Microsoft Pinyin: `0xE0200804`.
 ///
@@ -134,6 +142,11 @@ struct Fake {
     method: Report,
     /// What [`Machine::wait`] answers it waited, in milliseconds.
     slice_ms: u32,
+    /// **Task Т-22-4.** The window this machine says is in front right now.
+    window: Window,
+    /// **Task Т-22-4.** Where the foreground goes the instant [`Machine::read`] has answered —
+    /// the gap between the verdict and the message, staged.
+    moves_to: Option<Window>,
 
     // ---- what the switch did ----
     posts: u32,
@@ -141,6 +154,8 @@ struct Fake {
     waits: u32,
     waited_ms: u32,
     targets: Vec<LayoutId>,
+    /// **Task Т-22-4.** Every window a request was posted to, in order.
+    posted_to: Vec<Window>,
 }
 
 impl Fake {
@@ -152,17 +167,27 @@ impl Fake {
             blind: false,
             method: Report::LIES,
             slice_ms: VERIFY_POLL_MS,
+            window: IN_FRONT,
+            moves_to: None,
             posts: 0,
             reads: 0,
             waits: 0,
             waited_ms: 0,
             targets: Vec::new(),
+            posted_to: Vec::new(),
         }
     }
 
     /// Makes the method behave as `report` says.
     fn method(mut self, report: Report) -> Self {
         self.method = report;
+        self
+    }
+
+    /// **Task Т-22-4.** Moves the foreground the instant the verdict has been read — the gap
+    /// nothing in this program holds still.
+    fn foreground_moves_after_the_verdict(mut self, next: Window) -> Self {
+        self.moves_to = Some(next);
         self
     }
 
@@ -178,15 +203,26 @@ impl Machine for Fake {
     fn read(&mut self) -> Reading {
         self.reads += 1;
 
-        Reading {
+        let answer = Reading {
+            window: self.window,
             layout: self.layout,
             blind: self.blind,
+        };
+
+        // **Task Т-22-4.** The foreground moves once the verdict has been taken — once, so that
+        // the reading `to_in` holds and the window a second reading would find are different
+        // things, which is the whole of the race.
+        if let Some(next) = self.moves_to.take() {
+            self.window = next;
         }
+
+        answer
     }
 
-    fn post_request(&mut self, target: LayoutId) -> bool {
+    fn post_request(&mut self, window: Window, target: LayoutId) -> bool {
         self.posts += 1;
         self.targets.push(target);
+        self.posted_to.push(window);
 
         if self.method.switched {
             self.layout = target;
@@ -452,12 +488,13 @@ fn a_reading_that_goes_blind_during_the_wait_is_not_a_confirmation() {
             self.reads += 1;
 
             Reading {
+                window: IN_FRONT,
                 layout: if self.reads == 1 { US } else { RU },
                 blind: self.reads > 1,
             }
         }
 
-        fn post_request(&mut self, _target: LayoutId) -> bool {
+        fn post_request(&mut self, _window: Window, _target: LayoutId) -> bool {
             true
         }
 
@@ -915,6 +952,65 @@ fn a_target_that_is_already_active_is_not_a_failure_and_switches_nothing() {
     assert_eq!(fake.posts, 0, "no redundant WM_INPUTLANGCHANGEREQUEST");
     assert_eq!(fake.waits, 0, "and no time spent on the input thread");
     assert_eq!(switch::failures(), Failures::default(), "no counter moves");
+}
+
+// ---------------------------------------------------------------------------------------
+// Task Т-22-4 — the request goes to the window the verdict was taken of
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **Task Т-22-4, finding м4 of the audit of 2026-09-01 — the gap between the verdict and the
+/// message.**
+///
+/// `to_in` takes its whole decision from one reading: is there a foreground window at all, can a
+/// verdict be taken about it (FR-52's addendum), is it already on the target. The message of FR-50
+/// used to be addressed by a **second**, later reading — `post_request` called
+/// `GetForegroundWindow` for itself — and nothing holds the foreground still in between. A window
+/// appearing, a taskbar click, an installer taking focus, and the message went to a window nobody
+/// had asked a single question about.
+///
+/// What that cost, depending on which way the gap fell: the wrong window switched; or the switch
+/// silently skipped because the *old* window was found already on the target; or the whole of
+/// `VERIFY_BUDGET_MS` spent on the input thread waiting for a window that had been sent nothing.
+///
+/// The staging is the race itself: the machine moves its foreground the instant `read` has
+/// answered. The request must still carry the window the verdict was about.
+#[test]
+fn the_request_of_fr50_goes_to_the_window_the_verdict_was_taken_of() {
+    let _guard = counters();
+
+    // The ordinary path: a verdict is possible, the window is not on the target, the message goes
+    // out and the layout takes.
+    let mut fake = Fake::on(US)
+        .method(Report::WORKS)
+        .foreground_moves_after_the_verdict(AFTER_THE_VERDICT);
+
+    let outcome = switch::to_in(&mut fake, RU);
+
+    assert_eq!(outcome, Ok(Outcome::Switched));
+    assert_eq!(
+        fake.posted_to,
+        vec![IN_FRONT],
+        "Т-22-4: the request must go to the window the verdict was taken of, not to whatever \
+         took the foreground while the verdict was being taken"
+    );
+
+    // ⭐ **FR-52's addendum takes the same road.** The blind branch posts before any of the other
+    // refusals are reached, so it had a second reading of its own — and a console window losing
+    // the foreground is exactly the case where the two readings differ.
+    let mut blind = Fake::on(US)
+        .blind()
+        .method(Report::WORKS)
+        .foreground_moves_after_the_verdict(AFTER_THE_VERDICT);
+
+    let outcome = switch::to_in(&mut blind, RU);
+
+    assert_eq!(outcome, Ok(Outcome::Sent));
+    assert_eq!(
+        blind.posted_to,
+        vec![IN_FRONT],
+        "Т-22-4: the blind branch of FR-52's addendum posts to the same window it was blind about"
+    );
+    assert_eq!(blind.waits, 0, "and still waits for nothing");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1563,8 +1659,8 @@ impl Machine for Timed {
         self.inner.read()
     }
 
-    fn post_request(&mut self, target: LayoutId) -> bool {
-        self.inner.post_request(target)
+    fn post_request(&mut self, window: Window, target: LayoutId) -> bool {
+        self.inner.post_request(window, target)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
