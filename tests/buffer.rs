@@ -2571,6 +2571,64 @@ fn the_layout_read_leaves_fr10_and_fr11_exactly_as_they_were() {
 }
 
 // -------------------------------------------------------------------------------------
+// Task Т-22-3 — the auto-repeat of a held `CapsLock`
+// -------------------------------------------------------------------------------------
+
+/// ⭐ **Task Т-22-3, finding №14 of the audit of 2026-08-31 — measured, then repaired.**
+///
+/// A held `CapsLock` produces a run of `WM_KEYDOWN` with no `WM_KEYUP` between them, exactly as
+/// any other held key does. `Held::apply` used to flip the toggle on every one of them, and the
+/// comment above it claimed that this "is what the keyboard does to the light as well".
+///
+/// It is not. The probe crate `<dev>\sandbox\probes\capsrepeat` sent the system five repeated
+/// `Down` events for `VK_CAPITAL` with no `Up` between them and read `GetKeyState(VK_CAPITAL) & 1`
+/// after each: the system flipped the toggle **once**, in three runs out of three, each preceded
+/// by a positive control showing the reading does follow a real press.
+///
+/// # Why the repeat count here is even, and why that is the whole test
+///
+/// One repeat, not three: the two behaviours differ only in parity. With an odd number of events
+/// the old code and the new one agree by accident, and a test written that way would have been
+/// green on the defect. `Down`, one repeat, `Up` is the shortest sequence that tells them apart —
+/// the old code flips twice and reports the toggle **off**, the machine has it on.
+#[test]
+fn a_held_capslock_flips_the_toggle_once_however_many_repeats_arrive() {
+    let mut recorder = fresh();
+
+    // Before anything: the toggle is off and `A` types «a».
+    assert!(!recorder.held().caps());
+
+    // One press of `CapsLock`, one auto-repeat behind it, then the release.
+    assert_eq!(hold(&mut recorder, VK_CAPITAL), Recorded::Modifier);
+    assert_eq!(hold(&mut recorder, VK_CAPITAL), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_CAPITAL), Recorded::Modifier);
+
+    assert!(
+        recorder.held().caps(),
+        "Т-22-3: one press is one flip, however many repeats the system sends behind it"
+    );
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+
+    // The `CAPS` bit is the cache key of FR-20, so the disagreement is not academic: it decides
+    // which row of the layout the stroke is recorded from, and FR-32 restores what was recorded.
+    assert_eq!(typed(&recorder), "A");
+
+    // And the next press is a press again — the release cleared the held bit, so the toggle
+    // still answers a real second press.
+    assert_eq!(hold(&mut recorder, VK_CAPITAL), Recorded::Modifier);
+    assert_eq!(release(&mut recorder, VK_CAPITAL), Recorded::Modifier);
+
+    assert!(
+        !recorder.held().caps(),
+        "a second press is a second flip: the held bit must not survive the release"
+    );
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(typed(&recorder), "Aa");
+}
+
+// -------------------------------------------------------------------------------------
 // Task T-13-4 — the seed of `CapsLock`
 // -------------------------------------------------------------------------------------
 

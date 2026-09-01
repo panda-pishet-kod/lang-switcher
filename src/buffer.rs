@@ -857,6 +857,17 @@ struct Held {
     win_left: bool,
     win_right: bool,
     caps: bool,
+    /// Whether `CapsLock` itself is being **held down** right now — task **Т-22-3**.
+    ///
+    /// Not a modifier state and never read as one: the only thing it does is tell a first press
+    /// from the auto-repeat behind it, so that [`Held::apply`] flips [`caps`](Self::caps) once
+    /// per press instead of once per event. See that function for the measurement it rests on.
+    ///
+    /// Deliberately outside [`Held::reconcile`]'s reach, like every other `CapsLock` bit: the
+    /// system's answer about a toggle key's "physical state" means something else entirely, and
+    /// the worst a stale `true` here can do is skip one flip — never latch the command row of
+    /// FR-10, which is the defect that function exists for.
+    caps_down: bool,
 }
 
 impl Held {
@@ -884,12 +895,35 @@ impl Held {
             Role::AltRight => self.alt_right = down,
             Role::WinLeft => self.win_left = down,
             Role::WinRight => self.win_right = down,
-            // A toggle: it flips on the press and does nothing on the release. Auto-repeat of
-            // a held `CapsLock` would flip it once per repeat, which is what the keyboard does
-            // to the light as well.
+            // ⭐ **Task Т-22-3, finding №14 of the audit of 2026-08-31 — measured, then
+            // repaired.** A toggle: it flips on the press, does nothing on the release, and
+            // **does nothing on the auto-repeat behind the press either**.
+            //
+            // The line above used to flip on every `Down` and the comment used to say that this
+            // "is what the keyboard does to the light as well". It is not. The probe crate
+            // `<dev>\sandbox\probes\capsrepeat` sends the system a run of repeated `Down`
+            // events for `VK_CAPITAL` with no `Up` between them — which is exactly what
+            // typematic is on the wire, repeated make codes with no break code — and reads
+            // `GetKeyState(VK_CAPITAL) & 1` after each. Over five repeats the system flipped the
+            // toggle **once**, in three runs out of three, each preceded by a positive control
+            // that showed the reading does follow a real press. One press, one flip, however
+            // long it is held.
+            //
+            // What the old line cost: the belief and the machine part company whenever the
+            // repeat count is even. Hold `CapsLock` down for two events and the program thinks
+            // the toggle is off while the machine has it on, so every stroke afterwards is
+            // recorded in the wrong case — and FR-32's bit-for-bit rollback then restores the
+            // wrong case too, for the rest of the session or until the seed of task T-13-4
+            // happens to put it right.
             Role::Caps => {
                 if down {
-                    self.caps = !self.caps;
+                    if !self.caps_down {
+                        self.caps = !self.caps;
+                    }
+
+                    self.caps_down = true;
+                } else {
+                    self.caps_down = false;
                 }
             }
         }
