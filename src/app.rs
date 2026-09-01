@@ -201,14 +201,41 @@ pub fn run() -> ExitCode {
 /// This is the interface task T-01-4 attaches to for FR-83, and the one the panic hook
 /// (FR-98) uses. Decision R-20 point 3: the flag is what decides, the message only wakes.
 pub fn request_shutdown() {
-    // Release/Acquire pairing with the load in `shutdown_requested`: a thread woken by the
-    // message below, or one that re-reads the flag after publishing its window, is
-    // guaranteed to observe `true`. Without that ordering a thread could be woken, see a
-    // stale `false`, go back to waiting, and keep the process alive for ever.
-    SHUTDOWN_REQUESTED.store(true, Ordering::Release);
+    // ⭐ **Task Т-22-7, finding м7 of the audit of 2026-09-01 — `SeqCst`, and the comment is
+    // now literally true.**
+    //
+    // This store and the load below are one half of a **store-buffer litmus**; the other half
+    // is `Window::create` publishing its handle and `serve_window` re-reading this flag right
+    // afterwards. Written out, with the two threads side by side:
+    //
+    // ```text
+    //   request_shutdown                     serve_window / Window::create
+    //   ----------------                     -----------------------------
+    //   store SHUTDOWN_REQUESTED = true      store WAKE_TARGETS[role] = hwnd
+    //   load  WAKE_TARGETS[role]  -> ?       load  SHUTDOWN_REQUESTED  -> ?
+    // ```
+    //
+    // Release on a store and Acquire on a load — which is what stood here — order **each
+    // thread's own** operations against the data those operations publish. Neither forbids the
+    // outcome where both loads answer with the value that was there before either store: a
+    // release store may still be sitting in the storing core's buffer while the other thread's
+    // load goes ahead. `SeqCst` does forbid it, because it puts all four into one total order,
+    // and in any total order at least one of the two stores precedes the other thread's load.
+    //
+    // That outcome is the whole defect: `request_shutdown` reads `NO_WINDOW` and posts nothing,
+    // `serve_window` reads `false` and enters `GetMessageW`, and the thread pumps for ever with
+    // nobody left to ask it again. The comment that used to stand here promised the opposite —
+    // "guaranteed to observe `true`" — of the one ordering that does not give it.
+    //
+    // The cost is nothing worth measuring: these are cold paths. This store runs once per
+    // process shutdown, the load below three times with it, the publication once per thread at
+    // start-up, and the re-read once per thread before its first `GetMessageW`.
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
 
     for target in &WAKE_TARGETS {
-        let raw = target.load(Ordering::Acquire);
+        // `SeqCst`, and not merely to match: this load is the second operation of the litmus
+        // above, and a total order that one of the four is missing from is not a total order.
+        let raw = target.load(Ordering::SeqCst);
         if raw == NO_WINDOW {
             // That thread has not created its window yet, or has already destroyed it.
             // Neither needs a wake-up: the thread re-reads the flag right after publishing
@@ -246,8 +273,13 @@ pub fn request_shutdown() {
 }
 
 /// Whether shutdown has been requested. Every message loop consults this and nothing else.
+///
+/// `SeqCst` since task **Т-22-7**: the re-read `serve_window` makes after publishing its window is
+/// the fourth operation of the store-buffer litmus written out in [`request_shutdown`], and all
+/// four have to be in one total order for the guarantee that comment claims to exist at all. The
+/// other callers pay nothing for it — this is a load of a flag on a path that is already leaving.
 pub fn shutdown_requested() -> bool {
-    SHUTDOWN_REQUESTED.load(Ordering::Acquire)
+    SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
 }
 
 /// Puts the shutdown flag back to its start-up value — tests of this module only.
@@ -1124,6 +1156,12 @@ fn serve_window(role: Role) -> WinResult<()> {
     // that ran before the window existed found `NO_WINDOW`, posted nothing, and would
     // otherwise leave this thread pumping for ever. The flag is stored before the wake-ups
     // are posted, so either that store is visible here or the post reached the queue.
+    //
+    // ⭐ **Task Т-22-7: that last sentence is a conclusion, and until this task the code did not
+    // support it.** It is the store-buffer litmus — this read against `request_shutdown`'s read
+    // of `WAKE_TARGETS`, with the two publications crossing — and Release/Acquire permits the one
+    // outcome the sentence rules out. All four operations of the pair now run on `SeqCst`; the
+    // reasoning is written out once, in `request_shutdown`.
     if shutdown_requested() {
         return Ok(());
     }
@@ -2177,9 +2215,14 @@ impl Window {
             )?
         };
 
-        // Published only after the handle is known good. Release pairs with the Acquire
-        // load in `request_shutdown`.
-        WAKE_TARGETS[role.index()].store(handle.0 as usize, Ordering::Release);
+        // Published only after the handle is known good.
+        //
+        // `SeqCst` since task **Т-22-7**: this is the third operation of the store-buffer litmus
+        // written out in [`request_shutdown`], and Release here against Acquire there did **not**
+        // forbid the outcome both sides depend on being impossible — `request_shutdown` reading
+        // `NO_WINDOW` while `serve_window` reads `false`, and the thread pumping for ever. One
+        // store per thread per process, so the ordering costs nothing that could be measured.
+        WAKE_TARGETS[role.index()].store(handle.0 as usize, Ordering::SeqCst);
 
         Ok(Self { handle, role })
     }
@@ -3581,6 +3624,77 @@ mod tests {
     /// queue — and the two that are not failing park, because "still pumping" is the state that
     /// made this a defect.
     ///
+    /// ⭐ **Task Т-22-7, finding м7 of the audit of 2026-09-01 — the shutdown handshake walks on
+    /// `SeqCst`.**
+    ///
+    /// # Why this test reads the source
+    ///
+    /// The property is a *forbidden interleaving*, and no test can show one. The outcome
+    /// Release/Acquire permits — `request_shutdown` reading `NO_WINDOW` while `serve_window`
+    /// reads `false`, and the thread pumping for ever — needs two stores to sit in two store
+    /// buffers at once; it is architecture-, compiler- and scheduler-dependent, it does not
+    /// reproduce on x86 at all in practice, and a test that waited for it would be green because
+    /// it lost. What can be checked honestly is the memory ordering the four operations are
+    /// written with, which is also exactly what a reviewer checks — the same argument
+    /// `tests\hook.rs` gives for reading the source of the callback.
+    ///
+    /// # What is asserted
+    ///
+    /// The four operations of the pair, and their absence in the ordering the litmus goes
+    /// through. The store of `clear_shutdown_request` is not among them and is deliberately left
+    /// alone: it is `#[cfg(test)]`, it stores `false`, and it takes part in no handshake.
+    ///
+    /// ⚠ The line endings are normalised before anything is matched, for the reason
+    /// `tests\hook.rs` states at `the_capslock_seed_is_outside_the_callback`: `.gitattributes`
+    /// makes the canonical checkout CRLF, and a test about memory ordering must not have a
+    /// verdict that depends on how a checkout stored its newlines.
+    #[test]
+    fn the_shutdown_handshake_walks_on_seqcst() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join("app.rs"),
+        )
+        .expect("src/app.rs must be readable")
+        .replace("\r\n", "\n");
+
+        // ⚠ The product half of the file only. The needles below are written out in this very
+        // function, so a sweep over the whole text would find every one of them in its own
+        // argument list and answer about itself — the first draft of this test did exactly that
+        // and failed on the repaired tree. `clear_shutdown_request` stays on the product side and
+        // is meant to: it is `#[cfg(test)]`, it stores `false`, and no needle names it.
+        let product = source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .expect("this file ends in its own test module")
+            .0;
+
+        for operation in [
+            "SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);",
+            "let raw = target.load(Ordering::SeqCst);",
+            "WAKE_TARGETS[role.index()].store(handle.0 as usize, Ordering::SeqCst);",
+            "SHUTDOWN_REQUESTED.load(Ordering::SeqCst)",
+        ] {
+            assert!(
+                product.contains(operation),
+                "Т-22-7: the shutdown handshake needs one total order over all four of its \
+                 operations, and {operation:?} is not in src\\app.rs"
+            );
+        }
+
+        for permitted in [
+            "SHUTDOWN_REQUESTED.store(true, Ordering::Release)",
+            "SHUTDOWN_REQUESTED.load(Ordering::Acquire)",
+            "WAKE_TARGETS[role.index()].store(handle.0 as usize, Ordering::Release)",
+            "let raw = target.load(Ordering::Acquire);",
+        ] {
+            assert!(
+                !product.contains(permitted),
+                "Т-22-7: {permitted:?} leaves the store-buffer outcome permitted, and the \
+                 comments beside it promise that it is not"
+            );
+        }
+    }
+
     /// All three roles are one test on purpose: [`SHUTDOWN_REQUESTED`] is a `static` of the
     /// process, and two tests asserting on it would be asserting on each other's timing. The
     /// input case is the positive control — it was green before the repair as well, because
