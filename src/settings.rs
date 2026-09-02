@@ -6435,12 +6435,31 @@ pub const PANEL_CAPTION_INSET_DLU: i32 = 7;
 pub const PANEL_CAPTION_INSET_Y: i32 = 5;
 
 /// Point size of the caption face, in **tenths of a point** — the `$FSCAP = 7.6 * $DPI` of
-/// the generator, п. 7 of task T-11-16.
+/// the generator, п. 7 of task T-11-16; re-sized to 8,3 by решение 89.
 ///
 /// Tenths of a point rather than a percentage of the dialog font, because that is how the
 /// generator states it: two point sizes, `7.6` and `9`, whose ratio is 0,844. T-11-15 carried
 /// the ratio as a rounded «85 %», which is a number the pictures do not have.
-pub const PANEL_CAPTION_POINTS_TENTHS: i32 = 76;
+///
+/// # ⚠ 7,6 → 8,3: the one row Э26 grew everything **around** and not itself
+///
+/// Both windows were re-set one step larger by решения 85 and 87, and this face was the single
+/// thing left behind — measured on the raised windows, not deduced:
+///
+/// | окно | своё лицо | шапка при 76/90 |
+/// |---|---|---|
+/// | настройки | −13 (ячейка 17 px) | **−10** (12 px) |
+/// | «О программе» | −12, тело −13 | **−10** (12 px) |
+///
+/// ⚠ In the settings dialog it very nearly *did* grow and was thrown back by arithmetic:
+/// `−13 × 76 / 90 = −10,98`, and integer division truncates toward zero. A hundredth of a
+/// pixel is what kept the caption at its old size while the window around it grew.
+///
+/// The user saw it («в шапке шрифт мелковат») before anything here was measured. 8,3 answers
+/// **−11 in both windows**, and it is not a number picked to be bigger: the accepted mock-up
+/// sets its `.helpcap` at 10,5 px against a 12,5 px row — a ratio of 0,84 — and 11 / 13 is
+/// 0,846. The caption goes back to the proportion the picture has.
+pub const PANEL_CAPTION_POINTS_TENTHS: i32 = 83;
 
 /// Point size of the name row of the about window, in **tenths of a point** — finding
 /// **A-05**, task T-12-4.

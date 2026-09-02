@@ -3785,12 +3785,18 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
                 at_96(11),
             )],
         ),
+        // ⚠ 76 → 83 by решение 89. The Э11 generator's 7,6 pt was a ratio against a 9 pt body;
+        // both windows are set one step larger since решения 85 и 87, and this face was the one
+        // thing left behind — measured at `lfHeight` −10 in both while their own faces went to
+        // −13 and −12. The reference is now the accepted Э23 mock-up, whose `.helpcap` is
+        // 10,5 px against a 12,5 px row: 0,84, and 8,3 / 9 is 0,922 of the **9 pt** base, which
+        // lands the caption at −11 — 11 / 13 = 0,846 of the body it actually stands next to.
         units(
             "1. Панель · Кегль заголовка",
-            "7,6 pt против 9 pt = 0,844 основного, в промилле",
+            "8,3 pt против 9 pt = 0,922 основного, в промилле",
             vec![(
                 settings::PANEL_CAPTION_POINTS_TENTHS * 1000 / settings::DIALOG_FONT_POINTS_TENTHS,
-                76 * 1000 / 90,
+                83 * 1000 / 90,
             )],
         ),
         // ------------------------------------------------- 2. Флажок и переключатель
@@ -8646,8 +8652,9 @@ fn our_own_faces_are_asked_for_the_named_smoothing_and_nothing_else_moves() {
     );
     assert_eq!(
         caption.lfHeight,
-        (base.lfHeight * 76) / 90,
-        "7,6 pt against 9 pt — the two sizes the mock-ups were drawn with"
+        (base.lfHeight * 83) / 90,
+        "8,3 pt against 9 pt — решение 89, the caption put back into the proportion the \
+         accepted mock-up gives it against the body"
     );
     assert!(
         caption.lfHeight < 0,
