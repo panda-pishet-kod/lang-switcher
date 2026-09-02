@@ -583,7 +583,14 @@ END
 // (`scratchpad-Э23\Т-23-4-опрограмме-*.png`), are 3, 2, 2, 1, 2 in Russian and 3, 2, 2, 1, 1
 // in English. A template has one set of rectangles for the two languages, so every row is
 // given the taller of its two.
-IDD_ABOUT DIALOGEX 0, 0, 191, 233
+// ⚠ **233 → 256 units tall, and the width 191 is untouched** — task Т-26-2, решение 85. The
+// body of this window is set one step above the dialog font since that decision, and the air
+// between its lines is 1,4 of the face instead of the 1,33 `DrawTextW` gives on its own; every
+// row of text therefore takes more room than it did, and the room is taken downwards. The
+// numbers below are **read off the raised window in both locales**, exactly as task Т-23-4 read
+// its own — `scratchpad-Э26\Т-26-1-*.png` — because `MeasureString` overestimates the wrap and
+// has already cost this template a row of air once (see the note at the help panel).
+IDD_ABOUT DIALOGEX 0, 0, 191, 256
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -595,8 +602,13 @@ BEGIN
     ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 12, 13, 23, 22
     LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 42, 12, 141, 11, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_VERSION, 42, 24, 141, 8, SS_OWNERDRAW
-    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 32, 101, 17, SS_OWNERDRAW
-    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 49, 101, 24, SS_OWNERDRAW
+    // ⚠ 141 units wide and not the 101 they were until task Т-26-2: the accepted mock-up runs
+    // its `.applines` the full width of the text column, level with the name above them, and
+    // at 101 units the larger face of решение 85 broke both sentences into three lines apiece.
+    // Two lines each, 10 units of air under the version line — `.applines { margin-top: 10px }`
+    // of the mock-up, which is 5,3 vertical units here.
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 37, 141, 20, SS_OWNERDRAW
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 57, 141, 20, SS_OWNERDRAW
 
     // -- «Как пользоваться»: FR-92а, task Т-23-4, решение 82.5 ----------------------------
     //
@@ -617,25 +629,33 @@ BEGIN
     // `about_static_color_role`.
     //
     // The rows' own heights are the line counts **read off the raised window in both
-    // locales** — `scratchpad-Э23\Т-23-4-опрограмме-*.png` — and each row is given the taller
-    // of its two: 3, 2, 2, 1, 2 lines of 9 units. ⚠ Not the counts `MeasureString` predicted:
-    // that instrument answered two lines for the fourth row in both locales and the window
-    // draws one, so the prediction cost a row nine units of air until it was measured on the
-    // real thing. The first line of every row stands level with its numeral; a numeral is one
-    // line tall and needs no more.
-    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 79, 167, 127
-    LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 93, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_1, 30, 93, 142, 27, SS_OWNERDRAW
-    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 124, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_2, 30, 124, 142, 18, SS_OWNERDRAW
-    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 146, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_3, 30, 146, 142, 18, SS_OWNERDRAW
-    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 168, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_4, 30, 168, 142, 9, SS_OWNERDRAW
-    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 181, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_5, 30, 181, 142, 18, SS_OWNERDRAW
+    // locales** — `scratchpad-Э26\Т-26-1-*.png`, task Т-26-2, after
+    // `scratchpad-Э23\Т-23-4-опрограмме-*.png` before it — and each row is given the taller of
+    // its two. ⚠ Not the counts `MeasureString` predicted: that instrument answered two lines
+    // for the fourth row in both locales and the window drew one, so the prediction cost a row
+    // nine units of air until it was measured on the real thing. The first line of every row
+    // stands level with its numeral; a numeral is one line tall and needs no more.
+    //
+    // ⚠ **Re-cut by решение 85.** The unit of a row is no longer 9 units but **10**: the body
+    // is set one step larger and its lines stand 1,4 of the face apart (18 px against 15 at
+    // 96 DPI, which is 9,6 vertical units). A row of `n` lines therefore needs
+    // (n − 1) × 9,6 + 9,1 units, rounded up: 29 for three lines, 19 for two, 10 for one. The
+    // fourth row, one line in both locales until this task, is **two** now — the same sentence
+    // in a wider face — and that is measured, not predicted. The air between rows stays the
+    // mock-up's `margin-top: 7px`, which is 4 units here.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 142
+    LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 97, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_1, 30, 97, 142, 29, SS_OWNERDRAW
+    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 130, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_2, 30, 130, 142, 19, SS_OWNERDRAW
+    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 153, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_3, 30, 153, 142, 19, SS_OWNERDRAW
+    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 176, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_4, 30, 176, 142, 19, SS_OWNERDRAW
+    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 199, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_5, 30, 199, 142, 19, SS_OWNERDRAW
 
-    PUSHBUTTON      "ОК", IDOK, 144, 212, 39, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 144, 235, 39, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================

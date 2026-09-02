@@ -750,3 +750,131 @@ fn buffers_made_and_dropped_leave_no_gdi_object_behind() {
          loop, {after} after it"
     );
 }
+
+// =========================================================================================
+// Чип-«клавиша»: чистая арифметика коробки и разбор строки — task Т-26-2, решение 87
+// =========================================================================================
+
+/// **The box a chip wants around a key name** — task Т-26-2, решение 85 п. 1.
+///
+/// Pure arithmetic, so it is a table and not a hope: the air is a share of the chip face's em
+/// (the mock-up's `padding: 2px 5px 3px` on an 11 px face), the interior is the character cell
+/// the pen will draw into, and the frame is counted twice — once on each side — so it does not
+/// eat the interior.
+///
+/// The numbers are recomputed here from the percentages rather than read back off the module,
+/// for the reason the palette checks above recompute their triples: a constant compared with
+/// itself proves nothing.
+#[test]
+fn the_chip_box_is_air_around_the_key_and_the_frame_is_counted_on_both_sides() {
+    use lang_switcher::theme::{
+        CHIP_PAD_X_PERCENT, CHIP_PAD_Y_PERCENT, CHIP_RADIUS_PERCENT, chip_box,
+    };
+
+    // The face of the chip at 96 DPI: `lfHeight` −11, a character cell 13 px tall — the pair
+    // measured on the raised window, `scratchpad-Э26` probe.
+    let (em, line, thickness) = (11, 13, 1);
+    let text = 30;
+
+    let made = chip_box(text, em, line, thickness);
+
+    let pad_x = (em * CHIP_PAD_X_PERCENT) / 100;
+    let pad_y = (em * CHIP_PAD_Y_PERCENT) / 100;
+
+    println!("чип: {made:?}, воздух {pad_x} × {pad_y}");
+
+    assert_eq!(
+        made.width,
+        text + 2 * (pad_x + thickness),
+        "the width is the text plus air and frame on both sides"
+    );
+    assert_eq!(
+        made.height,
+        line + 2 * (pad_y + thickness),
+        "the height is the character cell plus air and frame on both sides"
+    );
+    assert_eq!(made.radius, (em * CHIP_RADIUS_PERCENT) / 100);
+    assert_eq!(
+        made.inset_x,
+        pad_x + thickness,
+        "the first glyph clears the frame"
+    );
+    assert_eq!(made.inset_y, pad_y + thickness);
+
+    // ⚠ The interior is never eaten by the frame: whatever the thickness, the room left for the
+    // text is exactly what was asked for. This is the one property a DPI change could break.
+    for thickness in 1..=3 {
+        let made = chip_box(text, em, line, thickness);
+
+        assert_eq!(
+            made.width - 2 * made.inset_x,
+            text,
+            "a {thickness} px frame must not eat the text it goes round"
+        );
+    }
+
+    // The air grows with the face and never with anything else: a chip on a twice larger face
+    // is more than twice as tall, because the cell grows too.
+    let larger = chip_box(text, em * 2, line * 2, thickness);
+
+    assert!(
+        larger.height > made.height && larger.radius > made.radius,
+        "the box is a share of its own face: {made:?} against {larger:?}"
+    );
+
+    // A key that measures nothing is still a box, not a negative one.
+    let empty = chip_box(0, em, line, thickness);
+
+    assert!(
+        empty.width > 0 && empty.height > 0,
+        "a chip round no text is air and frame, not a hole: {empty:?}"
+    );
+}
+
+/// **Where the chip stands in a help row** — task Т-26-2, решение 85 п. 1.
+///
+/// The row is split at the placeholder the string tables have carried since task Т-23-4, which
+/// is why решение 85 cost no new localisation string at all. Three cases and no fourth: a row
+/// with the placeholder, a row without one (rows 4 and 5 of the help), and a key name that is
+/// empty — a box round nothing is not a chip, so the two halves are joined back up.
+#[test]
+fn a_help_row_splits_at_the_placeholder_and_nowhere_else() {
+    use lang_switcher::theme::{KEY_PLACEHOLDER, chip_row};
+
+    // The real row 1 of the Russian table, byte for byte.
+    let row = "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется.";
+    let split = chip_row(row, "Pause");
+
+    println!("{split:?}");
+
+    assert_eq!(split.key, Some("Pause"));
+    assert_eq!(split.prefix, "Набрали слово не в той раскладке — нажмите ");
+    assert_eq!(
+        split.suffix, ": слово перекодируется.",
+        "the colon is glued to the chip and must stay on its side of the split"
+    );
+
+    // ⚠ Nothing is lost and nothing is invented: the two halves and the placeholder are the row.
+    assert_eq!(
+        format!("{}{KEY_PLACEHOLDER}{}", split.prefix, split.suffix),
+        row,
+        "the split must be reversible"
+    );
+
+    // A row with no placeholder — rows 4 and 5 — is all prefix and has no chip.
+    let plain = "Пауза, настройки и выход — в значке в трее.";
+    let split = chip_row(plain, "Pause");
+
+    assert_eq!(split.key, None, "a row with no placeholder has no chip");
+    assert_eq!(split.prefix, plain);
+    assert_eq!(split.suffix, "");
+
+    // An empty key name: the row keeps its words and loses only the figure.
+    let split = chip_row(row, "");
+
+    assert_eq!(split.key, None, "a box round an empty name is not a chip");
+    assert_eq!(
+        split.suffix, "",
+        "with no chip there is nothing to split at"
+    );
+}

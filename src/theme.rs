@@ -81,16 +81,17 @@
 //! to look up and brushes to repaint with, and nothing here takes a pointer, a string or a
 //! command out of any message.
 
-use windows::Win32::Foundation::{COLORREF, POINT, RECT};
+use windows::Win32::Foundation::{COLORREF, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, COLORONCOLOR,
     CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen,
     CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT,
     DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
-    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetStockObject, HBITMAP,
-    HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION,
-    OBJ_FONT, PS_SOLID, Polyline, RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject,
-    SetBkMode, SetStretchBltMode, SetTextColor, SetWindowOrgEx, StretchBlt, TRANSPARENT,
+    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetStockObject,
+    GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    IntersectClipRect, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, OBJ_FONT, PS_SOLID, Polyline,
+    RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode, SetStretchBltMode,
+    SetTextColor, SetWindowOrgEx, StretchBlt, TEXTMETRICW, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::{PCWSTR, w};
@@ -2607,6 +2608,36 @@ pub unsafe fn paint_label(
     ink: COLORREF,
     face: Option<HFONT>,
 ) -> isize {
+    // SAFETY: the whole contract of this function, forwarded unchanged — see the doc comment.
+    unsafe { paint_label_at_pitch(dc, rect, caption, ground, ink, face, None) }
+}
+
+/// [`paint_label`] with the line pitch **named by the caller** — task Т-26-2, решение 85.
+///
+/// The one difference: `pitch` in pixels of the window, or `None` for [`LABEL_LINE_PITCH`]
+/// through [`scaled`], which is what every label of the settings dialog has always been drawn
+/// at. The about window's two description lines ask for their own, because решение 85 sets
+/// them in a **larger** face than the dialog's, and a pitch worked out for the 9 pt face is
+/// no longer air under a 10 pt one — it is smaller than the line itself, and
+/// [`label_model_pitch`] would refuse it. The number the caller hands over is a ratio of the
+/// face it draws in (`settings::about_body_line_pitch`), so it grows with the face and with
+/// the DPI together.
+///
+/// `paint_label` is this function with `None`, and there is one body rather than two (§6.2).
+///
+/// # Safety
+///
+/// As [`paint_label`]: called with values copied out of the `WM_DRAWITEM` message the caller
+/// is inside of.
+pub unsafe fn paint_label_at_pitch(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    ground: HBRUSH,
+    ink: COLORREF,
+    face: Option<HFONT>,
+    pitch: Option<i32>,
+) -> isize {
     // NFR-13, for the paint calls below: each answers a success flag or a previous value, and
     // every answer is deliberately dropped for the reason `paint_push_button` gives for its
     // own — the manager never hands a dead DC, only a forged message could (SEC-05), and the
@@ -2643,11 +2674,13 @@ pub unsafe fn paint_label(
     // drawing below will use; `caption` and the scratch rectangles are live locals.
     let measured = unsafe { measure_label_lines(dc, rect, caption) };
 
-    // The model pitch of В-6, or `None` — «one plain call», which is the drawing of T-11-18
-    // byte for byte. [`label_model_pitch`] is the whole of the decision and is pure.
+    // The model pitch of В-6 — or the caller's own, task Т-26-2 — or `None`, «one plain call»,
+    // which is the drawing of T-11-18 byte for byte. [`label_model_pitch`] is the whole of the
+    // decision and is pure.
+    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, dc_dpi(dc)));
+
     let model = measured.and_then(|(lines, natural)| {
-        label_model_pitch(lines, natural, scaled(LABEL_LINE_PITCH, dc_dpi(dc)))
-            .map(|pitch| (lines, natural, pitch))
+        label_model_pitch(lines, natural, asked).map(|pitch| (lines, natural, pitch))
     });
 
     // The line by line drawing, and how many lines it managed. A caption of one line, or a
@@ -2832,6 +2865,573 @@ unsafe fn paint_label_lines(
     }
 
     painted
+}
+
+// =========================================================================================
+// Чип-«клавиша»: имя горячей клавиши внутри строки справки — task Т-26-2, решение 85
+// =========================================================================================
+//
+// The mock-up the user accepted with his own eye draws the key name of every help row inside
+// a little box — `kbd { font: 600 11px; background: var(--window-bg); border: 1px solid
+// var(--panel-border); border-radius: 4px; padding: 2px 5px 3px }` of
+// `scratchpad-Э23\макет-справка-о-программе.html`. Решение 85 п. 1 asks for that box and for
+// nothing new in the palette: the frame is `field_border` and the fill is `field_bg`, the two
+// fields the input boxes of the settings dialog are already drawn from (правило Э12).
+//
+// ⚠ **A chip cannot be drawn with `DrawTextW`.** The row it stands in wraps, and the system's
+// wrap is one call over one string — there is no place in it to put a figure. So a help row is
+// laid out here, word by word: every word is measured in the face it will be drawn in, the
+// chip is measured as one unbreakable word of its own, and the line is broken where the width
+// runs out. The measuring and the drawing are the **same instrument** (`GetTextExtentPoint32W`
+// and `TextOutW` on the same DC with the same face), which is what keeps the two from
+// disagreeing — the `&`-prefix trap `paint_label_lines` warns about belongs to `DrawTextW`,
+// and neither call below is one.
+
+/// The placeholder the string tables put where the key name goes — FR-94, task Т-23-4.
+///
+/// The five help rows already carry it (`{0}` of `IDS_ABOUT_HELP_1..3`), which is why решение
+/// 85 costs **no new localisation string at all**: the chip is drawn *at the placeholder*, and
+/// the substitution that used to happen in `settings::fill_about` happens at the pen instead.
+pub const KEY_PLACEHOLDER: &str = "{0}";
+
+/// Air on each side of the key name inside its chip, in **hundredths of the chip face's em**.
+///
+/// The mock-up's `padding: 2px 5px 3px` on an 11 px face: 5 / 11 = 45 %. Hundredths of the em
+/// rather than mock-up pixels through [`scaled`], for the reason
+/// [`PANEL_CAPTION_BLANK_PERCENT`] is a percentage of its own font's height — the figure is a
+/// box around **text**, so it has to grow with the text and not with the window, and the em is
+/// the one number that is the text's own at every DPI.
+pub const CHIP_PAD_X_PERCENT: i32 = 45;
+
+/// The same air above and below, in hundredths of the em — the mock-up's 2 px over and 3 px
+/// under an 11 px face, halved into one number because GDI has no asymmetric box here.
+pub const CHIP_PAD_Y_PERCENT: i32 = 14;
+
+/// Corner radius of a chip, in hundredths of the em — the mock-up's `border-radius: 4px`.
+pub const CHIP_RADIUS_PERCENT: i32 = 36;
+
+/// The box of one chip: the width and height of the whole figure, its radius, and the inset
+/// its text stands at — the pure arithmetic of the chip, closed by a table test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChipBox {
+    /// Whole width of the figure, frame included.
+    pub width: i32,
+    /// Whole height of the figure, frame included.
+    pub height: i32,
+    /// Corner radius, in the pixels of the window.
+    pub radius: i32,
+    /// Distance from the left edge of the figure to the first glyph.
+    pub inset_x: i32,
+    /// Distance from the top edge of the figure to the top of the character cell.
+    pub inset_y: i32,
+}
+
+/// The box a key name of `text_width` pixels, set in a face of `em` pixels and `line` pixels
+/// tall, wants around it — task Т-26-2.
+///
+/// `em` is the absolute value of the chip face's `lfHeight` and `line` is its `tmHeight`: the
+/// air is a share of the first (see the three percentages) and the interior is the second,
+/// because what has to fit inside the box is the character cell the pen will draw.
+///
+/// `thickness` is the frame [`paint_rounded`] will stroke — it is counted twice, once on each
+/// side, so the interior is not eaten by it.
+///
+/// Pure: no DC, no handle, no window.
+pub fn chip_box(text_width: i32, em: i32, line: i32, thickness: i32) -> ChipBox {
+    let em = em.abs();
+
+    let pad_x = (em * CHIP_PAD_X_PERCENT) / 100;
+    let pad_y = (em * CHIP_PAD_Y_PERCENT) / 100;
+
+    ChipBox {
+        width: text_width + 2 * (pad_x + thickness),
+        height: line + 2 * (pad_y + thickness),
+        radius: (em * CHIP_RADIUS_PERCENT) / 100,
+        inset_x: pad_x + thickness,
+        inset_y: pad_y + thickness,
+    }
+}
+
+/// The two colours and the brush one chip is drawn in — the fields of the palette решение 85
+/// names, carried together so the drawing takes a value instead of three arguments.
+#[derive(Clone, Copy)]
+pub struct ChipColors {
+    /// `field_border` — the frame.
+    pub outline: COLORREF,
+    /// `field_bg` — the fill.
+    pub fill: HBRUSH,
+    /// `text` — the key name itself.
+    pub ink: COLORREF,
+}
+
+/// One help row split at its placeholder: what stands before the key, the key, and what
+/// stands after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChipRow<'a> {
+    /// Everything before [`KEY_PLACEHOLDER`].
+    pub prefix: &'a str,
+    /// The key name, or `None` for a row with no placeholder — rows 4 and 5 of the help.
+    pub key: Option<&'a str>,
+    /// Everything after the placeholder; empty when there is none.
+    pub suffix: &'a str,
+}
+
+/// Splits one help row at its placeholder — pure, and the whole of «где стоит чип».
+///
+/// A template with no [`KEY_PLACEHOLDER`] is all prefix and no key, which is rows 4 and 5 of
+/// the help word for word. An **empty** key name is treated the same way and the two halves
+/// are drawn as one sentence: an empty chip would be a box around nothing.
+pub fn chip_row<'a>(template: &'a str, key: &'a str) -> ChipRow<'a> {
+    match template.split_once(KEY_PLACEHOLDER) {
+        Some((prefix, suffix)) if !key.is_empty() => ChipRow {
+            prefix,
+            key: Some(key),
+            suffix,
+        },
+        Some((prefix, _)) => ChipRow {
+            prefix,
+            key: None,
+            suffix: "",
+        },
+        None => ChipRow {
+            prefix: template,
+            key: None,
+            suffix: "",
+        },
+    }
+}
+
+/// Everything about a chip row that is not the words: the ground, the ink, the two faces, the
+/// chip's own colours and the geometry.
+///
+/// A value rather than eight arguments — `clippy::too_many_arguments` is a denied warning in
+/// this crate, and a row of this window needs every one of these.
+#[derive(Clone, Copy)]
+pub struct ChipRowStyle {
+    /// The ground of the whole rectangle, laid before a word is written.
+    pub ground: HBRUSH,
+    /// The ink of the sentence — `text`.
+    pub ink: COLORREF,
+    /// The face of the sentence.
+    pub body: Option<HFONT>,
+    /// The face of the key name inside the chip, and that face's `lfHeight`.
+    pub chip_face: Option<(HFONT, i32)>,
+    /// The colours of the chip.
+    pub chip: ChipColors,
+    /// The distance from one line of the row to the next, in pixels of the window.
+    pub pitch: i32,
+    /// The DPI of the window, for [`paint_rounded`] and the frame thickness.
+    pub dpi: i32,
+}
+
+/// One word of a laid-out row: a run of the sentence, or the chip.
+#[derive(Clone, Copy)]
+enum Atom<'a> {
+    /// A word of the sentence, drawn in the body face.
+    Word(&'a str),
+    /// The chip, drawn as a figure with the key name inside it.
+    Chip(&'a str),
+}
+
+/// One atom with its measured width and whether a space stands before it.
+struct Placed<'a> {
+    atom: Atom<'a>,
+    width: i32,
+    space_before: bool,
+}
+
+/// Paints one help row of the about window — the sentence, wrapped, with the chip of решение
+/// 85 standing where the placeholder was.
+///
+/// Answers 1 always: the ground is laid first and unconditionally, so the rectangle is drawn
+/// however little of the text could be. A row whose faces could not be made (`None` in the
+/// style) is drawn in the manager's own face — degraded-but-alive, exactly as [`paint_label`]
+/// treats the same refusal (NFR-13).
+///
+/// ⚠ **The clip is narrowed to the rectangle of the control for the whole of the drawing.** An
+/// owner-drawn static answers for its own rectangle and for not one pixel outside it, and this
+/// function places lines by arithmetic rather than by `DrawTextW` — a sentence one line taller
+/// than the template allowed would otherwise write on its neighbour. `SaveDC`/`RestoreDC` put
+/// the caller's clip back, and no region handle is created, so none can leak — the idiom
+/// [`paint_label_lines`] and [`paint_rounded`] already keep.
+///
+/// # Safety
+///
+/// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of: `dc` is
+/// owned by the sender for the length of the send, and every handle in `style` is an object
+/// the window's state owns for longer than the drawing.
+pub unsafe fn paint_chip_row(dc: HDC, rect: RECT, row: ChipRow<'_>, style: ChipRowStyle) -> isize {
+    // The ground, first and always — п. 2 of criterion 2 of T-12-6, the rule every body that
+    // draws a whole element keeps.
+    //
+    // SAFETY: `dc` is the DC of the message, `rect` a live local, `ground` a live brush.
+    unsafe { FillRect(dc, &rect, style.ground) };
+
+    // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC.
+    unsafe { SetBkMode(dc, TRANSPARENT) };
+
+    // SAFETY: `dc` is a handle passed by value; the state is put back below on every path.
+    let saved = unsafe { SaveDC(dc) };
+
+    // NFR-13: zero is «the state could not be saved», and a clip that cannot be put back is
+    // not narrowed. The row is then not drawn at all rather than drawn over its neighbours.
+    if saved == 0 {
+        return 1;
+    }
+
+    // SAFETY: `dc` is the live DC and the four numbers are plain values.
+    let narrowed = unsafe { IntersectClipRect(dc, rect.left, rect.top, rect.right, rect.bottom) };
+
+    if narrowed != RGN_ERROR && narrowed != NULLREGION {
+        // SAFETY: see the caller — the clip is narrowed to the control's own rectangle and the
+        // handles of `style` are alive for longer than this call.
+        unsafe { lay_chip_row(dc, rect, row, style) };
+    }
+
+    // SAFETY: `saved` is the state this function pushed above, and nothing between the two
+    // calls pushed another.
+    let _ = unsafe { RestoreDC(dc, saved) };
+
+    // TRUE — the row is drawn.
+    1
+}
+
+/// The body of [`paint_chip_row`], inside the narrowed clip: measure, wrap, draw.
+///
+/// # Safety
+///
+/// As [`paint_chip_row`], and with the clip already narrowed to `rect`.
+unsafe fn lay_chip_row(dc: HDC, rect: RECT, row: ChipRow<'_>, style: ChipRowStyle) {
+    let thickness = scaled(BORDER_THICKNESS, style.dpi).max(1);
+
+    // The body face goes in first: every width below is measured in the face the word will be
+    // drawn in, and the chip's own face is selected only for the chip's own two calls.
+    //
+    // SAFETY: `dc` is the DC of the message and the face is the window's; put back at the end.
+    let previous_face = unsafe { select_face(dc, style.body) };
+
+    // The two metrics the placing needs: the ascent the sentence sits on, and the height of
+    // one line of it. NFR-13 — a DC that will not answer leaves the row unlaid, which is the
+    // ground and nothing else.
+    //
+    // SAFETY: the face is selected above; the buffer is a live local this call fills.
+    let Some(body_metrics) = (unsafe { face_metrics(dc) }) else {
+        // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+        unsafe { restore_face(dc, previous_face) };
+        return;
+    };
+
+    // SAFETY: as above — the width of one space in the face now in the DC.
+    let space = unsafe { text_width(dc, " ") };
+
+    // The chip's own metrics, in its own face, or `None` for a row with no chip and for a
+    // window whose chip face could not be made.
+    let chip = match (row.key, style.chip_face) {
+        (Some(key), Some((face, em))) => {
+            // SAFETY: `dc` is the DC of the message and `face` is the window's own; the body
+            // face is put back immediately after the two measurements.
+            let previous = unsafe { select_face(dc, Some(face)) };
+
+            // SAFETY: the chip face is in the DC for exactly these two calls.
+            let measured = unsafe { face_metrics(dc).map(|m| (m, text_width(dc, key))) };
+
+            // SAFETY: `previous` is what `select_face` answered a moment ago.
+            unsafe { restore_face(dc, previous) };
+
+            measured.map(|(metrics, width)| {
+                (
+                    face,
+                    chip_box(width, em, metrics.height, thickness),
+                    metrics,
+                )
+            })
+        }
+        _ => None,
+    };
+
+    // A row whose chip could not be made or measured keeps its key name all the same: the two
+    // halves of the template are folded back into one sentence and the row is drawn as it was
+    // drawn before this task — degraded-but-alive, and the whole loss is the figure (NFR-13).
+    // Declared before `atoms`, because the words below borrow from it.
+    let folded = match (&chip, row.key) {
+        (None, Some(key)) => Some(format!("{}{key}{}", row.prefix, row.suffix)),
+        _ => None,
+    };
+
+    // The words, in reading order, each with its own width.
+    let mut atoms: Vec<Placed<'_>> = Vec::new();
+
+    match (&chip, row.key) {
+        (Some((_, box_of, _)), Some(key)) => {
+            // SAFETY: the body face is in the DC; every width below is measured in it.
+            unsafe { push_words(dc, &mut atoms, row.prefix, false) };
+
+            atoms.push(Placed {
+                atom: Atom::Chip(key),
+                width: box_of.width,
+                space_before: row.prefix.ends_with(char::is_whitespace),
+            });
+
+            let space_after = row.suffix.starts_with(char::is_whitespace);
+
+            // SAFETY: the body face is in the DC — the chip's face was put back above.
+            unsafe { push_words(dc, &mut atoms, row.suffix, space_after) };
+        }
+        _ => {
+            let plain = folded.as_deref().unwrap_or(row.prefix);
+
+            // SAFETY: as above.
+            unsafe { push_words(dc, &mut atoms, plain, false) };
+        }
+    }
+
+    // SAFETY: see the caller — the clip is narrowed and every handle is alive.
+    unsafe { draw_atoms(dc, rect, &atoms, space, &style, chip, body_metrics) };
+
+    // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+    unsafe { restore_face(dc, previous_face) };
+}
+
+/// Appends the words of `text` to `atoms`, each measured in the face now in `dc`.
+///
+/// `leading_space` says whether a space stands before the **first** of them — the two halves of
+/// a template carry their own spacing, and a chip glued to a colon must stay glued to it.
+///
+/// # Safety
+///
+/// `dc` is live and carries the face the words will be drawn in.
+unsafe fn push_words<'a>(dc: HDC, atoms: &mut Vec<Placed<'a>>, text: &'a str, leading_space: bool) {
+    let mut space_before = leading_space;
+
+    for word in text.split_whitespace() {
+        // SAFETY: see the contract — the width is measured in the face now in the DC.
+        let width = unsafe { text_width(dc, word) };
+
+        atoms.push(Placed {
+            atom: Atom::Word(word),
+            width,
+            space_before,
+        });
+
+        space_before = true;
+    }
+}
+
+/// Draws the laid-out row: greedy wrapping by clusters, one line every `style.pitch` pixels.
+///
+/// A «cluster» is one word that may start a line together with everything glued to it — the
+/// atoms whose `space_before` is false. Breaking inside one would put a colon at the start of
+/// a line, or take the chip away from the punctuation that follows it.
+///
+/// # Safety
+///
+/// `dc` is live, carries the body face, and is clipped to `rect`; every handle of `style` is
+/// alive for longer than this call.
+unsafe fn draw_atoms(
+    dc: HDC,
+    rect: RECT,
+    atoms: &[Placed<'_>],
+    space: i32,
+    style: &ChipRowStyle,
+    chip: Option<(HFONT, ChipBox, FaceMetrics)>,
+    body: FaceMetrics,
+) {
+    let limit = rect.right - rect.left;
+
+    let mut x = 0;
+    let mut line = 0;
+
+    // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC.
+    unsafe { SetTextColor(dc, style.ink) };
+
+    let mut index = 0;
+
+    while index < atoms.len() {
+        // The cluster: this atom and everything glued to it.
+        let start = index;
+        let mut width = atoms[index].width;
+
+        index += 1;
+
+        while index < atoms.len() && !atoms[index].space_before {
+            width += atoms[index].width;
+            index += 1;
+        }
+
+        let lead = if x == 0 {
+            0
+        } else if atoms[start].space_before {
+            space
+        } else {
+            0
+        };
+
+        // The break: a cluster that does not fit and is not the first on its line starts the
+        // next one. A cluster wider than the whole rectangle stands where it is and is cut off
+        // by the clip, which is what a word too long for its label has always cost here.
+        if x > 0 && x + lead + width > limit {
+            line += 1;
+            x = 0;
+        } else {
+            x += lead;
+        }
+
+        let top = rect.top + line * style.pitch;
+
+        for placed in &atoms[start..index] {
+            match placed.atom {
+                Atom::Word(word) => {
+                    // SAFETY: `dc` carries the body face and the ink set above; the buffer is a
+                    // live local of this frame.
+                    unsafe { draw_run(dc, rect.left + x, top, word) };
+                }
+                Atom::Chip(key) => {
+                    if let Some(chip) = chip {
+                        // SAFETY: see the caller — every handle is alive and the DC is clipped.
+                        unsafe { draw_chip(dc, rect.left + x, top, key, chip, style, body) };
+
+                        // The ink the sentence is drawn in, back after the figure.
+                        //
+                        // SAFETY: `dc` is a handle passed by value.
+                        unsafe { SetTextColor(dc, style.ink) };
+                    }
+                }
+            }
+
+            x += placed.width;
+        }
+    }
+}
+
+/// Draws one chip: the figure of [`paint_rounded`], then the key name inside it.
+///
+/// # Safety
+///
+/// `dc` is live and clipped to the label's rectangle; `face` and the brush of `style.chip` are
+/// objects the window's state owns for longer than this call. The body face is put back by the
+/// caller, which is why this one restores whatever it found.
+unsafe fn draw_chip(
+    dc: HDC,
+    x: i32,
+    top: i32,
+    key: &str,
+    chip: (HFONT, ChipBox, FaceMetrics),
+    style: &ChipRowStyle,
+    body: FaceMetrics,
+) {
+    let (face, box_of, metrics) = chip;
+
+    // The baseline of the chip's own text is put on the baseline of the sentence, and the
+    // figure is hung around it: that is what makes the box sit *on the line* rather than beside
+    // it. `top` is the top of the sentence's character cell, so the chip's cell starts as much
+    // lower as its ascent is shorter.
+    let cell = top + (body.ascent - metrics.ascent);
+
+    let area = RECT {
+        left: x,
+        top: cell - box_of.inset_y,
+        right: x + box_of.width,
+        bottom: cell - box_of.inset_y + box_of.height,
+    };
+
+    paint_rounded(
+        dc,
+        &area,
+        box_of.radius,
+        style.chip.outline,
+        style.chip.fill,
+        style.dpi,
+    );
+
+    // SAFETY: `dc` is the DC of the message and `face` is the window's own; put back below.
+    let previous = unsafe { select_face(dc, Some(face)) };
+
+    // SAFETY: `dc` is a handle passed by value.
+    unsafe { SetTextColor(dc, style.chip.ink) };
+
+    // SAFETY: `dc` carries the chip face and the ink set above.
+    unsafe { draw_run(dc, x + box_of.inset_x, cell, key) };
+
+    // SAFETY: `previous` is what `select_face` answered for this same DC a moment ago.
+    unsafe { restore_face(dc, previous) };
+}
+
+/// Writes one run of text at the top-left corner of its character cell.
+///
+/// `TextOutW` and not `DrawTextW`: the run is placed by this file's own arithmetic, and
+/// `DrawTextW` would bring its own alignment, its own tab expansion and its own `&`-prefix
+/// rule — the very disagreement between measuring and drawing that [`paint_label_lines`]
+/// warns about. `GetTextExtentPoint32W` and `TextOutW` are one instrument.
+///
+/// # Safety
+///
+/// `dc` is live and carries the face and the ink the run is to be drawn in.
+unsafe fn draw_run(dc: HDC, x: i32, y: i32, text: &str) {
+    let units: Vec<u16> = text.encode_utf16().collect();
+
+    if units.is_empty() {
+        return;
+    }
+
+    // NFR-13: the flag is answered and deliberately dropped, for the reason every paint call
+    // of this file drops its own.
+    //
+    // SAFETY: `dc` is the live DC and `units` is a live local of this frame, read by the call.
+    let _ = unsafe { TextOutW(dc, x, y, &units) };
+}
+
+/// The width of one run in the face now in `dc`, in pixels.
+///
+/// # Safety
+///
+/// `dc` is live and carries the face the run would be drawn in.
+unsafe fn text_width(dc: HDC, text: &str) -> i32 {
+    let units: Vec<u16> = text.encode_utf16().collect();
+
+    if units.is_empty() {
+        return 0;
+    }
+
+    let mut size = SIZE::default();
+
+    // SAFETY: `units` and `size` are live locals of this frame; the call reads the first and
+    // writes the second.
+    if unsafe { GetTextExtentPoint32W(dc, &units, &raw mut size) }.as_bool() {
+        size.cx
+    } else {
+        // NFR-13: a refused measurement is nothing rather than a wrong number — the run then
+        // overlaps its neighbour instead of standing at a random distance from it.
+        0
+    }
+}
+
+/// The two numbers a laid-out line needs of a face: where its baseline is and how tall one
+/// line of it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaceMetrics {
+    /// `tmAscent` — from the top of the character cell down to the baseline.
+    pub ascent: i32,
+    /// `tmHeight` — the whole character cell, ascent and descent together.
+    pub height: i32,
+}
+
+/// The metrics of the face now in `dc`, or `None` for a DC that would not answer (NFR-13).
+///
+/// # Safety
+///
+/// `dc` is live and carries the face the numbers are wanted of.
+unsafe fn face_metrics(dc: HDC) -> Option<FaceMetrics> {
+    let mut metrics = TEXTMETRICW::default();
+
+    // SAFETY: `metrics` is a live local of this frame, which the call fills.
+    if !unsafe { GetTextMetricsW(dc, &raw mut metrics) }.as_bool() {
+        return None;
+    }
+
+    Some(FaceMetrics {
+        ascent: metrics.tmAscent,
+        height: metrics.tmHeight,
+    })
 }
 
 // =========================================================================================

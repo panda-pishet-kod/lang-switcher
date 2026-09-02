@@ -5080,9 +5080,17 @@ fn every_owner_drawn_element_erases_its_ground_before_it_draws() {
 
     // Пять тел `WM_DRAWITEM` и шестое — закрытая часть комбобокса, которая рисует себя по
     // `WM_PAINT` подкласса и потому тем более отвечает за весь свой прямоугольник.
+    //
+    // ⚠ Т-26-2: тело подписи теперь называется `paint_label_at_pitch` — `paint_label` стала
+    // однострочной обёрткой над ним с `None` вместо шага строки (§6.2: одно тело, не два), и
+    // заливка уехала туда же, где рисование. Седьмое тело — строка справки с чипом: она
+    // рисуется не `DrawTextW`, а по словам, и отвечает за свой прямоугольник ровно так же.
+    // ⚠ `draw_chip` в списке НЕТ и быть не должно: он рисует фигуру ВНУТРИ строки, землю
+    // которой уже положили, — заливка там стёрла бы соседние слова.
     for signature in [
         "unsafe fn paint_push_button(",
-        "pub unsafe fn paint_label(",
+        "pub unsafe fn paint_label_at_pitch(",
+        "pub unsafe fn paint_chip_row(",
         "unsafe fn draw_glyph_element(",
         "unsafe fn draw_combo_item(",
         "unsafe fn draw_list_item(",
@@ -5648,10 +5656,16 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // ⚠ 233 and not the «≈175» of the mock-up: the estimate assumed one line per row, and the
     // rows measured on the raised window need ten lines between them, not five. The width is
     // the 191 it has always been — решение 82.5 says the window grows downwards only.
+    //
+    // ⚠ **233 → 256 by решение 87** (task Т-26-2): the body of this window is set one step
+    // above the dialog font since that decision, and its lines stand 1,4 of the face apart
+    // instead of the 1,33 `DrawTextW` gives — every row of text takes more room, and the room
+    // is taken downwards. The number moves by a decision of the user and never by a hand that
+    // found it inconvenient (правило [[canon]]); the width is untouched, as both decisions say.
     assert_eq!(
         template.size,
-        (191, 233),
-        "the about window of решение 82.5 is 191 × 233 dialog units"
+        (191, 256),
+        "the about window of решения 82.5 и 87 is 191 × 256 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
@@ -8621,6 +8635,166 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
         caption.lfFaceName, base.lfFaceName,
         "the caption is the dialog's own face, shrunk — never a face named in the module"
     );
+
+    // ---- Т-26-2, решение 87: the four faces of the about window ---------------------------
+    //
+    // Every one of them is the dialog's own `lfHeight` scaled by a ratio, never a point size
+    // written by hand — that is what makes them right at every DPI. The ratios are recomputed
+    // here from the published constants rather than read back as results.
+    let body = settings::about_body_logfont(base);
+
+    assert_eq!(
+        body.lfHeight,
+        (base.lfHeight * settings::ABOUT_BODY_POINTS_TENTHS) / 90,
+        "the body is 10 pt against the dialog's 9"
+    );
+    assert!(
+        body.lfHeight < base.lfHeight,
+        "a negative height grows by getting smaller: {} against {}",
+        body.lfHeight,
+        base.lfHeight
+    );
+    assert_eq!(
+        body.lfWeight, base.lfWeight,
+        "⚠ the body is ORDINARY weight — the hypothesis that these rows were drawn bold is \
+         refuted, and the repair is size, not weight"
+    );
+    assert_eq!(
+        body.lfFaceName, base.lfFaceName,
+        "the body is the dialog's own face, one step larger"
+    );
+
+    // The three emphasised roles. `Bold` is the dialog's own family at 700 — the picture of
+    // task T-12-4 and the fallback of решение 87 п. 1.
+    for (role, logfont) in [
+        (
+            "имя",
+            settings::about_name_logfont(base, settings::Emphasis::Bold),
+        ),
+        (
+            "номер",
+            settings::about_number_logfont(base, settings::Emphasis::Bold),
+        ),
+        (
+            "чип",
+            settings::about_chip_logfont(base, settings::Emphasis::Bold),
+        ),
+    ] {
+        println!(
+            "{role}, откат: lfHeight {}, вес {}",
+            logfont.lfHeight, logfont.lfWeight
+        );
+
+        assert_eq!(
+            logfont.lfWeight, 700,
+            "{role}: the fallback of решение 87 is FW_BOLD"
+        );
+        assert_eq!(
+            logfont.lfFaceName, base.lfFaceName,
+            "{role}: the fallback stays the dialog's own family"
+        );
+        assert_eq!(
+            logfont.lfQuality.0, 4,
+            "{role}: our own text is grey-antialiased"
+        );
+    }
+
+    // `Semibold` is the one exception решение 87 authorises: a family named in the module.
+    // ⚠ The weight is left at **zero** — `FW_DONTCARE` — on purpose: the semibold family has
+    // one weight, and asking it for 700 on top invites the synthetic bold GDI makes when it
+    // cannot find what it was asked for.
+    for (role, logfont) in [
+        (
+            "имя",
+            settings::about_name_logfont(base, settings::Emphasis::Semibold),
+        ),
+        (
+            "номер",
+            settings::about_number_logfont(base, settings::Emphasis::Semibold),
+        ),
+        (
+            "чип",
+            settings::about_chip_logfont(base, settings::Emphasis::Semibold),
+        ),
+    ] {
+        let family: String = String::from_utf16_lossy(&logfont.lfFaceName)
+            .trim_end_matches('\0')
+            .to_owned();
+
+        println!(
+            "{role}, Ш-2: семейство «{family}», вес {}",
+            logfont.lfWeight
+        );
+
+        assert_eq!(
+            family, "Segoe UI Semibold",
+            "{role}: the family of решение 87 п. 1"
+        );
+        assert_eq!(
+            logfont.lfWeight, 0,
+            "{role}: the weight is the family's own business"
+        );
+        assert_ne!(
+            logfont.lfFaceName, base.lfFaceName,
+            "{role}: this is the one place the module names a face, and it must differ"
+        );
+    }
+
+    // The two emphases differ in the family and **not** in the size: a system without the
+    // semibold family must lay the window out identically, or the fallback would move text.
+    for (semibold, bold) in [
+        (
+            settings::about_name_logfont(base, settings::Emphasis::Semibold),
+            settings::about_name_logfont(base, settings::Emphasis::Bold),
+        ),
+        (
+            settings::about_chip_logfont(base, settings::Emphasis::Semibold),
+            settings::about_chip_logfont(base, settings::Emphasis::Bold),
+        ),
+    ] {
+        assert_eq!(
+            semibold.lfHeight, bold.lfHeight,
+            "the fallback must not change the size, only the weight"
+        );
+    }
+}
+
+/// **The line pitch of the about window's body is a share of its own face** — task Т-26-2,
+/// решение 85, «воздух межстрочья».
+///
+/// `line-height: 1.4` of the accepted mock-up, and a share rather than a length of a picture,
+/// so it grows with the face and with the DPI in one step. The property that makes it *work* is
+/// the one asserted last: it must come out **larger** than the natural line of that face, or
+/// `theme::label_model_pitch` refuses it and the air never appears.
+#[test]
+fn the_body_line_pitch_is_a_share_of_the_face_and_larger_than_its_natural_line() {
+    // The two faces this program is really drawn at: 96 DPI (`lfHeight` −13 for the body) and
+    // 120 DPI (−16). Both measured on the raised window, not predicted.
+    for em in [13, 16, 26] {
+        let pitch = settings::about_body_line_pitch(em);
+
+        println!("тело {em} px → шаг {pitch} px");
+
+        assert_eq!(pitch, (em * settings::ABOUT_BODY_LINE_PERCENT) / 100);
+
+        // Segoe UI advances a line by about 1,33 em of its own accord (`tmHeight`), and the
+        // mock-up asks for 1,4 — so the pitch has something to give at every size.
+        let natural = (em * 133) / 100;
+
+        assert!(
+            pitch > natural,
+            "a pitch of {pitch} against a natural line of {natural} gives no air at all — \
+             `label_model_pitch` would refuse it and the window would look as it did before"
+        );
+    }
+
+    // A negative `lfHeight` is what the manager really hands over, and the pitch is a length:
+    // it must come out positive whichever sign it was given.
+    assert_eq!(
+        settings::about_body_line_pitch(-13),
+        settings::about_body_line_pitch(13),
+        "the sign of lfHeight is not the sign of a distance"
+    );
 }
 
 /// **Criterion 10 of T-11-17, as task T-11-23 left it** — the supersampling factor is a
@@ -10576,6 +10750,16 @@ fn the_face_is_handed_over_by_the_one_send_this_module_uses_for_its_own_controls
 /// same set, made by the same function on the same `WM_INITDIALOG` and freed by the same
 /// `Drop`. The number below is the count of *faces of the set*, and the point of the assertion
 /// is unchanged: nothing outside that constructor asks GDI for a font.
+///
+/// ⚠ **Task Т-26-2 stopped counting call sites and started counting faces.** The set grew to
+/// six (the body, the numerals and the chip of решение 87 joined the text, the caption and the
+/// name), and six `else` arms unwinding six half-built sets would have been six copies of the
+/// same three lines — so the constructor makes them in a **loop over one array**, and there is
+/// exactly one `create_font(` call site for all six. Counting call sites would now say «one»
+/// however many faces the set had, which measures nothing; the array is what the number below
+/// is taken from. The probe of `resolve_emphasis` is the one face made outside the set, and it
+/// is deliberately named here: it is a **question to GDI**, freed in the same function, and
+/// never handed to a window.
 #[test]
 fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     let made = product_lines_with("CreateFontIndirectW(");
@@ -10594,10 +10778,45 @@ fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     }
     assert_eq!(
         created.len(),
-        4,
-        "the declaration and the three faces of `DialogFonts::new` — and nothing else asks for \
-         a face: {created:?}"
+        3,
+        "the declaration, the one loop of `DialogFonts::new` and the one probe of \
+         `resolve_emphasis` — and nothing else asks for a face: {created:?}"
     );
+
+    // …and the size of the set is the length of the array the loop walks, which is where the
+    // number «six faces» is really written down. Read off the source, so a seventh face added
+    // without a `Drop` for it cannot slip past.
+    let source = settings_module_source();
+    let wanted = function_body(
+        &source,
+        "fn new(hwnd: HWND, control: i32) -> Option<Self> {",
+    );
+
+    let faces = wanted.matches("_logfont(base").count();
+
+    println!("лиц в наборе: {faces}");
+
+    assert_eq!(
+        faces, 6,
+        "the set of решение 87 is six faces: text, caption, name, body, number, chip"
+    );
+
+    // Every one of them is freed, and the list `Drop` walks is the list the constructor filled.
+    let dropped = function_body(&source, "impl Drop for DialogFonts {");
+
+    for face in [
+        "self.text",
+        "self.caption",
+        "self.name",
+        "self.body",
+        "self.number",
+        "self.chip",
+    ] {
+        assert!(
+            dropped.contains(face),
+            "`{face}` is made and never freed — `Drop` must walk the whole set: {dropped}"
+        );
+    }
 
     // The hand-over takes a face it was given, and takes it from the owner.
     let handed = product_lines_with("hand_our_face_to_the_controls_that_draw_their_own_text");

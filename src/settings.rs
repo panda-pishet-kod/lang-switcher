@@ -75,10 +75,11 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC,
     CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC,
-    DeleteObject, DrawFocusRect, DrawTextW, EndPaint, FW_BOLD, FillRect, GetDC, GetObjectW,
-    GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW,
-    PAINTSTRUCT, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, SRCCOPY,
-    ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
+    DeleteObject, DrawFocusRect, DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC,
+    GetObjectW, GetTextExtentPoint32W, GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    InvalidateRect, LOGFONTW, PAINTSTRUCT, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE,
+    RedrawWindow, ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode,
+    SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -138,15 +139,16 @@ use crate::layouts::{self, LayoutId, LayoutSpec};
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
     self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
-    CORNER_RADIUS, CheckMark, ComboBorderRole, ComboChevronRole, ComboFillRole, CornerColors,
-    GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole, HotBrush,
-    ResolvedButtonColors, StaticColorRole, ThemeSetting, antialiased_logfont, caption_advance,
-    check_frame_colors, combo_chevron_points, combo_closed_color_roles, combo_fill_brush,
-    combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
-    draw_combo_chevron, field_frame_air, glyph_color_roles, label_ink, list_frame_air,
-    list_frame_box, list_item_color_roles, paint_caption_underline, paint_ellipse, paint_label,
-    paint_rounded, paint_rounded_corners, paint_selection_stripe, resolve_button_colors,
-    restore_face, scaled, scaled_tenths_offset, select_face, title_bar_is_dark,
+    CORNER_RADIUS, CheckMark, ChipColors, ChipRowStyle, ComboBorderRole, ComboChevronRole,
+    ComboFillRole, CornerColors, GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole,
+    GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting,
+    antialiased_logfont, caption_advance, check_frame_colors, chip_row, combo_chevron_points,
+    combo_closed_color_roles, combo_fill_brush, combo_item_color_roles, combo_text_ink,
+    create_font, dc_dpi, draw_check_mark, draw_combo_chevron, field_frame_air, glyph_color_roles,
+    label_ink, list_frame_air, list_frame_box, list_item_color_roles, paint_caption_underline,
+    paint_chip_row, paint_ellipse, paint_label, paint_label_at_pitch, paint_rounded,
+    paint_rounded_corners, paint_selection_stripe, resolve_button_colors, restore_face, scaled,
+    scaled_tenths_offset, select_face, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -3608,6 +3610,20 @@ pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 10] = [
     IDC_ABOUT_HELP_5,
 ];
 
+/// The five **sentences** of the help panel — the labels that carry a key chip, task Т-26-2.
+///
+/// The numerals of [`ABOUT_LABELS_ON_THE_PANEL`] are deliberately absent: a digit has no
+/// placeholder and no chip, and it is drawn by the shared label path like every other label of
+/// this window. The split is what [`on_about_draw_item`] routes on, and it is written down here
+/// rather than tested for at the call site so that the list is one name and not a condition.
+pub const ABOUT_HELP_SENTENCES: [i32; 5] = [
+    IDC_ABOUT_HELP_1,
+    IDC_ABOUT_HELP_2,
+    IDC_ABOUT_HELP_3,
+    IDC_ABOUT_HELP_4,
+    IDC_ABOUT_HELP_5,
+];
+
 /// The colour roles of one button in one state — FR-92а, task T-11-5a, widened by the
 /// response of task T-12-8; the pure half of `WM_DRAWITEM`, closed by a table test:
 /// обычная/умолчательная × нормальная/**горячая**/нажатая/запрещённая.
@@ -6433,7 +6449,44 @@ pub const PANEL_CAPTION_POINTS_TENTHS: i32 = 76;
 /// face is never *made* from this number, it is made from the window's own `lfHeight` scaled
 /// by it, so the row grows with the DPI of the window like everything else and no point size
 /// is written down by hand.
-pub const ABOUT_NAME_POINTS_TENTHS: i32 = 107;
+///
+/// ⚠ **10,7 until task Т-26-2.** The 15 pt of the Э11 generator is one mock-up; the mock-up the
+/// user accepted with his own eye in stage Э23 is another, and решение 85 makes it the model:
+/// `.appname { font-size: 15.5px }` there, which is 15,5 × 72 / 96 = **11,6 pt**. The two
+/// numbers are read off two different pictures of the same window and the newer one wins,
+/// because it is the one a person looked at and said «намного лучше» about.
+pub const ABOUT_NAME_POINTS_TENTHS: i32 = 116;
+
+/// Point size of the **body** of the about window, in tenths of a point — task Т-26-2,
+/// решение 85.
+///
+/// The two description lines and the five sentences of the help panel. The accepted mock-up
+/// sets the first at `font-size: 13px` (9,75 pt) and the second at `12.5px` (9,4 pt); one
+/// number carries both, because a `lfHeight` is whole pixels and the two round together: at
+/// 96 DPI the dialog face is −12 and this ratio answers −13 for both, at 120 DPI it is −15 and
+/// this answers −16. A separate constant for 9,4 pt would answer **the same face** and cost a
+/// second name for one thing.
+///
+/// ⚠ It is the *only* number in this pair of windows that makes text **larger** than the
+/// dialog font apart from the name row, and it is what the user asked for in as many words:
+/// «размер, цвет и тип шрифтов такими же».
+pub const ABOUT_BODY_POINTS_TENTHS: i32 = 100;
+
+/// Point size of the key name **inside a chip**, in tenths of a point — task Т-26-2,
+/// решение 85 п. 1.
+///
+/// `kbd { font: 600 11px }` of the accepted mock-up is 8,25 pt; 8,5 is the nearest tenth that
+/// still comes out a whole pixel below the sentence around it at 96 DPI (−11 against −13), and
+/// that gap is what makes the box read as a key cap.
+pub const ABOUT_CHIP_POINTS_TENTHS: i32 = 85;
+
+/// Distance from one line of the about window's body to the next, as a **percentage of the
+/// body face's em** — `line-height: 1.4` of the accepted mock-up, task Т-26-2.
+///
+/// A percentage of the face and not a length of a picture, for the reason
+/// `theme::CHIP_PAD_X_PERCENT` is one: the air between two lines of text belongs to the text.
+/// [`about_body_line_pitch`] is the whole of the arithmetic.
+pub const ABOUT_BODY_LINE_PERCENT: i32 = 140;
 
 /// Point size of the dialog font itself, in **tenths of a point** — the `$FS = 9 * $DPI` of
 /// the generator, and the denominator [`PANEL_CAPTION_POINTS_TENTHS`] is a numerator of.
@@ -7120,14 +7173,7 @@ impl Drop for BackgroundCache {
 /// quality — through [`antialiased_logfont`], so there is one place that names the quality and
 /// not two. Pure, like it.
 pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
-    let mut logical = antialiased_logfont(base);
-
-    // `lfHeight` is negative for a font asked for by character height, which is how the
-    // manager creates a `DS_SETFONT` face; the multiplication keeps whichever sign it has.
-    logical.lfHeight = (base.lfHeight * PANEL_CAPTION_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
-    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(base.lfWeight);
-
-    logical
+    scaled_logfont(base, PANEL_CAPTION_POINTS_TENTHS, FW_BOLD)
 }
 
 /// The `LOGFONTW` of the name row of the about window — finding **A-05**, task T-12-4.
@@ -7142,16 +7188,218 @@ pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
 /// of the window, so a face derived from it is right at every scale, and a face created from a
 /// point size by hand would be right at 96 DPI only.
 ///
-/// Measured at 96 DPI, where the manager's face is `lfHeight` −12: this answers −14, and the
-/// «L» of «Lang Switcher» comes out **10 px tall on a two-pixel stem** — the mock-up's numbers
-/// (A-05: 14 mock-up px = 10 screen px, stem 2). Pure, like the two above it.
-pub fn about_name_logfont(base: LOGFONTW) -> LOGFONTW {
+/// ⚠ **Twice re-sized, and the second time by решение 85.** T-12-4 measured 10,7 pt off the
+/// generator of the Э11 mock-ups; the mock-up the user accepted with his own eye in stage Э23
+/// (`scratchpad-Э23\макет-справка-о-программе.html`) sets the same row at `font-size: 15.5px;
+/// font-weight: 650`, which is 15,5 × 72 / 96 = **11,6 pt** — the number
+/// [`ABOUT_NAME_POINTS_TENTHS`] carries now. The weight went with it: 650 is nearer semibold
+/// than bold, and [`FW_SEMIBOLD`] is what a `LOGFONTW` says that with.
+pub fn about_name_logfont(base: LOGFONTW, emphasis: Emphasis) -> LOGFONTW {
+    emphasised_logfont(base, ABOUT_NAME_POINTS_TENTHS, emphasis)
+}
+
+/// The `LOGFONTW` of the **body** of the about window — task Т-26-2, решение 85.
+///
+/// The two description lines and the five sentences of the help panel, one step larger than
+/// the dialog font: `font-size: 13px` and `12.5px` of the accepted mock-up, which are 9,75 and
+/// 9,4 pt — [`ABOUT_BODY_POINTS_TENTHS`] rounds the pair to one number, because the two land on
+/// the same whole pixel at every DPI this program is drawn at and a face is made of whole
+/// pixels. Ordinary weight: the mock-up's body is `font-weight` unset, and the hypothesis that
+/// the live window drew it **bold** is refuted in `reports\ИТОГ-Э26.md` §1 — the template's own
+/// `FONT 9, "Segoe UI", 400` is what those rows have always been drawn in.
+pub fn about_body_logfont(base: LOGFONTW) -> LOGFONTW {
+    scaled_logfont(base, ABOUT_BODY_POINTS_TENTHS, FONT_WEIGHT(0))
+}
+
+/// The `LOGFONTW` of a **numeral** of the help panel — task Т-26-2, решение 85.
+///
+/// The body face, semibold: `.key { font-weight: 600 }` of the accepted mock-up, against the
+/// ordinary weight of the sentence beside it. The column of digits is muted as well — that is
+/// [`about_static_color_role`]'s half of the same decision and was already true.
+pub fn about_number_logfont(base: LOGFONTW, emphasis: Emphasis) -> LOGFONTW {
+    emphasised_logfont(base, ABOUT_BODY_POINTS_TENTHS, emphasis)
+}
+
+/// The `LOGFONTW` of the key name **inside a chip** — task Т-26-2, решение 85 п. 1.
+///
+/// `kbd { font: 600 11px }` of the accepted mock-up: 11 × 72 / 96 = 8,25 pt, and
+/// [`ABOUT_CHIP_POINTS_TENTHS`] carries 8,5 — the nearest size that is still a whole pixel
+/// smaller than the sentence around it at 96 DPI, which is what makes the box read as a key cap
+/// rather than as emphasis.
+pub fn about_chip_logfont(base: LOGFONTW, emphasis: Emphasis) -> LOGFONTW {
+    emphasised_logfont(base, ABOUT_CHIP_POINTS_TENTHS, emphasis)
+}
+
+/// Whether this system really has [`SEMIBOLD_FAMILY`] — asked once, when a window's faces are
+/// made, and of GDI itself.
+///
+/// ⚠ **A created face is not proof of anything.** `CreateFontIndirectW` answers a valid handle
+/// for a family nobody has, having quietly mapped the request to whatever it considered nearest;
+/// on a system without the semibold family that could be another type face entirely, and the
+/// window would come out in it without one call failing. The only honest question is therefore
+/// *what came back*, and `GetTextFaceW` of the face selected into a DC is what answers it.
+///
+/// `false` on every refusal — no DC, no face, an unreadable name (NFR-13) — which spends the
+/// window on [`Emphasis::Bold`]: the picture of task T-12-4, and a good one.
+fn resolve_emphasis(hwnd: HWND, base: LOGFONTW) -> Emphasis {
+    let wanted = emphasised_logfont(base, ABOUT_NAME_POINTS_TENTHS, Emphasis::Semibold);
+
+    let Some(face) = create_font(wanted) else {
+        return Emphasis::Bold;
+    };
+
+    // SAFETY: `hwnd` is the live dialog; the DC is released below on every path.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    let given = if dc.is_invalid() {
+        None
+    } else {
+        // SAFETY: `dc` is the live DC just obtained and `face` was created above; the previous
+        // object is put back before the DC is released.
+        let previous = unsafe { SelectObject(dc, face.into()) };
+
+        let mut name = [0u16; 64];
+
+        // SAFETY: `name` is a live local of this frame and its length is what bounds the copy;
+        // the call answers the number of units written, never more than the buffer holds.
+        let copied = unsafe { GetTextFaceW(dc, Some(&mut name)) };
+
+        // SAFETY: `previous` is what `SelectObject` answered for this same DC a moment ago.
+        unsafe { SelectObject(dc, previous) };
+
+        // The count includes the terminating NUL, which is not part of the name.
+        let copied = usize::try_from(copied).unwrap_or(0).saturating_sub(1);
+
+        Some(String::from_utf16_lossy(&name[..copied.min(name.len())]))
+    };
+
+    if !dc.is_invalid() {
+        // SAFETY: `dc` came from the `GetDC` above and is released exactly once, here.
+        unsafe { ReleaseDC(Some(hwnd), dc) };
+    }
+
+    // SAFETY: `face` was created above, handed to nobody, and is freed exactly once here — it
+    // was a probe and never belonged to a `DialogFonts`.
+    let _ = unsafe { DeleteObject(face.into()) };
+
+    // ⚠ Deliberately **not** written to the journal. The vocabulary of `diag` is a closed table
+    // with a test that holds it closed, and what happened here is not a refusal of anything: the
+    // system simply has a different set of type faces, and the window is drawn in the weight
+    // that set has. A line here would widen a closed table for a cosmetic fallback.
+    match given {
+        Some(name) if name == SEMIBOLD_FAMILY => Emphasis::Semibold,
+        _ => Emphasis::Bold,
+    }
+}
+
+/// The dialog's own face at `tenths` of a point and at `weight` — the one body the five
+/// builders above and below are made of (§6.2: one body, not five copies).
+///
+/// A `weight` of zero — `FW_DONTCARE` — leaves the base weight alone, which is what the body
+/// face of the about window wants: the template already asks for 400 and a number written here
+/// would be a second opinion about it.
+///
+/// ⚠ **The size travels through the window's own `lfHeight` and never through a point size**:
+/// the dialog font is what the template asks for and what the manager already created at the
+/// DPI of the window, so a face derived from it is right at every scale, and a face created
+/// from a point size by hand would be right at 96 DPI only. `lfHeight` is negative for a font
+/// asked for by character height, which is how the manager creates a `DS_SETFONT` face; the
+/// multiplication keeps whichever sign it has.
+///
+/// Pure — no DC, no window — so every one of the five is closed by a table test.
+fn scaled_logfont(base: LOGFONTW, tenths: i32, weight: FONT_WEIGHT) -> LOGFONTW {
     let mut logical = antialiased_logfont(base);
 
-    logical.lfHeight = (base.lfHeight * ABOUT_NAME_POINTS_TENTHS) / DIALOG_FONT_POINTS_TENTHS;
-    logical.lfWeight = i32::try_from(FW_BOLD.0).unwrap_or(base.lfWeight);
+    logical.lfHeight = (base.lfHeight * tenths) / DIALOG_FONT_POINTS_TENTHS;
+
+    if weight.0 != 0 {
+        logical.lfWeight = i32::try_from(weight.0).unwrap_or(base.lfWeight);
+    }
 
     logical
+}
+
+/// The family the real 600 of the accepted mock-up lives in — решение 87 п. 1.
+///
+/// ⚠ **This is the one place in this module that names a type face**, and it is an exception
+/// granted by name: everywhere else the face is the dialog's own, because the template is what
+/// chooses it and a name written here would be a second opinion about the template. The
+/// exception exists because there is no other way to ask for what the mock-up shows —
+/// see [`Emphasis`].
+const SEMIBOLD_FAMILY: &str = "Segoe UI Semibold";
+
+/// How the three emphasised roles of the about window are set — решение 87 п. 1.
+///
+/// # Why this is a choice at all, and why it is made at run time
+///
+/// The accepted mock-up sets the name row, the help numerals and the chip at `font-weight: 600`.
+/// GDI cannot be asked for that through `lfWeight`: the family «Segoe UI» carries **400 and 700
+/// and nothing between**, and a request for 600 is answered — silently — with 700. Measured on
+/// the stand: `просили вес 600, дали tmWeight 700`. Writing `FW_SEMIBOLD` in the source would
+/// therefore be a line that says one thing and draws another.
+///
+/// The real 600 is a **family of its own**, [`SEMIBOLD_FAMILY`], and asking for it by name is
+/// what решение 87 authorises. That road has its own trap: `CreateFontIndirectW` never fails on
+/// a family the system does not have — it maps to the nearest one it does, which could be a
+/// different type face altogether. So the family is not assumed, it is **verified** on the
+/// created face ([`resolve_emphasis`]), and a system without it falls back to the dialog's own
+/// family at `FW_BOLD` — the picture of task T-12-4, which is a good picture and not a failure
+/// (NFR-13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Emphasis {
+    /// [`SEMIBOLD_FAMILY`] — the real 600 of the mock-up. Verified present before it is used.
+    Semibold,
+    /// The dialog's own family at `FW_BOLD` — what this program drew in before решение 87, and
+    /// what a system without the semibold family still draws in.
+    Bold,
+}
+
+/// The `LOGFONTW` of one emphasised role — task Т-26-2, решение 87 п. 1.
+///
+/// [`Emphasis::Bold`] is [`scaled_logfont`] at `FW_BOLD` and nothing else. [`Emphasis::Semibold`]
+/// is the same size with the family replaced and **`lfWeight` left at zero** — `FW_DONTCARE`,
+/// which is the honest thing to say when the weight is the family's own business: the semibold
+/// family has one weight and asking it for 700 on top would invite the synthetic bold GDI makes
+/// when it cannot find what it was asked for.
+///
+/// Pure, like every other builder here, so the pair is closed by a table test.
+fn emphasised_logfont(base: LOGFONTW, tenths: i32, emphasis: Emphasis) -> LOGFONTW {
+    let mut logical = scaled_logfont(base, tenths, FW_BOLD);
+
+    if emphasis == Emphasis::Bold {
+        return logical;
+    }
+
+    logical.lfWeight = 0;
+    logical.lfFaceName = [0; 32];
+
+    // The name, as UTF-16, into the fixed array — one unit short of its end at most, so the
+    // NUL the zeroing left behind is never overwritten.
+    for (slot, unit) in logical
+        .lfFaceName
+        .iter_mut()
+        .take(SEMIBOLD_FAMILY.len())
+        .zip(SEMIBOLD_FAMILY.encode_utf16())
+    {
+        *slot = unit;
+    }
+
+    logical
+}
+
+/// The distance from one line of the about window's body to the next, in pixels of the window
+/// — task Т-26-2, решение 85.
+///
+/// `em` is the absolute value of [`about_body_logfont`]'s `lfHeight`, and the answer is
+/// [`ABOUT_BODY_LINE_PERCENT`] of it: `line-height: 1.4` of the accepted mock-up, which is the
+/// «воздух межстрочья» решение 85 asks for by name. A share of the face and not a length of a
+/// picture, so it grows with the face and with the DPI in one step — and it is *larger* than
+/// the natural line of that face, which is what [`theme::label_model_pitch`] requires before it
+/// will place lines at all.
+///
+/// Pure.
+pub fn about_body_line_pitch(em: i32) -> i32 {
+    (em.abs() * ABOUT_BODY_LINE_PERCENT) / 100
 }
 
 /// The `LOGFONTW` of the font the dialog manager gave one of the window's own controls.
@@ -7220,48 +7468,88 @@ struct DialogFonts {
     text: HFONT,
     /// The same face smaller and bolder, for the eight panel captions.
     caption: HFONT,
-    /// The same face **larger** and bolder, for the one row it belongs to: «Lang Switcher» in
-    /// the about window — [`about_name_logfont`], finding A-05, task T-12-4.
+    /// The same face **larger** and semibold, for the one row it belongs to: «Lang Switcher» in
+    /// the about window — [`about_name_logfont`], finding A-05, task T-12-4, re-sized by
+    /// решение 85.
     name: HFONT,
+    /// The same face one step larger, ordinary weight — the body of the about window: its two
+    /// description lines and the five sentences of the help panel ([`about_body_logfont`], task
+    /// Т-26-2).
+    body: HFONT,
+    /// The body face semibold — the five numerals of the help panel
+    /// ([`about_number_logfont`]).
+    number: HFONT,
+    /// The face inside a key chip: smaller than the body and semibold
+    /// ([`about_chip_logfont`]).
+    chip: HFONT,
+    /// The `lfHeight` of [`Self::body`], kept because the line pitch of the body is a share of
+    /// it ([`about_body_line_pitch`]) and the drawing has no other way to ask.
+    body_height: i32,
+    /// The `lfHeight` of [`Self::chip`], kept because the air inside a chip is a share of it
+    /// (`theme::chip_box`).
+    chip_height: i32,
 }
 
 impl DialogFonts {
-    /// All three faces out of the font `control` was given, every handle examined.
+    /// All six faces out of the font `control` was given, every handle examined.
     ///
     /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, any
     /// `CreateFontIndirectW` declining. The window then draws in the manager's own face, which
-    /// is what it drew in before this task: degraded-but-alive, and the whole loss is the
+    /// is what it drew in before task T-11-17: degraded-but-alive, and the whole loss is the
     /// smoothing (NFR-13).
     ///
     /// ⚠ A half-built set is unwound here and not leaked: the handles already created are
     /// freed on the failing path, because a constructor that answers `None` leaves no value
-    /// for `Drop` to run on — the same discipline [`CaptionIcons::load`] keeps.
+    /// for `Drop` to run on — the same discipline [`CaptionIcons::load`] keeps. Since task
+    /// Т-26-2 the unwinding is a loop over what has been made so far rather than one `else`
+    /// arm per face: six faces would otherwise be six copies of the same three lines.
     fn new(hwnd: HWND, control: i32) -> Option<Self> {
         let base = dialog_logfont(hwnd, control)?;
 
-        let text = create_font(antialiased_logfont(base))?;
+        let body = about_body_logfont(base);
 
-        let Some(caption) = create_font(caption_logfont(base)) else {
-            // SAFETY: `text` was created a line above, handed to nobody, and is freed exactly
-            // once here — the failed constructor answers `None` and no `Drop` will run.
-            let _ = unsafe { DeleteObject(text.into()) };
-            return None;
-        };
+        // Решение 87 п. 1: asked once per window, and the three emphasised faces below are all
+        // built from the one answer — a window cannot come out semibold in one row and bold in
+        // the next.
+        let emphasis = resolve_emphasis(hwnd, base);
 
-        let Some(name) = create_font(about_name_logfont(base)) else {
-            for face in [text, caption] {
-                // SAFETY: both were created above, handed to nobody, and are freed exactly
-                // once here — the failed constructor answers `None` and no `Drop` will run.
-                let _ = unsafe { DeleteObject(face.into()) };
-            }
+        let chip = about_chip_logfont(base, emphasis);
 
-            return None;
-        };
+        let wanted = [
+            antialiased_logfont(base),
+            caption_logfont(base),
+            about_name_logfont(base, emphasis),
+            body,
+            about_number_logfont(base, emphasis),
+            chip,
+        ];
+
+        let mut made: Vec<HFONT> = Vec::with_capacity(wanted.len());
+
+        for logical in wanted {
+            let Some(face) = create_font(logical) else {
+                for face in made {
+                    // SAFETY: each was created by the loop above, handed to nobody, and is
+                    // freed exactly once here — the failed constructor answers `None` and no
+                    // `Drop` will run.
+                    let _ = unsafe { DeleteObject(face.into()) };
+                }
+
+                return None;
+            };
+
+            made.push(face);
+        }
 
         Some(Self {
-            text,
-            caption,
-            name,
+            text: made[0],
+            caption: made[1],
+            name: made[2],
+            body: made[3],
+            number: made[4],
+            chip: made[5],
+            body_height: body.lfHeight,
+            chip_height: chip.lfHeight,
         })
     }
 
@@ -7279,15 +7567,42 @@ impl DialogFonts {
     fn name(&self) -> HFONT {
         self.name
     }
+
+    /// The face of the about window's body, borrowed — the owner frees it, nobody else.
+    fn body(&self) -> HFONT {
+        self.body
+    }
+
+    /// The face of a help numeral, borrowed — the owner frees it, nobody else.
+    fn number(&self) -> HFONT {
+        self.number
+    }
+
+    /// The face inside a key chip and that face's `lfHeight`, borrowed — the owner frees it.
+    fn chip(&self) -> (HFONT, i32) {
+        (self.chip, self.chip_height)
+    }
+
+    /// The line pitch of the about window's body, in pixels of the window it was made for.
+    fn body_pitch(&self) -> i32 {
+        about_body_line_pitch(self.body_height)
+    }
 }
 
 impl Drop for DialogFonts {
     fn drop(&mut self) {
-        for face in [self.text, self.caption, self.name] {
+        for face in [
+            self.text,
+            self.caption,
+            self.name,
+            self.body,
+            self.number,
+            self.chip,
+        ] {
             // SAFETY: each came from a successful `CreateFontIndirectW` in `new` and is freed
             // exactly once: the type is neither `Copy` nor `Clone`, its fields are private and
             // never reassigned, and `drop` runs once. Every drawing that selected a face put
-            // the previous one back before it returned, so neither is in a DC any more. The
+            // the previous one back before it returned, so none is in a DC any more. The
             // `BOOL` is dropped for the reason `theme::Brushes` gives for its own cleanup.
             let _ = unsafe { DeleteObject(face.into()) };
         }
@@ -11158,7 +11473,7 @@ unsafe extern "system" fn about_proc(
             // frame of `show_about_dialog`, which outlives this modal call.
             unsafe {
                 with_about_state(hwnd, |state| {
-                    fill_about(hwnd, state.version, &state.hotkey);
+                    fill_about(hwnd, state.version);
 
                     // FR-92а, task T-11-17: the face the caption of «ОК» is set in, made out
                     // of the font the manager gave the window — the same call, and the same
@@ -11356,12 +11671,13 @@ fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
 /// question 7 — and the template literal already is the name. The five numerals of the help
 /// panel are not set either, for the same kind of reason: a digit is a digit in both locales.
 ///
-/// `key` is the name of the hotkey **as it acts** — [`effective_hotkey_name`] of the running
-/// configuration — and it is what the first three rows of the help substitute into their
-/// `{0}`. It arrives as an argument rather than being read here, because this module does not
-/// own the configuration: section 6.3 gives that to the caller, and the caller copies the
-/// field out of it exactly as it copies the theme setting.
-fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>, key: &str) {
+/// ⚠ **The key name is no longer substituted here** — task Т-26-2. The name of the hotkey as it
+/// acts ([`effective_hotkey_name`] of the running configuration) used to be filled into the
+/// `{0}` of the first three help rows on this road; решение 85 п. 1 draws a chip around it, so
+/// the substitution moved to the pen and the placeholder is left standing on the control. The
+/// key itself is where it was — in the window's state, resolved once when the window opened —
+/// and `draw_about_help_row` is what reads it.
+fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
     let caption = wide(&text(IDS_ABOUT_CAPTION));
 
     // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer
@@ -11384,9 +11700,15 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>, key: &str) {
     set_text(hwnd, IDC_ABOUT_HELP, &text(IDS_ABOUT_HELP));
 
     // The numerals are already on their controls — template literals, the same in both
-    // locales — so only the five sentences are set here, each with the key name substituted.
+    // locales — so only the five sentences are set here.
+    //
+    // ⚠ **The placeholder is left standing**, and that is task Т-26-2: решение 85 п. 1 draws a
+    // chip around the key name, and a chip has to be drawn *where the name is*. A substituted
+    // sentence no longer says where that was, so the substitution moved to the pen —
+    // `draw_about_help_row` splits the caption at `theme::KEY_PLACEHOLDER` and writes the key
+    // itself inside the figure.
     for (_, row, string) in ABOUT_HELP_ROWS {
-        set_text(hwnd, row, &format_text(string, &[key]));
+        set_text(hwnd, row, &text(string));
     }
 
     set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
@@ -11609,13 +11931,39 @@ unsafe fn on_about_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: L
     apply_ctl_color(dc, choice.flatten())
 }
 
+/// The face and the line pitch one label of the about window is set in — task Т-26-2,
+/// решение 85, and the whole of the role table of that decision on the drawing side.
+///
+/// Roles rather than identifiers scattered through a `match` in the drawing: the name row is
+/// the largest and semibold, the body is one step above the dialog font and ordinary, a numeral
+/// is the body semibold, and everything else — the version line and «ОК» — keeps the dialog
+/// font, exactly as the accepted mock-up sets them (`.appver { font-size: 12.5px }` against the
+/// dialog's own 12,5 px at 96 DPI).
+///
+/// The pitch is `Some` only where a label may wrap and решение 85 asks for air between the
+/// lines: the two description lines. A one-line label is unaffected by any pitch
+/// ([`theme::label_model_pitch`] refuses it), and passing one would be noise.
+fn about_label_face(control: i32, fonts: &DialogFonts) -> (HFONT, Option<i32>) {
+    match control {
+        IDC_ABOUT_NAME => (fonts.name(), None),
+        IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => (fonts.body(), Some(fonts.body_pitch())),
+        IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
+        | IDC_ABOUT_HELP_N5 => (fonts.number(), None),
+        _ => (fonts.text(), None),
+    }
+}
+
 /// Draws one owner-drawn label of the about window — FR-92а, task T-11-18.
 ///
-/// The choosing half; the painting half is the shared [`paint_label`] (§6.2: the settings
-/// dialog's path, not a copy of it). Three differences from [`draw_label`] and no more: the
-/// state is this window's, the ground is always the window brush — this dialog has no panels —
-/// and the identifier's role comes from [`about_static_color_role`], the mapping task T-11-11
-/// already wrote for exactly these five controls.
+/// The choosing half; the painting half is the shared [`paint_label_at_pitch`] (§6.2: the
+/// settings dialog's path, not a copy of it). Three differences from [`draw_label`] and no
+/// more: the state is this window's, the ground is the panel brush for the ten labels standing
+/// on the help block and the window brush everywhere else, and the identifier's role comes from
+/// [`about_static_color_role`] — the mapping task T-11-11 wrote and task Т-23-4 widened.
+///
+/// ⚠ The five **sentences** of the help panel do not come here at all since task Т-26-2: a row
+/// with a chip in it is laid word by word, which `DrawTextW` cannot do — see
+/// [`draw_about_help_row`].
 ///
 /// FR-94 holds here as it does there: the caption is read back off the control `fill_about`
 /// wrote it into, and the version line composed from the `VERSIONINFO` resource arrives by the
@@ -11645,18 +11993,11 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
                     brushes.window_bg()
                 },
                 label_ink(about_static_color_role(control), state.palette),
-                // Finding A-05, task T-12-4: **one** row of this window is set in the second
-                // face — the name. Everything else here (the version line and the two
-                // description lines) keeps the dialog font, exactly as the mock-up draws them:
-                // the generator gives `$FBold` to `'Lang Switcher'` and `$F` to the rest of the
-                // window (`chrome.ps1:194-196`).
-                state.fonts.as_ref().map(|fonts| {
-                    if control == IDC_ABOUT_NAME {
-                        fonts.name()
-                    } else {
-                        fonts.text()
-                    }
-                }),
+                // Решение 85: the role table of this window, in one pure place.
+                state
+                    .fonts
+                    .as_ref()
+                    .map(|fonts| about_label_face(control, fonts)),
             ))
         })
     };
@@ -11665,13 +12006,89 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
         return 0;
     };
 
+    let (face, pitch) = match face {
+        Some((face, pitch)) => (Some(face), pitch),
+        None => (None, None),
+    };
+
     // Read after the borrow ends, for the reason `draw_label` gives. Without the trailing NUL:
     // `DrawTextW` takes the length of the slice it is given.
     let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
 
     // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
     // `face` are objects this window's state owns for longer than this call.
-    unsafe { paint_label(dc, rect, &mut caption, ground, ink, face) }
+    unsafe { paint_label_at_pitch(dc, rect, &mut caption, ground, ink, face, pitch) }
+}
+
+/// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.
+///
+/// The choosing half of a chip row; the laying and the painting are `theme::paint_chip_row`.
+/// What is chosen here is the same four things every drawing of this file chooses — the ground,
+/// the ink, the faces and the colours — plus the two halves of the sentence, which come from
+/// the control's own caption split at `theme::KEY_PLACEHOLDER`.
+///
+/// # Why the caption on the control still carries `{0}`
+///
+/// FR-94 puts the text of the locale in force on the control and the drawing reads it back;
+/// that road is unchanged. What changed is *where the key name is substituted*: it used to
+/// happen in [`fill_about`] with [`format_text`], and now it happens at the pen, because the
+/// chip has to be drawn **at** the placeholder and a substituted string no longer says where
+/// that was. The key name itself is the same one, resolved once when the window opens
+/// ([`effective_hotkey_name`]) and kept in the state — решение 82.5 untouched.
+///
+/// # Safety
+///
+/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM`
+/// message it is inside of.
+unsafe fn draw_about_help_row(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
+    // The colour choice, split from the painting — the borrow ends before the DC is touched.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+
+            let fonts = state.fonts.as_ref();
+
+            Some((
+                ChipRowStyle {
+                    ground: brushes.panel_bg(),
+                    ink: label_ink(about_static_color_role(control), state.palette),
+                    body: fonts.map(DialogFonts::body),
+                    chip_face: fonts.map(DialogFonts::chip),
+                    chip: ChipColors {
+                        // ⛔ No new palette field — правило Э12. The chip is the box a field of
+                        // the settings dialog is drawn in, in that box's own two colours.
+                        outline: state.palette.field_border,
+                        // ⚠ **`window_bg` and not `field_bg`** — решение 87 п. 2, which corrects
+                        // the wording of the mandate. The mock-up fills the chip with the colour
+                        // of the **window** (`kbd { background: var(--window-bg) }`), and the
+                        // difference is decisive in «Туман»: there `field_bg` and `panel_bg` are
+                        // both pure white, so a chip filled with the first would be a bare frame
+                        // on the second. Both are fields of the existing palette either way —
+                        // правило Э12 is untouched; what changed is which of the two.
+                        fill: brushes.window_bg(),
+                        ink: state.palette.text,
+                    },
+                    pitch: fonts.map_or(0, DialogFonts::body_pitch),
+                    dpi: dc_dpi(dc),
+                },
+                state.hotkey.clone(),
+            ))
+        })
+    };
+
+    let Some(Some((style, key))) = choice else {
+        return 0;
+    };
+
+    // Read after the borrow ends, for the reason `draw_label` gives.
+    let template = get_text(hwnd, control);
+
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message, and every handle
+    // of `style` is an object this window's state owns for longer than this call.
+    unsafe { paint_chip_row(dc, rect, chip_row(&template, &key), style) }
 }
 
 /// The `WM_DRAWITEM` of the about window — the four labels of task T-11-18 and one
@@ -11715,6 +12132,15 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     if ctl_type == ODT_STATIC {
         if !OWNER_DRAWN_ABOUT_LABELS.contains(&control) {
             return 0;
+        }
+
+        // Task Т-26-2, решение 85 п. 1: the five sentences of the help panel carry a chip and
+        // are laid word by word; every other label of this window is one call of the shared
+        // label drawing.
+        if ABOUT_HELP_SENTENCES.contains(&control) {
+            // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
+            // only to paint into for the length of this send.
+            return unsafe { draw_about_help_row(hwnd, control, dc, rect) };
         }
 
         // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
