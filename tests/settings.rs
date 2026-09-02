@@ -3768,12 +3768,17 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
             "7 DLU",
             vec![(settings::PANEL_CAPTION_INSET_DLU, 7)],
         ),
+        // ⚠ 5 → 11 by решение 90: the generator's 5 pressed the caption against the panel's
+        // top edge (4 px above it, 13 px below it to the first control). 11 mock-up pixels are
+        // 8 screen pixels at 96 DPI and put the heading between the two instead of on the edge.
+        // The reference moves with the constant because it *is* the decision, not a reading of
+        // the Э11 picture any more — same as the caption's point size in решение 89.
         token(
             "1. Панель · Отступ заголовка сверху",
-            "5 px макета",
+            "11 px макета",
             vec![(
                 px(theme::scaled(settings::PANEL_CAPTION_INSET_Y, 96)),
-                at_96(50),
+                at_96(110),
             )],
         ),
         token(

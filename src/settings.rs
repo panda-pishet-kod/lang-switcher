@@ -6431,8 +6431,26 @@ pub const GLYPH_DOT_INSET_TENTHS: i32 = 46;
 pub const PANEL_CAPTION_INSET_DLU: i32 = 7;
 
 /// Inset of the panel caption from the panel's top edge, in mock-up pixels — the `($py + 5)`
-/// of the same call.
-pub const PANEL_CAPTION_INSET_Y: i32 = 5;
+/// of the same call; **11 since решение 90**.
+///
+/// # ⚠ 5 → 11: воздух над заголовком, и почему это не «подвинуть картинку»
+///
+/// The generator's 5 put the caption 4 px under the panel's top edge at 96 DPI, and left 13 px
+/// between the caption and the first control below it — a block whose heading is pressed
+/// against the ceiling and floats over a gap. The user named it after e31 («я бы добавил
+/// немного пустого места над заголовками, сейчас как будто немного тесновато»), and the
+/// measurement agreed: 4 above, 13 below.
+///
+/// 11 mock-up pixels are 8 screen pixels at 96 DPI, which leaves 9 below — the caption sits
+/// **between** the edge and the content instead of on the edge. ⚠ Nothing moves for this: the
+/// caption is drawn inside room the panel already had, so no control, panel or window changes
+/// by a unit. That is the whole reason this was a one-constant answer and the title bar of
+/// пункт 1 was not.
+///
+/// The number departs from the Э11 generator, like [`PANEL_CAPTION_POINTS_TENTHS`] did before
+/// it — and for the same kind of reason: the generator drew a 9 pt window, and both windows
+/// are set larger since решения 85, 87 и 89. The air a heading needs grew with the type.
+pub const PANEL_CAPTION_INSET_Y: i32 = 11;
 
 /// Point size of the caption face, in **tenths of a point** — the `$FSCAP = 7.6 * $DPI` of
 /// the generator, п. 7 of task T-11-16; re-sized to 8,3 by решение 89.
