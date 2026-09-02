@@ -83,7 +83,7 @@
 
 use windows::Win32::Foundation::{COLORREF, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, COLORONCOLOR,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CLEARTYPE_QUALITY, COLORONCOLOR,
     CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen,
     CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT,
     DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
@@ -2433,20 +2433,45 @@ pub(crate) fn draw_combo_chevron(dc: HDC, points: [(i32, i32); 3], ink: COLORREF
 }
 
 // =========================================================================================
-// Начертания: серое сглаживание нашего текста и то, как лицо попадает в DC
+// Начертания: сглаживание нашего текста и то, как лицо попадает в DC
 // =========================================================================================
 
-/// The `LOGFONTW` of the dialog's own face, asked to render with grey antialiasing — the pure
-/// half of `settings::DialogFonts`, and the whole of «наш текст — серое сглаживание».
+/// The `LOGFONTW` of the dialog's own face, asked to render with the smoothing this program
+/// draws its text in — the pure half of `settings::DialogFonts`.
 ///
 /// One field changed and not a byte else: the face, the size, the weight and the character set
 /// are the window's own, because the dialog font is what the template asks for and what the
 /// manager already created at the window's DPI. Pure, so criterion 13 of task T-11-17 is a
 /// test on a `LOGFONTW` and needs no window.
-pub fn antialiased_logfont(base: LOGFONTW) -> LOGFONTW {
+///
+/// # ⚠ Серое → ClearType: решение 88 поправляет T-11-17
+///
+/// Task T-11-17 (the user's decision of 2026-08-22) asked for **grey** coverage, because
+/// ClearType tints the edge of every stroke red and blue and the Э11 mock-ups, drawn with GDI+,
+/// had no such fringe. Решение 88 (2026-09-02) reverses that half, and for a reason the earlier
+/// decision could not have weighed: **the fringe was not the only cost being paid.**
+///
+/// GDI places every glyph on a **whole pixel**, and the advance widths of a face are fractional.
+/// With grey coverage a stem therefore lands wholly inside a pixel in one place of a word and
+/// straddles two in another, coming out as two columns of half ink — measured on the delivered
+/// window, one row of «Исправляет текст»: `152 121 | 149 134 | 81 152 116`, where 152 is full
+/// ink. The eye reads the half-lit neighbour as an echo, and the user reported it as «шрифт
+/// двоится» — the same effect that made the body of the about window look bold until task
+/// Т-26-2 measured its weight at 400.
+///
+/// ClearType has no cure for the *placement* either, but it triples the horizontal resolution
+/// it can spend on the edge, so the stem stays one stem. The fringe comes back and is the price;
+/// it was shown at 6× on `scratchpad-Э26\ВРЕЗ-*.png` and accepted with open eyes.
+///
+/// ⚠ This is the **only** place the program names a smoothing mode, and that is what makes the
+/// decision one line: `settings::DialogFonts`, the two derived faces of the about window, the
+/// hand-over to the fields and the tray menu all come through here.
+pub fn smoothed_logfont(base: LOGFONTW) -> LOGFONTW {
     LOGFONTW {
-        // Grey coverage instead of the manager's ClearType — the ⚠ of this section.
-        lfQuality: ANTIALIASED_QUALITY,
+        // Решение 88. The manager's own font asks for `DEFAULT_QUALITY`, which the machine
+        // resolves to this same mode — but «what the machine resolves it to» is not a promise,
+        // and this file does not draw in a mode it did not name.
+        lfQuality: CLEARTYPE_QUALITY,
         ..base
     }
 }

@@ -8572,14 +8572,22 @@ fn product_lines_with(needle: &str) -> Vec<String> {
         .collect()
 }
 
-/// **Criterion 13 of T-11-17** — every face this program sets its own text in is asked for grey
-/// antialiasing, and the ask is a pure function of a `LOGFONTW`.
+/// **Criterion 13 of T-11-17, as решение 88 left it** — every face this program sets its own
+/// text in is asked for the **named** smoothing, and the ask is a pure function of a `LOGFONTW`.
 ///
-/// The expected value is written out here as the `ANTIALIASED_QUALITY` of `wingdi.h` — the
-/// literal 4 — and not only read back from the crate: a builder that quietly left the manager's
-/// ClearType in place would agree with itself and disagree with the decision of 2026-08-22.
+/// ⚠ **The mode is ClearType since решение 88 (2026-09-02) and was grey coverage before it.**
+/// T-11-17 chose grey against the colour fringe; решение 88 chose ClearType against the
+/// «двоение» grey coverage produces when GDI puts a fractional stem on a whole pixel — both
+/// modes rendered side by side at 6× and picked by eye. The derivation lives at
+/// `theme::smoothed_logfont`.
+///
+/// What this test is really for has not changed, and it is **not** the value: it is that the
+/// program **names** a mode instead of inheriting one. The expected number is written out here
+/// as the `CLEARTYPE_QUALITY` of `wingdi.h` — the literal 5 — and not only read back from the
+/// crate: a builder that quietly left the manager's `DEFAULT_QUALITY` in place would agree with
+/// itself, look identical on this machine, and be wrong on a machine whose smoothing is off.
 #[test]
-fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
+fn our_own_faces_are_asked_for_the_named_smoothing_and_nothing_else_moves() {
     // A face with something recognisable in every field the builders must not touch.
     let mut base = LOGFONTW {
         lfHeight: -18,
@@ -8588,9 +8596,10 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
         lfItalic: 1,
         lfUnderline: 1,
         lfStrikeOut: 1,
-        // The manager's own face renders with ClearType — the starting point this task moves
-        // our own text away from.
-        lfQuality: CLEARTYPE_QUALITY,
+        // ⚠ Deliberately the mode the builder must **write over**, and deliberately not the
+        // one it writes: `DEFAULT_QUALITY` is what the dialog manager's own font carries, and
+        // a builder that changed nothing at all would be caught by this starting point.
+        lfQuality: DEFAULT_QUALITY,
         ..Default::default()
     };
 
@@ -8599,19 +8608,23 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
         *slot = unit;
     }
 
-    let text = theme::antialiased_logfont(base);
+    let text = theme::smoothed_logfont(base);
 
     assert_eq!(
-        text.lfQuality.0, 4,
-        "the quality must be ANTIALIASED_QUALITY — the 4 of wingdi.h"
+        text.lfQuality.0, 5,
+        "the quality must be CLEARTYPE_QUALITY — the 5 of wingdi.h (решение 88)"
     );
     assert_eq!(
-        text.lfQuality, ANTIALIASED_QUALITY,
-        "and it must be the constant the crate names 4 by"
+        text.lfQuality, CLEARTYPE_QUALITY,
+        "and it must be the constant the crate names 5 by"
     );
     assert_ne!(
-        text.lfQuality, CLEARTYPE_QUALITY,
-        "ClearType is what this task takes off our own text"
+        text.lfQuality, base.lfQuality,
+        "the builder must NAME a mode, not pass the manager's own through"
+    );
+    assert_ne!(
+        text.lfQuality, ANTIALIASED_QUALITY,
+        "grey coverage is what решение 88 takes off our own text — it is what «двоило»"
     );
 
     // And not one other field moved: the face, the size, the weight and the rest are the
@@ -8624,11 +8637,11 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
     assert_eq!(text.lfStrikeOut, base.lfStrikeOut);
     assert_eq!(text.lfFaceName, base.lfFaceName);
 
-    // The caption face: the same antialiasing, and the two changes п. 2.1 of T-11-13 asks for.
+    // The caption face: the same smoothing, and the two changes п. 2.1 of T-11-13 asks for.
     let caption = settings::caption_logfont(base);
 
     assert_eq!(
-        caption.lfQuality.0, 4,
+        caption.lfQuality.0, 5,
         "a panel caption is our own text as much as a button caption is"
     );
     assert_eq!(
@@ -8709,8 +8722,8 @@ fn our_own_faces_are_asked_for_grey_antialiasing_and_nothing_else_moves() {
             "{role}: the fallback stays the dialog's own family"
         );
         assert_eq!(
-            logfont.lfQuality.0, 4,
-            "{role}: our own text is grey-antialiased"
+            logfont.lfQuality.0, 5,
+            "{role}: our own text carries the smoothing решение 88 names"
         );
     }
 
@@ -10603,7 +10616,7 @@ const BASE_QUALITIES: [(&str, FONT_QUALITY); 2] = [
 
 /// **Criterion 9 of T-11-20 — the whole of the controller's objection, as a measurement.**
 ///
-/// The dialog's own face and [`theme::antialiased_logfont`] of it are created side by side
+/// The dialog's own face and [`theme::smoothed_logfont`] of it are created side by side
 /// and measured on the same memory DC. Height, ascent, descent, internal and external leading,
 /// average and maximum character width and weight must come back **equal**. Had one field
 /// disagreed, the remainder would have been honestly unfixable and nothing would have been
@@ -10619,15 +10632,21 @@ fn our_face_measures_the_same_as_the_dialog_font_in_every_field_the_task_names()
 
     for (name, quality) in BASE_QUALITIES {
         let base = manager_logfont(sheet.dc, &font, quality);
-        let ours = theme::antialiased_logfont(base);
+        let ours = theme::smoothed_logfont(base);
 
         // The premise first: one field moved and not a byte else. A base that differed
         // somewhere else would make the metrics agree for a reason this task cannot claim.
         assert_eq!(
-            ours.lfQuality, ANTIALIASED_QUALITY,
-            "our face is the one asked for grey coverage"
+            ours.lfQuality, CLEARTYPE_QUALITY,
+            "our face is the one that NAMES its smoothing — решение 88"
         );
-        assert_ne!(ours.lfQuality, base.lfQuality, "and the base is not");
+
+        // ⚠ Since решение 88 the named mode is one of the two starting points below, so for
+        // that one the builder moves **nothing** — and that is correct, not a miss. The claim
+        // this test makes is «the mode is named», never «the mode differs from the manager's».
+        if quality != CLEARTYPE_QUALITY {
+            assert_ne!(ours.lfQuality, base.lfQuality, "and the base is not");
+        }
         assert_eq!(ours.lfHeight, base.lfHeight);
         assert_eq!(ours.lfWidth, base.lfWidth);
         assert_eq!(ours.lfWeight, base.lfWeight);
@@ -10915,7 +10934,7 @@ fn real_strings_take_the_same_width_in_our_face_as_in_the_dialog_font() {
         let base = manager_logfont(sheet.dc, &font, quality);
 
         let dialog_face = Face::new(base);
-        let our_face = Face::new(theme::antialiased_logfont(base));
+        let our_face = Face::new(theme::smoothed_logfont(base));
 
         for text in [
             "0",

@@ -141,14 +141,14 @@ use crate::theme::{
     self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
     CORNER_RADIUS, CheckMark, ChipColors, ChipRowStyle, ComboBorderRole, ComboChevronRole,
     ComboFillRole, CornerColors, GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole,
-    GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting,
-    antialiased_logfont, caption_advance, check_frame_colors, chip_row, combo_chevron_points,
-    combo_closed_color_roles, combo_fill_brush, combo_item_color_roles, combo_text_ink,
-    create_font, dc_dpi, draw_check_mark, draw_combo_chevron, field_frame_air, glyph_color_roles,
-    label_ink, list_frame_air, list_frame_box, list_item_color_roles, paint_caption_underline,
-    paint_chip_row, paint_ellipse, paint_label, paint_label_at_pitch, paint_rounded,
-    paint_rounded_corners, paint_selection_stripe, resolve_button_colors, restore_face, scaled,
-    scaled_tenths_offset, select_face, title_bar_is_dark,
+    GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting, caption_advance,
+    check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles, combo_fill_brush,
+    combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
+    draw_combo_chevron, field_frame_air, glyph_color_roles, label_ink, list_frame_air,
+    list_frame_box, list_item_color_roles, paint_caption_underline, paint_chip_row, paint_ellipse,
+    paint_label, paint_label_at_pitch, paint_rounded, paint_rounded_corners,
+    paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
+    select_face, smoothed_logfont, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -5800,11 +5800,17 @@ unsafe fn draw_list_item(
                 // ⚠ Into `target` and never into `dc`: the face has to be selected into the very
                 // DC `DrawTextW` writes through. Selecting it into the DC of the message while
                 // drawing into the buffer left the buffer wearing the font the CONTROL was
-                // created with — and that font is `DEFAULT_QUALITY`, so the row came out in
-                // ClearType, with colour fringes on every glyph, against the grey antialiasing of
-                // the rest of the dialog. Caught by the 24 frames: `excl-dark` moved 197 levels
-                // on one row (task T-15-1б, and the reason that number is not allowed to be
-                // waved through as "one level on text").
+                // created with — `DEFAULT_QUALITY` — instead of the face this window names for
+                // itself. Caught by the 24 frames: `excl-dark` moved 197 levels on one row (task
+                // T-15-1б, and the reason that number is not allowed to be waved through as
+                // "one level on text").
+                //
+                // ⚠ **Since решение 88 this defect no longer shows itself.** The symptom was the
+                // row coming out in ClearType against the grey antialiasing of the rest of the
+                // dialog; now the rest of the dialog is ClearType too, and a buffer wearing the
+                // control's own font would look right by accident. The bug would still be a bug —
+                // the face of a window must not depend on which DC a buffer was born from — so
+                // the line below stays where it is, and this note is why it may not be «tidied».
                 //
                 // SAFETY: `target` is the buffer or the DC of the message and `face` is a live
                 // font the dialog's state owns for longer than this call.
@@ -7128,15 +7134,26 @@ impl Drop for BackgroundCache {
 }
 
 // =========================================================================================
-// Серое сглаживание нашего текста — FR-92а, task T-11-17, пункт 2
+// Сглаживание нашего текста — FR-92а, task T-11-17 п. 2, поправлено решением 88
 // =========================================================================================
 //
-// The second half of the user's decision of 2026-08-22: the text **this file draws itself** is
-// set with `ANTIALIASED_QUALITY` — grey antialiasing — instead of the ClearType the dialog
-// manager's own font asks for. ClearType tints the edge of every stroke red and blue; against
-// the graphite ground of FR-92а that fringe is what `zoom-pairs.png` shows as colour around
-// the live captions, and the mock-ups have none of it because they were drawn with grey
-// coverage.
+// The text **this file draws itself** is set in the smoothing this program names for itself,
+// through the one function that names it — `theme::smoothed_logfont`. What that mode is has
+// changed once, and the history is the point:
+//
+// - **T-11-17, 2026-08-22 — grey coverage** (`ANTIALIASED_QUALITY`). ClearType tints the edge
+//   of every stroke red and blue; against the graphite ground of FR-92а that fringe is what
+//   `zoom-pairs.png` shows as colour around the live captions, and the Э11 mock-ups have none
+//   of it because they were drawn with GDI+ grey coverage.
+// - **Решение 88, 2026-09-02 — ClearType.** ⚠ The fringe was not the only cost being paid, and
+//   the second one was invisible until it was measured: GDI places glyphs on whole pixels, so
+//   under grey coverage a stem lands inside a pixel in one place of a word and straddles two in
+//   another. The user read the half-lit neighbour as an echo — «шрифт двоится» — and the same
+//   effect had already made the body of the about window look bold until Т-26-2 measured its
+//   weight at 400. Both modes were rendered side by side at 6× and the choice was made by eye:
+//   `scratchpad-Э26\ЛИСТ-*.png`, `ВРЕЗ-*.png`. The fringe is back and is the price.
+//
+// The derivation lives at `theme::smoothed_logfont`; nothing here names a quality of its own.
 //
 // ⚠ **What is drawn with this face.** The face covers the text this file draws itself: the
 // captions of the nine owner-drawn buttons, the eight panel captions, the rows of both lists,
@@ -7159,7 +7176,7 @@ impl Drop for BackgroundCache {
 // ⚠ **Task T-11-18 wrote here that owning either «would mean pushing a face of our own onto the
 // control with `WM_SETFONT`, which is a change of the dialog's metrics and not of its
 // smoothing». That sentence was wrong, and task T-11-20 replaced it with a measurement.** The
-// face handed over is [`DialogFonts::text`] — [`antialiased_logfont`] of the window's own
+// face handed over is [`DialogFonts::text`] — [`smoothed_logfont`] of the window's own
 // `LOGFONTW`, one field changed and not a byte else. Same type face, same character height,
 // same weight, same character set: `GetTextMetricsW` answers the identical height, ascent,
 // descent, internal and external leading, average and maximum character width and weight for
@@ -7174,7 +7191,7 @@ impl Drop for BackgroundCache {
 /// Three fields changed against the dialog's own face: the height to
 /// [`PANEL_CAPTION_POINTS_TENTHS`] over [`DIALOG_FONT_POINTS_TENTHS`] of what it was (7,6 pt
 /// against 9 pt, the two sizes the mock-ups were drawn with), the weight to bold, and the
-/// quality — through [`antialiased_logfont`], so there is one place that names the quality and
+/// quality — through [`smoothed_logfont`], so there is one place that names the quality and
 /// not two. Pure, like it.
 pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
     scaled_logfont(base, PANEL_CAPTION_POINTS_TENTHS, FW_BOLD)
@@ -7185,7 +7202,7 @@ pub fn caption_logfont(base: LOGFONTW) -> LOGFONTW {
 /// [`caption_logfont`] with one number changed: [`ABOUT_NAME_POINTS_TENTHS`] over
 /// [`DIALOG_FONT_POINTS_TENTHS`] instead of the caption's ratio, so the row comes out *larger*
 /// than the dialog font where the panel caption comes out smaller. Bold in both cases, and
-/// both go through [`antialiased_logfont`], so the quality is named in exactly one place.
+/// both go through [`smoothed_logfont`], so the quality is named in exactly one place.
 ///
 /// ⚠ **The size travels through the window's own `lfHeight` and never through «10,7 pt»**: the
 /// dialog font is what the template asks for and what the manager already created at the DPI
@@ -7312,7 +7329,7 @@ fn resolve_emphasis(hwnd: HWND, base: LOGFONTW) -> Emphasis {
 ///
 /// Pure — no DC, no window — so every one of the five is closed by a table test.
 fn scaled_logfont(base: LOGFONTW, tenths: i32, weight: FONT_WEIGHT) -> LOGFONTW {
-    let mut logical = antialiased_logfont(base);
+    let mut logical = smoothed_logfont(base);
 
     logical.lfHeight = (base.lfHeight * tenths) / DIALOG_FONT_POINTS_TENTHS;
 
@@ -7521,7 +7538,7 @@ impl DialogFonts {
         let chip = about_chip_logfont(base, emphasis);
 
         let wanted = [
-            antialiased_logfont(base),
+            smoothed_logfont(base),
             caption_logfont(base),
             about_name_logfont(base, emphasis),
             body,
@@ -8878,7 +8895,7 @@ pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] =
 /// # Why this is not a change of metrics — the measurement, not the argument
 ///
 /// The face is the dialog's own `LOGFONTW` with `lfQuality` moved to `ANTIALIASED_QUALITY` and
-/// **nothing else touched** ([`antialiased_logfont`]): same type face, same character height,
+/// **nothing else touched** ([`smoothed_logfont`]): same type face, same character height,
 /// same weight, same character set, same escapement. `GetTextMetricsW` answers the same height,
 /// ascent, descent, internal and external leading, average and maximum character width and
 /// weight for it as for the manager's own face, and real strings measure the same number of

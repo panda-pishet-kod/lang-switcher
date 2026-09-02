@@ -38,7 +38,7 @@ use lang_switcher::watchdog::{self, WM_APP_WIPE};
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{ANTIALIASED_QUALITY, LOGFONTW};
+use windows::Win32::Graphics::Gdi::{CLEARTYPE_QUALITY, LOGFONTW};
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
@@ -2155,9 +2155,9 @@ fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
 }
 
 #[test]
-fn the_entries_are_drawn_in_our_own_grey_antialiased_face() {
+fn the_entries_are_drawn_in_the_face_this_program_names_for_itself() {
     // **Criterion 10 of T-11-21.** The entries are measured and drawn in `lfMenuFont` of
-    // `SPI_GETNONCLIENTMETRICS` put through `theme::antialiased_logfont` — one field
+    // `SPI_GETNONCLIENTMETRICS` put through `theme::smoothed_logfont` — one field
     // changed, the quality, and not a byte else. The metrics therefore do not move: that
     // was measured by task T-11-20 on the dialog's own face and is held by two tests of
     // `tests\settings.rs`; what is checked here is that the menu really does ask for it.
@@ -2169,13 +2169,16 @@ fn the_entries_are_drawn_in_our_own_grey_antialiased_face() {
         system.lfHeight, system.lfWeight, system.lfCharSet, system.lfQuality, ours.lfQuality
     );
 
+    // ⚠ ClearType since решение 88 and grey coverage before it — see `theme::smoothed_logfont`
+    // for why the mode moved. The tray menu rides along by construction: it goes through the
+    // one function that names a mode, which is the whole point of there being only one.
     assert_eq!(
-        ours.lfQuality, ANTIALIASED_QUALITY,
-        "the face of the menu asks for grey coverage and not for ClearType"
+        ours.lfQuality, CLEARTYPE_QUALITY,
+        "the face of the menu asks for the smoothing this program names for itself"
     );
     assert_ne!(
-        system.lfQuality, ANTIALIASED_QUALITY,
-        "and that is a change: the system's own menu face does not ask for it"
+        system.lfQuality, ours.lfQuality,
+        "and that is a change: the system's own menu face leaves the mode to the machine"
     );
 
     // Everything else is the system's, field for field — the same type face at the same

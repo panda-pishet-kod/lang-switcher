@@ -2566,7 +2566,7 @@ pub fn menu_check_cell(item: &RECT, column: i32, dpi: i32) -> RECT {
 /// The face the entries of FR-91 are measured and drawn in — FR-92а, task T-11-21.
 ///
 /// `lfMenuFont` of `SPI_GETNONCLIENTMETRICS`, which is the face a menu of this system is set
-/// in, put through [`crate::theme::antialiased_logfont`]: one field changed — the quality —
+/// in, put through [`crate::theme::smoothed_logfont`]: one field changed — the quality —
 /// and not a byte else, so the entries keep the system's type face, size, weight and character
 /// set and lose only the colour fringe of ClearType. **The metrics do not move.** That is not
 /// an assumption: task T-11-20 measured the same substitution on the dialog's own face with
@@ -2599,7 +2599,7 @@ pub fn menu_item_logfont() -> Option<LOGFONTW> {
         return None;
     }
 
-    Some(theme::antialiased_logfont(metrics.lfMenuFont))
+    Some(theme::smoothed_logfont(metrics.lfMenuFont))
 }
 
 /// The `WM_MEASUREITEM` of the menu of FR-91 — the measuring half of task T-11-10.
