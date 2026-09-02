@@ -1018,6 +1018,809 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
 END
 
+// =======================================================================================
+// The ten locales of tier one — решение 93, task Т-28-3.
+// =======================================================================================
+//
+// ⚠ **The code page governs these ten exactly as it governs the two above**, and here it is
+// load-bearing in ten alphabets at once: Cyrillic, Greek, the carons of Czech, the ogoneks of
+// Polish, the dotless ı of Turkish. `#pragma code_page(65001)` above the tables is what makes
+// them survive `rc.exe`, and the damage it prevents is silent — mojibake builds green and
+// tests green until somebody looks at the window. The instrument that watches for it is
+// `scratchpad-Э28\мохибейк-греп.ps1`, and it is run after every one of these blocks.
+//
+// ⚠ Every string here obeys `scratchpad-Э28\глоссарий.md`: one agreed word per term per
+// language, decided **before** the first translation was written. A translation that reads
+// well but names a term differently from the glossary is a defect of the translation.
+//
+// ⚠ «Lang Switcher» is not translated in any of the twelve — the decision on question 7.
+// Neither are the key names (`Esc`, `Ctrl`, `Alt`, `Shift`, `F12`, `Pause`) or `%APPDATA%`.
+// `{0}`, `{1}`, `{2}` keep their number and their count; only their place may move.
+//
+// The order below is the order of the language combo box, which is `Language::ALL`.
+
+// ---------------------------------------------------------------------------------------
+// Ukrainian — `[general] language = "uk"`. LANG_UKRAINIAN 0x22.
+// ---------------------------------------------------------------------------------------
+LANGUAGE 0x22, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — налаштування"
+    IDS_GROUP_GENERAL       "Загальні"
+    IDS_AUTOSTART           "Запускати під час входу в систему"
+    IDS_LANGUAGE_LABEL      "Мова інтерфейсу:"
+    IDS_LANGUAGE_RESTART    "набуде чинності після перезапуску"
+    IDS_GROUP_HOTKEY        "Гаряча клавіша"
+    IDS_HOTKEY_LABEL        "Клавіша:"
+    IDS_HOTKEY_SET          "Задати"
+    IDS_HOTKEY_STOP         "Скасувати"
+    IDS_GROUP_LAYOUTS       "Розкладки"
+    IDS_MODE_PAIR           "Пара"
+    IDS_MODE_CYCLE          "Кілька розкладок"
+    IDS_PAIR_SOURCE         "Джерело:"
+    IDS_PAIR_TARGET         "Ціль:"
+    IDS_CYCLE_HINT          "Цикл: галочка — участь, кнопки — порядок"
+    IDS_CYCLE_UP            "Вище"
+    IDS_CYCLE_DOWN          "Нижче"
+    IDS_SELECTION_ENABLED   "Конвертувати виділений текст"
+    IDS_GROUP_EXCLUSIONS    "Винятки"
+    IDS_EXCLUSION_REMOVE    "Видалити"
+    IDS_EXCLUSION_ADD       "Додати"
+    IDS_EXCLUSION_HINT      "Ім'я процесу, наприклад game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Діагностика"
+    IDS_LOG_ENABLED         "Вести журнал"
+    IDS_LOG_OPEN            "Відкрити теку журналу"
+    IDS_LOG_DIR_LABEL       "Тека журналу:"
+    IDS_GROUP_STATE         "Стан"
+    IDS_OK                  "ОК"
+    IDS_CANCEL              "Скасувати"
+    IDS_APPLY               "Застосувати"
+    IDS_NOTE_TEXT_KEY       "Це текстова клавіша: доки програма активна, вона перестане вводити символ."
+    IDS_NOTE_UNKNOWN_KEY    "Ім'я клавіші не розпізнано — діє клавіша за умовчанням, Pause."
+    IDS_CAPTURE_PROMPT      "Натисніть клавішу…"
+    IDS_CAPTURE_MODIFIER    "Модифікатор сам по собі гарячою клавішею бути не може."
+    IDS_CAPTURE_COMBINATION "Сполучення з модифікаторами не підтримуються: у файлі налаштувань зберігається одна клавіша."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварійний вихід, це сполучення не призначається."
+    IDS_CAPTURE_NAMELESS    "У цієї клавіші немає імені у файлі налаштувань — виберіть іншу."
+    IDS_CAPTURE_RESERVED    "Цю клавішу займає система — виберіть іншу."
+    IDS_STATE_HOOK          "Перехоплення клавіатури: {0} · відновлень хука: {1} · відмов встановлення: {2}"
+    IDS_HOOK_UP             "активне"
+    IDS_HOOK_DOWN           "НЕАКТИВНЕ"
+    IDS_STATE_LAYOUTS       "Розкладок у сеансі: {0} · винятків опубліковано: {1} · записів у журналі: {2}"
+    IDS_STATE_AUTOSTART     "Автозапуск у реєстрі (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "є, {0}"
+    IDS_AUTOSTART_ABSENT    "немає"
+    IDS_LAYOUT_NOTE         "У сеансі немає розкладки, названої у файлі ({0}) — виберіть заново."
+    IDS_LAYOUT_WORD_SOURCE  "джерело"
+    IDS_LAYOUT_WORD_TARGET  "ціль"
+    IDS_LOG_DIR_MISSING     "%APPDATA% не задано — журнал писати нікуди"
+    IDS_THEME_LABEL         "Оформлення:"
+    IDS_THEME_SYSTEM        "Як у системі"
+    IDS_THEME_LIGHT         "Світле"
+    IDS_THEME_DARK          "Темне"
+    IDS_SOUND               "Звуковий відгук"
+    IDS_ABOUT_CAPTION       "Про програму"
+    IDS_ABOUT_VERSION       "версія {0}"
+    IDS_ABOUT_LINE_1        "Виправляє текст, набраний у невірній розкладці."
+    IDS_ABOUT_LINE_2        "Перекодування — одним натисканням клавіші."
+    IDS_ABOUT_OK            "ОК"
+    IDS_ABOUT_HELP          "Як користуватися"
+    IDS_ABOUT_HELP_1        "Набрали слово не в тій розкладці — натисніть {0}: слово перекодується, розкладка переключиться."
+    IDS_ABOUT_HELP_2        "Повторне натискання {0} повертає початковий текст."
+    IDS_ABOUT_HELP_3        "Виділіть текст і натисніть {0} — конвертується виділене."
+    IDS_ABOUT_HELP_4        "Пауза, налаштування та вихід — у значку в треї."
+    IDS_ABOUT_HELP_5        "Змінити клавішу: Налаштування → Гаряча клавіша."
+    IDS_CAPTURE_HINT        "Esc або клік повз — скасування"
+END
+
+// ---------------------------------------------------------------------------------------
+// German — `[general] language = "de"`. LANG_GERMAN 0x07.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ The locale Т-28-4 watches hardest: German compounds are the longest strings of the twelve,
+// and «Oberflächensprache:» is the widest label in the window. Where a word did not fit, the
+// glossary was shortened — never the layout, which решение 87 accepted by eye.
+LANGUAGE 0x07, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — Einstellungen"
+    IDS_GROUP_GENERAL       "Allgemein"
+    IDS_AUTOSTART           "Beim Anmelden starten"
+    IDS_LANGUAGE_LABEL      "Sprache:"
+    IDS_LANGUAGE_RESTART    "wirkt nach einem Neustart"
+    IDS_GROUP_HOTKEY        "Tastenkürzel"
+    IDS_HOTKEY_LABEL        "Taste:"
+    IDS_HOTKEY_SET          "Festlegen"
+    IDS_HOTKEY_STOP         "Abbrechen"
+    IDS_GROUP_LAYOUTS       "Layouts"
+    IDS_MODE_PAIR           "Paar"
+    IDS_MODE_CYCLE          "Mehrere Layouts"
+    IDS_PAIR_SOURCE         "Quelle:"
+    IDS_PAIR_TARGET         "Ziel:"
+    IDS_CYCLE_HINT          "Zyklus: Haken — dabei, Tasten — Reihenfolge"
+    IDS_CYCLE_UP            "Nach oben"
+    IDS_CYCLE_DOWN          "Nach unten"
+    IDS_SELECTION_ENABLED   "Markierten Text umwandeln"
+    IDS_GROUP_EXCLUSIONS    "Ausnahmen"
+    IDS_EXCLUSION_REMOVE    "Entfernen"
+    IDS_EXCLUSION_ADD       "Hinzufügen"
+    IDS_EXCLUSION_HINT      "Prozessname, zum Beispiel game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnose"
+    IDS_LOG_ENABLED         "Protokoll führen"
+    IDS_LOG_OPEN            "Protokollordner öffnen"
+    IDS_LOG_DIR_LABEL       "Protokollordner:"
+    IDS_GROUP_STATE         "Status"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Abbrechen"
+    IDS_APPLY               "Übernehmen"
+    IDS_NOTE_TEXT_KEY       "Das ist eine Schreibtaste: solange das Programm aktiv ist, gibt sie ihr Zeichen nicht mehr ein."
+    IDS_NOTE_UNKNOWN_KEY    "Tastenname nicht erkannt — es gilt die Standardtaste Pause."
+    IDS_CAPTURE_PROMPT      "Taste drücken…"
+    IDS_CAPTURE_MODIFIER    "Eine Modifikatortaste allein kann kein Tastenkürzel sein."
+    IDS_CAPTURE_COMBINATION "Kombinationen mit Modifikatoren werden nicht unterstützt: die Einstellungsdatei hält eine einzige Taste."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 ist der Notausstieg und wird nicht vergeben."
+    IDS_CAPTURE_NAMELESS    "Diese Taste hat keinen Namen in der Einstellungsdatei — wählen Sie eine andere."
+    IDS_CAPTURE_RESERVED    "Diese Taste gehört dem System — wählen Sie eine andere."
+    IDS_STATE_HOOK          "Tastatur-Hook: {0} · Wiederherstellungen: {1} · Fehlschläge: {2}"
+    IDS_HOOK_UP             "aktiv"
+    IDS_HOOK_DOWN           "NICHT AKTIV"
+    IDS_STATE_LAYOUTS       "Layouts in der Sitzung: {0} · Ausnahmen veröffentlicht: {1} · Protokolleinträge: {2}"
+    IDS_STATE_AUTOSTART     "Autostart in der Registrierung (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "ja, {0}"
+    IDS_AUTOSTART_ABSENT    "nein"
+    IDS_LAYOUT_NOTE         "Die Sitzung hat kein Layout mit dem Namen aus der Datei ({0}) — bitte neu wählen."
+    IDS_LAYOUT_WORD_SOURCE  "Quelle"
+    IDS_LAYOUT_WORD_TARGET  "Ziel"
+    IDS_LOG_DIR_MISSING     "%APPDATA% ist nicht gesetzt — kein Ort für das Protokoll"
+    IDS_THEME_LABEL         "Darstellung:"
+    IDS_THEME_SYSTEM        "Wie im System"
+    IDS_THEME_LIGHT         "Hell"
+    IDS_THEME_DARK          "Dunkel"
+    IDS_SOUND               "Tonrückmeldung"
+    IDS_ABOUT_CAPTION       "Über"
+    IDS_ABOUT_VERSION       "Version {0}"
+    IDS_ABOUT_LINE_1        "Korrigiert Text, der im falschen Layout getippt wurde."
+    IDS_ABOUT_LINE_2        "Die Umwandlung kostet einen Tastendruck."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "So wird es benutzt"
+    IDS_ABOUT_HELP_1        "Wort im falschen Layout getippt — {0} drücken: das Wort wird umgewandelt, das Layout wechselt."
+    IDS_ABOUT_HELP_2        "Noch einmal {0} holt den ursprünglichen Text zurück."
+    IDS_ABOUT_HELP_3        "Text markieren und {0} drücken — die Markierung wird umgewandelt."
+    IDS_ABOUT_HELP_4        "Anhalten, Einstellungen und Beenden sind im Infobereichssymbol."
+    IDS_ABOUT_HELP_5        "Taste ändern: Einstellungen → Tastenkürzel."
+    IDS_CAPTURE_HINT        "Esc oder ein Klick daneben bricht ab"
+END
+
+// ---------------------------------------------------------------------------------------
+// French — `[general] language = "fr"`. LANG_FRENCH 0x0C.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ French puts a space before `:` `;` `?` `!` — a **narrow no-break space** in typography, and
+// an ordinary one here, because the labels are drawn by our own code and a no-break space
+// would be one more character to get wrong in ten places. The space is deliberate, not a typo.
+LANGUAGE 0x0C, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — paramètres"
+    IDS_GROUP_GENERAL       "Général"
+    IDS_AUTOSTART           "Démarrer à l'ouverture de session"
+    IDS_LANGUAGE_LABEL      "Langue :"
+    IDS_LANGUAGE_RESTART    "prend effet après un redémarrage"
+    IDS_GROUP_HOTKEY        "Raccourci"
+    IDS_HOTKEY_LABEL        "Touche :"
+    IDS_HOTKEY_SET          "Définir"
+    IDS_HOTKEY_STOP         "Annuler"
+    IDS_GROUP_LAYOUTS       "Dispositions"
+    IDS_MODE_PAIR           "Paire"
+    IDS_MODE_CYCLE          "Plusieurs dispositions"
+    IDS_PAIR_SOURCE         "Source :"
+    IDS_PAIR_TARGET         "Cible :"
+    IDS_CYCLE_HINT          "Cycle : la coche participe, les boutons ordonnent"
+    IDS_CYCLE_UP            "Monter"
+    IDS_CYCLE_DOWN          "Descendre"
+    IDS_SELECTION_ENABLED   "Convertir le texte sélectionné"
+    IDS_GROUP_EXCLUSIONS    "Exceptions"
+    IDS_EXCLUSION_REMOVE    "Retirer"
+    IDS_EXCLUSION_ADD       "Ajouter"
+    IDS_EXCLUSION_HINT      "Nom du processus, par exemple game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnostic"
+    IDS_LOG_ENABLED         "Tenir un journal"
+    // ⚠ Т-28-4: «Ouvrir le dossier du journal» demandait 160 px sur les 151 du bouton, et
+    // «Dossier du journal :» 114 px sur les 105 de l'étiquette. Raccourcis, pas remis en page.
+    IDS_LOG_OPEN            "Ouvrir le dossier"
+    IDS_LOG_DIR_LABEL       "Dossier :"
+    IDS_GROUP_STATE         "État"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Annuler"
+    IDS_APPLY               "Appliquer"
+    IDS_NOTE_TEXT_KEY       "C'est une touche de saisie : tant que le programme est actif, elle cesse d'écrire son caractère."
+    IDS_NOTE_UNKNOWN_KEY    "Nom de touche non reconnu — la touche par défaut, Pause, s'applique."
+    IDS_CAPTURE_PROMPT      "Appuyez sur une touche…"
+    IDS_CAPTURE_MODIFIER    "Une touche de modification seule ne peut pas être un raccourci."
+    IDS_CAPTURE_COMBINATION "Les combinaisons avec modificateurs ne sont pas prises en charge : le fichier ne garde qu'une touche."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 est la sortie d'urgence ; elle ne s'attribue pas."
+    IDS_CAPTURE_NAMELESS    "Cette touche n'a pas de nom dans le fichier de paramètres — choisissez-en une autre."
+    IDS_CAPTURE_RESERVED    "Le système occupe cette touche — choisissez-en une autre."
+    IDS_STATE_HOOK          "Interception clavier : {0} · rétablissements : {1} · échecs : {2}"
+    IDS_HOOK_UP             "actif"
+    IDS_HOOK_DOWN           "INACTIF"
+    IDS_STATE_LAYOUTS       "Dispositions dans la session : {0} · exceptions publiées : {1} · entrées du journal : {2}"
+    IDS_STATE_AUTOSTART     "Démarrage automatique dans le registre (HKCU\\…\\Run) : {0}"
+    IDS_AUTOSTART_PRESENT   "oui, {0}"
+    IDS_AUTOSTART_ABSENT    "non"
+    IDS_LAYOUT_NOTE         "La session n'a pas la disposition nommée dans le fichier ({0}) — choisissez de nouveau."
+    IDS_LAYOUT_WORD_SOURCE  "source"
+    IDS_LAYOUT_WORD_TARGET  "cible"
+    IDS_LOG_DIR_MISSING     "%APPDATA% n'est pas défini — nulle part où écrire le journal"
+    IDS_THEME_LABEL         "Apparence :"
+    IDS_THEME_SYSTEM        "Comme le système"
+    IDS_THEME_LIGHT         "Clair"
+    IDS_THEME_DARK          "Sombre"
+    IDS_SOUND               "Retour sonore"
+    IDS_ABOUT_CAPTION       "À propos"
+    IDS_ABOUT_VERSION       "version {0}"
+    IDS_ABOUT_LINE_1        "Corrige le texte tapé dans la mauvaise disposition."
+    IDS_ABOUT_LINE_2        "La conversion tient en une touche."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Comment s'en servir"
+    IDS_ABOUT_HELP_1        "Mot tapé dans la mauvaise disposition — appuyez sur {0} : le mot est converti, la disposition change."
+    IDS_ABOUT_HELP_2        "Appuyer de nouveau sur {0} rend le texte d'origine."
+    IDS_ABOUT_HELP_3        "Sélectionnez du texte et appuyez sur {0} — la sélection est convertie."
+    IDS_ABOUT_HELP_4        "Pause, paramètres et sortie sont dans l'icône de la zone de notification."
+    IDS_ABOUT_HELP_5        "Changer de touche : Paramètres → Raccourci."
+    IDS_CAPTURE_HINT        "Esc ou un clic à côté annule"
+END
+
+// ---------------------------------------------------------------------------------------
+// Spanish — `[general] language = "es"`. LANG_SPANISH 0x0A, which Windows answers as
+// `es-ES_tradnl`.
+// ---------------------------------------------------------------------------------------
+LANGUAGE 0x0A, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — configuración"
+    IDS_GROUP_GENERAL       "General"
+    IDS_AUTOSTART           "Iniciar al iniciar sesión"
+    IDS_LANGUAGE_LABEL      "Idioma:"
+    IDS_LANGUAGE_RESTART    "surte efecto tras reiniciar"
+    IDS_GROUP_HOTKEY        "Atajo"
+    IDS_HOTKEY_LABEL        "Tecla:"
+    IDS_HOTKEY_SET          "Definir"
+    IDS_HOTKEY_STOP         "Cancelar"
+    IDS_GROUP_LAYOUTS       "Distribuciones"
+    IDS_MODE_PAIR           "Par"
+    IDS_MODE_CYCLE          "Varias distribuciones"
+    IDS_PAIR_SOURCE         "Origen:"
+    IDS_PAIR_TARGET         "Destino:"
+    IDS_CYCLE_HINT          "Ciclo: la casilla participa, los botones ordenan"
+    IDS_CYCLE_UP            "Subir"
+    IDS_CYCLE_DOWN          "Bajar"
+    IDS_SELECTION_ENABLED   "Convertir el texto seleccionado"
+    IDS_GROUP_EXCLUSIONS    "Excepciones"
+    IDS_EXCLUSION_REMOVE    "Quitar"
+    IDS_EXCLUSION_ADD       "Añadir"
+    IDS_EXCLUSION_HINT      "Nombre del proceso, por ejemplo game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnóstico"
+    IDS_LOG_ENABLED         "Llevar un registro"
+    // ⚠ Т-28-4: «Abrir la carpeta del registro» pedía 163 px de los 151 del botón, y «Carpeta
+    // del registro:» 121 px de los 105 de la etiqueta. Acortados; la maquetación no se toca.
+    IDS_LOG_OPEN            "Abrir la carpeta"
+    IDS_LOG_DIR_LABEL       "Carpeta:"
+    IDS_GROUP_STATE         "Estado"
+    IDS_OK                  "Aceptar"
+    IDS_CANCEL              "Cancelar"
+    IDS_APPLY               "Aplicar"
+    IDS_NOTE_TEXT_KEY       "Es una tecla de escritura: mientras el programa esté activo dejará de escribir su carácter."
+    IDS_NOTE_UNKNOWN_KEY    "Nombre de tecla no reconocido — rige la tecla predeterminada, Pause."
+    IDS_CAPTURE_PROMPT      "Pulse una tecla…"
+    IDS_CAPTURE_MODIFIER    "Una tecla modificadora por sí sola no puede ser un atajo."
+    IDS_CAPTURE_COMBINATION "No se admiten combinaciones con modificadores: el archivo guarda una sola tecla."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 es la salida de emergencia; no se asigna."
+    IDS_CAPTURE_NAMELESS    "Esta tecla no tiene nombre en el archivo de configuración — elija otra."
+    IDS_CAPTURE_RESERVED    "El sistema ocupa esta tecla — elija otra."
+    IDS_STATE_HOOK          "Interceptación de teclado: {0} · restauraciones: {1} · fallos: {2}"
+    IDS_HOOK_UP             "activo"
+    IDS_HOOK_DOWN           "INACTIVO"
+    IDS_STATE_LAYOUTS       "Distribuciones en la sesión: {0} · excepciones publicadas: {1} · entradas del registro: {2}"
+    IDS_STATE_AUTOSTART     "Inicio automático en el registro (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "sí, {0}"
+    IDS_AUTOSTART_ABSENT    "no"
+    IDS_LAYOUT_NOTE         "La sesión no tiene la distribución nombrada en el archivo ({0}) — elija de nuevo."
+    IDS_LAYOUT_WORD_SOURCE  "origen"
+    IDS_LAYOUT_WORD_TARGET  "destino"
+    IDS_LOG_DIR_MISSING     "%APPDATA% no está definido — no hay dónde escribir el registro"
+    IDS_THEME_LABEL         "Apariencia:"
+    IDS_THEME_SYSTEM        "Como el sistema"
+    IDS_THEME_LIGHT         "Claro"
+    IDS_THEME_DARK          "Oscuro"
+    IDS_SOUND               "Respuesta sonora"
+    IDS_ABOUT_CAPTION       "Acerca de"
+    IDS_ABOUT_VERSION       "versión {0}"
+    IDS_ABOUT_LINE_1        "Corrige el texto escrito en la distribución equivocada."
+    IDS_ABOUT_LINE_2        "La conversión cuesta una sola tecla."
+    IDS_ABOUT_OK            "Aceptar"
+    IDS_ABOUT_HELP          "Cómo se usa"
+    IDS_ABOUT_HELP_1        "Escribió una palabra en la distribución equivocada — pulse {0}: la palabra se convierte y la distribución cambia."
+    IDS_ABOUT_HELP_2        "Pulsar {0} de nuevo devuelve el texto original."
+    IDS_ABOUT_HELP_3        "Seleccione texto y pulse {0} — se convierte lo seleccionado."
+    IDS_ABOUT_HELP_4        "Pausa, configuración y salida están en el icono del área de notificación."
+    IDS_ABOUT_HELP_5        "Cambiar la tecla: Configuración → Atajo."
+    IDS_CAPTURE_HINT        "Esc o un clic fuera cancela"
+END
+
+// ---------------------------------------------------------------------------------------
+// Portuguese (Brazil) — `[general] language = "pt"`. LANG_PORTUGUESE 0x16 with
+// SUBLANG_PORTUGUESE_BRAZILIAN 0x01, that is `pt-BR` and **not** the 0x0816 of Portugal.
+// ---------------------------------------------------------------------------------------
+LANGUAGE 0x16, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — configurações"
+    IDS_GROUP_GENERAL       "Geral"
+    IDS_AUTOSTART           "Iniciar ao entrar no sistema"
+    IDS_LANGUAGE_LABEL      "Idioma:"
+    IDS_LANGUAGE_RESTART    "vale após reiniciar"
+    IDS_GROUP_HOTKEY        "Atalho"
+    IDS_HOTKEY_LABEL        "Tecla:"
+    IDS_HOTKEY_SET          "Definir"
+    IDS_HOTKEY_STOP         "Cancelar"
+    IDS_GROUP_LAYOUTS       "Layouts"
+    IDS_MODE_PAIR           "Par"
+    IDS_MODE_CYCLE          "Vários layouts"
+    IDS_PAIR_SOURCE         "Origem:"
+    IDS_PAIR_TARGET         "Destino:"
+    IDS_CYCLE_HINT          "Ciclo: a marca participa, os botões ordenam"
+    IDS_CYCLE_UP            "Acima"
+    IDS_CYCLE_DOWN          "Abaixo"
+    IDS_SELECTION_ENABLED   "Converter o texto selecionado"
+    IDS_GROUP_EXCLUSIONS    "Exceções"
+    IDS_EXCLUSION_REMOVE    "Remover"
+    IDS_EXCLUSION_ADD       "Adicionar"
+    IDS_EXCLUSION_HINT      "Nome do processo, por exemplo game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnóstico"
+    IDS_LOG_ENABLED         "Manter um registro"
+    IDS_LOG_OPEN            "Abrir a pasta do registro"
+    IDS_LOG_DIR_LABEL       "Pasta do registro:"
+    IDS_GROUP_STATE         "Estado"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Cancelar"
+    IDS_APPLY               "Aplicar"
+    IDS_NOTE_TEXT_KEY       "Esta é uma tecla de escrita: enquanto o programa estiver ativo, ela deixa de digitar seu caractere."
+    IDS_NOTE_UNKNOWN_KEY    "Nome da tecla não reconhecido — vale a tecla padrão, Pause."
+    IDS_CAPTURE_PROMPT      "Pressione uma tecla…"
+    IDS_CAPTURE_MODIFIER    "Uma tecla modificadora sozinha não pode ser um atalho."
+    IDS_CAPTURE_COMBINATION "Combinações com modificadores não têm suporte: o arquivo guarda uma única tecla."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 é a saída de emergência; não se atribui."
+    IDS_CAPTURE_NAMELESS    "Esta tecla não tem nome no arquivo de configurações — escolha outra."
+    IDS_CAPTURE_RESERVED    "O sistema ocupa esta tecla — escolha outra."
+    IDS_STATE_HOOK          "Interceptação do teclado: {0} · restaurações: {1} · falhas: {2}"
+    IDS_HOOK_UP             "ativa"
+    IDS_HOOK_DOWN           "INATIVA"
+    IDS_STATE_LAYOUTS       "Layouts na sessão: {0} · exceções publicadas: {1} · entradas do registro: {2}"
+    IDS_STATE_AUTOSTART     "Inicialização automática no registro (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "sim, {0}"
+    IDS_AUTOSTART_ABSENT    "não"
+    IDS_LAYOUT_NOTE         "A sessão não tem o layout nomeado no arquivo ({0}) — escolha de novo."
+    IDS_LAYOUT_WORD_SOURCE  "origem"
+    IDS_LAYOUT_WORD_TARGET  "destino"
+    IDS_LOG_DIR_MISSING     "%APPDATA% não está definido — não há onde escrever o registro"
+    IDS_THEME_LABEL         "Aparência:"
+    IDS_THEME_SYSTEM        "Como o sistema"
+    IDS_THEME_LIGHT         "Claro"
+    IDS_THEME_DARK          "Escuro"
+    IDS_SOUND               "Resposta sonora"
+    IDS_ABOUT_CAPTION       "Sobre"
+    IDS_ABOUT_VERSION       "versão {0}"
+    IDS_ABOUT_LINE_1        "Corrige o texto digitado no layout errado."
+    IDS_ABOUT_LINE_2        "A conversão custa uma tecla."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Como usar"
+    IDS_ABOUT_HELP_1        "Digitou a palavra no layout errado — pressione {0}: a palavra é convertida e o layout muda."
+    IDS_ABOUT_HELP_2        "Pressionar {0} de novo devolve o texto original."
+    IDS_ABOUT_HELP_3        "Selecione o texto e pressione {0} — a seleção é convertida."
+    IDS_ABOUT_HELP_4        "Pausa, configurações e saída ficam no ícone da área de notificação."
+    IDS_ABOUT_HELP_5        "Trocar a tecla: Configurações → Atalho."
+    IDS_CAPTURE_HINT        "Esc ou um clique fora cancela"
+END
+
+// ---------------------------------------------------------------------------------------
+// Italian — `[general] language = "it"`. LANG_ITALIAN 0x10.
+// ---------------------------------------------------------------------------------------
+LANGUAGE 0x10, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — impostazioni"
+    IDS_GROUP_GENERAL       "Generale"
+    IDS_AUTOSTART           "Avvia all'accesso"
+    IDS_LANGUAGE_LABEL      "Lingua:"
+    IDS_LANGUAGE_RESTART    "ha effetto dopo il riavvio"
+    IDS_GROUP_HOTKEY        "Scorciatoia"
+    IDS_HOTKEY_LABEL        "Tasto:"
+    IDS_HOTKEY_SET          "Imposta"
+    IDS_HOTKEY_STOP         "Annulla"
+    IDS_GROUP_LAYOUTS       "Layout"
+    IDS_MODE_PAIR           "Coppia"
+    IDS_MODE_CYCLE          "Più layout"
+    // ⚠ Т-28-4: «Destinazione:» chiedeva 44,0 unità sulle 42,3 dell'etichetta. La coppia
+    // diventa «Da:» / «A:» — l'idioma italiano per origine e destinazione, quello che usano le
+    // finestre di copia del sistema, e due parole vere, non abbreviazioni. I sostantivi
+    // «origine» e «destinazione» restano dove c'è spazio: dentro la nota del layout.
+    IDS_PAIR_SOURCE         "Da:"
+    IDS_PAIR_TARGET         "A:"
+    IDS_CYCLE_HINT          "Ciclo: la spunta partecipa, i pulsanti ordinano"
+    IDS_CYCLE_UP            "Su"
+    IDS_CYCLE_DOWN          "Giù"
+    IDS_SELECTION_ENABLED   "Converti il testo selezionato"
+    IDS_GROUP_EXCLUSIONS    "Eccezioni"
+    IDS_EXCLUSION_REMOVE    "Rimuovi"
+    IDS_EXCLUSION_ADD       "Aggiungi"
+    IDS_EXCLUSION_HINT      "Nome del processo, per esempio game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnostica"
+    IDS_LOG_ENABLED         "Tenere un registro"
+    // ⚠ Т-28-4: «Apri la cartella del registro» chiedeva 156 px sui 151 del pulsante, e
+    // «Cartella del registro:» 119 px sui 105 dell'etichetta. Accorciati, non rimpaginati.
+    IDS_LOG_OPEN            "Apri la cartella"
+    IDS_LOG_DIR_LABEL       "Cartella:"
+    IDS_GROUP_STATE         "Stato"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Annulla"
+    IDS_APPLY               "Applica"
+    IDS_NOTE_TEXT_KEY       "È un tasto di scrittura: finché il programma è attivo smette di inserire il suo carattere."
+    IDS_NOTE_UNKNOWN_KEY    "Nome del tasto non riconosciuto — vale il tasto predefinito, Pause."
+    IDS_CAPTURE_PROMPT      "Premi un tasto…"
+    IDS_CAPTURE_MODIFIER    "Un tasto modificatore da solo non può essere una scorciatoia."
+    IDS_CAPTURE_COMBINATION "Le combinazioni con modificatori non sono supportate: il file tiene un solo tasto."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 è l'uscita di emergenza e non si assegna."
+    IDS_CAPTURE_NAMELESS    "Questo tasto non ha un nome nel file delle impostazioni — scegline un altro."
+    IDS_CAPTURE_RESERVED    "Il sistema occupa questo tasto — scegline un altro."
+    IDS_STATE_HOOK          "Intercettazione tastiera: {0} · ripristini: {1} · errori: {2}"
+    IDS_HOOK_UP             "attiva"
+    IDS_HOOK_DOWN           "NON ATTIVA"
+    IDS_STATE_LAYOUTS       "Layout nella sessione: {0} · eccezioni pubblicate: {1} · voci nel registro: {2}"
+    IDS_STATE_AUTOSTART     "Avvio automatico nel registro (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "sì, {0}"
+    IDS_AUTOSTART_ABSENT    "no"
+    IDS_LAYOUT_NOTE         "La sessione non ha il layout indicato nel file ({0}) — scegli di nuovo."
+    IDS_LAYOUT_WORD_SOURCE  "origine"
+    IDS_LAYOUT_WORD_TARGET  "destinazione"
+    IDS_LOG_DIR_MISSING     "%APPDATA% non è impostato — non c'è dove scrivere il registro"
+    IDS_THEME_LABEL         "Aspetto:"
+    IDS_THEME_SYSTEM        "Come il sistema"
+    IDS_THEME_LIGHT         "Chiaro"
+    IDS_THEME_DARK          "Scuro"
+    IDS_SOUND               "Risposta sonora"
+    IDS_ABOUT_CAPTION       "Informazioni"
+    IDS_ABOUT_VERSION       "versione {0}"
+    IDS_ABOUT_LINE_1        "Corregge il testo digitato nel layout sbagliato."
+    IDS_ABOUT_LINE_2        "La conversione costa un tasto."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Come si usa"
+    IDS_ABOUT_HELP_1        "Parola digitata nel layout sbagliato — premi {0}: la parola si converte e il layout cambia."
+    IDS_ABOUT_HELP_2        "Premere {0} di nuovo riporta il testo originale."
+    IDS_ABOUT_HELP_3        "Seleziona il testo e premi {0} — la selezione viene convertita."
+    IDS_ABOUT_HELP_4        "Pausa, impostazioni e uscita sono nell'icona dell'area di notifica."
+    IDS_ABOUT_HELP_5        "Cambiare tasto: Impostazioni → Scorciatoia."
+    IDS_CAPTURE_HINT        "Esc o un clic fuori annulla"
+END
+
+// ---------------------------------------------------------------------------------------
+// Polish — `[general] language = "pl"`. LANG_POLISH 0x15.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ Ogoneks and the crossed ł are the letters the code page decides: `ą ę ł ń ó ś ź ż`. The
+// help lines are written impersonally («Słowo napisane…»), not in the second person singular,
+// so that no string carries a grammatical gender for its reader.
+LANGUAGE 0x15, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — ustawienia"
+    IDS_GROUP_GENERAL       "Ogólne"
+    IDS_AUTOSTART           "Uruchamiaj przy logowaniu"
+    IDS_LANGUAGE_LABEL      "Język:"
+    // ⚠ Т-28-4: «zadziała po ponownym uruchomieniu» rozpadało się na TRZY wiersze w polu
+    // dwuwierszowym (51 px potrzeba, 38 px jest). Krótsze zdanie mieści się w dwóch.
+    IDS_LANGUAGE_RESTART    "zacznie działać po restarcie"
+    IDS_GROUP_HOTKEY        "Skrót klawiszowy"
+    IDS_HOTKEY_LABEL        "Klawisz:"
+    IDS_HOTKEY_SET          "Ustaw"
+    IDS_HOTKEY_STOP         "Anuluj"
+    IDS_GROUP_LAYOUTS       "Układy"
+    IDS_MODE_PAIR           "Para"
+    IDS_MODE_CYCLE          "Kilka układów"
+    IDS_PAIR_SOURCE         "Źródło:"
+    IDS_PAIR_TARGET         "Cel:"
+    IDS_CYCLE_HINT          "Cykl: znacznik — udział, przyciski — kolejność"
+    IDS_CYCLE_UP            "W górę"
+    IDS_CYCLE_DOWN          "W dół"
+    IDS_SELECTION_ENABLED   "Konwertuj zaznaczony tekst"
+    IDS_GROUP_EXCLUSIONS    "Wyjątki"
+    IDS_EXCLUSION_REMOVE    "Usuń"
+    IDS_EXCLUSION_ADD       "Dodaj"
+    IDS_EXCLUSION_HINT      "Nazwa procesu, na przykład game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnostyka"
+    IDS_LOG_ENABLED         "Prowadź dziennik"
+    IDS_LOG_OPEN            "Otwórz folder dziennika"
+    IDS_LOG_DIR_LABEL       "Folder dziennika:"
+    IDS_GROUP_STATE         "Stan"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Anuluj"
+    IDS_APPLY               "Zastosuj"
+    IDS_NOTE_TEXT_KEY       "To klawisz pisania: dopóki program działa, przestanie wprowadzać swój znak."
+    IDS_NOTE_UNKNOWN_KEY    "Nazwa klawisza nierozpoznana — obowiązuje klawisz domyślny, Pause."
+    IDS_CAPTURE_PROMPT      "Naciśnij klawisz…"
+    IDS_CAPTURE_MODIFIER    "Sam klawisz modyfikujący nie może być skrótem."
+    IDS_CAPTURE_COMBINATION "Kombinacje z modyfikatorami nie są obsługiwane: plik ustawień trzyma jeden klawisz."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 to awaryjne wyjście — tej kombinacji nie przypisuje się."
+    IDS_CAPTURE_NAMELESS    "Ten klawisz nie ma nazwy w pliku ustawień — wybierz inny."
+    IDS_CAPTURE_RESERVED    "Ten klawisz zajmuje system — wybierz inny."
+    IDS_STATE_HOOK          "Przechwytywanie klawiatury: {0} · przywróceń: {1} · niepowodzeń: {2}"
+    IDS_HOOK_UP             "aktywne"
+    IDS_HOOK_DOWN           "NIEAKTYWNE"
+    IDS_STATE_LAYOUTS       "Układów w sesji: {0} · opublikowanych wyjątków: {1} · wpisów w dzienniku: {2}"
+    IDS_STATE_AUTOSTART     "Autostart w rejestrze (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "jest, {0}"
+    IDS_AUTOSTART_ABSENT    "nie ma"
+    IDS_LAYOUT_NOTE         "W sesji nie ma układu wskazanego w pliku ({0}) — wybierz ponownie."
+    IDS_LAYOUT_WORD_SOURCE  "źródło"
+    IDS_LAYOUT_WORD_TARGET  "cel"
+    IDS_LOG_DIR_MISSING     "%APPDATA% nie jest ustawiona — nie ma gdzie pisać dziennika"
+    IDS_THEME_LABEL         "Wygląd:"
+    IDS_THEME_SYSTEM        "Jak w systemie"
+    IDS_THEME_LIGHT         "Jasny"
+    IDS_THEME_DARK          "Ciemny"
+    IDS_SOUND               "Sygnał dźwiękowy"
+    IDS_ABOUT_CAPTION       "O programie"
+    IDS_ABOUT_VERSION       "wersja {0}"
+    IDS_ABOUT_LINE_1        "Poprawia tekst napisany w złym układzie."
+    IDS_ABOUT_LINE_2        "Konwersja kosztuje jedno naciśnięcie."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Jak używać"
+    IDS_ABOUT_HELP_1        "Słowo napisane w złym układzie — naciśnij {0}: słowo się przekonwertuje, układ się przełączy."
+    IDS_ABOUT_HELP_2        "Ponowne naciśnięcie {0} przywraca pierwotny tekst."
+    IDS_ABOUT_HELP_3        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane."
+    IDS_ABOUT_HELP_4        "Pauza, ustawienia i wyjście są w ikonie w zasobniku."
+    IDS_ABOUT_HELP_5        "Zmiana klawisza: Ustawienia → Skrót klawiszowy."
+    IDS_CAPTURE_HINT        "Esc albo kliknięcie obok anuluje"
+END
+
+// ---------------------------------------------------------------------------------------
+// Czech — `[general] language = "cs"`. LANG_CZECH 0x05.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ The carons and the ring — `č ď ě ň ř š ť ů ž` — are the letters the code page decides.
+LANGUAGE 0x05, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — nastavení"
+    IDS_GROUP_GENERAL       "Obecné"
+    IDS_AUTOSTART           "Spouštět při přihlášení"
+    IDS_LANGUAGE_LABEL      "Jazyk:"
+    IDS_LANGUAGE_RESTART    "projeví se po restartu"
+    IDS_GROUP_HOTKEY        "Klávesová zkratka"
+    IDS_HOTKEY_LABEL        "Klávesa:"
+    IDS_HOTKEY_SET          "Nastavit"
+    IDS_HOTKEY_STOP         "Zrušit"
+    IDS_GROUP_LAYOUTS       "Rozložení"
+    IDS_MODE_PAIR           "Dvojice"
+    IDS_MODE_CYCLE          "Několik rozložení"
+    IDS_PAIR_SOURCE         "Zdroj:"
+    IDS_PAIR_TARGET         "Cíl:"
+    IDS_CYCLE_HINT          "Cyklus: zaškrtnutí — účast, tlačítka — pořadí"
+    IDS_CYCLE_UP            "Nahoru"
+    IDS_CYCLE_DOWN          "Dolů"
+    IDS_SELECTION_ENABLED   "Převést vybraný text"
+    IDS_GROUP_EXCLUSIONS    "Výjimky"
+    IDS_EXCLUSION_REMOVE    "Odebrat"
+    IDS_EXCLUSION_ADD       "Přidat"
+    IDS_EXCLUSION_HINT      "Název procesu, například game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Diagnostika"
+    IDS_LOG_ENABLED         "Vést protokol"
+    IDS_LOG_OPEN            "Otevřít složku protokolu"
+    IDS_LOG_DIR_LABEL       "Složka protokolu:"
+    IDS_GROUP_STATE         "Stav"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Zrušit"
+    IDS_APPLY               "Použít"
+    IDS_NOTE_TEXT_KEY       "Toto je psací klávesa: dokud program běží, přestane psát svůj znak."
+    IDS_NOTE_UNKNOWN_KEY    "Název klávesy nebyl rozpoznán — platí výchozí klávesa Pause."
+    IDS_CAPTURE_PROMPT      "Stiskněte klávesu…"
+    IDS_CAPTURE_MODIFIER    "Modifikační klávesa sama o sobě zkratkou být nemůže."
+    IDS_CAPTURE_COMBINATION "Kombinace s modifikátory nejsou podporovány: soubor nastavení drží jednu klávesu."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 je nouzové ukončení a nepřiřazuje se."
+    IDS_CAPTURE_NAMELESS    "Tato klávesa nemá v souboru nastavení název — zvolte jinou."
+    IDS_CAPTURE_RESERVED    "Tuto klávesu zabírá systém — zvolte jinou."
+    IDS_STATE_HOOK          "Zachytávání klávesnice: {0} · obnovení: {1} · selhání: {2}"
+    IDS_HOOK_UP             "aktivní"
+    IDS_HOOK_DOWN           "NEAKTIVNÍ"
+    IDS_STATE_LAYOUTS       "Rozložení v relaci: {0} · zveřejněných výjimek: {1} · záznamů v protokolu: {2}"
+    IDS_STATE_AUTOSTART     "Automatické spuštění v registru (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "ano, {0}"
+    IDS_AUTOSTART_ABSENT    "ne"
+    IDS_LAYOUT_NOTE         "Relace nemá rozložení uvedené v souboru ({0}) — zvolte znovu."
+    IDS_LAYOUT_WORD_SOURCE  "zdroj"
+    IDS_LAYOUT_WORD_TARGET  "cíl"
+    IDS_LOG_DIR_MISSING     "%APPDATA% není nastavena — protokol není kam psát"
+    IDS_THEME_LABEL         "Vzhled:"
+    IDS_THEME_SYSTEM        "Jako systém"
+    IDS_THEME_LIGHT         "Světlý"
+    IDS_THEME_DARK          "Tmavý"
+    IDS_SOUND               "Zvuková odezva"
+    IDS_ABOUT_CAPTION       "O programu"
+    IDS_ABOUT_VERSION       "verze {0}"
+    IDS_ABOUT_LINE_1        "Opravuje text napsaný ve špatném rozložení."
+    IDS_ABOUT_LINE_2        "Převod stojí jedno stisknutí klávesy."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Jak se používá"
+    IDS_ABOUT_HELP_1        "Slovo napsané ve špatném rozložení — stiskněte {0}: slovo se převede a rozložení se přepne."
+    IDS_ABOUT_HELP_2        "Další stisk {0} vrátí původní text."
+    IDS_ABOUT_HELP_3        "Vyberte text a stiskněte {0} — převede se výběr."
+    IDS_ABOUT_HELP_4        "Pozastavení, nastavení a ukončení jsou v ikoně v oznamovací oblasti."
+    IDS_ABOUT_HELP_5        "Změna klávesy: Nastavení → Klávesová zkratka."
+    IDS_CAPTURE_HINT        "Esc nebo kliknutí vedle zruší"
+END
+
+// ---------------------------------------------------------------------------------------
+// Turkish — `[general] language = "tr"`. LANG_TURKISH 0x1F.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ **The dotted and dotless i.** Turkish has four letters where other Latin alphabets have
+// two: `i`/`İ` and `ı`/`I`. Every capital at the start of a string below was checked by eye
+// against that rule — «İptal», «İstisnalar», «İşlem adı» carry the dot, and «ETKİN DEĞİL» does
+// too. Getting it wrong is not mojibake and no instrument catches it; only reading catches it.
+LANGUAGE 0x1F, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — ayarlar"
+    IDS_GROUP_GENERAL       "Genel"
+    IDS_AUTOSTART           "Oturum açıldığında başlat"
+    IDS_LANGUAGE_LABEL      "Dil:"
+    IDS_LANGUAGE_RESTART    "yeniden başlatınca geçerli olur"
+    IDS_GROUP_HOTKEY        "Kısayol tuşu"
+    IDS_HOTKEY_LABEL        "Tuş:"
+    IDS_HOTKEY_SET          "Ata"
+    IDS_HOTKEY_STOP         "İptal"
+    IDS_GROUP_LAYOUTS       "Düzenler"
+    IDS_MODE_PAIR           "Çift"
+    IDS_MODE_CYCLE          "Birkaç düzen"
+    IDS_PAIR_SOURCE         "Kaynak:"
+    IDS_PAIR_TARGET         "Hedef:"
+    IDS_CYCLE_HINT          "Döngü: işaret — katılım, düğmeler — sıra"
+    IDS_CYCLE_UP            "Yukarı"
+    IDS_CYCLE_DOWN          "Aşağı"
+    IDS_SELECTION_ENABLED   "Seçili metni dönüştür"
+    IDS_GROUP_EXCLUSIONS    "İstisnalar"
+    IDS_EXCLUSION_REMOVE    "Kaldır"
+    IDS_EXCLUSION_ADD       "Ekle"
+    IDS_EXCLUSION_HINT      "İşlem adı, örneğin game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Tanılama"
+    IDS_LOG_ENABLED         "Günlük tut"
+    IDS_LOG_OPEN            "Günlük klasörünü aç"
+    IDS_LOG_DIR_LABEL       "Günlük klasörü:"
+    IDS_GROUP_STATE         "Durum"
+    IDS_OK                  "Tamam"
+    IDS_CANCEL              "İptal"
+    IDS_APPLY               "Uygula"
+    IDS_NOTE_TEXT_KEY       "Bu bir yazı tuşu: program etkinken kendi karakterini yazmayı bırakır."
+    IDS_NOTE_UNKNOWN_KEY    "Tuş adı tanınmadı — varsayılan tuş Pause geçerli."
+    IDS_CAPTURE_PROMPT      "Bir tuşa basın…"
+    IDS_CAPTURE_MODIFIER    "Değiştirici tuş tek başına kısayol olamaz."
+    IDS_CAPTURE_COMBINATION "Değiştiricili birleşimler desteklenmiyor: ayar dosyası tek tuş tutar."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 acil çıkıştır, atanamaz."
+    IDS_CAPTURE_NAMELESS    "Bu tuşun ayar dosyasında adı yok — başka bir tuş seçin."
+    IDS_CAPTURE_RESERVED    "Bu tuşu sistem kullanıyor — başka bir tuş seçin."
+    IDS_STATE_HOOK          "Klavye yakalama: {0} · geri yükleme: {1} · kurulum hatası: {2}"
+    IDS_HOOK_UP             "etkin"
+    IDS_HOOK_DOWN           "ETKİN DEĞİL"
+    IDS_STATE_LAYOUTS       "Oturumdaki düzen: {0} · yayımlanan istisna: {1} · günlük kaydı: {2}"
+    IDS_STATE_AUTOSTART     "Kayıt defterinde otomatik başlatma (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "var, {0}"
+    IDS_AUTOSTART_ABSENT    "yok"
+    IDS_LAYOUT_NOTE         "Oturumda dosyada adı geçen düzen yok ({0}) — yeniden seçin."
+    IDS_LAYOUT_WORD_SOURCE  "kaynak"
+    IDS_LAYOUT_WORD_TARGET  "hedef"
+    IDS_LOG_DIR_MISSING     "%APPDATA% tanımlı değil — günlüğü yazacak yer yok"
+    IDS_THEME_LABEL         "Görünüm:"
+    IDS_THEME_SYSTEM        "Sistemle aynı"
+    IDS_THEME_LIGHT         "Açık"
+    IDS_THEME_DARK          "Koyu"
+    IDS_SOUND               "Sesli geri bildirim"
+    IDS_ABOUT_CAPTION       "Hakkında"
+    IDS_ABOUT_VERSION       "sürüm {0}"
+    IDS_ABOUT_LINE_1        "Yanlış klavye düzeninde yazılan metni düzeltir."
+    IDS_ABOUT_LINE_2        "Dönüştürme tek tuşa bakar."
+    IDS_ABOUT_OK            "Tamam"
+    IDS_ABOUT_HELP          "Nasıl kullanılır"
+    IDS_ABOUT_HELP_1        "Kelimeyi yanlış düzende yazdınız — {0} tuşuna basın: kelime dönüşür, düzen değişir."
+    IDS_ABOUT_HELP_2        "{0} tuşuna yeniden basmak özgün metni geri getirir."
+    IDS_ABOUT_HELP_3        "Metni seçip {0} tuşuna basın — seçim dönüştürülür."
+    IDS_ABOUT_HELP_4        "Duraklatma, ayarlar ve çıkış bildirim alanı simgesindedir."
+    IDS_ABOUT_HELP_5        "Tuşu değiştirmek: Ayarlar → Kısayol tuşu."
+    IDS_CAPTURE_HINT        "Esc ya da dışarı tıklamak iptal eder"
+END
+
+// ---------------------------------------------------------------------------------------
+// Greek — `[general] language = "el"`. LANG_GREEK 0x08.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ The only non-Latin, non-Cyrillic script of the twelve, and therefore the sharpest test of
+// the code page: every letter here is two bytes in UTF-8 and one wrong reading turns the whole
+// table into `Î•Î»…`. The tonos is written on the multisyllabic words that carry it and on no
+// others; «OK» stays in Latin letters, which is what Greek Windows itself shows on the button.
+LANGUAGE 0x08, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — ρυθμίσεις"
+    IDS_GROUP_GENERAL       "Γενικά"
+    IDS_AUTOSTART           "Εκκίνηση με τη σύνδεση"
+    IDS_LANGUAGE_LABEL      "Γλώσσα:"
+    IDS_LANGUAGE_RESTART    "ισχύει μετά την επανεκκίνηση"
+    IDS_GROUP_HOTKEY        "Συντόμευση"
+    IDS_HOTKEY_LABEL        "Πλήκτρο:"
+    IDS_HOTKEY_SET          "Ορισμός"
+    IDS_HOTKEY_STOP         "Άκυρο"
+    IDS_GROUP_LAYOUTS       "Διατάξεις"
+    IDS_MODE_PAIR           "Ζεύγος"
+    IDS_MODE_CYCLE          "Πολλές διατάξεις"
+    IDS_PAIR_SOURCE         "Πηγή:"
+    // ⚠ Т-28-4: «Προορισμός:» ζητούσε 42,9 μονάδες από τις 42,3 της ετικέτας. «Στόχος» είναι
+    // η ίδια έννοια σε λιγότερα γράμματα, και το γλωσσάρι το κρατά και στη σημείωση παρακάτω.
+    IDS_PAIR_TARGET         "Στόχος:"
+    IDS_CYCLE_HINT          "Κύκλος: το τικ συμμετέχει, τα κουμπιά ορίζουν σειρά"
+    IDS_CYCLE_UP            "Πάνω"
+    IDS_CYCLE_DOWN          "Κάτω"
+    IDS_SELECTION_ENABLED   "Μετατροπή επιλεγμένου κειμένου"
+    IDS_GROUP_EXCLUSIONS    "Εξαιρέσεις"
+    IDS_EXCLUSION_REMOVE    "Αφαίρεση"
+    IDS_EXCLUSION_ADD       "Προσθήκη"
+    IDS_EXCLUSION_HINT      "Όνομα διεργασίας, για παράδειγμα game.exe"
+    IDS_GROUP_DIAGNOSTICS   "Διαγνωστικά"
+    IDS_LOG_ENABLED         "Τήρηση καταγραφής"
+    // ⚠ Т-28-4: «Άνοιγμα φακέλου καταγραφής» ζητούσε 181 px από τα 151 του κουμπιού, και
+    // «Φάκελος καταγραφής:» 131 px από τα 105 της ετικέτας. Συντομεύτηκαν, χωρίς αλλαγή σχεδίου.
+    IDS_LOG_OPEN            "Άνοιγμα φακέλου"
+    IDS_LOG_DIR_LABEL       "Φάκελος:"
+    IDS_GROUP_STATE         "Κατάσταση"
+    IDS_OK                  "OK"
+    IDS_CANCEL              "Άκυρο"
+    IDS_APPLY               "Εφαρμογή"
+    IDS_NOTE_TEXT_KEY       "Αυτό είναι πλήκτρο γραφής: όσο το πρόγραμμα είναι ενεργό, παύει να γράφει τον χαρακτήρα του."
+    IDS_NOTE_UNKNOWN_KEY    "Το όνομα του πλήκτρου δεν αναγνωρίστηκε — ισχύει το προεπιλεγμένο πλήκτρο Pause."
+    IDS_CAPTURE_PROMPT      "Πατήστε ένα πλήκτρο…"
+    IDS_CAPTURE_MODIFIER    "Ένα πλήκτρο τροποποίησης μόνο του δεν γίνεται συντόμευση."
+    IDS_CAPTURE_COMBINATION "Οι συνδυασμοί με πλήκτρα τροποποίησης δεν υποστηρίζονται: το αρχείο κρατά ένα πλήκτρο."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 είναι η έξοδος έκτακτης ανάγκης και δεν ανατίθεται."
+    IDS_CAPTURE_NAMELESS    "Αυτό το πλήκτρο δεν έχει όνομα στο αρχείο ρυθμίσεων — επιλέξτε άλλο."
+    IDS_CAPTURE_RESERVED    "Το σύστημα κρατά αυτό το πλήκτρο — επιλέξτε άλλο."
+    IDS_STATE_HOOK          "Παρακολούθηση πληκτρολογίου: {0} · αποκαταστάσεις: {1} · αποτυχίες: {2}"
+    IDS_HOOK_UP             "ενεργή"
+    IDS_HOOK_DOWN           "ΑΝΕΝΕΡΓΗ"
+    IDS_STATE_LAYOUTS       "Διατάξεις στη συνεδρία: {0} · δημοσιευμένες εξαιρέσεις: {1} · εγγραφές καταγραφής: {2}"
+    IDS_STATE_AUTOSTART     "Αυτόματη εκκίνηση στο μητρώο (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "ναι, {0}"
+    IDS_AUTOSTART_ABSENT    "όχι"
+    IDS_LAYOUT_NOTE         "Η συνεδρία δεν έχει τη διάταξη του αρχείου ({0}) — επιλέξτε ξανά."
+    IDS_LAYOUT_WORD_SOURCE  "πηγή"
+    IDS_LAYOUT_WORD_TARGET  "στόχος"
+    IDS_LOG_DIR_MISSING     "Το %APPDATA% δεν ορίστηκε — δεν υπάρχει πού να γραφτεί η καταγραφή"
+    IDS_THEME_LABEL         "Εμφάνιση:"
+    IDS_THEME_SYSTEM        "Όπως το σύστημα"
+    IDS_THEME_LIGHT         "Ανοιχτό"
+    IDS_THEME_DARK          "Σκούρο"
+    IDS_SOUND               "Ηχητική απόκριση"
+    IDS_ABOUT_CAPTION       "Σχετικά"
+    IDS_ABOUT_VERSION       "έκδοση {0}"
+    IDS_ABOUT_LINE_1        "Διορθώνει κείμενο γραμμένο σε λάθος διάταξη."
+    IDS_ABOUT_LINE_2        "Η μετατροπή κοστίζει ένα πάτημα."
+    IDS_ABOUT_OK            "OK"
+    IDS_ABOUT_HELP          "Πώς χρησιμοποιείται"
+    IDS_ABOUT_HELP_1        "Γράψατε λέξη σε λάθος διάταξη — πατήστε {0}: η λέξη μετατρέπεται, η διάταξη αλλάζει."
+    IDS_ABOUT_HELP_2        "Νέο πάτημα του {0} επαναφέρει το αρχικό κείμενο."
+    IDS_ABOUT_HELP_3        "Επιλέξτε κείμενο και πατήστε {0} — μετατρέπεται η επιλογή."
+    IDS_ABOUT_HELP_4        "Παύση, ρυθμίσεις και έξοδος είναι στο εικονίδιο ειδοποιήσεων."
+    IDS_ABOUT_HELP_5        "Αλλαγή πλήκτρου: Ρυθμίσεις → Συντόμευση."
+    IDS_CAPTURE_HINT        "Esc ή κλικ αλλού ακυρώνει"
+END
+
 // ---------------------------------------------------------------------------------------
 // The menu of FR-91, both locales. Task T-08-2.
 // ---------------------------------------------------------------------------------------
@@ -1053,4 +1856,122 @@ BEGIN
     IDS_MENU_AUTOSTART      "Start when I sign in"
     IDS_MENU_ABOUT          "About"
     IDS_MENU_EXIT           "Exit"
+END
+
+// ---------------------------------------------------------------------------------------
+// The same menu in the ten locales of tier one — решение 93, task Т-28-3.
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ «Запускать при входе в систему» is the **same sentence** as `IDS_AUTOSTART` of the dialog
+// above, and it is translated the same way in every locale on purpose: one action, one wording,
+// two places it can be reached from. A test compares the two rows in all twelve tables.
+
+LANGUAGE 0x22, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Призупинити"
+    IDS_MENU_RESUME         "Відновити"
+    IDS_MENU_SETTINGS       "Налаштування…"
+    IDS_MENU_AUTOSTART      "Запускати під час входу в систему"
+    IDS_MENU_ABOUT          "Про програму"
+    IDS_MENU_EXIT           "Вихід"
+END
+
+LANGUAGE 0x07, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Anhalten"
+    IDS_MENU_RESUME         "Fortsetzen"
+    IDS_MENU_SETTINGS       "Einstellungen…"
+    IDS_MENU_AUTOSTART      "Beim Anmelden starten"
+    IDS_MENU_ABOUT          "Über"
+    IDS_MENU_EXIT           "Beenden"
+END
+
+LANGUAGE 0x0C, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Suspendre"
+    IDS_MENU_RESUME         "Reprendre"
+    IDS_MENU_SETTINGS       "Paramètres…"
+    IDS_MENU_AUTOSTART      "Démarrer à l'ouverture de session"
+    IDS_MENU_ABOUT          "À propos"
+    IDS_MENU_EXIT           "Quitter"
+END
+
+LANGUAGE 0x0A, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Pausar"
+    IDS_MENU_RESUME         "Reanudar"
+    IDS_MENU_SETTINGS       "Configuración…"
+    IDS_MENU_AUTOSTART      "Iniciar al iniciar sesión"
+    IDS_MENU_ABOUT          "Acerca de"
+    IDS_MENU_EXIT           "Salir"
+END
+
+LANGUAGE 0x16, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Pausar"
+    IDS_MENU_RESUME         "Retomar"
+    IDS_MENU_SETTINGS       "Configurações…"
+    IDS_MENU_AUTOSTART      "Iniciar ao entrar no sistema"
+    IDS_MENU_ABOUT          "Sobre"
+    IDS_MENU_EXIT           "Sair"
+END
+
+LANGUAGE 0x10, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Sospendi"
+    IDS_MENU_RESUME         "Riprendi"
+    IDS_MENU_SETTINGS       "Impostazioni…"
+    IDS_MENU_AUTOSTART      "Avvia all'accesso"
+    IDS_MENU_ABOUT          "Informazioni"
+    IDS_MENU_EXIT           "Esci"
+END
+
+LANGUAGE 0x15, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Wstrzymaj"
+    IDS_MENU_RESUME         "Wznów"
+    IDS_MENU_SETTINGS       "Ustawienia…"
+    IDS_MENU_AUTOSTART      "Uruchamiaj przy logowaniu"
+    IDS_MENU_ABOUT          "O programie"
+    IDS_MENU_EXIT           "Zakończ"
+END
+
+LANGUAGE 0x05, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Pozastavit"
+    IDS_MENU_RESUME         "Pokračovat"
+    IDS_MENU_SETTINGS       "Nastavení…"
+    IDS_MENU_AUTOSTART      "Spouštět při přihlášení"
+    IDS_MENU_ABOUT          "O programu"
+    IDS_MENU_EXIT           "Ukončit"
+END
+
+LANGUAGE 0x1F, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Duraklat"
+    IDS_MENU_RESUME         "Sürdür"
+    IDS_MENU_SETTINGS       "Ayarlar…"
+    IDS_MENU_AUTOSTART      "Oturum açıldığında başlat"
+    IDS_MENU_ABOUT          "Hakkında"
+    IDS_MENU_EXIT           "Çıkış"
+END
+
+LANGUAGE 0x08, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "Παύση"
+    IDS_MENU_RESUME         "Συνέχιση"
+    IDS_MENU_SETTINGS       "Ρυθμίσεις…"
+    IDS_MENU_AUTOSTART      "Εκκίνηση με τη σύνδεση"
+    IDS_MENU_ABOUT          "Σχετικά"
+    IDS_MENU_EXIT           "Έξοδος"
 END

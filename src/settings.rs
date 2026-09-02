@@ -182,9 +182,28 @@ fn pre_version_schema() -> u32 {
     PRE_VERSION_SCHEMA
 }
 
-/// Interface language, `general.language` of section 7. Values `ru` and `en`.
+/// Interface language, `general.language` of section 7. Twelve values — решение 93, tier one.
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
+///
+/// # ⚠ What a closed set costs on a downgrade, and why the cost is accepted
+///
+/// Решение 93 adds ten **values** to this field and deliberately leaves
+/// [`CURRENT_SCHEMA_VERSION`] where it is: the values live inside the schema that already
+/// exists, and a new build reads every old file without a migration. The price is paid in the
+/// other direction. An installed build that knows two values, handed a file that says
+/// `language = "de"` under the same stamp `3`, refuses the strict parse — that is what «must
+/// not pass silently» means — and [`Config::from_toml_str`] then asks the document what schema
+/// it claims. The answer is `3`, which is **not** newer than that build's own, so the file is
+/// [`ConfigError::Malformed`] and the policy is [`SavePolicy::QuarantineFirst`]: the
+/// configuration is moved to `.bad` and replaced by defaults. It is *not*
+/// [`ReadOutcome::FromNewerSchema`] → [`SavePolicy::Forbidden`] — that arm needs a stamp the
+/// reading build is too old for.
+///
+/// The behaviour is measured and pinned by
+/// `an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_write`, so that
+/// the day someone wants the gentler answer they change the schema and see this test go with
+/// it, rather than discovering the cost on a user's machine.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -193,45 +212,156 @@ pub enum Language {
     Ru,
     /// English.
     En,
+    /// Ukrainian.
+    Uk,
+    /// German.
+    De,
+    /// French.
+    Fr,
+    /// Spanish.
+    Es,
+    /// Portuguese — **Brazilian**, which is what решение 93 names and what [`Self::langid`]
+    /// asks for. The tag stays the bare `pt` of the other eleven: section 7 spells locales in
+    /// two letters, and there is no second Portuguese here to tell it apart from.
+    Pt,
+    /// Italian.
+    It,
+    /// Polish.
+    Pl,
+    /// Czech.
+    Cs,
+    /// Turkish.
+    Tr,
+    /// Greek.
+    El,
 }
 
 impl Language {
+    /// Every locale, in the order the language combo box shows them — Russian, English, then
+    /// the ten of решение 93.
+    ///
+    /// The one place that order is written down. [`Self::index`] is a position in this array,
+    /// the atomic of [`set_ui_language`] stores that position, and the dialog fills the combo
+    /// by walking this array — so the three cannot drift apart the way three hand-written
+    /// `match` arms could.
+    pub const ALL: [Self; 12] = [
+        Self::Ru,
+        Self::En,
+        Self::Uk,
+        Self::De,
+        Self::Fr,
+        Self::Es,
+        Self::Pt,
+        Self::It,
+        Self::Pl,
+        Self::Cs,
+        Self::Tr,
+        Self::El,
+    ];
+
     /// The Windows language identifier of this locale — the number `app.rc` tags its string
     /// table with and the number [`text`] asks `FindResourceExW` for.
     ///
-    /// `LANG_RUSSIAN` (0x19) and `LANG_ENGLISH` (0x09) with `SUBLANG_DEFAULT` (0x01) in the high
-    /// four bits, which is how a `LANGID` is built. Spelled out rather than computed for the same
-    /// reason `app.rc` spells them out: the two files have no shared header, and these two
-    /// numbers are the joint between them.
+    /// A primary language identifier from `winnt.h` with a sublanguage in the high six bits,
+    /// which is how a `LANGID` is built: `LANG_RUSSIAN` (0x19) with `SUBLANG_DEFAULT` (0x01) is
+    /// 0x0419. Spelled out rather than computed for the same reason `app.rc` spells them out:
+    /// the two files have no shared header, and these twelve numbers are the joint between them.
+    ///
+    /// ⚠ Every number below was read back from `LCIDToLocaleName` before it was written here —
+    /// `scratchpad-Э28\прибор-langid.log`, positive control on the impossible `0x0FFF`. Two of
+    /// them are worth naming: `Pt` is **0x0416**, `pt-BR`, and not the 0x0816 of Portugal; `Es`
+    /// is 0x040A, which Windows answers as `es-ES_tradnl`.
     pub const fn langid(self) -> u16 {
         match self {
             Self::Ru => 0x0419,
             Self::En => 0x0409,
+            Self::Uk => 0x0422,
+            Self::De => 0x0407,
+            Self::Fr => 0x040C,
+            Self::Es => 0x040A,
+            Self::Pt => 0x0416,
+            Self::It => 0x0410,
+            Self::Pl => 0x0415,
+            Self::Cs => 0x0405,
+            Self::Tr => 0x041F,
+            Self::El => 0x0408,
         }
     }
 
-    /// The two-word name of section 7, for a message and for a test.
+    /// The two-letter name of section 7, for a message and for a test.
+    ///
+    /// The same twelve words `#[serde(rename_all = "lowercase")]` produces from the variants
+    /// above, written out rather than derived: this is the vocabulary of the configuration
+    /// file, and a reader of section 7 should find it spelled here and not inferred.
     pub const fn tag(self) -> &'static str {
         match self {
             Self::Ru => "ru",
             Self::En => "en",
+            Self::Uk => "uk",
+            Self::De => "de",
+            Self::Fr => "fr",
+            Self::Es => "es",
+            Self::Pt => "pt",
+            Self::It => "it",
+            Self::Pl => "pl",
+            Self::Cs => "cs",
+            Self::Tr => "tr",
+            Self::El => "el",
         }
     }
 
-    /// This locale as the number [`UI_LANGUAGE`] stores.
-    const fn index(self) -> u32 {
+    /// What the language combo box of FR-92 shows for this locale — **the name of the language
+    /// in that language**, first letter capital.
+    ///
+    /// Hard-coded and not asked of `GetLocaleInfoEx`, unlike the *layout* names of решение 92:
+    /// the name of an interface language is a piece of this program's interface, and it must
+    /// read the same on every machine whatever Windows itself is set to. The capital first
+    /// letter is the rule решение 92 established for the layout list, applied here by writing
+    /// the names that way rather than by lifting a letter at run time — these twelve strings
+    /// never change, so there is nothing to lift.
+    ///
+    /// ⚠ **Not localised, on purpose:** the list reads the same in all twelve locales. A person
+    /// who has the program in a language they cannot read has to find their own language in it,
+    /// and «Deutsch» is the only spelling that helps them.
+    pub const fn native_name(self) -> &'static str {
         match self {
-            Self::Ru => 0,
-            Self::En => 1,
+            Self::Ru => "Русский",
+            Self::En => "English",
+            Self::Uk => "Українська",
+            Self::De => "Deutsch",
+            Self::Fr => "Français",
+            Self::Es => "Español",
+            Self::Pt => "Português (Brasil)",
+            Self::It => "Italiano",
+            Self::Pl => "Polski",
+            Self::Cs => "Čeština",
+            Self::Tr => "Türkçe",
+            Self::El => "Ελληνικά",
         }
+    }
+
+    /// This locale as its position in [`Self::ALL`] — the number [`UI_LANGUAGE`] stores and the
+    /// item index of the language combo box.
+    ///
+    /// Public since task Т-28-2: with twelve positions the order is worth a test of its own,
+    /// and a test cannot check a contract it is not allowed to read.
+    pub fn index(self) -> u32 {
+        // A locale is always in `ALL` — the array is the enumeration itself — but NFR-13 asks
+        // what happens if it somehow is not, and the honest answer is the default of section 7,
+        // exactly as `from_index` gives for a number out of range.
+        Self::ALL
+            .iter()
+            .position(|&language| language == self)
+            .and_then(|at| u32::try_from(at).ok())
+            .unwrap_or(0)
     }
 
     /// The locale [`Self::index`] came from. Anything else is the default of section 7.
-    const fn from_index(index: u32) -> Self {
-        match index {
-            1 => Self::En,
-            _ => Self::Ru,
-        }
+    pub fn from_index(index: u32) -> Self {
+        usize::try_from(index)
+            .ok()
+            .and_then(|at| Self::ALL.get(at).copied())
+            .unwrap_or(Self::Ru)
     }
 }
 
@@ -2306,8 +2436,9 @@ pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
 /// here exists in **both** tables of it.
 ///
 /// The caption of the window is not in the table — it is not a control — and neither are the
-/// two entries of the language combo box: a language is named in its own language in a language
-/// chooser, so «Русский» and «English» stand as they are in both locales.
+/// twelve entries of the language combo box: a language is named in its own language in a
+/// language chooser, so «Русский», «English» and «Ελληνικά» stand as they are in all twelve
+/// locales. They live in [`Language::native_name`] instead.
 pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_GENERAL, IDS_GROUP_GENERAL),
     (IDC_AUTOSTART, IDS_AUTOSTART),
@@ -9037,17 +9168,19 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
     // timings that stood beside it are in `config.toml` and on no control (решение 81).
     set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
+    // FR-94, task Т-28-2, решение 93: twelve locales, each named in its own language. The
+    // list is `Language::ALL` walked in order and nothing else — the array is the one place
+    // the order of this combo is written down, and `Language::index` below reads the same
+    // array, so the selected item and the stored value cannot come apart.
     send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
-    combo_add(hwnd, IDC_LANGUAGE, "Русский");
-    combo_add(hwnd, IDC_LANGUAGE, "English");
+    for language in Language::ALL {
+        combo_add(hwnd, IDC_LANGUAGE, language.native_name());
+    }
     send_to(
         hwnd,
         IDC_LANGUAGE,
         CB_SETCURSEL,
-        match state.working.general.language {
-            Language::Ru => 0,
-            Language::En => 1,
-        },
+        usize::try_from(state.working.general.language.index()).unwrap_or(0),
         0,
     );
 
@@ -9232,10 +9365,13 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2.
     state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
-    state.working.general.language = match send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0) {
-        1 => Language::En,
-        _ => Language::Ru,
-    };
+    // Task Т-28-2: the item index is a position in `Language::ALL`, the same array `fill_dialog`
+    // filled the combo from. `CB_ERR` is −1 and every other stray answer is out of range, and
+    // both read as the default of section 7 — the same way the appearance combo beside it
+    // treats a state the dialog cannot reach.
+    state.working.general.language = Language::from_index(
+        u32::try_from(send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0)).unwrap_or(u32::MAX),
+    );
     state.working.general.theme =
         theme_from_combo_index(send_to(hwnd, IDC_THEME, CB_GETCURSEL, 0, 0));
 

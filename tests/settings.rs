@@ -6938,7 +6938,17 @@ impl ProductImage {
     /// block, block `id / 16 + 1`, each string a `u16` length followed by that many UTF-16
     /// units, counted and not NUL-terminated.
     fn string(&self, language: settings::Language, id: u16) -> String {
-        let bytes = self.resource_of_language(RT_STRING, id / 16 + 1, language.langid());
+        self.string_of_langid(language.langid(), id)
+    }
+
+    /// The same string, addressed by the raw `LANGID` instead of by the variant.
+    ///
+    /// The sweep of the twelve locales (Т-28-5) needs this form and not the one above: it
+    /// walks a table of numbers written out in the test, so that a locale missing from
+    /// `Language` altogether is caught by the sweep rather than by the compiler refusing to
+    /// name it.
+    fn string_of_langid(&self, langid: u16, id: u16) -> String {
+        let bytes = self.resource_of_language(RT_STRING, id / 16 + 1, langid);
 
         let units: Vec<u16> = bytes
             .chunks_exact(2)
@@ -12440,4 +12450,370 @@ fn gdi_objects() -> u32 {
     // means the counter could not be read, and the caller's comparison survives it — zero
     // before and zero after is «no growth», which is the honest reading of «cannot tell».
     unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+}
+
+// =========================================================================================
+// FR-94, task Т-28-2 and Т-28-5 — the twelve locales of tier one, решение 93.
+// =========================================================================================
+
+/// The twelve locales of tier one: the value section 7 stores, the `LANGID` `app.rc` tags the
+/// string table with, and the name the language combo box shows.
+///
+/// Written out here rather than imported from the crate on purpose, exactly as the interface
+/// strings are: what a test must not borrow from the code under test is the **answer**. The
+/// order is the order of the combo box — Russian, English, then the ten of решение 93 — and it
+/// is a contract, not a preference: `Language::index` encodes it and the atomic of
+/// `set_ui_language` stores it.
+///
+/// ⚠ Every `LANGID` here was taken from `LCIDToLocaleName` and not from memory
+/// (`scratchpad-Э28\прибор-langid.log`, with a positive control on `0x0FFF`).
+const TWELVE_LOCALES: [(&str, u16, &str); 12] = [
+    ("ru", 0x0419, "Русский"),
+    ("en", 0x0409, "English"),
+    ("uk", 0x0422, "Українська"),
+    ("de", 0x0407, "Deutsch"),
+    ("fr", 0x040C, "Français"),
+    ("es", 0x040A, "Español"),
+    ("pt", 0x0416, "Português (Brasil)"),
+    ("it", 0x0410, "Italiano"),
+    ("pl", 0x0415, "Polski"),
+    ("cs", 0x0405, "Čeština"),
+    ("tr", 0x041F, "Türkçe"),
+    ("el", 0x0408, "Ελληνικά"),
+];
+
+/// The `Language` a configuration naming `tag` reads back as — through the file, deliberately.
+///
+/// The parse is the point: `Language` is a **closed** set, and the only honest way to ask
+/// whether a value belongs to it is to hand the value to the reader as a file would. A helper
+/// that named the variant in Rust would be asking the compiler, not the schema.
+fn language_of_tag(tag: &str) -> Language {
+    let dir = TestDir::new(&format!("twelve_{tag}"));
+    let path = write_file(
+        &dir,
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             language = \"{tag}\"\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::Current),
+        "`language = \"{tag}\"` must be a value of section 7, not a refusal"
+    );
+
+    config.general.language
+}
+
+/// **Т-28-2: all twelve values of `general.language` survive the file, both ways.**
+///
+/// Round trip and not just a read: the value has to come back out of `to_toml_string` spelled
+/// the same way it went in, or a build that merely *reads* twelve values would write two.
+#[test]
+fn every_one_of_the_twelve_language_values_survives_a_round_trip() {
+    for (tag, _, _) in TWELVE_LOCALES {
+        let language = language_of_tag(tag);
+
+        assert_eq!(
+            language.tag(),
+            tag,
+            "the value read back must be the value written"
+        );
+
+        let dir = TestDir::new(&format!("twelve_back_{tag}"));
+        let path = dir.config();
+        let mut config = Config::default();
+        config.general.language = language;
+
+        settings::write_to(&path, &config).expect("the configuration must be writable");
+
+        let text = fs::read_to_string(&path).expect("the written file must be readable");
+
+        assert!(
+            text.contains(&format!("language = \"{tag}\"")),
+            "the writer must spell `{tag}` back; it wrote:\n{text}"
+        );
+
+        let (again, outcome) = settings::read_or_default(&path);
+
+        assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
+        assert_eq!(again.general.language, language, "round trip of `{tag}`");
+    }
+}
+
+/// **Т-28-2: every locale is joined to the `LANGID` its string table is tagged with.**
+///
+/// The joint between `app.rc` and `settings.rs` is these twelve numbers and nothing else — the
+/// two files share no header — so the test states them itself.
+#[test]
+fn every_locale_carries_the_langid_its_string_table_is_tagged_with() {
+    for (tag, langid, _) in TWELVE_LOCALES {
+        assert_eq!(
+            language_of_tag(tag).langid(),
+            langid,
+            "locale `{tag}` must ask the resource loader for 0x{langid:04X}"
+        );
+    }
+}
+
+/// **Т-28-5: not one hole in any of the twelve tables — the completeness sweep.**
+///
+/// Walks every identifier of [`settings::INTERFACE_STRINGS`] in every one of the twelve
+/// locales of the **built** binary. A locale whose table is missing altogether fails inside
+/// `resource_of_language`; a row missing from a table that exists comes back empty and fails
+/// here. Both are the same defect seen at two distances, and neither is visible at build time:
+/// `rc.exe` does not mind a table with holes in it.
+#[test]
+fn every_locale_carries_every_interface_string() {
+    let product = ProductImage::shared();
+    let mut empty: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in TWELVE_LOCALES {
+        for id in settings::INTERFACE_STRINGS {
+            let string = product.string_of_langid(langid, id);
+
+            if string.trim().is_empty() {
+                empty.push(format!("{tag} ({langid:#06X}) has no string {id}"));
+            }
+        }
+    }
+
+    assert!(
+        empty.is_empty(),
+        "every one of the twelve tables must carry all {} identifiers; holes:\n{}",
+        settings::INTERFACE_STRINGS.len(),
+        empty.join("\n")
+    );
+}
+
+/// **Т-28-2: what an *older* build does with a value it has never heard of — measured, not
+/// assumed.**
+///
+/// Решение 93 keeps `Language` closed and `CURRENT_SCHEMA_VERSION` where it is, so this is the
+/// case a downgrade creates in the world: a file written by the twelve-locale build, carrying
+/// `language = "de"` and the schema stamp **3**, read by an installed build that knows two
+/// values and the same stamp 3.
+///
+/// The strict parse refuses the document — that is what a closed set is for — and
+/// `claimed_schema_version` then answers **3**, which is *not* newer than this build's own. So
+/// the file is [`ConfigError::Malformed`] and the policy is
+/// [`SavePolicy::QuarantineFirst`]: the user's configuration is moved to `.bad` and replaced
+/// by the defaults. It is **not** `FromNewerSchema` → `Forbidden`; that arm needs a stamp this
+/// build is too old for, and решение 93 does not raise the stamp.
+///
+/// The test states the measured behaviour rather than the hoped-for one. If it is ever to
+/// change, what changes is the schema, not this assertion.
+#[test]
+fn an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_write() {
+    let dir = TestDir::new("older_build_new_locale");
+    let path = write_file(
+        &dir,
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             language = \"zz\"\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Malformed { .. })),
+        "a closed set must refuse a value outside it: {outcome:?}"
+    );
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::QuarantineFirst,
+        "and the refusal costs the file its place — this is the downgrade cost of решение 93"
+    );
+    assert_eq!(
+        config.general.language.tag(),
+        "ru",
+        "what came back in its place is the default of section 7"
+    );
+}
+
+/// **Т-28-2: the language combo offers the twelve native names, in the order of the array.**
+///
+/// Three things at once, and they are one contract: the name shown, the position it stands at,
+/// and the value that position reads back as. A build that showed «Deutsch» at position three
+/// and stored Ukrainian for it would pass any two of the three checks separately.
+#[test]
+fn the_language_combo_offers_twelve_native_names_in_the_order_of_the_array() {
+    assert_eq!(
+        Language::ALL.len(),
+        12,
+        "решение 93 names twelve locales for tier one"
+    );
+
+    for (position, (tag, _, native)) in TWELVE_LOCALES.iter().enumerate() {
+        let language = language_of_tag(tag);
+        let index = u32::try_from(position).expect("twelve fits");
+
+        assert_eq!(
+            language.native_name(),
+            *native,
+            "the combo shows `{tag}` under its own name"
+        );
+        assert_eq!(
+            language.index(),
+            index,
+            "`{tag}` stands at position {position}"
+        );
+        assert_eq!(
+            Language::from_index(index),
+            language,
+            "and position {position} reads back as `{tag}`"
+        );
+        assert_eq!(
+            Language::ALL[position],
+            language,
+            "the array itself holds `{tag}` at {position}"
+        );
+    }
+
+    // Out of range in both directions is the default of section 7, not a panic and not a
+    // neighbouring language: this is what a `CB_ERR` of −1 arrives as.
+    assert_eq!(Language::from_index(12), Language::Ru);
+    assert_eq!(Language::from_index(u32::MAX), Language::Ru);
+}
+
+/// **Т-28-2: the twelve names are twelve, and every one of them starts with a capital.**
+///
+/// Решение 92 established the capital first letter for the *layout* list; решение 93 keeps the
+/// rule for the *language* list, where the names are literals and the capital is simply typed.
+/// A duplicate would be worse than ugly — two rows of a chooser reading the same word give the
+/// user no way to pick.
+#[test]
+fn the_twelve_native_names_are_distinct_and_capitalised() {
+    let mut seen: Vec<&str> = Vec::new();
+
+    for language in Language::ALL {
+        let name = language.native_name();
+        let first = name.chars().next().expect("a name is not empty");
+
+        assert!(
+            first.is_uppercase(),
+            "«{name}» must start with a capital: решение 92, kept by решение 93"
+        );
+        assert!(
+            !seen.contains(&name),
+            "«{name}» appears twice in the language chooser"
+        );
+
+        seen.push(name);
+    }
+
+    assert_eq!(seen.len(), 12);
+}
+
+/// **Т-28-2: the dialog fills the combo from the array rather than from a list of its own.**
+///
+/// A source sweep, like the sweeps this file already keeps over `read_dialog`: the two literals
+/// that used to stand here — `"Русский"` and `"English"` — must be gone from the module, or a
+/// thirteenth locale would be added to the enum and quietly not appear in the window.
+#[test]
+fn the_dialog_names_no_language_of_its_own() {
+    let source = settings_module_source();
+
+    for line in source.lines().map(str::trim) {
+        if line.starts_with("//") || line.starts_with("///") {
+            continue;
+        }
+
+        assert!(
+            !line.contains("combo_add(hwnd, IDC_LANGUAGE, \""),
+            "the language combo must be filled from `Language::ALL`, not from a literal: {line}"
+        );
+    }
+
+    assert!(
+        source.contains("for language in Language::ALL {"),
+        "and it is filled by walking the array"
+    );
+}
+
+/// **Т-28-3: the autostart row reads the same in the dialog and in the tray menu.**
+///
+/// One action reachable from two places, so one wording. The two identifiers are separate on
+/// purpose (they belong to different windows), and that is exactly why a test has to hold them
+/// together — nothing else would notice them drifting apart in the tenth locale.
+#[test]
+fn the_autostart_row_reads_the_same_in_the_dialog_and_in_the_menu() {
+    let product = ProductImage::shared();
+
+    for (tag, langid, _) in TWELVE_LOCALES {
+        assert_eq!(
+            product.string_of_langid(langid, settings::IDS_AUTOSTART),
+            product.string_of_langid(langid, settings::IDS_MENU_AUTOSTART),
+            "locale `{tag}` words the same action twice"
+        );
+    }
+}
+
+/// **Т-28-3: every locale keeps every placeholder of the row it translates.**
+///
+/// `format_text` substitutes by number, so a translation is free to move `{0}` and `{1}` about
+/// — and is not free to lose one or invent one. A lost `{0}` shows the user a help line that
+/// never names their key; an invented `{2}` shows them a literal `{2}`. Neither is visible at
+/// build time and neither is visible to the completeness sweep.
+#[test]
+fn every_locale_keeps_the_placeholders_of_the_row_it_translates() {
+    let product = ProductImage::shared();
+    let mut wrong: Vec<String> = Vec::new();
+
+    for id in settings::INTERFACE_STRINGS {
+        let russian = product.string_of_langid(0x0419, id);
+        let wanted = placeholders_of(&russian);
+
+        for (tag, langid, _) in TWELVE_LOCALES {
+            let mine = placeholders_of(&product.string_of_langid(langid, id));
+
+            if mine != wanted {
+                wrong.push(format!(
+                    "{tag}: string {id} carries {mine:?} where Russian carries {wanted:?}"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "a translation may move a placeholder and may not lose or invent one:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// Which of `{0}`, `{1}`, `{2}` a string carries, sorted — the order inside the string is the
+/// translator's business, the set is not.
+fn placeholders_of(text: &str) -> Vec<&'static str> {
+    ["{0}", "{1}", "{2}"]
+        .into_iter()
+        .filter(|slot| text.contains(slot))
+        .collect()
+}
+
+/// **Т-28-3: the product name is not translated in any of the twelve.**
+///
+/// The decision on question 7, now with ten more chances to be broken: «Lang Switcher» is the
+/// display name of the product, and it is the same three words under `HKCU\…\Run` and in the
+/// caption of every locale.
+#[test]
+fn the_product_name_is_untranslated_in_every_locale() {
+    let product = ProductImage::shared();
+
+    for (tag, langid, _) in TWELVE_LOCALES {
+        let caption = product.string_of_langid(langid, settings::IDS_DIALOG_CAPTION);
+
+        assert!(
+            caption.starts_with("Lang Switcher"),
+            "locale `{tag}` renamed the product: «{caption}»"
+        );
+    }
 }
