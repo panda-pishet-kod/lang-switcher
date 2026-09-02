@@ -2638,10 +2638,17 @@ fn the_window_carries_the_geometry_chosen_at_the_control_point() {
 
     println!("window: {:?} dialog units", template.size);
 
+    // ⚠ **420 → 430 by решение 87 п. 3** (task Т-26-3). The width, and only the width, is what
+    // moved: the dialog font went from 9 pt to 10, and the vertical base unit grew with it —
+    // so the 364 units below are *longer in pixels* than they were and did not have to change.
+    // The horizontal unit did **not** grow (Segoe UI has the same 7 px average character width
+    // at both sizes, measured), so the two labels that were already tight — «Язык интерфейса:»
+    // and «Клавиша:» — needed the ten units this number carries. The user asked for exactly
+    // this: «расширить модуль и соответственно окно самой программы».
     assert_eq!(
         template.size,
-        (420, 364),
-        "the window of решение 83 is 420 × 364 dialog units"
+        (430, 364),
+        "the window of решения 83 и 87 is 430 × 364 dialog units"
     );
 
     let bottom = |panel: u32| -> i32 {
@@ -3197,25 +3204,33 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // off the window. What T-11-19 was really about — that the rhythm below the last block is
     // a decided number and not a leftover — is what this test still holds; the number is now
     // 4 and the decision is 83 rather than В-1.
+    // ⚠ The **height** is what this test is about, and it did not move: 364 units, decided by
+    // решение 83 п. 3 and untouched by Т-26-3. The width went 420 → 430 (решение 87 п. 3) —
+    // see the sister test for why that is a horizontal matter and this one is not.
     assert_eq!(
         template.size,
-        (420, 364),
-        "the settings dialog has to be 420 x 364 dialog units — решение 83 п. 3"
+        (430, 364),
+        "the settings dialog has to be 430 x 364 dialog units — решения 83 п. 3 и 87 п. 3"
     );
 
     // The eight rectangles that moved, in full: a `y` alone would say nothing about a width
     // or a height that drifted with it. «Диагностика» moved up with the rest of the right
     // column when «Замена» and «Выделение» left it (task Т-23-2), and its children moved
     // with it — the panel keeps its own 74 units.
+    //
+    // ⚠ **Every x below is ten units larger since решение 87 п. 3** (task Т-26-3), and every
+    // `y`, width and height is exactly what it was. That is the whole shape of the change and
+    // the reason it is safe: the right column was **moved**, not re-cut — «Диагностика» keeps
+    // its own 200 × 74 — and the two full-width rows grew by the ten units the window grew by.
     const MOVED: [(u32, &str, i32, i32, i32, i32); 8] = [
-        (1106, "Диагностика: панель", 213, 215, 200, 74),
-        (1108, "Состояние: панель", 7, 293, 406, 44),
-        (1070, "Состояние: перехватчик", 14, 305, 392, 9),
-        (1071, "Состояние: раскладки", 14, 316, 392, 9),
-        (1072, "Состояние: автозапуск", 14, 327, 392, 9),
-        (1, "ОК", 253, 343, 50, 14),
-        (2, "Отмена", 307, 343, 50, 14),
-        (1080, "Применить", 361, 343, 52, 14),
+        (1106, "Диагностика: панель", 223, 215, 200, 74),
+        (1108, "Состояние: панель", 7, 293, 416, 44),
+        (1070, "Состояние: перехватчик", 14, 305, 402, 9),
+        (1071, "Состояние: раскладки", 14, 316, 402, 9),
+        (1072, "Состояние: автозапуск", 14, 327, 402, 9),
+        (1, "ОК", 263, 343, 50, 14),
+        (2, "Отмена", 317, 343, 50, 14),
+        (1080, "Применить", 371, 343, 52, 14),
     ];
 
     for (id, what, x, y, cx, cy) in MOVED {
@@ -11632,10 +11647,17 @@ fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
     );
 
     // Where the generator puts the hint: beside the language row it belongs to.
+    //
+    // ⚠ **x 132 → 138 by решение 87 п. 3** (task Т-26-3). The generator's x was the address of
+    // «right of the language combo», and that is what the hint still is: the label before the
+    // combo grew by six units so «Язык интерфейса:» would stop being cut off, the combo moved
+    // by six after it, and the hint moved by six after the combo. The *y* is the generator's
+    // own and has not moved — this test is about the row, and the row is where it was.
     assert_eq!(
         (hint_left, hint_top),
-        (132, 32),
-        "the hint stands at the generator's own place — ui.ps1: x = 132, y = 32"
+        (138, 32),
+        "the hint stands beside the language row — the generator's y = 32, and the x the \
+         widened label of решение 87 п. 3 pushed it to"
     );
 
     // Disjoint, and by the vertical: the two share the whole of their width.
@@ -11725,10 +11747,21 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
          рамка {button_frame} px; поднятие {lifted} px"
     );
 
-    assert_eq!(
-        list_frame, button_frame,
+    // ⚠ **One pixel of slack since решение 87 п. 3, and it is arithmetic, not a defect.** The
+    // cure of Д-3 is «one dialog unit down», and it worked exactly while one vertical unit was
+    // 1,875 px — near enough to the {lifted} px lift that the rounding hid the difference. The
+    // 10 pt dialog font of Т-26-3 makes the unit **2,125 px**, and no whole number of units is
+    // 2 px any more: the achievable positions are multiples of 2,125 and the lift is a fixed
+    // count of mock-up pixels. The two frames therefore land at most one pixel apart, and on
+    // the raised window at 96 DPI they read as level (`scratchpad-Э26\врез-рамки.png`, 6×).
+    //
+    // Д-3 itself was **two** pixels and is not back: what is asserted is the distance, not an
+    // equality that the unit can no longer deliver at every DPI.
+    assert!(
+        (list_frame - button_frame).abs() <= 1,
         "the frame of the list is drawn {lifted} px above the control and the button frames \
-         its own rectangle — declared level they come out apart, which is defect Д-3"
+         its own rectangle: they may differ by the one pixel the 2,125 px unit cannot spend, \
+         and no more — list {list_frame} px against button {button_frame} px (defect Д-3)"
     );
 
     // And the shape of the cure, which is what survived the re-layout of task Т-23-2: the
@@ -11777,10 +11810,14 @@ fn the_journal_path_stands_where_the_generator_puts_it() {
         "ui.ps1 puts the journal path nine units under its caption (y = 264 → y = 273); the \
          eleven it stood at were defect Д-4"
     );
+    // ⚠ **x 220 → 230 by решение 87 п. 3**: the whole right column moved ten units to the
+    // right when the left one grew, and this control moved with its column. The width and the
+    // two lines of height are the generator's still, and they are what the defect was about.
     assert_eq!(
         (left, right - left, bottom - top),
-        (220, 186, 16),
-        "and the path keeps the generator's x, width and its two lines of height"
+        (230, 186, 16),
+        "and the path keeps the generator's width and its two lines of height, at the x its \
+         column was moved to"
     );
 }
 

@@ -6467,9 +6467,13 @@ pub const ABOUT_NAME_POINTS_TENTHS: i32 = 116;
 /// this answers −16. A separate constant for 9,4 pt would answer **the same face** and cost a
 /// second name for one thing.
 ///
-/// ⚠ It is the *only* number in this pair of windows that makes text **larger** than the
-/// dialog font apart from the name row, and it is what the user asked for in as many words:
-/// «размер, цвет и тип шрифтов такими же».
+/// ⚠ **This is the about window's number and stays so.** The settings dialog is set one step
+/// larger too since решение 87 п. 3 — but it gets there by asking its **template** for a 10 pt
+/// font, not by drawing its own face over a 9 pt one. See the `FONT` line of `IDD_SETTINGS`:
+/// dialog units are *defined* by the dialog font, so a window that draws in a face its
+/// template does not know has broken the one invariant its whole layout rests on. This window
+/// can afford it because its body is four kinds of label it owns outright; a dialog of forty
+/// controls cannot.
 pub const ABOUT_BODY_POINTS_TENTHS: i32 = 100;
 
 /// Point size of the key name **inside a chip**, in tenths of a point — task Т-26-2,
@@ -7200,13 +7204,13 @@ pub fn about_name_logfont(base: LOGFONTW, emphasis: Emphasis) -> LOGFONTW {
 
 /// The `LOGFONTW` of the **body** of the about window — task Т-26-2, решение 85.
 ///
-/// The two description lines and the five sentences of the help panel, one step larger than
-/// the dialog font: `font-size: 13px` and `12.5px` of the accepted mock-up, which are 9,75 and
-/// 9,4 pt — [`ABOUT_BODY_POINTS_TENTHS`] rounds the pair to one number, because the two land on
-/// the same whole pixel at every DPI this program is drawn at and a face is made of whole
-/// pixels. Ordinary weight: the mock-up's body is `font-weight` unset, and the hypothesis that
-/// the live window drew it **bold** is refuted in `reports\ИТОГ-Э26.md` §1 — the template's own
-/// `FONT 9, "Segoe UI", 400` is what those rows have always been drawn in.
+/// One step larger than the dialog font: `font-size: 13px` and `12.5px` of the accepted
+/// mock-up, which are 9,75 and 9,4 pt — [`ABOUT_BODY_POINTS_TENTHS`] rounds the pair to one
+/// number, because the two land on the same whole pixel at every DPI this program is drawn at
+/// and a face is made of whole pixels. Ordinary weight: the mock-up's body is `font-weight`
+/// unset, and the hypothesis that the live window drew it **bold** is refuted in
+/// `reports\ИТОГ-Э26.md` §1 — the template's own `FONT 9, "Segoe UI", 400` is what those rows
+/// have always been drawn in.
 pub fn about_body_logfont(base: LOGFONTW) -> LOGFONTW {
     scaled_logfont(base, ABOUT_BODY_POINTS_TENTHS, FONT_WEIGHT(0))
 }
@@ -7503,6 +7507,7 @@ impl DialogFonts {
     /// for `Drop` to run on — the same discipline [`CaptionIcons::load`] keeps. Since task
     /// Т-26-2 the unwinding is a loop over what has been made so far rather than one `else`
     /// arm per face: six faces would otherwise be six copies of the same three lines.
+    ///
     fn new(hwnd: HWND, control: i32) -> Option<Self> {
         let base = dialog_logfont(hwnd, control)?;
 

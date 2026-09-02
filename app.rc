@@ -328,7 +328,37 @@ END
 // that the columns end level and the window carries no hole; and «Состояние» stands **four**
 // units under the columns — the gap every other pair of groups here has — where the mock-up
 // first shown had 25. Cutting that gap is what took the window from 385 to 364.
-IDD_SETTINGS DIALOGEX 0, 0, 420, 364
+// ⚠ **Шрифт шаблона 9 → 10 pt** — задача Т-26-3, решение 87 п. 3 («можно трогать верстку и
+// расширить модуль и соответственно окно самой программы, чтобы и текст влез и все смотрелось
+// гармонично»). Ни одна координата ниже не изменилась, и это НЕ лень, а устройство единицы
+// диалога: она ОПРЕДЕЛЕНА через шрифт диалога (базовая единица — средняя ширина знака на 4 по
+// X и высота знакоместа на 8 по Y), поэтому окно, выросшее вместе со своим шрифтом, растёт
+// целиком и в тех же пропорциях. Текст влезает по построению: и он, и коробки под ним меряются
+// одной линейкой.
+//
+// ⚠ Была ошибка, и её стоит помнить. Первый заход делал ровно наоборот: шрифт шаблона
+// оставался 9 pt, а рисование велось СВОИМ лицом на 10 pt. Так сломан единственный инвариант,
+// на котором стоит вся эта таблица координат, — и расплата пришла числами: подпись «Язык
+// интерфейса:» просила 60,6 единицы при 58 отведённых, «Клавиша:» — 32,6 при 32, а КАЖДАЯ
+// девятиединичная подпись обрезала выносные элементы («участие», «порядок» — замерено глазом
+// на поднятом окне, scratchpad-Э26\врез-выносные.png). Починка тем путём означала около
+// тридцати правок координат руками. Здесь — одна строка, и ни одного нового числа.
+//
+// Что НЕ растёт вместе со шрифтом: длины, снятые с макетов Э11 в их собственных пикселях и
+// приведённые к DPI окна (`theme::scaled`) — радиус скругления, толщина рамки, отступ шапки
+// панели, разрядка. Они остаются теми же на экране, и это правильно: рамка в один пиксель на
+// более крупной панели — по-прежнему рамка в один пиксель.
+//
+// ⚠ **Единица выросла ТОЛЬКО ПО ВЕРТИКАЛИ, и это замер, а не ожидание.** Базовая единица по Y
+// — высота знакоместа на 8 — поднялась с 1,875 до 2,125 px; базовая единица по X — средняя
+// ширина знака на 4 — осталась **1,750 px**: у Segoe UI она целое число пикселей, и 9 pt с
+// 10 pt дают одно и то же 7. Поэтому вертикаль вылечилась сама, а две подписи, которым не
+// хватало ширины, не вылечились ни на единицу: «Язык интерфейса:» просила 60,6 при 58,
+// «Клавиша:» — 32,6 при 32 (scratchpad-Э26\Т-26-3-замер-после.log). Им ширина и добавлена
+// ниже, и вместе с ними расширена левая колонка — 200 → 210 единиц, — а правая сдвинута на
+// те же 10. Окно 420 → 430 по ширине; по высоте те же 364 единицы, которые теперь просто
+// длиннее в пикселях.
+IDD_SETTINGS DIALOGEX 0, 0, 430, 364
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, spelled numerically like every other constant here — task
 // T-21-4, the user's finding П-1: with the window open there was no button on the task bar.
@@ -339,7 +369,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 // window is first shown. Modality and the owner are untouched.
 EXSTYLE 0x00040000
 CAPTION "Lang Switcher — настройки"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     // -- Общие: автозапуск, язык интерфейса и оформление ---------------------------------
     //
@@ -388,24 +418,27 @@ BEGIN
     // into the file. The units come, as they did the last time, out of the air under
     // «Раскладки»; unlike the last time the window itself IS re-cut, and the number that
     // moved is not this one but the gap over «Состояние» — see the header of the template.
-    CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 7, 200, 94
-    CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 186, 10
-    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 58, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_LANGUAGE, 74, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Общие", IDC_GROUP_GENERAL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 7, 210, 94
+    CONTROL         "Запускать при входе в систему", IDC_AUTOSTART, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 19, 196, 10
+    // ⚠ 64 единицы и не 58: задача Т-26-3 замерила подпись в лице, которым её рисуют, — 60,6
+    // единицы. При 58 она переносилась, и в окне оставалось «Язык». Ширина комбо — 54, как
+    // запечатало решение 82.2 «по содержимому»: место взято ростом колонки, а не ужатием комбо.
+    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 64, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_LANGUAGE, 80, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     // ⚠ The «Оформление» row sits two units below the bottom of the hint beside the language
     // row (32 + 18 = 50), and not at the 46 it had until task T-12-3. An SS_OWNERDRAW static
     // fills its own rectangle with panel_bg before it writes a word, so a rectangle that
     // overlaps a combo box does not merely sit on top of it: it *erases* the top of the frame
     // the background drew, which is what defect Г-1 was. The two rectangles are now disjoint
     // by arithmetic: hint y 32..50, combo y 52..132.
-    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 58, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_THEME, 74, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 64, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_THEME, 80, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     // ⚠ Two lines high (18 units against the 9 of a one-line label) and the text does not fit
     // on one: the drawing of task T-11-18 keeps DT_WORDBREAK, which is what an SS_LEFT static
     // wrapped with. IDC_LOG_DIR below is the other one of these.
     // y = 32 is where the generator of the mock-ups puts it (ui.ps1: x=132, y=32, w=70, h=18),
     // level with the language row it belongs to.
-    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 132, 32, 70, 18, SS_OWNERDRAW
+    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 138, 32, 72, 18, SS_OWNERDRAW
     // FR-100, task Т-21-5 — the sound switch, a row of «Общие» like the three above it.
     //
     // ⚠ It was nine units tall at y = 64 for one delivery, wedged into the strip left over
@@ -414,7 +447,7 @@ BEGIN
     // panel had room to grow because the left column carries 53 units of air under
     // «Раскладки». Ten units like every other check box, four units of air under the combo,
     // nine units of padding under it — the spacing the other groups already had.
-    CONTROL         "Звуковой отклик", IDC_SOUND, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 68, 186, 10
+    CONTROL         "Звуковой отклик", IDC_SOUND, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 68, 196, 10
     // FR-61, FR-65 — the selection switch, and since task Т-23-2 (решение 82.2) a row of
     // «Общие» like the three above it.
     //
@@ -424,7 +457,7 @@ BEGIN
     // sisters here and the group is gone. Ten units and fourteen below the row above — the
     // step every check box of this block keeps; nine units of padding under it — the same
     // padding the sound switch had when it was last.
-    CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 82, 186, 10
+    CONTROL         "Конвертировать выделенный текст", IDC_SELECTION_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 14, 82, 196, 10
 
     // -- Горячая клавиша -----------------------------------------------------------------
     //
@@ -432,7 +465,7 @@ BEGIN
     // task T-08-2. The button next to it arms the capture, the field then shows the name of
     // the key that was pressed, and the label below it says what is wrong when the press
     // cannot become a hotkey.
-    CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 105, 200, 48
+    CONTROL         "Горячая клавиша", IDC_GROUP_HOTKEY, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 105, 210, 48
     // ⚠ The two EDITTEXT of this template are 8 units tall since task T-12-3, and not the 12
     // of the box the mock-ups draw round them. Eight vertical units are one height of the
     // dialog font by the definition of the unit, so the control is exactly the em box of its
@@ -443,33 +476,35 @@ BEGIN
     // src\settings.rs), which puts the surplus above and below the text in equal halves. Each
     // y is therefore two units lower than the box it stands in: the box, not the control, is
     // what the eye sees and what the mock-up places.
-    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 120, 32, 9, SS_OWNERDRAW
+    // ⚠ 40 единиц и не 32: замер Т-26-3 — подпись просит 32,6 при 32 отведённых, то есть не
+    // влезала на шесть десятых единицы. Ровно та же болезнь, что у подписи языка выше.
+    LTEXT           "Клавиша:", IDC_HOTKEY_LABEL, 14, 120, 40, 9, SS_OWNERDRAW
     // ⚠ 100 units wide and not the 64 it was until task Т-23-5, and the button stands at the
     // right edge of the block instead of beside the field. Решение 82.6 puts the invitation
     // «Нажмите клавишу…» **into this field**, and at 64 units that sentence ran into its own
     // frame — measured on the raised window, not predicted. The mock-up draws the same shape:
     // a field that takes the width and a button at the end of the row.
-    EDITTEXT        IDC_HOTKEY, 48, 120, 100, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
-    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 154, 117, 46, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_HOTKEY_NOTE, 14, 134, 186, 16, SS_OWNERDRAW
+    EDITTEXT        IDC_HOTKEY, 56, 120, 104, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 164, 117, 46, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_HOTKEY_NOTE, 14, 134, 196, 16, SS_OWNERDRAW
 
     // -- Раскладки: FR-30, FR-31, FR-35 --------------------------------------------------
-    CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 157, 200, 132
-    CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 169, 60, 10
-    CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 78, 169, 122, 10
-    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 185, 38, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_PAIR_SOURCE, 54, 183, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 201, 38, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_PAIR_TARGET, 54, 199, 146, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 216, 186, 9, SS_OWNERDRAW
+    CONTROL         "Раскладки", IDC_GROUP_LAYOUTS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 157, 210, 132
+    CONTROL         "Пара", IDC_MODE_PAIR, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP | WS_GROUP, 14, 169, 64, 10
+    CONTROL         "Несколько раскладок", IDC_MODE_CYCLE, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 82, 169, 128, 10
+    LTEXT           "Источник:", IDC_PAIR_SOURCE_LABEL, 14, 185, 42, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_PAIR_SOURCE, 58, 183, 152, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цель:", IDC_PAIR_TARGET_LABEL, 14, 201, 42, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_PAIR_TARGET, 58, 199, 152, 100, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Цикл: галочка — участие, кнопки — порядок", IDC_CYCLE_HINT, 14, 216, 196, 9, SS_OWNERDRAW
     // ⚠ No WS_BORDER since task T-11-13: the system border is a sunken rectangle drawn by
     // the system in the system's colours, and the mock-ups ask for a rounded field_border
     // frame. The frame is drawn by the dialog's own background drawing, one pixel outside
     // this rectangle — see src\settings.rs.
-    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 227, 142, 44
-    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 160, 227, 40, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 160, 244, 40, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LAYOUT_NOTE, 14, 274, 186, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_CYCLE_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER | WS_TABSTOP, 14, 227, 148, 44
+    PUSHBUTTON      "Выше", IDC_CYCLE_UP, 166, 227, 44, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Ниже", IDC_CYCLE_DOWN, 166, 244, 44, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LAYOUT_NOTE, 14, 274, 196, 10, SS_OWNERDRAW
 
     // -- Исключения: FR-84 — первая группа правой колонки с задачи Т-23-2 -----------------
     //
@@ -479,31 +514,34 @@ BEGIN
     // genuinely grows with use, and the alternative candidate — both groups at their present
     // height, the bottom of the right column left empty — is the one the user turned down.
     // Four rows of names became fifteen, and the two columns now end level, both at 289.
-    CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 7, 200, 204
+    // ⚠ Вся правая колонка сдвинута на +10 единиц — ровно на столько, на сколько выросла
+    // левая (задача Т-26-3, решение 87 п. 3). Ни одна её собственная ширина не изменилась:
+    // колонке добавили не места, а адрес.
+    CONTROL         "Исключения", IDC_GROUP_EXCLUSIONS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 223, 7, 200, 204
     // ⚠ The list stands one unit below the button beside it, and its own frame then lands on
     // the same row as the button's: the frame of a list is drawn LIST_FIRST_ROW_TOP above the
     // control (2 px at 96 DPI, the air of the mock-ups before the first row, task T-11-16),
     // where a button frames its own rectangle. Declared level, they came out 2 px apart, which
     // was defect Д-3; the height is one unit short of the box so that its bottom does not move.
-    LISTBOX         IDC_EXCLUSIONS, 220, 20, 120, 163, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
-    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 346, 19, 60, 14, BS_OWNERDRAW
-    EDITTEXT        IDC_EXCLUSION_NAME, 220, 188, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
-    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 346, 185, 60, 14, BS_OWNERDRAW
-    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 220, 200, 186, 9, SS_OWNERDRAW
+    LISTBOX         IDC_EXCLUSIONS, 230, 20, 120, 163, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 356, 19, 60, 14, BS_OWNERDRAW
+    EDITTEXT        IDC_EXCLUSION_NAME, 230, 188, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 356, 185, 60, 14, BS_OWNERDRAW
+    LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 230, 200, 186, 9, SS_OWNERDRAW
 
     // -- Диагностика: SEC-07 -------------------------------------------------------------
     //
     // Unchanged in every number but its origin: 74 units as it always was, and its bottom
     // edge is what makes the right column end level with the left (215 + 74 = 289).
-    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 213, 215, 200, 74
-    CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 220, 227, 90, 10
-    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 320, 225, 86, 14, BS_OWNERDRAW
-    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 220, 243, 60, 9, SS_OWNERDRAW
+    CONTROL         "Диагностика", IDC_GROUP_DIAGNOSTICS, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 223, 215, 200, 74
+    CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 230, 227, 90, 10
+    PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 330, 225, 86, 14, BS_OWNERDRAW
+    LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 230, 243, 60, 9, SS_OWNERDRAW
     // ⚠ The second two-line label — 16 units for a path that does not fit on one line. Its
     // DT_WORDBREAK is load-bearing exactly as IDC_LANGUAGE_RESTART's is; task T-11-18.
     // Nine units under its own caption, which is the generator's own step (ui.ps1: y = 264
     // and y = 273 in the numbering of the window this group had before Т-23-2).
-    LTEXT           "", IDC_LOG_DIR, 220, 252, 186, 16, SS_OWNERDRAW
+    LTEXT           "", IDC_LOG_DIR, 230, 252, 186, 16, SS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     //
@@ -512,19 +550,21 @@ BEGIN
     // standard: it is the gap between «Общие» and «Горячей клавишей», between «Горячей
     // клавишей» and «Раскладками», and between «Исключениями» и «Диагностикой». It was 25 in
     // the candidate first shown and 39 in every build up to e25.
-    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 293, 406, 44
-    LTEXT           "", IDC_STATE_HOOK, 14, 305, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_LAYOUTS, 14, 316, 392, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_STATE_AUTOSTART, 14, 327, 392, 9, SS_OWNERDRAW
+    // «Состояние» идёт во всю ширину окна и потому растёт вместе с ней: 406 → 416, строки
+    // 392 → 402.
+    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 293, 416, 44
+    LTEXT           "", IDC_STATE_HOOK, 14, 305, 402, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_LAYOUTS, 14, 316, 402, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_AUTOSTART, 14, 327, 402, 9, SS_OWNERDRAW
 
     // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
     // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
     // survive owner drawing. The behaviour survives by the documented replacement: the dialog
     // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
     // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
-    PUSHBUTTON      "ОК", IDOK, 253, 343, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Отмена", IDCANCEL, 307, 343, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Применить", IDC_APPLY, 361, 343, 52, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 263, 343, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 317, 343, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 371, 343, 52, 14, BS_OWNERDRAW
 END
 
 // ---------------------------------------------------------------------------------------
