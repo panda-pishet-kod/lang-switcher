@@ -10920,7 +10920,26 @@ pub fn disambiguated_labels(rows: &[(Option<String>, String)]) -> Vec<String> {
         .collect()
 }
 
-/// The localised display name of the language a layout serves, asked of the system.
+/// The display name of the language a layout serves, asked of the system — **the name that
+/// language calls itself by**, with its first letter raised.
+///
+/// `LOCALE_SNATIVEDISPLAYNAME` and not `LOCALE_SLOCALIZEDDISPLAYNAME` — **вопрос 92**. The
+/// localised name is the one the interface language of **Windows** would use, and it follows
+/// the system rather than the layout or the program: on the Russian machine of this project
+/// an English layout read «Английский (США)» even in a program window switched to English,
+/// which is what the user saw. The native name follows neither — «English (United States)»
+/// and «Русский (Россия)» say the same thing under any Windows and in either locale of FR-94,
+/// and a person who cannot read the interface language still finds their own layout in the
+/// list. The road not taken — following the program's own language — was turned down at the
+/// same вопрос: for a Russian name on a machine without Russian there is no honest source.
+///
+/// The raised first letter is the other half of вопрос 92, and it is not decoration: a
+/// language writes its own name the way it writes its adjectives, and Russian writes them in
+/// lower case. Measured, not remembered — `GetLocaleInfoEx` returns «**р**усский (Россия)»,
+/// `U+0440`, for `ru-RU`. A list of layouts is not running prose, so [`capitalised`] puts the
+/// letter back up. It stands **here**, before the name is a name at all, so everything
+/// downstream — the collision rule of решение 82.1 and the discriminator it glues on — counts
+/// the names it will actually show.
 fn language_name(layout: LayoutId) -> Option<String> {
     let mut locale = [0u16; 85];
 
@@ -10948,7 +10967,7 @@ fn language_name(layout: LayoutId) -> Option<String> {
     let written = unsafe {
         windows::Win32::Globalization::GetLocaleInfoEx(
             PCWSTR(locale.as_ptr()),
-            windows::Win32::Globalization::LOCALE_SLOCALIZEDDISPLAYNAME,
+            windows::Win32::Globalization::LOCALE_SNATIVEDISPLAYNAME,
             Some(&mut display),
         )
     };
@@ -10959,9 +10978,34 @@ fn language_name(layout: LayoutId) -> Option<String> {
 
     let units = usize::try_from(written).ok()?.saturating_sub(1);
 
-    Some(String::from_utf16_lossy(
+    Some(capitalised(&String::from_utf16_lossy(
         &display[..units.min(display.len())],
-    ))
+    )))
+}
+
+/// `name` with its first character raised to upper case and everything after it untouched —
+/// the capitalisation вопрос 92 asks for.
+///
+/// The first character goes through Unicode `to_uppercase` **and the whole iterator it
+/// returns**: raising a character can produce more than one — `ß` raises into `SS` — and
+/// keeping only the first unit would drop the rest of the letter silently. A character of a
+/// script that has no case at all comes back as it was, which is what makes this safe to run
+/// over every name the locale service can produce rather than over the two this machine
+/// happens to have.
+///
+/// Nothing else is touched: «English (United States)» keeps its inner capitals, «русский
+/// (Россия)» keeps the capital of «Россия», and a name the system gave empty stays empty
+/// instead of costing a panic.
+///
+/// Pure, and public for that reason: `tests\settings.rs` closes it on a bare string, without a
+/// window and without a locale service.
+pub fn capitalised(name: &str) -> String {
+    let mut characters = name.chars();
+
+    match characters.next() {
+        Some(first) => first.to_uppercase().chain(characters).collect(),
+        None => String::new(),
+    }
 }
 
 /// Selects in `control` the session layout `spec` names, if the session has one.

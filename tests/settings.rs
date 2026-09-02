@@ -6156,7 +6156,8 @@ fn one_layout_per_language_is_written_in_the_language_form() {
 // the identifier back **only to the strings that would otherwise be identical**.
 //
 // Two halves. The rule itself is pure — it is a count of equal names over a list of pairs and
-// nothing else — and is closed here on synthetic names no system produced. The wiring is
+// nothing else — and is closed here on names written by hand rather than asked of a locale
+// service; that no window and no system are needed is the point of the half. The wiring is
 // closed on the layout identifiers the other tests of this file already use: `EN` and
 // `EN_SECOND` share a language identifier, so the system gives them one and the same display
 // name, which is exactly the collision the rule is for.
@@ -6166,10 +6167,13 @@ fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
     // No collision: three different names, three bare labels, not a hexadecimal digit in
     // sight — and the discriminators are present and deliberately unused.
     let apart = settings::disambiguated_labels(&[
-        (Some("Английский (США)".to_owned()), "0x00000409".to_owned()),
+        (
+            Some("English (United States)".to_owned()),
+            "0x00000409".to_owned(),
+        ),
         (Some("Русский (Россия)".to_owned()), "0x00000419".to_owned()),
         (
-            Some("Немецкий (Германия)".to_owned()),
+            Some("Deutsch (Deutschland)".to_owned()),
             "0x00000407".to_owned(),
         ),
     ]);
@@ -6179,9 +6183,9 @@ fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
     assert_eq!(
         apart,
         vec![
-            "Английский (США)",
+            "English (United States)",
             "Русский (Россия)",
-            "Немецкий (Германия)"
+            "Deutsch (Deutschland)"
         ],
         "a name nobody else wears is shown as it is — решение 82.1"
     );
@@ -6189,9 +6193,15 @@ fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
     // A collision of two: **both** get the tail, not just the second. A discriminator on one
     // of a pair tells the reader nothing about which one they are looking at.
     let together = settings::disambiguated_labels(&[
-        (Some("Английский (США)".to_owned()), "0x04090409".to_owned()),
+        (
+            Some("English (United States)".to_owned()),
+            "0x04090409".to_owned(),
+        ),
         (Some("Русский (Россия)".to_owned()), "0x00000419".to_owned()),
-        (Some("Английский (США)".to_owned()), "0xF0010409".to_owned()),
+        (
+            Some("English (United States)".to_owned()),
+            "0xF0010409".to_owned(),
+        ),
     ]);
 
     println!("{together:?}");
@@ -6199,9 +6209,9 @@ fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
     assert_eq!(
         together,
         vec![
-            "Английский (США) — 0x04090409",
+            "English (United States) — 0x04090409",
             "Русский (Россия)",
-            "Английский (США) — 0xF0010409"
+            "English (United States) — 0xF0010409"
         ],
         "both of the pair carry the identifier, and the third name is left alone"
     );
@@ -6226,9 +6236,13 @@ fn a_layout_name_carries_a_discriminator_only_when_it_collides() {
 
 /// **Т-23-3, решение 82.1 — the wiring, on this machine's own locale service.**
 ///
-/// The names come from `LCIDToLocaleName` + `GetLocaleInfoEx`, so what they *say* depends on
-/// the Windows the test runs on and is deliberately not asserted. What is asserted is the
-/// shape, and it is machine-independent: a language nobody shares is shown without a tail, a
+/// The names come from `LCIDToLocaleName` + `GetLocaleInfoEx`, and what they *say* is not
+/// asserted here: this test is about the shape the rule gives them. ⚠ Until task Т-27-1 the
+/// reason was stronger than that — a localised name said whatever the Windows of the machine
+/// said, so there was nothing stable to write down. Вопрос 92 took that away: a native name
+/// is the same on every Windows, and the two tests of Т-27-1 below write both of this
+/// machine's out in full. What is asserted here is still only the shape, and it is
+/// machine-independent: a language nobody shares is shown without a tail, a
 /// language two layouts share is shown with one, and the tail is **character for character
 /// what section 7 would store for that layout** — the string `spec_text` produces, so a person
 /// who reads the identifier off the window can find it in `config.toml`.
@@ -6306,6 +6320,116 @@ fn every_place_that_shows_a_layout_name_asks_the_one_function() {
         "`layout_label` built one label out of one layout and could not see a collision at \
          all — Т-23-3 replaced it with `layout_labels`"
     );
+}
+
+// -----------------------------------------------------------------------------------------
+// Т-27-1, вопрос 92 — имя раскладки: как язык называет себя сам, с заглавной первой буквы
+// -----------------------------------------------------------------------------------------
+//
+// The user's observation was a window in English showing its layouts in Russian. The cause
+// was not a defect but a property of the construction: `LOCALE_SLOCALIZEDDISPLAYNAME` is the
+// name the **Windows** interface language uses, and it follows the system, never the
+// program. Вопрос 92 moved the names to `LOCALE_SNATIVEDISPLAYNAME` — each language named as
+// it names itself — and asked for the first letter to be raised, because that is the one
+// thing the native names do not agree on.
+//
+// ⚠ What the two tests below assert is exactly what the old ones could not: a native name
+// does not depend on the Windows the test runs on, so the strings are machine-independent
+// and may be written out. They are the live values of this machine, taken with an instrument
+// and not from memory (`scratchpad-Э27\прибор-имена.log`):
+//
+// | язык | `LOCALE_SLOCALIZEDDISPLAYNAME` | `LOCALE_SNATIVEDISPLAYNAME` |
+// |---|---|---|
+// | `0x0409` | «Английский (США)» | «English (United States)» |
+// | `0x0419` | «Русский (Россия)» | «русский (Россия)» — строчная `U+0440` |
+
+/// **Т-27-1 — красное «до», и его носитель.**
+///
+/// On this machine — a Russian Windows — the English layout read «Английский (США)» before
+/// вопрос 92, in a program window switched to English as readily as in a Russian one. This
+/// test is the one that was red on `508fee8` and is the honest proof that the constant moved.
+#[test]
+fn an_english_layout_is_named_in_english_however_the_system_is_localised() {
+    let labels = settings::layout_labels(&[EN], &[EN]);
+
+    println!("0x0409: {labels:?}");
+
+    assert_eq!(
+        labels,
+        vec!["English (United States)"],
+        "the English layout must name itself in English — вопрос 92; a localised name would \
+         follow the language of Windows and not of the layout"
+    );
+}
+
+/// **Т-27-1 — регресс-сторож капитализации, и не красное «до».**
+///
+/// ⚠ This one was green before the change as well, and for a different reason: the localised
+/// name of `ru-RU` on a Russian Windows already read «Русский (Россия)» with a capital. The
+/// native name does not — the system returns «русский (Россия)», `U+0440`, measured — so the
+/// same string now stands only because the capitalisation puts the letter back up. Take the
+/// capitalisation away and this test goes red; that is what it is here for.
+#[test]
+fn a_russian_layout_keeps_its_capital_letter_though_the_native_name_has_none() {
+    let labels = settings::layout_labels(&[RU], &[RU]);
+
+    let first: Vec<String> = labels[0]
+        .chars()
+        .take(1)
+        .map(|character| format!("U+{:04X}", u32::from(character)))
+        .collect();
+
+    println!("0x0419: {labels:?}, первый знак {first:?}");
+
+    assert_eq!(
+        labels,
+        vec!["Русский (Россия)"],
+        "the native name of Russian starts with a lower-case «р» and a list of layouts is not \
+         running prose — вопрос 92 raises the first letter"
+    );
+}
+
+/// **Т-27-1 — сама капитализация, на голой строке-образце.**
+///
+/// This machine has two layouts and one of them is English, whose native name is already
+/// capital: a capitalisation that did nothing at all would pass the English test above. So
+/// the rule is closed here without a locale service, on strings — including the ones no
+/// machine of this project will ever be asked about.
+#[test]
+fn the_first_character_is_raised_whole_and_the_rest_of_the_name_is_left_alone() {
+    // The live case of вопрос 92, measured off this machine: `LOCALE_SNATIVEDISPLAYNAME`
+    // returns the adjective in lower case, and «Россия» behind it must stay as it is.
+    assert_eq!(
+        settings::capitalised("русский (Россия)"),
+        "Русский (Россия)"
+    );
+
+    // A name that is already right comes back untouched — which is exactly why the English
+    // layout could not close the capitalisation on its own.
+    assert_eq!(
+        settings::capitalised("English (United States)"),
+        "English (United States)"
+    );
+
+    // The same lower-case habit in another language, and inner capitals again left alone.
+    assert_eq!(
+        settings::capitalised("español (España)"),
+        "Español (España)"
+    );
+
+    // A script with no case at all: nothing to raise, and nothing lost on the way through.
+    assert_eq!(settings::capitalised("日本語 (日本)"), "日本語 (日本)");
+
+    // ⚠ The case the **whole** iterator is for. No language names itself this way, but the
+    // form of the code is decided by it all the same: `ß` raises into two characters, and an
+    // implementation that took `to_uppercase().next()` returns «S-lein» — half the letter,
+    // measured on that very implementation and not imagined. This is the only assertion here
+    // that tells the two forms apart.
+    assert_eq!(settings::capitalised("ß-lein"), "SS-lein");
+
+    // A name the system gave empty is not a panic and not a space — it is an empty name, and
+    // `layout_labels` decides what to do with it.
+    assert_eq!(settings::capitalised(""), "");
 }
 
 // ⚠ `a_millisecond_field_reads_as_a_number_and_never_as_a_guess` stood here until task
