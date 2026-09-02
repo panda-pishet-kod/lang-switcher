@@ -613,7 +613,15 @@ fn behavioural_four_presses_alternate_and_restore_the_original_text() {
     };
 
     // The product first: its hook must be up before anything is typed.
-    let product = Product::start();
+    //
+    // ⚠ Finding м-Э25-1, decision 86 п. 1: a launch that did not become **the** instance is not a
+    // product to measure — the conversion would be done by whichever copy holds the mutex, and
+    // this test would report on a binary it did not build. It says so and measures nothing.
+    let Some(product) = Product::start() else {
+        println!("{}", own_window::SKIPPED_NOT_THE_INSTANCE);
+        return;
+    };
+
     println!("product started, pid {}", product.id());
 
     let Some(bench) = Bench::open() else {
@@ -697,6 +705,109 @@ fn behavioural_four_presses_alternate_and_restore_the_original_text() {
 }
 
 // -------------------------------------------------------------------------------------
+// Task Т-26-4 — the harness may not measure a product it did not raise
+// -------------------------------------------------------------------------------------
+
+/// **Every launch of the product in this pack is checked, and an unchecked one cannot come
+/// back** — finding м-Э25-1, the user's decision 86 п. 1.
+///
+/// # Why this is read off the source and not run
+///
+/// The property is «the pack refuses to measure when the installed product holds the mutex»,
+/// and the only way to *run* it is to have an installed product running — which is exactly the
+/// machine state no battery may depend on. The live control belongs to acceptance and was taken
+/// there (`scratchpad-Э26\Т-26-4-*.log`: SKIPPED with the product up, green with it down). What
+/// a test in the battery can do is keep the shape that makes the live control possible, and
+/// that is what this one does — the same technique `tests\settings.rs` uses on `src\`, pointed
+/// at the two harness files instead.
+///
+/// The shape is three things, and each of them is the whole defect if it goes missing:
+/// `start` answers an `Option`, so the outcome cannot be ignored by accident; every call site
+/// binds it with `let Some(... ) = ... else`, so a future edit cannot go back to `let product =
+/// Product::start();`; and the reason a person reads is one sentence in one place per crate.
+/// ⚠ **Every needle below is assembled at run time and none of them is written out whole.**
+/// This test reads the very file it lives in, so a literal `Product::start()` in its own body
+/// would be counted as a call site, and a literal `-> Option<Self>` would satisfy the check
+/// that the signature exists — the instrument would pass on a tree where the repair had been
+/// reverted, which is the «свип-самоизмеритель» this project has been bitten by before. Built
+/// from pieces, the needles appear in the file only where the real code puts them, and the
+/// red-before of `scratchpad-Э26\Т-26-4-красное-до-сторож.log` proves it can still fail.
+#[test]
+fn every_behavioural_launch_asks_whether_it_became_the_instance() {
+    use std::path::Path;
+
+    // The pieces. Joined here, so no needle exists as a literal anywhere in this file.
+    let start_call = format!("Product::{}()", "start");
+    let guarded_call = format!("{start_call} else {{");
+    let signature = format!("pub fn {}() -> Option<Self> {{", "start");
+    let reason = format!("SKIPPED_NOT_THE_{}", "INSTANCE");
+    let contract = format!("EXIT_ALREADY_{}", "RUNNING");
+    let mutex_type = format!("Single{}", "Instance");
+
+    for harness in ["cycle.rs", "switch.rs"] {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join(harness),
+        )
+        .unwrap_or_else(|error| panic!("tests\\{harness} must be readable: {error}"));
+
+        // ⚠ **Prose is not code.** Both harnesses explain this very repair in their doc
+        // comments, and an explanation that quotes the old, unchecked form would otherwise be
+        // counted as a call site — the instrument would report a defect that is only a
+        // sentence. Comment lines are dropped before anything is counted; the checks above
+        // stay on the whole file, where a mention either way is harmless.
+        let code: String = source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            source.contains(&signature),
+            "tests\\{harness}: `Product::start` must answer an Option — a launch that did not \
+             become the instance is not a product to measure (м-Э25-1)"
+        );
+
+        // The outcome is taken from the product's own published contract, not from a second
+        // copy of the mutex name: a name spelled in two files is a name that can drift.
+        assert!(
+            source.contains(&contract),
+            "tests\\{harness}: the outcome must be read off the exit code FR-82 publishes"
+        );
+        assert!(
+            !source.contains(&mutex_type),
+            "tests\\{harness}: the mutex name belongs to `src\\app.rs` alone — a copy of it \
+             here is a copy that can drift"
+        );
+
+        // One sentence, in one place, per crate: declared once and used at least once.
+        let sentences = source.matches(&reason).count();
+        assert!(
+            sentences >= 2,
+            "tests\\{harness}: the skip reason must be declared once and used, not written out \
+             at each call site (found {sentences} mentions)"
+        );
+
+        // ⚠ The load-bearing half: **every** call site is a checked binding.
+        let calls = code.matches(&start_call).count();
+        let guarded = code.matches(&guarded_call).count();
+
+        println!("tests\\{harness}: вызовов start() — {calls}, из них проверенных — {guarded}");
+
+        assert!(
+            calls > 0,
+            "tests\\{harness}: the pack must start the product somewhere"
+        );
+        assert_eq!(
+            calls, guarded,
+            "tests\\{harness}: an unchecked launch is back — it measures whichever copy holds \
+             the mutex of FR-82, which is the whole of finding м-Э25-1"
+        );
+    }
+}
+
+// -------------------------------------------------------------------------------------
 // Task Т-25-2 — a behavioural test that falls over leaves no product behind
 // -------------------------------------------------------------------------------------
 
@@ -743,7 +854,13 @@ fn a_panic_after_the_product_is_up_leaves_no_process_behind() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let outcome = std::panic::catch_unwind(move || {
-        let product = own_window::Product::start();
+        // Task Т-26-4: the same gate as the behavioural test above, and for the same reason —
+        // there is nothing to abandon when this launch never became the instance. The `None`
+        // leaves `raised` at zero, which is what the caller below reports the skip by.
+        let Some(product) = own_window::Product::start() else {
+            return;
+        };
+
         let pid = product.id();
         inside.store(pid, Ordering::Release);
 
@@ -760,10 +877,7 @@ fn a_panic_after_the_product_is_up_leaves_no_process_behind() {
     let pid = raised.load(Ordering::Acquire);
 
     if outcome.is_ok() {
-        println!(
-            "SKIPPED: экземпляр (pid {pid}) не встал — мьютекс FR-82 держит другая копия \
-             продукта; стенд ничего не мерил"
-        );
+        println!("{}", own_window::SKIPPED_NOT_THE_INSTANCE);
         return;
     }
 
@@ -790,6 +904,7 @@ mod own_window {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use lang_switcher::app::EXIT_ALREADY_RUNNING;
     use lang_switcher::layouts::LayoutId;
     use lang_switcher::switch;
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
@@ -1028,20 +1143,92 @@ mod own_window {
         child: std::process::Child,
     }
 
+    /// What a behavioural test prints when it will not measure — finding **м-Э25-1**, the
+    /// user's decision 86 п. 1.
+    ///
+    /// One sentence in one place: every test of this pack says it, and copies of it would drift.
+    pub const SKIPPED_NOT_THE_INSTANCE: &str = concat!(
+        "SKIPPED: установленный продукт работает и держит мьютекс FR-82 — ",
+        "выключите его для поведенческих прогонов; эта пачка ничего не мерила"
+    );
+
     impl Product {
-        /// Starts the product with the deadline of FR-97 and waits for its hook to be up.
-        pub fn start() -> Self {
+        /// Starts the product with the deadline of FR-97 and waits for its hook to be up — or
+        /// answers `None`, having raised nothing that could be measured.
+        ///
+        /// # Why this answers an `Option` — finding м-Э25-1, decision 86 п. 1
+        ///
+        /// ⚠ **A launch is not an instance.** FR-82 gives one copy of the program the session,
+        /// and the installed product usually holds it. A second copy started here takes no hook
+        /// and converts nothing; it leaves at once, silently, since task Т-25-2. What the bench
+        /// did *not* notice until stage Э25 is that the conversion it went on to measure was then
+        /// being done by the **installed** build rather than by the one it had just compiled — so
+        /// the pack was measuring the wrong binary and had no way to tell. Measured twice:
+        /// `scratchpad-Э25\Т-25-2-красное-до-*.log`, and again at
+        /// `scratchpad-Э26\Т-26-4-красное-до.log`, where the same condition made two behavioural
+        /// tests go **red** for reasons that had nothing to do with the code under test.
+        ///
+        /// # How the outcome is asked
+        ///
+        /// Of the product's own published contract — [`EXIT_ALREADY_RUNNING`], the exit code
+        /// FR-82 leaves with — and **not** of a second copy of the mutex name: a name spelled in
+        /// two files is a name that can drift, and `src\app.rs` is not this task's file to touch
+        /// (the perimeter of Т-26-4 is the harness; the product is not changed by it). A child
+        /// that has left with that code was never the instance; a child still running when the
+        /// wait is up is.
+        ///
+        /// ⚠ The reading depends on `LANGSW_DEBUG_TIMEOUT_SEC` being set below. Without it a
+        /// second instance stands on the modal notification of FR-82 instead of leaving, and a
+        /// process standing on a window cannot be told from a working one by liveness alone. The
+        /// variable is set on every launch this bench makes, which is what makes the exit code
+        /// arrive at all — that is the half of task Т-25-2 this one is built on.
+        pub fn start() -> Option<Self> {
             let child = std::process::Command::new(env!("CARGO_BIN_EXE_LangSwitcher"))
                 // FR-97. Never started without it: the program carries a live global hook.
                 .env("LANGSW_DEBUG_TIMEOUT_SEC", "45")
                 .spawn()
                 .expect("the product binary is built beside this test");
 
-            // NFR-08 gives the hook fifty milliseconds from start-up; the layout sweep of FR-20
-            // follows it and this is a debug build, so the wait is generous rather than tight.
-            std::thread::sleep(Duration::from_millis(2_500));
+            // Wrapped before the first early return, so that `Drop` — decision Р-42's one door —
+            // ends this process on every path out of here, exactly as it does for a test that
+            // panics half way through.
+            let mut product = Self { child };
 
-            Self { child }
+            // NFR-08 gives the hook fifty milliseconds from start-up; the layout sweep of FR-20
+            // follows it and this is a debug build, so the wait is generous rather than tight. It
+            // is spent in short naps instead of one sleep so that a second instance — which
+            // leaves in milliseconds — is noticed at once rather than at the end of it.
+            let deadline = Instant::now() + Duration::from_millis(2_500);
+
+            while Instant::now() < deadline {
+                // NFR-13: `try_wait` answers `Err` only for a child that was already reaped, and
+                // nothing reaps this one except `Product::end`, which has not run yet.
+                match product.child.try_wait() {
+                    Ok(Some(status)) => {
+                        let already = status.code() == Some(i32::from(EXIT_ALREADY_RUNNING));
+
+                        println!(
+                            "экземпляр (pid {}) ушёл с кодом {:?} — {}",
+                            product.id(),
+                            status.code(),
+                            if already {
+                                "мьютекс FR-82 держит другая копия продукта"
+                            } else {
+                                "продукт не встал по другой причине"
+                            }
+                        );
+
+                        return None;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                    Err(error) => {
+                        println!("состояние экземпляра нечитаемо: {error}");
+                        return None;
+                    }
+                }
+            }
+
+            Some(product)
         }
 
         /// The process id, for the record in the report.

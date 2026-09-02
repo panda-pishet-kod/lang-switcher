@@ -1588,7 +1588,15 @@ fn behavioural_the_whole_scenario_of_section_11_3() {
     };
 
     // The product first: it must have its hook up before anything is typed.
-    let product = Product::start();
+    //
+    // ⚠ Finding м-Э25-1, decision 86 п. 1: a launch that did not become **the** instance is not a
+    // product to measure — the conversion would be done by whichever copy holds the mutex, and
+    // this test would report on a binary it did not build. It says so and measures nothing.
+    let Some(product) = Product::start() else {
+        println!("{}", own_window::SKIPPED_NOT_THE_INSTANCE);
+        return;
+    };
+
     println!("product started, pid {}", product.id());
 
     let Some(bench) = Bench::open() else {
@@ -1682,6 +1690,7 @@ mod own_window {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use lang_switcher::app::EXIT_ALREADY_RUNNING;
     use lang_switcher::layouts::LayoutId;
     use lang_switcher::switch;
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -1913,20 +1922,94 @@ mod own_window {
         child: std::process::Child,
     }
 
+    /// What a behavioural test prints when it will not measure — finding **м-Э25-1**, the
+    /// user's decision 86 п. 1.
+    ///
+    /// One sentence in one place, and the twin of the one in `tests\cycle.rs`: an integration
+    /// test is a crate of its own, so the pair is copied rather than shared, exactly as
+    /// [`Product`] itself is.
+    pub const SKIPPED_NOT_THE_INSTANCE: &str = concat!(
+        "SKIPPED: установленный продукт работает и держит мьютекс FR-82 — ",
+        "выключите его для поведенческих прогонов; эта пачка ничего не мерила"
+    );
+
     impl Product {
-        /// Starts the product with the deadline of FR-97 and waits for its hook to be up.
-        pub fn start() -> Self {
+        /// Starts the product with the deadline of FR-97 and waits for its hook to be up — or
+        /// answers `None`, having raised nothing that could be measured.
+        ///
+        /// # Why this answers an `Option` — finding м-Э25-1, decision 86 п. 1
+        ///
+        /// ⚠ **A launch is not an instance.** FR-82 gives one copy of the program the session,
+        /// and the installed product usually holds it. A second copy started here takes no hook
+        /// and converts nothing; it leaves at once, silently, since task Т-25-2. What the bench
+        /// did *not* notice until stage Э25 is that the conversion it went on to measure was then
+        /// being done by the **installed** build rather than by the one it had just compiled — so
+        /// the pack was measuring the wrong binary and had no way to tell. Measured twice:
+        /// `scratchpad-Э25\Т-25-2-красное-до-*.log`, and again at
+        /// `scratchpad-Э26\Т-26-4-красное-до.log`, where the same condition made two behavioural
+        /// tests go **red** for reasons that had nothing to do with the code under test.
+        ///
+        /// # How the outcome is asked
+        ///
+        /// Of the product's own published contract — [`EXIT_ALREADY_RUNNING`], the exit code
+        /// FR-82 leaves with — and **not** of a second copy of the mutex name: a name spelled in
+        /// two files is a name that can drift, and `src\app.rs` is not this task's file to touch
+        /// (the perimeter of Т-26-4 is the harness; the product is not changed by it). A child
+        /// that has left with that code was never the instance; a child still running when the
+        /// wait is up is.
+        ///
+        /// ⚠ The reading depends on `LANGSW_DEBUG_TIMEOUT_SEC` being set below. Without it a
+        /// second instance stands on the modal notification of FR-82 instead of leaving, and a
+        /// process standing on a window cannot be told from a working one by liveness alone. The
+        /// variable is set on every launch this bench makes, which is what makes the exit code
+        /// arrive at all — that is the half of task Т-25-2 this one is built on.
+        pub fn start() -> Option<Self> {
             let child = std::process::Command::new(env!("CARGO_BIN_EXE_LangSwitcher"))
                 // FR-97. Never started without it: the program carries a live global hook.
                 .env("LANGSW_DEBUG_TIMEOUT_SEC", "45")
                 .spawn()
                 .expect("the product binary is built beside this test");
 
-            // NFR-08 gives the hook fifty milliseconds from start-up; the layout sweep of FR-20
-            // follows it and this is a debug build, so the wait is generous rather than tight.
-            std::thread::sleep(Duration::from_millis(2_500));
+            // Wrapped before the first early return, so that `Drop` — decision R-42's one door —
+            // ends this process on every path out of here, exactly as it does for a test that
+            // panics half way through.
+            let mut product = Self { child };
 
-            Self { child }
+            // NFR-08 gives the hook fifty milliseconds from start-up; the layout sweep of FR-20
+            // follows it and this is a debug build, so the wait is generous rather than tight. It
+            // is spent in short naps instead of one sleep so that a second instance — which
+            // leaves in milliseconds — is noticed at once rather than at the end of it.
+            let deadline = Instant::now() + Duration::from_millis(2_500);
+
+            while Instant::now() < deadline {
+                // NFR-13: `try_wait` answers `Err` only for a child that was already reaped, and
+                // nothing reaps this one except `Product::end`, which has not run yet.
+                match product.child.try_wait() {
+                    Ok(Some(status)) => {
+                        let already = status.code() == Some(i32::from(EXIT_ALREADY_RUNNING));
+
+                        println!(
+                            "экземпляр (pid {}) ушёл с кодом {:?} — {}",
+                            product.id(),
+                            status.code(),
+                            if already {
+                                "мьютекс FR-82 держит другая копия продукта"
+                            } else {
+                                "продукт не встал по другой причине"
+                            }
+                        );
+
+                        return None;
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                    Err(error) => {
+                        println!("состояние экземпляра нечитаемо: {error}");
+                        return None;
+                    }
+                }
+            }
+
+            Some(product)
         }
 
         /// The process id, for the record in the report.
