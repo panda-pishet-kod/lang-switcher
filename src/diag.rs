@@ -544,6 +544,37 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // is a call to the shell; what the balloon would have said is a sentence of this program's
     // own string tables, and none of it goes into the ring.
     ("Shell_NotifyIconW(NIF_INFO)", Kind::Tray),
+    // ⭐ **Task Т-32-6, FR-102 and SEC-03** — the one network operation this program has, and
+    // the cryptography that decides whether to believe what it brought back. Appended at the
+    // end so that no index above them moves.
+    //
+    // `Kind::Process` and **no new `Kind`**: SEC-03 makes the feed a property of the process —
+    // «сетевая активность ограничена одной операцией» — and a `Kind::Feed` would be a new
+    // variant where a name will do, which is the rule every note above follows.
+    //
+    // ⚠ **A name and a code, and nothing of the request or the answer (SEC-01, SEC-07).** Not
+    // the address, not the status, not a byte of the document, not the reason a signature
+    // failed beyond the fixed sentence. A dump of this program can say «the feed was read» and
+    // «a feed was refused»; it can never say what was in it or where it came from.
+    ("WinHttpOpen", Kind::Process),
+    ("WinHttpConnect", Kind::Process),
+    ("WinHttpSendRequest", Kind::Process),
+    ("WinHttpReceiveResponse", Kind::Process),
+    ("WinHttpReadData", Kind::Process),
+    ("WinHttpOpenRequest", Kind::Process),
+    ("BCryptOpenAlgorithmProvider", Kind::Process),
+    ("BCryptImportKeyPair", Kind::Process),
+    // ⚠ Written the moment the session is opened, **before** anything is sent — the one line
+    // that says a request was made at all. Its absence is what proves `[letters] feed = false`
+    // reaches the network never: a refusal further down leaves its own name, but a request that
+    // failed at the socket would otherwise leave nothing, and «nothing» would prove nothing.
+    ("feed request", Kind::Process),
+    ("feed read ok", Kind::Process),
+    ("feed signature line refused", Kind::Process),
+    ("feed document refused", Kind::Process),
+    ("feed from a newer schema", Kind::Process),
+    ("feed signature did not verify", Kind::Process),
+    ("feed answer oversized", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

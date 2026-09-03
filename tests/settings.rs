@@ -7992,7 +7992,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 134] = [
+const FR_94_STRINGS: [(u16, &str, &str); 144] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8355,20 +8355,23 @@ const FR_94_STRINGS: [(u16, &str, &str); 134] = [
     ),
     (
         settings::IDS_WHATSNEW_1,
-        "Письма от автора: «Привет» при первом запуске, «Что нового» после обновления и \
-         «Спасибо» через месяц.",
-        "Letters from the author: «Hello» on the first run, «What is new» after an update and \
-         «Thank you» after a month.",
+        "Лента автора: раз в 15 дней программа читает подписанный файл новостей и ничего не \
+         отправляет.",
+        "The author's feed: once in fifteen days the program reads a signed news file and sends \
+         nothing.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Окно «От автора»: поддержка, канал и состояние ленты новостей.",
-        "The «From the author» window: support, the channel and the state of the news feed.",
+        "Из ленты приходят письма «Новость» и «Обновление», а кнопка «Прочитано» гасит точку на \
+         значке.",
+        "The «News» and «Update» letters come from it, and «Read» puts out the dot on the icon.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "На значке в трее загорается точка, когда есть непрочитанное письмо.",
-        "The tray icon shows a dot while a letter is unread.",
+        "Чтение ленты отключается: в файле настроек сразу, а после первого письма — в окне «От \
+         автора».",
+        "The reading can be turned off: in the settings file at once, later in the «From the \
+         author» window.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
@@ -8531,6 +8534,52 @@ const FR_94_STRINGS: [(u16, &str, &str); 134] = [
         settings::IDS_ENTRY_READ_MARK,
         "{0} · прочитано",
         "{0} · read",
+    ),
+    (
+        settings::IDS_UPDATE_SUB,
+        "у вас {0} · выпуск {1}",
+        "you have {0} · released {1}",
+    ),
+    (settings::IDS_UPDATE_HOW, "Как обновиться", "How to update"),
+    (
+        settings::IDS_UPDATE_STEP_1,
+        "Нажмите «Открыть страницу загрузки»: там всегда последняя версия.",
+        "Press «Open the download page»: the latest version is always there.",
+    ),
+    (
+        settings::IDS_UPDATE_STEP_2,
+        "Скачайте файл LangSwitcher-setup.exe и запустите его.",
+        "Download the LangSwitcher-setup.exe file and run it.",
+    ),
+    (
+        settings::IDS_UPDATE_STEP_3,
+        "Установщик сам закроет программу, заменит её и предложит запустить заново. Ваши \
+         настройки сохранятся.",
+        "The installer closes the program itself, replaces it and offers to start it again. \
+         Your settings are kept.",
+    ),
+    (
+        settings::IDS_UPDATE_FOOT,
+        "Строка «Доступна версия {0}» останется в меню значка, пока вы не обновитесь.",
+        "The «Version {0} is available» entry stays in the tray menu until you update.",
+    ),
+    (
+        settings::IDS_NEWS_LETTER_TITLE,
+        "Новость от автора",
+        "News from the author",
+    ),
+    (settings::IDS_NEWS_LATER, "Позже", "Later"),
+    (
+        settings::IDS_NEWS_OPEN_LINK,
+        "Открыть ссылку",
+        "Open the link",
+    ),
+    (
+        settings::IDS_NEWS_FOOT,
+        "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё \
+         раз через две, потом только точка на значке.",
+        "«Mark as read» closes the letter for good. «Later» or the cross: I will remind you in \
+         a week and once more in two, after that only the dot on the icon.",
     ),
 ];
 
@@ -13620,10 +13669,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        134,
-        "a hundred and thirty-four identifiers in use — the mandate of Э32 authorised the canon \
-         of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the sixty-one \
-         strings of the letters from the author (FR-101…FR-103) are the growth"
+        144,
+        "a hundred and forty-four identifiers in use — the mandate of Э32 authorised the canon \
+         of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
+         sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3) plus \
+         the ten of the two letters out of the feed (same task, ступень Б)"
     );
 
     let product = ProductImage::shared();

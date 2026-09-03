@@ -183,6 +183,88 @@ if ($crateFailed) {
     Write-Host '  RESULT: pass'
 }
 
+# --- Gate 3: SEC-03, the addresses in the shipped binary ------------------------------------------
+#
+# FR-102 and SEC-03: «в Release-бинаре единственные сетевые адреса — адреса ленты, проверяется
+# поиском по строкам бинаря». This gate reads the strings of the FILE THAT SHIPS and refuses any
+# https:// that the program does not declare in `letters::links`.
+#
+# ⚠ THREE ADDRESSES AND NOT ONE. The mandate's sentence names the feed alone; the program also
+# carries the channel and the support page (FR-103), and both are https:// by SEC-03's own rule
+# that a link this program opens is a secure one. So the allowed set is what `letters::links`
+# declares, read out of the SOURCE rather than typed here -- a list typed twice is a list that
+# drifts.
+#
+# The strings are read the way `strings(1)` reads them: runs of printable ASCII of four or more
+# bytes, over the whole file. UTF-16 literals are found by the same walk with the zero bytes
+# dropped, because Rust `&str` constants are UTF-8 and Windows resources are UTF-16 -- both
+# appear in this binary.
+Write-Host ''
+Write-Host '--- Gate 3: SEC-03, the addresses in the shipped binary ---------------'
+
+$source = Join-Path $ProjectDir 'src\letters.rs'
+$declared = @()
+
+if (Test-Path $source) {
+    $text = Get-Content -LiteralPath $source -Raw -Encoding UTF8
+    foreach ($match in [regex]::Matches($text, '"(https://[^"]+)"')) {
+        $declared += $match.Groups[1].Value
+    }
+}
+
+$declared = $declared | Sort-Object -Unique
+
+Write-Host ("  declared in src\letters.rs: {0}" -f $declared.Count)
+foreach ($url in $declared) { Write-Host ("    {0}" -f $url) }
+
+$bytes = [System.IO.File]::ReadAllBytes($Artifact)
+
+# Both encodings in one pass: the raw bytes, and the same bytes with every zero dropped.
+$ascii = -join ($bytes | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
+$wide  = -join ($bytes | Where-Object { $_ -ne 0 } | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
+
+# ⚠ Rust string constants sit next to one another in `.rdata` with NO terminator between them,
+# so two addresses come out of the file as ONE run: «https://a/onehttps://b/two». A pattern that
+# stopped at the first «https://» would then find one address, and a stray one glued to a known
+# one would be «explained» by it. Each run is therefore cut at every further «https://».
+$found = @()
+foreach ($haystack in @($ascii, $wide)) {
+    foreach ($match in [regex]::Matches($haystack, 'https://(?:(?!https://)[A-Za-z0-9\.\-/_%~:@\?=&\+])*')) {
+        $found += $match.Value
+    }
+}
+
+$found = $found | Sort-Object -Unique
+$strayAddresses = @()
+
+foreach ($url in $found) {
+    # A run is explained when a declared address is a PREFIX of it -- the linker stores strings
+    # side by side with no terminator, so «<the feed address>example.invalid» is one run and two
+    # constants -- or when the run is a prefix of a declared one.
+    #
+    # ⚠ This is safe ONLY because the runs above are cut at every further «https://»: a stray
+    # address glued behind a known one is a run of its own and is judged on its own. Measured
+    # both ways -- the control below appends `https://evil.example.org/collect` to a copy of the
+    # binary and the gate must fail on it.
+    $explained = $false
+    foreach ($known in $declared) {
+        if ($url.StartsWith($known) -or $known.StartsWith($url)) { $explained = $true; break }
+    }
+    if (-not $explained) { $strayAddresses += $url }
+}
+
+Write-Host ("  https:// runs in the binary: {0}" -f $found.Count)
+
+$addressFailed = $strayAddresses.Count -gt 0
+
+if ($addressFailed) {
+    foreach ($url in $strayAddresses) { Write-Host ("  FOUND   {0}" -f $url) }
+    Write-Host '  RESULT: FAIL -- the binary carries an address the program does not declare'
+} else {
+    Write-Host '  every address in the binary is one the program declares'
+    Write-Host '  RESULT: pass'
+}
+
 # --- Verdict ------------------------------------------------------------------------------------
 Write-Host ''
 Write-Host '======================================================================'
@@ -209,12 +291,12 @@ if ($sizeControl -or $crateControl) {
     exit 1
 }
 
-if ($sizeFailed -or $crateFailed) {
+if ($sizeFailed -or $crateFailed -or $addressFailed) {
     Write-Host ' RESULT: FAIL'
     Write-Host '======================================================================'
     exit 1
 }
 
-Write-Host ' RESULT: PASS -- NFR-07 and criterion 4 both hold'
+Write-Host ' RESULT: PASS -- NFR-07, criterion 4 and SEC-03 addresses all hold'
 Write-Host '======================================================================'
 exit 0

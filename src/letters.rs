@@ -458,8 +458,8 @@ impl FeedView<'_> {
 ///
 /// * `state` — the `[letters]` section as it stands.
 /// * `today` — the day, from [`today`].
-/// * `version` — this build's version as `VERSIONINFO` spells it, `"0.39.0"`.
-/// * `feed` — what the last successful feed read left; [`FeedView::EMPTY`] in stage А.
+/// * `version` — this build's version as `VERSIONINFO` spells it, `"0.40.0"`.
+/// * `feed` — what the last successful feed read left; [`FeedView::EMPTY`] until one succeeds.
 /// * `quiet` — whether this is a quiet moment: the system accepts notifications and the
 ///   keyboard has been still for [`crate::letters::QUIET_IDLE_SECONDS`] seconds.
 ///
@@ -606,7 +606,7 @@ pub fn has_unread_news(state: &Letters, feed: FeedView<'_>) -> bool {
 /// so that `0.10.0` is newer than `0.9.0` and a text comparison's answer is not taken.
 ///
 /// A part that is not a number counts as zero, and a version with fewer parts is padded with
-/// them: `0.39` and `0.39.0` are the same version. Neither case can arise from a feed the
+/// them: `0.40` and `0.40.0` are the same version. Neither case can arise from a feed the
 /// author's own script signed — it checks the shape — and both have to answer something
 /// rather than panic, because the string arrives from outside this program (SEC-05).
 pub fn version_is_newer(candidate: &str, installed: &str) -> bool {
@@ -1161,9 +1161,11 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
         IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK,
         IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS,
-        IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_READ_BUTTON,
-        IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD,
-        IDS_THANKS_PARA, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_WHATSNEW_1, IDS_WHATSNEW_2,
+        IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
+        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
+        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_PARA,
+        IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1,
+        IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, IDS_WHATSNEW_1, IDS_WHATSNEW_2,
         IDS_WHATSNEW_3, IDS_WHATSNEW_FROM, IDS_WHATSNEW_FULL, IDS_WHATSNEW_PANEL,
         IDS_WHATSNEW_TITLE, IDS_WHATSNEW_TODAY, format_text, text,
     };
@@ -1273,31 +1275,73 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
 
             let is_update = matches!(letter, Letter::Update);
 
+            let released = item.date.map(format_date).unwrap_or_default();
+
+            if is_update {
+                // «Обновление» — FR-101 and the mock-up: the author's own words about what
+                // changed stand as the paragraph, and the panel under them is the program's:
+                // three steps, in words a person who has never installed anything can follow.
+                //
+                // The version in the heading is **the entry's own**: the author writes the
+                // heading, and the number in it is the one being announced. What the program
+                // adds underneath is the version running here and the day of the release.
+                let announced = item.version.clone().unwrap_or_default();
+
+                return LetterPlan {
+                    caption,
+                    title: item.title.clone(),
+                    subtitle: format_text(IDS_UPDATE_SUB, &[&context.version, &released]),
+                    para: item.text.clone(),
+                    panel: text(IDS_UPDATE_HOW),
+                    rows: vec![
+                        Row {
+                            marker: "1".to_owned(),
+                            text: text(IDS_UPDATE_STEP_1),
+                        },
+                        Row {
+                            marker: "2".to_owned(),
+                            text: text(IDS_UPDATE_STEP_2),
+                        },
+                        Row {
+                            marker: "3".to_owned(),
+                            text: text(IDS_UPDATE_STEP_3),
+                        },
+                    ],
+                    left: Some(Button::live(text(IDS_CLOSE), Action::Close)),
+                    accent: Some(Button::link(
+                        text(IDS_NEWS_DOWNLOAD),
+                        Action::OpenDownload,
+                        &item.link,
+                    )),
+                    foot: format_text(IDS_UPDATE_FOOT, &[&announced]),
+                    ..LetterPlan::default()
+                };
+            }
+
+            // «Новость» — the window says whose news it is, the panel says which news. The
+            // entry's own heading goes **inside** the panel and not into the window's title:
+            // the title belongs to the program, and a heading out of the feed in that place
+            // would let the author write anything at all where the program speaks.
             LetterPlan {
                 caption,
-                title: item.title.clone(),
+                title: text(IDS_NEWS_LETTER_TITLE),
+                subtitle: released,
+                panel_title: item.title.clone(),
                 panel_text: item.text.clone(),
-                panel: if is_update {
-                    text(IDS_WHATSNEW_PANEL)
-                } else {
-                    String::new()
-                },
                 panel_buttons: if item.link.is_empty() {
                     Vec::new()
                 } else {
                     vec![Button::link(
-                        text(IDS_NEWS_DOWNLOAD),
-                        if is_update {
-                            Action::OpenDownload
-                        } else {
-                            Action::OpenLink
-                        },
+                        text(IDS_NEWS_OPEN_LINK),
+                        Action::OpenLink,
                         &item.link,
                     )]
                 },
-                left: Some(Button::live(text(IDS_CLOSE), Action::Close)),
-                accent: (!is_update)
-                    .then(|| Button::live(text(IDS_NEWS_READ_BUTTON), Action::MarkRead)),
+                // FR-101: closing is postponing, and the button says so. «Закрыть» here would
+                // promise an end the letter does not give — it comes back in a week.
+                left: Some(Button::live(text(IDS_NEWS_LATER), Action::Close)),
+                accent: Some(Button::live(text(IDS_NEWS_READ_BUTTON), Action::MarkRead)),
+                foot: text(IDS_NEWS_FOOT),
                 ..LetterPlan::default()
             }
         }
@@ -2752,6 +2796,111 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
     }
 }
 
+/// Draws the feed switch of FR-102 — the one check box of these three windows.
+///
+/// **Assembled from `theme`'s own primitives, not copied from the settings dialog**: the roles
+/// come from `theme::glyph_color_roles` (the 2×2×2 table of FR-92а), the figure from
+/// `theme::paint_rounded`, the tick from `theme::draw_check_mark` with the settings dialog's own
+/// `GLYPH_CHECK_MARK`, and the caption from `theme::paint_label`. What is in this function is
+/// **which** element is being drawn — which is exactly the line §6.2 draws between a window's
+/// owner and the drawing library.
+///
+/// ⚠ The tick is drawn through `check_mark_points(…, mirrored)` — a polyline is turned round by
+/// a mirrored window and `LAYOUT_BITMAPORIENTATIONPRESERVED` does not fix it (ИТОГ-Э30 §9.5).
+///
+/// # Safety
+///
+/// Called from [`on_draw_item`] with values copied out of the `WM_DRAWITEM` message.
+unsafe fn draw_switch(
+    dc: HDC,
+    rect: RECT,
+    state: &WindowState,
+    disabled: bool,
+    label: &str,
+) -> isize {
+    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
+        return 0;
+    };
+
+    let palette = state.palette;
+    let dpi = theme::dc_dpi(dc);
+    let checked = state.author.switch.unwrap_or(false);
+    let colors = theme::glyph_color_roles(theme::GlyphKind::CheckBox, checked, disabled);
+
+    // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
+    unsafe { FillRect(dc, &rect, brushes.panel_bg()) };
+
+    let size = theme::scaled(settings::GLYPH_SIZE, dpi);
+    let cell = RECT {
+        left: rect.left,
+        top: rect.top + ((rect.bottom - rect.top) - size) / 2,
+        right: rect.left + size,
+        bottom: rect.top + ((rect.bottom - rect.top) - size) / 2 + size,
+    };
+
+    let fill = match colors.fill {
+        theme::GlyphFillRole::FieldBg => brushes.field_bg(),
+        theme::GlyphFillRole::AccentBg => brushes.accent_bg(),
+    };
+
+    let outline = match colors.frame {
+        Some(theme::GlyphFrameRole::BoxBorder) => palette.box_border,
+        // The one cell the accent fill covers whole is outlined in its own fill, so that
+        // `RoundRect` — which draws frame and fill in one figure — shows no line at all.
+        None => match colors.fill {
+            theme::GlyphFillRole::FieldBg => palette.field_bg,
+            theme::GlyphFillRole::AccentBg => palette.accent_bg,
+        },
+    };
+
+    theme::paint_rounded(
+        dc,
+        &cell,
+        theme::scaled(settings::GLYPH_CORNER_RADIUS, dpi),
+        outline,
+        fill,
+        dpi,
+    );
+
+    if let Some(mark) = colors.mark {
+        let ink = match mark {
+            theme::GlyphMarkRole::AccentFg => palette.accent_fg,
+            theme::GlyphMarkRole::AccentBg => palette.accent_bg,
+            theme::GlyphMarkRole::BoxBorder => palette.box_border,
+        };
+
+        theme::draw_check_mark(dc, &cell, ink, settings::GLYPH_CHECK_MARK, dpi);
+    }
+
+    let text = RECT {
+        left: cell.right + theme::scaled(settings::LIST_CHECK_TEXT_GAP, dpi),
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    };
+
+    let mut caption: Vec<u16> = label.encode_utf16().collect();
+
+    // SAFETY: `dc` and `text` are live; the face belongs to this window's state.
+    unsafe {
+        theme::paint_label(
+            dc,
+            text,
+            &mut caption,
+            theme::LabelStyle {
+                ground: brushes.panel_bg(),
+                ink: match colors.text {
+                    theme::GlyphTextRole::Text => palette.text,
+                    theme::GlyphTextRole::TextMuted => palette.text_muted,
+                },
+                face: Some(faces.text),
+                pitch: None,
+                reading: theme::Reading::Native,
+            },
+        )
+    }
+}
+
 /// The `WM_DRAWITEM` of these windows: the owner-drawn statics and the owner-drawn buttons.
 ///
 /// SEC-05: the control type and the identifier are checked before any work, the same copied
@@ -2813,6 +2962,16 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     let disabled = item_state.0 & ODS_DISABLED.0 != 0;
     let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
     let hot = settings::is_hot(item_window);
+
+    // The one control of these three windows that is not a push button: the switch of FR-102.
+    if control == IDC_NEWS_SWITCH {
+        // Read **before** the borrow, the discipline of every drawing of this file.
+        let label = settings::get_text(hwnd, IDC_NEWS_SWITCH);
+
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message.
+        return unsafe { with_state(hwnd, |state| draw_switch(dc, rect, state, disabled, &label)) }
+            .unwrap_or(0);
+    }
 
     // SAFETY: see the caller.
     let choice = unsafe {
@@ -3102,6 +3261,26 @@ unsafe extern "system" fn letter_proc(
             // Esc, which the dialog manager sends whether or not the window has the button.
             if control == IDCANCEL.0 {
                 close_window(hwnd);
+                return 0;
+            }
+
+            // **FR-102: the switch writes the file at once.** Not on «Закрыть» and not on a
+            // later save — a person who turns the feed off has turned it off, and a window
+            // they close some other way must not undo that.
+            if control == IDC_NEWS_SWITCH {
+                let wanted = !state_now().feed;
+
+                update_state(|state| state.feed = wanted);
+
+                settings::send_to(
+                    hwnd,
+                    IDC_NEWS_SWITCH,
+                    windows::Win32::UI::WindowsAndMessaging::BM_SETCHECK,
+                    usize::from(wanted),
+                    0,
+                );
+                settings::repaint_control(hwnd, IDC_NEWS_SWITCH);
+
                 return 0;
             }
 
@@ -3755,6 +3934,18 @@ fn fill_author(hwnd: HWND, state: &WindowState) {
         IDC_AUTHOR_CHANNEL,
         !links::is_placeholder(links::CHANNEL_URL),
     );
+
+    // The download button leads where the **feed entry** points, and that address is the
+    // author's data rather than a constant of the build — so it is judged by the same rule as
+    // the two above and by nothing else. An entry that points at the placeholder host (which
+    // is what the site carries until it is published) leaves the button drawn and dead.
+    enable(
+        hwnd,
+        IDC_NEWS_DOWNLOAD,
+        view.download
+            .as_deref()
+            .is_some_and(|url| !links::is_placeholder(url)),
+    );
 }
 
 /// Lays out «От автора»: three panels, each as tall as what stands on it, and the window as
@@ -4151,6 +4342,20 @@ thread_local! {
         const { RefCell::new((None, Vec::new())) };
 }
 
+/// The entry a letter out of the feed is about, taken from the published feed by its own name.
+///
+/// The two feed letters carry their entry in the window state, and that copy is enough while
+/// the window stands. It is **not** enough when the window has to be built again — a change of
+/// interface language reopens it (Э31) — and a letter rebuilt without its entry would come
+/// back empty. Everything else answers `None`: their words are in the string tables.
+pub fn item_of(letter: Letter) -> Option<FeedItem> {
+    match letter {
+        Letter::Update => with_feed(|feed| feed.update.cloned()),
+        Letter::News(id) => with_feed(|feed| feed.news.iter().find(|item| item.id == id).cloned()),
+        Letter::Welcome | Letter::Thanks | Letter::WhatsNew => None,
+    }
+}
+
 /// Lends the feed to whoever asks — a borrow and not a copy, because a letter reads it and
 /// keeps nothing.
 pub fn with_feed<R>(body: impl FnOnce(FeedView<'_>) -> R) -> R {
@@ -4209,7 +4414,7 @@ fn news_due_or_unread<'a>(state: &Letters, feed: FeedView<'a>) -> Option<&'a Fee
     feed.news.iter().find(|item| !state.is_read(item.id))
 }
 
-/// This build's version as `VERSIONINFO` spells it — `"0.39.0"`, three parts and not four, the
+/// This build's version as `VERSIONINFO` spells it — `"0.40.0"`, three parts and not four, the
 /// same three the about window shows.
 ///
 /// Empty when the resource cannot be read, which is next to impossible for a window created
@@ -4511,12 +4716,14 @@ pub fn open_author(owner: HWND) {
     let stored = state_now();
     let mut state = fresh_state(owner, Kind::Author);
 
-    state.author = author_view(
-        &stored,
-        today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
-        &version_string(),
-        FeedView::EMPTY,
-    );
+    state.author = with_feed(|feed| {
+        author_view(
+            &stored,
+            today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
+            &version_string(),
+            feed,
+        )
+    });
 
     open_window(owner, state, true);
 }
@@ -4538,6 +4745,117 @@ thread_local! {
     /// Cleared when the letter is shown, however it is shown: by the click on the balloon, or
     /// by itself at the next quiet moment.
     static ANNOUNCED: RefCell<Option<Letter>> = const { RefCell::new(None) };
+}
+
+// -----------------------------------------------------------------------------------------
+// The feed thread — SPEC section 6.1, SEC-05
+// -----------------------------------------------------------------------------------------
+
+/// The message the feed thread posts to the UI window when it has something — **and it carries
+/// nothing at all**.
+///
+/// SEC-05, the shape SPEC section 6.3 asks for: the message says «look in the box», and what is
+/// in the box is checked where it is taken out. A `wParam` carrying a pointer would be a
+/// pointer any process of this integrity level could forge.
+pub const WM_APP_FEED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 19;
+
+/// What the feed thread leaves for the UI thread.
+///
+/// A `Mutex` and not an atomic because what is passed is a whole document; and a mutex is
+/// allowed here for the reason NFR-04 gives for forbidding it elsewhere — this is the UI and
+/// the feed thread, not the hook path, and neither of them is on anybody's keystroke.
+static MAILBOX: std::sync::Mutex<Option<feed::Feed>> = std::sync::Mutex::new(None);
+
+/// Whether a read is in flight. One at a time: a second thread would be a second request.
+static READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// **Starts the one read of FR-102**, on a thread that lives exactly one request.
+///
+/// SPEC section 6.1: a fourth thread, short-lived, doing no user interface, no input and no
+/// hook. It reads, checks the signature, parses, leaves the answer in [`MAILBOX`] and posts
+/// [`WM_APP_FEED`] to the UI window. Then it ends.
+///
+/// Nothing at all happens when the feed is off (`[letters] feed = false`): no thread is
+/// started, so there is no timer, no socket and no name to resolve — which is what makes the
+/// switch of FR-102 a real switch and not a filter on the answer.
+pub fn start_feed_read(owner: HWND, language: String) {
+    use std::sync::atomic::Ordering;
+
+    if READING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    // The window is passed by value across the thread boundary as a number: `HWND` is not
+    // `Send`, and what is actually sent is the handle's bits — which `PostMessageW` is
+    // documented to take from any thread.
+    let target = owner.0 as isize;
+
+    let started = std::thread::Builder::new()
+        .name("langsw-feed".to_owned())
+        .spawn(move || {
+            let answer = feed::read_now(&language);
+
+            if let Ok(mut box_of) = MAILBOX.lock() {
+                *box_of = answer;
+            }
+
+            READING.store(false, Ordering::Release);
+
+            // SAFETY: `target` is the bits of this program's own UI window, which outlives
+            // every thread of the process (it is destroyed as the process ends); the message
+            // carries two zeros and no pointer.
+            let _ = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    Some(HWND(target as *mut std::ffi::c_void)),
+                    WM_APP_FEED,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
+        });
+
+    if started.is_err() {
+        READING.store(false, Ordering::Release);
+        crate::app::report_non_critical("thread body", &WinError::from_thread());
+    }
+}
+
+/// **Takes what the feed thread left** — the far end of [`WM_APP_FEED`], on the UI thread.
+///
+/// SEC-05: a forged message finds an empty box and does nothing at all. What is in the box came
+/// from this program's own thread and has already been checked against the author's signature —
+/// the message is only the nudge that says to look.
+///
+/// Everything that happens to the state happens here, in one place and in this order: the
+/// news is published, the day of the read is written (**only** on a successful read — FR-102),
+/// what has fallen out of the feed is forgotten, and the dot on the icon is recomputed.
+pub fn take_feed() {
+    let Some(fresh) = MAILBOX.lock().ok().and_then(|mut box_of| box_of.take()) else {
+        return;
+    };
+
+    let Some(today) = today() else {
+        return;
+    };
+
+    publish_feed(fresh.update.clone(), fresh.news.clone());
+
+    let view = FeedView {
+        update: fresh.update.as_ref(),
+        news: &fresh.news,
+    };
+
+    update_state(|state| {
+        state.feed_last_read = Some(today);
+        forget_expired(state, view);
+    });
+
+    crate::tray::refresh_unread_mark();
+
+    crate::diag::record(
+        crate::diag::Operation::from_name("feed read ok"),
+        crate::diag::OsCode::NONE,
+    );
 }
 
 /// **One tick of the schedule of FR-101** — the whole of what the letters do on their own.
@@ -4565,6 +4883,13 @@ pub fn tick(owner: HWND) {
         let fresh = stored.clone();
 
         update_state(move |state| *state = fresh);
+    }
+
+    // FR-102: the one read of the feed, when it is due. Started **before** the letters are
+    // looked at, on a thread of its own — what it brings back reaches the next tick, and the
+    // one after that if the answer was slow. Nothing waits for it.
+    if feed_read_is_due(&stored, today) {
+        start_feed_read(owner, settings::ui_language().tag().to_owned());
     }
 
     let announced = ANNOUNCED.with_borrow(|announced| *announced);
@@ -4722,7 +5047,11 @@ pub fn language_changed(owner: HWND) {
 
                 match letter {
                     Some((Some(letter), Kind::Letter)) => {
-                        show_letter(owner, letter, None, false);
+                        // Its entry again — the window is being built from nothing, and
+                        // `None` here would reopen «Новость» as an empty frame.
+                        let item = item_of(letter);
+
+                        show_letter(owner, letter, item.as_ref(), false);
                     }
                     Some((_, Kind::Author)) => open_author(owner),
                     Some((_, Kind::List)) => open_list(owner),
@@ -4742,6 +5071,10 @@ fn refresh_plan(state: &mut WindowState) {
     match state.kind {
         Kind::Letter => {
             if let Some(letter) = state.letter {
+                // The entry comes back out of the published feed, not out of thin air: a
+                // «Новость» rebuilt in another language must be the same news item.
+                let item = item_of(letter);
+
                 state.plan = plan_for(
                     letter,
                     &PlanContext {
@@ -4749,19 +5082,851 @@ fn refresh_plan(state: &mut WindowState) {
                         previous_version: stored.last_seen_version.clone(),
                         hotkey: String::new(),
                         snooze_offered: snooze_is_offered(&stored),
-                        item: None,
+                        item: item.as_ref(),
                     },
                 );
             }
         }
         Kind::Author => {
-            state.author = author_view(
-                &stored,
-                today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
-                &version,
-                FeedView::EMPTY,
-            );
+            state.author = with_feed(|feed| {
+                author_view(
+                    &stored,
+                    today()
+                        .unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
+                    &version,
+                    feed,
+                )
+            });
         }
         Kind::List => {}
+    }
+}
+
+// =========================================================================================
+// 12. The author's feed — FR-102, SEC-03, task Т-32-6
+// =========================================================================================
+
+/// **The one network operation this program has**, and everything that decides what to do with
+/// what it brings back.
+///
+/// # What is in here and what is deliberately not
+///
+/// In: one `GET` over HTTPS from a fixed list of addresses, no more often than once in fifteen
+/// days; the ECDSA P-256 signature of the answer, checked by the system's own cryptography; the
+/// parsing of the document; the choice of language. **Nothing else in this program opens a
+/// socket** — that is what makes «which code can reach the network» a question with a one-line
+/// answer, and what ворота 3 of `tools\verify-perimeter.ps1` checks from the outside by reading
+/// the strings of the shipped binary.
+///
+/// Not in, and never: sending anything, downloading anything, running anything, an identifier,
+/// a version, a language, a cookie, a conditional request. The request carries **no parameters
+/// of any kind** (вопрос 101 п. 5): the file holds every language and the choice is made on
+/// this machine.
+///
+/// # The trust is in the signature and not in the host
+///
+/// The addresses are ordinary web hosting and may be anybody's tomorrow. What the program
+/// believes is the author's signature over the body, checked against **two** public keys
+/// compiled into it — a working one and a reserve. A file whose signature does not check out is
+/// dropped with one line in the journal and no trace in the interface at all: a person must
+/// never be shown a letter this program cannot prove is the author's.
+pub mod feed {
+    use super::{Date, FeedItem, NEWS_KEPT};
+
+    /// The two public keys a signature is accepted from — the working one and the reserve.
+    ///
+    /// `X` then `Y`, thirty-two bytes each, which is the tail of a `BCRYPT_ECCPUBLIC_BLOB`; the
+    /// eight-byte header is a constant of the format and is put on at import time.
+    ///
+    /// Made by `tools\make-news-key.ps1`. The private half of the first lives in this machine's
+    /// key store and in an encrypted file; the private half of the second lives **only** in an
+    /// encrypted file, off this machine — so that a stolen working key can be answered with a
+    /// letter the thief cannot forge.
+    pub const FEED_KEYS: [[u8; 64]; 2] = [
+        // The working key.
+        [
+            0x44, 0xCF, 0xB8, 0xB2, 0x7F, 0x43, 0x40, 0xF0, 0x58, 0x5E, 0x82, 0x4A, 0x46, 0xEE,
+            0xA1, 0x8B, 0xD9, 0x84, 0x48, 0x47, 0x45, 0x50, 0xB4, 0x12, 0xA8, 0x3D, 0x45, 0x71,
+            0xB3, 0x9B, 0xC0, 0x8E, 0x25, 0xF3, 0x49, 0xD0, 0x99, 0xC8, 0x6D, 0xA6, 0x9F, 0x96,
+            0x58, 0x41, 0x86, 0x91, 0x86, 0xA4, 0x33, 0x81, 0xB3, 0xAD, 0x71, 0xC9, 0xB5, 0x84,
+            0x74, 0xDB, 0x90, 0x38, 0x34, 0x7B, 0x3D, 0x66,
+        ],
+        // The reserve key — it does not live on this machine.
+        [
+            0x94, 0xFC, 0x7F, 0x20, 0x1A, 0x69, 0x5E, 0x35, 0xD2, 0x09, 0x46, 0xE1, 0xF9, 0x49,
+            0x4E, 0x45, 0x88, 0x90, 0xF6, 0xF7, 0x18, 0x23, 0x46, 0x56, 0x02, 0x19, 0xA1, 0x9F,
+            0xC8, 0xBC, 0x4D, 0x27, 0xF1, 0x25, 0x37, 0x4A, 0x7F, 0x7E, 0x0A, 0xDA, 0x2D, 0xAD,
+            0x30, 0x41, 0xE8, 0x67, 0x98, 0xC9, 0x56, 0x26, 0xA8, 0x0D, 0x9D, 0xD9, 0x9C, 0xCA,
+            0x04, 0xB6, 0x7C, 0x86, 0x62, 0xFC, 0xFF, 0x9C,
+        ],
+    ];
+
+    /// The largest answer this program will read — FR-102.
+    ///
+    /// A news item in fourteen languages is about 21 KB and the whole file about 84 KB; the
+    /// author's own signing script refuses to sign anything over 192 KB. This is the ceiling on
+    /// what is **read**, and it is deliberately above that one: the script's limit protects the
+    /// reader from a mistake, and this one protects it from a host that is not the author's.
+    pub const RESPONSE_CAP: usize = 256 * 1024;
+
+    /// The schema of the document this build understands.
+    pub const FEED_SCHEMA: u32 = 1;
+
+    /// Why a feed was refused — one word for the journal and nothing else.
+    ///
+    /// **Never shown to anybody.** SEC-07: a refusal is a line in the journal with the name of
+    /// the operation, and what the interface does about it is nothing at all.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Refusal {
+        /// The first line is not a signature.
+        NoSignature,
+        /// The signature is not sixty-four bytes of base64.
+        BadSignature,
+        /// The body is not TOML, or not the shape FR-102 describes.
+        Malformed,
+        /// The document names a schema this build does not know.
+        Schema(u32),
+        /// The signature did not check out against either key.
+        Unsigned,
+        /// The answer was longer than [`RESPONSE_CAP`].
+        TooBig,
+    }
+
+    impl Refusal {
+        /// The name this refusal goes into the journal under — one of a closed set, and no
+        /// value of the document travels with it (SEC-07).
+        pub fn journal_name(self) -> &'static str {
+            match self {
+                Self::NoSignature | Self::BadSignature => "feed signature line refused",
+                Self::Malformed => "feed document refused",
+                Self::Schema(_) => "feed from a newer schema",
+                Self::Unsigned => "feed signature did not verify",
+                Self::TooBig => "feed answer oversized",
+            }
+        }
+    }
+
+    /// What one read of the feed produced: the single `update` entry and the news items kept.
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub struct Feed {
+        /// The `update` entry with the greatest identifier, if there is one.
+        pub update: Option<FeedItem>,
+        /// At most [`NEWS_KEPT`] `news` entries — the ones with the greatest identifiers,
+        /// **oldest first**, which is the order they are shown in.
+        pub news: Vec<FeedItem>,
+    }
+
+    /// The signature line and the body it covers — the split every read makes first.
+    ///
+    /// The body is **the bytes after the first newline**, verbatim. Not «the document without
+    /// the first line» as a parsed thing: what is signed is bytes, and re-serialising them
+    /// would let a difference of formatting change what was checked.
+    fn split(text: &str) -> Result<(Vec<u8>, &str), Refusal> {
+        let (first, body) = text.split_once('\n').ok_or(Refusal::NoSignature)?;
+
+        let quoted = first
+            .trim()
+            .strip_prefix("signature")
+            .map(str::trim_start)
+            .and_then(|rest| rest.strip_prefix('='))
+            .map(str::trim)
+            .ok_or(Refusal::NoSignature)?;
+
+        let encoded = quoted
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+            .ok_or(Refusal::NoSignature)?;
+
+        let signature = base64(encoded).ok_or(Refusal::BadSignature)?;
+
+        if signature.len() != 64 {
+            return Err(Refusal::BadSignature);
+        }
+
+        Ok((signature, body))
+    }
+
+    /// Decodes base64 — the sixty-four bytes of a signature and nothing else.
+    ///
+    /// Written here because the dependency list of section 3.2 is closed (SEC-03) and holds no
+    /// base64 crate. Deliberately strict: the standard alphabet, padding required, and any
+    /// character outside it refuses the whole string. It decodes **one field of one file**, and
+    /// a lenient decoder is a decoder that accepts two spellings of one signature.
+    fn base64(text: &str) -> Option<Vec<u8>> {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+        let bytes = text.as_bytes();
+
+        if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
+            return None;
+        }
+
+        let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
+
+        if padding > 2 {
+            return None;
+        }
+
+        let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+        let mut accumulator = 0u32;
+        let mut held = 0u32;
+
+        for byte in &bytes[..bytes.len() - padding] {
+            let value = ALPHABET.iter().position(|letter| letter == byte)? as u32;
+
+            accumulator = (accumulator << 6) | value;
+            held += 6;
+
+            if held >= 8 {
+                held -= 8;
+                out.push(u8::try_from((accumulator >> held) & 0xFF).ok()?);
+            }
+        }
+
+        // What is left over must be zero bits: anything else is a string that decodes to
+        // something its own padding says it does not.
+        if accumulator & ((1 << held) - 1) != 0 {
+            return None;
+        }
+
+        Some(out)
+    }
+
+    /// Reads one feed document: the signature, the signature check, the parse and the choice of
+    /// what to keep — **the whole of what a read of the feed means**.
+    ///
+    /// `verify` is passed in rather than called: the signature check is the one part of this
+    /// that needs the system, and a test that could not replace it could not check a single
+    /// rule of the parsing against a document it wrote itself. The product passes
+    /// [`verify_signature`]; the tests pass their own.
+    pub fn read_document(
+        text: &str,
+        language: &str,
+        verify: impl Fn(&[u8], &[u8]) -> bool,
+    ) -> Result<Feed, Refusal> {
+        if text.len() > RESPONSE_CAP {
+            return Err(Refusal::TooBig);
+        }
+
+        let (signature, body) = split(text)?;
+
+        if !verify(body.as_bytes(), &signature) {
+            return Err(Refusal::Unsigned);
+        }
+
+        parse_body(body, language)
+    }
+
+    /// The parsed body — the half that needs no cryptography and no network.
+    pub fn parse_body(body: &str, language: &str) -> Result<Feed, Refusal> {
+        let document: RawFeed = toml::from_str(body).map_err(|_| Refusal::Malformed)?;
+
+        if document.schema != FEED_SCHEMA {
+            return Err(Refusal::Schema(document.schema));
+        }
+
+        let mut news: Vec<FeedItem> = Vec::new();
+        let mut update: Option<FeedItem> = None;
+
+        for raw in document.item {
+            let Some(item) = raw.into_item(language) else {
+                // FR-102: a record with no Russian and no English is skipped, and the file is
+                // **not** refused over it. One bad entry must not silence the others.
+                continue;
+            };
+
+            match item.version {
+                // An `update` entry: the one with the greatest identifier wins.
+                Some(_) => {
+                    if update.as_ref().is_none_or(|kept| kept.id < item.id) {
+                        update = Some(item);
+                    }
+                }
+                None => news.push(item),
+            }
+        }
+
+        // The three greatest identifiers, then back into ascending order — the order they are
+        // shown and reminded of in.
+        news.sort_unstable_by_key(|item| item.id);
+
+        if news.len() > NEWS_KEPT {
+            news.drain(..news.len() - NEWS_KEPT);
+        }
+
+        Ok(Feed { update, news })
+    }
+
+    /// **Checks the author's signature over the body** — FR-102, the system's own cryptography
+    /// and no crate of anybody's (SEC-03).
+    ///
+    /// ECDSA P-256 over SHA-256, and the signature is the raw `r ‖ s` pair of sixty-four bytes
+    /// that `BCryptVerifySignature` wants — not a DER structure. It is accepted from **either**
+    /// of [`FEED_KEYS`]: that is the whole of the recovery plan, and the check costs one more
+    /// import of thirty-two bytes.
+    ///
+    /// `false` for every refusal along the way (NFR-13, SEC-05): a provider that will not open,
+    /// a key that will not import, a hash that will not finish, a signature that does not
+    /// verify — all mean the same thing to the caller, «this is not the author's file», and the
+    /// journal is told which call refused. **A document that fails here is dropped without a
+    /// trace in the interface**: a person must never be shown a letter this program cannot
+    /// prove is the author's.
+    pub fn verify_signature(body: &[u8], signature: &[u8]) -> bool {
+        verify_with(body, signature, &FEED_KEYS)
+    }
+
+    /// [`verify_signature`] against a named set of keys — the same body, and the only thing the
+    /// product ever passes is [`FEED_KEYS`].
+    ///
+    /// The keys are a parameter for one reason and it is not flexibility: **a test must sign
+    /// with keys of its own** (the mandate: «тестовые ключи — отдельные от рабочих»), and a
+    /// check that could only be run against the author's own key could only be run by the
+    /// author. What the test then exercises is this very body — the import, the hash, the
+    /// verify and the two-key loop — and not a copy of it.
+    pub fn verify_with(body: &[u8], signature: &[u8], keys: &[[u8; 64]]) -> bool {
+        use windows::Win32::Security::Cryptography::{
+            BCRYPT_ALG_HANDLE, BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM,
+            BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_FLAGS, BCRYPT_KEY_HANDLE,
+            BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS, BCryptCloseAlgorithmProvider, BCryptDestroyKey,
+            BCryptImportKeyPair, BCryptOpenAlgorithmProvider, BCryptVerifySignature,
+        };
+        use windows::core::PCWSTR;
+
+        if signature.len() != 64 {
+            return false;
+        }
+
+        let Some(hash) = sha256(body) else {
+            return false;
+        };
+
+        let mut algorithm = BCRYPT_ALG_HANDLE::default();
+
+        // SAFETY: `algorithm` is a live local the call fills; the algorithm name is a static
+        // NUL-terminated literal of this image and the implementation is the default.
+        let opened = unsafe {
+            BCryptOpenAlgorithmProvider(
+                &mut algorithm,
+                BCRYPT_ECDSA_P256_ALGORITHM,
+                PCWSTR::null(),
+                BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS(0),
+            )
+        };
+
+        if opened.is_err() {
+            crate::app::report_non_critical(
+                "BCryptOpenAlgorithmProvider",
+                &windows::core::Error::from_hresult(opened.to_hresult()),
+            );
+            return false;
+        }
+
+        let mut accepted = false;
+
+        for key in keys {
+            // `BCRYPT_ECCPUBLIC_BLOB`: the magic, the size of one coordinate, then X and Y.
+            let mut blob = Vec::with_capacity(8 + key.len());
+            blob.extend_from_slice(&BCRYPT_ECDSA_PUBLIC_P256_MAGIC.to_le_bytes());
+            blob.extend_from_slice(&32u32.to_le_bytes());
+            blob.extend_from_slice(key);
+
+            let mut handle = BCRYPT_KEY_HANDLE::default();
+
+            // SAFETY: `algorithm` is the provider just opened, `blob` a live buffer of this
+            // frame holding a whole public blob, and `handle` a live local the call fills.
+            let imported = unsafe {
+                BCryptImportKeyPair(
+                    algorithm,
+                    None,
+                    BCRYPT_ECCPUBLIC_BLOB,
+                    &mut handle,
+                    &blob,
+                    0,
+                )
+            };
+
+            if imported.is_err() {
+                crate::app::report_non_critical(
+                    "BCryptImportKeyPair",
+                    &windows::core::Error::from_hresult(imported.to_hresult()),
+                );
+                continue;
+            }
+
+            // SAFETY: `handle` is the key just imported; both slices are live buffers of this
+            // frame and are read, not written.
+            let verified =
+                unsafe { BCryptVerifySignature(handle, None, &hash, signature, BCRYPT_FLAGS(0)) };
+
+            // SAFETY: frees exactly the key imported above, once.
+            let _ = unsafe { BCryptDestroyKey(handle) };
+
+            if verified.is_ok() {
+                accepted = true;
+                break;
+            }
+        }
+
+        // SAFETY: closes exactly the provider opened above, once.
+        let _ = unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
+
+        accepted
+    }
+
+    /// The SHA-256 of a buffer, by the system's own hash — the half of the check that is not
+    /// about keys.
+    fn sha256(body: &[u8]) -> Option<[u8; 32]> {
+        use windows::Win32::Security::Cryptography::{
+            BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS,
+            BCRYPT_SHA256_ALGORITHM, BCryptCloseAlgorithmProvider, BCryptCreateHash,
+            BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCryptOpenAlgorithmProvider,
+        };
+        use windows::core::PCWSTR;
+
+        let mut algorithm = BCRYPT_ALG_HANDLE::default();
+
+        // SAFETY: as in `verify_signature` — a live local and a static literal.
+        let opened = unsafe {
+            BCryptOpenAlgorithmProvider(
+                &mut algorithm,
+                BCRYPT_SHA256_ALGORITHM,
+                PCWSTR::null(),
+                BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS(0),
+            )
+        };
+
+        if opened.is_err() {
+            crate::app::report_non_critical(
+                "BCryptOpenAlgorithmProvider",
+                &windows::core::Error::from_hresult(opened.to_hresult()),
+            );
+            return None;
+        }
+
+        let mut hash = BCRYPT_HASH_HANDLE::default();
+
+        // SAFETY: `algorithm` is the provider just opened; `None` for the object buffer asks
+        // the provider to allocate its own, which is the documented modern form.
+        let created = unsafe { BCryptCreateHash(algorithm, &mut hash, None, None, 0) };
+
+        let mut digest = [0u8; 32];
+        let mut ok = created.is_ok();
+
+        if ok {
+            // SAFETY: `hash` is the object just created and `body` a buffer the caller owns for
+            // the length of this call; it is read and not written.
+            ok = unsafe { BCryptHashData(hash, body, 0) }.is_ok();
+        }
+
+        if ok {
+            // SAFETY: as above; `digest` is a live local the call fills, and its length is what
+            // SHA-256 produces.
+            ok = unsafe { BCryptFinishHash(hash, &mut digest, 0) }.is_ok();
+        }
+
+        if !created.is_err() {
+            // SAFETY: frees exactly the hash object created above, once.
+            let _ = unsafe { BCryptDestroyHash(hash) };
+        }
+
+        // SAFETY: closes exactly the provider opened above, once.
+        let _ = unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
+
+        ok.then_some(digest)
+    }
+
+    /// The name this program calls itself on the network — FR-102, and **it carries no
+    /// version**.
+    ///
+    /// A user agent is the one field of the request the author could be tempted to put
+    /// something in, and вопрос 101 п. 5 says the request carries no information about the
+    /// machine at all. A version would tell the host how many people are running which build —
+    /// which is telemetry with a different name. The test
+    /// `the_user_agent_names_the_program_and_nothing_about_the_machine` fails if a digit ever
+    /// appears here.
+    pub const USER_AGENT: &str = "LangSwitcher";
+
+    /// How long the program waits for the name to resolve and the connection to open, in
+    /// milliseconds — FR-102.
+    pub const CONNECT_TIMEOUT_MS: i32 = 10_000;
+
+    /// And how long for the answer — FR-102.
+    pub const RECEIVE_TIMEOUT_MS: i32 = 20_000;
+
+    /// **Reads one address** — the whole of the network surface of this program.
+    ///
+    /// One `GET` over HTTPS with no parameters, no headers of ours beyond the agent, no
+    /// conditional request and no cookie. The answer is read to [`RESPONSE_CAP`] and no
+    /// further: a host that answers for ever gets to fill one buffer.
+    ///
+    /// ⛔ **Nothing is written to disk, nothing is executed, nothing is sent.** What comes back
+    /// is bytes in memory, and the only thing done with them is a signature check.
+    ///
+    /// `None` for every refusal — a name that will not resolve, a connection that will not
+    /// open, a status that is not 200, a body over the ceiling. FR-102 says a refusal is
+    /// silent: the journal is told the name of the call, the interface is told nothing, and
+    /// `feed_last_read` is **not** moved, so a broken host is tried again tomorrow rather than
+    /// in fifteen days.
+    ///
+    /// # Safety
+    ///
+    /// None: every unsafe block inside is local and documented. The function is safe to call
+    /// from any thread, and the product calls it from a thread of its own that lives exactly
+    /// one request (SPEC section 6.1).
+    pub fn fetch(url: &str) -> Option<String> {
+        use windows::Win32::Networking::WinHttp::{
+            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WinHttpCloseHandle, WinHttpOpen,
+            WinHttpSetTimeouts,
+        };
+        use windows::core::PCWSTR;
+
+        let (host, path) = split_https(url)?;
+
+        // The line that makes «no request was made» measurable. It is written **before** the
+        // session exists, carries no address and no status (SEC-07), and is the positive half
+        // of the instrument that checks `[letters] feed = false`: with the feed on, the journal
+        // of a due read holds this line; with it off, the journal never holds it.
+        crate::diag::record(
+            crate::diag::Operation::from_name("feed request"),
+            crate::diag::OsCode::NONE,
+        );
+
+        let agent = crate::settings::wide(USER_AGENT);
+        let host_wide = crate::settings::wide(&host);
+        let path_wide = crate::settings::wide(&path);
+        let verb = crate::settings::wide("GET");
+
+        // SAFETY: the agent is a NUL-terminated buffer of this frame; the two null pointers are
+        // the documented «no proxy, no bypass», and the access type asks Windows for the
+        // machine's own automatic proxy configuration.
+        let session = unsafe {
+            WinHttpOpen(
+                PCWSTR(agent.as_ptr()),
+                WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                PCWSTR::null(),
+                PCWSTR::null(),
+                0,
+            )
+        };
+
+        if session.is_null() {
+            crate::app::report_non_critical("WinHttpOpen", &windows::core::Error::from_thread());
+            return None;
+        }
+
+        // The four timeouts of FR-102: resolve, connect, send, receive. A feed that does not
+        // answer must not hold a thread of this program for minutes.
+        //
+        // SAFETY: `session` is the handle just opened; the four numbers are plain values.
+        let _ = unsafe {
+            WinHttpSetTimeouts(
+                session,
+                CONNECT_TIMEOUT_MS,
+                CONNECT_TIMEOUT_MS,
+                RECEIVE_TIMEOUT_MS,
+                RECEIVE_TIMEOUT_MS,
+            )
+        };
+
+        let answer = read_over(session, &host_wide, &path_wide, &verb);
+
+        // SAFETY: closes exactly the session opened above, once. Every handle below it is
+        // closed by `read_over` before it returns.
+        let _ = unsafe { WinHttpCloseHandle(session) };
+
+        answer
+    }
+
+    /// The connection, the request and the reading — the half of [`fetch`] that owns three
+    /// handles, split out so that the session above is closed on every path.
+    fn read_over(
+        session: *mut std::ffi::c_void,
+        host: &[u16],
+        path: &[u16],
+        verb: &[u16],
+    ) -> Option<String> {
+        use windows::Win32::Networking::WinHttp::{
+            WINHTTP_FLAG_SECURE, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect,
+            WinHttpOpenRequest, WinHttpReceiveResponse, WinHttpSendRequest,
+        };
+        use windows::core::PCWSTR;
+
+        const HTTPS_PORT: u16 = 443;
+
+        // SAFETY: `session` is the live session and `host` a NUL-terminated buffer of the
+        // caller's frame; the reserved argument is zero as documented.
+        let connection = unsafe { WinHttpConnect(session, PCWSTR(host.as_ptr()), HTTPS_PORT, 0) };
+
+        if connection.is_null() {
+            crate::app::report_non_critical("WinHttpConnect", &windows::core::Error::from_thread());
+            return None;
+        }
+
+        // ⚠ **`WINHTTP_FLAG_SECURE` is what makes this HTTPS and it is not optional.** Without
+        // it the same call would fetch the same path over plain HTTP from port 443 and fail in
+        // a way that looks like a network problem.
+        //
+        // SAFETY: `connection` is the handle just opened; the four string arguments are
+        // NUL-terminated buffers (two of the caller's frame, two null for «the default version»
+        // and «no referrer»), and the accept-types pointer is null for «anything».
+        let request = unsafe {
+            WinHttpOpenRequest(
+                connection,
+                PCWSTR(verb.as_ptr()),
+                PCWSTR(path.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                std::ptr::null(),
+                WINHTTP_OPEN_REQUEST_FLAGS(WINHTTP_FLAG_SECURE.0),
+            )
+        };
+
+        if request.is_null() {
+            crate::app::report_non_critical(
+                "WinHttpOpenRequest",
+                &windows::core::Error::from_thread(),
+            );
+            // SAFETY: closes exactly the connection opened above, once.
+            let _ = unsafe { WinHttpCloseHandle(connection) };
+            return None;
+        }
+
+        // **No headers of ours and no body**: `None` for the headers, null and zero for the
+        // optional data, and zero for the context. That is the whole request — вопрос 101 п. 5.
+        //
+        // SAFETY: `request` is the handle just opened; every argument is a plain value or a
+        // documented «nothing».
+        let sent = unsafe { WinHttpSendRequest(request, None, None, 0, 0, 0) };
+
+        let answer = if sent.is_err() {
+            crate::app::report_non_critical(
+                "WinHttpSendRequest",
+                &windows::core::Error::from_thread(),
+            );
+            None
+        } else {
+            // SAFETY: `request` is the live request; the reserved argument is null.
+            let received = unsafe { WinHttpReceiveResponse(request, std::ptr::null_mut()) };
+
+            if received.is_err() {
+                crate::app::report_non_critical(
+                    "WinHttpReceiveResponse",
+                    &windows::core::Error::from_thread(),
+                );
+                None
+            } else if status_of(request) != 200 {
+                // A status that is not 200 is a refusal like any other and is not journalled
+                // with its number: SEC-07, and the number is the host's business.
+                None
+            } else {
+                drain(request)
+            }
+        };
+
+        // SAFETY: closes exactly the two handles opened above, once each.
+        unsafe {
+            let _ = WinHttpCloseHandle(request);
+            let _ = WinHttpCloseHandle(connection);
+        }
+
+        answer
+    }
+
+    /// The status code of an answer, or zero when it cannot be read.
+    fn status_of(request: *mut std::ffi::c_void) -> u32 {
+        use windows::Win32::Networking::WinHttp::{
+            WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE, WinHttpQueryHeaders,
+        };
+        use windows::core::PCWSTR;
+
+        let mut status = 0u32;
+        let mut length = u32::try_from(size_of::<u32>()).unwrap_or(4);
+        let mut index = 0u32;
+
+        // SAFETY: `request` is the live request; `status`, `length` and `index` are live locals
+        // the call fills, and the length says how big the buffer is.
+        let read = unsafe {
+            WinHttpQueryHeaders(
+                request,
+                WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                PCWSTR::null(),
+                Some(std::ptr::from_mut(&mut status).cast()),
+                &mut length,
+                &mut index,
+            )
+        };
+
+        if read.is_err() { 0 } else { status }
+    }
+
+    /// Reads the body to [`RESPONSE_CAP`] and no further.
+    fn drain(request: *mut std::ffi::c_void) -> Option<String> {
+        use windows::Win32::Networking::WinHttp::WinHttpReadData;
+
+        let mut body: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 8192];
+
+        loop {
+            let mut read = 0u32;
+
+            // SAFETY: `request` is the live request and `chunk` a live local of this frame;
+            // the call writes at most as many bytes as it is told the buffer holds.
+            let ok = unsafe {
+                WinHttpReadData(
+                    request,
+                    chunk.as_mut_ptr().cast(),
+                    u32::try_from(chunk.len()).unwrap_or(0),
+                    &mut read,
+                )
+            };
+
+            if ok.is_err() {
+                crate::app::report_non_critical(
+                    "WinHttpReadData",
+                    &windows::core::Error::from_thread(),
+                );
+                return None;
+            }
+
+            if read == 0 {
+                break;
+            }
+
+            let taken = usize::try_from(read).unwrap_or(0).min(chunk.len());
+
+            // The ceiling of FR-102. A host that answers for ever fills one buffer and is then
+            // dropped: the read stops and the file is refused, because a truncated document is
+            // a document whose signature will not check out anyway.
+            if body.len() + taken > RESPONSE_CAP {
+                return None;
+            }
+
+            body.extend_from_slice(&chunk[..taken]);
+        }
+
+        // The document is UTF-8 by construction — the author's own script writes it. Anything
+        // else is not the author's file, and `from_utf8` saying so is the cheapest of the
+        // checks that say it.
+        String::from_utf8(body).ok()
+    }
+
+    /// **One read of the feed**: every address in order, the first good answer winning.
+    ///
+    /// «Good» means all of it — the answer arrived, the signature checked out against one of the
+    /// two keys, and the document parsed. An address that answers with something that is not
+    /// the author's file is not «a bad host» to be retried differently; it is simply not an
+    /// answer, and the next address is tried.
+    ///
+    /// `None` when no address gave one. The caller then leaves `feed_last_read` where it is, so
+    /// the next attempt is tomorrow rather than in fifteen days.
+    pub fn read_now(language: &str) -> Option<Feed> {
+        for url in super::links::FEED_URLS {
+            // A placeholder address is not read at all: `.invalid` never resolves, and asking
+            // costs a DNS timeout for nothing (полномочие П5).
+            if super::links::is_placeholder(url) {
+                continue;
+            }
+
+            let Some(text) = fetch(url) else {
+                continue;
+            };
+
+            match read_document(&text, language, verify_signature) {
+                Ok(feed) => return Some(feed),
+                Err(refusal) => {
+                    // SEC-07: the name of what went wrong and not a word of the document.
+                    crate::diag::record(
+                        crate::diag::Operation::from_name(refusal.journal_name()),
+                        crate::diag::OsCode::NONE,
+                    );
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Splits an `https://host/path` into its two halves — `None` for anything that is not one.
+    ///
+    /// ⛔ **Only `https://`.** Not a preference: SEC-03 says the one network operation is over
+    /// HTTPS, and a plain-HTTP address in the list would be a signature check over a document
+    /// anybody on the way could have replaced — the signature would catch the replacement, and
+    /// the address would still have leaked to whoever was listening.
+    pub fn split_https(url: &str) -> Option<(String, String)> {
+        let rest = url.strip_prefix("https://")?;
+        let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+
+        if host.is_empty() || host.contains(':') || host.contains('@') {
+            return None;
+        }
+
+        Some((host.to_owned(), format!("/{path}")))
+    }
+
+    /// The document as the author writes it — FR-102.
+    #[derive(serde::Deserialize)]
+    struct RawFeed {
+        schema: u32,
+        #[serde(default)]
+        item: Vec<RawItem>,
+    }
+
+    /// One entry, before the language is chosen.
+    #[derive(serde::Deserialize)]
+    struct RawItem {
+        id: u64,
+        #[serde(rename = "type")]
+        kind: String,
+        #[serde(default)]
+        date: Option<Date>,
+        #[serde(default)]
+        version: Option<String>,
+        #[serde(default)]
+        link: String,
+        /// The per-language sub-tables, `ru`, `en`, `uk`… — everything else in the entry.
+        #[serde(flatten)]
+        languages: std::collections::BTreeMap<String, RawText>,
+    }
+
+    /// The two strings of one language.
+    #[derive(serde::Deserialize)]
+    struct RawText {
+        title: String,
+        text: String,
+    }
+
+    impl RawItem {
+        /// The entry with the language chosen — `None` for one this program cannot show.
+        ///
+        /// **The choice of language is made here and on this machine** (вопрос 101 п. 5): the
+        /// interface language, then English, then Russian. A record that has none of the three
+        /// is skipped: FR-102 makes `ru` and `en` obligatory, and one the author forgot is one
+        /// nobody can read.
+        fn into_item(mut self, language: &str) -> Option<FeedItem> {
+            let is_update = self.kind == "update";
+
+            if !is_update && self.kind != "news" {
+                return None;
+            }
+
+            // An update with no version says nothing at all — there is no version to compare.
+            if is_update && self.version.is_none() {
+                return None;
+            }
+
+            let chosen = [language, "en", "ru"]
+                .into_iter()
+                .find_map(|tag| self.languages.remove(tag))?;
+
+            Some(FeedItem {
+                id: self.id,
+                date: self.date,
+                title: chosen.title,
+                text: chosen.text,
+                link: self.link,
+                version: if is_update { self.version } else { None },
+            })
+        }
     }
 }

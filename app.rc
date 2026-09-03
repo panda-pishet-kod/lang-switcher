@@ -374,8 +374,8 @@ IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
 
 // Values fixed by decision 8 of DECISIONS.md.
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,39,0,0
-  PRODUCTVERSION  0,39,0,0
+  FILEVERSION     0,40,0,0
+  PRODUCTVERSION  0,40,0,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L
@@ -388,12 +388,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Panda_Pishet_Kod"
             VALUE "FileDescription",  "Lang Switcher"
-            VALUE "FileVersion",      "0.39.0.0"
+            VALUE "FileVersion",      "0.40.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
             VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
-            VALUE "ProductVersion",   "0.39.0.0"
+            VALUE "ProductVersion",   "0.40.0.0"
         END
     END
     BLOCK "VarFileInfo"
@@ -1208,6 +1208,20 @@ END
 #define IDS_ENTRY_UNREAD_MARK   3141
 #define IDS_ENTRY_READ_MARK     3142
 
+// The frame around the two letters that come out of the feed — task Т-32-6, ступень Б. The
+// words *inside* them are the author's and travel in the feed; these are the program's own:
+// which version you have, the three steps of updating, and what «Позже» promises.
+#define IDS_UPDATE_SUB          3143
+#define IDS_UPDATE_HOW          3144
+#define IDS_UPDATE_STEP_1       3145
+#define IDS_UPDATE_STEP_2       3146
+#define IDS_UPDATE_STEP_3       3147
+#define IDS_UPDATE_FOOT         3148
+#define IDS_NEWS_LETTER_TITLE   3149
+#define IDS_NEWS_LATER          3150
+#define IDS_NEWS_OPEN_LINK      3151
+#define IDS_NEWS_FOOT           3152
+
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
 // ---------------------------------------------------------------------------------------
@@ -1316,9 +1330,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "было {0} · обновлено сегодня"
     IDS_WHATSNEW_TODAY      "обновлено сегодня"
     IDS_WHATSNEW_PANEL      "Три изменения"
-    IDS_WHATSNEW_1          "Письма от автора: «Привет» при первом запуске, «Что нового» после обновления и «Спасибо» через месяц."
-    IDS_WHATSNEW_2          "Окно «От автора»: поддержка, канал и состояние ленты новостей."
-    IDS_WHATSNEW_3          "На значке в трее загорается точка, когда есть непрочитанное письмо."
+    IDS_WHATSNEW_1          "Лента автора: раз в 15 дней программа читает подписанный файл новостей и ничего не отправляет."
+    IDS_WHATSNEW_2          "Из ленты приходят письма «Новость» и «Обновление», а кнопка «Прочитано» гасит точку на значке."
+    IDS_WHATSNEW_3          "Чтение ленты отключается: в файле настроек сразу, а после первого письма — в окне «От автора»."
     IDS_WHATSNEW_FULL       "Полный список изменений опубликован в канале."
     IDS_AUTHOR_CAPTION      "От автора"
     IDS_AUTHOR_VERSION      "версия {0} · Панда, он же Panda_Pishet_Kod"
@@ -1353,6 +1367,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · обновление · у вас {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
     IDS_ENTRY_READ_MARK     "{0} · прочитано"
+    IDS_UPDATE_SUB          "у вас {0} · выпуск {1}"
+    IDS_UPDATE_HOW          "Как обновиться"
+    IDS_UPDATE_STEP_1       "Нажмите «Открыть страницу загрузки»: там всегда последняя версия."
+    IDS_UPDATE_STEP_2       "Скачайте файл LangSwitcher-setup.exe и запустите его."
+    IDS_UPDATE_STEP_3       "Установщик сам закроет программу, заменит её и предложит запустить заново. Ваши настройки сохранятся."
+    IDS_UPDATE_FOOT         "Строка «Доступна версия {0}» останется в меню значка, пока вы не обновитесь."
+    IDS_NEWS_LETTER_TITLE   "Новость от автора"
+    IDS_NEWS_LATER          "Позже"
+    IDS_NEWS_OPEN_LINK      "Открыть ссылку"
+    IDS_NEWS_FOOT           "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё раз через две, потом только точка на значке."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1460,9 +1484,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "you had {0} · updated today"
     IDS_WHATSNEW_TODAY      "updated today"
     IDS_WHATSNEW_PANEL      "Three changes"
-    IDS_WHATSNEW_1          "Letters from the author: «Hello» on the first run, «What is new» after an update and «Thank you» after a month."
-    IDS_WHATSNEW_2          "The «From the author» window: support, the channel and the state of the news feed."
-    IDS_WHATSNEW_3          "The tray icon shows a dot while a letter is unread."
+    IDS_WHATSNEW_1          "The author's feed: once in fifteen days the program reads a signed news file and sends nothing."
+    IDS_WHATSNEW_2          "The «News» and «Update» letters come from it, and «Read» puts out the dot on the icon."
+    IDS_WHATSNEW_3          "The reading can be turned off: in the settings file at once, later in the «From the author» window."
     IDS_WHATSNEW_FULL       "The full list of changes is published in the channel."
     IDS_AUTHOR_CAPTION      "From the author"
     IDS_AUTHOR_VERSION      "version {0} · Panda, also known as Panda_Pishet_Kod"
@@ -1497,6 +1521,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · update · you have {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · not read"
     IDS_ENTRY_READ_MARK     "{0} · read"
+    IDS_UPDATE_SUB          "you have {0} · released {1}"
+    IDS_UPDATE_HOW          "How to update"
+    IDS_UPDATE_STEP_1       "Press «Open the download page»: the latest version is always there."
+    IDS_UPDATE_STEP_2       "Download the LangSwitcher-setup.exe file and run it."
+    IDS_UPDATE_STEP_3       "The installer closes the program itself, replaces it and offers to start it again. Your settings are kept."
+    IDS_UPDATE_FOOT         "The «Version {0} is available» entry stays in the tray menu until you update."
+    IDS_NEWS_LETTER_TITLE   "News from the author"
+    IDS_NEWS_LATER          "Later"
+    IDS_NEWS_OPEN_LINK      "Open the link"
+    IDS_NEWS_FOOT           "«Mark as read» closes the letter for good. «Later» or the cross: I will remind you in a week and once more in two, after that only the dot on the icon."
 END
 
 // =======================================================================================
@@ -1617,9 +1651,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "було {0} · оновлено сьогодні"
     IDS_WHATSNEW_TODAY      "оновлено сьогодні"
     IDS_WHATSNEW_PANEL      "Три зміни"
-    IDS_WHATSNEW_1          "Листи від автора: «Вітаю» під час першого запуску, «Що нового» після оновлення і «Дякую» через місяць."
-    IDS_WHATSNEW_2          "Вікно «Від автора»: підтримка, канал і стан стрічки новин."
-    IDS_WHATSNEW_3          "На значку в треї загоряється крапка, коли є непрочитаний лист."
+    IDS_WHATSNEW_1          "Стрічка автора: раз на 15 днів програма читає підписаний файл новин і нічого не надсилає."
+    IDS_WHATSNEW_2          "Зі стрічки приходять листи «Новина» й «Оновлення», а кнопка «Прочитано» гасить крапку на значку."
+    IDS_WHATSNEW_3          "Читання стрічки вимикається: у файлі налаштувань одразу, а після першого листа — у вікні «Від автора»."
     IDS_WHATSNEW_FULL       "Повний список змін опубліковано в каналі."
     IDS_AUTHOR_CAPTION      "Від автора"
     IDS_AUTHOR_VERSION      "версія {0} · Панда, він же Panda_Pishet_Kod"
@@ -1654,6 +1688,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · оновлення · у вас {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
     IDS_ENTRY_READ_MARK     "{0} · прочитано"
+    IDS_UPDATE_SUB          "у вас {0} · випуск {1}"
+    IDS_UPDATE_HOW          "Як оновитися"
+    IDS_UPDATE_STEP_1       "Натисніть «Відкрити сторінку завантаження»: там завжди остання версія."
+    IDS_UPDATE_STEP_2       "Завантажте файл LangSwitcher-setup.exe і запустіть його."
+    IDS_UPDATE_STEP_3       "Установник сам закриє програму, замінить її та запропонує запустити знову. Ваші налаштування збережуться."
+    IDS_UPDATE_FOOT         "Рядок «Доступна версія {0}» лишиться в меню значка, доки ви не оновитеся."
+    IDS_NEWS_LETTER_TITLE   "Новина від автора"
+    IDS_NEWS_LATER          "Пізніше"
+    IDS_NEWS_OPEN_LINK      "Відкрити посилання"
+    IDS_NEWS_FOOT           "«Прочитано» закриває лист назавжди. «Пізніше» або хрестик: нагадаю через тиждень і ще раз через два, потім лише крапка на значку."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1757,9 +1801,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vorher {0} · heute aktualisiert"
     IDS_WHATSNEW_TODAY      "heute aktualisiert"
     IDS_WHATSNEW_PANEL      "Drei Änderungen"
-    IDS_WHATSNEW_1          "Briefe vom Autor: «Hallo» beim ersten Start, «Was ist neu» nach einem Update und «Danke» nach einem Monat."
-    IDS_WHATSNEW_2          "Das Fenster «Vom Autor»: Unterstützung, Kanal und Zustand des Nachrichten-Feeds."
-    IDS_WHATSNEW_3          "Das Symbol im Infobereich zeigt einen Punkt, solange ein Brief ungelesen ist."
+    IDS_WHATSNEW_1          "Kanal des Autors: alle 15 Tage liest das Programm eine signierte Nachrichtendatei und sendet nichts."
+    IDS_WHATSNEW_2          "Von dort kommen die Briefe «Neuigkeit» und «Update»; «Gelesen» löscht den Punkt am Symbol."
+    IDS_WHATSNEW_3          "Das Lesen lässt sich abschalten: sofort in der Einstellungsdatei, später im Fenster «Vom Autor»."
     IDS_WHATSNEW_FULL       "Die vollständige Liste der Änderungen ist im Kanal veröffentlicht."
     IDS_AUTHOR_CAPTION      "Vom Autor"
     IDS_AUTHOR_VERSION      "Version {0} · Panda, auch bekannt als Panda_Pishet_Kod"
@@ -1794,6 +1838,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · Update · Sie haben {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · ungelesen"
     IDS_ENTRY_READ_MARK     "{0} · gelesen"
+    IDS_UPDATE_SUB          "Sie haben {0} · erschienen {1}"
+    IDS_UPDATE_HOW          "So wird aktualisiert"
+    IDS_UPDATE_STEP_1       "Klicken Sie auf «Downloadseite öffnen»: dort steht immer die neueste Version."
+    IDS_UPDATE_STEP_2       "Laden Sie LangSwitcher-setup.exe herunter und starten Sie die Datei."
+    IDS_UPDATE_STEP_3       "Das Installationsprogramm schließt das Programm selbst, ersetzt es und bietet an, es neu zu starten. Ihre Einstellungen bleiben erhalten."
+    IDS_UPDATE_FOOT         "Der Eintrag «Version {0} verfügbar» bleibt im Symbolmenü, bis Sie aktualisieren."
+    IDS_NEWS_LETTER_TITLE   "Neuigkeit vom Autor"
+    IDS_NEWS_LATER          "Später"
+    IDS_NEWS_OPEN_LINK      "Link öffnen"
+    IDS_NEWS_FOOT           "«Gelesen» schließt den Brief endgültig. «Später» oder das Kreuz: ich erinnere in einer Woche und noch einmal in zwei, danach bleibt nur der Punkt am Symbol."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1899,9 +1953,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vous aviez {0} · mis à jour aujourd'hui"
     IDS_WHATSNEW_TODAY      "mis à jour aujourd'hui"
     IDS_WHATSNEW_PANEL      "Trois changements"
-    IDS_WHATSNEW_1          "Des lettres de l'auteur : « Bonjour » au premier lancement, « Quoi de neuf » après une mise à jour et « Merci » après un mois."
-    IDS_WHATSNEW_2          "La fenêtre « De l'auteur » : le soutien, la chaîne et l'état du flux de nouvelles."
-    IDS_WHATSNEW_3          "L'icône de la zone de notification affiche un point tant qu'une lettre n'est pas lue."
+    IDS_WHATSNEW_1          "Le flux de l'auteur : tous les 15 jours le programme lit un fichier de nouvelles signé et n'envoie rien."
+    IDS_WHATSNEW_2          "Les lettres « Nouvelle » et « Mise à jour » en viennent ; « Lu » éteint le point sur l'icône."
+    IDS_WHATSNEW_3          "La lecture se désactive : dans le fichier de réglages tout de suite, puis dans « De l'auteur »."
     IDS_WHATSNEW_FULL       "La liste complète des changements est publiée dans la chaîne."
     IDS_AUTHOR_CAPTION      "De l'auteur"
     IDS_AUTHOR_VERSION      "version {0} · Panda, alias Panda_Pishet_Kod"
@@ -1936,6 +1990,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · mise à jour · vous avez la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · non lue"
     IDS_ENTRY_READ_MARK     "{0} · lue"
+    IDS_UPDATE_SUB          "vous avez la {0} · parue le {1}"
+    IDS_UPDATE_HOW          "Comment mettre à jour"
+    IDS_UPDATE_STEP_1       "Cliquez sur « Ouvrir la page de téléchargement » : la dernière version y est toujours."
+    IDS_UPDATE_STEP_2       "Téléchargez le fichier LangSwitcher-setup.exe et lancez-le."
+    IDS_UPDATE_STEP_3       "L'installateur ferme le programme lui-même, le remplace et propose de le relancer. Vos réglages sont conservés."
+    IDS_UPDATE_FOOT         "La ligne « Version {0} disponible » reste dans le menu de l'icône jusqu'à la mise à jour."
+    IDS_NEWS_LETTER_TITLE   "Nouvelle de l'auteur"
+    IDS_NEWS_LATER          "Plus tard"
+    IDS_NEWS_OPEN_LINK      "Ouvrir le lien"
+    IDS_NEWS_FOOT           "« Lu » ferme la lettre pour de bon. « Plus tard » ou la croix : je vous rappelle dans une semaine et encore dans deux, ensuite il ne reste que le point sur l'icône."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2038,9 +2102,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "tenía {0} · actualizado hoy"
     IDS_WHATSNEW_TODAY      "actualizado hoy"
     IDS_WHATSNEW_PANEL      "Tres cambios"
-    IDS_WHATSNEW_1          "Cartas del autor: «Hola» en el primer arranque, «Novedades» tras una actualización y «Gracias» al cabo de un mes."
-    IDS_WHATSNEW_2          "La ventana «Del autor»: apoyo, canal y estado del canal de noticias."
-    IDS_WHATSNEW_3          "El icono del área de notificación muestra un punto mientras haya una carta sin leer."
+    IDS_WHATSNEW_1          "El canal del autor: cada 15 días el programa lee un archivo de noticias firmado y no envía nada."
+    IDS_WHATSNEW_2          "De ahí llegan las cartas «Noticia» y «Actualización»; «Leído» apaga el punto del icono."
+    IDS_WHATSNEW_3          "La lectura se desactiva: en el archivo de ajustes desde el primer día y luego en «Del autor»."
     IDS_WHATSNEW_FULL       "La lista completa de cambios está publicada en el canal."
     IDS_AUTHOR_CAPTION      "Del autor"
     IDS_AUTHOR_VERSION      "versión {0} · Panda, alias Panda_Pishet_Kod"
@@ -2075,6 +2139,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · actualización · usted tiene la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · sin leer"
     IDS_ENTRY_READ_MARK     "{0} · leída"
+    IDS_UPDATE_SUB          "usted tiene la {0} · publicada el {1}"
+    IDS_UPDATE_HOW          "Cómo actualizar"
+    IDS_UPDATE_STEP_1       "Pulse «Abrir la página de descarga»: allí siempre está la última versión."
+    IDS_UPDATE_STEP_2       "Descargue el archivo LangSwitcher-setup.exe y ejecútelo."
+    IDS_UPDATE_STEP_3       "El instalador cierra el programa por su cuenta, lo sustituye y ofrece iniciarlo de nuevo. Sus ajustes se conservan."
+    IDS_UPDATE_FOOT         "La línea «Versión {0} disponible» permanece en el menú del icono hasta que actualice."
+    IDS_NEWS_LETTER_TITLE   "Noticia del autor"
+    IDS_NEWS_LATER          "Más tarde"
+    IDS_NEWS_OPEN_LINK      "Abrir el enlace"
+    IDS_NEWS_FOOT           "«Leída» cierra la carta para siempre. «Más tarde» o la cruz: le recuerdo en una semana y otra vez en dos, después solo queda el punto en el icono."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2175,9 +2249,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "você tinha {0} · atualizado hoje"
     IDS_WHATSNEW_TODAY      "atualizado hoje"
     IDS_WHATSNEW_PANEL      "Três mudanças"
-    IDS_WHATSNEW_1          "Cartas do autor: «Olá» na primeira execução, «O que há de novo» depois de uma atualização e «Obrigado» depois de um mês."
-    IDS_WHATSNEW_2          "A janela «Do autor»: apoio, canal e estado do feed de notícias."
-    IDS_WHATSNEW_3          "O ícone na área de notificação mostra um ponto enquanto houver carta não lida."
+    IDS_WHATSNEW_1          "O canal do autor: a cada 15 dias o programa lê um ficheiro de notícias assinado e não envia nada."
+    IDS_WHATSNEW_2          "De lá vêm as cartas «Notícia» e «Atualização»; «Lido» apaga o ponto no ícone."
+    IDS_WHATSNEW_3          "A leitura pode ser desligada: no ficheiro de definições desde já e depois em «Do autor»."
     IDS_WHATSNEW_FULL       "A lista completa de mudanças está publicada no canal."
     IDS_AUTHOR_CAPTION      "Do autor"
     IDS_AUTHOR_VERSION      "versão {0} · Panda, também conhecido como Panda_Pishet_Kod"
@@ -2212,6 +2286,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · atualização · você tem a {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · não lida"
     IDS_ENTRY_READ_MARK     "{0} · lida"
+    IDS_UPDATE_SUB          "você tem a {0} · lançada em {1}"
+    IDS_UPDATE_HOW          "Como atualizar"
+    IDS_UPDATE_STEP_1       "Carregue em «Abrir a página de download»: a última versão está sempre lá."
+    IDS_UPDATE_STEP_2       "Descarregue o ficheiro LangSwitcher-setup.exe e execute-o."
+    IDS_UPDATE_STEP_3       "O instalador fecha o programa sozinho, substitui-o e oferece-se para o iniciar de novo. As suas definições são mantidas."
+    IDS_UPDATE_FOOT         "A linha «Versão {0} disponível» fica no menu do ícone até você atualizar."
+    IDS_NEWS_LETTER_TITLE   "Notícia do autor"
+    IDS_NEWS_LATER          "Mais tarde"
+    IDS_NEWS_OPEN_LINK      "Abrir a ligação"
+    IDS_NEWS_FOOT           "«Lida» fecha a carta para sempre. «Mais tarde» ou a cruz: lembro daqui a uma semana e outra vez daqui a duas, depois fica só o ponto no ícone."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2317,9 +2401,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "avevi la {0} · aggiornato oggi"
     IDS_WHATSNEW_TODAY      "aggiornato oggi"
     IDS_WHATSNEW_PANEL      "Tre cambiamenti"
-    IDS_WHATSNEW_1          "Lettere dall'autore: «Ciao» al primo avvio, «Novità» dopo un aggiornamento e «Grazie» dopo un mese."
-    IDS_WHATSNEW_2          "La finestra «Dall'autore»: sostegno, canale e stato del flusso di notizie."
-    IDS_WHATSNEW_3          "L'icona nell'area di notifica mostra un punto finché una lettera non è letta."
+    IDS_WHATSNEW_1          "Il canale dell'autore: ogni 15 giorni il programma legge un file di notizie firmato e non invia nulla."
+    IDS_WHATSNEW_2          "Da lì arrivano le lettere «Novità» e «Aggiornamento»; «Letto» spegne il punto sull'icona."
+    IDS_WHATSNEW_3          "La lettura si disattiva: subito nel file delle impostazioni e poi in «Dall'autore»."
     IDS_WHATSNEW_FULL       "L'elenco completo dei cambiamenti è pubblicato nel canale."
     IDS_AUTHOR_CAPTION      "Dall'autore"
     IDS_AUTHOR_VERSION      "versione {0} · Panda, alias Panda_Pishet_Kod"
@@ -2354,6 +2438,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · aggiornamento · hai la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · non letta"
     IDS_ENTRY_READ_MARK     "{0} · letta"
+    IDS_UPDATE_SUB          "hai la {0} · uscita il {1}"
+    IDS_UPDATE_HOW          "Come aggiornare"
+    IDS_UPDATE_STEP_1       "Premi «Apri la pagina di download»: lì c'è sempre l'ultima versione."
+    IDS_UPDATE_STEP_2       "Scarica il file LangSwitcher-setup.exe ed eseguilo."
+    IDS_UPDATE_STEP_3       "Il programma di installazione chiude il programma da solo, lo sostituisce e propone di riavviarlo. Le tue impostazioni restano."
+    IDS_UPDATE_FOOT         "La riga «Versione {0} disponibile» resta nel menu dell'icona finché non aggiorni."
+    IDS_NEWS_LETTER_TITLE   "Novità dall'autore"
+    IDS_NEWS_LATER          "Più tardi"
+    IDS_NEWS_OPEN_LINK      "Apri il collegamento"
+    IDS_NEWS_FOOT           "«Letta» chiude la lettera per sempre. «Più tardi» o la crocetta: te lo ricordo fra una settimana e ancora fra due, poi resta solo il punto sull'icona."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2459,9 +2553,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "było {0} · zaktualizowano dzisiaj"
     IDS_WHATSNEW_TODAY      "zaktualizowano dzisiaj"
     IDS_WHATSNEW_PANEL      "Trzy zmiany"
-    IDS_WHATSNEW_1          "Listy od autora: «Cześć» przy pierwszym uruchomieniu, «Co nowego» po aktualizacji i «Dziękuję» po miesiącu."
-    IDS_WHATSNEW_2          "Okno «Od autora»: wsparcie, kanał i stan kanału wiadomości."
-    IDS_WHATSNEW_3          "Ikona w zasobniku pokazuje kropkę, dopóki list jest nieprzeczytany."
+    IDS_WHATSNEW_1          "Kanał autora: raz na 15 dni program czyta podpisany plik z nowościami i niczego nie wysyła."
+    IDS_WHATSNEW_2          "Stamtąd przychodzą listy «Nowość» i «Aktualizacja»; «Przeczytane» gasi kropkę na ikonie."
+    IDS_WHATSNEW_3          "Czytanie można wyłączyć: od razu w pliku ustawień, a później w oknie «Od autora»."
     IDS_WHATSNEW_FULL       "Pełna lista zmian jest opublikowana na kanale."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "wersja {0} · Panda, znany też jako Panda_Pishet_Kod"
@@ -2496,6 +2590,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · aktualizacja · masz {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · nieprzeczytane"
     IDS_ENTRY_READ_MARK     "{0} · przeczytane"
+    IDS_UPDATE_SUB          "masz {0} · wydanie {1}"
+    IDS_UPDATE_HOW          "Jak zaktualizować"
+    IDS_UPDATE_STEP_1       "Naciśnij «Otwórz stronę pobierania»: tam zawsze jest najnowsza wersja."
+    IDS_UPDATE_STEP_2       "Pobierz plik LangSwitcher-setup.exe i uruchom go."
+    IDS_UPDATE_STEP_3       "Instalator sam zamknie program, zastąpi go i zaproponuje ponowne uruchomienie. Twoje ustawienia zostaną zachowane."
+    IDS_UPDATE_FOOT         "Wiersz «Dostępna wersja {0}» zostanie w menu ikony, dopóki nie zaktualizujesz."
+    IDS_NEWS_LETTER_TITLE   "Nowość od autora"
+    IDS_NEWS_LATER          "Później"
+    IDS_NEWS_OPEN_LINK      "Otwórz odnośnik"
+    IDS_NEWS_FOOT           "«Przeczytane» zamyka list na zawsze. «Później» lub krzyżyk: przypomnę za tydzień i jeszcze raz za dwa, potem zostanie tylko kropka na ikonie."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2597,9 +2701,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "měli jste {0} · aktualizováno dnes"
     IDS_WHATSNEW_TODAY      "aktualizováno dnes"
     IDS_WHATSNEW_PANEL      "Tři změny"
-    IDS_WHATSNEW_1          "Dopisy od autora: «Dobrý den» při prvním spuštění, «Co je nového» po aktualizaci a «Děkuji» po měsíci."
-    IDS_WHATSNEW_2          "Okno «Od autora»: podpora, kanál a stav kanálu novinek."
-    IDS_WHATSNEW_3          "Ikona v oznamovací oblasti ukazuje tečku, dokud je dopis nepřečtený."
+    IDS_WHATSNEW_1          "Kanál autora: jednou za 15 dní program přečte podepsaný soubor novinek a nic neodesílá."
+    IDS_WHATSNEW_2          "Odtud přicházejí dopisy «Novinka» a «Aktualizace»; «Přečteno» zhasne tečku na ikoně."
+    IDS_WHATSNEW_3          "Čtení lze vypnout: hned v souboru nastavení a později v okně «Od autora»."
     IDS_WHATSNEW_FULL       "Úplný seznam změn je zveřejněn na kanálu."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "verze {0} · Panda, známý též jako Panda_Pishet_Kod"
@@ -2634,6 +2738,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · aktualizace · máte {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · nepřečteno"
     IDS_ENTRY_READ_MARK     "{0} · přečteno"
+    IDS_UPDATE_SUB          "máte {0} · vydáno {1}"
+    IDS_UPDATE_HOW          "Jak aktualizovat"
+    IDS_UPDATE_STEP_1       "Stiskněte «Otevřít stránku stahování»: je tam vždy poslední verze."
+    IDS_UPDATE_STEP_2       "Stáhněte soubor LangSwitcher-setup.exe a spusťte jej."
+    IDS_UPDATE_STEP_3       "Instalátor program sám zavře, nahradí jej a nabídne nové spuštění. Vaše nastavení zůstanou."
+    IDS_UPDATE_FOOT         "Řádek «K dispozici verze {0}» zůstane v nabídce ikony, dokud neaktualizujete."
+    IDS_NEWS_LETTER_TITLE   "Novinka od autora"
+    IDS_NEWS_LATER          "Později"
+    IDS_NEWS_OPEN_LINK      "Otevřít odkaz"
+    IDS_NEWS_FOOT           "«Přečteno» zavře dopis natrvalo. «Později» nebo křížek: připomenu za týden a ještě jednou za dva, potom zůstane jen tečka na ikoně."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2738,9 +2852,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "önceki {0} · bugün güncellendi"
     IDS_WHATSNEW_TODAY      "bugün güncellendi"
     IDS_WHATSNEW_PANEL      "Üç değişiklik"
-    IDS_WHATSNEW_1          "Yazardan mektuplar: ilk çalıştırmada «Merhaba», güncellemeden sonra «Neler yeni» ve bir ay sonra «Teşekkürler»."
-    IDS_WHATSNEW_2          "«Yazardan» penceresi: destek, kanal ve haber akışının durumu."
-    IDS_WHATSNEW_3          "Okunmamış bir mektup varken bildirim alanındaki simgede bir nokta yanar."
+    IDS_WHATSNEW_1          "Yazarın akışı: program 15 günde bir imzalı bir haber dosyası okur ve hiçbir şey göndermez."
+    IDS_WHATSNEW_2          "«Haber» ve «Güncelleme» mektupları oradan gelir; «Okundu» simgedeki noktayı söndürür."
+    IDS_WHATSNEW_3          "Okuma kapatılabilir: hemen ayar dosyasından, ilk mektuptan sonra «Yazardan» penceresinden."
     IDS_WHATSNEW_FULL       "Değişikliklerin tam listesi kanalda yayımlandı."
     IDS_AUTHOR_CAPTION      "Yazardan"
     IDS_AUTHOR_VERSION      "sürüm {0} · Panda, namıdiğer Panda_Pishet_Kod"
@@ -2775,6 +2889,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · güncelleme · sizde {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · okunmadı"
     IDS_ENTRY_READ_MARK     "{0} · okundu"
+    IDS_UPDATE_SUB          "sizde {0} · çıkış {1}"
+    IDS_UPDATE_HOW          "Nasıl güncellenir"
+    IDS_UPDATE_STEP_1       "«İndirme sayfasını aç» düğmesine basın: son sürüm her zaman oradadır."
+    IDS_UPDATE_STEP_2       "LangSwitcher-setup.exe dosyasını indirin ve çalıştırın."
+    IDS_UPDATE_STEP_3       "Kurulum programı programı kendisi kapatır, yenisiyle değiştirir ve yeniden başlatmayı önerir. Ayarlarınız korunur."
+    IDS_UPDATE_FOOT         "«{0} sürümü mevcut» satırı, siz güncelleyene kadar simge menüsünde kalır."
+    IDS_NEWS_LETTER_TITLE   "Yazardan haber"
+    IDS_NEWS_LATER          "Daha sonra"
+    IDS_NEWS_OPEN_LINK      "Bağlantıyı aç"
+    IDS_NEWS_FOOT           "«Okundu» mektubu tamamen kapatır. «Daha sonra» ya da çarpı: bir hafta sonra, bir kez de iki hafta sonra hatırlatırım, ardından yalnızca simgedeki nokta kalır."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2883,9 +3007,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "είχατε {0} · ενημερώθηκε σήμερα"
     IDS_WHATSNEW_TODAY      "ενημερώθηκε σήμερα"
     IDS_WHATSNEW_PANEL      "Τρεις αλλαγές"
-    IDS_WHATSNEW_1          "Γράμματα από τον δημιουργό: «Γεια σας» στην πρώτη εκκίνηση, «Τι νέο υπάρχει» μετά από ενημέρωση και «Ευχαριστώ» μετά από έναν μήνα."
-    IDS_WHATSNEW_2          "Το παράθυρο «Από τον δημιουργό»: υποστήριξη, κανάλι και κατάσταση της ροής ειδήσεων."
-    IDS_WHATSNEW_3          "Το εικονίδιο στην περιοχή ειδοποιήσεων δείχνει μια κουκκίδα όσο υπάρχει αδιάβαστο γράμμα."
+    IDS_WHATSNEW_1          "Η ροή του δημιουργού: κάθε 15 ημέρες το πρόγραμμα διαβάζει ένα υπογεγραμμένο αρχείο ειδήσεων και δεν στέλνει τίποτα."
+    IDS_WHATSNEW_2          "Από εκεί έρχονται τα γράμματα «Νέο» και «Ενημέρωση»· το «Διαβάστηκε» σβήνει την κουκκίδα."
+    IDS_WHATSNEW_3          "Η ανάγνωση απενεργοποιείται: αμέσως στο αρχείο ρυθμίσεων και αργότερα στο «Από τον δημιουργό»."
     IDS_WHATSNEW_FULL       "Ο πλήρης κατάλογος αλλαγών δημοσιεύεται στο κανάλι."
     IDS_AUTHOR_CAPTION      "Από τον δημιουργό"
     IDS_AUTHOR_VERSION      "έκδοση {0} · Πάντα, γνωστός και ως Panda_Pishet_Kod"
@@ -2920,6 +3044,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · ενημέρωση · έχετε την {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · αδιάβαστο"
     IDS_ENTRY_READ_MARK     "{0} · διαβασμένο"
+    IDS_UPDATE_SUB          "έχετε την {0} · κυκλοφόρησε {1}"
+    IDS_UPDATE_HOW          "Πώς γίνεται η ενημέρωση"
+    IDS_UPDATE_STEP_1       "Πατήστε «Άνοιγμα της σελίδας λήψης»: εκεί βρίσκεται πάντα η τελευταία έκδοση."
+    IDS_UPDATE_STEP_2       "Κατεβάστε το αρχείο LangSwitcher-setup.exe και εκτελέστε το."
+    IDS_UPDATE_STEP_3       "Το πρόγραμμα εγκατάστασης κλείνει μόνο του το πρόγραμμα, το αντικαθιστά και προτείνει να ξεκινήσει ξανά. Οι ρυθμίσεις σας διατηρούνται."
+    IDS_UPDATE_FOOT         "Η γραμμή «Διαθέσιμη η έκδοση {0}» μένει στο μενού του εικονιδίου μέχρι να ενημερώσετε."
+    IDS_NEWS_LETTER_TITLE   "Νέο από τον δημιουργό"
+    IDS_NEWS_LATER          "Αργότερα"
+    IDS_NEWS_OPEN_LINK      "Άνοιγμα του συνδέσμου"
+    IDS_NEWS_FOOT           "Το «Διαβάστηκε» κλείνει το γράμμα οριστικά. Το «Αργότερα» ή ο σταυρός: θυμίζω σε μία εβδομάδα και άλλη μία σε δύο, μετά μένει μόνο η κουκκίδα στο εικονίδιο."
 END
 
 // ---------------------------------------------------------------------------------------
@@ -3034,9 +3168,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "הייתה {0} · עודכן היום"
     IDS_WHATSNEW_TODAY      "עודכן היום"
     IDS_WHATSNEW_PANEL      "שלושה שינויים"
-    IDS_WHATSNEW_1          "מכתבים מהמפתח: «שלום» בהפעלה הראשונה, «מה חדש» אחרי עדכון ו«תודה» אחרי חודש."
-    IDS_WHATSNEW_2          "חלון «מהמפתח»: תמיכה, ערוץ ומצב הזנת החדשות."
-    IDS_WHATSNEW_3          "בסמל שבאזור ההודעות נדלקת נקודה כשיש מכתב שלא נקרא."
+    IDS_WHATSNEW_1          "ערוץ המפתח: אחת ל־15 ימים התוכנה קוראת קובץ חדשות חתום ואינה שולחת דבר."
+    IDS_WHATSNEW_2          "משם מגיעים המכתבים «חדשה» ו«עדכון»; «נקרא» מכבה את הנקודה שעל הסמל."
+    IDS_WHATSNEW_3          "אפשר לכבות את הקריאה: בקובץ ההגדרות מיד, ואחרי המכתב הראשון בחלון «מהמפתח»."
     IDS_WHATSNEW_FULL       "הרשימה המלאה של השינויים מתפרסמת בערוץ."
     IDS_AUTHOR_CAPTION      "מהמפתח"
     IDS_AUTHOR_VERSION      "גרסה {0} · פנדה, הידוע גם כ־Panda_Pishet_Kod"
@@ -3071,6 +3205,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · עדכון · אצלכם {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · לא נקרא"
     IDS_ENTRY_READ_MARK     "{0} · נקרא"
+    IDS_UPDATE_SUB          "אצלכם {0} · יצאה {1}"
+    IDS_UPDATE_HOW          "איך מעדכנים"
+    IDS_UPDATE_STEP_1       "לחצו «פתיחת עמוד ההורדה»: שם תמיד נמצאת הגרסה האחרונה."
+    IDS_UPDATE_STEP_2       "הורידו את הקובץ LangSwitcher-setup.exe והפעילו אותו."
+    IDS_UPDATE_STEP_3       "תוכנית ההתקנה סוגרת את התוכנה בעצמה, מחליפה אותה ומציעה להפעיל מחדש. ההגדרות שלכם נשמרות."
+    IDS_UPDATE_FOOT         "השורה «זמינה גרסה {0}» תישאר בתפריט הסמל עד שתעדכנו."
+    IDS_NEWS_LETTER_TITLE   "חדשה מהמפתח"
+    IDS_NEWS_LATER          "מאוחר יותר"
+    IDS_NEWS_OPEN_LINK      "פתיחת הקישור"
+    IDS_NEWS_FOOT           "«נקרא» סוגר את המכתב לתמיד. «מאוחר יותר» או הסגירה: אזכיר בעוד שבוע ועוד פעם בעוד שבועיים, ואחר כך תישאר רק הנקודה על הסמל."
 END
 
 LANGUAGE 0x01, 0x01
@@ -3171,9 +3315,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "كانت {0} · حُدّث اليوم"
     IDS_WHATSNEW_TODAY      "حُدّث اليوم"
     IDS_WHATSNEW_PANEL      "ثلاثة تغييرات"
-    IDS_WHATSNEW_1          "رسائل من المؤلف: «مرحبًا» عند أول تشغيل، و«ما الجديد» بعد التحديث، و«شكرًا» بعد شهر."
-    IDS_WHATSNEW_2          "نافذة «من المؤلف»: الدعم والقناة وحالة تغذية الأخبار."
-    IDS_WHATSNEW_3          "تظهر نقطة على الأيقونة في منطقة الإشعارات ما دامت هناك رسالة غير مقروءة."
+    IDS_WHATSNEW_1          "قناة المؤلف: مرة كل 15 يومًا يقرأ البرنامج ملف أخبار موقّعًا ولا يرسل شيئًا."
+    IDS_WHATSNEW_2          "من هناك تصل رسالتا «خبر» و«تحديث»؛ و«مقروء» يطفئ النقطة على الأيقونة."
+    IDS_WHATSNEW_3          "يمكن إيقاف القراءة: في ملف الإعدادات فورًا، وبعد أول رسالة من نافذة «من المؤلف»."
     IDS_WHATSNEW_FULL       "قائمة التغييرات الكاملة منشورة في القناة."
     IDS_AUTHOR_CAPTION      "من المؤلف"
     IDS_AUTHOR_VERSION      "الإصدار {0} · باندا، المعروف أيضًا بـ Panda_Pishet_Kod"
@@ -3208,6 +3352,16 @@ BEGIN
     IDS_ENTRY_UPDATE_MARK   "{0} · تحديث · لديك {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · غير مقروءة"
     IDS_ENTRY_READ_MARK     "{0} · مقروءة"
+    IDS_UPDATE_SUB          "لديك {0} · صدرت في {1}"
+    IDS_UPDATE_HOW          "كيفية التحديث"
+    IDS_UPDATE_STEP_1       "اضغط «فتح صفحة التنزيل»: الإصدار الأحدث موجود هناك دائمًا."
+    IDS_UPDATE_STEP_2       "نزّل الملف LangSwitcher-setup.exe ثم شغّله."
+    IDS_UPDATE_STEP_3       "يغلق المثبّت البرنامج بنفسه ويستبدله ويعرض تشغيله من جديد. تبقى إعداداتك كما هي."
+    IDS_UPDATE_FOOT         "يبقى السطر «الإصدار {0} متاح» في قائمة الأيقونة حتى تُحدّث البرنامج."
+    IDS_NEWS_LETTER_TITLE   "خبر من المؤلف"
+    IDS_NEWS_LATER          "لاحقًا"
+    IDS_NEWS_OPEN_LINK      "فتح الرابط"
+    IDS_NEWS_FOOT           "«مقروءة» تغلق الرسالة نهائيًا. «لاحقًا» أو علامة الإغلاق: أذكّرك بعد أسبوع ومرة أخرى بعد أسبوعين، ثم تبقى النقطة على الأيقونة فقط."
 END
 
 // ---------------------------------------------------------------------------------------

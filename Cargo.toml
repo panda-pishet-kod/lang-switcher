@@ -1,6 +1,6 @@
 [package]
 name = "lang_switcher"
-version = "0.39.0"
+version = "0.40.0"
 edition = "2024"
 
 # Two targets on purpose. Integration tests under tests\ can only link against a library
@@ -63,6 +63,17 @@ windows = { version = "0.62.2", features = [
   "Win32_UI_Controls",
   "Win32_Globalization",
   "Win32_Graphics_Dwm",
+  # FR-102 and SEC-03, вопрос 101 п. 3, полномочие П2 («да») — **the only two features this
+  # program has ever added for a purpose other than a window**, and they are the whole of what
+  # the author's feed needs:
+  #
+  #   Win32_Networking_WinHttp     — one GET, no more often than once in fifteen days
+  #   Win32_Security_Cryptography  — the ECDSA P-256 signature of the file, checked by CNG
+  #
+  # ⚠ **Crates: none added.** The list of section 3.2 is closed, and SEC-03 is enforced by
+  # exactly that: `cargo tree` stays at 83 lines and criterion 4 of section 13 checks it.
+  "Win32_Networking_WinHttp",
+  "Win32_Security_Cryptography",
 ] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

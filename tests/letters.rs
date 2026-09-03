@@ -996,7 +996,13 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 
     let plan = letters::plan_for(Letter::News(12), &context);
 
-    assert_eq!(plan.title, item.title, "the heading is the author's");
+    // ⚠ The window's own heading is the **program's** and the entry's heading stands inside
+    // the panel. Task Т-32-6 moved it there deliberately: the title line is where the program
+    // speaks, and a heading out of the feed in that place would let whoever holds the signing
+    // key write anything at all in the program's own voice.
+    assert_ne!(plan.title, item.title, "the title line is the program's");
+    assert!(!plan.title.is_empty(), "and it says whose news this is");
+    assert_eq!(plan.panel_title, item.title, "the heading is the author's");
     assert_eq!(plan.panel_text, item.text, "and so is the text");
     assert_eq!(plan.panel_buttons.len(), 1, "and the link it carried");
     assert!(
@@ -1009,9 +1015,14 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
             .is_some_and(|button| button.action == letters::Action::MarkRead),
         "«Прочитано» is the accented button of a news letter — FR-101"
     );
+    assert!(
+        !plan.foot.is_empty(),
+        "the line under it says what «Позже» promises — FR-101, word for word from the mock-up"
+    );
 
-    // An update is the same shape without «Прочитано»: there is nothing to mark as read.
-    let update = update("0.40.0");
+    // An update has nothing to mark as read: its accented button is the download page, and the
+    // three steps of FR-102 stand in the panel under the author's own words.
+    let update = update("0.41.0");
     let plan = letters::plan_for(
         Letter::Update,
         &letters::PlanContext {
@@ -1020,8 +1031,35 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
         },
     );
 
-    assert!(plan.accent.is_none(), "an update has nothing to mark read");
-    assert!(plan.left.is_some(), "and closes with the plain button");
+    assert!(
+        plan.accent
+            .as_ref()
+            .is_some_and(|button| button.action == letters::Action::OpenDownload),
+        "«Открыть страницу загрузки» is the accented button of an update — the mock-up"
+    );
+    assert!(plan.left.is_some(), "and it closes with the plain button");
+    assert_eq!(plan.para, update.text, "the author says what changed");
+    assert_eq!(plan.rows.len(), 3, "and the program says how to update");
+    assert_eq!(
+        plan.rows
+            .iter()
+            .map(|row| row.marker.as_str())
+            .collect::<Vec<_>>(),
+        ["1", "2", "3"],
+        "the steps are numbered, not bulleted"
+    );
+    assert!(
+        plan.rows.iter().all(|row| !row.text.trim().is_empty()),
+        "every step is written in all fourteen tables"
+    );
+    assert!(
+        plan.subtitle.contains("0.39.0"),
+        "the quiet line names the version installed here, not the one announced"
+    );
+    assert!(
+        plan.foot.contains("0.41.0"),
+        "and the line under the buttons names the one in the menu"
+    );
 }
 
 /// «Что нового» names the version it came from when it knows it, and does not invent one when
@@ -1178,6 +1216,107 @@ fn the_list_shows_the_update_and_the_three_news_newest_first() {
 
     // An installation with no feed behind it has nothing to show, which is the whole of stage А.
     assert!(letters::list_entries(&state, "0.39.0", FeedView::EMPTY).is_empty());
+}
+
+/// A letter out of the feed can find its own entry again — task Т-32-6.
+///
+/// Why this exists: a change of interface language **destroys and rebuilds** the window (Э31),
+/// and the rebuild starts from the letter and nothing else. Before this, the rebuilt window
+/// asked `plan_for` with no entry at all and «Новость» came back as an empty frame. The test
+/// walks the same road the rebuild does: publish a feed, then ask for the entry by letter.
+#[test]
+fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
+    with_product_strings();
+
+    let announced = update("0.41.0");
+    let items = [news(11), news(12), news(13)];
+
+    letters::publish_feed(Some(announced.clone()), items.to_vec());
+
+    assert_eq!(
+        letters::item_of(Letter::Update).map(|item| item.version),
+        Some(announced.version.clone()),
+        "the update entry comes back"
+    );
+    assert_eq!(
+        letters::item_of(Letter::News(12)).map(|item| item.id),
+        Some(12),
+        "and a news entry comes back by its own identifier"
+    );
+    assert!(
+        letters::item_of(Letter::News(99)).is_none(),
+        "an identifier that has fallen out of the feed finds nothing"
+    );
+
+    for letter in [Letter::Welcome, Letter::Thanks, Letter::WhatsNew] {
+        assert!(
+            letters::item_of(letter).is_none(),
+            "{letter:?} says its own words and has no entry"
+        );
+    }
+
+    // The window this rebuilds is not empty: the entry that came back fills it.
+    let item = letters::item_of(Letter::News(13)).expect("13 is in the feed");
+    let plan = letters::plan_for(
+        Letter::News(13),
+        &letters::PlanContext {
+            version: "0.40.0".to_owned(),
+            previous_version: String::new(),
+            hotkey: String::new(),
+            snooze_offered: false,
+            item: Some(&item),
+        },
+    );
+
+    assert!(!plan.panel_title.is_empty(), "with the entry's own heading");
+    assert!(!plan.panel_text.is_empty(), "and the entry's own text");
+
+    letters::publish_feed(None, Vec::new());
+}
+
+/// The download button obeys the placeholder rule even though its address comes out of the
+/// feed rather than out of the build — полномочия П5.
+#[test]
+fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
+    with_product_strings();
+
+    let mut announced = update("0.41.0");
+    announced.link = "https://example.invalid/download".to_owned();
+
+    let plan = letters::plan_for(
+        Letter::Update,
+        &letters::PlanContext {
+            version: "0.40.0".to_owned(),
+            previous_version: String::new(),
+            hotkey: String::new(),
+            snooze_offered: false,
+            item: Some(&announced),
+        },
+    );
+
+    assert!(
+        plan.accent.as_ref().is_some_and(|button| !button.enabled),
+        "a placeholder address leaves the button drawn and dead — П5"
+    );
+
+    // And a real one does not.
+    announced.link = "https://example.com/download".to_owned();
+
+    let plan = letters::plan_for(
+        Letter::Update,
+        &letters::PlanContext {
+            version: "0.40.0".to_owned(),
+            previous_version: String::new(),
+            hotkey: String::new(),
+            snooze_offered: false,
+            item: Some(&announced),
+        },
+    );
+
+    assert!(
+        plan.accent.as_ref().is_some_and(|button| button.enabled),
+        "an address that is not on the reserved domain is a live button"
+    );
 }
 
 // =========================================================================================

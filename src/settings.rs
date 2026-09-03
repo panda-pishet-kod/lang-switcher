@@ -2380,20 +2380,49 @@ pub const IDS_ENTRY_UNREAD_MARK: u16 = 3141;
 /// And for one that has.
 pub const IDS_ENTRY_READ_MARK: u16 = 3142;
 
+// The ten strings the two letters **out of the feed** need — task Т-32-6, ступень Б. Stage А
+// left both letters with the entry's own words and nothing around them; FR-102 and the mock-up
+// ask for the frame: what version you have, how to update, and what «Позже» actually promises.
+/// «Обновление» — the quiet line under the heading: the version installed here and the day the
+/// entry is dated.
+pub const IDS_UPDATE_SUB: u16 = 3143;
+/// The caption of its panel — the three steps of updating.
+pub const IDS_UPDATE_HOW: u16 = 3144;
+/// ⚠ The first step names the button below it by name; if that button is ever renamed, this
+/// sentence is renamed with it in all fourteen tables.
+pub const IDS_UPDATE_STEP_1: u16 = 3145;
+/// The second step — see [`IDS_UPDATE_STEP_1`].
+pub const IDS_UPDATE_STEP_2: u16 = 3146;
+/// The third step — see [`IDS_UPDATE_STEP_1`].
+pub const IDS_UPDATE_STEP_3: u16 = 3147;
+/// The line under «Обновление»: the menu entry stays until the update happens.
+pub const IDS_UPDATE_FOOT: u16 = 3148;
+/// «Новость» — the heading of the window itself; the entry's own heading goes inside the panel.
+pub const IDS_NEWS_LETTER_TITLE: u16 = 3149;
+/// Its left button: **not** «Закрыть», because closing and postponing are the same act here and
+/// the letter says so out loud.
+pub const IDS_NEWS_LATER: u16 = 3150;
+/// The button that opens the entry's link — a news entry points anywhere, not at a download.
+pub const IDS_NEWS_OPEN_LINK: u16 = 3151;
+/// The line under «Новость», word for word from the mock-up: what «Прочитано» does and what
+/// «Позже» and the cross do instead.
+pub const IDS_NEWS_FOOT: u16 = 3152;
+
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
 /// Exported rather than rebuilt in the test: what the test must not import is the *text*, and
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-/// ⚠ **A hundred and thirty-four since task Т-32-3**, and the canon of «seventy-three» that
+/// ⚠ **A hundred and forty-four since task Т-32-6**, and the canon of «seventy-three» that
 /// stood here is authorised away by the mandate of Э32 («канон `INTERFACE_STRINGS` растёт с
-/// 73 — цифру в отчёт»): the sixty-one strings of the letters from the author arrived
-/// (FR-101, FR-102, FR-103). Before that it was seventy-three since task Т-31-4, and
+/// 73 — цифру в отчёт»): the sixty-one strings of the letters from the author arrived with
+/// Т-32-3 (FR-101, FR-102, FR-103), and ten more with the two letters out of the feed
+/// (Т-32-6, ступень Б). Before that it was seventy-three since task Т-31-4, and
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 134] = [
+pub const INTERFACE_STRINGS: [u16; 144] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2528,6 +2557,16 @@ pub const INTERFACE_STRINGS: [u16; 134] = [
     IDS_ENTRY_UPDATE_MARK,
     IDS_ENTRY_UNREAD_MARK,
     IDS_ENTRY_READ_MARK,
+    IDS_UPDATE_SUB,
+    IDS_UPDATE_HOW,
+    IDS_UPDATE_STEP_1,
+    IDS_UPDATE_STEP_2,
+    IDS_UPDATE_STEP_3,
+    IDS_UPDATE_FOOT,
+    IDS_NEWS_LETTER_TITLE,
+    IDS_NEWS_LATER,
+    IDS_NEWS_OPEN_LINK,
+    IDS_NEWS_FOOT,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

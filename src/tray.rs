@@ -1724,6 +1724,15 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
         return Some(LRESULT(0));
     }
 
+    // FR-102, task Т-32-6: the feed thread has left something in its box. Outside every borrow
+    // of the tray — taking it writes the configuration through `with_tray` of its own.
+    //
+    // SEC-05: the message carries nothing; a forged one finds an empty box.
+    if message == crate::letters::WM_APP_FEED {
+        crate::letters::take_feed();
+        return Some(LRESULT(0));
+    }
+
     // FR-101: the balloon was clicked. Outside the borrow for the same reason, and after the
     // tray has been asked — the icon's own bookkeeping runs first.
     if message == WM_APP_TRAY && u32::from(low_word(unsigned(lparam.0))) == NIN_BALLOONUSERCLICK {
