@@ -523,6 +523,27 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("GetDateFormatEx", Kind::Process),
     ("SHQueryUserNotificationState", Kind::Process),
     ("GetLastInputInfo", Kind::Process),
+    // ⭐ **Task Т-32-3, FR-101 and FR-103** — the three calls the modeless windows of the
+    // letters make and this program had never made before: the two ways a modeless dialog is
+    // created, and the timer that drives the demonstration of «Привет».
+    //
+    // `Kind::Window` for all three, and **no new `Kind`** — the rule every note above follows.
+    // The subject of each is a window of this program, which is the kind the whole block of
+    // `SetDlgItemTextW` and its neighbours already takes.
+    // ⚠ `DestroyWindow` is **not** added here: it has been in the table since `app` first
+    // created a window, and a second row with the same name would make the name ambiguous —
+    // which the test `every_name_maps_back_to_its_own_row` says out loud.
+    ("CreateDialogIndirectParamW", Kind::Window),
+    ("CreateDialogParamW", Kind::Window),
+    ("SetTimer", Kind::Window),
+    // ⭐ **Task Т-32-4, FR-101** — the balloon that announces a letter. `Kind::Tray`, the group
+    // every other `Shell_NotifyIcon` row of this program is in, and the name says which of the
+    // four calls it was: the flag, not the operation, is what tells them apart.
+    //
+    // ⚠ **A name and a code, and not one word of the letter (SEC-01, SEC-07).** What refused
+    // is a call to the shell; what the balloon would have said is a sentence of this program's
+    // own string tables, and none of it goes into the ring.
+    ("Shell_NotifyIconW(NIF_INFO)", Kind::Tray),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

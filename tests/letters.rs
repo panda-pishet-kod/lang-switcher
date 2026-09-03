@@ -13,7 +13,64 @@
 use lang_switcher::letters::{
     self, Date, FeedItem, FeedView, Letter, REMINDERS_PER_NEWS, Thanks, links,
 };
-use lang_switcher::settings::Letters;
+use lang_switcher::settings::{self, Letters};
+
+use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
+use std::sync::OnceLock;
+use windows::Win32::Foundation::HMODULE;
+use windows::Win32::System::LibraryLoader::{LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW};
+use windows::core::PCWSTR;
+
+/// The built `LangSwitcher.exe`, mapped once so that the string tables of FR-94 can be read.
+///
+/// Section 4.4 of STATE.md: `embed-resource` links `app.rc` into the **binary** targets of this
+/// crate and not into the test executables, so a test that asked this one for a string would be
+/// told there is no resource section at all. The strings a letter is made of are the strings
+/// that ship, so the test reads the file that ships — the same road `tests\settings.rs` takes.
+///
+/// The mapping is never freed: it is handed to `settings::set_resource_module`, which keeps no
+/// lifetime, and the tests of one binary run on parallel threads.
+static PRODUCT: OnceLock<usize> = OnceLock::new();
+
+/// Points the string tables at the product binary. Every test that reads a word of a letter
+/// calls this first; calling it twice is calling it once.
+fn with_product_strings() {
+    let raw = *PRODUCT.get_or_init(|| {
+        // `cargo test` puts the test executables in `<target>\debug\deps` and the binary
+        // target one level up.
+        let exe = std::env::current_exe()
+            .expect("the test executable must have a path")
+            .parent()
+            .and_then(Path::parent)
+            .expect("the test executable lives in <target>\\debug\\deps")
+            .join("LangSwitcher.exe");
+
+        assert!(
+            exe.is_file(),
+            "the product binary must be built alongside the tests: {}",
+            exe.display()
+        );
+
+        let path: Vec<u16> = exe
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // SAFETY: `path` is a NUL-terminated UTF-16 buffer owned by this frame and not moved
+        // or dropped until the call returns. `LOAD_LIBRARY_AS_DATAFILE` maps the image for
+        // resource reading only: no entry point runs and no dependency is loaded.
+        let module =
+            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+                .expect("the product binary must be openable as a data file");
+
+        module.0 as usize
+    });
+
+    settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
+    settings::set_ui_language(settings::Language::Ru);
+}
 
 /// The day the stage was built, and the «today» of most of the tests below.
 fn day(year: i32, month: u32, day: u32) -> Date {
@@ -793,4 +850,406 @@ fn every_address_in_the_program_is_https_and_named_here() {
 
     assert!(links::CHANNEL_URL.starts_with("https://"));
     assert!(links::SUPPORT_URL.starts_with("https://"));
+}
+
+// =========================================================================================
+// The demonstration of «Привет» — FR-101
+// =========================================================================================
+
+/// The whole animation is a table: typed letter by letter, the key flashes, the word is fixed,
+/// the key flashes again, the word comes back — and it repeats exactly.
+#[test]
+fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
+    // The typing: one more character every frame, and nothing else moves.
+    for frame in 0..6 {
+        let shown = letters::demo_frame(frame);
+
+        assert_eq!(shown.shown, frame as usize + 1, "frame {frame}");
+        assert!(!shown.pressed, "the key is not down while a word is typed");
+        assert!(!shown.converted, "and the layout has not switched yet");
+    }
+
+    // The key goes down, and only then does the word change.
+    assert!(letters::demo_frame(14).pressed);
+    assert!(!letters::demo_frame(14).converted, "the press comes first");
+    assert!(letters::demo_frame(16).converted, "and the word after it");
+    assert_ne!(
+        letters::demo_frame(16).text,
+        letters::demo_frame(14).text,
+        "the word really changes — that is the whole picture"
+    );
+
+    // The second press puts it back, letter for letter (FR-05).
+    assert!(letters::demo_frame(30).pressed);
+    assert_eq!(
+        letters::demo_frame(40).text,
+        letters::demo_frame(0).text,
+        "and the word comes back exactly as it was"
+    );
+
+    // And the turn repeats: frame `n` and frame `n + DEMO_FRAMES` are the same picture.
+    for frame in 0..letters::DEMO_FRAMES {
+        assert_eq!(
+            letters::demo_frame(frame),
+            letters::demo_frame(frame + letters::DEMO_FRAMES),
+            "the turn must repeat exactly at frame {frame}"
+        );
+    }
+}
+
+// =========================================================================================
+// What a letter says — FR-101, and what «От автора» says — FR-103
+// =========================================================================================
+
+/// Every letter of FR-101 fills the slots it is supposed to and leaves the rest empty.
+///
+/// The **structure** and not the words: the words are the string tables, and
+/// `tests\settings.rs` checks all hundred and thirty-four of them against both locales. What
+/// this test is about is that «Привет» has a demonstration and «Спасибо» does not, that the
+/// panel of «Что нового» holds three rows, that the letters out of the feed refuse to be built
+/// without an entry behind them.
+#[test]
+fn each_letter_fills_the_slots_of_its_own_shape() {
+    with_product_strings();
+
+    let context = letters::PlanContext {
+        version: "0.39.0".to_owned(),
+        previous_version: String::new(),
+        hotkey: "Pause".to_owned(),
+        snooze_offered: true,
+        item: None,
+    };
+
+    let hello = letters::plan_for(Letter::Welcome, &context);
+    assert!(
+        hello.demo,
+        "«Привет» is the one letter with a demonstration"
+    );
+    assert_eq!(hello.rows.len(), 3, "and three things for the first day");
+    assert!(hello.left.is_some(), "«Открыть настройки»");
+    assert!(hello.accent.is_some(), "«Понятно»");
+    assert!(hello.panel_buttons.is_empty(), "and nothing on the panel");
+    assert!(hello.foot.is_empty(), "and no line under the buttons");
+
+    let thanks = letters::plan_for(Letter::Thanks, &context);
+    assert!(!thanks.demo);
+    assert_eq!(
+        thanks.panel_buttons.len(),
+        2,
+        "«Спасибо» carries the support page and the channel"
+    );
+    assert!(
+        thanks.panel_buttons.iter().all(|button| !button.enabled),
+        "and both are disabled while their addresses are placeholders (П7, П8)"
+    );
+    assert!(thanks.left.is_some(), "«Напомнить через неделю» is offered");
+    assert!(
+        !thanks.foot.is_empty(),
+        "and the letter says it is shown once"
+    );
+
+    // FR-101: the snooze is offered once. The second showing has no button in its place.
+    let second = letters::plan_for(
+        Letter::Thanks,
+        &letters::PlanContext {
+            snooze_offered: false,
+            ..context.clone()
+        },
+    );
+    assert!(second.left.is_none(), "the snooze is offered once");
+
+    let news = letters::plan_for(Letter::WhatsNew, &context);
+    assert_eq!(news.rows.len(), 3, "«Что нового» names three changes");
+    assert!(!news.demo);
+    assert!(
+        news.left.as_ref().is_some_and(|button| !button.enabled),
+        "«Открыть канал» is drawn and disabled while the address is a placeholder"
+    );
+
+    // The two letters out of the feed have nothing to say without an entry behind them, and a
+    // plan with no heading is what `show_letter` refuses to open a window for.
+    for letter in [Letter::Update, Letter::News(12)] {
+        assert_eq!(
+            letters::plan_for(letter, &context),
+            letters::LetterPlan::default(),
+            "{letter:?} without a feed entry must produce no window at all"
+        );
+    }
+}
+
+/// A letter out of the feed says what the feed said, and its buttons follow the link the entry
+/// carried.
+#[test]
+fn a_letter_out_of_the_feed_says_what_the_entry_said() {
+    with_product_strings();
+
+    let mut item = news(12);
+    item.link = "https://example.com/post".to_owned();
+
+    let context = letters::PlanContext {
+        version: "0.39.0".to_owned(),
+        previous_version: "0.38.0".to_owned(),
+        hotkey: "Pause".to_owned(),
+        snooze_offered: false,
+        item: Some(&item),
+    };
+
+    let plan = letters::plan_for(Letter::News(12), &context);
+
+    assert_eq!(plan.title, item.title, "the heading is the author's");
+    assert_eq!(plan.panel_text, item.text, "and so is the text");
+    assert_eq!(plan.panel_buttons.len(), 1, "and the link it carried");
+    assert!(
+        plan.panel_buttons[0].enabled,
+        "a real address is a live button — the rule is about placeholders, not about links"
+    );
+    assert!(
+        plan.accent
+            .as_ref()
+            .is_some_and(|button| button.action == letters::Action::MarkRead),
+        "«Прочитано» is the accented button of a news letter — FR-101"
+    );
+
+    // An update is the same shape without «Прочитано»: there is nothing to mark as read.
+    let update = update("0.40.0");
+    let plan = letters::plan_for(
+        Letter::Update,
+        &letters::PlanContext {
+            item: Some(&update),
+            ..context.clone()
+        },
+    );
+
+    assert!(plan.accent.is_none(), "an update has nothing to mark read");
+    assert!(plan.left.is_some(), "and closes with the plain button");
+}
+
+/// «Что нового» names the version it came from when it knows it, and does not invent one when
+/// it does not — the case a machine raised from schema 5 is in.
+#[test]
+fn whats_new_names_the_previous_version_only_when_there_is_one() {
+    with_product_strings();
+
+    let context = letters::PlanContext {
+        version: "0.39.0".to_owned(),
+        previous_version: "0.38.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: false,
+        item: None,
+    };
+
+    let known = letters::plan_for(Letter::WhatsNew, &context);
+    let unknown = letters::plan_for(
+        Letter::WhatsNew,
+        &letters::PlanContext {
+            previous_version: String::new(),
+            ..context.clone()
+        },
+    );
+
+    assert!(
+        known.subtitle.contains("0.38.0"),
+        "the version it came from is named: {}",
+        known.subtitle
+    );
+    assert!(
+        !unknown.subtitle.contains("0.38.0") && !unknown.subtitle.is_empty(),
+        "and a machine that does not know still says something: {}",
+        unknown.subtitle
+    );
+    assert!(
+        known.title.contains("0.39.0"),
+        "and the heading names the version now running: {}",
+        known.title
+    );
+}
+
+/// **FR-102, the two states of the «Новости и обновления» panel.** Before the switch may be
+/// shown the panel says what the feed is and that the setting lives in the file; after, the
+/// switch stands in that line's place and the sentence moves under it.
+#[test]
+fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
+    with_product_strings();
+
+    let today = day(2027, 1, 1);
+    let mut state = settled("0.39.0");
+    state.first_run = Some(day(2026, 9, 1));
+
+    let before = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+
+    assert!(before.switch.is_none(), "no letter from the feed yet");
+    assert!(
+        !before.file_only.is_empty(),
+        "so the file is the way to say no"
+    );
+    assert!(
+        !before.feed_about.is_empty(),
+        "and the panel says what the feed is"
+    );
+    assert!(before.switch_note.is_empty());
+    assert!(
+        !before.feed_state.is_empty(),
+        "and whether it has been read"
+    );
+    assert!(before.download.is_none(), "no update to lead to");
+    assert!(!before.letters, "and nothing in «Последние письма»");
+
+    state.first_feed_letter = Some(day(2026, 9, 10));
+
+    let after = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+
+    assert_eq!(after.switch, Some(true), "the switch appears, and it is on");
+    assert!(after.file_only.is_empty(), "and the quiet line goes");
+    assert!(
+        after.feed_about.is_empty(),
+        "the sentence is not said twice"
+    );
+    assert!(!after.switch_note.is_empty(), "it moved under the switch");
+
+    // And it follows the setting rather than being decoration.
+    state.feed = false;
+    assert_eq!(
+        letters::author_view(&state, today, "0.39.0", FeedView::EMPTY).switch,
+        Some(false)
+    );
+}
+
+/// The version line of «От автора» says what is installed, and what is available when the feed
+/// names something newer.
+#[test]
+fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
+    with_product_strings();
+
+    let state = settled("0.39.0");
+    let today = day(2026, 9, 3);
+    let announced = update("0.40.0");
+    let feed = FeedView {
+        update: Some(&announced),
+        news: &[],
+    };
+
+    let latest = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+    assert!(latest.version_state.contains("0.39.0"));
+    assert!(latest.download.is_none());
+
+    let waiting = letters::author_view(&state, today, "0.39.0", feed);
+    assert!(waiting.version_state.contains("0.39.0"));
+    assert!(
+        waiting.version_state.contains("0.40.0"),
+        "and the one that is waiting: {}",
+        waiting.version_state
+    );
+    assert!(waiting.download.is_some(), "with a page to open");
+    assert!(waiting.letters, "and something for «Последние письма»");
+}
+
+/// **«Последние письма»** — the update first, then the news newest first, each marked read or
+/// not.
+#[test]
+fn the_list_shows_the_update_and_the_three_news_newest_first() {
+    with_product_strings();
+
+    let mut state = settled("0.39.0");
+    let announced = update("0.40.0");
+    let items = [news(11), news(12), news(13)];
+    let feed = FeedView {
+        update: Some(&announced),
+        news: &items,
+    };
+
+    state.mark_read(12);
+
+    let entries = letters::list_entries(&state, "0.39.0", feed);
+
+    assert_eq!(entries.len(), 4, "one update and three news");
+    assert_eq!(entries[0].news, None, "the update is first and is not news");
+    assert!(!entries[0].unread, "and it is never «unread»");
+    assert_eq!(entries[1].news, Some(13), "then the newest news");
+    assert_eq!(entries[2].news, Some(12));
+    assert_eq!(entries[3].news, Some(11));
+    assert!(entries[1].unread, "13 has not been read");
+    assert!(!entries[2].unread, "12 has");
+    assert!(entries[3].unread, "11 has not");
+
+    for entry in &entries {
+        assert!(!entry.title.is_empty(), "every entry has a heading");
+        assert!(!entry.meta.is_empty(), "and a line saying when and whether");
+    }
+
+    // An installation with no feed behind it has nothing to show, which is the whole of stage А.
+    assert!(letters::list_entries(&state, "0.39.0", FeedView::EMPTY).is_empty());
+}
+
+// =========================================================================================
+// The colours and the grounds of the windows — FR-92а's vocabulary, reused
+// =========================================================================================
+
+/// The quiet labels are quiet and the rest are not — the closed vocabulary of
+/// `theme::StaticColorRole`, reused rather than widened.
+#[test]
+fn the_colour_roles_of_the_letter_windows_follow_their_table() {
+    use lang_switcher::theme::StaticColorRole;
+
+    // The two quiet lines of the mock-up and the markers of the panel rows.
+    for control in [1202, 1223, 1206, 1210, 1211, 1212, 1213] {
+        assert_eq!(
+            letters::label_color_role(control),
+            StaticColorRole::Muted,
+            "control {control} is one of the quiet ones"
+        );
+    }
+
+    // The demonstration is a field of its own.
+    assert_eq!(letters::label_color_role(1205), StaticColorRole::Field);
+
+    // And everything else is the full-strength ink.
+    for control in [1201, 1203, 1204, 1208, 1209, 1214, 1215, 1216, 1217] {
+        assert_eq!(
+            letters::label_color_role(control),
+            StaticColorRole::Label,
+            "control {control} is ordinary text"
+        );
+    }
+}
+
+/// **Every label that stands on a block is filled with the block's colour**, and the runs are
+/// whole.
+///
+/// ⚠ The test exists because the twin of this rule was written short once: the gate of
+/// `WM_DRAWITEM` named `IDC_LETTER_ROW_1` and not the four rows, and «Привет» came up with
+/// three markers and one sentence. A run written short is the defect this file is watching for.
+#[test]
+fn every_row_of_every_run_stands_on_its_panel() {
+    // The four rows of a letter and their four markers.
+    for control in 1210..1218 {
+        assert!(
+            letters::label_stands_on_a_panel(control),
+            "control {control} is a row of a letter's panel"
+        );
+    }
+
+    // The three labels of each of the four entries of «Последние письма».
+    for control in (1231..1235).chain(1235..1239).chain(1239..1243) {
+        assert!(
+            letters::label_stands_on_a_panel(control),
+            "control {control} is a label of an entry"
+        );
+    }
+
+    // The paragraphs of the three panels of «От автора».
+    for control in [1264, 1268, 1275, 1269, 1270, 1273, 1277] {
+        assert!(
+            letters::label_stands_on_a_panel(control),
+            "control {control} stands on a panel of «От автора»"
+        );
+    }
+
+    // And what does **not**: the head of a letter, the demonstration, the line under the
+    // buttons, the name and version of «От автора», the footnote of the list.
+    for control in [1201, 1202, 1203, 1204, 1205, 1206, 1223, 1261, 1262, 1252] {
+        assert!(
+            !letters::label_stands_on_a_panel(control),
+            "control {control} stands on the window's own ground"
+        );
+    }
 }

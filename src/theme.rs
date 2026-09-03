@@ -2929,6 +2929,73 @@ pub unsafe fn paint_label_at_pitch(
 /// `dc` is a live DC with the face of the drawing already selected into it, and `caption` is a
 /// live slice. `DT_CALCRECT` writes the measured extent into the scratch rectangles of this
 /// frame and nowhere else; without `DT_MODIFYSTRING` the caption itself is only read.
+/// How tall a label of this caption has to be to hold all of it at this width — task Т-32-3,
+/// FR-101.
+///
+/// **The measuring half of [`paint_label_at_pitch`], and it must stay its exact twin.** The
+/// windows of the letters from the author are laid out at run time rather than in the template:
+/// one template serves five letters, a panel holds between nothing and four rows, and a news
+/// item's text comes out of the author's feed. So the layout has to ask how tall each label
+/// will be **before** it places it, and the only answer worth having is the one the painter
+/// will act on — the same `DrawTextW`, the same [`LABEL_TEXT_FORMAT`], the same model pitch.
+///
+/// ⛔ Not `GetTextExtentPoint32W` and not `MeasureString`: both are second opinions, and this
+/// project has already measured them disagreeing with `DrawTextW` by whole pixels (the note at
+/// [`paint_label_lines`], and the memory of the fitting stand). A layout laid out by one engine
+/// and painted by another is a layout that clips somewhere nobody looked.
+///
+/// `pitch` is the caller's model pitch, exactly as in [`LabelStyle`]: `None` means
+/// [`LABEL_LINE_PITCH`] through [`scaled`], which is what a label of the settings dialog is
+/// drawn at.
+///
+/// Answers zero for an empty caption — an empty slot takes no room — and the natural height of
+/// the `DT_CALCRECT` when the line model refuses (a caption of one line, or a measurement that
+/// did not divide), which is the same fallback the painter takes.
+///
+/// # Safety
+///
+/// `dc` is a live DC with the face this label will be drawn in already selected into it —
+/// otherwise the answer is the height of some other face. `caption` is the caller's buffer,
+/// read and not kept.
+pub unsafe fn measure_label(dc: HDC, width: i32, caption: &mut [u16], pitch: Option<i32>) -> i32 {
+    if caption.is_empty() {
+        return 0;
+    }
+
+    let rect = RECT {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: 0,
+    };
+
+    // SAFETY: the contract above — `dc` carries the face, `caption` and `rect` are live.
+    let Some((lines, natural)) = (unsafe { measure_label_lines(dc, rect, caption) }) else {
+        let mut calculated = rect;
+
+        // SAFETY: as above. `DT_CALCRECT` writes the rectangle and paints nothing.
+        let height = unsafe {
+            DrawTextW(
+                dc,
+                caption,
+                &mut calculated,
+                LABEL_TEXT_FORMAT | DT_CALCRECT,
+            )
+        };
+
+        return height.max(0);
+    };
+
+    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, dc_dpi(dc)));
+
+    match label_model_pitch(lines, natural, asked) {
+        // The very arithmetic `paint_label_lines` lays the bands out by: line `i` starts at
+        // `i × pitch` and the last one is `natural` tall.
+        Some(pitch) => (lines - 1) * pitch + natural,
+        None => lines * natural,
+    }
+}
+
 unsafe fn measure_label_lines(dc: HDC, rect: RECT, caption: &mut [u16]) -> Option<(i32, i32)> {
     let mut wrapped = rect;
 

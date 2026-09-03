@@ -142,8 +142,9 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, ODT_MENU};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
-    NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_USER, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NIN_SELECT, NOTIFYICON_VERSION_4,
+    NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CWPSTRUCT, CallNextHookEx, CreatePopupMenu, DestroyIcon, DestroyMenu,
@@ -152,10 +153,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
     RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
     SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
-    SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
+    SetTimer, SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU,
     WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
 };
 use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
 
@@ -195,11 +196,36 @@ pub const CMD_ABOUT: u32 = 0x1004;
 /// Command identifier of `Выход`.
 pub const CMD_EXIT: u32 = 0x1005;
 
-/// Number of entries FR-91 puts in the menu: five commands and two separators.
+/// Command identifier of the permanent entry `Написать автору…` — FR-91, task Т-32-4,
+/// решение 101 п. 9. It stands above `О программе`.
+pub const CMD_WRITE: u32 = 0x1006;
+
+/// Command identifier of the temporary entry `Непрочитанное письмо…` — FR-91. Present only
+/// while a news item of the feed is unread.
+pub const CMD_UNREAD: u32 = 0x1007;
+
+/// Command identifier of the temporary entry `Доступна версия X…` — FR-91. Present only while
+/// the feed names a version newer than this one.
+pub const CMD_UPDATE: u32 = 0x1008;
+
+/// Command identifier of the way into «От автора» from the about window — FR-103.
 ///
-/// Spelled out because it is the number a reader is most likely to get wrong: the block in
-/// FR-91 has seven lines, two of which are rules.
-pub const MENU_ENTRY_COUNT: i32 = 7;
+/// A number of its own rather than [`CMD_WRITE`], although stage А sends both to the same
+/// window: the two entries mean different things to a person (one says «write», the other says
+/// «from the author»), and stage В gives the first one the wizard. A command that changed
+/// meaning under an installed build would be exactly the trap `app.rc` warns about for control
+/// identifiers.
+pub const CMD_AUTHOR: u32 = 0x1009;
+
+/// Number of entries FR-91 puts in the menu when nothing temporary is due: **six** commands and
+/// two separators.
+///
+/// Spelled out because it is the number a reader is most likely to get wrong. ⚠ **Seven until
+/// task Т-32-4**: FR-91's addition puts the permanent entry «Написать автору…» above «О
+/// программе», and the two temporary entries of FR-101 stand above the first rule *only while
+/// there is a reason for them* — so this is the count of the menu at rest, and
+/// [`Menu::build`] answers a longer one when the feed has something to say.
+pub const MENU_ENTRY_COUNT: i32 = 8;
 
 // ---------------------------------------------------------------------------------------
 // Private constants
@@ -210,6 +236,12 @@ const IDI_APP_ACTIVE: u16 = 101;
 
 /// Resource identifier of the "suspended" icon in `app.rc`.
 const IDI_APP_PAUSED: u16 = 102;
+
+/// The "active, and a letter is unread" icon of FR-90's third state — task Т-32-4.
+const IDI_APP_ACTIVE_UNREAD: u16 = 103;
+
+/// The "suspended, and a letter is unread" icon.
+const IDI_APP_PAUSED_UNREAD: u16 = 104;
 
 /// Identifier of our one and only notify icon, unique within this window.
 const TRAY_ICON_ID: u32 = 1;
@@ -507,6 +539,10 @@ pub struct Tray {
     active: Icon,
     /// The "suspended" icon.
     paused: Icon,
+    /// The "active, and a letter is unread" icon — FR-90's third state, task Т-32-4.
+    active_unread: Icon,
+    /// The "suspended, and a letter is unread" icon.
+    paused_unread: Icon,
     /// The configuration; `general.enabled` *is* the state of FR-90.
     config: Config,
     /// Where the configuration is written back to. `None` when `%APPDATA%` is not set.
@@ -558,6 +594,10 @@ impl Tray {
         let icon_size = small_icon_size();
         let active = Icon::load(instance, IDI_APP_ACTIVE, icon_size)?;
         let paused = Icon::load(instance, IDI_APP_PAUSED, icon_size)?;
+        // FR-90's third state, task Т-32-4 — loaded here with the other two so that the dot
+        // appears the moment a letter arrives rather than after a load that could fail then.
+        let active_unread = Icon::load(instance, IDI_APP_ACTIVE_UNREAD, icon_size)?;
+        let paused_unread = Icon::load(instance, IDI_APP_PAUSED_UNREAD, icon_size)?;
 
         let (config, save_policy) = match config_path.as_deref() {
             Some(path) => {
@@ -611,6 +651,8 @@ impl Tray {
             icon_size,
             active,
             paused,
+            active_unread,
+            paused_unread,
             config,
             config_path,
             save_policy,
@@ -731,6 +773,20 @@ impl Tray {
             WM_MEASUREITEM => measure_menu_item(lparam),
             WM_DRAWITEM => draw_menu_item(lparam),
 
+            // **FR-101, task Т-32-4 — the one clock the letters run on.** The first tick comes
+            // ninety seconds after the start (NFR-08: nothing of this may be in the way of a
+            // program starting), and every one after it an hour later (NFR-10: a program at
+            // rest does nothing, and once an hour is as close to nothing as a schedule counted
+            // in days can be).
+            //
+            // The reaction is `Ignored` so that the answer is worked out **outside** the borrow
+            // of the tray: showing a letter reads the configuration through `with_tray`, and a
+            // second borrow would panic. `handle_ui_message` is what runs it.
+            //
+            // SEC-05: a forged `WM_TIMER` buys the sender one run of a schedule that reads its
+            // own state and a clock, and at worst one letter shown a few hours early.
+            WM_TIMER if wparam.0 == LETTERS_TIMER => Reaction::Ignored,
+
             // FR-92а, task T-11-9: the two messages Windows broadcasts when the system
             // theme moves, received here because the hidden UI window is the one top-level
             // window of this process. The whole reaction is a call that may post one
@@ -793,10 +849,23 @@ impl Tray {
             // documented way in, and this is the shortcut for whoever expects it to work.
             WM_LBUTTONDBLCLK => Reaction::ShowSettings,
 
-            // Every other notification of the icon: balloon events, the hover notifications
-            // of version 4, the raw button messages that accompany the ones above. A
-            // `WM_APP` message has no default handling, so answering zero is the whole of
-            // "ignore it".
+            // **FR-101, task Т-32-4 — the balloon was clicked.** The person is asking for the
+            // letter the balloon announced, so the window comes up **with** the focus: this is
+            // the case FR-101 excepts from «фокус не отбирают», because the focus was given
+            // rather than taken.
+            //
+            // `Ignored` so that the work happens outside the borrow of the tray — showing a
+            // letter reads the configuration through `with_tray` of its own.
+            //
+            // SEC-05: the event number is the whole of what is read out of the message, and a
+            // forged one buys the sender one window of ours, holding a letter this program
+            // itself composed.
+            NIN_BALLOONUSERCLICK => Reaction::Ignored,
+
+            // Every other notification of the icon: the rest of the balloon events, the hover
+            // notifications of version 4, the raw button messages that accompany the ones
+            // above. A `WM_APP` message has no default handling, so answering zero is the
+            // whole of "ignore it".
             _ => Reaction::Handled(LRESULT(0)),
         }
     }
@@ -1009,11 +1078,28 @@ impl Tray {
 
     /// The icon that matches the current state.
     fn state_icon(&self) -> HICON {
-        if self.enabled() {
-            self.active.handle
-        } else {
-            self.paused.handle
+        // FR-90's third state, task Т-32-4: the dot of FR-101 rides on **both** of the two
+        // states this program has always had, because they are independent — a person can pause
+        // the program with a letter unread. Four icons, two questions, and neither of them
+        // knows about the other.
+        match (self.enabled(), self.has_unread()) {
+            (true, false) => self.active.handle,
+            (false, false) => self.paused.handle,
+            (true, true) => self.active_unread.handle,
+            (false, true) => self.paused_unread.handle,
         }
+    }
+
+    /// Whether a news item of the feed is unread — the fact the dot of FR-90 shows and the
+    /// entry «Непрочитанное письмо…» of FR-91 stands on.
+    ///
+    /// Read out of **this value's own** configuration and the feed the letters module holds,
+    /// so that nothing here reaches for `with_tray` — the tray is already borrowed whenever
+    /// this is called, and a second borrow would panic.
+    fn has_unread(&self) -> bool {
+        crate::letters::with_feed(|feed| {
+            crate::letters::has_unread_news(&self.config.letters, feed)
+        })
     }
 
     /// The descriptor every `Shell_NotifyIcon` call of this module is built from.
@@ -1084,6 +1170,55 @@ impl Tray {
                 &WinError::from_thread(),
             );
         }
+    }
+
+    /// Announces a letter with the icon's own balloon — `NIF_INFO`, FR-101, task Т-32-4.
+    ///
+    /// **The first knock of every letter but «Привет».** The balloon is the system's own — its
+    /// colours, its font and its place are Windows', ours are only the icon and the words — and
+    /// clicking it opens the letter (`NIN_BALLOONUSERCLICK`). If it is not noticed, FR-101 says
+    /// the window opens by itself at the next quiet moment, and that is the schedule's business
+    /// rather than this method's.
+    ///
+    /// `NIIF_USER` with `NIF_ICON` asks the shell to show **this program's own icon** in the
+    /// balloon rather than one of the three system glyphs: a letter from the author is neither
+    /// a warning nor an error, and the icon a person will click is the icon they already know.
+    ///
+    /// The two fields are truncated by [`write_field`] rather than refused: `szInfo` holds 255
+    /// UTF-16 units and `szInfoTitle` 63, and a sentence of the string tables in a language
+    /// nobody measured must never be able to stop a letter being announced (NFR-13).
+    fn announce(&mut self, title: &str, body: &str) {
+        if !self.icon_present {
+            return;
+        }
+
+        let mut data = self.notify_data();
+
+        data.uFlags |= NIF_INFO;
+        data.dwInfoFlags = NIIF_USER;
+
+        write_field(&mut data.szInfo, body);
+        write_field(&mut data.szInfoTitle, title);
+
+        // SAFETY: identical to the `NIM_MODIFY` of `refresh_icon` — the same locally owned
+        // descriptor, the same live window, the same icon handles owned by `self`; the two
+        // extra fields are arrays inside that descriptor.
+        let shown = unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+
+        if !shown.as_bool() {
+            // NFR-13. A balloon the shell refused is a letter that will open by itself at the
+            // next quiet moment instead — the schedule does not depend on this.
+            app::report_non_critical("Shell_NotifyIconW(NIF_INFO)", &WinError::from_thread());
+        }
+    }
+
+    /// Updates the icon in place because the **letters** moved — task Т-32-4, FR-90.
+    ///
+    /// The public half is [`refresh_unread_mark`]; this is the method it reaches, and it exists
+    /// because `refresh_icon` is private and the tray is the one owner of the notification area
+    /// entry.
+    pub fn refresh_state_icon(&mut self) {
+        self.refresh_icon();
     }
 
     /// Updates the icon and the tooltip in place — `NIM_MODIFY`.
@@ -1378,6 +1513,11 @@ pub fn attach_at(
 
     UI_TRAY.with(|slot| slot.replace(Some(tray)));
 
+    // FR-101, task Т-32-4 — the clock of the letters, armed once, here: this is the moment the
+    // program has a UI window, a configuration and an icon, and the first check is ninety
+    // seconds away (NFR-08).
+    start_letters_clock(hwnd);
+
     Ok(Attachment {
         _not_send: PhantomData,
     })
@@ -1577,6 +1717,23 @@ unsafe fn setting_change_name(lparam: LPARAM) -> Option<String> {
 /// `Some` means the message was handled and that value has to be returned to Windows; `None`
 /// means it is none of ours and belongs to `DefWindowProcW`.
 pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+    // FR-101, task Т-32-4: the tick of the letters, answered **before** the tray is borrowed
+    // and outside it — the schedule reads the configuration through `with_tray` of its own.
+    if message == WM_TIMER && wparam.0 == LETTERS_TIMER {
+        on_letters_tick();
+        return Some(LRESULT(0));
+    }
+
+    // FR-101: the balloon was clicked. Outside the borrow for the same reason, and after the
+    // tray has been asked — the icon's own bookkeeping runs first.
+    if message == WM_APP_TRAY && u32::from(low_word(unsigned(lparam.0))) == NIN_BALLOONUSERCLICK {
+        if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+            crate::letters::open_announced(hwnd);
+        }
+
+        return Some(LRESULT(0));
+    }
+
     let reaction = with_tray(|tray| tray.handle_message(message, wparam, lparam))?;
 
     match reaction {
@@ -1624,6 +1781,26 @@ pub struct MenuItem {
     /// that from **this** field rather than from the `ODS_GRAYED` of the message, so that
     /// nothing a forged `WM_DRAWITEM` carries decides how our menu looks (SEC-05).
     pub enabled: bool,
+}
+
+/// What the letters of FR-101 have to say in the menu right now — the two temporary entries of
+/// FR-91's addition.
+///
+/// A value rather than two arguments, and it carries the **version** rather than a flag because
+/// the entry names it: «Доступна версия 0.40.0…».
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pending {
+    /// A news item of the feed is unread — FR-101, and the same fact the dot on the icon shows.
+    pub unread: bool,
+    /// The feed names this version, and it is newer than the one running.
+    pub update: Option<String>,
+}
+
+impl Pending {
+    /// Whether either entry is due — what decides the rule under them.
+    pub fn any(&self) -> bool {
+        self.unread || self.update.is_some()
+    }
 }
 
 /// The context menu of FR-91, destroyed when this value is dropped.
@@ -1678,6 +1855,7 @@ impl Menu {
         autostart: bool,
         fail_safe: bool,
         dialog_open: bool,
+        pending: &Pending,
     ) -> WinResult<Self> {
         // SAFETY: takes no arguments and touches no memory of ours. The handle it returns is
         // owned by this value from here on and is destroyed exactly once, in `Drop`. The
@@ -1686,8 +1864,35 @@ impl Menu {
 
         let mut menu = Self {
             handle,
-            items: Vec::with_capacity(5),
+            items: Vec::with_capacity(8),
         };
+
+        // FR-91, task Т-32-4 — the two temporary entries of FR-101, in the top group and above
+        // the first rule. They are here **only while there is a reason for them**: an unread
+        // news item and a version newer than this one. Nothing else in this menu appears and
+        // disappears, and that is deliberate — a person who has read the letter should not go
+        // on being told there is one.
+        if pending.unread {
+            menu.append_command(
+                CMD_UNREAD,
+                &settings::text(settings::IDS_MENU_UNREAD),
+                false,
+                true,
+            )?;
+        }
+
+        if let Some(version) = pending.update.as_deref() {
+            menu.append_command(
+                CMD_UPDATE,
+                &settings::format_text(settings::IDS_MENU_UPDATE, &[version]),
+                false,
+                true,
+            )?;
+        }
+
+        if pending.any() {
+            menu.append_separator()?;
+        }
 
         // FR-94: every label out of the string table of the locale in force. The menu is built
         // afresh on every click, so it carries the locale published at start-up without any
@@ -1720,6 +1925,14 @@ impl Menu {
             autostart_available,
         )?;
         menu.append_separator()?;
+        // FR-91's addition, task Т-32-4, решение 101 п. 9: the permanent entry stands **above**
+        // «О программе», which is where the accepted mock-up puts it.
+        menu.append_command(
+            CMD_WRITE,
+            &settings::text(settings::IDS_WRITE_TO_AUTHOR),
+            false,
+            true,
+        )?;
         menu.append_command(
             CMD_ABOUT,
             &settings::text(settings::IDS_MENU_ABOUT),
@@ -2954,6 +3167,9 @@ fn show_menu(x: i32, y: i32) {
         autostart,
         crate::hook::fail_safe(),
         settings::dialog_is_open(),
+        // FR-101: what the letters have to say right now, read once, here, and handed to the
+        // builder — the direction the three states above travel and for the same reason.
+        &pending_now(),
     ) {
         Ok(menu) => menu,
         Err(error) => {
@@ -3173,6 +3389,22 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         // Outside any borrow of the tray: the about dialog is modal and pumps messages.
         CMD_ABOUT => show_about(hwnd),
 
+        // FR-101 and FR-103, task Т-32-4 — the three entries of the letters from the author.
+        // Every one of them opens a **modeless** window, which returns at once and holds no
+        // borrow of anything: unlike the two arms above, these do not pump a message loop of
+        // their own.
+        //
+        // ⚠ `CMD_WRITE` is the permanent entry «Написать автору…» of FR-91. Until the wizard of
+        // FR-104 exists (stage В) it opens «От автора», where the button that will hold the
+        // wizard already stands — see the report of Э32 for the contradiction between FR-103
+        // and §4 В-2 of the mandate and how it was resolved.
+        CMD_WRITE | CMD_AUTHOR => crate::letters::open_author(hwnd),
+
+        // The two temporary entries: the unread letter and the newer version. Both are present
+        // in the menu only while there is a reason for them (FR-91), and both open the letter
+        // they are about.
+        CMD_UNREAD | CMD_UPDATE => show_pending_letter(hwnd, command == CMD_UPDATE),
+
         // The ordinary way out. Nothing is cleaned up here: asking `app` to come down leads
         // the UI thread out of its message loop and into the one cleanup path of FR-83,
         // `Tray::shut_down`, by way of `Attachment::drop`. The same route the FR-97 timeout
@@ -3183,6 +3415,93 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         // turn up here: the identifiers are ours and the menu is built two frames up.
         _ => {}
     }
+}
+
+/// The identifier of the timer the schedule of FR-101 runs on — the UI window's own, and
+/// distinct from the watchdog's, which lives on the input window.
+const LETTERS_TIMER: usize = 2;
+
+/// How long after the start the first check of the letters happens — NFR-08, «ничего не делает
+/// в первые секунды».
+const LETTERS_FIRST_MS: u32 = 90_000;
+
+/// And how often after that — NFR-10. Once an hour is as rare as a schedule counted in days can
+/// afford to be, and the whole of what it does when nothing is due is compare four dates.
+const LETTERS_EVERY_MS: u32 = 60 * 60 * 1000;
+
+/// Arms the clock of FR-101 on the UI window — called once, when the tray is installed.
+///
+/// NFR-13: a refused timer costs the letters, not the program. It is journaled and the program
+/// runs on without them.
+pub fn start_letters_clock(hwnd: HWND) {
+    // SAFETY: `hwnd` is the live UI window; `None` for the callback asks for `WM_TIMER` at that
+    // window, which is what `handle_ui_message` answers.
+    let started = unsafe { SetTimer(Some(hwnd), LETTERS_TIMER, LETTERS_FIRST_MS, None) };
+
+    if started == 0 {
+        app::report_non_critical("SetTimer", &WinError::from_thread());
+    }
+}
+
+/// One tick of the schedule of FR-101 — the whole of what the letters do on their own.
+///
+/// Three steps and in this order, and none of them holds a borrow of the tray while the next
+/// runs:
+///
+/// 1. the first tick re-arms the clock at the hourly period — the ninety seconds of NFR-08 are
+///    a delay before the first check, not a period;
+/// 2. the state is initialised if it has never been (the day this installation started
+///    counting), and the file is written if that changed anything;
+/// 3. `letters::due` is asked what is due, and if anything is, it is shown — announced by a
+///    balloon first for every letter but «Привет» (FR-101).
+fn on_letters_tick() {
+    let Some(hwnd) = with_tray(|tray| tray.hwnd) else {
+        return;
+    };
+
+    // The period after the first tick. `SetTimer` with an identifier that already exists
+    // **replaces** the timer rather than making a second one, which is the documented way to
+    // change a period and the reason this needs no state of its own.
+    //
+    // SAFETY: `hwnd` is the live UI window and the identifier is this module's own.
+    let restarted = unsafe { SetTimer(Some(hwnd), LETTERS_TIMER, LETTERS_EVERY_MS, None) };
+
+    if restarted == 0 {
+        app::report_non_critical("SetTimer", &WinError::from_thread());
+    }
+
+    crate::letters::tick(hwnd);
+}
+
+/// What the letters of FR-101 have to say in the menu right now.
+///
+/// Read **outside** any borrow of the tray, because `letters::pending` takes one of its own to
+/// read the configuration.
+fn pending_now() -> Pending {
+    let (unread, update) = crate::letters::pending();
+
+    Pending { unread, update }
+}
+
+/// Shows the letter one of the two temporary menu entries is about — FR-91, task Т-32-4.
+fn show_pending_letter(hwnd: HWND, update: bool) {
+    crate::letters::show_pending(hwnd, update);
+}
+
+/// Announces a letter with the balloon of the icon — FR-101, task Т-32-4. The public half of
+/// [`Tray::announce`].
+pub fn announce_letter(title: &str, body: &str) {
+    with_tray(|tray| tray.announce(title, body));
+}
+
+/// Puts the dot of FR-90 on the icon, or takes it off — task Т-32-4.
+///
+/// Called when the answer may have moved: a news item was marked read, a read of the feed
+/// brought new ones or dropped old ones. The icon is refreshed unconditionally, which costs one
+/// `NIM_MODIFY` and cannot be wrong; deciding whether it moved would need a second copy of the
+/// rule.
+pub fn refresh_unread_mark() {
+    with_tray(Tray::refresh_state_icon);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -3389,6 +3708,14 @@ pub fn adopt_ui_language() {
     // a string of the locale. `NIM_MODIFY` in a second borrow, after the first has ended —
     // the discipline of this module, and cheap: the shell is told the icon it already has.
     with_tray(|tray| tray.refresh_icon());
+
+    // FR-101, task Т-32-3: a letter or «От автора» that is open right now follows the language
+    // too, by the two mechanisms of решение 99.1 — refilled where the direction of the script
+    // is the same, rebuilt where it changed. Outside every borrow of the tray: rebuilding a
+    // window reads the configuration through `with_tray` of its own.
+    if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+        crate::letters::language_changed(hwnd);
+    }
 }
 
 /// The check mark of FR-91, made to do what FR-93 says.
@@ -3453,12 +3780,18 @@ fn show_about(hwnd: HWND) {
 
     // The version travels the same road it always did: out of the `VERSIONINFO` resource
     // of the running executable by [`file_version`], never out of a literal.
-    if let Err(error) =
-        settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version(), &key)
-    {
-        // NFR-13. The dialog either came up or it did not, and if it did not the user is
-        // told by the absence of a window; the reason goes to the journal.
-        app::report_non_critical("DialogBoxParamW", &error);
+    match settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version(), &key) {
+        // FR-103, task Т-32-4: «От автора…» ended the modal window, and the modeless one is
+        // opened **here** — after the modal call has returned, at the depth the about window
+        // was shown from, and owned by this program's own window rather than by one that has
+        // just closed.
+        Ok(true) => crate::letters::open_author(hwnd),
+        Ok(false) => {}
+        Err(error) => {
+            // NFR-13. The dialog either came up or it did not, and if it did not the user is
+            // told by the absence of a window; the reason goes to the journal.
+            app::report_non_critical("DialogBoxParamW", &error);
+        }
     }
 }
 
@@ -3670,6 +4003,25 @@ pub fn icon_tip(enabled: bool) -> String {
 /// no future edit can make the field overrun.
 fn write_tip(field: &mut [u16; 128], text: &str) {
     let limit = field.len() - 1;
+    let mut written = 0;
+
+    for unit in text.encode_utf16().take(limit) {
+        field[written] = unit;
+        written += 1;
+    }
+
+    field[written] = 0;
+}
+
+/// [`write_tip`] for a field of any length — the two balloon fields of FR-101, task Т-32-4.
+///
+/// `szInfo` is 256 units and `szInfoTitle` 64, and neither is the 128 of `szTip`; a generic
+/// body is one place the truncation can be wrong instead of three. The rule is the same:
+/// **cut, never refuse** — a sentence of a locale nobody measured must not be able to stop a
+/// letter being announced (NFR-13), and it is cut at a UTF-16 unit, which is where the field
+/// itself ends.
+fn write_field<const N: usize>(field: &mut [u16; N], text: &str) {
+    let limit = field.len().saturating_sub(1);
     let mut written = 0;
 
     for unit in text.encode_utf16().take(limit) {

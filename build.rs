@@ -14,6 +14,8 @@ fn main() {
     println!("cargo:rerun-if-changed=app-dev.manifest");
     println!("cargo:rerun-if-changed=res/langswitcher-active.ico");
     println!("cargo:rerun-if-changed=res/langswitcher-paused.ico");
+    println!("cargo:rerun-if-changed=res/langswitcher-active-unread.ico");
+    println!("cargo:rerun-if-changed=res/langswitcher-paused-unread.ico");
 
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
     let macros: &[&str] = if release { &["LANGSW_UIACCESS=1"] } else { &[] };

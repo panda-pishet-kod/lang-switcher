@@ -92,7 +92,7 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   $g.FillPath($br, $plate)
   $br.Dispose(); $plate.Dispose()
 
-  if ($state -eq 'paused') { $glyph = New-PausePath; $ink = $pal.Paused }
+  if ($state -eq 'paused' -or $state -eq 'paused-unread') { $glyph = New-PausePath; $ink = $pal.Paused }
   else { $glyph = New-ArrowPath; $ink = $pal.Active }
 
   # Scale the glyph to 70% about the centre of the plate.
@@ -103,6 +103,27 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   $br = New-Object System.Drawing.SolidBrush($ink)
   $g.FillPath($br, $glyph)
   $br.Dispose(); $glyph.Dispose()
+
+  # FR-90's third state, task T-32-4: "there is an unread letter". The mark is a dot in the
+  # icon's OWN colours -- filled with the colour of the glyph, ringed with the colour of the
+  # plate -- so it reads on a light taskbar and on a dark one by exactly the contrast the two
+  # states above already rely on, and no second icon set exists to go wrong.
+  #
+  # WHY A RING AND NOT A BARE DOT. The dot sits on the corner of the plate and hangs over its
+  # edge; without the ring its lower-right arc would be the glyph colour against whatever the
+  # taskbar happens to be, which is the one place in this drawing where the taskbar's own
+  # colour can touch the ink.
+  if ($state -like '*-unread') {
+    $cx = 74.0; $cy = 74.0; $r = 17.0; $ring = 6.0
+    $ringBrush = New-Object System.Drawing.SolidBrush($pal.Plate)
+    $g.FillEllipse($ringBrush, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
+                   [single](2*($r+$ring)), [single](2*($r+$ring)))
+    $ringBrush.Dispose()
+    $dotBrush = New-Object System.Drawing.SolidBrush($ink)
+    $g.FillEllipse($dotBrush, [single]($cx-$r), [single]($cy-$r), [single](2*$r), [single](2*$r))
+    $dotBrush.Dispose()
+  }
+
   $g.Dispose()
 
   $dst = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -165,7 +186,12 @@ function Write-Ico([string]$path, [string]$paletteName, [string]$state) {
 # The light palette stays available above but produces no file in res\.
 $targets = @(
   @{ File = 'langswitcher-active.ico'; Palette = 'graphite'; State = 'active' },
-  @{ File = 'langswitcher-paused.ico'; Palette = 'graphite'; State = 'paused' }
+  @{ File = 'langswitcher-paused.ico'; Palette = 'graphite'; State = 'paused' },
+  # FR-90's third state, task T-32-4: the same two icons carrying the dot of FR-101. Two files
+  # and not one, because the state of the program and the state of the letters are independent:
+  # a person can pause the program with a letter unread.
+  @{ File = 'langswitcher-active-unread.ico'; Palette = 'graphite'; State = 'active-unread' },
+  @{ File = 'langswitcher-paused-unread.ico'; Palette = 'graphite'; State = 'paused-unread' }
 )
 
 foreach ($t in $targets) {

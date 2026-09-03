@@ -115,20 +115,21 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
     CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
-    DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon,
-    DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
-    GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
-    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
-    ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
-    LoadImageW, MapDialogRect, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY,
-    WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
+    CreateDialogIndirectParamW, CreateDialogParamW, DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID,
+    DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW,
+    EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
+    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
+    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+    LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect, PostMessageW,
+    RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW,
+    SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
+    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2371,6 +2372,13 @@ pub const IDS_TOAST_UPDATE_TITLE: u16 = 3137;
 pub const IDS_TOAST_UPDATE: u16 = 3138;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
+/// The line under the heading of the update entry of «Последние письма»: the date, the word
+/// «обновление» and the version installed here.
+pub const IDS_ENTRY_UPDATE_MARK: u16 = 3140;
+/// The same line for a news item that has not been read.
+pub const IDS_ENTRY_UNREAD_MARK: u16 = 3141;
+/// And for one that has.
+pub const IDS_ENTRY_READ_MARK: u16 = 3142;
 
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
@@ -2378,14 +2386,14 @@ pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-/// ⚠ **A hundred and thirty-one since task Т-32-2**, and the canon of «seventy-three» that
+/// ⚠ **A hundred and thirty-four since task Т-32-3**, and the canon of «seventy-three» that
 /// stood here is authorised away by the mandate of Э32 («канон `INTERFACE_STRINGS` растёт с
-/// 73 — цифру в отчёт»): the fifty-eight strings of the letters from the author arrived
+/// 73 — цифру в отчёт»): the sixty-one strings of the letters from the author arrived
 /// (FR-101, FR-102, FR-103). Before that it was seventy-three since task Т-31-4, and
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 131] = [
+pub const INTERFACE_STRINGS: [u16; 134] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2517,6 +2525,9 @@ pub const INTERFACE_STRINGS: [u16; 131] = [
     IDS_TOAST_UPDATE_TITLE,
     IDS_TOAST_UPDATE,
     IDS_ABOUT_AUTHOR,
+    IDS_ENTRY_UPDATE_MARK,
+    IDS_ENTRY_UNREAD_MARK,
+    IDS_ENTRY_READ_MARK,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -3204,6 +3215,93 @@ unsafe fn show_modal_dialog(
     }
 }
 
+/// The **modeless twin** of [`show_modal_dialog`] — task Т-32-3, FR-101.
+///
+/// Same template, same mirror, same fallbacks; `CreateDialogIndirectParamW` in place of
+/// `DialogBoxIndirectParamW`, and the window handle answered instead of a modal result.
+///
+/// # Why a twin and not a flag
+///
+/// The two calls differ in what they *are*: one does not return until the window is gone and
+/// the other returns at once. Everything a modal caller may do with the frame it is standing on
+/// — keeping the state on it, borrowing it from the procedure — is exactly what a modeless
+/// caller may not. Making that a boolean parameter would put the difference in an `if` and take
+/// it out of the type; here it is in the name of the function, and `letters` cannot reach the
+/// modal one by accident.
+///
+/// **What is shared is the half that matters**: the mirror. Both go through
+/// [`compiled_template`] and [`mirror_template`], so a letter is born mirrored in Hebrew and in
+/// Arabic by the very code the settings window is (§6.2, and the rule of ИТОГ-Э30 §9.2 — a
+/// window that must mirror has to be *born* mirrored, because the children inherit the layout
+/// at creation and there is no later moment).
+///
+/// ⚠ **The caller owns `param` for as long as the window lives**, which is the whole difference
+/// from the modal call and the reason it is spelled out here: a state on the stack would be
+/// gone before the first `WM_PAINT`. `letters` puts the state in a `Box`, hands over the raw
+/// pointer, and frees it on `WM_NCDESTROY`.
+///
+/// `None` for every refusal (NFR-13) — no window is a poor answer and a wrong window is worse.
+///
+/// # Safety
+///
+/// `owner` is a live window of this thread, `proc` is the dialog procedure that reads `param`,
+/// and `param` names something that outlives **the window**, not this call.
+pub(crate) unsafe fn show_modeless_dialog(
+    instance: HINSTANCE,
+    template: u16,
+    owner: HWND,
+    proc: DLGPROC,
+    param: LPARAM,
+) -> Option<HWND> {
+    let mirrored = ui_language().is_rtl();
+
+    if let Some(mut copy) = compiled_template(instance, template)
+        && (!mirrored || mirror_template(&mut copy).is_some())
+    {
+        // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template. The
+        // dialog manager reads it while it builds the window and keeps no pointer into it —
+        // the window exists by the time this returns, which is what makes a frame buffer
+        // enough here as well as in the modal call. The other three arguments are the
+        // caller's, under the contract above.
+        let created = unsafe {
+            CreateDialogIndirectParamW(
+                Some(instance),
+                copy.as_ptr().cast(),
+                Some(owner),
+                proc,
+                param,
+            )
+        };
+
+        if let Ok(window) = created {
+            return Some(window);
+        }
+
+        crate::app::report_non_critical("CreateDialogIndirectParamW", &WinError::from_thread());
+    }
+
+    // The template could not be copied, or is not the extended form, or the manager refused the
+    // copy: run the resource itself, unmirrored. An unmirrored window is a poor answer for a
+    // Hebrew reader and a far better one than no window at all (NFR-13).
+    //
+    // SAFETY: as above, with the template named by its integer identifier in the
+    // `MAKEINTRESOURCE` form — a value below 65536 carried inside the pointer, never
+    // dereferenced as a string.
+    let created = unsafe {
+        CreateDialogParamW(
+            Some(instance),
+            resource_id(template),
+            Some(owner),
+            proc,
+            param,
+        )
+    };
+
+    created
+        .inspect_err(|error| crate::app::report_non_critical("CreateDialogParamW", error))
+        .ok()
+}
+
 /// Adds `WS_EX_LAYOUTRTL` to the `exStyle` of a compiled dialog template, in place — the pure
 /// half of [`show_modal_dialog`], task Т-30-2.
 ///
@@ -3267,7 +3365,7 @@ pub fn mirror_template(template: &mut [u8]) -> Option<(u32, u32)> {
 /// NFR-13: a control that cannot be found or whose style cannot be read is left alone — an
 /// island that reads the wrong way round is a blemish, and refusing to open the window over it
 /// would be a fault.
-fn unmirror_control(hwnd: HWND, control: i32) {
+pub(crate) fn unmirror_control(hwnd: HWND, control: i32) {
     let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
         return;
     };
@@ -3412,6 +3510,10 @@ const IDC_ABOUT_HELP_3: i32 = 1133;
 const IDC_ABOUT_HELP_4: i32 = 1134;
 const IDC_ABOUT_HELP_5: i32 = 1135;
 
+/// The «От автора…» button of FR-103 — task Т-32-4, the one control this window gained. It
+/// stands to the left of «ОК» and the window did not grow (решение 101 п. 7).
+const IDC_ABOUT_AUTHOR: i32 = 1136;
+
 /// The rows of the «Как пользоваться» panel: the numeral, the text and the string row each
 /// text is set from — FR-92а, task Т-23-4.
 ///
@@ -3545,7 +3647,7 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
 /// The crate's metadata types the constant as `MESSAGEBOX_RESULT`, because that is one of the
 /// places it appears; what arrives in a `WM_COMMAND` is the plain number, and it is the plain
 /// number that is matched on.
-const OK_COMMAND: i32 = IDOK.0;
+pub(crate) const OK_COMMAND: i32 = IDOK.0;
 
 /// `IDCANCEL`, for the reason above. This is also what the dialog manager sends when the user
 /// presses `Esc` or closes the window, which is why «Отмена» needs no separate handling.
@@ -5211,7 +5313,7 @@ fn child_rects(hwnd: HWND) -> Vec<(i32, RECT)> {
 /// NFR-13: a refused conversion drops that one child rather than the whole list — a panel
 /// missing is what a missing rectangle has always cost here, and the other five still get their
 /// background.
-fn child_rects_in_client(hwnd: HWND) -> Vec<(i32, RECT)> {
+pub(crate) fn child_rects_in_client(hwnd: HWND) -> Vec<(i32, RECT)> {
     child_rects(hwnd)
         .into_iter()
         .filter_map(|(control, rect)| Some((control, screen_rect_in_client(hwnd, &rect)?)))
@@ -5302,7 +5404,7 @@ const COMBO_BOXES: [i32; 4] = [IDC_LANGUAGE, IDC_THEME, IDC_PAIR_SOURCE, IDC_PAI
 /// path. It is not journaled either: the closed `OPERATIONS` vocabulary of `diag` has no row
 /// for it (decision of `reviews\T-11-1.md`), and the only consequence is a system-coloured
 /// title bar over a correctly painted client area.
-fn apply_title_bar_theme(hwnd: HWND, palette: &theme::Palette) {
+pub(crate) fn apply_title_bar_theme(hwnd: HWND, palette: &theme::Palette) {
     let dark = windows::core::BOOL::from(title_bar_is_dark(palette));
 
     // SAFETY: `hwnd` is the live dialog. The attribute pointer names `dark`, a live local
@@ -5379,7 +5481,7 @@ const IDI_APP_ACTIVE: u16 = 101;
 /// of [`show_dialog`] / [`show_about_dialog`], and `DialogBoxParamW` is modal — it returns
 /// only once the window is gone, and the state is dropped after it returns. Destroying an
 /// icon a live caption is still displaying is exactly the bug this ordering rules out.
-struct CaptionIcons {
+pub(crate) struct CaptionIcons {
     /// The frame the caption itself shows — `ICON_SMALL`, asked for at the system's
     /// small-icon metric.
     small: HICON,
@@ -5402,7 +5504,7 @@ impl CaptionIcons {
     /// the module that owns the table and not to this one. NFR-13 is satisfied where it asks
     /// to be — the answer is examined, the half-built pair is unwound, and the caller sees
     /// `None`.
-    fn load() -> Option<Self> {
+    pub(crate) fn load() -> Option<Self> {
         let module = resource_module();
         let instance = HINSTANCE(module.0);
 
@@ -5474,7 +5576,7 @@ impl CaptionIcons {
     /// message is put anywhere, so no message can find the state busy underneath. The handles
     /// outlive the borrow — they belong to the value the state keeps, which is dropped only
     /// after the modal call returns.
-    fn frames(&self) -> [(u32, HICON); 2] {
+    pub(crate) fn frames(&self) -> [(u32, HICON); 2] {
         [(ICON_SMALL, self.small), (ICON_BIG, self.big)]
     }
 
@@ -5495,7 +5597,7 @@ impl CaptionIcons {
     ///
     /// `hwnd` is a live window of this thread, and `frames` came from a [`CaptionIcons`]
     /// somebody keeps alive for longer than that window.
-    unsafe fn show_on(hwnd: HWND, frames: [(u32, HICON); 2]) {
+    pub(crate) unsafe fn show_on(hwnd: HWND, frames: [(u32, HICON); 2]) {
         for (which, icon) in frames {
             // SAFETY: see the contract above. `wparam` is a plain number and `lparam` carries
             // an icon handle by value — `PostMessageW` queues the two words and returns, and
@@ -5542,7 +5644,7 @@ impl Drop for CaptionIcons {
 ///
 /// Named for what it does rather than for the first reason it was written: it was
 /// `repaint_after_palette_change` until the second caller arrived.
-fn repaint_whole_window(hwnd: HWND) {
+pub(crate) fn repaint_whole_window(hwnd: HWND) {
     // NFR-13: both answers are examined in words and deliberately dropped. Either call
     // refuses only for a window that is not alive, and `hwnd` is the dialog whose
     // procedure is running; there is nothing to do about a refused invalidation beyond the
@@ -5682,13 +5784,13 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
 /// One `WM_CTLCOLOR*` answer, chosen but not yet applied: the caption ink (`None` — no text
 /// on this DC), the opaque text background of a field (`None` — transparent), and the brush
 /// the control is erased with.
-type CtlColorChoice = (Option<COLORREF>, Option<COLORREF>, HBRUSH);
+pub(crate) type CtlColorChoice = (Option<COLORREF>, Option<COLORREF>, HBRUSH);
 
 /// Applies one chosen `WM_CTLCOLOR*` answer to the DC — the drawing half [`on_ctl_color`]
 /// and [`on_about_ctl_color`] share (§6.2, task T-11-11: one body, not a copy).
 ///
 /// `None` is the «not handled» of both callers — the system colours — and answers zero.
-fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
+pub(crate) fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize {
     let Some((ink, opaque_bg, brush)) = choice else {
         return 0;
     };
@@ -6550,7 +6652,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
 /// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of:
 /// `dc` and `rect` are owned by the sender for the length of the send, and `hwnd` is the
 /// live dialog whose state keeps the brushes of `colors` alive.
-unsafe fn paint_push_button(
+pub(crate) unsafe fn paint_push_button(
     hwnd: HWND,
     control: i32,
     dc: HDC,
@@ -8771,7 +8873,7 @@ pub fn about_chip_logfont(base: LOGFONTW, emphasis: Emphasis) -> LOGFONTW {
 ///
 /// `false` on every refusal — no DC, no face, an unreadable name (NFR-13) — which spends the
 /// window on [`Emphasis::Bold`]: the picture of task T-12-4, and a good one.
-fn resolve_emphasis(hwnd: HWND, base: LOGFONTW) -> Emphasis {
+pub(crate) fn resolve_emphasis(hwnd: HWND, base: LOGFONTW) -> Emphasis {
     let wanted = emphasised_logfont(base, ABOUT_NAME_POINTS_TENTHS, Emphasis::Semibold);
 
     let Some(face) = create_font(wanted) else {
@@ -8939,7 +9041,7 @@ pub fn about_body_line_pitch(em: i32) -> i32 {
 /// control it creates, and an invisible control has it like any other.
 ///
 /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW` (NFR-13).
-fn dialog_logfont(hwnd: HWND, control: i32) -> Option<LOGFONTW> {
+pub(crate) fn dialog_logfont(hwnd: HWND, control: i32) -> Option<LOGFONTW> {
     let font = HFONT(send_to(hwnd, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void);
 
     // NFR-13: examined. A control with no font of its own answers zero.
@@ -9158,7 +9260,7 @@ impl Drop for DialogFonts {
 ///
 /// `dc` is the DC of the message the caller is inside of, and `face` is a live font the
 /// caller owns for longer than this call.
-unsafe fn draw_panel_caption(
+pub(crate) unsafe fn draw_panel_caption(
     hwnd: HWND,
     control: i32,
     dc: HDC,
@@ -9822,7 +9924,7 @@ thread_local! {
 ///
 /// The zero check is not redundant: an invalid handle must not match the «nothing is hot»
 /// record.
-fn is_hot(window: HWND) -> bool {
+pub(crate) fn is_hot(window: HWND) -> bool {
     let hot = HOT_CONTROL.with(Cell::get);
 
     hot != 0 && hot == window.0 as isize
@@ -9949,7 +10051,7 @@ const PUSH_BUTTONS: [i32; 9] = [
 /// The repaint the flag asks for costs nothing visible — a push button has drawn itself
 /// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
 /// that were there.
-const ABOUT_BUTTONS: [i32; 1] = [OK_COMMAND];
+const ABOUT_BUTTONS: [i32; 2] = [OK_COMMAND, IDC_ABOUT_AUTHOR];
 
 /// The identifier of the button subclass — one number for all ten windows, because the key of
 /// the subclass API is the (window, procedure, identifier) triple and the window is what varies.
@@ -9971,7 +10073,7 @@ const BUTTON_SUBCLASS_ID: usize = 3;
 /// A refused install is survived (NFR-13): that button then behaves as it did before this task
 /// — no response to the cursor — and everything else about it is unchanged. Not journaled, for
 /// the reason [`subclass_combo_boxes`] writes down at its own dropped answer.
-fn subclass_buttons(hwnd: HWND, buttons: &[i32]) {
+pub(crate) fn subclass_buttons(hwnd: HWND, buttons: &[i32]) {
     for &control in buttons {
         // SAFETY: `hwnd` is the live window; the crate turns a missing control into an error.
         let Ok(button) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
@@ -9994,7 +10096,7 @@ fn subclass_buttons(hwnd: HWND, buttons: &[i32]) {
 /// The refusal is deliberately **not** journaled, for the reason [`unsubclass_combo_boxes`]
 /// gives: on `WM_DESTROY` a `FALSE` means the subclass was already gone — never installed, or
 /// removed by the `WM_NCDESTROY` arm of the procedure — and neither is a fault.
-fn unsubclass_buttons(hwnd: HWND, buttons: &[i32]) {
+pub(crate) fn unsubclass_buttons(hwnd: HWND, buttons: &[i32]) {
     for &control in buttons {
         // SAFETY: `hwnd` is the live window — `WM_DESTROY` reaches it before its children are
         // destroyed — and the crate turns a missing control into an error.
@@ -10102,7 +10204,7 @@ unsafe extern "system" fn button_proc(
 /// the sum overshot the control by its own width — the rounded patch would have been drawn
 /// entirely outside the list. [`screen_rect_in_client`] does the conversion and puts the corners
 /// back in order.
-fn window_rect_in_client(control: HWND) -> Option<RECT> {
+pub(crate) fn window_rect_in_client(control: HWND) -> Option<RECT> {
     let mut window = RECT::default();
 
     // SAFETY: `control` is the live control and `window` is a live local the call fills.
@@ -12697,17 +12799,17 @@ fn selected_layout(hwnd: HWND, control: i32, session: &[LayoutId]) -> Option<Lay
 ///
 /// The identifier goes *into* the pointer and is never dereferenced — the same convention
 /// `crate::tray` uses for the icons, and `without_provenance` is what says so in Rust.
-fn resource_id(id: u16) -> PCWSTR {
+pub(crate) fn resource_id(id: u16) -> PCWSTR {
     PCWSTR(std::ptr::without_provenance(usize::from(id)))
 }
 
 /// A NUL-terminated UTF-16 copy of `text`, for the Win32 calls that want one.
-fn wide(text: &str) -> Vec<u16> {
+pub(crate) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// The low 16 bits of a message parameter.
-fn low_word(value: usize) -> u16 {
+pub(crate) fn low_word(value: usize) -> u16 {
     u16::try_from(value & 0xFFFF).unwrap_or(0)
 }
 
@@ -12725,7 +12827,13 @@ fn high_word(value: usize) -> u16 {
 /// `CB_ADDSTRING`, `LB_ADDSTRING`, `LVM_INSERTITEMW` — answer an index or an error, and an error
 /// there shows up as a row missing from a list the user is looking at, which is visible in a way
 /// no journal entry would improve on.
-fn send_to(hwnd: HWND, control: i32, message: u32, wparam: usize, lparam: isize) -> isize {
+pub(crate) fn send_to(
+    hwnd: HWND,
+    control: i32,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
     // SAFETY: `hwnd` is the live dialog and `control` is one of the identifiers of its
     // template; a message to a control that does not exist answers zero rather than doing
     // anything. Where `lparam` is a pointer, the value it points at is owned by the caller's
@@ -12734,7 +12842,7 @@ fn send_to(hwnd: HWND, control: i32, message: u32, wparam: usize, lparam: isize)
 }
 
 /// Sets the text of one control.
-fn set_text(hwnd: HWND, control: i32, text: &str) {
+pub(crate) fn set_text(hwnd: HWND, control: i32, text: &str) {
     let text = wide(text);
 
     // SAFETY: `text` is a NUL-terminated UTF-16 buffer owned by this frame and not moved or
@@ -12747,7 +12855,7 @@ fn set_text(hwnd: HWND, control: i32, text: &str) {
 }
 
 /// Reads the text of one control.
-fn get_text(hwnd: HWND, control: i32) -> String {
+pub(crate) fn get_text(hwnd: HWND, control: i32) -> String {
     let mut buffer = [0u16; 512];
 
     // SAFETY: `buffer` is owned by this frame and its length is what bounds the copy; the call
@@ -12822,7 +12930,7 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
 /// Repaints one control now — task T-11-5b: writing check state changes no pixels of an
 /// owner-drawn button, so [`set_check`] asks for the repaint the moment it writes the
 /// store (task T-11-5b-2).
-fn repaint_control(hwnd: HWND, control: i32) {
+pub(crate) fn repaint_control(hwnd: HWND, control: i32) {
     // SAFETY: `hwnd` is the live dialog and `control` names a control of its template;
     // the crate turns a missing control into an error, which is the `Ok` guard below.
     let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
@@ -13046,7 +13154,7 @@ pub const ABOUT_LOGO_SIZE: i32 = 56;
 /// After the window is destroyed and not before, exactly as [`CaptionIcons`]: the value lives
 /// in the state on the frame of [`show_about_dialog`], and `DialogBoxParamW` is modal — it
 /// returns only once the window is gone, and the state is dropped after it returns.
-struct AboutLogo {
+pub(crate) struct AboutLogo {
     /// The frame, scaled to [`ABOUT_LOGO_SIZE`] mock-up pixels of the window's own DPI.
     icon: HICON,
 }
@@ -13064,7 +13172,7 @@ impl AboutLogo {
     /// alive. The refusal is deliberately **not** journaled, for the reason
     /// [`CaptionIcons::load`] gives for its own: the `OPERATIONS` vocabulary of module `diag`
     /// is closed and has no row for loading a picture.
-    fn load(hwnd: HWND) -> Option<Self> {
+    pub(crate) fn load(hwnd: HWND) -> Option<Self> {
         let module = resource_module();
         let instance = HINSTANCE(module.0);
 
@@ -13106,7 +13214,7 @@ impl AboutLogo {
 
     /// The frame as a plain value — what the handler takes out of the state before it lets the
     /// borrow go, the split every handler of this file makes.
-    fn handle(&self) -> HICON {
+    pub(crate) fn handle(&self) -> HICON {
         self.icon
     }
 }
@@ -13143,7 +13251,7 @@ pub fn show_about_dialog(
     setting: ThemeSetting,
     version: Option<(u16, u16, u16, u16)>,
     hotkey: &str,
-) -> windows::core::Result<()> {
+) -> windows::core::Result<bool> {
     // FR-92а, task T-13-17. Taken here and released however this function leaves, the `-1`
     // return below and a panic on the way through included — see [`AboutSession`]. The
     // window itself is recorded from `WM_INITDIALOG`, which is the first moment there is
@@ -13195,7 +13303,10 @@ pub fn show_about_dialog(
         return Err(WinError::from_thread());
     }
 
-    Ok(())
+    // Task Т-32-4, FR-103: which button ended the window. `true` means «От автора…», and the
+    // caller opens that window — after this modal call has returned, so the modeless window of
+    // FR-103 is owned by the program's own window and not by one that is closing.
+    Ok(result == isize::try_from(IDC_ABOUT_AUTHOR).unwrap_or(0))
 }
 
 /// The dialog procedure of the about window.
@@ -13359,7 +13470,14 @@ unsafe extern "system" fn about_proc(
             // «ОК» and Esc — `IDCANCEL`, which the dialog manager sends whether or not
             // the window has the button — both simply end the window: it changes nothing,
             // so there is nothing to apply and nothing to undo (SEC-05).
-            if control == OK_COMMAND || control == CANCEL_COMMAND {
+            //
+            // ⚠ **«От автора…» is the third**, task Т-32-4: it ends the window too, and with
+            // its own identifier, so that the caller can tell the three apart. The window of
+            // FR-103 is **not** opened from here — this dialog is modal and about to be gone,
+            // and a modeless window owned by a window that is closing would be an orphan. The
+            // caller opens it after the modal call returns, which is where `tray::show_about`
+            // already stands.
+            if control == OK_COMMAND || control == CANCEL_COMMAND || control == IDC_ABOUT_AUTHOR {
                 end_dialog(hwnd, isize::try_from(control).unwrap_or(0));
             }
 
@@ -13990,3 +14108,24 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // to paint into for the length of this send; `face` is a face the state owns for longer.
     unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
+
+// =========================================================================================
+// The window kit `letters` builds its own windows out of — task Т-32-3, §6.2
+// =========================================================================================
+//
+// ⚠ **Twenty of this module's own helpers are `pub(crate)` since task Т-32-3, and each of them
+// says so where it is defined.** They are the pen the windows of FR-101 and FR-103 are drawn
+// with: the rounded panel, the tracked caption, the push button with its four states, the
+// colour answers to `WM_CTLCOLOR*`, the hover record, the title-bar theme, the small helpers
+// that write a control's text and repaint it.
+//
+// SPEC section 6.2 gives those windows to `letters` — «окно «От автора», мастер обращения» —
+// and gives the dialog machinery to this module. Between the two there is a seam, and the
+// alternative to lending across it was a second copy of all of it: this project has a rule
+// about that, and task T-14-3 already spent a whole task moving a drawing library out of this
+// file into `theme` rather than let `tray` keep a copy of the pixels. **One body, not a copy.**
+//
+// ⛔ **`pub(crate)` and never `pub`.** None of it is API of the crate; it is one module lending
+// another the tools it already had. A test that wants any of it goes through the window using
+// it. (A `pub(crate) use` re-export was tried first and refused by the compiler — E0364/E0365:
+// a private item cannot be re-exported at a wider visibility, it has to *be* wider.)

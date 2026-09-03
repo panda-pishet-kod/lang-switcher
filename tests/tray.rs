@@ -32,7 +32,7 @@ use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession, Language};
 // owner, `theme` (§6.2) — the whole point being that the tray no longer goes to the
 // configuration module for pixels.
 use lang_switcher::theme::{self, ThemeSetting};
-use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
+use lang_switcher::tray::{self, Attachment, Menu, Pending, Reaction, Tray};
 use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
 use windows::Win32::Foundation::{
@@ -78,6 +78,17 @@ const FAIL_SAFE: bool = true;
 /// three too many to tell apart by position.
 const NO_DIALOG: bool = false;
 
+/// The fifth argument of [`Menu::build`] in the ordinary state of the program — task Т-32-4,
+/// FR-101.
+///
+/// What the letters of the author have to say in the menu, which for a program with no feed
+/// read behind it is nothing at all: no unread news and no newer version. The menu then has
+/// exactly the [`MENU_ENTRY_COUNT`] entries of FR-91, and the tests below are about those.
+const NOTHING_PENDING: Pending = Pending {
+    unread: false,
+    update: None,
+};
+
 /// The same argument while the modal settings dialog of FR-92 is on the screen.
 const DIALOG_UP: bool = true;
 
@@ -85,24 +96,28 @@ const DIALOG_UP: bool = true;
 ///
 /// Written out here on purpose. These seven lines are the requirement; the module's own
 /// resources are the implementation, and a test must not check one against itself.
-const FR_91: [Option<&str>; 7] = [
+const FR_91: [Option<&str>; 8] = [
     Some("Приостановить"),
     None,
     Some("Настройки…"),
     Some("Запускать при входе в систему"),
     None,
+    // FR-91's addition, task Т-32-4, решение 101 п. 9 — the permanent entry stands **above**
+    // «О программе», which is where the accepted mock-up puts it.
+    Some("Написать автору…"),
     Some("О программе"),
     Some("Выход"),
 ];
 
 /// The same seven lines with the program suspended — the first line of FR-91 is a pair and
 /// this is its other word.
-const FR_91_SUSPENDED: [Option<&str>; 7] = [
+const FR_91_SUSPENDED: [Option<&str>; 8] = [
     Some("Возобновить"),
     None,
     Some("Настройки…"),
     Some("Запускать при входе в систему"),
     None,
+    Some("Написать автору…"),
     Some("О программе"),
     Some("Выход"),
 ];
@@ -112,12 +127,13 @@ const FR_91_SUSPENDED: [Option<&str>; 7] = [
 /// ⚠ The **composition** is identical and only the words move: five commands and the same two
 /// rules in the same places. A translation that quietly dropped or added an entry would be a
 /// different menu, and FR-91 fixes the menu.
-const FR_91_ENGLISH: [Option<&str>; 7] = [
+const FR_91_ENGLISH: [Option<&str>; 8] = [
     Some("Suspend"),
     None,
     Some("Settings…"),
     Some("Start when I sign in"),
     None,
+    Some("Write to the author…"),
     Some("About"),
     Some("Exit"),
 ];
@@ -194,16 +210,17 @@ fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
 /// for both rules, over a command identifier of zero. Out of the builder's record, because
 /// Windows no longer holds a string for an owner-drawn entry: the labels, in order, against the
 /// literals of the block.
-fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
+fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 8]) {
     assert_eq!(
         block.len(),
         usize::try_from(tray::MENU_ENTRY_COUNT).expect("the count fits in a usize"),
-        "FR-91 lists five commands and two rules, which is seven entries"
+        "FR-91 lists six commands and two rules, which is eight entries — «Написать автору…» \
+         arrived with task Т-32-4"
     );
     assert_eq!(
         item_count(menu.handle()),
         tray::MENU_ENTRY_COUNT,
-        "and the menu Windows holds has exactly those seven"
+        "and the menu Windows holds has exactly those eight"
     );
 
     let commands: Vec<usize> = menu
@@ -300,7 +317,7 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 7]) {
 #[test]
 fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG)
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
         .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91);
@@ -312,14 +329,14 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
     // *is*, and the second must survive the first — same seven entries, same two rules,
     // same places.
     let _locale = product_strings(settings::Language::En);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG)
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
         .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91_ENGLISH);
 
     // The suspended state moves the same entry in this locale as in the other one.
-    let suspended =
-        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let suspended = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
     assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
@@ -328,10 +345,10 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
 #[test]
 fn the_first_entry_follows_the_state() {
     let _locale = product_strings(settings::Language::Ru);
-    let active =
-        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
-    let suspended =
-        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let active = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
+    let suspended = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     assert_eq!(active.items()[0].label, "Приостановить");
     assert_eq!(suspended.items()[0].label, "Возобновить");
@@ -540,7 +557,8 @@ fn the_guard_of_fr99_stands_at_the_top_of_the_method_that_moves_the_state() {
 #[test]
 fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(false, true, FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let menu = Menu::build(false, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     println!(
         "entry 0: label={:?} enabled={} grayed={} disabled={}",
@@ -590,8 +608,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
     let _locale = product_strings(settings::Language::Ru);
 
     // The ordinary suspended program: «Возобновить» is the user's to choose.
-    let ordinary =
-        Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let ordinary = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     assert_eq!(ordinary.items()[0].label, "Возобновить");
     assert!(ordinary.items()[0].enabled);
@@ -600,8 +618,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     // FR-99 has just disarmed an armed program. The move it is about to make is the
     // suspension, and that one must stay available or the icon never becomes honest.
-    let suspending =
-        Menu::build(true, true, FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let suspending = Menu::build(true, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     assert_eq!(suspending.items()[0].label, "Приостановить");
     assert!(suspending.items()[0].enabled);
@@ -649,8 +667,8 @@ const LIVE_POSITIONS: [u32; 3] = [2, 5, 6];
 #[test]
 fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu =
-        Menu::build(true, true, NOT_FAIL_SAFE, DIALOG_UP).expect("the menu must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, DIALOG_UP, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     for position in LOCKED_POSITIONS {
         println!(
@@ -685,15 +703,17 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
         );
     }
 
-    // The builder's record, which is what the drawing picks its ink by. The five commands in
-    // menu order: toggle, settings, autostart, about, exit.
+    // The builder's record, which is what the drawing picks its ink by. The six commands in
+    // menu order: toggle, settings, autostart, write, about, exit — «Написать автору…» arrived
+    // with task Т-32-4 and changes no configuration, so it stays available like the three
+    // after it.
     let record: Vec<bool> = menu.items().iter().map(|item| item.enabled).collect();
 
     println!("builder's record of availability: {record:?}");
 
     assert_eq!(
         record,
-        vec![false, true, false, true, true],
+        vec![false, true, false, true, true, true],
         "the record and Windows must say the same thing about every entry"
     );
 
@@ -711,8 +731,8 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
 fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
     let _locale = product_strings(settings::Language::Ru);
 
-    let ordinary =
-        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let ordinary = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     for position in LOCKED_POSITIONS.iter().chain(LIVE_POSITIONS.iter()) {
         assert!(
@@ -722,7 +742,8 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
     }
 
     // Both rules at once: FR-99 has disarmed a suspended program **and** the dialog is up.
-    let both = Menu::build(false, true, FAIL_SAFE, DIALOG_UP).expect("the menu must be creatable");
+    let both = Menu::build(false, true, FAIL_SAFE, DIALOG_UP, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     println!(
         "fail-safe and dialog together: entry 0 grayed={} entry 3 grayed={}",
@@ -878,8 +899,14 @@ fn closing_the_dialog_gives_both_entries_back() {
 
     let dialog = DialogSession::open();
 
-    let while_up = Menu::build(true, true, NOT_FAIL_SAFE, settings::dialog_is_open())
-        .expect("the menu must be creatable");
+    let while_up = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        settings::dialog_is_open(),
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     for position in LOCKED_POSITIONS {
         assert!(
@@ -900,8 +927,14 @@ fn closing_the_dialog_gives_both_entries_back() {
         "the guard lowers the flag on the way out, whatever the way is"
     );
 
-    let after = Menu::build(true, true, NOT_FAIL_SAFE, settings::dialog_is_open())
-        .expect("the menu must be creatable");
+    let after = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        settings::dialog_is_open(),
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     for position in LOCKED_POSITIONS {
         println!(
@@ -1313,9 +1346,10 @@ fn the_re_entry_gate_wraps_the_modal_call_and_lets_go_before_the_dialog() {
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let on = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
-    let off =
-        Menu::build(true, false, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let on = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
+    let off = Menu::build(true, false, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
     assert!(
         is_checked(on.handle(), 3),
@@ -1345,11 +1379,12 @@ fn the_item_data_of_every_command_entry_is_its_command_number() {
     // Windows: the `itemData` of every command entry equals the command identifier of the
     // same entry, and both equal what the builder recorded.
     let _locale = product_strings(settings::Language::Ru);
-    let menu =
-        Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must be creatable");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
 
-    // The five command positions of the FR-91 block — everything but the two rules.
-    let command_positions = [0u32, 2, 3, 5, 6];
+    // The six command positions of the FR-91 block — everything but the two rules. Six since
+    // task Т-32-4 put «Написать автору…» at position 5.
+    let command_positions = [0u32, 2, 3, 5, 6, 7];
 
     assert_eq!(menu.items().len(), command_positions.len());
 
@@ -3413,7 +3448,8 @@ fn applying_a_configuration_publishes_its_language_into_the_running_process() {
         "«Применить» must publish the language of the configuration it accepted — решение 99"
     );
 
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must build");
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must build");
     let labels: Vec<&str> = menu
         .items()
         .iter()
@@ -3428,6 +3464,9 @@ fn applying_a_configuration_publishes_its_language_into_the_running_process() {
             "Anhalten",
             "Einstellungen…",
             "Beim Anmelden starten",
+            // Task Т-32-4: the permanent entry of FR-91's addition follows the locale like
+            // every other line of the menu.
+            "An den Autor schreiben…",
             "Über",
             "Beenden",
         ],

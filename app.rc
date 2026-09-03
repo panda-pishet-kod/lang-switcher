@@ -35,6 +35,11 @@
 
 #define IDI_APP_ACTIVE  101
 #define IDI_APP_PAUSED  102
+// FR-90's third state, task Т-32-4: the same two icons carrying the dot of FR-101, "there is
+// an unread letter". Two files and not one, because the state of the program and the state of
+// the letters are independent — a person can pause the program with a letter unread.
+#define IDI_APP_ACTIVE_UNREAD  103
+#define IDI_APP_PAUSED_UNREAD  104
 
 // Identifier of the settings dialog of FR-92, task T-08-1. Above the icons and well clear of
 // them: a resource identifier is only unique within its type, but keeping the numbering
@@ -352,6 +357,8 @@
 // way and a wrong one shows up as a silently missing resource, not as an error.
 IDI_APP_ACTIVE  ICON  "res/langswitcher-active.ico"
 IDI_APP_PAUSED  ICON  "res/langswitcher-paused.ico"
+IDI_APP_ACTIVE_UNREAD  ICON  "res/langswitcher-active-unread.ico"
+IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
 
 // The manifest is chosen by a /d define passed from build.rs, NOT hard-wired.
 //
@@ -1194,6 +1201,12 @@ END
 #define IDS_TOAST_UPDATE_TITLE  3137
 #define IDS_TOAST_UPDATE        3138
 #define IDS_ABOUT_AUTHOR        3139
+// The three lines under the headings of «Последние письма» — FR-101. Composed rather than
+// written out because two of the three parts are numbers the program knows: the day the author
+// dated the entry and the version installed here.
+#define IDS_ENTRY_UPDATE_MARK   3140
+#define IDS_ENTRY_UNREAD_MARK   3141
+#define IDS_ENTRY_READ_MARK     3142
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -1337,6 +1350,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Вышла версия {0}"
     IDS_TOAST_UPDATE        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать."
     IDS_ABOUT_AUTHOR        "От автора…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · обновление · у вас {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
+    IDS_ENTRY_READ_MARK     "{0} · прочитано"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1478,6 +1494,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Version {0} is out"
     IDS_TOAST_UPDATE        "Three changes and a link to the download. Click to read it."
     IDS_ABOUT_AUTHOR        "From the author…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · update · you have {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · not read"
+    IDS_ENTRY_READ_MARK     "{0} · read"
 END
 
 // =======================================================================================
@@ -1632,6 +1651,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Вийшла версія {0}"
     IDS_TOAST_UPDATE        "Три зміни і посилання на завантаження. Натисніть, щоб прочитати."
     IDS_ABOUT_AUTHOR        "Від автора…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · оновлення · у вас {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
+    IDS_ENTRY_READ_MARK     "{0} · прочитано"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1769,6 +1791,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Version {0} ist da"
     IDS_TOAST_UPDATE        "Drei Änderungen und ein Link zum Download. Klicken Sie, um es zu lesen."
     IDS_ABOUT_AUTHOR        "Vom Autor…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · Update · Sie haben {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · ungelesen"
+    IDS_ENTRY_READ_MARK     "{0} · gelesen"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1908,6 +1933,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "La version {0} est sortie"
     IDS_TOAST_UPDATE        "Trois changements et un lien de téléchargement. Cliquez pour lire."
     IDS_ABOUT_AUTHOR        "De l'auteur…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · mise à jour · vous avez la {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · non lue"
+    IDS_ENTRY_READ_MARK     "{0} · lue"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2044,6 +2072,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Ha salido la versión {0}"
     IDS_TOAST_UPDATE        "Tres cambios y un enlace de descarga. Pulse para leerlo."
     IDS_ABOUT_AUTHOR        "Del autor…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · actualización · usted tiene la {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · sin leer"
+    IDS_ENTRY_READ_MARK     "{0} · leída"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2178,6 +2209,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Saiu a versão {0}"
     IDS_TOAST_UPDATE        "Três mudanças e um link para o download. Clique para ler."
     IDS_ABOUT_AUTHOR        "Do autor…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · atualização · você tem a {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · não lida"
+    IDS_ENTRY_READ_MARK     "{0} · lida"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2317,6 +2351,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "È uscita la versione {0}"
     IDS_TOAST_UPDATE        "Tre cambiamenti e un collegamento al download. Fai clic per leggere."
     IDS_ABOUT_AUTHOR        "Dall'autore…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · aggiornamento · hai la {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · non letta"
+    IDS_ENTRY_READ_MARK     "{0} · letta"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2456,6 +2493,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Wyszła wersja {0}"
     IDS_TOAST_UPDATE        "Trzy zmiany i link do pobrania. Kliknij, żeby przeczytać."
     IDS_ABOUT_AUTHOR        "Od autora…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · aktualizacja · masz {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · nieprzeczytane"
+    IDS_ENTRY_READ_MARK     "{0} · przeczytane"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2591,6 +2631,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Vyšla verze {0}"
     IDS_TOAST_UPDATE        "Tři změny a odkaz ke stažení. Klepnutím si to přečtete."
     IDS_ABOUT_AUTHOR        "Od autora…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · aktualizace · máte {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · nepřečteno"
+    IDS_ENTRY_READ_MARK     "{0} · přečteno"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2729,6 +2772,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "{0} sürümü çıktı"
     IDS_TOAST_UPDATE        "Üç değişiklik ve indirme bağlantısı. Okumak için tıklayın."
     IDS_ABOUT_AUTHOR        "Yazardan…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · güncelleme · sizde {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · okunmadı"
+    IDS_ENTRY_READ_MARK     "{0} · okundu"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2871,6 +2917,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "Κυκλοφόρησε η έκδοση {0}"
     IDS_TOAST_UPDATE        "Τρεις αλλαγές και ένας σύνδεσμος λήψης. Κάντε κλικ για να το διαβάσετε."
     IDS_ABOUT_AUTHOR        "Από τον δημιουργό…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · ενημέρωση · έχετε την {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · αδιάβαστο"
+    IDS_ENTRY_READ_MARK     "{0} · διαβασμένο"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -3019,6 +3068,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "יצאה גרסה {0}"
     IDS_TOAST_UPDATE        "שלושה שינויים וקישור להורדה. הקישו כדי לקרוא."
     IDS_ABOUT_AUTHOR        "מהמפתח…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · עדכון · אצלכם {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · לא נקרא"
+    IDS_ENTRY_READ_MARK     "{0} · נקרא"
 END
 
 LANGUAGE 0x01, 0x01
@@ -3153,6 +3205,9 @@ BEGIN
     IDS_TOAST_UPDATE_TITLE  "صدر الإصدار {0}"
     IDS_TOAST_UPDATE        "ثلاثة تغييرات ورابط للتنزيل. اضغط للقراءة."
     IDS_ABOUT_AUTHOR        "من المؤلف…"
+    IDS_ENTRY_UPDATE_MARK   "{0} · تحديث · لديك {1}"
+    IDS_ENTRY_UNREAD_MARK   "{0} · غير مقروءة"
+    IDS_ENTRY_READ_MARK     "{0} · مقروءة"
 END
 
 // ---------------------------------------------------------------------------------------

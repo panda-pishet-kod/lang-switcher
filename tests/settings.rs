@@ -7992,7 +7992,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 131] = [
+const FR_94_STRINGS: [(u16, &str, &str); 134] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8517,6 +8517,21 @@ const FR_94_STRINGS: [(u16, &str, &str); 131] = [
         "Three changes and a link to the download. Click to read it.",
     ),
     (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
+    (
+        settings::IDS_ENTRY_UPDATE_MARK,
+        "{0} · обновление · у вас {1}",
+        "{0} · update · you have {1}",
+    ),
+    (
+        settings::IDS_ENTRY_UNREAD_MARK,
+        "{0} · не прочитано",
+        "{0} · not read",
+    ),
+    (
+        settings::IDS_ENTRY_READ_MARK,
+        "{0} · прочитано",
+        "{0} · read",
+    ),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -13605,9 +13620,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        131,
-        "a hundred and thirty-one identifiers in use — the mandate of Э32 authorised the canon \
-         of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the fifty-eight \
+        134,
+        "a hundred and thirty-four identifiers in use — the mandate of Э32 authorised the canon \
+         of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the sixty-one \
          strings of the letters from the author (FR-101…FR-103) are the growth"
     );
 

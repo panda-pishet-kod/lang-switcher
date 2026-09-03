@@ -2134,6 +2134,22 @@ fn pump() -> WinResult<()> {
             -1 => return Err(WinError::from_thread()),
             0 => return Ok(()),
             _ => {
+                // **FR-101, task Т-32-3 — the modeless windows of the letters.** A modal
+                // dialog runs its own loop and gets `IsDialogMessageW` for free; the windows
+                // of the letters are modeless and run in *this* loop, so without this line
+                // Tab would not move between their buttons, Enter would not press the default
+                // one and Esc would not close them.
+                //
+                // It costs one comparison per message on a thread with no letters open, which
+                // is the ordinary state of this program: `letters::filter_message` walks a
+                // list that is empty then.
+                //
+                // SAFETY: `message` was filled by the `GetMessageW` above and is read, not
+                // written.
+                if unsafe { crate::letters::filter_message(&message) } {
+                    continue;
+                }
+
                 // SAFETY: `message` was filled by the GetMessageW above and is read, not
                 // written, by DispatchMessageW.
                 //
