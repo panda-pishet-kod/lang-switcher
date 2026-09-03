@@ -3797,15 +3797,16 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
 
     // ⭐ **The number moves with every delivery now.** Решение 8 fixed `0.1.0` as the *starting*
     // version and it stood, unmoved, for thirty-two deliveries. The rule adopted on 2026-09-03
-    // is «MINOR is the number of the delivery tag»: the build tagged `e36` is `0.36.0`, `e37` is
-    // `0.37.0`, and PATCH exists for a second delivery under one tag. `Cargo.toml` is the single
+    // is «MINOR is the number of the delivery tag»: the build tagged `e36` is `0.36.0`, `e38` is
+    // `0.38.0`, and PATCH exists for a second delivery under one tag. `Cargo.toml` is the single
     // reference and `tools\verify-version.ps1` is what makes the other nine places agree with
-    // it — this assertion is the tenth reader, and the only one that reads the bytes `rc.exe`
-    // really produced.
+    // it — this assertion is the tenth reader, the only one that reads the bytes `rc.exe`
+    // really produced, and the only one the instrument cannot see: it is raised **by hand**,
+    // and that is what makes it the honest red before a version bump.
     assert_eq!(
         version,
-        Some((0, 37, 0, 0)),
-        "app.rc must declare FILEVERSION 0,37,0,0 — the delivery is `e37`"
+        Some((0, 38, 0, 0)),
+        "app.rc must declare FILEVERSION 0,38,0,0 — the delivery is `e38`"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process
