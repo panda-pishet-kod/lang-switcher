@@ -1790,6 +1790,123 @@ unsafe fn measure(dc: HDC, face: HFONT, width: i32, caption: &str, pitch: Option
     height
 }
 
+/// How tall a **row that may carry a key chip** has to be — [`measure`] with the width narrowed
+/// by what the chip adds.
+///
+/// ⚠ **A row with a chip in it is wider than its words, and measuring it without the chip is a
+/// measurement of a different row.** The German «Привет» came up one line short because of
+/// exactly this: the last two words of its caption were drawn past the bottom of the label
+/// (`scratchpad-Э32\снимки\de-dark-hello.png`, before this function existed). The figure round
+/// the key name takes `chip_box().width` where the words take the width of the name itself, so
+/// the honest measurement is of the same sentence in a **narrower** column — the shape the
+/// fitting stand of Э30 already found for the help rows of «О программе».
+///
+/// A caption with no placeholder, or a window with no key name, is measured exactly as
+/// [`measure`] measures it: the overhang is zero and the call is the same call.
+///
+/// # Safety
+///
+/// As [`measure`], with `chip` a live font of this window as well.
+unsafe fn measure_row(
+    dc: HDC,
+    face: HFONT,
+    chip: Chip<'_>,
+    width: i32,
+    caption: &str,
+    pitch: Option<i32>,
+) -> i32 {
+    // SAFETY: see the contract.
+    let overhang = unsafe { chip_overhang(dc, face, chip, caption) };
+
+    // SAFETY: as above.
+    unsafe { measure(dc, face, width - overhang, caption, pitch) }
+}
+
+/// The chip of a row: the face its key name is set in, that face's `lfHeight`, and the name.
+///
+/// A record rather than three more parameters — the shape `theme::ChipRowStyle` already has,
+/// and for the same reason: this project's `clippy` denies a seventh argument.
+#[derive(Clone, Copy)]
+struct Chip<'a> {
+    face: HFONT,
+    height: i32,
+    key: &'a str,
+}
+
+/// How much wider than its own words a chip row is — the figure minus the placeholder it
+/// replaces. Zero when there is no chip in this caption.
+///
+/// # Safety
+///
+/// As [`measure`].
+unsafe fn chip_overhang(dc: HDC, face: HFONT, chip: Chip<'_>, caption: &str) -> i32 {
+    if chip.key.is_empty() || !caption.contains(theme::KEY_PLACEHOLDER) {
+        return 0;
+    }
+
+    // SAFETY: see the contract — the two faces are live fonts of this window.
+    let key_width = unsafe { text_width(dc, chip.face, chip.key) };
+    // SAFETY: as above.
+    let placeholder = unsafe { text_width(dc, face, theme::KEY_PLACEHOLDER) };
+
+    let mut metrics = windows::Win32::Graphics::Gdi::TEXTMETRICW::default();
+
+    // SAFETY: the chip face is selected into the DC for the measurement and put back.
+    let previous = unsafe { SelectObject(dc, chip.face.into()) };
+    // SAFETY: `metrics` is a live local the call fills.
+    let _ = unsafe { windows::Win32::Graphics::Gdi::GetTextMetricsW(dc, &mut metrics) };
+    // SAFETY: puts back exactly the handle the call above answered with.
+    let _ = unsafe { SelectObject(dc, previous) };
+
+    let box_of_chip = theme::chip_box(
+        key_width,
+        chip.height,
+        metrics.tmHeight,
+        theme::scaled(theme::BORDER_THICKNESS, theme::dc_dpi(dc)),
+    );
+
+    (box_of_chip.width - placeholder).max(0)
+}
+
+/// The width of one run of text in one face, on one line.
+///
+/// # Safety
+///
+/// As [`measure`].
+unsafe fn text_width(dc: HDC, face: HFONT, text: &str) -> i32 {
+    let mut wide: Vec<u16> = text.encode_utf16().collect();
+
+    if wide.is_empty() {
+        return 0;
+    }
+
+    // SAFETY: see the contract.
+    let previous = unsafe { SelectObject(dc, face.into()) };
+
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+
+    // SAFETY: `DT_CALCRECT | DT_SINGLELINE` measures and paints nothing.
+    let _ = unsafe {
+        windows::Win32::Graphics::Gdi::DrawTextW(
+            dc,
+            &mut wide,
+            &mut rect,
+            windows::Win32::Graphics::Gdi::DT_CALCRECT
+                | windows::Win32::Graphics::Gdi::DT_SINGLELINE,
+        )
+    };
+
+    // SAFETY: puts back exactly the handle the call above answered with.
+    let _ = unsafe { SelectObject(dc, previous) };
+
+    rect.right - rect.left
+}
+
 /// How wide a button has to be to hold its caption — the caption plus the air of the mock-up,
 /// and never narrower than [`air::BUTTON_MIN`].
 ///
@@ -2057,7 +2174,21 @@ unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
             hide(hwnd, IDC_LETTER_DEMO_CAP);
         } else {
             // SAFETY: as above.
-            let height = unsafe { measure(dc, faces.body, full_width, &plan.demo_caption, pitch) };
+            // The caption of the demonstration names the key, so it is measured as a chip row.
+            let height = unsafe {
+                measure_row(
+                    dc,
+                    faces.body,
+                    Chip {
+                        face: faces.chip,
+                        height: faces.chip_height,
+                        key: &state.hotkey,
+                    },
+                    full_width,
+                    &plan.demo_caption,
+                    pitch,
+                )
+            };
 
             place(hwnd, IDC_LETTER_DEMO_CAP, pad, top, full_width, height);
             top += height;
@@ -2212,9 +2343,23 @@ unsafe fn layout_panel(
             continue;
         };
 
-        // SAFETY: see the contract. A row with a chip in it is measured in the body face all
-        // the same: the chip is drawn around a word of that face and stands on its line.
-        let height = unsafe { measure(dc, faces.body, row_width, &row.text, pitch) };
+        // SAFETY: see the contract. A row that names the key is measured **as a chip row**:
+        // the figure is wider than the words it replaces, and measuring without it is what put
+        // the German «Привет» one line short.
+        let height = unsafe {
+            measure_row(
+                dc,
+                faces.body,
+                Chip {
+                    face: faces.chip,
+                    height: faces.chip_height,
+                    key: &state.hotkey,
+                },
+                row_width,
+                &row.text,
+                pitch,
+            )
+        };
         // SAFETY: as above — one line of the marker's own face.
         let marker_height = unsafe { measure(dc, faces.number, marker_width, &row.marker, None) };
 
