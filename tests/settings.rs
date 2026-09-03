@@ -7776,9 +7776,9 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
 ///
-/// ⚠ **Seventy-one since task Т-31-3** — решение 99.4 authorised the canon of «seventy-two»
-/// away with `IDS_LANGUAGE_RESTART`.
-const FR_94_STRINGS: [(u16, &str, &str); 71] = [
+/// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
+/// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
+const FR_94_STRINGS: [(u16, &str, &str); 73] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8002,6 +8002,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 71] = [
         "Esc или клик мимо — отмена",
         "Esc or a click elsewhere cancels",
     ),
+    // FR-90, task Т-31-4, решение 99.2 — the state of the program in the tooltip of the tray
+    // icon. Two words that were Russian literals in `src\tray.rs` in all fourteen locales until
+    // this task, and the gender is the program's: «программа активна», «the program is
+    // suspended» — not the hook's, which is what IDS_HOOK_UP above speaks of.
+    (settings::IDS_TIP_ACTIVE, "активна", "active"),
+    (settings::IDS_TIP_PAUSED, "приостановлена", "suspended"),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -13090,8 +13096,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        71,
-        "seventy-one identifiers in use — решение 99.4 authorised the canon of seventy-two away"
+        73,
+        "seventy-three identifiers in use — решение 99.4 authorised the canon of seventy-two \
+         away: the restart hint left and the two words of the tray tooltip arrived"
     );
 
     let product = ProductImage::shared();

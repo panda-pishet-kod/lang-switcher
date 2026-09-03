@@ -1964,6 +1964,20 @@ pub const IDS_SOUND: u16 = 3078;
 /// Appended after [`IDS_SOUND`] for the reason that one was appended, and it costs no new
 /// block: 3072..3087 is the block the menu opened and 3079 is inside it.
 pub const IDS_CAPTURE_HINT: u16 = 3079;
+/// The state of the **program** in the tooltip of the tray icon while it is working — FR-90,
+/// решение 99.2, task Т-31-4.
+///
+/// Both words lived as Russian literals in `crate::tray`, past these tables and past every
+/// sweep, in all fourteen locales; the fitting stand of Э28 measures windows and the tooltip is
+/// not a window. The numbers 3080 and 3081 are appended after the last one in use and cost no
+/// new block — 3072..3087 is the one the menu opened.
+///
+/// ⚠ The gender is the **program**'s, not the keyboard hook's, so these two are allowed to
+/// disagree with [`IDS_HOOK_UP`] / [`IDS_HOOK_DOWN`] in the same window: there the subject is
+/// «перехват». The choice per language is written down in `scratchpad-Э31\глоссарий.md` §1.
+pub const IDS_TIP_ACTIVE: u16 = 3080;
+/// The same while FR-91 holds it suspended.
+pub const IDS_TIP_PAUSED: u16 = 3081;
 
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
@@ -1971,11 +1985,11 @@ pub const IDS_CAPTURE_HINT: u16 = 3079;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-/// ⚠ **Seventy-one since task Т-31-3**, and the canon of «seventy-two» that stood here is
+/// ⚠ **Seventy-three since task Т-31-4**, and the canon of «seventy-two» that stood here is
 /// authorised away by решение 99.4: `IDS_LANGUAGE_RESTART` was retired with the sentence it
-/// carried. The list is of *identifiers in use*, not of numbers in the range — 3004 is a hole
-/// and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 71] = [
+/// carried (71), and the two words of the tray tooltip arrived (73). The list is of
+/// *identifiers in use*, not of numbers in the range — 3004 is a hole and holes are not walked.
+pub const INTERFACE_STRINGS: [u16; 73] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2047,6 +2061,8 @@ pub const INTERFACE_STRINGS: [u16; 71] = [
     IDS_MENU_EXIT,
     IDS_SOUND,
     IDS_CAPTURE_HINT,
+    IDS_TIP_ACTIVE,
+    IDS_TIP_PAUSED,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

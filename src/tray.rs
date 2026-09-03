@@ -1016,17 +1016,6 @@ impl Tray {
         }
     }
 
-    /// Tooltip text — `APP_NAME` plus the state, and nothing else, ever (SEC-01, SEC-07).
-    fn tip_text(&self) -> String {
-        let state = if self.enabled() {
-            "активна"
-        } else {
-            "приостановлена"
-        };
-
-        format!("{APP_NAME} — {state}")
-    }
-
     /// The descriptor every `Shell_NotifyIcon` call of this module is built from.
     fn notify_data(&self) -> NOTIFYICONDATAW {
         let mut data = NOTIFYICONDATAW {
@@ -1045,7 +1034,7 @@ impl Tray {
             ..Default::default()
         };
 
-        write_tip(&mut data.szTip, &self.tip_text());
+        write_tip(&mut data.szTip, &icon_tip(self.enabled()));
 
         data
     }
@@ -3648,6 +3637,30 @@ pub fn small_icon_size() -> (i32, i32) {
 /// mistaken for a pointer that could be read.
 fn resource_id(id: u16) -> PCWSTR {
     PCWSTR(std::ptr::without_provenance(usize::from(id)))
+}
+
+/// The tooltip of the icon — `APP_NAME` plus the state of the **program**, and nothing else,
+/// ever (SEC-01, SEC-07). FR-90, решение 99.2, task Т-31-4.
+///
+/// A free function and not a method, so that a test can walk all fourteen locales against both
+/// states without a tray, an icon and a window; [`Tray::notify_data`] is the one caller in the
+/// product and hands in `self.enabled()`.
+///
+/// **The name is not translated** — decision on question 7 — and the state word is, which is the
+/// whole of this task: until решение 99.2 both words were Russian literals here, in all fourteen
+/// locales, and neither Э28 nor Э30 caught it because the fitting stand measures windows and not
+/// the notification area.
+///
+/// The em dash and the two spaces around it are the same joiner the caption of the settings
+/// window uses («Lang Switcher — настройки»), and they are not translated either.
+pub fn icon_tip(enabled: bool) -> String {
+    let state = settings::text(if enabled {
+        settings::IDS_TIP_ACTIVE
+    } else {
+        settings::IDS_TIP_PAUSED
+    });
+
+    format!("{APP_NAME} — {state}")
 }
 
 /// Copies `text` into the fixed tooltip field, always leaving it NUL-terminated.

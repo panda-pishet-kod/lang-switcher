@@ -3434,6 +3434,24 @@ fn applying_a_configuration_publishes_its_language_into_the_running_process() {
         "the menu built after the apply carries the labels of the new locale"
     );
 
+    // Criterion 3 of task Т-31-1, third half — the tooltip of the icon follows too. It is a
+    // string of the locale only since task Т-31-4, which is why the assertion lives here and
+    // not in the commit that published the language: on that tree both words were Russian
+    // literals whatever the locale said.
+    let tip = tray::icon_tip(live(Tray::enabled));
+
+    println!("--- tooltip after «Применить» with language = de ---\n{tip}");
+
+    assert!(
+        tip.starts_with("Lang Switcher — "),
+        "the name of the product is not translated — decision on question 7"
+    );
+    assert!(
+        !tip.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+        "the tooltip must have left Russian with the rest of the interface: «{tip}»"
+    );
+    assert_eq!(tip, "Lang Switcher — aktiv");
+
     // Back to where the rest of this binary expects to find the process.
     settings::set_ui_language(Language::Ru);
 }
@@ -3536,6 +3554,120 @@ fn the_language_of_the_running_process_is_published_from_exactly_one_place() {
         apply[..end].contains("adopt_ui_language()"),
         "and so does «Применить», after the configuration has been stored and written"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-90, решение 99.2, task Т-31-4 — the tooltip of the icon
+// ---------------------------------------------------------------------------------------
+
+/// The fourteen locales, and the script each of them must be written in.
+///
+/// The alphabets are ranges rather than names because that is what can be measured: a
+/// translation that quietly stayed Russian, or came back as question marks, is caught by asking
+/// which block its characters live in. The same instrument Э28 built for the string tables,
+/// pointed at the one string those sweeps could not see.
+const TIP_LOCALES: [(&str, Language, char, char); 14] = [
+    ("ru", Language::Ru, '\u{0400}', '\u{04FF}'),
+    ("en", Language::En, '\u{0041}', '\u{024F}'),
+    ("uk", Language::Uk, '\u{0400}', '\u{04FF}'),
+    ("de", Language::De, '\u{0041}', '\u{024F}'),
+    ("fr", Language::Fr, '\u{0041}', '\u{024F}'),
+    ("es", Language::Es, '\u{0041}', '\u{024F}'),
+    ("pt", Language::Pt, '\u{0041}', '\u{024F}'),
+    ("it", Language::It, '\u{0041}', '\u{024F}'),
+    ("pl", Language::Pl, '\u{0041}', '\u{024F}'),
+    ("cs", Language::Cs, '\u{0041}', '\u{024F}'),
+    ("tr", Language::Tr, '\u{0041}', '\u{024F}'),
+    ("el", Language::El, '\u{0370}', '\u{03FF}'),
+    ("he", Language::He, '\u{0590}', '\u{05FF}'),
+    ("ar", Language::Ar, '\u{0600}', '\u{06FF}'),
+];
+
+/// **Criteria of task Т-31-4.** The tooltip carries `APP_NAME` untranslated, a state word in the
+/// script of the locale, and fits the field `write_tip` copies into.
+///
+/// Красное «до» this test was written against: the tooltip of `he` — of every locale — held the
+/// Russian literals «активна» / «приостановлена», hard-wired in `tray.rs` past the string tables
+/// (`scratchpad-Э31\красное-до-4-подсказка.log`).
+#[test]
+fn the_tooltip_of_the_icon_is_written_in_the_locale_of_the_interface() {
+    let _locale = product_strings(Language::Ru);
+
+    // ⚠ The field of `NOTIFYICONDATAW` holds 128 UTF-16 units including the terminator, so
+    // `write_tip` copies at most 127 — посылка П5 of the mandate, measured on the drafted
+    // strings before they were written (`scratchpad-Э31\посылки-п5.log`, longest 30).
+    const LIMIT: usize = 127;
+
+    let mut longest = 0;
+    let mut measured = 0;
+
+    for (tag, language, first, last) in TIP_LOCALES {
+        settings::set_ui_language(language);
+
+        for enabled in [true, false] {
+            let tip = tray::icon_tip(enabled);
+            let units = tip.encode_utf16().count();
+
+            measured += 1;
+            longest = longest.max(units);
+
+            println!("{tag} / enabled = {enabled}: «{tip}» — {units} UTF-16 units");
+
+            let state = tip.strip_prefix("Lang Switcher — ").unwrap_or_else(|| {
+                panic!("{tag}: the tooltip must be «Lang Switcher — состояние»")
+            });
+
+            assert!(
+                !state.trim().is_empty(),
+                "{tag}: the state word must not be empty — an absent string row comes back blank"
+            );
+            assert!(
+                state.chars().any(|c| (first..=last).contains(&c)),
+                "{tag}: «{state}» carries no character of the script this locale is written in \
+                 — a translation that stayed in another language, or came back as question marks"
+            );
+
+            // The красное of the mandate, said in the direction it was said: no locale but the
+            // two Cyrillic ones may hold Cyrillic.
+            if !matches!(tag, "ru" | "uk") {
+                assert!(
+                    !state
+                        .chars()
+                        .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+                    "{tag}: «{state}» holds Cyrillic — this is the defect решение 99.2 names, \
+                     the tooltip hard-wired in Russian past the string tables"
+                );
+            }
+
+            assert!(
+                units <= LIMIT,
+                "{tag}: {units} UTF-16 units against the {LIMIT} `write_tip` copies — the \
+                 tooltip would be cut"
+            );
+        }
+    }
+
+    println!("--- {measured} tooltips measured, longest {longest} of {LIMIT} units ---");
+
+    assert_eq!(
+        measured,
+        TIP_LOCALES.len() * 2,
+        "fourteen locales in two states — «no defects» out of no readings is the cheapest lie"
+    );
+
+    // The two states really differ. Without this, one string used for both would pass every
+    // assertion above.
+    for (tag, language, _, _) in TIP_LOCALES {
+        settings::set_ui_language(language);
+
+        assert_ne!(
+            tray::icon_tip(true),
+            tray::icon_tip(false),
+            "{tag}: «активна» and «приостановлена» are two words, not one"
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
 }
 
 #[test]

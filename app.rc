@@ -828,6 +828,20 @@ END
 // already opened, and 3079 is inside it. The **definition** stands here for the same reason
 // IDS_SOUND's does — above the tables that use it, or `error RC2104`.
 #define IDS_CAPTURE_HINT        3079
+// FR-90, task Т-31-4, решение 99.2 — the state of the **program** in the tooltip of the tray
+// icon: «Lang Switcher — активна» / «Lang Switcher — приостановлена». Both words were Russian
+// literals in `src\tray.rs`, past these tables, in all fourteen locales; neither Э28 nor Э30
+// caught it, because the fitting stand measures windows and not the notification area. The
+// **numbers** are 3080 and 3081, appended after the last one in use (IDS_CAPTURE_HINT), and they
+// cost no new block: 3072..3087 is the block the menu opened. The **definitions** stand here for
+// the reason IDS_SOUND's does — above the tables that use them, or `error RC2104`.
+//
+// ⚠ The gender is the **program**'s and not the keyboard hook's, so these two do not have to
+// agree with IDS_HOOK_UP / IDS_HOOK_DOWN in the same window: there the subject is «перехват».
+// The glossary of the stage writes the choice down per language
+// (`scratchpad-Э31\глоссарий.md`, §1).
+#define IDS_TIP_ACTIVE          3080
+#define IDS_TIP_PAUSED          3081
 // The about dialog of FR-92а, task T-11-11: the caption, the version line, the two
 // description lines and its «ОК». They continue the sixteen-string block 3056 opened,
 // contiguously — no gap, so no empty block between. «ОК» takes a row of its own rather
@@ -941,6 +955,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Пауза, настройки и выход — в значке в трее."
     IDS_ABOUT_HELP_5        "Сменить клавишу: Настройки → Горячая клавиша."
     IDS_CAPTURE_HINT        "Esc или клик мимо — отмена"
+    IDS_TIP_ACTIVE          "активна"
+    IDS_TIP_PAUSED          "приостановлена"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1022,6 +1038,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Suspend, settings and exit are in the tray icon."
     IDS_ABOUT_HELP_5        "To change the key: Settings → Hotkey."
     IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
+    IDS_TIP_ACTIVE          "active"
+    IDS_TIP_PAUSED          "suspended"
 END
 
 // =======================================================================================
@@ -1116,6 +1134,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Пауза, налаштування та вихід — у значку в треї."
     IDS_ABOUT_HELP_5        "Змінити клавішу: Налаштування → Гаряча клавіша."
     IDS_CAPTURE_HINT        "Esc або клік повз — скасування"
+    IDS_TIP_ACTIVE          "активна"
+    IDS_TIP_PAUSED          "призупинена"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1193,6 +1213,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Anhalten, Einstellungen und Beenden sind im Infobereichssymbol."
     IDS_ABOUT_HELP_5        "Taste ändern: Einstellungen → Tastenkürzel."
     IDS_CAPTURE_HINT        "Esc oder ein Klick daneben bricht ab"
+    IDS_TIP_ACTIVE          "aktiv"
+    IDS_TIP_PAUSED          "angehalten"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1272,6 +1294,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pause, paramètres et sortie sont dans l'icône de la zone de notification."
     IDS_ABOUT_HELP_5        "Changer de touche : Paramètres → Raccourci."
     IDS_CAPTURE_HINT        "Esc ou un clic à côté annule"
+    IDS_TIP_ACTIVE          "actif"
+    IDS_TIP_PAUSED          "suspendu"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1348,6 +1372,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pausa, configuración y salida están en el icono del área de notificación."
     IDS_ABOUT_HELP_5        "Cambiar la tecla: Configuración → Atajo."
     IDS_CAPTURE_HINT        "Esc o un clic fuera cancela"
+    IDS_TIP_ACTIVE          "activo"
+    IDS_TIP_PAUSED          "pausado"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1422,6 +1448,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pausa, configurações e saída ficam no ícone da área de notificação."
     IDS_ABOUT_HELP_5        "Trocar a tecla: Configurações → Atalho."
     IDS_CAPTURE_HINT        "Esc ou um clique fora cancela"
+    IDS_TIP_ACTIVE          "ativo"
+    IDS_TIP_PAUSED          "pausado"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1501,6 +1529,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pausa, impostazioni e uscita sono nell'icona dell'area di notifica."
     IDS_ABOUT_HELP_5        "Cambiare tasto: Impostazioni → Scorciatoia."
     IDS_CAPTURE_HINT        "Esc o un clic fuori annulla"
+    IDS_TIP_ACTIVE          "attivo"
+    IDS_TIP_PAUSED          "sospeso"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1580,6 +1610,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pauza, ustawienia i wyjście są w ikonie w zasobniku."
     IDS_ABOUT_HELP_5        "Zmiana klawisza: Ustawienia → Skrót klawiszowy."
     IDS_CAPTURE_HINT        "Esc albo kliknięcie obok anuluje"
+    IDS_TIP_ACTIVE          "aktywna"
+    IDS_TIP_PAUSED          "wstrzymana"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1655,6 +1687,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Pozastavení, nastavení a ukončení jsou v ikoně v oznamovací oblasti."
     IDS_ABOUT_HELP_5        "Změna klávesy: Nastavení → Klávesová zkratka."
     IDS_CAPTURE_HINT        "Esc nebo kliknutí vedle zruší"
+    IDS_TIP_ACTIVE          "aktivní"
+    IDS_TIP_PAUSED          "pozastavena"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1733,6 +1767,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Duraklatma, ayarlar ve çıkış bildirim alanı simgesindedir."
     IDS_ABOUT_HELP_5        "Tuşu değiştirmek: Ayarlar → Kısayol tuşu."
     IDS_CAPTURE_HINT        "Esc ya da dışarı tıklamak iptal eder"
+    IDS_TIP_ACTIVE          "etkin"
+    IDS_TIP_PAUSED          "duraklatıldı"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1815,6 +1851,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "Παύση, ρυθμίσεις και έξοδος είναι στο εικονίδιο ειδοποιήσεων."
     IDS_ABOUT_HELP_5        "Αλλαγή πλήκτρου: Ρυθμίσεις → Συντόμευση."
     IDS_CAPTURE_HINT        "Esc ή κλικ αλλού ακυρώνει"
+    IDS_TIP_ACTIVE          "ενεργή"
+    IDS_TIP_PAUSED          "σε παύση"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1903,6 +1941,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "השהיה, הגדרות ויציאה נמצאים בסמל אזור ההודעות."
     IDS_ABOUT_HELP_5        "החלפת מקש: הגדרות ← מקש קיצור."
     IDS_CAPTURE_HINT        "Esc או קליק בחוץ מבטלים"
+    IDS_TIP_ACTIVE          "פעילה"
+    IDS_TIP_PAUSED          "מושהית"
 END
 
 LANGUAGE 0x01, 0x01
@@ -1977,6 +2017,8 @@ BEGIN
     IDS_ABOUT_HELP_4        "الإيقاف المؤقت والإعدادات والخروج في أيقونة منطقة الإشعارات."
     IDS_ABOUT_HELP_5        "تغيير المفتاح: الإعدادات ← مفتاح الاختصار."
     IDS_CAPTURE_HINT        "Esc أو نقرة خارجه تُلغي"
+    IDS_TIP_ACTIVE          "نشط"
+    IDS_TIP_PAUSED          "متوقف مؤقتًا"
 END
 
 // ---------------------------------------------------------------------------------------
