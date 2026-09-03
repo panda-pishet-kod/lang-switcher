@@ -121,8 +121,8 @@ fn defaults_match_section_7_field_by_field() {
     // ⚠ **This is the one place the number is written as a literal**, and it is written twice on
     // purpose: everywhere else in this file a file "of today" is stamped
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
-    assert_eq!(config.schema_version, 4);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 4);
+    assert_eq!(config.schema_version, 5);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 5);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -1028,7 +1028,7 @@ fn a_file_of_schema_two_is_raised_to_three_with_the_sound_on() {
 ///
 /// The fields below are deliberately not the defaults, so that damage would show.
 #[test]
-fn a_file_of_schema_three_is_raised_to_four_and_nothing_else_moves() {
+fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves() {
     let dir = TestDir::new("locale_schema_migration");
     let path = write_file(
         &dir,
@@ -1049,7 +1049,14 @@ fn a_file_of_schema_three_is_raised_to_four_and_nothing_else_moves() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 3 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 4, "and that version is four");
+    // ⚠ Task Т-30-5 renamed this test: a schema 3 file now climbs **two** rungs, 3 → 4 → 5, and
+    // lands on the current schema rather than on four. That the ladder is walked to the top and
+    // not one step is the thing worth pinning, and the number the file lands on is asserted by
+    // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
+    assert_eq!(
+        config.schema_version, 5,
+        "and it climbed the whole ladder, not one rung of it"
+    );
 
     assert!(
         !config.general.enabled,
@@ -1058,6 +1065,65 @@ fn a_file_of_schema_three_is_raised_to_four_and_nothing_else_moves() {
     assert_eq!(
         config.general.language,
         Language::En,
+        "and the locale the person chose, untouched"
+    );
+    assert!(!config.feedback.sound, "and the sound they turned off");
+    assert_eq!(config.exclusions.processes, ["мой-редактор.exe"]);
+
+    // --- the round trip: written back, the file is a current one and reads as one ----------
+    let again = write_file(&dir, &config.to_toml_string().expect("serialises"));
+    let (back, outcome) = settings::read_from(&again).expect("the raised file must be read");
+
+    assert_eq!(
+        outcome,
+        ReadOutcome::Current,
+        "once written back, the file is of this schema and needs no rung"
+    );
+    assert_eq!(back, config, "and every field survived the round trip");
+}
+
+/// **Т-30-5, решение 97.3: a file of schema four is raised to five and nothing else moves.**
+///
+/// The same rung as `a_file_of_schema_three_is_raised_to_four_and_nothing_else_moves`, one step
+/// up, and for the same reason: вопрос 97 adds **two admissible values** to `general.language`
+/// and renames nothing, retypes nothing and changes the meaning of nothing. So the step is a
+/// bare stamp, and what has to be shown is that it is *only* a stamp — every field a schema 4
+/// file can hold means under schema 5 what it meant before.
+///
+/// The fields below are deliberately not the defaults, so that damage would show. `el` is one of
+/// the ten of решение 93 — a value that schema 4 admits and schema 3 did not — because the rung
+/// under test is the one above it and it must carry that value through untouched.
+#[test]
+fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
+    let dir = TestDir::new("rtl_schema_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 4\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"el\"\n\
+         \n\
+         [feedback]\n\
+         sound = false\n\
+         \n\
+         [exclusions]\n\
+         processes = [\"мой-редактор.exe\"]\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 4 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 4 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.schema_version, 5, "and that version is five");
+
+    assert!(
+        !config.general.enabled,
+        "the rung carried the switch through"
+    );
+    assert_eq!(
+        config.general.language,
+        Language::El,
         "and the locale the person chose, untouched"
     );
     assert!(!config.feedback.sound, "and the sound they turned off");
@@ -12787,6 +12853,120 @@ fn every_locale_carries_every_interface_string() {
 /// defaults. That was the measured downgrade cost of решение 93, and вопрос **94.1** is the
 /// decision to stop paying it.
 const LAST_TWO_LOCALE_SCHEMA: u32 = 3;
+
+/// The last schema a build that knew **twelve** locales could have stamped a file with — the one
+/// вопрос 94.1 bought, and the one вопрос 97.3 now leaves behind.
+///
+/// Exactly the same cost, one tier up: `he` and `ar` are two more values of a **closed** enum, so
+/// a twelve-locale build meeting `language = "he"` under an unchanged stamp would refuse the
+/// document, read its own schema number back, and quarantine the user's configuration. Раising
+/// the schema to five is what stops it — that is решение 97.3, and the reason the schema of the
+/// letters window of the parallel window moves on to six.
+const LAST_TWELVE_LOCALE_SCHEMA: u32 = 4;
+
+/// **Т-30-5, решение 97.3 — the Т-29-1 flip on the numbers of this stage: a twelve-locale build
+/// meeting a Hebrew file refuses to write instead of quarantining.**
+///
+/// The same three steps and the same shape, with the pair that вопрос 97 creates in the world:
+/// «a stamp I am too young for» + «`he`, a value I cannot parse». Modelled with
+/// `CURRENT_SCHEMA_VERSION + 1` and `zz` for the reason the older test gives — a test may not
+/// install an older build — and the **real** pair is asserted where it can be: what this build
+/// writes for `he` carries a stamp no twelve-locale build ever wrote.
+#[test]
+fn a_twelve_locale_build_meeting_a_right_to_left_file_refuses_to_write() {
+    // --- 1. what this build writes for one of the two locales вопрос 97 added ---------------
+    let mut ours = Config::default();
+    ours.general.language = Language::He;
+
+    let text = ours.to_toml_string().expect("the file must serialise");
+
+    assert!(
+        text.contains("language = \"he\""),
+        "the file carries the locale it was given: {text}"
+    );
+
+    // A `const` block for the reason the older test states: both sides are constants, so the day
+    // somebody lowers the schema this stops being a red test and becomes a build that does not
+    // compile — the right weight for the one number решение 97.3 bought.
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_TWELVE_LOCALE_SCHEMA,
+            "a file naming `he` or `ar` must be stamped with a schema no twelve-locale build \
+             had — that is решение 97.3, and without it such a build quarantines the file"
+        );
+    }
+    assert!(
+        text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+        "and the stamp is in the file, not merely in memory: {text}"
+    );
+
+    // --- 2. the reader that is too old for that stamp ---------------------------------------
+    let dir = TestDir::new("rtl_downgrade_meets_the_stamp");
+    let newer = CURRENT_SCHEMA_VERSION + 1;
+    let original = format!(
+        "schema_version = {newer}\n\
+         \n\
+         [general]\n\
+         language = \"zz\"\n"
+    );
+    let path = write_file(&dir, &original);
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: newer }),
+        "the stamp is read before the refused parse is called a verdict"
+    );
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::Forbidden,
+        "and a file from the future is never written back"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original,
+        "the bytes are exactly where the person left them"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "and no `.bad` was made — this is what решение 97.3 bought"
+    );
+    assert_eq!(
+        config.schema_version, newer,
+        "the stamp is carried, not reset"
+    );
+
+    // --- 3. the control, which must not move: a file of THIS schema naming `he` is current ---
+    //
+    // The other half of the truth. Raising the schema must not turn the new locales into
+    // strangers to the build that has them: `he` under the current stamp is an ordinary file.
+    let mine = TestDir::new("rtl_current_schema");
+    let good = write_file(
+        &mine,
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             language = \"he\"\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_or_default(&good);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::Current),
+        "a file of this schema naming `he` is a current file and nothing else"
+    );
+    assert_eq!(config.general.language, Language::He);
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::Allowed,
+        "and it may be written back"
+    );
+}
 
 /// **Т-29-1, вопрос 94.1 — the flip of the Т-28-2 measurement: a downgrade now refuses to write
 /// instead of quarantining.**

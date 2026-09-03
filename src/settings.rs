@@ -172,7 +172,12 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// direction: a build that knows two locales now recognises a file of the twelve by its stamp,
 /// **before** its parser refuses one of the ten values, and so leaves that file alone instead of
 /// moving it to `.bad`. See [`Language`], where the cost this pays off is written out.
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+///
+/// Version 5 arrived with **решение 97.3** and task Т-30-5: Hebrew and Arabic. The same coin
+/// spent one tier up, and for the same thing — [`step_4_to_5`] is a bare stamp, and what the
+/// number buys is that a twelve-locale build meeting `language = "he"` leaves the file whole
+/// instead of quarantining it.
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -189,7 +194,8 @@ fn pre_version_schema() -> u32 {
     PRE_VERSION_SCHEMA
 }
 
-/// Interface language, `general.language` of section 7. Twelve values — решение 93, tier one.
+/// Interface language, `general.language` of section 7. Fourteen values — the twelve of решение
+/// 93, tier one, and the two right-to-left locales of вопрос 97.
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
 ///
@@ -215,6 +221,14 @@ fn pre_version_schema() -> u32 {
 /// `a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining`, whose
 /// control keeps the other half true: a file of the **current** stamp that will not parse is
 /// still damaged, and still quarantined.
+///
+/// **Вопрос 97.3 pays the same coin again, one tier up.** `He` and `Ar` are two more values of
+/// this closed set, so a *twelve*-locale build meeting `language = "he"` would have refused the
+/// document and quarantined it exactly as a two-locale build once did with `de`. The schema is
+/// therefore `5`, [`step_4_to_5`] is a bare stamp, and
+/// `a_twelve_locale_build_meeting_a_right_to_left_file_refuses_to_write` pins the same three
+/// claims on the new numbers. The lesson this enum keeps writing down is one line long: **a new
+/// value of a closed set costs a schema**.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -1201,6 +1215,9 @@ impl Config {
         if self.schema_version < 4 {
             step_3_to_4(self);
         }
+        if self.schema_version < 5 {
+            step_4_to_5(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -1292,6 +1309,26 @@ fn step_2_to_3(config: &mut Config) {
 /// person made. A value that was already the person's own carries no such ambiguity.
 fn step_3_to_4(config: &mut Config) {
     config.schema_version = 4;
+}
+
+/// Raises a file from schema 4 to schema 5 — **решение 97.3**, Hebrew and Arabic.
+///
+/// **The stamp and nothing else**, for the same reason [`step_3_to_4`] is one rung down: вопрос
+/// 97 adds two admissible **values** to `general.language` and renames no field, retypes none
+/// and changes the meaning of none. Every value a schema 4 file can hold means under schema 5
+/// exactly what it meant before.
+///
+/// And the number is spent in the same direction — on the build that has *not* been updated.
+/// `Language` is a **closed** set, so a twelve-locale build meeting `language = "he"` refuses
+/// the whole document; without a stamp it had never seen, it would read its own schema number
+/// back out of the file, call it damaged, and move the person's configuration to `.bad`. That is
+/// the cost вопрос 94.1 measured at the tier below and paid with schema 4; this rung is where it
+/// is paid again, for the same coin, one tier up.
+///
+/// ⚠ The letters window of the parallel work planned schema 5 for itself and moves on to **6**
+/// (вопрос 97.3): two windows cannot spend the same number.
+fn step_4_to_5(config: &mut Config) {
+    config.schema_version = 5;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
