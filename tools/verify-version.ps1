@@ -24,6 +24,27 @@
     agree" because its pattern stopped matching is the kind of instrument this project has
     already paid for three times; every row below has to be found before it can be compared.
 
+    WHAT THE NUMBER ITSELF HAS TO BE -- the rule adopted on 2026-09-03, by the user.
+
+        MINOR IS THE NUMBER OF THE DELIVERY TAG. The build tagged `e36` is 0.36.0, `e37` is
+        0.37.0, and so on. PATCH exists for a second delivery made under one tag, which is
+        not expected and is the escape hatch rather than the road. MAJOR stays 0 until the
+        public release, which is a decision of its own and will bring its own rule.
+
+    WHY THIS RULE AND NOT SemVer's "raise it when something breaks". This product has no API
+    to break: what a user can see is one executable and one configuration file. The question a
+    version has to answer here is therefore "WHICH DELIVERY IS THIS ONE?" -- the question this
+    project has had to answer by hand, with SHA-256 sums, at every acceptance -- and tying the
+    number to the tag answers it outright. The number is also unfakeable: `git tag` measures
+    it, so nobody has to judge whether a change "deserves" a bump, and the version cannot
+    quietly stand still for thirty-two deliveries the way 0.1.0 did between 2026-08-14 and
+    2026-09-03.
+
+    Решение 8 named 0.1.0 the STARTING version, so this rule continues that decision rather
+    than reopening it. `tests\tray.rs` holds the tenth reader of the number -- it parses the
+    bytes `rc.exe` really produced -- and it is the one place that has to be edited by hand
+    beside the ten below.
+
     ONE OF THE PATTERNS ALREADY CAUGHT ITSELF DOING THE OTHER THING. The first draft looked
     for `version="..."` in the manifests, and the first `version=` in an XML file is the
     declaration on line 1 -- `<?xml version="1.0" ...?>`. The script reported the two
