@@ -503,6 +503,26 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `Kind::Process` — the group `CreateMutexW` and the rest of the FR-82 path are already in —
     // and **no new `Kind`**, the rule every note above follows.
     ("FR-82 notification suppressed", Kind::Process),
+    // ⭐ **Task Т-32-1, FR-101** — the three system calls the letters of the author make outside
+    // a window. Appended at the end so that no index above them moves: a slot already written
+    // carries a number, and renumbering the table would change what a dump of an earlier run
+    // means.
+    //
+    // `GetDateFormatEx` is the clock: this program asks it for today's local date, because the
+    // schedule of FR-101 counts in whole days and `GetTickCount` measures something else
+    // entirely. The other two are the quiet moment of FR-101 — whether Windows is accepting
+    // notifications at all, and how long the session has been still.
+    //
+    // ⚠ **A name and a code, and nothing of what was asked (SEC-01, SEC-07).** None of the
+    // three carries a date, a state or a number of seconds into the ring; a refusal says which
+    // call refused and what the system said about it, exactly as every Win32 row above does.
+    //
+    // `Kind::Process` for all three, and **no new `Kind`** — the rule every note above follows.
+    // The subject of each is this process's own environment, which is the kind
+    // `GetUserPreferredUILanguages` already takes.
+    ("GetDateFormatEx", Kind::Process),
+    ("SHQueryUserNotificationState", Kind::Process),
+    ("GetLastInputInfo", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

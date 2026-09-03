@@ -14,6 +14,11 @@ use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
     QUARANTINE_SUFFIX, Quarantined, ReadOutcome, ReplacementMethod, SavePolicy,
 };
+// Task Т-32-1, FR-101: the section `[letters]` of section 7 lives in `settings` because the
+// schema does, and the calendar it is written in and the vocabulary of `thanks` live in their
+// owner (§6.2). The tests of the section are here, beside the rest of section 7, and they call
+// the owner at its own address.
+use lang_switcher::letters;
 // Task T-14-3: the drawing library of FR-92а moved out of `settings` into its owner, `theme`
 // (§6.2, finding 24 of the audit of 2026-08-24). The tests of it are still here — they are
 // tests of the pictures this dialog draws — and they call it at its new address.
@@ -112,17 +117,19 @@ fn a_thoroughly_customised_config() -> Config {
 fn defaults_match_section_7_field_by_field() {
     let config = Config::default();
 
-    // Schema 4 — task Т-29-1, вопрос 94.1: the twelve locales of решение 93 became a schema of
-    // their own, so that a build which knows two of them recognises a file of the twelve by its
-    // stamp instead of by failing to parse it. Schema 3 — FR-100 (task Т-21-5) added the section
-    // `[feedback]`. Schema 2 was FR-42а moving the default of `[replacement] method` to `auto`;
-    // every rung is still on the ladder and every one is asserted by the migration tests below.
+    // Schema 6 — task Т-32-1, вопрос 101: the section `[letters]` of FR-101 and FR-102. Schema 5
+    // — решение 97.3 (Hebrew and Arabic). Schema 4 — task Т-29-1, вопрос 94.1: the twelve locales
+    // of решение 93 became a schema of their own, so that a build which knows two of them
+    // recognises a file of the twelve by its stamp instead of by failing to parse it. Schema 3 —
+    // FR-100 (task Т-21-5) added the section `[feedback]`. Schema 2 was FR-42а moving the default
+    // of `[replacement] method` to `auto`; every rung is still on the ladder and every one is
+    // asserted by the migration tests below.
     //
     // ⚠ **This is the one place the number is written as a literal**, and it is written twice on
     // purpose: everywhere else in this file a file "of today" is stamped
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
-    assert_eq!(config.schema_version, 5);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 5);
+    assert_eq!(config.schema_version, 6);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -148,6 +155,22 @@ fn defaults_match_section_7_field_by_field() {
     assert!(config.exclusions.processes.is_empty());
 
     assert!(!config.diagnostics.log_enabled);
+
+    // Section `[letters]` — FR-101 and FR-102, task Т-32-1. The feed is **on** (вопрос 101 п. 3)
+    // and nothing else has happened yet: no day counted from, no letter shown, no news read.
+    assert!(config.letters.feed);
+    assert_eq!(config.letters.first_run, None);
+    assert!(!config.letters.welcome_shown);
+    assert_eq!(config.letters.thanks, letters::Thanks::Pending);
+    assert_eq!(config.letters.thanks_due, None);
+    assert_eq!(config.letters.last_seen_version, "");
+    assert_eq!(config.letters.last_letter, None);
+    assert_eq!(config.letters.feed_last_read, None);
+    assert_eq!(config.letters.first_feed_letter, None);
+    assert_eq!(config.letters.latest_known, "");
+    assert!(config.letters.read_ids.is_empty());
+    assert!(config.letters.reminders.is_empty());
+    assert!(config.letters.first_shown.is_empty());
 }
 
 // Criterion 10. Round trip: write, read, get the same thing back.
@@ -364,7 +387,16 @@ fn empty_file_gives_the_default_configuration() {
 
     let (config, outcome) = settings::read_from(&path).expect("an empty file must be readable");
 
-    assert_eq!(config, Config::default());
+    // ⚠ **One field of the defaults is not what an empty file gives, since task Т-32-1** —
+    // `[letters] welcome_shown`. An empty file is a file, and a file means the program has been
+    // here before: the rung `step_5_to_6` marks «Привет» as shown for exactly that reason, so
+    // the letter of a first run is not shown to somebody being migrated. The assertion below is
+    // therefore «the defaults with that one field moved», and it is written out rather than
+    // relaxed, so that any *other* drift still fails here.
+    let mut expected = Config::default();
+    expected.letters.welcome_shown = true;
+
+    assert_eq!(config, expected);
     // An empty file has no version marker, so it arrives through migration.
     assert_eq!(outcome, ReadOutcome::Migrated { from: 0 });
 }
@@ -1054,7 +1086,7 @@ fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves
     // not one step is the thing worth pinning, and the number the file lands on is asserted by
     // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
     assert_eq!(
-        config.schema_version, 5,
+        config.schema_version, 6,
         "and it climbed the whole ladder, not one rung of it"
     );
 
@@ -1115,7 +1147,10 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 4 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 5, "and that version is five");
+    // ⚠ Task Т-32-1: a schema 4 file now climbs **two** rungs, 4 → 5 → 6, and the rung this test
+    // owns is still the bare stamp of решение 97.3. What the rung above it does to such a file is
+    // asserted by `a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new`.
+    assert_eq!(config.schema_version, 6, "and that version is six");
 
     assert!(
         !config.general.enabled,
@@ -1139,6 +1174,180 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
         "once written back, the file is of this schema and needs no rung"
     );
     assert_eq!(back, config, "and every field survived the round trip");
+}
+
+/// **Т-32-1, вопрос 101: a file of schema five is raised to six, and the raised file knows it is
+/// not a new installation.**
+///
+/// The first rung since schema 2 that is **not** a bare stamp, so this test is about what it
+/// carries rather than about what it leaves alone — although it checks that too. Three things:
+///
+/// 1. `welcome_shown` comes out **true**. The file exists, so the program has been here before,
+///    so «Привет» — the letter of a first run — must not be shown. This is the whole reason the
+///    rung has a body.
+/// 2. `last_seen_version` comes out **empty**, which differs from every build's version and is
+///    what makes «Что нового» appear exactly once for somebody who has just updated.
+/// 3. `first_run` stays **empty**. `Config::migrate` reads no clock, by design; the day is
+///    written by `letters::initialise` on the first run after the migration, which is the same
+///    day. A test of the ladder must not depend on what day it is run.
+///
+/// The other fields are deliberately not the defaults, so that damage would show.
+#[test]
+fn a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new() {
+    let dir = TestDir::new("letters_schema_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 5\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"he\"\n\
+         \n\
+         [feedback]\n\
+         sound = false\n\
+         \n\
+         [exclusions]\n\
+         processes = [\"мой-редактор.exe\"]\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 5 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 5 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.schema_version, 6, "and that version is six");
+
+    // What the rung carries — the three decisions of the rung, in order.
+    assert!(
+        config.letters.welcome_shown,
+        "a machine being updated has been used: «Привет» must not be shown to it"
+    );
+    assert_eq!(
+        config.letters.last_seen_version, "",
+        "and «Что нового» must be shown to it exactly once"
+    );
+    assert_eq!(
+        config.letters.first_run, None,
+        "the day is written on the first run after the migration, not by the pure ladder"
+    );
+
+    // What the rung leaves alone — the rest of `[letters]`, at its defaults, and every field of
+    // the file the person actually chose.
+    assert!(
+        config.letters.feed,
+        "the feed is on by default (вопрос 101)"
+    );
+    assert_eq!(config.letters.thanks, letters::Thanks::Pending);
+    assert_eq!(config.letters.thanks_due, None);
+    assert!(config.letters.read_ids.is_empty());
+
+    assert!(
+        !config.general.enabled,
+        "the rung carried the switch through"
+    );
+    assert_eq!(
+        config.general.language,
+        Language::He,
+        "and the locale the person chose, untouched"
+    );
+    assert!(!config.feedback.sound, "and the sound they turned off");
+    assert_eq!(config.exclusions.processes, ["мой-редактор.exe"]);
+
+    // --- the round trip: written back, the file is a current one and reads as one ----------
+    let again = write_file(&dir, &config.to_toml_string().expect("serialises"));
+    let (back, outcome) = settings::read_from(&again).expect("the raised file must be read");
+
+    assert_eq!(
+        outcome,
+        ReadOutcome::Current,
+        "once written back, the file is of this schema and needs no rung"
+    );
+    assert_eq!(back, config, "and every field survived the round trip");
+}
+
+/// **Т-32-1: every field of `[letters]` survives a round trip through the file, dates and maps
+/// included.**
+///
+/// The section holds three kinds of value the rest of section 7 does not — a date, a list of
+/// numbers and two maps keyed by number — and each of them has a way of not coming back. A date
+/// is written as a bare TOML date and has to be read as one; an empty map is left out of the
+/// file altogether and has to come back empty rather than missing; a map key is text on the disk
+/// and a number in the program.
+#[test]
+fn every_field_of_the_letters_section_survives_the_file() {
+    let dir = TestDir::new("letters_round_trip");
+    let path = dir.config();
+
+    let mut written = Config::default();
+    written.letters.feed = false;
+    written.letters.first_run = letters::Date::from_ymd(2026, 9, 3);
+    written.letters.welcome_shown = true;
+    written.letters.thanks = letters::Thanks::Snoozed;
+    written.letters.thanks_due = letters::Date::from_ymd(2026, 10, 3);
+    written.letters.last_seen_version = "0.39.0".to_owned();
+    written.letters.last_letter = letters::Date::from_ymd(2026, 9, 30);
+    written.letters.feed_last_read = letters::Date::from_ymd(2026, 9, 20);
+    written.letters.first_feed_letter = letters::Date::from_ymd(2026, 9, 21);
+    written.letters.latest_known = "0.40.0".to_owned();
+    written.letters.read_ids = vec![12, 13];
+    written.letters.count_reminder(14);
+    written
+        .letters
+        .set_first_shown(14, letters::Date::from_ymd(2026, 9, 25).expect("a date"));
+
+    settings::write_to(&path, &written).expect("writing the configuration must succeed");
+
+    let text = fs::read_to_string(&path).expect("the file must be readable as text");
+    println!("--- the file as written ---\n{text}");
+
+    // The dates are **bare** TOML dates, exactly as section 7 prints them — not quoted strings.
+    assert!(
+        text.contains("first_run = 2026-09-03"),
+        "a date must be written as a TOML date:\n{text}"
+    );
+    assert!(
+        !text.contains("\"2026-09-03\""),
+        "and never as a quoted string:\n{text}"
+    );
+
+    let (read_back, outcome) = settings::read_from(&path).expect("reading it back must succeed");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(read_back, written, "every field of `[letters]` came back");
+    assert_eq!(read_back.letters.reminders_sent(14), 1);
+    assert_eq!(
+        read_back.letters.first_shown_on(14),
+        letters::Date::from_ymd(2026, 9, 25)
+    );
+}
+
+/// **Т-32-1: a date written by a person's own hand — quoted — is read rather than refused.**
+///
+/// `[letters] feed` is a field section 7 tells people to edit for the first ninety days
+/// (FR-102), so this section is one people open. A quoted date is what a person writes; refusing
+/// the document over it would move the whole configuration to `.bad` and take every other
+/// setting with it. The value this program *writes* is still the bare form — the test above
+/// pins that — and this is only about what it will **read**.
+#[test]
+fn a_date_written_by_hand_in_quotes_is_read_as_a_date() {
+    let dir = TestDir::new("letters_quoted_date");
+    let path = write_file(
+        &dir,
+        "schema_version = 6\n\
+         \n\
+         [letters]\n\
+         feed = false\n\
+         first_run = \"2026-09-01\"\n\
+         welcome_shown = true\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a quoted date must be readable");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert!(!config.letters.feed);
+    assert_eq!(
+        config.letters.first_run,
+        letters::Date::from_ymd(2026, 9, 1)
+    );
 }
 
 /// **Task T-19-4 through the bump: the file of a schema this build does not know is refused.**

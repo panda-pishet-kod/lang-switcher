@@ -55,6 +55,7 @@
 //! for.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
@@ -133,6 +134,12 @@ use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
 use crate::CONFIG_DIR_NAME;
 use crate::layouts::{self, LayoutId, LayoutSpec};
+// The state of `[letters]` lives in this file because the schema of section 7 does; the
+// calendar it is written in, the vocabulary of `thanks` and every rule that reads the section
+// live in `letters`, which owns them (§6.2). The import is by module name for the same reason
+// `theme` is: a field of the schema reads as `letters::Date`, and where it came from is part of
+// what it says.
+use crate::letters;
 // ⚠ The names after `ThemeSetting` are the drawing library task T-14-3 moved out of this file
 // into its owner (§6.2, finding 24 of the audit of 2026-08-24). They are imported by name — not
 // called as `theme::…` — so that the change of address stayed a change of address: every call
@@ -177,7 +184,12 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// spent one tier up, and for the same thing — [`step_4_to_5`] is a bare stamp, and what the
 /// number buys is that a twelve-locale build meeting `language = "he"` leaves the file whole
 /// instead of quarantining it.
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+///
+/// Version 6 arrived with **вопрос 101** and task Т-32-1: the section `[letters]` of FR-101 and
+/// FR-102. The first rung since [`step_1_to_2`] that is **not** a bare stamp — it has a
+/// decision to carry, and [`step_5_to_6`] spells it out: a machine that is being updated has
+/// already been used, so it must not meet «Привет», and it must meet «Что нового» exactly once.
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -840,6 +852,220 @@ pub struct Diagnostics {
     pub log_enabled: bool,
 }
 
+/// Section `[letters]` of section 7 — **FR-101 and FR-102**, вопрос 101, task Т-32-1.
+///
+/// The state of the five letters and of the feed: when this installation started counting,
+/// which letters it has shown, which news it has read and when it last looked at the feed.
+/// Nothing here is a keystroke, a window title or anything a person typed (SEC-01, SEC-07):
+/// the section holds dates, two version strings, a handful of flags and the numbers the author
+/// gave the entries of the feed.
+///
+/// # Only one field of this section is meant to be edited by hand
+///
+/// `feed` is, and section 7 says so out loud: for the first ninety days it is the **only** way
+/// to turn the feed off (FR-102), because the switch in the «От автора» window does not appear
+/// until the feed has actually produced a letter. The rest is bookkeeping — a person is free to
+/// edit it, and the worst that comes of it is a letter shown twice or not at all.
+///
+/// # The order of the fields is load-bearing
+///
+/// TOML puts every plain value of a table before its sub-tables, so the two maps go last and
+/// this section goes last in [`Config`]. A map written above a scalar would make the file
+/// unreadable to the very parser that wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Letters {
+    /// Whether the author's feed is read at all — FR-102, and **on** by default (вопрос 101
+    /// п. 3). This is the field SEC-03 names as the way to refuse the one network operation
+    /// this program has.
+    #[serde(default = "default_true")]
+    pub feed: bool,
+
+    /// The day this installation was first used, from which every cadence of FR-101 counts.
+    ///
+    /// Empty on a file that has never been used — a fresh install and a file just raised from
+    /// schema 5 alike — and filled by [`crate::letters::initialise`] on the first run, which
+    /// is the day the migration happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_run: Option<letters::Date>,
+
+    /// Whether «Привет» has been shown. False only on a machine that had no configuration file
+    /// at all (FR-101); the migration of schema 5 → 6 sets it true, because a machine that is
+    /// being updated has been used.
+    #[serde(default)]
+    pub welcome_shown: bool,
+
+    /// The state of the «Спасибо» letter — `pending`, `snoozed` or `done`.
+    #[serde(
+        default,
+        deserialize_with = "thanks_from_toml",
+        serialize_with = "thanks_to_toml"
+    )]
+    pub thanks: letters::Thanks,
+
+    /// The day «Спасибо» becomes due: thirty days from the first run, or seven from a snooze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thanks_due: Option<letters::Date>,
+
+    /// The version «Что нового» was last shown for. Empty means «show it once», which is what
+    /// the migration leaves behind for a person who has just updated.
+    #[serde(default)]
+    pub last_seen_version: String,
+
+    /// The day the last letter was put on the screen — the one-letter-a-day rule of FR-101.
+    ///
+    /// ⚠ **Not in the mock-up's печать of section 7, and added by the executor of Э32 with the
+    /// reason written down in the report.** Every other letter is stopped from coming back by a
+    /// mark of its own — the version it was about, the day it was first shown, `done` — and
+    /// none of those stops *another* letter from following it an hour later, across a restart,
+    /// on the same day. FR-101 says «не более одного письма в сутки», and a rule that has to
+    /// survive a restart needs a day written in the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_letter: Option<letters::Date>,
+
+    /// The day the feed was last read **and its signature verified** — FR-102. A failed read
+    /// does not move it, which is what keeps a broken host from being asked again for fifteen
+    /// days.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feed_last_read: Option<letters::Date>,
+
+    /// The day the first letter out of the feed was shown — half of the condition the feed
+    /// switch of FR-102 appears on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_feed_letter: Option<letters::Date>,
+
+    /// The newest version the «Обновление» letter has already been shown for — FR-101, «один
+    /// раз на версию».
+    #[serde(default)]
+    pub latest_known: String,
+
+    /// The identifiers of the news items that have been read — FR-101, and «Прочитано» is the
+    /// only thing that ever puts one here.
+    #[serde(default)]
+    pub read_ids: Vec<u64>,
+
+    /// How many reminders each unread news item has had — at most
+    /// [`crate::letters::REMINDERS_PER_NEWS`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reminders: letters::NewsMap<u32>,
+
+    /// The day each news item was **first** shown, which is what its two reminders are counted
+    /// from.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub first_shown: letters::NewsMap<letters::Date>,
+}
+
+impl Default for Letters {
+    /// The section as section 7 prints it for a machine that has never run this program: the
+    /// feed on, nothing shown, nothing read, no day counted from yet.
+    fn default() -> Self {
+        Self {
+            feed: true,
+            first_run: None,
+            welcome_shown: false,
+            thanks: letters::Thanks::Pending,
+            thanks_due: None,
+            last_seen_version: String::new(),
+            last_letter: None,
+            feed_last_read: None,
+            first_feed_letter: None,
+            latest_known: String::new(),
+            read_ids: Vec::new(),
+            reminders: BTreeMap::new(),
+            first_shown: BTreeMap::new(),
+        }
+    }
+}
+
+impl Letters {
+    /// Whether this news item has been read — FR-101.
+    pub fn is_read(&self, id: u64) -> bool {
+        self.read_ids.contains(&id)
+    }
+
+    /// Marks a news item read. Idempotent: «Прочитано» pressed twice is one entry.
+    pub fn mark_read(&mut self, id: u64) {
+        if !self.is_read(id) {
+            self.read_ids.push(id);
+            self.read_ids.sort_unstable();
+        }
+
+        self.reminders.remove(&letters::key_of(id));
+    }
+
+    /// The day this news item was first shown, if it has been.
+    pub fn first_shown_on(&self, id: u64) -> Option<letters::Date> {
+        self.first_shown.get(&letters::key_of(id)).copied()
+    }
+
+    /// Records the day a news item was first shown.
+    pub fn set_first_shown(&mut self, id: u64, day: letters::Date) {
+        self.first_shown.insert(letters::key_of(id), day);
+    }
+
+    /// How many reminders this news item has already had.
+    pub fn reminders_sent(&self, id: u64) -> u32 {
+        self.reminders
+            .get(&letters::key_of(id))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Counts one more reminder for this news item, and never past
+    /// [`crate::letters::REMINDERS_PER_NEWS`] — a saturating count, because the number is read
+    /// back out of a file anybody may edit (SEC-05).
+    pub fn count_reminder(&mut self, id: u64) {
+        let sent = self.reminders_sent(id);
+
+        self.reminders.insert(
+            letters::key_of(id),
+            sent.saturating_add(1).min(letters::REMINDERS_PER_NEWS),
+        );
+    }
+
+    /// Records that the feed has produced a letter — the day of the **first** one, which is
+    /// half of the condition the switch of FR-102 appears on, and it is never moved again.
+    pub fn note_feed_letter(&mut self, day: letters::Date) {
+        if self.first_feed_letter.is_none() {
+            self.first_feed_letter = Some(day);
+        }
+    }
+
+    /// Forgets every news item that is not in `kept` — FR-101: the news the feed no longer
+    /// carries goes, and its reminders and its read mark go with it.
+    ///
+    /// Keys that are not numbers at all — a hand-edited file — are dropped by the same sweep:
+    /// nothing can ever match them again, and leaving them would grow the file for ever.
+    pub fn retain_news(&mut self, kept: &[u64]) {
+        self.read_ids.retain(|id| kept.contains(id));
+        self.reminders
+            .retain(|key, _| letters::id_of(key).is_some_and(|id| kept.contains(&id)));
+        self.first_shown
+            .retain(|key, _| letters::id_of(key).is_some_and(|id| kept.contains(&id)));
+    }
+}
+
+// Serde bridge for `letters.thanks`, on the terms `general.theme` is on: the vocabulary of the
+// three words belongs to [`letters::Thanks`], and a derive here would mint a second spelling of
+// them. Neither function knows a single word of it.
+
+/// Reads `letters.thanks`: the word goes to the owner of the vocabulary, which answers for
+/// every string — see [`letters::Thanks`] for why an unknown word is not an error here.
+fn thanks_from_toml<'de, D>(deserializer: D) -> Result<letters::Thanks, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    Ok(letters::Thanks::from_config_str(&text))
+}
+
+/// Writes `letters.thanks`: the word is the owner's, verbatim.
+fn thanks_to_toml<S>(thanks: &letters::Thanks, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(thanks.as_config_str())
+}
+
 /// The whole configuration file of section 7.
 ///
 /// Every field carries a serde default, which is the machine-checkable form of the rule of
@@ -887,6 +1113,13 @@ pub struct Config {
     /// Section `[diagnostics]`.
     #[serde(default)]
     pub diagnostics: Diagnostics,
+    /// Section `[letters]` — FR-101 and FR-102.
+    ///
+    /// ⚠ **Last on purpose.** It is the only section holding maps, TOML writes a table's
+    /// sub-tables after its plain values, and a section that follows one would be swallowed by
+    /// it. See [`Letters`].
+    #[serde(default)]
+    pub letters: Letters,
 }
 
 impl Default for Config {
@@ -903,6 +1136,7 @@ impl Default for Config {
             exclusions: Exclusions::default(),
             feedback: Feedback::default(),
             diagnostics: Diagnostics::default(),
+            letters: Letters::default(),
         }
     }
 }
@@ -1218,6 +1452,9 @@ impl Config {
         if self.schema_version < 5 {
             step_4_to_5(self);
         }
+        if self.schema_version < 6 {
+            step_5_to_6(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -1329,6 +1566,36 @@ fn step_3_to_4(config: &mut Config) {
 /// (вопрос 97.3): two windows cannot spend the same number.
 fn step_4_to_5(config: &mut Config) {
     config.schema_version = 5;
+}
+
+/// Raises a file from schema 5 to schema 6 — **вопрос 101**, the section `[letters]` of FR-101
+/// and FR-102.
+///
+/// **The first rung since [`step_1_to_2`] that carries a decision rather than a stamp**, and
+/// the decision is about who the file belongs to: somebody who has been using this program
+/// already. Three things follow from that, and the mandate of Э32 names all three.
+///
+/// * `welcome_shown = true`. «Привет» is the letter of a first run, and this is not one. The
+///   absence of the section would otherwise read as «never shown» — which is exactly what it
+///   means on a machine with no file at all, and exactly what it must not mean here.
+/// * `last_seen_version` left **empty**. A person who has just updated is the one person «Что
+///   нового» is written for, and an empty version differs from every build's, so they meet it
+///   once and then never again.
+/// * `thanks` and the rest left at their defaults. `first_run` stays empty and is filled on the
+///   first run after the migration — [`crate::letters::initialise`] — which is the day of the
+///   migration, because this function runs while the program is starting. It is not written
+///   here for one reason: [`Config::migrate`] is a pure function of the document, it reads no
+///   clock, and every test of the ladder would otherwise answer differently tomorrow.
+///
+/// ⚠ The `feed` field is left at its default, which is **on** (вопрос 101 п. 3). That is the
+/// one thing in this rung that is a change of behaviour for an existing installation, and it is
+/// the decision the user took: the feed is announced in the «От автора» window from the first
+/// day, refusable in this very file from the first day, and refusable with a switch once it has
+/// actually shown a letter.
+fn step_5_to_6(config: &mut Config) {
+    config.letters.welcome_shown = true;
+    config.letters.last_seen_version = String::new();
+    config.schema_version = 6;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.

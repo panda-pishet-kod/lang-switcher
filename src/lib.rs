@@ -20,6 +20,7 @@ pub mod guard;
 pub mod hook;
 pub mod inject;
 pub mod layouts;
+pub mod letters;
 pub mod selection;
 pub mod settings;
 pub mod switch;
