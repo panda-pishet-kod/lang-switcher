@@ -114,7 +114,9 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   # taskbar happens to be, which is the one place in this drawing where the taskbar's own
   # colour can touch the ink.
   if ($state -like '*-unread') {
-    $cx = 74.0; $cy = 74.0; $r = 17.0; $ring = 6.0
+    # Tuned against the proof sheet rather than guessed: at r = 17 the dot ate the right head
+    # of the arrow at 16 px, which is the size the notification area actually shows.
+    $cx = 78.0; $cy = 78.0; $r = 14.0; $ring = 5.0
     $ringBrush = New-Object System.Drawing.SolidBrush($pal.Plate)
     $g.FillEllipse($ringBrush, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
                    [single](2*($r+$ring)), [single](2*($r+$ring)))

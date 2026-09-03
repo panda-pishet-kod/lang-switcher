@@ -70,7 +70,10 @@ function Get-LoadedIconSize([string]$path, [int]$px) {
   return @($w, $ht)
 }
 
-$files = @('langswitcher-active.ico','langswitcher-paused.ico')
+# FR-90's third state, task T-32-4: the same two icons carrying the dot of FR-101. Four files
+# and not two -- the state of the program and the state of the letters are independent.
+$files = @('langswitcher-active.ico','langswitcher-paused.ico',
+           'langswitcher-active-unread.ico','langswitcher-paused-unread.ico')
 $SIZES = @(16,20,24,32,48,64,256)
 $fail = 0
 
@@ -111,7 +114,10 @@ foreach ($f in $files) {
 }
 
 # Proof sheet at true pixel sizes on both taskbar colours.
-$rows = @(@{f='langswitcher-active.ico';label='активна'}, @{f='langswitcher-paused.ico';label='пауза'})
+$rows = @(@{f='langswitcher-active.ico';label='активна'},
+          @{f='langswitcher-paused.ico';label='пауза'},
+          @{f='langswitcher-active-unread.ico';label='активна + письмо'},
+          @{f='langswitcher-paused-unread.ico';label='пауза + письмо'})
 $shown = @(16,20,24,32,48)
 $W = 700; $H = 56 + $rows.Count*84
 $bmp = New-Object System.Drawing.Bitmap($W,$H,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
