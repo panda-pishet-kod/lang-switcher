@@ -2601,11 +2601,11 @@ pub(crate) unsafe fn restore_face(dc: HDC, previous: Option<HGDIOBJ>) {
 /// - `DT_LEFT | DT_TOP` — the alignment of `SS_LEFT`: against the left edge, against the top,
 ///   never centred. Both are zero, and both are written out because a format built out of
 ///   silence is a format nobody can read.
-/// - **`DT_WORDBREAK`** — the one flag that is load-bearing rather than cosmetic. Two labels of
-///   the settings template are two lines high and their text does not fit on one: the note
-///   «вступит в силу после перезапуска» (`IDC_LANGUAGE_RESTART`, 70 × 18 dialog units) and the
-///   journal path (`IDC_LOG_DIR`, 186 × 16). A static wraps them; without this flag they would
-///   come back as one clipped line, and the wrap is a regression the task names by name.
+/// - **`DT_WORDBREAK`** — the one flag that is load-bearing rather than cosmetic. One label of
+///   the settings template is two lines high and its text does not fit on one: the journal path
+///   (`IDC_LOG_DIR`, 186 × 16). A static wraps it; without this flag it would come back as one
+///   clipped line, and the wrap is a regression the task names by name. Two until task Т-31-3
+///   retired the note «вступит в силу после перезапуска» (`IDC_LANGUAGE_RESTART`, решение 99.4).
 /// - `DT_EXPANDTABS` — also what the static did. No string of either locale carries a tab
 ///   today, so it changes no pixel today; it is here so that one arriving tomorrow lands the
 ///   same way it would have before the task.

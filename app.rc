@@ -105,7 +105,10 @@
 // clear of everything above.
 #define IDC_GROUP_GENERAL      1090
 #define IDC_LANGUAGE_LABEL     1091
-#define IDC_LANGUAGE_RESTART   1092
+// ⚠ **1092 is retired, not free** — task Т-31-3, решение 99.4. It was IDC_LANGUAGE_RESTART,
+// «вступит в силу после перезапуска», and the sentence stopped being true: since task Т-31-1 the
+// language takes effect at once. The number stays a hole for the reason every hole in this file
+// stays one — an identifier that moved would change what an installed build shows.
 #define IDC_GROUP_HOTKEY       1093
 #define IDC_HOTKEY_LABEL       1094
 #define IDC_GROUP_LAYOUTS      1095
@@ -425,20 +428,18 @@ BEGIN
     // запечатало решение 82.2 «по содержимому»: место взято ростом колонки, а не ужатием комбо.
     LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 64, 9, SS_OWNERDRAW
     COMBOBOX        IDC_LANGUAGE, 80, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    // ⚠ The «Оформление» row sits two units below the bottom of the hint beside the language
-    // row (32 + 18 = 50), and not at the 46 it had until task T-12-3. An SS_OWNERDRAW static
-    // fills its own rectangle with panel_bg before it writes a word, so a rectangle that
-    // overlaps a combo box does not merely sit on top of it: it *erases* the top of the frame
-    // the background drew, which is what defect Г-1 was. The two rectangles are now disjoint
-    // by arithmetic: hint y 32..50, combo y 52..132.
+    // ⚠ The «Оформление» row sits at y = 54 and not at the 46 it had until task T-12-3, and the
+    // number does not move now that the hint beside the language row is gone. Until task Т-31-3
+    // this y was arithmetic — «two units below the bottom of the hint», 32 + 18 = 50 — because an
+    // SS_OWNERDRAW static fills its own rectangle with panel_bg before it writes a word, so a
+    // static overlapping a combo box does not merely sit on top of it: it *erases* the top of
+    // the frame the background drew, which is what defect Г-1 was. The hint has been retired by
+    // решение 99.4, the overlap can no longer happen, and **the layout stays exactly where it
+    // is**: решение 87 accepted these coordinates by eye, and a row that moved because a
+    // neighbour left would be a change nobody asked for. The place right of the language combo
+    // is simply empty now.
     LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 64, 9, SS_OWNERDRAW
     COMBOBOX        IDC_THEME, 80, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    // ⚠ Two lines high (18 units against the 9 of a one-line label) and the text does not fit
-    // on one: the drawing of task T-11-18 keeps DT_WORDBREAK, which is what an SS_LEFT static
-    // wrapped with. IDC_LOG_DIR below is the other one of these.
-    // y = 32 is where the generator of the mock-ups puts it (ui.ps1: x=132, y=32, w=70, h=18),
-    // level with the language row it belongs to.
-    LTEXT           "вступит в силу после перезапуска", IDC_LANGUAGE_RESTART, 138, 32, 72, 18, SS_OWNERDRAW
     // FR-100, task Т-21-5 — the sound switch, a row of «Общие» like the three above it.
     //
     // ⚠ It was nine units tall at y = 64 for one delivery, wedged into the strip left over
@@ -537,8 +538,8 @@ BEGIN
     CONTROL         "Вести журнал", IDC_LOG_ENABLED, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 230, 227, 90, 10
     PUSHBUTTON      "Открыть папку журнала", IDC_LOG_OPEN, 330, 225, 86, 14, BS_OWNERDRAW
     LTEXT           "Папка журнала:", IDC_LOG_DIR_LABEL, 230, 243, 60, 9, SS_OWNERDRAW
-    // ⚠ The second two-line label — 16 units for a path that does not fit on one line. Its
-    // DT_WORDBREAK is load-bearing exactly as IDC_LANGUAGE_RESTART's is; task T-11-18.
+    // ⚠ The **only** two-line label since task Т-31-3 retired the restart hint — 16 units for a
+    // path that does not fit on one line. Its DT_WORDBREAK is load-bearing; task T-11-18.
     // Nine units under its own caption, which is the generator's own step (ui.ps1: y = 264
     // and y = 273 in the numbering of the window this group had before Т-23-2).
     LTEXT           "", IDC_LOG_DIR, 230, 252, 186, 16, SS_OWNERDRAW
@@ -743,7 +744,14 @@ END
 #define IDS_GROUP_GENERAL       3001
 #define IDS_AUTOSTART           3002
 #define IDS_LANGUAGE_LABEL      3003
-#define IDS_LANGUAGE_RESTART    3004
+// ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was IDS_LANGUAGE_RESTART,
+// «вступит в силу после перезапуска»: решения 83 и 83а.2 put the sentence beside the language
+// combo, and вопрос 99 made it untrue — the language now takes effect at once. The row is gone
+// from all fourteen tables and the number stays a hole, like 3017..3021, 3023, 3024 and 3056
+// below: a string identifier that moved would change what an installed build shows. A hole
+// costs nothing here — `settings::string_from` walks a block of sixteen by index and an empty
+// row is not a defect; the sweeps of completeness walk `INTERFACE_STRINGS`, which no longer
+// names it.
 #define IDS_GROUP_HOTKEY        3005
 #define IDS_HOTKEY_LABEL        3006
 #define IDS_HOTKEY_SET          3007
@@ -872,7 +880,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Общие"
     IDS_AUTOSTART           "Запускать при входе в систему"
     IDS_LANGUAGE_LABEL      "Язык интерфейса:"
-    IDS_LANGUAGE_RESTART    "вступит в силу после перезапуска"
     IDS_GROUP_HOTKEY        "Горячая клавиша"
     IDS_HOTKEY_LABEL        "Клавиша:"
     IDS_HOTKEY_SET          "Задать"
@@ -954,7 +961,6 @@ BEGIN
     IDS_GROUP_GENERAL       "General"
     IDS_AUTOSTART           "Start when I sign in"
     IDS_LANGUAGE_LABEL      "Interface language:"
-    IDS_LANGUAGE_RESTART    "takes effect after a restart"
     IDS_GROUP_HOTKEY        "Hotkey"
     IDS_HOTKEY_LABEL        "Key:"
     IDS_HOTKEY_SET          "Set"
@@ -1049,7 +1055,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Загальні"
     IDS_AUTOSTART           "Запускати під час входу в систему"
     IDS_LANGUAGE_LABEL      "Мова інтерфейсу:"
-    IDS_LANGUAGE_RESTART    "набуде чинності після перезапуску"
     IDS_GROUP_HOTKEY        "Гаряча клавіша"
     IDS_HOTKEY_LABEL        "Клавіша:"
     IDS_HOTKEY_SET          "Задати"
@@ -1127,7 +1132,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Allgemein"
     IDS_AUTOSTART           "Beim Anmelden starten"
     IDS_LANGUAGE_LABEL      "Sprache:"
-    IDS_LANGUAGE_RESTART    "wirkt nach einem Neustart"
     IDS_GROUP_HOTKEY        "Tastenkürzel"
     IDS_HOTKEY_LABEL        "Taste:"
     IDS_HOTKEY_SET          "Festlegen"
@@ -1205,7 +1209,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Général"
     IDS_AUTOSTART           "Démarrer à l'ouverture de session"
     IDS_LANGUAGE_LABEL      "Langue :"
-    IDS_LANGUAGE_RESTART    "prend effet après un redémarrage"
     IDS_GROUP_HOTKEY        "Raccourci"
     IDS_HOTKEY_LABEL        "Touche :"
     IDS_HOTKEY_SET          "Définir"
@@ -1282,7 +1285,6 @@ BEGIN
     IDS_GROUP_GENERAL       "General"
     IDS_AUTOSTART           "Iniciar al iniciar sesión"
     IDS_LANGUAGE_LABEL      "Idioma:"
-    IDS_LANGUAGE_RESTART    "surte efecto tras reiniciar"
     IDS_GROUP_HOTKEY        "Atajo"
     IDS_HOTKEY_LABEL        "Tecla:"
     IDS_HOTKEY_SET          "Definir"
@@ -1359,7 +1361,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Geral"
     IDS_AUTOSTART           "Iniciar ao entrar no sistema"
     IDS_LANGUAGE_LABEL      "Idioma:"
-    IDS_LANGUAGE_RESTART    "vale após reiniciar"
     IDS_GROUP_HOTKEY        "Atalho"
     IDS_HOTKEY_LABEL        "Tecla:"
     IDS_HOTKEY_SET          "Definir"
@@ -1433,7 +1434,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Generale"
     IDS_AUTOSTART           "Avvia all'accesso"
     IDS_LANGUAGE_LABEL      "Lingua:"
-    IDS_LANGUAGE_RESTART    "ha effetto dopo il riavvio"
     IDS_GROUP_HOTKEY        "Scorciatoia"
     IDS_HOTKEY_LABEL        "Tasto:"
     IDS_HOTKEY_SET          "Imposta"
@@ -1519,7 +1519,6 @@ BEGIN
     IDS_LANGUAGE_LABEL      "Język:"
     // ⚠ Т-28-4: «zadziała po ponownym uruchomieniu» rozpadało się na TRZY wiersze w polu
     // dwuwierszowym (51 px potrzeba, 38 px jest). Krótsze zdanie mieści się w dwóch.
-    IDS_LANGUAGE_RESTART    "zacznie działać po restarcie"
     IDS_GROUP_HOTKEY        "Skrót klawiszowy"
     IDS_HOTKEY_LABEL        "Klawisz:"
     IDS_HOTKEY_SET          "Ustaw"
@@ -1595,7 +1594,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Obecné"
     IDS_AUTOSTART           "Spouštět při přihlášení"
     IDS_LANGUAGE_LABEL      "Jazyk:"
-    IDS_LANGUAGE_RESTART    "projeví se po restartu"
     IDS_GROUP_HOTKEY        "Klávesová zkratka"
     IDS_HOTKEY_LABEL        "Klávesa:"
     IDS_HOTKEY_SET          "Nastavit"
@@ -1674,7 +1672,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Genel"
     IDS_AUTOSTART           "Oturum açıldığında başlat"
     IDS_LANGUAGE_LABEL      "Dil:"
-    IDS_LANGUAGE_RESTART    "yeniden başlatınca geçerli olur"
     IDS_GROUP_HOTKEY        "Kısayol tuşu"
     IDS_HOTKEY_LABEL        "Tuş:"
     IDS_HOTKEY_SET          "Ata"
@@ -1753,7 +1750,6 @@ BEGIN
     IDS_GROUP_GENERAL       "Γενικά"
     IDS_AUTOSTART           "Εκκίνηση με τη σύνδεση"
     IDS_LANGUAGE_LABEL      "Γλώσσα:"
-    IDS_LANGUAGE_RESTART    "ισχύει μετά την επανεκκίνηση"
     IDS_GROUP_HOTKEY        "Συντόμευση"
     IDS_HOTKEY_LABEL        "Πλήκτρο:"
     IDS_HOTKEY_SET          "Ορισμός"
@@ -1842,7 +1838,6 @@ BEGIN
     IDS_GROUP_GENERAL       "כללי"
     IDS_AUTOSTART           "הפעלה עם הכניסה למערכת"
     IDS_LANGUAGE_LABEL      "שפת הממשק:"
-    IDS_LANGUAGE_RESTART    "ייכנס לתוקף לאחר הפעלה מחדש"
     IDS_GROUP_HOTKEY        "מקש קיצור"
     IDS_HOTKEY_LABEL        "מקש:"
     IDS_HOTKEY_SET          "הגדר"
@@ -1917,7 +1912,6 @@ BEGIN
     IDS_GROUP_GENERAL       "عام"
     IDS_AUTOSTART           "التشغيل عند تسجيل الدخول"
     IDS_LANGUAGE_LABEL      "لغة الواجهة:"
-    IDS_LANGUAGE_RESTART    "يسري بعد إعادة التشغيل"
     IDS_GROUP_HOTKEY        "مفتاح الاختصار"
     IDS_HOTKEY_LABEL        "المفتاح:"
     IDS_HOTKEY_SET          "تعيين"

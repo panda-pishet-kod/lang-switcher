@@ -1792,8 +1792,13 @@ pub const IDS_GROUP_GENERAL: u16 = 3001;
 pub const IDS_AUTOSTART: u16 = 3002;
 /// The label of the language combo box.
 pub const IDS_LANGUAGE_LABEL: u16 = 3003;
-/// The note that says the language takes effect after a restart — and it now does.
-pub const IDS_LANGUAGE_RESTART: u16 = 3004;
+// ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was `IDS_LANGUAGE_RESTART`,
+// «вступит в силу после перезапуска». Решения 83 и 83а.2 chose that sentence and вопрос 99 took
+// its subject away: the language now takes effect at once (task Т-31-1). The number stays a hole
+// for the reason 3017..3021, 3023, 3024 and 3056 are holes — a string identifier that moved would
+// change what an **installed** build shows — and it costs nothing: [`string_from`] walks a block
+// of sixteen by index, an absent row comes back empty, and the sweeps of completeness walk
+// [`INTERFACE_STRINGS`], which no longer names it.
 /// «Горячая клавиша» — the second group of FR-92.
 pub const IDS_GROUP_HOTKEY: u16 = 3005;
 /// The label of the hotkey field.
@@ -1966,12 +1971,15 @@ pub const IDS_CAPTURE_HINT: u16 = 3079;
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-pub const INTERFACE_STRINGS: [u16; 72] = [
+/// ⚠ **Seventy-one since task Т-31-3**, and the canon of «seventy-two» that stood here is
+/// authorised away by решение 99.4: `IDS_LANGUAGE_RESTART` was retired with the sentence it
+/// carried. The list is of *identifiers in use*, not of numbers in the range — 3004 is a hole
+/// and holes are not walked.
+pub const INTERFACE_STRINGS: [u16; 71] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
     IDS_LANGUAGE_LABEL,
-    IDS_LANGUAGE_RESTART,
     IDS_GROUP_HOTKEY,
     IDS_HOTKEY_LABEL,
     IDS_HOTKEY_SET,
@@ -2894,7 +2902,10 @@ const IDC_APPLY: i32 = 1080;
 // to replace their text, and a control identified by -1 is a control `GetDlgItem` cannot find.
 const IDC_GROUP_GENERAL: i32 = 1090;
 const IDC_LANGUAGE_LABEL: i32 = 1091;
-const IDC_LANGUAGE_RESTART: i32 = 1092;
+// ⚠ **1092 is retired, not free** — task Т-31-3, решение 99.4. It was `IDC_LANGUAGE_RESTART`,
+// the two-line static «вступит в силу после перезапуска», and it is gone from the template with
+// the sentence it carried. The place right of the language combo stays empty: решение 87
+// accepted these coordinates by eye and nothing else moves because a neighbour left.
 const IDC_GROUP_HOTKEY: i32 = 1093;
 const IDC_HOTKEY_LABEL: i32 = 1094;
 const IDC_GROUP_LAYOUTS: i32 = 1095;
@@ -3030,7 +3041,6 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_AUTOSTART, IDS_AUTOSTART),
     (IDC_LANGUAGE_LABEL, IDS_LANGUAGE_LABEL),
     (IDC_THEME_LABEL, IDS_THEME_LABEL),
-    (IDC_LANGUAGE_RESTART, IDS_LANGUAGE_RESTART),
     (IDC_SOUND, IDS_SOUND),
     // A row of «Общие» since task Т-23-2, решение 82.2 — the group «Выделение» it used to
     // belong to is gone, and the table follows the window.
@@ -4358,29 +4368,31 @@ unsafe fn with_window_state<S, R>(hwnd: HWND, f: impl FnOnce(&mut S) -> R) -> Op
 pub fn static_color_role(control: i32) -> StaticColorRole {
     match control {
         IDC_HOTKEY => StaticColorRole::Field,
-        IDC_HOTKEY_NOTE | IDC_LANGUAGE_RESTART | IDC_CYCLE_HINT | IDC_EXCLUSION_HINT
-        | IDC_LAYOUT_NOTE | IDC_LOG_DIR => StaticColorRole::Muted,
+        // Five since task Т-31-3 — `IDC_LANGUAGE_RESTART` was the sixth and решение 99.4
+        // retired it with its sentence.
+        IDC_HOTKEY_NOTE | IDC_CYCLE_HINT | IDC_EXCLUSION_HINT | IDC_LAYOUT_NOTE | IDC_LOG_DIR => {
+            StaticColorRole::Muted
+        }
         _ => StaticColorRole::Label,
     }
 }
 
 /// The `SS_OWNERDRAW` labels of the settings template — FR-92а, task T-11-18.
 ///
-/// The single place the fifteen are listed on the drawing side, and the identifier gate the
+/// The single place the fourteen are listed on the drawing side, and the identifier gate the
 /// last sentence of SEC-05 asks for: a `WM_DRAWITEM` naming `ODT_STATIC` and anything else is
 /// refused before a DC is touched. Mirrored by hand from the `LTEXT` rows of `app.rc`, exactly
 /// as [`GROUP_BOXES`] and [`COMBO_BOXES`] are, and a test compares this list against the
 /// statics of the **built** template so the two cannot drift apart.
 ///
 /// Eighteen until task Т-23-2 took the three millisecond captions off the window with their
-/// fields.
+/// fields, and fifteen until task Т-31-3 took the restart hint off it (решение 99.4).
 ///
 /// ⚠ This is a list of *controls*, not of colours: the colour role of every one of them comes
 /// from [`static_color_role`], which task T-11-4 wrote and this task reuses unchanged.
-pub const OWNER_DRAWN_LABELS: [i32; 15] = [
+pub const OWNER_DRAWN_LABELS: [i32; 14] = [
     IDC_LANGUAGE_LABEL,
     IDC_THEME_LABEL,
-    IDC_LANGUAGE_RESTART,
     IDC_HOTKEY_LABEL,
     IDC_HOTKEY_NOTE,
     IDC_PAIR_SOURCE_LABEL,

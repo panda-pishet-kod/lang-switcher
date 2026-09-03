@@ -1729,10 +1729,10 @@ use lang_switcher::theme::{
 // identifiers would agree with any renumbering of them.
 #[test]
 fn the_static_colour_roles_follow_the_table_of_fr_92a() {
-    // The six explanatory notes and hints — muted ink over the window background.
+    // The explanatory notes and hints — muted ink over the window background. Six until task
+    // Т-31-3 retired 1092, `IDC_LANGUAGE_RESTART`, with its sentence (решение 99.4).
     for (control, name) in [
         (1011, "IDC_HOTKEY_NOTE"),
-        (1092, "IDC_LANGUAGE_RESTART"),
         (1098, "IDC_CYCLE_HINT"),
         (1105, "IDC_EXCLUSION_HINT"),
         (1027, "IDC_LAYOUT_NOTE"),
@@ -2678,14 +2678,15 @@ const FR_92_SECTIONS: [&str; 6] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 30] = [
+const TEMPLATE_TEXT: [&str; 29] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
     // The appearance row of FR-92а, task T-11-3, declared right after the language combo;
     // its own combo carries no text in the template — the items are added by the dialog.
     "Оформление:",
-    "вступит в силу после перезапуска",
+    // «вступит в силу после перезапуска» stood here until task Т-31-3. Решение 99.4 retired it:
+    // the language takes effect at once now, and a window that promised a restart would lie.
     // The sound switch of FR-100, task Т-21-5.
     "Звуковой отклик",
     // ⚠ Т-23-2, решение 82.2: the selection switch of FR-61 is the **last row of «Общие»**
@@ -2732,7 +2733,10 @@ const TEMPLATE_TEXT: [&str; 30] = [
 /// ⚠ And one control **arrived**: 1004, the sound switch task Т-21-5 added to «Общие» and
 /// never wrote into this list. A row missing here is a control whose disappearance no test
 /// notices, which is the whole point of the list; found while rewriting it for Т-23-2.
-const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
+///
+/// ⚠ **Thirty-seven since task Т-31-3**: 1092, «вступит в силу после перезапуска», left with
+/// its sentence (решение 99.4). Its number is retired, not freed, exactly as the eleven above.
+const TEMPLATE_CONTROLS: [(u32, &str); 37] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1003, "Общие: оформление — FR-92а"),
@@ -2761,7 +2765,8 @@ const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
     // interface having a second language at all.
     (1090, "Общие: заголовок группы"),
     (1091, "Общие: подпись «Язык интерфейса»"),
-    (1092, "Общие: «вступит в силу после перезапуска»"),
+    // 1092 — «вступит в силу после перезапуска» — снят задачей Т-31-3 (решение 99.4) вместе с
+    // предложением, которое перестало быть правдой: язык действует сразу.
     (1093, "Горячая клавиша: заголовок группы"),
     (1094, "Горячая клавиша: подпись «Клавиша»"),
     (1095, "Раскладки: заголовок группы"),
@@ -3276,10 +3281,10 @@ fn the_six_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
 // `SS_ICON` is the type that loads the 32 px frame of the `.ico`, and it draws no text.
 
 /// Every `LTEXT` of the settings template, by identifier and by what it says on the window.
-const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
+const OWNER_DRAWN_LABELS: [(u32, &str); 14] = [
     (1091, "Общие: подпись «Язык интерфейса»"),
     (1109, "Общие: подпись «Оформление»"),
-    (1092, "Общие: «вступит в силу после перезапуска»"),
+    // 1092 — «вступит в силу после перезапуска» — снят задачей Т-31-3, решение 99.4.
     (1094, "Горячая клавиша: подпись «Клавиша»"),
     (1011, "Горячая клавиша: предупреждение"),
     (1096, "Раскладки: подпись «Источник»"),
@@ -3529,12 +3534,12 @@ fn the_two_line_labels_keep_their_word_wrap() {
          tabs expanded; it is {format:#010x}"
     );
 
-    // The two labels the wrap exists for, and the height they need for a second line. A
-    // one-line label of this dialog is 9 dialog units high; these two are 18 and 16.
-    const TWO_LINE_LABELS: [(u32, &str, i32); 2] = [
-        (1092, "вступит в силу после перезапуска", 18),
-        (1062, "путь к папке журнала", 16),
-    ];
+    // The label the wrap exists for, and the height it needs for a second line. A one-line
+    // label of this dialog is 9 dialog units high; this one is 16.
+    //
+    // Two until task Т-31-3: «вступит в силу после перезапуска» (1092, 18 units) was retired
+    // with its sentence by решение 99.4, and the wrap now has exactly one customer.
+    const TWO_LINE_LABELS: [(u32, &str, i32); 1] = [(1062, "путь к папке журнала", 16)];
 
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
@@ -7770,7 +7775,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// The identifiers come from the crate — they are the contract between `app.rc` and
 /// `src\settings.rs`, and checking that contract is the point. The text does not.
-const FR_94_STRINGS: [(u16, &str, &str); 72] = [
+///
+/// ⚠ **Seventy-one since task Т-31-3** — решение 99.4 authorised the canon of «seventy-two»
+/// away with `IDS_LANGUAGE_RESTART`.
+const FR_94_STRINGS: [(u16, &str, &str); 71] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7787,11 +7795,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 72] = [
         "Язык интерфейса:",
         "Interface language:",
     ),
-    (
-        settings::IDS_LANGUAGE_RESTART,
-        "вступит в силу после перезапуска",
-        "takes effect after a restart",
-    ),
+    // 3004 — «вступит в силу после перезапуска» / «takes effect after a restart» — снята
+    // задачей Т-31-3 из всех четырнадцати таблиц: решение 99.4, язык действует сразу.
+    // Номер оставлен дырой, как 3017..3021, 3023, 3024 и 3056.
     (settings::IDS_GROUP_HOTKEY, "Горячая клавиша", "Hotkey"),
     (settings::IDS_HOTKEY_LABEL, "Клавиша:", "Key:"),
     (settings::IDS_HOTKEY_SET, "Задать", "Set"),
@@ -12216,55 +12222,75 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
     }
 }
 
-/// **Defect Г-1 of the Э12 comparison, «критично»** — the hint of the language row and the
-/// «Оформление» combo box are disjoint rectangles.
+/// **Defect Г-1 of the Э12 comparison, «критично»** — nothing overlaps the «Оформление» combo
+/// box, and the place the retired restart hint left beside the language row is empty.
 ///
-/// An `SS_OWNERDRAW` static fills its own rectangle with `panel_bg` before it writes a word,
-/// so a static overlapping a combo box does not sit on top of it — it **erases** the top of
-/// the frame the background drew. The template is where the overlap was and the template is
-/// where it is answered: two rectangles, disjoint by arithmetic, with air between the rows.
+/// An `SS_OWNERDRAW` static fills its own rectangle with `panel_bg` before it writes a word, so
+/// a static overlapping a combo box does not sit on top of it — it **erases** the top of the
+/// frame the background drew.
+///
+/// ⚠ **Rewritten by task Т-31-3.** The defect had one culprit — the hint 1092 sitting beside the
+/// language row — and решение 99.4 retired that control with its sentence. A test written about
+/// two rectangles would now be a test about one, so it is written about the property instead:
+/// **no** control of the template may overlap the combo, and 1092 is not in the template at all.
+/// The guard is stronger than the one it replaces and it costs the same line.
 #[test]
-fn the_restart_hint_and_the_appearance_row_do_not_overlap() {
+fn nothing_overlaps_the_appearance_row_and_the_hint_is_gone() {
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
-    let (hint_left, hint_top, hint_right, hint_bottom) = template.rect_of(1092);
-    let (combo_left, combo_top, combo_right, _) = template.rect_of(1003);
-
-    println!(
-        "хинт (1092): {hint_left},{hint_top}..{hint_right},{hint_bottom}; \
-         «Оформление» (1003): {combo_left},{combo_top}..{combo_right},…"
+    assert!(
+        !template.controls.contains(&1092),
+        "1092 — «вступит в силу после перезапуска» — was retired by решение 99.4; the place \
+         right of the language combo stays empty and the layout does not move"
     );
 
-    // Where the generator puts the hint: beside the language row it belongs to.
-    //
-    // ⚠ **x 132 → 138 by решение 87 п. 3** (task Т-26-3). The generator's x was the address of
-    // «right of the language combo», and that is what the hint still is: the label before the
-    // combo grew by six units so «Язык интерфейса:» would stop being cut off, the combo moved
-    // by six after it, and the hint moved by six after the combo. The *y* is the generator's
-    // own and has not moved — this test is about the row, and the row is where it was.
-    assert_eq!(
-        (hint_left, hint_top),
-        (138, 32),
-        "the hint stands beside the language row — the generator's y = 32, and the x the \
-         widened label of решение 87 п. 3 pushed it to"
-    );
+    let (combo_left, combo_top, combo_right, combo_bottom) = template.rect_of(1003);
 
-    // Disjoint, and by the vertical: the two share the whole of their width.
+    println!("«Оформление» (1003): {combo_left},{combo_top}..{combo_right},{combo_bottom}");
+
+    // ⚠ The closed part of the combo is twelve dialog units (task T-12-2); the rectangle the
+    // template declares carries the **dropped-down list** below it, and a control standing
+    // under the closed part is not the defect. What Г-1 was about is the *top* of the frame,
+    // so the band this test guards is the closed part.
+    let closed_bottom = combo_top + 12;
+    let mut checked = 0;
+
+    // ⚠ **Statics only, and the six panels are deliberately not among them.** A panel is a
+    // `Button` of class 0x0080 carrying `NOT WS_VISIBLE`, and it contains every control of its
+    // group by construction — «Общие» (1090) is 7,7 210×94 and the combo sits inside it. What
+    // Г-1 was about is a *static*: `SS_OWNERDRAW` fills its own rectangle before it writes.
+    const STATIC_CLASS: u16 = 0x0082;
+
+    for (id, x, y, cx, cy) in &template.bounds {
+        let is_static = template
+            .classes
+            .iter()
+            .any(|(other, class)| other == id && *class == Some(STATIC_CLASS));
+
+        if !is_static {
+            continue;
+        }
+
+        checked += 1;
+
+        let overlaps =
+            *x < combo_right && combo_left < x + cx && *y < closed_bottom && combo_top < y + cy;
+
+        assert!(
+            !overlaps,
+            "static {id} ({x},{y} {cx}×{cy}) overlaps the closed part of «Оформление» \
+             ({combo_left},{combo_top}..{combo_right},{closed_bottom}) — an SS_OWNERDRAW static \
+             there erases the top of the combo box's frame, which is defect Г-1"
+        );
+    }
+
+    println!("{checked} statics checked against the combo");
+
     assert!(
-        hint_left < combo_right && combo_left < hint_right,
-        "the two rectangles overlap horizontally, which is why the vertical is what has to \
-         part them"
-    );
-    assert!(
-        hint_bottom <= combo_top,
-        "the hint ends at {hint_bottom} and «Оформление» starts at {combo_top} — the static \
-         erases the top of the combo box's frame, which is defect Г-1"
-    );
-    assert!(
-        combo_top - hint_bottom >= 2,
-        "there has to be air between the two rows: {} units",
-        combo_top - hint_bottom
+        checked >= 14,
+        "«overlaps: none» out of a handful of controls is the cheapest lie such a test tells: \
+         {checked} statics is not this template"
     );
 
     // And the row still fits the panel «Общие».
@@ -13035,6 +13061,79 @@ fn every_locale_carries_every_interface_string() {
         "every one of the twelve tables must carry all {} identifiers; holes:\n{}",
         settings::INTERFACE_STRINGS.len(),
         empty.join("\n")
+    );
+}
+
+/// **Task Т-31-3 — the retired number 3004 is a hole, and a hole costs nothing.**
+///
+/// Решение 99.4 took `IDS_LANGUAGE_RESTART` out of all fourteen tables and left its number
+/// where it was, because a string identifier that moved would change what an **installed** build
+/// shows. Three facts, measured on the built binary rather than reasoned about:
+///
+/// 1. `INTERFACE_STRINGS` no longer names 3004, so the completeness sweep above — the one that
+///    would have failed on an empty row — does not walk it. The vocabulary is a list of
+///    identifiers *in use*, not a range.
+/// 2. The row really is gone from every one of the fourteen tables. A sweep that only checked
+///    the crate's list would pass a resource that still carried the string.
+/// 3. **The hole does not take its neighbours with it.** Strings live sixteen to a resource and
+///    3004 sits in the middle of the block 3000..3015; `settings::string_from` walks that block
+///    by index, so a row that stopped short would silently empty everything after it. 3003 and
+///    3005 — the two immediate neighbours — and 3015, the last of the block, are read back in
+///    all fourteen locales.
+#[test]
+fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
+    const RETIRED: u16 = 3004;
+
+    assert!(
+        !settings::INTERFACE_STRINGS.contains(&RETIRED),
+        "the vocabulary of the interface must not name a retired identifier"
+    );
+    assert_eq!(
+        settings::INTERFACE_STRINGS.len(),
+        71,
+        "seventy-one identifiers in use — решение 99.4 authorised the canon of seventy-two away"
+    );
+
+    let product = ProductImage::shared();
+    let mut still_there: Vec<String> = Vec::new();
+    let mut empty_neighbours: Vec<String> = Vec::new();
+    let mut read = 0;
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let retired = product.string_of_langid(langid, RETIRED);
+
+        if !retired.trim().is_empty() {
+            still_there.push(format!("{tag} ({langid:#06X}) still carries «{retired}»"));
+        }
+
+        // The two neighbours of the hole and the last row of the same sixteen-string block.
+        for id in [3003_u16, 3005, 3015] {
+            let string = product.string_of_langid(langid, id);
+            read += 1;
+
+            if string.trim().is_empty() {
+                empty_neighbours.push(format!("{tag} ({langid:#06X}) has no string {id}"));
+            }
+        }
+    }
+
+    println!("--- {read} neighbour rows read across the hole at {RETIRED} ---");
+
+    assert!(
+        still_there.is_empty(),
+        "the row was retired from every table, not only from the crate's list:\n{}",
+        still_there.join("\n")
+    );
+    assert!(
+        empty_neighbours.is_empty(),
+        "a hole in the middle of a sixteen-string block must not empty the rows after it:\n{}",
+        empty_neighbours.join("\n")
+    );
+    assert_eq!(
+        read,
+        ALL_LOCALES.len() * 3,
+        "three rows in each of the fourteen locales — «no holes» out of no readings is the \
+         cheapest lie such a sweep tells"
     );
 }
 
