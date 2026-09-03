@@ -488,7 +488,7 @@ schema_version = 3
 [general]
 enabled   = true
 autostart = true
-language  = "ru"              # ru | en
+language  = "ru"              # ru | en | uk | de | fr | es | pt | it | pl | cs | tr | el
 theme     = "system"          # system | light | dark
 
 [hotkey]
