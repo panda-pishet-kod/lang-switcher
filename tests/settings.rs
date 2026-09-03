@@ -6229,7 +6229,7 @@ fn the_about_dialog_template_carries_its_elements() {
     // Every element the task names: the icon, the name row, the version row, the two
     // description lines, the «Как пользоваться» block of task Т-23-4 and the one button. One
     // row per element, so a lost control is a failing test and not a smaller window.
-    const ABOUT_CONTROLS: [(u32, &str); 17] = [
+    const ABOUT_CONTROLS: [(u32, &str); 18] = [
         (1120, "иконка программы"),
         (1121, "имя программы"),
         (1122, "строка версии"),
@@ -6246,6 +6246,8 @@ fn the_about_dialog_template_carries_its_elements() {
         (1133, "Как пользоваться: строка 3"),
         (1134, "Как пользоваться: строка 4"),
         (1135, "Как пользоваться: строка 5"),
+        // Task Т-32-4, FR-103: the one control this window gained — the way into «От автора».
+        (1136, "кнопка «От автора…»"),
         (1, "кнопка «ОК»"),
     ];
 
@@ -6259,7 +6261,7 @@ fn the_about_dialog_template_carries_its_elements() {
     assert_eq!(
         template.controls.len(),
         ABOUT_CONTROLS.len(),
-        "the about dialog carries exactly its seventeen controls and nothing else"
+        "the about dialog carries exactly its eighteen controls and nothing else"
     );
 
     // The visible literals, in template order. The version row is empty on purpose — it is
@@ -6279,6 +6281,9 @@ fn the_about_dialog_template_carries_its_elements() {
             "3",
             "4",
             "5",
+            // Task Т-32-4: the button that leads to «От автора». Its caption is a template
+            // literal like every other, and FR-94 replaces it on the live window.
+            "От автора…",
             "ОК",
         ],
         "the visible strings of the about dialog came out of rc.exe wrong"
@@ -7987,7 +7992,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 73] = [
+const FR_94_STRINGS: [(u16, &str, &str); 131] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8217,6 +8222,301 @@ const FR_94_STRINGS: [(u16, &str, &str); 73] = [
     // suspended» — not the hook's, which is what IDS_HOOK_UP above speaks of.
     (settings::IDS_TIP_ACTIVE, "активна", "active"),
     (settings::IDS_TIP_PAUSED, "приостановлена", "suspended"),
+    // FR-101, FR-102 and FR-103, task Т-32-2, вопрос 101 — the letters from the author. The
+    // heart is «♥» (U+2665) and not the mock-up's «🖤»: measured, `scratchpad-Э32\глиф-сердце.log`
+    // — U+2665 is in all three faces this program draws in, and U+1F5A4 is outside the BMP,
+    // where the glyph-coverage instrument cannot answer at all.
+    (
+        settings::IDS_LETTER_CAPTION,
+        "Письмо от автора",
+        "A letter from the author",
+    ),
+    (settings::IDS_CLOSE, "Закрыть", "Close"),
+    (
+        settings::IDS_CHANNEL_OPEN,
+        "Открыть канал",
+        "Open the channel",
+    ),
+    (
+        settings::IDS_SUPPORT_OPEN,
+        "Открыть страницу поддержки",
+        "Open the support page",
+    ),
+    (
+        settings::IDS_HELLO_TITLE,
+        "Здравствуйте! Меня зовут Панда.",
+        "Hello! My name is Panda.",
+    ),
+    (
+        settings::IDS_HELLO_LEAD,
+        "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: чинит \
+         слово, набранное не в той раскладке. Вот как это выглядит:",
+        "I made Lang Switcher and I am glad you installed it. The program does one thing: it \
+         fixes a word typed in the wrong layout. Here is what that looks like:",
+    ),
+    (
+        settings::IDS_HELLO_DEMO_CAP,
+        "Набрали «ghbdtn», нажали {0}: получили «привет», раскладка переключилась на русскую. \
+         Ещё раз — и как было.",
+        "You typed «ghbdtn», pressed {0} and got «привет», with the layout switched to Russian. \
+         Press it again and it is back as it was.",
+    ),
+    (
+        settings::IDS_HELLO_PANEL,
+        "Три вещи на первый день",
+        "Three things for the first day",
+    ),
+    (
+        settings::IDS_HELLO_ROW_1,
+        "{0} перекодирует последнее набранное слово и переключает раскладку. Работает в любом \
+         окне.",
+        "{0} converts the last word you typed and switches the layout. It works in any window.",
+    ),
+    (
+        settings::IDS_HELLO_ROW_2,
+        "Ещё раз {0}: слово вернётся к исходному, буква в букву.",
+        "Press {0} again and the word comes back exactly as it was, letter for letter.",
+    ),
+    (
+        settings::IDS_HELLO_ROW_3,
+        "Значок в трее: пауза, настройки и «О программе», где есть раздел «Как пользоваться».",
+        "The tray icon: pause, settings and «About», which has a «How to use it» section.",
+    ),
+    (
+        settings::IDS_HELLO_SETTINGS,
+        "Открыть настройки",
+        "Open settings",
+    ),
+    (settings::IDS_HELLO_OK, "Понятно", "Got it"),
+    (
+        settings::IDS_THANKS_TITLE,
+        "Прошёл месяц. Спасибо!",
+        "A month has passed. Thank you!",
+    ),
+    (
+        settings::IDS_THANKS_LEAD,
+        "Здравствуйте, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, \
+         что вам с ним удобно: я потратил много сил, чтобы программа была лёгкой и просто \
+         работала.",
+        "Hello, it is Panda again. You installed Lang Switcher a month ago, and I hope it suits \
+         you: I put a great deal of work into keeping it light and simply working.",
+    ),
+    (
+        settings::IDS_THANKS_PARA,
+        "Если понравилось, расскажите об этом в канале. Если что-то не так, напишите мне: \
+         негатив тоже важен, только узнав о проблеме, её можно починить. Мастер обращения есть \
+         в меню значка, пункт «Написать автору…».",
+        "If you liked it, say so in the channel. If something is wrong, write to me: criticism \
+         matters too — a problem can only be fixed once somebody knows about it. The wizard is \
+         in the tray menu, under «Write to the author…».",
+    ),
+    (
+        settings::IDS_SUPPORT_PANEL,
+        "Поддержать автора",
+        "Support the author",
+    ),
+    (
+        settings::IDS_SUPPORT_TEXT,
+        "Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице \
+         поддержки есть несколько способов. Классно, что вы цените чужой труд ♥",
+        "The program is free and will stay that way. If you would like to say thank you in \
+         deed, the support page lists a few ways. It is good that you value somebody else's \
+         work ♥",
+    ),
+    (
+        settings::IDS_THANKS_SNOOZE,
+        "Напомнить через неделю",
+        "Remind me in a week",
+    ),
+    (
+        settings::IDS_THANKS_FOOT,
+        "Это письмо показывается один раз.",
+        "This letter is shown once.",
+    ),
+    (
+        settings::IDS_WHATSNEW_TITLE,
+        "Что нового в {0}",
+        "What is new in {0}",
+    ),
+    (
+        settings::IDS_WHATSNEW_FROM,
+        "было {0} · обновлено сегодня",
+        "you had {0} · updated today",
+    ),
+    (
+        settings::IDS_WHATSNEW_TODAY,
+        "обновлено сегодня",
+        "updated today",
+    ),
+    (
+        settings::IDS_WHATSNEW_PANEL,
+        "Три изменения",
+        "Three changes",
+    ),
+    (
+        settings::IDS_WHATSNEW_1,
+        "Письма от автора: «Привет» при первом запуске, «Что нового» после обновления и \
+         «Спасибо» через месяц.",
+        "Letters from the author: «Hello» on the first run, «What is new» after an update and \
+         «Thank you» after a month.",
+    ),
+    (
+        settings::IDS_WHATSNEW_2,
+        "Окно «От автора»: поддержка, канал и состояние ленты новостей.",
+        "The «From the author» window: support, the channel and the state of the news feed.",
+    ),
+    (
+        settings::IDS_WHATSNEW_3,
+        "На значке в трее загорается точка, когда есть непрочитанное письмо.",
+        "The tray icon shows a dot while a letter is unread.",
+    ),
+    (
+        settings::IDS_WHATSNEW_FULL,
+        "Полный список изменений опубликован в канале.",
+        "The full list of changes is published in the channel.",
+    ),
+    (settings::IDS_AUTHOR_CAPTION, "От автора", "From the author"),
+    (
+        settings::IDS_AUTHOR_VERSION,
+        "версия {0} · Панда, он же Panda_Pishet_Kod",
+        "version {0} · Panda, also known as Panda_Pishet_Kod",
+    ),
+    (settings::IDS_AUTHOR_PANEL, "Автор", "The author"),
+    (
+        settings::IDS_AUTHOR_TEXT,
+        "Программу делает один человек в свободное время. Программа бесплатная и останется \
+         такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько \
+         способов. Классно, что вы цените чужой труд ♥",
+        "The program is made by one person in their spare time. It is free and will stay that \
+         way. If you would like to say thank you in deed, the support page lists a few ways. It \
+         is good that you value somebody else's work ♥",
+    ),
+    (
+        settings::IDS_NEWS_PANEL,
+        "Новости и обновления",
+        "News and updates",
+    ),
+    (
+        settings::IDS_NEWS_ABOUT_FEED,
+        "Раз в 15 дней программа читает один файл с сайта автора: письма и номер свежей версии. \
+         Больше она ничего не отправляет и не скачивает.",
+        "Once in fifteen days the program reads one file from the author's site: letters and \
+         the number of the latest version. It sends nothing else and downloads nothing.",
+    ),
+    (
+        settings::IDS_NEWS_NEVER_READ,
+        "Лента ещё не читалась.",
+        "The feed has not been read yet.",
+    ),
+    (
+        settings::IDS_NEWS_READ_ON,
+        "Лента прочитана {0}, подпись автора верна. Следующее чтение через {1} дней.",
+        "Feed read on {0}, the author's signature checks out. Next reading in {1} days.",
+    ),
+    (
+        settings::IDS_NEWS_LATEST,
+        "Установлена версия {0}, это последняя.",
+        "Version {0} is installed, and it is the latest.",
+    ),
+    (
+        settings::IDS_NEWS_AVAILABLE,
+        "Установлена версия {0}, доступна {1}.",
+        "Version {0} is installed, {1} is available.",
+    ),
+    (
+        settings::IDS_NEWS_DOWNLOAD,
+        "Открыть страницу загрузки",
+        "Open the download page",
+    ),
+    (
+        settings::IDS_NEWS_LETTERS,
+        "Последние письма",
+        "Recent letters",
+    ),
+    (
+        settings::IDS_NEWS_FILE_ONLY,
+        "Отключается в файле настроек: [letters] feed = false.",
+        "Turned off in the settings file: [letters] feed = false.",
+    ),
+    (
+        settings::IDS_NEWS_SWITCH,
+        "Сообщать об обновлениях и новостях автора",
+        "Tell me about the author's updates and news",
+    ),
+    (
+        settings::IDS_NEWS_SWITCH_SUB,
+        "Раз в 15 дней программа читает один файл с сайта автора. Больше она ничего не \
+         отправляет и не скачивает.",
+        "Once in fifteen days the program reads one file from the author's site. It sends \
+         nothing else and downloads nothing.",
+    ),
+    (settings::IDS_FEEDBACK_PANEL, "Обратная связь", "Feedback"),
+    (
+        settings::IDS_FEEDBACK_TEXT,
+        "Нашли ошибку или есть идея? Мастер соберёт обращение за пять шагов. Ничего не \
+         отправится само: текст попадёт в буфер обмена, а вставите его вы.",
+        "Found a bug or have an idea? The wizard puts a message together in five steps. Nothing \
+         is sent by itself: the text goes to the clipboard, and you paste it.",
+    ),
+    (
+        settings::IDS_WRITE_TO_AUTHOR,
+        "Написать автору…",
+        "Write to the author…",
+    ),
+    (
+        settings::IDS_LETTERS_CAPTION,
+        "Последние письма",
+        "Recent letters",
+    ),
+    (
+        settings::IDS_LETTERS_FOOT,
+        "Хранятся три последние новости. Когда приходит четвёртая, самая старая уходит, даже \
+         непрочитанная.",
+        "The three latest news items are kept. When a fourth arrives, the oldest goes, read or \
+         not.",
+    ),
+    (
+        settings::IDS_LETTERS_OPEN,
+        "Открыть письмо",
+        "Open the letter",
+    ),
+    (settings::IDS_NEWS_READ_BUTTON, "Прочитано", "Mark as read"),
+    (
+        settings::IDS_MENU_UNREAD,
+        "Непрочитанное письмо…",
+        "An unread letter…",
+    ),
+    (
+        settings::IDS_MENU_UPDATE,
+        "Доступна версия {0}…",
+        "Version {0} is available…",
+    ),
+    (
+        settings::IDS_TOAST_TITLE,
+        "Письмо от автора",
+        "A letter from the author",
+    ),
+    (
+        settings::IDS_TOAST_NEWS,
+        "У Панды новость для вас. Нажмите, чтобы прочитать, это займёт минуту.",
+        "Panda has news for you. Click to read it, it will take a minute.",
+    ),
+    (
+        settings::IDS_TOAST_THANKS,
+        "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать.",
+        "It has been a month since you installed it. Panda would like a word. Click to read it.",
+    ),
+    (
+        settings::IDS_TOAST_UPDATE_TITLE,
+        "Вышла версия {0}",
+        "Version {0} is out",
+    ),
+    (
+        settings::IDS_TOAST_UPDATE,
+        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать.",
+        "Three changes and a link to the download. Click to read it.",
+    ),
+    (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -13305,9 +13605,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        73,
-        "seventy-three identifiers in use — решение 99.4 authorised the canon of seventy-two \
-         away: the restart hint left and the two words of the tray tooltip arrived"
+        131,
+        "a hundred and thirty-one identifiers in use — the mandate of Э32 authorised the canon \
+         of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the fifty-eight \
+         strings of the letters from the author (FR-101…FR-103) are the growth"
     );
 
     let product = ProductImage::shared();

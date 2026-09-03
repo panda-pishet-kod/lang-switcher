@@ -2246,17 +2246,146 @@ pub const IDS_TIP_ACTIVE: u16 = 3080;
 /// The same while FR-91 holds it suspended.
 pub const IDS_TIP_PAUSED: u16 = 3081;
 
+// =========================================================================================
+// FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.
+// =========================================================================================
+//
+// Fifty-eight identifiers mirrored from `app.rc` by hand, exactly as every identifier above
+// is. A mismatch is not silent: the string comes back empty, `FindResourceExW` is journaled,
+// and the test that reads the tables out of the built binary compares them against these.
+
+/// The caption of the letter window — one window serves all five letters (FR-101).
+pub const IDS_LETTER_CAPTION: u16 = 3082;
+/// «Закрыть» — the button that closes a letter and asks for nothing.
+pub const IDS_CLOSE: u16 = 3083;
+/// «Открыть канал» — FR-103. Disabled while `letters::links::CHANNEL_URL` is a placeholder.
+pub const IDS_CHANNEL_OPEN: u16 = 3084;
+/// «Открыть страницу поддержки» — FR-103, on the same terms.
+pub const IDS_SUPPORT_OPEN: u16 = 3085;
+/// «Привет» — the heading.
+pub const IDS_HELLO_TITLE: u16 = 3086;
+/// «Привет» — the paragraph under the heading.
+pub const IDS_HELLO_LEAD: u16 = 3087;
+/// «Привет» — the caption under the demonstration; carries the key chip.
+pub const IDS_HELLO_DEMO_CAP: u16 = 3088;
+/// «Привет» — the caption of the panel.
+pub const IDS_HELLO_PANEL: u16 = 3089;
+/// «Привет» — the first of the three rows; carries the key chip.
+pub const IDS_HELLO_ROW_1: u16 = 3090;
+/// «Привет» — the second row; carries the key chip.
+pub const IDS_HELLO_ROW_2: u16 = 3091;
+/// «Привет» — the third row.
+pub const IDS_HELLO_ROW_3: u16 = 3092;
+/// «Привет» — the left button, which opens the settings window (FR-92).
+pub const IDS_HELLO_SETTINGS: u16 = 3093;
+/// «Привет» — the accented button.
+pub const IDS_HELLO_OK: u16 = 3094;
+/// «Спасибо» — the heading.
+pub const IDS_THANKS_TITLE: u16 = 3095;
+/// «Спасибо» — the paragraph under the heading.
+pub const IDS_THANKS_LEAD: u16 = 3096;
+/// «Спасибо» — the second paragraph.
+pub const IDS_THANKS_PARA: u16 = 3097;
+/// The caption of the «Поддержать автора» panel — FR-103.
+pub const IDS_SUPPORT_PANEL: u16 = 3098;
+/// The text of that panel, the heart included.
+pub const IDS_SUPPORT_TEXT: u16 = 3099;
+/// «Напомнить через неделю» — the one snooze of FR-101.
+pub const IDS_THANKS_SNOOZE: u16 = 3100;
+/// The line under «Спасибо»: it is shown once.
+pub const IDS_THANKS_FOOT: u16 = 3101;
+/// «Что нового» — the heading, with the version substituted.
+pub const IDS_WHATSNEW_TITLE: u16 = 3102;
+/// «Что нового» — the second line when the previous version is known.
+pub const IDS_WHATSNEW_FROM: u16 = 3103;
+/// «Что нового» — the second line when it is not (a file raised from schema 5).
+pub const IDS_WHATSNEW_TODAY: u16 = 3104;
+/// «Что нового» — the caption of the panel.
+pub const IDS_WHATSNEW_PANEL: u16 = 3105;
+/// ⚠ **Per-delivery text.** The first of the three sentences of «Что нового» — rewritten in all
+/// fourteen tables for every release; the check-list of `tools\release.ps1` is the reminder.
+pub const IDS_WHATSNEW_1: u16 = 3106;
+/// The second sentence — see [`IDS_WHATSNEW_1`].
+pub const IDS_WHATSNEW_2: u16 = 3107;
+/// The third sentence — see [`IDS_WHATSNEW_1`].
+pub const IDS_WHATSNEW_3: u16 = 3108;
+/// «Полный список изменений опубликован в канале.»
+pub const IDS_WHATSNEW_FULL: u16 = 3109;
+/// The caption of the «От автора» window — FR-103.
+pub const IDS_AUTHOR_CAPTION: u16 = 3110;
+/// The line under the program's name in that window: the version and the author's alias.
+pub const IDS_AUTHOR_VERSION: u16 = 3111;
+/// The caption of its first panel.
+pub const IDS_AUTHOR_PANEL: u16 = 3112;
+/// The text of that panel, the heart included.
+pub const IDS_AUTHOR_TEXT: u16 = 3113;
+/// The caption of the «Новости и обновления» panel — FR-102.
+pub const IDS_NEWS_PANEL: u16 = 3114;
+/// What the feed is and how often it is read — said out loud from the first day (FR-102).
+pub const IDS_NEWS_ABOUT_FEED: u16 = 3115;
+/// «Лента ещё не читалась.»
+pub const IDS_NEWS_NEVER_READ: u16 = 3116;
+/// When the feed was read, that the signature checked out, and when the next reading is.
+pub const IDS_NEWS_READ_ON: u16 = 3117;
+/// «Установлена версия X, это последняя.»
+pub const IDS_NEWS_LATEST: u16 = 3118;
+/// «Установлена версия X, доступна Y.»
+pub const IDS_NEWS_AVAILABLE: u16 = 3119;
+/// «Открыть страницу загрузки» — the link the `update` entry of the feed carries.
+pub const IDS_NEWS_DOWNLOAD: u16 = 3120;
+/// «Последние письма» — the button that opens the list window.
+pub const IDS_NEWS_LETTERS: u16 = 3121;
+/// The quiet line the panel carries before the switch of FR-102 appears.
+pub const IDS_NEWS_FILE_ONLY: u16 = 3122;
+/// The switch itself, once it may be shown.
+pub const IDS_NEWS_SWITCH: u16 = 3123;
+/// The sentence under the switch.
+pub const IDS_NEWS_SWITCH_SUB: u16 = 3124;
+/// The caption of the «Обратная связь» panel.
+pub const IDS_FEEDBACK_PANEL: u16 = 3125;
+/// The text of that panel.
+pub const IDS_FEEDBACK_TEXT: u16 = 3126;
+/// «Написать автору…» — the permanent entry of FR-91 and the button of FR-103.
+pub const IDS_WRITE_TO_AUTHOR: u16 = 3127;
+/// The caption of the «Последние письма» window — FR-101.
+pub const IDS_LETTERS_CAPTION: u16 = 3128;
+/// The line under it: three news items are kept, the fourth pushes the oldest out.
+pub const IDS_LETTERS_FOOT: u16 = 3129;
+/// «Открыть письмо» — the button of one entry of that window.
+pub const IDS_LETTERS_OPEN: u16 = 3130;
+/// «Прочитано» — the only thing that marks a news item read (FR-101).
+pub const IDS_NEWS_READ_BUTTON: u16 = 3131;
+/// The temporary menu entry of FR-91: there is an unread letter.
+pub const IDS_MENU_UNREAD: u16 = 3132;
+/// The temporary menu entry of FR-91: a newer version exists.
+pub const IDS_MENU_UPDATE: u16 = 3133;
+/// The title of the balloon a letter is announced by — `NIF_INFO`, FR-101.
+pub const IDS_TOAST_TITLE: u16 = 3134;
+/// The balloon's text before a «Новость».
+pub const IDS_TOAST_NEWS: u16 = 3135;
+/// The balloon's text before «Спасибо».
+pub const IDS_TOAST_THANKS: u16 = 3136;
+/// The balloon's title before «Обновление», with the version substituted.
+pub const IDS_TOAST_UPDATE_TITLE: u16 = 3137;
+/// The balloon's text before «Обновление».
+pub const IDS_TOAST_UPDATE: u16 = 3138;
+/// The caption of the button the about window gains — FR-103.
+pub const IDS_ABOUT_AUTHOR: u16 = 3139;
+
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
 /// Exported rather than rebuilt in the test: what the test must not import is the *text*, and
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-/// ⚠ **Seventy-three since task Т-31-4**, and the canon of «seventy-two» that stood here is
-/// authorised away by решение 99.4: `IDS_LANGUAGE_RESTART` was retired with the sentence it
-/// carried (71), and the two words of the tray tooltip arrived (73). The list is of
-/// *identifiers in use*, not of numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 73] = [
+/// ⚠ **A hundred and thirty-one since task Т-32-2**, and the canon of «seventy-three» that
+/// stood here is authorised away by the mandate of Э32 («канон `INTERFACE_STRINGS` растёт с
+/// 73 — цифру в отчёт»): the fifty-eight strings of the letters from the author arrived
+/// (FR-101, FR-102, FR-103). Before that it was seventy-three since task Т-31-4, and
+/// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
+/// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
+/// numbers in the range — 3004 is a hole and holes are not walked.
+pub const INTERFACE_STRINGS: [u16; 131] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2330,6 +2459,64 @@ pub const INTERFACE_STRINGS: [u16; 73] = [
     IDS_CAPTURE_HINT,
     IDS_TIP_ACTIVE,
     IDS_TIP_PAUSED,
+    IDS_LETTER_CAPTION,
+    IDS_CLOSE,
+    IDS_CHANNEL_OPEN,
+    IDS_SUPPORT_OPEN,
+    IDS_HELLO_TITLE,
+    IDS_HELLO_LEAD,
+    IDS_HELLO_DEMO_CAP,
+    IDS_HELLO_PANEL,
+    IDS_HELLO_ROW_1,
+    IDS_HELLO_ROW_2,
+    IDS_HELLO_ROW_3,
+    IDS_HELLO_SETTINGS,
+    IDS_HELLO_OK,
+    IDS_THANKS_TITLE,
+    IDS_THANKS_LEAD,
+    IDS_THANKS_PARA,
+    IDS_SUPPORT_PANEL,
+    IDS_SUPPORT_TEXT,
+    IDS_THANKS_SNOOZE,
+    IDS_THANKS_FOOT,
+    IDS_WHATSNEW_TITLE,
+    IDS_WHATSNEW_FROM,
+    IDS_WHATSNEW_TODAY,
+    IDS_WHATSNEW_PANEL,
+    IDS_WHATSNEW_1,
+    IDS_WHATSNEW_2,
+    IDS_WHATSNEW_3,
+    IDS_WHATSNEW_FULL,
+    IDS_AUTHOR_CAPTION,
+    IDS_AUTHOR_VERSION,
+    IDS_AUTHOR_PANEL,
+    IDS_AUTHOR_TEXT,
+    IDS_NEWS_PANEL,
+    IDS_NEWS_ABOUT_FEED,
+    IDS_NEWS_NEVER_READ,
+    IDS_NEWS_READ_ON,
+    IDS_NEWS_LATEST,
+    IDS_NEWS_AVAILABLE,
+    IDS_NEWS_DOWNLOAD,
+    IDS_NEWS_LETTERS,
+    IDS_NEWS_FILE_ONLY,
+    IDS_NEWS_SWITCH,
+    IDS_NEWS_SWITCH_SUB,
+    IDS_FEEDBACK_PANEL,
+    IDS_FEEDBACK_TEXT,
+    IDS_WRITE_TO_AUTHOR,
+    IDS_LETTERS_CAPTION,
+    IDS_LETTERS_FOOT,
+    IDS_LETTERS_OPEN,
+    IDS_NEWS_READ_BUTTON,
+    IDS_MENU_UNREAD,
+    IDS_MENU_UPDATE,
+    IDS_TOAST_TITLE,
+    IDS_TOAST_NEWS,
+    IDS_TOAST_THANKS,
+    IDS_TOAST_UPDATE_TITLE,
+    IDS_TOAST_UPDATE,
+    IDS_ABOUT_AUTHOR,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

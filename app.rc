@@ -46,6 +46,19 @@
 // place of MessageBoxW, which no documented means can repaint. Next in the dialog row.
 #define IDD_ABOUT 201
 
+// The three windows of the letters from the author — FR-101 and FR-103, task Т-32-2. Next in
+// the dialog row, contiguous with the two above: a dialog identifier is only unique within its
+// type, and keeping the numbering distinct makes a mismatched constant in the Rust source show
+// up as a missing resource rather than as the wrong window.
+//
+// One template serves **five letters** (IDD_LETTER): «Привет», «Спасибо», «Что нового»,
+// «Обновление» and «Новость» differ in which of its slots are filled, not in their shape. The
+// list of recent letters (IDD_LETTERS_LIST) is the same outline with four entry slots in the
+// panel, and «От автора» (IDD_AUTHOR) is the wider window of FR-103.
+#define IDD_LETTER 202
+#define IDD_LETTERS_LIST 203
+#define IDD_AUTHOR 204
+
 // The two identifiers the dialog manager itself acts on. Named here for the same reason
 // VS_VERSION_INFO is defined above: they are macros of windows.h, this script deliberately
 // does not include it, and their values are fixed by the window manager.
@@ -150,6 +163,103 @@
 #define IDC_ABOUT_HELP_3       1133
 #define IDC_ABOUT_HELP_4       1134
 #define IDC_ABOUT_HELP_5       1135
+// The «От автора» button of FR-103, task Т-32-4 — the one control the about window gains. It
+// stands to the left of «ОК» and the window does not grow: решение 101 п. 7.
+#define IDC_ABOUT_AUTHOR       1136
+
+// Controls of the letter template IDD_LETTER — FR-101, task Т-32-2. A block of their own from
+// 1200, contiguous and clear of everything above.
+//
+// ⚠ **These rectangles are a pool of slots and not a layout.** One template serves five
+// letters, each filling a different set of slots, so the position and the height of every
+// control below are computed at `WM_INITDIALOG` by `letters::layout` out of the text actually
+// put into it, measured with the very `DrawTextW` that will draw it. What the template fixes is
+// the *window* — its width, its height and its font — and which slots exist. A slot no letter
+// fills is hidden, and a hidden control paints nothing; that is what keeps the rule of the two
+// windows above true here as well: **no two owner-drawn statics ever overlap**, because the
+// layout assigns disjoint rectangles and hides the rest.
+#define IDC_LETTER_ICON        1200
+#define IDC_LETTER_TITLE       1201
+#define IDC_LETTER_SUBTITLE    1202
+#define IDC_LETTER_LEAD        1203
+#define IDC_LETTER_PARA        1204
+// The demonstration of «Привет» — an owner-drawn static this program animates while the window
+// is open (FR-101, NFR-10: the timer runs only then).
+#define IDC_LETTER_DEMO        1205
+#define IDC_LETTER_DEMO_CAP    1206
+// The panel: a hidden CONTROL on the terms the six panels of the settings dialog and the one
+// panel of the about window are on — it carries the caption and the rectangle, and the window's
+// own WM_ERASEBKGND draws the block.
+#define IDC_LETTER_PANEL       1207
+#define IDC_LETTER_PANEL_TITLE 1208
+#define IDC_LETTER_PANEL_TEXT  1209
+#define IDC_LETTER_N1          1210
+#define IDC_LETTER_N2          1211
+#define IDC_LETTER_N3          1212
+#define IDC_LETTER_N4          1213
+#define IDC_LETTER_ROW_1       1214
+#define IDC_LETTER_ROW_2       1215
+#define IDC_LETTER_ROW_3       1216
+#define IDC_LETTER_ROW_4       1217
+#define IDC_LETTER_PANEL_BTN_1 1218
+#define IDC_LETTER_PANEL_BTN_2 1219
+#define IDC_LETTER_LEFT        1220
+#define IDC_LETTER_RIGHT       1221
+#define IDC_LETTER_ACCENT      1222
+#define IDC_LETTER_FOOT        1223
+
+// Controls of the «Последние письма» window IDD_LETTERS_LIST — FR-101, task Т-32-2. Four
+// entries of five controls each, in four contiguous runs, so that the identifier of entry `i`
+// is the first of its run plus `i`.
+#define IDC_LETTERS_PANEL      1230
+#define IDC_LETTERS_T1         1231
+#define IDC_LETTERS_T2         1232
+#define IDC_LETTERS_T3         1233
+#define IDC_LETTERS_T4         1234
+#define IDC_LETTERS_D1         1235
+#define IDC_LETTERS_D2         1236
+#define IDC_LETTERS_D3         1237
+#define IDC_LETTERS_D4         1238
+#define IDC_LETTERS_X1         1239
+#define IDC_LETTERS_X2         1240
+#define IDC_LETTERS_X3         1241
+#define IDC_LETTERS_X4         1242
+#define IDC_LETTERS_B1         1243
+#define IDC_LETTERS_B2         1244
+#define IDC_LETTERS_B3         1245
+#define IDC_LETTERS_B4         1246
+#define IDC_LETTERS_R1         1247
+#define IDC_LETTERS_R2         1248
+#define IDC_LETTERS_R3         1249
+#define IDC_LETTERS_R4         1250
+#define IDC_LETTERS_CLOSE      1251
+#define IDC_LETTERS_FOOT       1252
+
+// Controls of the «От автора» window IDD_AUTHOR — FR-103, task Т-32-3. Three panels: the
+// author, the news and the feed, and the way to write to the author.
+#define IDC_AUTHOR_ICON        1260
+#define IDC_AUTHOR_NAME        1261
+#define IDC_AUTHOR_VERSION     1262
+#define IDC_AUTHOR_PANEL       1263
+#define IDC_AUTHOR_TEXT        1264
+#define IDC_AUTHOR_SUPPORT     1265
+#define IDC_AUTHOR_CHANNEL     1266
+#define IDC_NEWS_PANEL         1267
+#define IDC_NEWS_ABOUT         1268
+#define IDC_NEWS_STATE         1269
+#define IDC_NEWS_VERSION       1270
+#define IDC_NEWS_DOWNLOAD      1271
+#define IDC_NEWS_LETTERS       1272
+#define IDC_NEWS_FILE_ONLY     1273
+// The switch of FR-102, which appears only after the feed has shown a letter and ninety days
+// have passed. A check box on the terms every check box of this program is on: BS_OWNERDRAW
+// with BS_NOTIFY, the glyph drawn by this program.
+#define IDC_NEWS_SWITCH        1274
+#define IDC_NEWS_SWITCH_SUB    1275
+#define IDC_FEEDBACK_PANEL     1276
+#define IDC_FEEDBACK_TEXT      1277
+#define IDC_FEEDBACK_WRITE     1278
+#define IDC_AUTHOR_CLOSE       1279
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -696,7 +806,141 @@ BEGIN
     LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 199, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_HELP_5, 30, 199, 142, 19, SS_OWNERDRAW
 
+    // FR-103, task Т-32-4: the way into «От автора». It stands to the left of «ОК» and the
+    // window does not grow — решение 101 п. 7 — which is why it takes the air that was already
+    // there rather than a row of its own. 86 units is 150 px at 96 DPI: the longest of the
+    // fourteen captions measured by the fitting stand with room to spare, and it stops 46 units
+    // short of «ОК», so the two never meet however wide a locale writes it.
+    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 235, 86, 14, BS_OWNERDRAW
     PUSHBUTTON      "ОК", IDOK, 144, 235, 39, 14, BS_OWNERDRAW
+END
+
+// =======================================================================================
+// FR-101 and FR-103 -- the windows of the letters from the author. Task Т-32-2.
+// =======================================================================================
+//
+// ⚠ **Three templates, and every rectangle in them is a slot rather than a layout.**
+//
+// The two windows above are laid out to the unit in this file, and each was cut against a
+// mock-up measured on the raised window (tasks Т-23-4, Т-26-2). These three cannot be: one
+// template serves five letters, a letter's panel holds between nothing and four rows, and the
+// text of a news item comes out of the author's feed at run time. So `letters::layout` places
+// every control top to bottom out of the height its own text actually needs, measured with the
+// same `DrawTextW` that will draw it, and hides the slots this letter does not use.
+//
+// What the templates below therefore fix is exactly three things, and they are the three that
+// cannot be decided at run time: **the size of the window**, **the font its units are in**, and
+// **which slots exist at all**. The `x`, `y` and `cy` of every child are starting values that
+// the layout overwrites before the window is shown.
+//
+// The width is 191 units, which is the about window's, and the font is its font — 9 pt — so the
+// two windows are the same 334 px wide at 96 DPI and one set of paddings serves both. The
+// height is 296 units: the accepted mock-up draws the tallest letter at about 555 px, and
+// 555 × 8 / 15 is 296. Решение 101 п. 7 fixes it there for every letter, so that a person does
+// not meet a window that changes size depending on what the author had to say.
+
+IDD_LETTER DIALOGEX 0, 0, 191, 296
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+// 0x00040000 = WS_EX_APPWINDOW, for the reason the two windows above carry it: the owner is
+// this program's hidden WS_EX_TOOLWINDOW window, and an owned window inherits its owner's
+// absence from the task bar. A letter that cannot be found on the task bar is a letter that
+// cannot be found at all — and unlike those two, this one is **modeless** and may sit open.
+EXSTYLE 0x00040000
+CAPTION "Письмо от автора"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    ICON            IDI_APP_ACTIVE, IDC_LETTER_ICON, 12, 13, 23, 22
+    LTEXT           "", IDC_LETTER_TITLE, 42, 12, 141, 22, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_SUBTITLE, 42, 35, 141, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_LEAD, 42, 46, 141, 40, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_PARA, 12, 88, 167, 30, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_DEMO, 12, 120, 167, 34, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_DEMO_CAP, 12, 156, 167, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 167, 80
+    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 194, 153, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 206, 153, 30, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N1, 19, 194, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N2, 19, 208, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N3, 19, 222, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N4, 19, 236, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_1, 30, 194, 142, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_2, 30, 208, 142, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_3, 30, 222, 142, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_4, 30, 236, 142, 12, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 250, 86, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 250, 63, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 268, 74, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_RIGHT, 90, 268, 44, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_ACCENT, 138, 268, 41, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_FOOT, 12, 284, 167, 10, SS_OWNERDRAW
+END
+
+// «Последние письма» — FR-101. The letter's outline with four entry slots in place of the
+// rows: each entry is a heading, a line of «when and whether it was read», one line of the
+// text, and up to two buttons. Built in stage А and filled in stage Б, when there is a feed to
+// fill it from.
+IDD_LETTERS_LIST DIALOGEX 0, 0, 191, 296
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE 0x00040000
+CAPTION "Последние письма"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    CONTROL         "", IDC_LETTERS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 12, 167, 240
+    LTEXT           "", IDC_LETTERS_T1, 19, 20, 153, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D1, 19, 32, 153, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X1, 19, 42, 153, 20, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_B1, 19, 63, 60, 13, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_R1, 83, 63, 48, 13, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T2, 19, 82, 153, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D2, 19, 94, 153, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X2, 19, 104, 153, 20, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_B2, 19, 125, 60, 13, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_R2, 83, 125, 48, 13, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T3, 19, 144, 153, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D3, 19, 156, 153, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X3, 19, 166, 153, 20, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_B3, 19, 187, 60, 13, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_R3, 83, 187, 48, 13, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T4, 19, 206, 153, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D4, 19, 218, 153, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X4, 19, 228, 153, 20, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_B4, 19, 249, 60, 13, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_R4, 83, 249, 48, 13, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 138, 268, 41, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_FOOT, 12, 284, 167, 10, SS_OWNERDRAW
+END
+
+// «От автора» — FR-103. Wider than a letter and the one window of the three whose height the
+// content decides: the accepted mock-up draws it 430 px across, and 430 × 4 / 7 is 246 units at
+// this font. Three panels, and the middle one has two states — before the feed has shown a
+// letter it carries a quiet line saying the setting is edited in the file, and after it (and
+// after ninety days) a switch stands in that line's place (FR-102).
+IDD_AUTHOR DIALOGEX 0, 0, 246, 300
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE 0x00040000
+CAPTION "От автора"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    ICON            IDI_APP_ACTIVE, IDC_AUTHOR_ICON, 12, 13, 23, 22
+    LTEXT           "Lang Switcher", IDC_AUTHOR_NAME, 42, 12, 192, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_AUTHOR_VERSION, 42, 25, 192, 9, SS_OWNERDRAW
+    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 44, 222, 76
+    LTEXT           "", IDC_AUTHOR_TEXT, 19, 60, 208, 40, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_SUPPORT, 19, 101, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_CHANNEL, 133, 101, 63, 14, BS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 126, 222, 100
+    LTEXT           "", IDC_NEWS_ABOUT, 19, 142, 208, 30, SS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 142, 208, 10
+    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 153, 195, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_STATE, 19, 175, 208, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_VERSION, 19, 196, 208, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_NEWS_DOWNLOAD, 19, 207, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_NEWS_LETTERS, 133, 207, 63, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 223, 208, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 232, 222, 60
+    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 248, 208, 30, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 273, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 296, 41, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -874,6 +1118,84 @@ END
 #define IDS_ABOUT_HELP_5        3071
 
 // ---------------------------------------------------------------------------------------
+// FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.
+// ---------------------------------------------------------------------------------------
+//
+// Fifty-eight identifiers continuing the block at 3082, contiguous with everything above it,
+// and the canon of `settings::INTERFACE_STRINGS` grows from 73 to 131 with them.
+//
+// ⚠ **The three sentences of «Что нового» are per-delivery text and not permanent strings.**
+// 3106..3108 say what changed in *this* build; the release check-list of `tools\release.ps1`
+// reminds whoever cuts the next one to rewrite them in all fourteen tables. They are strings
+// rather than a formatted list because a translation is a translation.
+//
+// ⚠ **The heart is «♥» (U+2665) and not the mock-up's «🖤» (U+1F5A4), and that is measured
+// rather than preferred** — `scratchpad-Э32\глиф-сердце.log`. U+2665 is present in all three
+// faces this program draws in (Segoe UI, Segoe UI Semibold); U+1F5A4 is outside the BMP, so
+// `GetGlyphIndicesW` — the instrument of Э30 — **cannot answer for it at all**: it works over
+// UTF-16 units and a surrogate is not a character. What would draw it is font linking to Segoe
+// UI Emoji, a colour face, in a window that sets one ink for every row. ТЗ names this exact
+// fallback: «нет глифа — «♥»».
+#define IDS_LETTER_CAPTION      3082
+#define IDS_CLOSE               3083
+#define IDS_CHANNEL_OPEN        3084
+#define IDS_SUPPORT_OPEN        3085
+#define IDS_HELLO_TITLE         3086
+#define IDS_HELLO_LEAD          3087
+#define IDS_HELLO_DEMO_CAP      3088
+#define IDS_HELLO_PANEL         3089
+#define IDS_HELLO_ROW_1         3090
+#define IDS_HELLO_ROW_2         3091
+#define IDS_HELLO_ROW_3         3092
+#define IDS_HELLO_SETTINGS      3093
+#define IDS_HELLO_OK            3094
+#define IDS_THANKS_TITLE        3095
+#define IDS_THANKS_LEAD         3096
+#define IDS_THANKS_PARA         3097
+#define IDS_SUPPORT_PANEL       3098
+#define IDS_SUPPORT_TEXT        3099
+#define IDS_THANKS_SNOOZE       3100
+#define IDS_THANKS_FOOT         3101
+#define IDS_WHATSNEW_TITLE      3102
+#define IDS_WHATSNEW_FROM       3103
+#define IDS_WHATSNEW_TODAY      3104
+#define IDS_WHATSNEW_PANEL      3105
+#define IDS_WHATSNEW_1          3106
+#define IDS_WHATSNEW_2          3107
+#define IDS_WHATSNEW_3          3108
+#define IDS_WHATSNEW_FULL       3109
+#define IDS_AUTHOR_CAPTION      3110
+#define IDS_AUTHOR_VERSION      3111
+#define IDS_AUTHOR_PANEL        3112
+#define IDS_AUTHOR_TEXT         3113
+#define IDS_NEWS_PANEL          3114
+#define IDS_NEWS_ABOUT_FEED     3115
+#define IDS_NEWS_NEVER_READ     3116
+#define IDS_NEWS_READ_ON        3117
+#define IDS_NEWS_LATEST         3118
+#define IDS_NEWS_AVAILABLE      3119
+#define IDS_NEWS_DOWNLOAD       3120
+#define IDS_NEWS_LETTERS        3121
+#define IDS_NEWS_FILE_ONLY      3122
+#define IDS_NEWS_SWITCH         3123
+#define IDS_NEWS_SWITCH_SUB     3124
+#define IDS_FEEDBACK_PANEL      3125
+#define IDS_FEEDBACK_TEXT       3126
+#define IDS_WRITE_TO_AUTHOR     3127
+#define IDS_LETTERS_CAPTION     3128
+#define IDS_LETTERS_FOOT        3129
+#define IDS_LETTERS_OPEN        3130
+#define IDS_NEWS_READ_BUTTON    3131
+#define IDS_MENU_UNREAD         3132
+#define IDS_MENU_UPDATE         3133
+#define IDS_TOAST_TITLE         3134
+#define IDS_TOAST_NEWS          3135
+#define IDS_TOAST_THANKS        3136
+#define IDS_TOAST_UPDATE_TITLE  3137
+#define IDS_TOAST_UPDATE        3138
+#define IDS_ABOUT_AUTHOR        3139
+
+// ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
 // ---------------------------------------------------------------------------------------
 //
@@ -957,6 +1279,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc или клик мимо — отмена"
     IDS_TIP_ACTIVE          "активна"
     IDS_TIP_PAUSED          "приостановлена"
+    IDS_LETTER_CAPTION      "Письмо от автора"
+    IDS_CLOSE               "Закрыть"
+    IDS_CHANNEL_OPEN        "Открыть канал"
+    IDS_SUPPORT_OPEN        "Открыть страницу поддержки"
+    IDS_HELLO_TITLE         "Здравствуйте! Меня зовут Панда."
+    IDS_HELLO_LEAD          "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: чинит слово, набранное не в той раскладке. Вот как это выглядит:"
+    IDS_HELLO_DEMO_CAP      "Набрали «ghbdtn», нажали {0}: получили «привет», раскладка переключилась на русскую. Ещё раз — и как было."
+    IDS_HELLO_PANEL         "Три вещи на первый день"
+    IDS_HELLO_ROW_1         "{0} перекодирует последнее набранное слово и переключает раскладку. Работает в любом окне."
+    IDS_HELLO_ROW_2         "Ещё раз {0}: слово вернётся к исходному, буква в букву."
+    IDS_HELLO_ROW_3         "Значок в трее: пауза, настройки и «О программе», где есть раздел «Как пользоваться»."
+    IDS_HELLO_SETTINGS      "Открыть настройки"
+    IDS_HELLO_OK            "Понятно"
+    IDS_THANKS_TITLE        "Прошёл месяц. Спасибо!"
+    IDS_THANKS_LEAD         "Здравствуйте, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, что вам с ним удобно: я потратил много сил, чтобы программа была лёгкой и просто работала."
+    IDS_THANKS_PARA         "Если понравилось, расскажите об этом в канале. Если что-то не так, напишите мне: негатив тоже важен, только узнав о проблеме, её можно починить. Мастер обращения есть в меню значка, пункт «Написать автору…»."
+    IDS_SUPPORT_PANEL       "Поддержать автора"
+    IDS_SUPPORT_TEXT        "Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько способов. Классно, что вы цените чужой труд ♥"
+    IDS_THANKS_SNOOZE       "Напомнить через неделю"
+    IDS_THANKS_FOOT         "Это письмо показывается один раз."
+    IDS_WHATSNEW_TITLE      "Что нового в {0}"
+    IDS_WHATSNEW_FROM       "было {0} · обновлено сегодня"
+    IDS_WHATSNEW_TODAY      "обновлено сегодня"
+    IDS_WHATSNEW_PANEL      "Три изменения"
+    IDS_WHATSNEW_1          "Письма от автора: «Привет» при первом запуске, «Что нового» после обновления и «Спасибо» через месяц."
+    IDS_WHATSNEW_2          "Окно «От автора»: поддержка, канал и состояние ленты новостей."
+    IDS_WHATSNEW_3          "На значке в трее загорается точка, когда есть непрочитанное письмо."
+    IDS_WHATSNEW_FULL       "Полный список изменений опубликован в канале."
+    IDS_AUTHOR_CAPTION      "От автора"
+    IDS_AUTHOR_VERSION      "версия {0} · Панда, он же Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Автор"
+    IDS_AUTHOR_TEXT         "Программу делает один человек в свободное время. Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько способов. Классно, что вы цените чужой труд ♥"
+    IDS_NEWS_PANEL          "Новости и обновления"
+    IDS_NEWS_ABOUT_FEED     "Раз в 15 дней программа читает один файл с сайта автора: письма и номер свежей версии. Больше она ничего не отправляет и не скачивает."
+    IDS_NEWS_NEVER_READ     "Лента ещё не читалась."
+    IDS_NEWS_READ_ON        "Лента прочитана {0}, подпись автора верна. Следующее чтение через {1} дней."
+    IDS_NEWS_LATEST         "Установлена версия {0}, это последняя."
+    IDS_NEWS_AVAILABLE      "Установлена версия {0}, доступна {1}."
+    IDS_NEWS_DOWNLOAD       "Открыть страницу загрузки"
+    IDS_NEWS_LETTERS        "Последние письма"
+    IDS_NEWS_FILE_ONLY      "Отключается в файле настроек: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Сообщать об обновлениях и новостях автора"
+    IDS_NEWS_SWITCH_SUB     "Раз в 15 дней программа читает один файл с сайта автора. Больше она ничего не отправляет и не скачивает."
+    IDS_FEEDBACK_PANEL      "Обратная связь"
+    IDS_FEEDBACK_TEXT       "Нашли ошибку или есть идея? Мастер соберёт обращение за пять шагов. Ничего не отправится само: текст попадёт в буфер обмена, а вставите его вы."
+    IDS_WRITE_TO_AUTHOR     "Написать автору…"
+    IDS_LETTERS_CAPTION     "Последние письма"
+    IDS_LETTERS_FOOT        "Хранятся три последние новости. Когда приходит четвёртая, самая старая уходит, даже непрочитанная."
+    IDS_LETTERS_OPEN        "Открыть письмо"
+    IDS_NEWS_READ_BUTTON    "Прочитано"
+    IDS_MENU_UNREAD         "Непрочитанное письмо…"
+    IDS_MENU_UPDATE         "Доступна версия {0}…"
+    IDS_TOAST_TITLE         "Письмо от автора"
+    IDS_TOAST_NEWS          "У Панды новость для вас. Нажмите, чтобы прочитать, это займёт минуту."
+    IDS_TOAST_THANKS        "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать."
+    IDS_TOAST_UPDATE_TITLE  "Вышла версия {0}"
+    IDS_TOAST_UPDATE        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать."
+    IDS_ABOUT_AUTHOR        "От автора…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1040,6 +1420,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
     IDS_TIP_ACTIVE          "active"
     IDS_TIP_PAUSED          "suspended"
+    IDS_LETTER_CAPTION      "A letter from the author"
+    IDS_CLOSE               "Close"
+    IDS_CHANNEL_OPEN        "Open the channel"
+    IDS_SUPPORT_OPEN        "Open the support page"
+    IDS_HELLO_TITLE         "Hello! My name is Panda."
+    IDS_HELLO_LEAD          "I made Lang Switcher and I am glad you installed it. The program does one thing: it fixes a word typed in the wrong layout. Here is what that looks like:"
+    IDS_HELLO_DEMO_CAP      "You typed «ghbdtn», pressed {0} and got «привет», with the layout switched to Russian. Press it again and it is back as it was."
+    IDS_HELLO_PANEL         "Three things for the first day"
+    IDS_HELLO_ROW_1         "{0} converts the last word you typed and switches the layout. It works in any window."
+    IDS_HELLO_ROW_2         "Press {0} again and the word comes back exactly as it was, letter for letter."
+    IDS_HELLO_ROW_3         "The tray icon: pause, settings and «About», which has a «How to use it» section."
+    IDS_HELLO_SETTINGS      "Open settings"
+    IDS_HELLO_OK            "Got it"
+    IDS_THANKS_TITLE        "A month has passed. Thank you!"
+    IDS_THANKS_LEAD         "Hello, it is Panda again. You installed Lang Switcher a month ago, and I hope it suits you: I put a great deal of work into keeping it light and simply working."
+    IDS_THANKS_PARA         "If you liked it, say so in the channel. If something is wrong, write to me: criticism matters too — a problem can only be fixed once somebody knows about it. The wizard is in the tray menu, under «Write to the author…»."
+    IDS_SUPPORT_PANEL       "Support the author"
+    IDS_SUPPORT_TEXT        "The program is free and will stay that way. If you would like to say thank you in deed, the support page lists a few ways. It is good that you value somebody else's work ♥"
+    IDS_THANKS_SNOOZE       "Remind me in a week"
+    IDS_THANKS_FOOT         "This letter is shown once."
+    IDS_WHATSNEW_TITLE      "What is new in {0}"
+    IDS_WHATSNEW_FROM       "you had {0} · updated today"
+    IDS_WHATSNEW_TODAY      "updated today"
+    IDS_WHATSNEW_PANEL      "Three changes"
+    IDS_WHATSNEW_1          "Letters from the author: «Hello» on the first run, «What is new» after an update and «Thank you» after a month."
+    IDS_WHATSNEW_2          "The «From the author» window: support, the channel and the state of the news feed."
+    IDS_WHATSNEW_3          "The tray icon shows a dot while a letter is unread."
+    IDS_WHATSNEW_FULL       "The full list of changes is published in the channel."
+    IDS_AUTHOR_CAPTION      "From the author"
+    IDS_AUTHOR_VERSION      "version {0} · Panda, also known as Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "The author"
+    IDS_AUTHOR_TEXT         "The program is made by one person in their spare time. It is free and will stay that way. If you would like to say thank you in deed, the support page lists a few ways. It is good that you value somebody else's work ♥"
+    IDS_NEWS_PANEL          "News and updates"
+    IDS_NEWS_ABOUT_FEED     "Once in fifteen days the program reads one file from the author's site: letters and the number of the latest version. It sends nothing else and downloads nothing."
+    IDS_NEWS_NEVER_READ     "The feed has not been read yet."
+    IDS_NEWS_READ_ON        "Feed read on {0}, the author's signature checks out. Next reading in {1} days."
+    IDS_NEWS_LATEST         "Version {0} is installed, and it is the latest."
+    IDS_NEWS_AVAILABLE      "Version {0} is installed, {1} is available."
+    IDS_NEWS_DOWNLOAD       "Open the download page"
+    IDS_NEWS_LETTERS        "Recent letters"
+    IDS_NEWS_FILE_ONLY      "Turned off in the settings file: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Tell me about the author's updates and news"
+    IDS_NEWS_SWITCH_SUB     "Once in fifteen days the program reads one file from the author's site. It sends nothing else and downloads nothing."
+    IDS_FEEDBACK_PANEL      "Feedback"
+    IDS_FEEDBACK_TEXT       "Found a bug or have an idea? The wizard puts a message together in five steps. Nothing is sent by itself: the text goes to the clipboard, and you paste it."
+    IDS_WRITE_TO_AUTHOR     "Write to the author…"
+    IDS_LETTERS_CAPTION     "Recent letters"
+    IDS_LETTERS_FOOT        "The three latest news items are kept. When a fourth arrives, the oldest goes, read or not."
+    IDS_LETTERS_OPEN        "Open the letter"
+    IDS_NEWS_READ_BUTTON    "Mark as read"
+    IDS_MENU_UNREAD         "An unread letter…"
+    IDS_MENU_UPDATE         "Version {0} is available…"
+    IDS_TOAST_TITLE         "A letter from the author"
+    IDS_TOAST_NEWS          "Panda has news for you. Click to read it, it will take a minute."
+    IDS_TOAST_THANKS        "It has been a month since you installed it. Panda would like a word. Click to read it."
+    IDS_TOAST_UPDATE_TITLE  "Version {0} is out"
+    IDS_TOAST_UPDATE        "Three changes and a link to the download. Click to read it."
+    IDS_ABOUT_AUTHOR        "From the author…"
 END
 
 // =======================================================================================
@@ -1136,6 +1574,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc або клік повз — скасування"
     IDS_TIP_ACTIVE          "активна"
     IDS_TIP_PAUSED          "призупинена"
+    IDS_LETTER_CAPTION      "Лист від автора"
+    IDS_CLOSE               "Закрити"
+    IDS_CHANNEL_OPEN        "Відкрити канал"
+    IDS_SUPPORT_OPEN        "Відкрити сторінку підтримки"
+    IDS_HELLO_TITLE         "Вітаю! Мене звати Панда."
+    IDS_HELLO_LEAD          "Я зробив Lang Switcher і радий, що ви його встановили. Програма робить одну річ: виправляє слово, набране не в тій розкладці. Ось як це виглядає:"
+    IDS_HELLO_DEMO_CAP      "Набрали «ghbdtn», натиснули {0}: отримали «привет», розкладка перемкнулася на російську. Ще раз — і як було."
+    IDS_HELLO_PANEL         "Три речі на перший день"
+    IDS_HELLO_ROW_1         "{0} перекодовує останнє набране слово і перемикає розкладку. Працює в будь-якому вікні."
+    IDS_HELLO_ROW_2         "Ще раз {0}: слово повернеться до початкового, літера в літеру."
+    IDS_HELLO_ROW_3         "Значок у треї: пауза, налаштування і «Про програму», де є розділ «Як користуватися»."
+    IDS_HELLO_SETTINGS      "Відкрити налаштування"
+    IDS_HELLO_OK            "Зрозуміло"
+    IDS_THANKS_TITLE        "Минув місяць. Дякую!"
+    IDS_THANKS_LEAD         "Вітаю, це знову Панда. Місяць тому ви встановили Lang Switcher, і я сподіваюся, що вам з ним зручно: я витратив багато сил, щоб програма була легкою і просто працювала."
+    IDS_THANKS_PARA         "Якщо сподобалося, розкажіть про це в каналі. Якщо щось не так, напишіть мені: негатив теж важливий, лише дізнавшись про проблему, її можна виправити. Майстер звернення є в меню значка, пункт «Написати автору…»."
+    IDS_SUPPORT_PANEL       "Підтримати автора"
+    IDS_SUPPORT_TEXT        "Програма безкоштовна і залишиться такою. Якщо хочете подякувати ділом, на сторінці підтримки є кілька способів. Класно, що ви цінуєте чужу працю ♥"
+    IDS_THANKS_SNOOZE       "Нагадати через тиждень"
+    IDS_THANKS_FOOT         "Цей лист показується один раз."
+    IDS_WHATSNEW_TITLE      "Що нового у {0}"
+    IDS_WHATSNEW_FROM       "було {0} · оновлено сьогодні"
+    IDS_WHATSNEW_TODAY      "оновлено сьогодні"
+    IDS_WHATSNEW_PANEL      "Три зміни"
+    IDS_WHATSNEW_1          "Листи від автора: «Вітаю» під час першого запуску, «Що нового» після оновлення і «Дякую» через місяць."
+    IDS_WHATSNEW_2          "Вікно «Від автора»: підтримка, канал і стан стрічки новин."
+    IDS_WHATSNEW_3          "На значку в треї загоряється крапка, коли є непрочитаний лист."
+    IDS_WHATSNEW_FULL       "Повний список змін опубліковано в каналі."
+    IDS_AUTHOR_CAPTION      "Від автора"
+    IDS_AUTHOR_VERSION      "версія {0} · Панда, він же Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Автор"
+    IDS_AUTHOR_TEXT         "Програму робить одна людина у вільний час. Програма безкоштовна і залишиться такою. Якщо хочете подякувати ділом, на сторінці підтримки є кілька способів. Класно, що ви цінуєте чужу працю ♥"
+    IDS_NEWS_PANEL          "Новини та оновлення"
+    IDS_NEWS_ABOUT_FEED     "Раз на 15 днів програма читає один файл із сайту автора: листи і номер свіжої версії. Більше вона нічого не надсилає і не завантажує."
+    IDS_NEWS_NEVER_READ     "Стрічку ще не читали."
+    IDS_NEWS_READ_ON        "Стрічку прочитано {0}, підпис автора правильний. Наступне читання через {1} днів."
+    IDS_NEWS_LATEST         "Встановлено версію {0}, це остання."
+    IDS_NEWS_AVAILABLE      "Встановлено версію {0}, доступна {1}."
+    IDS_NEWS_DOWNLOAD       "Відкрити сторінку завантаження"
+    IDS_NEWS_LETTERS        "Останні листи"
+    IDS_NEWS_FILE_ONLY      "Вимикається у файлі налаштувань: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Повідомляти про оновлення та новини автора"
+    IDS_NEWS_SWITCH_SUB     "Раз на 15 днів програма читає один файл із сайту автора. Більше вона нічого не надсилає і не завантажує."
+    IDS_FEEDBACK_PANEL      "Зворотний зв'язок"
+    IDS_FEEDBACK_TEXT       "Знайшли помилку або маєте ідею? Майстер збере звернення за п'ять кроків. Нічого не надішлеться саме: текст потрапить у буфер обміну, а вставите його ви."
+    IDS_WRITE_TO_AUTHOR     "Написати автору…"
+    IDS_LETTERS_CAPTION     "Останні листи"
+    IDS_LETTERS_FOOT        "Зберігаються три останні новини. Коли надходить четверта, найстаріша йде, навіть непрочитана."
+    IDS_LETTERS_OPEN        "Відкрити лист"
+    IDS_NEWS_READ_BUTTON    "Прочитано"
+    IDS_MENU_UNREAD         "Непрочитаний лист…"
+    IDS_MENU_UPDATE         "Доступна версія {0}…"
+    IDS_TOAST_TITLE         "Лист від автора"
+    IDS_TOAST_NEWS          "У Панди новина для вас. Натисніть, щоб прочитати, це займе хвилину."
+    IDS_TOAST_THANKS        "Минув місяць від встановлення. Панда хоче сказати кілька слів. Натисніть, щоб прочитати."
+    IDS_TOAST_UPDATE_TITLE  "Вийшла версія {0}"
+    IDS_TOAST_UPDATE        "Три зміни і посилання на завантаження. Натисніть, щоб прочитати."
+    IDS_ABOUT_AUTHOR        "Від автора…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1215,6 +1711,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc oder ein Klick daneben bricht ab"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "angehalten"
+    IDS_LETTER_CAPTION      "Ein Brief vom Autor"
+    IDS_CLOSE               "Schließen"
+    IDS_CHANNEL_OPEN        "Kanal öffnen"
+    IDS_SUPPORT_OPEN        "Unterstützungsseite öffnen"
+    IDS_HELLO_TITLE         "Hallo! Ich heiße Panda."
+    IDS_HELLO_LEAD          "Ich habe Lang Switcher gemacht und freue mich, dass Sie es installiert haben. Das Programm macht eine Sache: Es repariert ein Wort, das im falschen Tastaturlayout getippt wurde. So sieht das aus:"
+    IDS_HELLO_DEMO_CAP      "Sie tippten «ghbdtn», drückten {0} und bekamen «привет», das Layout wechselte zu Russisch. Noch einmal — und es ist wieder wie vorher."
+    IDS_HELLO_PANEL         "Drei Dinge für den ersten Tag"
+    IDS_HELLO_ROW_1         "{0} wandelt das zuletzt getippte Wort um und wechselt das Layout. Das funktioniert in jedem Fenster."
+    IDS_HELLO_ROW_2         "Noch einmal {0}: Das Wort kommt Buchstabe für Buchstabe zurück."
+    IDS_HELLO_ROW_3         "Das Symbol im Infobereich: Pause, Einstellungen und «Über», wo es den Abschnitt «Bedienung» gibt."
+    IDS_HELLO_SETTINGS      "Einstellungen öffnen"
+    IDS_HELLO_OK            "Verstanden"
+    IDS_THANKS_TITLE        "Ein Monat ist vergangen. Danke!"
+    IDS_THANKS_LEAD         "Hallo, hier ist wieder Panda. Vor einem Monat haben Sie Lang Switcher installiert, und ich hoffe, es ist bequem für Sie: Ich habe viel Mühe darauf verwendet, dass das Programm leicht ist und einfach funktioniert."
+    IDS_THANKS_PARA         "Wenn es Ihnen gefallen hat, erzählen Sie davon im Kanal. Wenn etwas nicht stimmt, schreiben Sie mir: Kritik ist genauso wichtig — ein Problem lässt sich erst beheben, wenn jemand davon weiß. Der Assistent steht im Menü des Symbols unter «An den Autor schreiben…»."
+    IDS_SUPPORT_PANEL       "Den Autor unterstützen"
+    IDS_SUPPORT_TEXT        "Das Programm ist kostenlos und bleibt es. Wenn Sie sich mit einer Tat bedanken möchten, nennt die Unterstützungsseite einige Wege. Schön, dass Sie fremde Arbeit zu schätzen wissen ♥"
+    IDS_THANKS_SNOOZE       "In einer Woche erinnern"
+    IDS_THANKS_FOOT         "Dieser Brief wird einmal gezeigt."
+    IDS_WHATSNEW_TITLE      "Was ist neu in {0}"
+    IDS_WHATSNEW_FROM       "vorher {0} · heute aktualisiert"
+    IDS_WHATSNEW_TODAY      "heute aktualisiert"
+    IDS_WHATSNEW_PANEL      "Drei Änderungen"
+    IDS_WHATSNEW_1          "Briefe vom Autor: «Hallo» beim ersten Start, «Was ist neu» nach einem Update und «Danke» nach einem Monat."
+    IDS_WHATSNEW_2          "Das Fenster «Vom Autor»: Unterstützung, Kanal und Zustand des Nachrichten-Feeds."
+    IDS_WHATSNEW_3          "Das Symbol im Infobereich zeigt einen Punkt, solange ein Brief ungelesen ist."
+    IDS_WHATSNEW_FULL       "Die vollständige Liste der Änderungen ist im Kanal veröffentlicht."
+    IDS_AUTHOR_CAPTION      "Vom Autor"
+    IDS_AUTHOR_VERSION      "Version {0} · Panda, auch bekannt als Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Der Autor"
+    IDS_AUTHOR_TEXT         "Das Programm macht ein einzelner Mensch in seiner Freizeit. Es ist kostenlos und bleibt es. Wenn Sie sich mit einer Tat bedanken möchten, nennt die Unterstützungsseite einige Wege. Schön, dass Sie fremde Arbeit zu schätzen wissen ♥"
+    IDS_NEWS_PANEL          "Nachrichten und Updates"
+    IDS_NEWS_ABOUT_FEED     "Alle 15 Tage liest das Programm eine Datei von der Seite des Autors: Briefe und die Nummer der neuesten Version. Sonst sendet es nichts und lädt nichts herunter."
+    IDS_NEWS_NEVER_READ     "Der Feed wurde noch nicht gelesen."
+    IDS_NEWS_READ_ON        "Feed am {0} gelesen, die Signatur des Autors stimmt. Nächste Lesung in {1} Tagen."
+    IDS_NEWS_LATEST         "Version {0} ist installiert, das ist die neueste."
+    IDS_NEWS_AVAILABLE      "Version {0} ist installiert, {1} ist verfügbar."
+    IDS_NEWS_DOWNLOAD       "Downloadseite öffnen"
+    IDS_NEWS_LETTERS        "Letzte Briefe"
+    IDS_NEWS_FILE_ONLY      "Abschaltbar in der Einstellungsdatei: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Über Updates und Neuigkeiten des Autors informieren"
+    IDS_NEWS_SWITCH_SUB     "Alle 15 Tage liest das Programm eine Datei von der Seite des Autors. Sonst sendet es nichts und lädt nichts herunter."
+    IDS_FEEDBACK_PANEL      "Rückmeldung"
+    IDS_FEEDBACK_TEXT       "Einen Fehler gefunden oder eine Idee? Der Assistent stellt die Nachricht in fünf Schritten zusammen. Nichts geht von selbst weg: Der Text landet in der Zwischenablage, und einfügen tun Sie ihn."
+    IDS_WRITE_TO_AUTHOR     "An den Autor schreiben…"
+    IDS_LETTERS_CAPTION     "Letzte Briefe"
+    IDS_LETTERS_FOOT        "Die drei letzten Nachrichten werden aufbewahrt. Kommt eine vierte, geht die älteste — auch ungelesen."
+    IDS_LETTERS_OPEN        "Brief öffnen"
+    IDS_NEWS_READ_BUTTON    "Gelesen"
+    IDS_MENU_UNREAD         "Ungelesener Brief…"
+    IDS_MENU_UPDATE         "Version {0} verfügbar…"
+    IDS_TOAST_TITLE         "Ein Brief vom Autor"
+    IDS_TOAST_NEWS          "Panda hat eine Neuigkeit für Sie. Klicken Sie, um sie zu lesen, das dauert eine Minute."
+    IDS_TOAST_THANKS        "Seit der Installation ist ein Monat vergangen. Panda möchte ein paar Worte sagen. Klicken Sie, um sie zu lesen."
+    IDS_TOAST_UPDATE_TITLE  "Version {0} ist da"
+    IDS_TOAST_UPDATE        "Drei Änderungen und ein Link zum Download. Klicken Sie, um es zu lesen."
+    IDS_ABOUT_AUTHOR        "Vom Autor…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1296,6 +1850,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc ou un clic à côté annule"
     IDS_TIP_ACTIVE          "actif"
     IDS_TIP_PAUSED          "suspendu"
+    IDS_LETTER_CAPTION      "Une lettre de l'auteur"
+    IDS_CLOSE               "Fermer"
+    IDS_CHANNEL_OPEN        "Ouvrir la chaîne"
+    IDS_SUPPORT_OPEN        "Ouvrir la page de soutien"
+    IDS_HELLO_TITLE         "Bonjour ! Je m'appelle Panda."
+    IDS_HELLO_LEAD          "J'ai fait Lang Switcher et je suis heureux que vous l'ayez installé. Le programme fait une seule chose : il répare un mot tapé dans la mauvaise disposition. Voici à quoi cela ressemble :"
+    IDS_HELLO_DEMO_CAP      "Vous avez tapé « ghbdtn », appuyé sur {0} et obtenu « привет », la disposition est passée au russe. Encore une fois — et tout revient comme avant."
+    IDS_HELLO_PANEL         "Trois choses pour le premier jour"
+    IDS_HELLO_ROW_1         "{0} convertit le dernier mot tapé et change la disposition. Cela fonctionne dans n'importe quelle fenêtre."
+    IDS_HELLO_ROW_2         "Appuyez encore sur {0} : le mot revient à l'original, lettre pour lettre."
+    IDS_HELLO_ROW_3         "L'icône de la zone de notification : pause, paramètres et « À propos », qui contient la section « Comment s'en servir »."
+    IDS_HELLO_SETTINGS      "Ouvrir les paramètres"
+    IDS_HELLO_OK            "Compris"
+    IDS_THANKS_TITLE        "Un mois a passé. Merci !"
+    IDS_THANKS_LEAD         "Bonjour, c'est encore Panda. Il y a un mois vous avez installé Lang Switcher, et j'espère qu'il vous convient : j'ai mis beaucoup d'efforts pour qu'il reste léger et fonctionne simplement."
+    IDS_THANKS_PARA         "Si cela vous a plu, dites-le dans la chaîne. Si quelque chose ne va pas, écrivez-moi : les critiques comptent aussi — un problème ne se répare qu'une fois connu. L'assistant est dans le menu de l'icône, sous « Écrire à l'auteur… »."
+    IDS_SUPPORT_PANEL       "Soutenir l'auteur"
+    IDS_SUPPORT_TEXT        "Le programme est gratuit et le restera. Si vous voulez dire merci par un geste, la page de soutien propose plusieurs moyens. C'est bien de savoir apprécier le travail d'autrui ♥"
+    IDS_THANKS_SNOOZE       "Me le rappeler dans une semaine"
+    IDS_THANKS_FOOT         "Cette lettre est montrée une seule fois."
+    IDS_WHATSNEW_TITLE      "Quoi de neuf dans {0}"
+    IDS_WHATSNEW_FROM       "vous aviez {0} · mis à jour aujourd'hui"
+    IDS_WHATSNEW_TODAY      "mis à jour aujourd'hui"
+    IDS_WHATSNEW_PANEL      "Trois changements"
+    IDS_WHATSNEW_1          "Des lettres de l'auteur : « Bonjour » au premier lancement, « Quoi de neuf » après une mise à jour et « Merci » après un mois."
+    IDS_WHATSNEW_2          "La fenêtre « De l'auteur » : le soutien, la chaîne et l'état du flux de nouvelles."
+    IDS_WHATSNEW_3          "L'icône de la zone de notification affiche un point tant qu'une lettre n'est pas lue."
+    IDS_WHATSNEW_FULL       "La liste complète des changements est publiée dans la chaîne."
+    IDS_AUTHOR_CAPTION      "De l'auteur"
+    IDS_AUTHOR_VERSION      "version {0} · Panda, alias Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "L'auteur"
+    IDS_AUTHOR_TEXT         "Le programme est fait par une seule personne sur son temps libre. Il est gratuit et le restera. Si vous voulez dire merci par un geste, la page de soutien propose plusieurs moyens. C'est bien de savoir apprécier le travail d'autrui ♥"
+    IDS_NEWS_PANEL          "Nouvelles et mises à jour"
+    IDS_NEWS_ABOUT_FEED     "Tous les 15 jours le programme lit un fichier sur le site de l'auteur : les lettres et le numéro de la dernière version. Il n'envoie rien d'autre et ne télécharge rien."
+    IDS_NEWS_NEVER_READ     "Le flux n'a pas encore été lu."
+    IDS_NEWS_READ_ON        "Flux lu le {0}, la signature de l'auteur est correcte. Prochaine lecture dans {1} jours."
+    IDS_NEWS_LATEST         "La version {0} est installée, c'est la dernière."
+    IDS_NEWS_AVAILABLE      "La version {0} est installée, la {1} est disponible."
+    IDS_NEWS_DOWNLOAD       "Ouvrir la page de téléchargement"
+    IDS_NEWS_LETTERS        "Dernières lettres"
+    IDS_NEWS_FILE_ONLY      "Se désactive dans le fichier de paramètres : [letters] feed = false."
+    IDS_NEWS_SWITCH         "M'informer des mises à jour et des nouvelles de l'auteur"
+    IDS_NEWS_SWITCH_SUB     "Tous les 15 jours le programme lit un fichier sur le site de l'auteur. Il n'envoie rien d'autre et ne télécharge rien."
+    IDS_FEEDBACK_PANEL      "Retour"
+    IDS_FEEDBACK_TEXT       "Vous avez trouvé une erreur ou vous avez une idée ? L'assistant compose le message en cinq étapes. Rien ne part tout seul : le texte va dans le presse-papiers, et c'est vous qui le collez."
+    IDS_WRITE_TO_AUTHOR     "Écrire à l'auteur…"
+    IDS_LETTERS_CAPTION     "Dernières lettres"
+    IDS_LETTERS_FOOT        "Les trois dernières nouvelles sont conservées. Quand une quatrième arrive, la plus ancienne s'en va, même non lue."
+    IDS_LETTERS_OPEN        "Ouvrir la lettre"
+    IDS_NEWS_READ_BUTTON    "Lu"
+    IDS_MENU_UNREAD         "Lettre non lue…"
+    IDS_MENU_UPDATE         "Version {0} disponible…"
+    IDS_TOAST_TITLE         "Une lettre de l'auteur"
+    IDS_TOAST_NEWS          "Panda a une nouvelle pour vous. Cliquez pour la lire, cela prendra une minute."
+    IDS_TOAST_THANKS        "Un mois a passé depuis l'installation. Panda voudrait dire deux mots. Cliquez pour les lire."
+    IDS_TOAST_UPDATE_TITLE  "La version {0} est sortie"
+    IDS_TOAST_UPDATE        "Trois changements et un lien de téléchargement. Cliquez pour lire."
+    IDS_ABOUT_AUTHOR        "De l'auteur…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1374,6 +1986,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc o un clic fuera cancela"
     IDS_TIP_ACTIVE          "activo"
     IDS_TIP_PAUSED          "pausado"
+    IDS_LETTER_CAPTION      "Una carta del autor"
+    IDS_CLOSE               "Cerrar"
+    IDS_CHANNEL_OPEN        "Abrir el canal"
+    IDS_SUPPORT_OPEN        "Abrir la página de apoyo"
+    IDS_HELLO_TITLE         "¡Hola! Me llamo Panda."
+    IDS_HELLO_LEAD          "Hice Lang Switcher y me alegra que lo haya instalado. El programa hace una sola cosa: arregla una palabra escrita en la distribución equivocada. Así se ve:"
+    IDS_HELLO_DEMO_CAP      "Escribió «ghbdtn», pulsó {0} y obtuvo «привет», la distribución cambió a ruso. Otra vez — y todo vuelve como estaba."
+    IDS_HELLO_PANEL         "Tres cosas para el primer día"
+    IDS_HELLO_ROW_1         "{0} convierte la última palabra escrita y cambia la distribución. Funciona en cualquier ventana."
+    IDS_HELLO_ROW_2         "Pulse {0} otra vez: la palabra vuelve a su forma original, letra por letra."
+    IDS_HELLO_ROW_3         "El icono del área de notificación: pausa, ajustes y «Acerca de», que tiene la sección «Cómo usarlo»."
+    IDS_HELLO_SETTINGS      "Abrir los ajustes"
+    IDS_HELLO_OK            "Entendido"
+    IDS_THANKS_TITLE        "Ha pasado un mes. ¡Gracias!"
+    IDS_THANKS_LEAD         "Hola, soy Panda otra vez. Hace un mes instaló Lang Switcher, y espero que le resulte cómodo: puse mucho esfuerzo en que el programa fuera ligero y simplemente funcionara."
+    IDS_THANKS_PARA         "Si le gustó, cuéntelo en el canal. Si algo no va bien, escríbame: la crítica también importa — un problema solo se arregla cuando alguien lo conoce. El asistente está en el menú del icono, en «Escribir al autor…»."
+    IDS_SUPPORT_PANEL       "Apoyar al autor"
+    IDS_SUPPORT_TEXT        "El programa es gratuito y seguirá siéndolo. Si quiere dar las gracias con un gesto, la página de apoyo ofrece varias formas. Está bien saber valorar el trabajo ajeno ♥"
+    IDS_THANKS_SNOOZE       "Recordármelo en una semana"
+    IDS_THANKS_FOOT         "Esta carta se muestra una sola vez."
+    IDS_WHATSNEW_TITLE      "Novedades de {0}"
+    IDS_WHATSNEW_FROM       "tenía {0} · actualizado hoy"
+    IDS_WHATSNEW_TODAY      "actualizado hoy"
+    IDS_WHATSNEW_PANEL      "Tres cambios"
+    IDS_WHATSNEW_1          "Cartas del autor: «Hola» en el primer arranque, «Novedades» tras una actualización y «Gracias» al cabo de un mes."
+    IDS_WHATSNEW_2          "La ventana «Del autor»: apoyo, canal y estado del canal de noticias."
+    IDS_WHATSNEW_3          "El icono del área de notificación muestra un punto mientras haya una carta sin leer."
+    IDS_WHATSNEW_FULL       "La lista completa de cambios está publicada en el canal."
+    IDS_AUTHOR_CAPTION      "Del autor"
+    IDS_AUTHOR_VERSION      "versión {0} · Panda, alias Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "El autor"
+    IDS_AUTHOR_TEXT         "El programa lo hace una sola persona en su tiempo libre. Es gratuito y seguirá siéndolo. Si quiere dar las gracias con un gesto, la página de apoyo ofrece varias formas. Está bien saber valorar el trabajo ajeno ♥"
+    IDS_NEWS_PANEL          "Noticias y actualizaciones"
+    IDS_NEWS_ABOUT_FEED     "Cada 15 días el programa lee un archivo del sitio del autor: las cartas y el número de la última versión. No envía nada más ni descarga nada."
+    IDS_NEWS_NEVER_READ     "El canal aún no se ha leído."
+    IDS_NEWS_READ_ON        "Canal leído el {0}, la firma del autor es correcta. Próxima lectura en {1} días."
+    IDS_NEWS_LATEST         "Está instalada la versión {0}, y es la última."
+    IDS_NEWS_AVAILABLE      "Está instalada la versión {0}, hay disponible la {1}."
+    IDS_NEWS_DOWNLOAD       "Abrir la página de descarga"
+    IDS_NEWS_LETTERS        "Últimas cartas"
+    IDS_NEWS_FILE_ONLY      "Se desactiva en el archivo de ajustes: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Avisarme de las actualizaciones y noticias del autor"
+    IDS_NEWS_SWITCH_SUB     "Cada 15 días el programa lee un archivo del sitio del autor. No envía nada más ni descarga nada."
+    IDS_FEEDBACK_PANEL      "Comentarios"
+    IDS_FEEDBACK_TEXT       "¿Encontró un error o tiene una idea? El asistente compone el mensaje en cinco pasos. Nada se envía solo: el texto va al portapapeles, y lo pega usted."
+    IDS_WRITE_TO_AUTHOR     "Escribir al autor…"
+    IDS_LETTERS_CAPTION     "Últimas cartas"
+    IDS_LETTERS_FOOT        "Se guardan las tres últimas noticias. Cuando llega una cuarta, la más antigua se va, aunque no se haya leído."
+    IDS_LETTERS_OPEN        "Abrir la carta"
+    IDS_NEWS_READ_BUTTON    "Leída"
+    IDS_MENU_UNREAD         "Carta sin leer…"
+    IDS_MENU_UPDATE         "Versión {0} disponible…"
+    IDS_TOAST_TITLE         "Una carta del autor"
+    IDS_TOAST_NEWS          "Panda tiene una noticia para usted. Pulse para leerla, le llevará un minuto."
+    IDS_TOAST_THANKS        "Ha pasado un mes desde la instalación. Panda quiere decirle un par de cosas. Pulse para leerlas."
+    IDS_TOAST_UPDATE_TITLE  "Ha salido la versión {0}"
+    IDS_TOAST_UPDATE        "Tres cambios y un enlace de descarga. Pulse para leerlo."
+    IDS_ABOUT_AUTHOR        "Del autor…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1450,6 +2120,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc ou um clique fora cancela"
     IDS_TIP_ACTIVE          "ativo"
     IDS_TIP_PAUSED          "pausado"
+    IDS_LETTER_CAPTION      "Uma carta do autor"
+    IDS_CLOSE               "Fechar"
+    IDS_CHANNEL_OPEN        "Abrir o canal"
+    IDS_SUPPORT_OPEN        "Abrir a página de apoio"
+    IDS_HELLO_TITLE         "Olá! Meu nome é Panda."
+    IDS_HELLO_LEAD          "Eu fiz o Lang Switcher e fico feliz que você o tenha instalado. O programa faz uma coisa só: conserta uma palavra digitada no layout errado. Veja como é:"
+    IDS_HELLO_DEMO_CAP      "Você digitou «ghbdtn», apertou {0} e obteve «привет», com o layout trocado para russo. Mais uma vez — e volta como estava."
+    IDS_HELLO_PANEL         "Três coisas para o primeiro dia"
+    IDS_HELLO_ROW_1         "{0} converte a última palavra digitada e troca o layout. Funciona em qualquer janela."
+    IDS_HELLO_ROW_2         "Aperte {0} de novo: a palavra volta ao original, letra por letra."
+    IDS_HELLO_ROW_3         "O ícone na área de notificação: pausa, configurações e «Sobre», que tem a seção «Como usar»."
+    IDS_HELLO_SETTINGS      "Abrir as configurações"
+    IDS_HELLO_OK            "Entendi"
+    IDS_THANKS_TITLE        "Passou um mês. Obrigado!"
+    IDS_THANKS_LEAD         "Olá, é o Panda de novo. Há um mês você instalou o Lang Switcher, e espero que esteja confortável para você: dediquei muito esforço para que o programa fosse leve e simplesmente funcionasse."
+    IDS_THANKS_PARA         "Se você gostou, conte no canal. Se algo não está certo, escreva para mim: a crítica também importa — um problema só se conserta depois que alguém sabe dele. O assistente está no menu do ícone, em «Escrever para o autor…»."
+    IDS_SUPPORT_PANEL       "Apoiar o autor"
+    IDS_SUPPORT_TEXT        "O programa é gratuito e continuará assim. Se quiser agradecer com um gesto, a página de apoio tem algumas formas. É bom que você valorize o trabalho dos outros ♥"
+    IDS_THANKS_SNOOZE       "Lembrar em uma semana"
+    IDS_THANKS_FOOT         "Esta carta é mostrada uma única vez."
+    IDS_WHATSNEW_TITLE      "O que há de novo em {0}"
+    IDS_WHATSNEW_FROM       "você tinha {0} · atualizado hoje"
+    IDS_WHATSNEW_TODAY      "atualizado hoje"
+    IDS_WHATSNEW_PANEL      "Três mudanças"
+    IDS_WHATSNEW_1          "Cartas do autor: «Olá» na primeira execução, «O que há de novo» depois de uma atualização e «Obrigado» depois de um mês."
+    IDS_WHATSNEW_2          "A janela «Do autor»: apoio, canal e estado do feed de notícias."
+    IDS_WHATSNEW_3          "O ícone na área de notificação mostra um ponto enquanto houver carta não lida."
+    IDS_WHATSNEW_FULL       "A lista completa de mudanças está publicada no canal."
+    IDS_AUTHOR_CAPTION      "Do autor"
+    IDS_AUTHOR_VERSION      "versão {0} · Panda, também conhecido como Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "O autor"
+    IDS_AUTHOR_TEXT         "O programa é feito por uma pessoa só no tempo livre. É gratuito e continuará assim. Se quiser agradecer com um gesto, a página de apoio tem algumas formas. É bom que você valorize o trabalho dos outros ♥"
+    IDS_NEWS_PANEL          "Notícias e atualizações"
+    IDS_NEWS_ABOUT_FEED     "A cada 15 dias o programa lê um arquivo do site do autor: as cartas e o número da versão mais recente. Ele não envia mais nada e não baixa nada."
+    IDS_NEWS_NEVER_READ     "O feed ainda não foi lido."
+    IDS_NEWS_READ_ON        "Feed lido em {0}, a assinatura do autor confere. Próxima leitura em {1} dias."
+    IDS_NEWS_LATEST         "A versão {0} está instalada, e é a mais recente."
+    IDS_NEWS_AVAILABLE      "A versão {0} está instalada, a {1} está disponível."
+    IDS_NEWS_DOWNLOAD       "Abrir a página de download"
+    IDS_NEWS_LETTERS        "Últimas cartas"
+    IDS_NEWS_FILE_ONLY      "Desliga-se no arquivo de configurações: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Avisar sobre atualizações e novidades do autor"
+    IDS_NEWS_SWITCH_SUB     "A cada 15 dias o programa lê um arquivo do site do autor. Ele não envia mais nada e não baixa nada."
+    IDS_FEEDBACK_PANEL      "Retorno"
+    IDS_FEEDBACK_TEXT       "Achou um erro ou tem uma ideia? O assistente monta a mensagem em cinco passos. Nada sai sozinho: o texto vai para a área de transferência, e quem cola é você."
+    IDS_WRITE_TO_AUTHOR     "Escrever para o autor…"
+    IDS_LETTERS_CAPTION     "Últimas cartas"
+    IDS_LETTERS_FOOT        "As três últimas notícias ficam guardadas. Quando chega uma quarta, a mais antiga sai, mesmo não lida."
+    IDS_LETTERS_OPEN        "Abrir a carta"
+    IDS_NEWS_READ_BUTTON    "Lida"
+    IDS_MENU_UNREAD         "Carta não lida…"
+    IDS_MENU_UPDATE         "Versão {0} disponível…"
+    IDS_TOAST_TITLE         "Uma carta do autor"
+    IDS_TOAST_NEWS          "O Panda tem uma novidade para você. Clique para ler, leva um minuto."
+    IDS_TOAST_THANKS        "Passou um mês desde a instalação. O Panda quer dizer duas palavras. Clique para ler."
+    IDS_TOAST_UPDATE_TITLE  "Saiu a versão {0}"
+    IDS_TOAST_UPDATE        "Três mudanças e um link para o download. Clique para ler."
+    IDS_ABOUT_AUTHOR        "Do autor…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1531,6 +2259,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc o un clic fuori annulla"
     IDS_TIP_ACTIVE          "attivo"
     IDS_TIP_PAUSED          "sospeso"
+    IDS_LETTER_CAPTION      "Una lettera dall'autore"
+    IDS_CLOSE               "Chiudi"
+    IDS_CHANNEL_OPEN        "Apri il canale"
+    IDS_SUPPORT_OPEN        "Apri la pagina di sostegno"
+    IDS_HELLO_TITLE         "Ciao! Mi chiamo Panda."
+    IDS_HELLO_LEAD          "Ho fatto io Lang Switcher e sono contento che tu lo abbia installato. Il programma fa una cosa sola: ripara una parola digitata con il layout sbagliato. Ecco come appare:"
+    IDS_HELLO_DEMO_CAP      "Hai digitato «ghbdtn», premuto {0} e ottenuto «привет», con il layout passato al russo. Ancora una volta — e torna com'era."
+    IDS_HELLO_PANEL         "Tre cose per il primo giorno"
+    IDS_HELLO_ROW_1         "{0} converte l'ultima parola digitata e cambia il layout. Funziona in qualsiasi finestra."
+    IDS_HELLO_ROW_2         "Premi di nuovo {0}: la parola torna com'era, lettera per lettera."
+    IDS_HELLO_ROW_3         "L'icona nell'area di notifica: pausa, impostazioni e «Informazioni», dove c'è la sezione «Come si usa»."
+    IDS_HELLO_SETTINGS      "Apri le impostazioni"
+    IDS_HELLO_OK            "Ho capito"
+    IDS_THANKS_TITLE        "È passato un mese. Grazie!"
+    IDS_THANKS_LEAD         "Ciao, è di nuovo Panda. Un mese fa hai installato Lang Switcher, e spero che ti trovi bene: ho messo molte energie perché il programma restasse leggero e funzionasse e basta."
+    IDS_THANKS_PARA         "Se ti è piaciuto, raccontalo nel canale. Se qualcosa non va, scrivimi: anche le critiche contano — un problema si ripara solo quando qualcuno lo conosce. La procedura guidata è nel menu dell'icona, alla voce «Scrivi all'autore…»."
+    IDS_SUPPORT_PANEL       "Sostieni l'autore"
+    IDS_SUPPORT_TEXT        "Il programma è gratuito e resterà tale. Se vuoi dire grazie con un gesto, la pagina di sostegno propone alcuni modi. È bello che tu apprezzi il lavoro altrui ♥"
+    IDS_THANKS_SNOOZE       "Ricordamelo tra una settimana"
+    IDS_THANKS_FOOT         "Questa lettera viene mostrata una volta sola."
+    IDS_WHATSNEW_TITLE      "Novità nella {0}"
+    IDS_WHATSNEW_FROM       "avevi la {0} · aggiornato oggi"
+    IDS_WHATSNEW_TODAY      "aggiornato oggi"
+    IDS_WHATSNEW_PANEL      "Tre cambiamenti"
+    IDS_WHATSNEW_1          "Lettere dall'autore: «Ciao» al primo avvio, «Novità» dopo un aggiornamento e «Grazie» dopo un mese."
+    IDS_WHATSNEW_2          "La finestra «Dall'autore»: sostegno, canale e stato del flusso di notizie."
+    IDS_WHATSNEW_3          "L'icona nell'area di notifica mostra un punto finché una lettera non è letta."
+    IDS_WHATSNEW_FULL       "L'elenco completo dei cambiamenti è pubblicato nel canale."
+    IDS_AUTHOR_CAPTION      "Dall'autore"
+    IDS_AUTHOR_VERSION      "versione {0} · Panda, alias Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "L'autore"
+    IDS_AUTHOR_TEXT         "Il programma è fatto da una sola persona nel tempo libero. È gratuito e resterà tale. Se vuoi dire grazie con un gesto, la pagina di sostegno propone alcuni modi. È bello che tu apprezzi il lavoro altrui ♥"
+    IDS_NEWS_PANEL          "Notizie e aggiornamenti"
+    IDS_NEWS_ABOUT_FEED     "Ogni 15 giorni il programma legge un file dal sito dell'autore: le lettere e il numero dell'ultima versione. Non invia altro e non scarica nulla."
+    IDS_NEWS_NEVER_READ     "Il flusso non è ancora stato letto."
+    IDS_NEWS_READ_ON        "Flusso letto il {0}, la firma dell'autore è valida. Prossima lettura tra {1} giorni."
+    IDS_NEWS_LATEST         "È installata la versione {0}, ed è l'ultima."
+    IDS_NEWS_AVAILABLE      "È installata la versione {0}, è disponibile la {1}."
+    IDS_NEWS_DOWNLOAD       "Apri la pagina di download"
+    IDS_NEWS_LETTERS        "Ultime lettere"
+    IDS_NEWS_FILE_ONLY      "Si disattiva nel file delle impostazioni: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Avvisami degli aggiornamenti e delle notizie dell'autore"
+    IDS_NEWS_SWITCH_SUB     "Ogni 15 giorni il programma legge un file dal sito dell'autore. Non invia altro e non scarica nulla."
+    IDS_FEEDBACK_PANEL      "Riscontro"
+    IDS_FEEDBACK_TEXT       "Hai trovato un errore o hai un'idea? La procedura guidata compone il messaggio in cinque passi. Niente parte da solo: il testo finisce negli appunti, e a incollarlo sei tu."
+    IDS_WRITE_TO_AUTHOR     "Scrivi all'autore…"
+    IDS_LETTERS_CAPTION     "Ultime lettere"
+    IDS_LETTERS_FOOT        "Vengono conservate le tre notizie più recenti. Quando ne arriva una quarta, la più vecchia se ne va, anche se non letta."
+    IDS_LETTERS_OPEN        "Apri la lettera"
+    IDS_NEWS_READ_BUTTON    "Letta"
+    IDS_MENU_UNREAD         "Lettera non letta…"
+    IDS_MENU_UPDATE         "Versione {0} disponibile…"
+    IDS_TOAST_TITLE         "Una lettera dall'autore"
+    IDS_TOAST_NEWS          "Panda ha una notizia per te. Fai clic per leggerla, ci vuole un minuto."
+    IDS_TOAST_THANKS        "È passato un mese dall'installazione. Panda vuole dirti due parole. Fai clic per leggerle."
+    IDS_TOAST_UPDATE_TITLE  "È uscita la versione {0}"
+    IDS_TOAST_UPDATE        "Tre cambiamenti e un collegamento al download. Fai clic per leggere."
+    IDS_ABOUT_AUTHOR        "Dall'autore…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1612,6 +2398,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc albo kliknięcie obok anuluje"
     IDS_TIP_ACTIVE          "aktywna"
     IDS_TIP_PAUSED          "wstrzymana"
+    IDS_LETTER_CAPTION      "List od autora"
+    IDS_CLOSE               "Zamknij"
+    IDS_CHANNEL_OPEN        "Otwórz kanał"
+    IDS_SUPPORT_OPEN        "Otwórz stronę wsparcia"
+    IDS_HELLO_TITLE         "Cześć! Nazywam się Panda."
+    IDS_HELLO_LEAD          "Zrobiłem Lang Switcher i cieszę się, że go zainstalowałeś. Program robi jedną rzecz: naprawia słowo napisane w złym układzie klawiatury. Wygląda to tak:"
+    IDS_HELLO_DEMO_CAP      "Napisałeś «ghbdtn», nacisnąłeś {0} i wyszło «привет», układ przełączył się na rosyjski. Jeszcze raz — i jest jak było."
+    IDS_HELLO_PANEL         "Trzy rzeczy na pierwszy dzień"
+    IDS_HELLO_ROW_1         "{0} przekształca ostatnie napisane słowo i przełącza układ. Działa w każdym oknie."
+    IDS_HELLO_ROW_2         "Jeszcze raz {0}: słowo wróci do pierwotnej postaci, litera w literę."
+    IDS_HELLO_ROW_3         "Ikona w zasobniku: pauza, ustawienia i «O programie», gdzie jest sekcja «Jak używać»."
+    IDS_HELLO_SETTINGS      "Otwórz ustawienia"
+    IDS_HELLO_OK            "Rozumiem"
+    IDS_THANKS_TITLE        "Minął miesiąc. Dziękuję!"
+    IDS_THANKS_LEAD         "Cześć, tu znowu Panda. Miesiąc temu zainstalowałeś Lang Switcher i mam nadzieję, że jest ci z nim wygodnie: włożyłem wiele wysiłku w to, żeby program był lekki i po prostu działał."
+    IDS_THANKS_PARA         "Jeśli ci się spodobało, napisz o tym na kanale. Jeśli coś jest nie tak, napisz do mnie: krytyka też jest ważna — problem da się naprawić dopiero wtedy, gdy ktoś o nim wie. Kreator jest w menu ikony, pozycja «Napisz do autora…»."
+    IDS_SUPPORT_PANEL       "Wesprzyj autora"
+    IDS_SUPPORT_TEXT        "Program jest darmowy i taki zostanie. Jeśli chcesz podziękować czynem, na stronie wsparcia jest kilka sposobów. Fajnie, że cenisz cudzą pracę ♥"
+    IDS_THANKS_SNOOZE       "Przypomnij za tydzień"
+    IDS_THANKS_FOOT         "Ten list pokazuje się raz."
+    IDS_WHATSNEW_TITLE      "Co nowego w {0}"
+    IDS_WHATSNEW_FROM       "było {0} · zaktualizowano dzisiaj"
+    IDS_WHATSNEW_TODAY      "zaktualizowano dzisiaj"
+    IDS_WHATSNEW_PANEL      "Trzy zmiany"
+    IDS_WHATSNEW_1          "Listy od autora: «Cześć» przy pierwszym uruchomieniu, «Co nowego» po aktualizacji i «Dziękuję» po miesiącu."
+    IDS_WHATSNEW_2          "Okno «Od autora»: wsparcie, kanał i stan kanału wiadomości."
+    IDS_WHATSNEW_3          "Ikona w zasobniku pokazuje kropkę, dopóki list jest nieprzeczytany."
+    IDS_WHATSNEW_FULL       "Pełna lista zmian jest opublikowana na kanale."
+    IDS_AUTHOR_CAPTION      "Od autora"
+    IDS_AUTHOR_VERSION      "wersja {0} · Panda, znany też jako Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Autor"
+    IDS_AUTHOR_TEXT         "Program robi jedna osoba w wolnym czasie. Jest darmowy i taki zostanie. Jeśli chcesz podziękować czynem, na stronie wsparcia jest kilka sposobów. Fajnie, że cenisz cudzą pracę ♥"
+    IDS_NEWS_PANEL          "Wiadomości i aktualizacje"
+    IDS_NEWS_ABOUT_FEED     "Raz na 15 dni program czyta jeden plik ze strony autora: listy i numer najnowszej wersji. Poza tym nic nie wysyła i nic nie pobiera."
+    IDS_NEWS_NEVER_READ     "Kanał nie był jeszcze czytany."
+    IDS_NEWS_READ_ON        "Kanał przeczytany {0}, podpis autora się zgadza. Następne czytanie za {1} dni."
+    IDS_NEWS_LATEST         "Zainstalowana wersja {0}, to najnowsza."
+    IDS_NEWS_AVAILABLE      "Zainstalowana wersja {0}, dostępna {1}."
+    IDS_NEWS_DOWNLOAD       "Otwórz stronę pobierania"
+    IDS_NEWS_LETTERS        "Ostatnie listy"
+    IDS_NEWS_FILE_ONLY      "Wyłącza się w pliku ustawień: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Powiadamiaj o aktualizacjach i wiadomościach autora"
+    IDS_NEWS_SWITCH_SUB     "Raz na 15 dni program czyta jeden plik ze strony autora. Poza tym nic nie wysyła i nic nie pobiera."
+    IDS_FEEDBACK_PANEL      "Kontakt"
+    IDS_FEEDBACK_TEXT       "Znalazłeś błąd albo masz pomysł? Kreator złoży zgłoszenie w pięciu krokach. Nic nie wyjdzie samo: tekst trafi do schowka, a wkleisz go ty."
+    IDS_WRITE_TO_AUTHOR     "Napisz do autora…"
+    IDS_LETTERS_CAPTION     "Ostatnie listy"
+    IDS_LETTERS_FOOT        "Przechowywane są trzy ostatnie wiadomości. Gdy przyjdzie czwarta, najstarsza odchodzi, nawet nieprzeczytana."
+    IDS_LETTERS_OPEN        "Otwórz list"
+    IDS_NEWS_READ_BUTTON    "Przeczytane"
+    IDS_MENU_UNREAD         "Nieprzeczytany list…"
+    IDS_MENU_UPDATE         "Dostępna wersja {0}…"
+    IDS_TOAST_TITLE         "List od autora"
+    IDS_TOAST_NEWS          "Panda ma dla ciebie wiadomość. Kliknij, żeby przeczytać, zajmie to minutę."
+    IDS_TOAST_THANKS        "Minął miesiąc od instalacji. Panda chce powiedzieć parę słów. Kliknij, żeby przeczytać."
+    IDS_TOAST_UPDATE_TITLE  "Wyszła wersja {0}"
+    IDS_TOAST_UPDATE        "Trzy zmiany i link do pobrania. Kliknij, żeby przeczytać."
+    IDS_ABOUT_AUTHOR        "Od autora…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1689,6 +2533,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc nebo kliknutí vedle zruší"
     IDS_TIP_ACTIVE          "aktivní"
     IDS_TIP_PAUSED          "pozastavena"
+    IDS_LETTER_CAPTION      "Dopis od autora"
+    IDS_CLOSE               "Zavřít"
+    IDS_CHANNEL_OPEN        "Otevřít kanál"
+    IDS_SUPPORT_OPEN        "Otevřít stránku podpory"
+    IDS_HELLO_TITLE         "Dobrý den! Jmenuji se Panda."
+    IDS_HELLO_LEAD          "Udělal jsem Lang Switcher a mám radost, že jste si ho nainstalovali. Program dělá jednu věc: opraví slovo napsané ve špatném rozložení klávesnice. Vypadá to takto:"
+    IDS_HELLO_DEMO_CAP      "Napsali jste «ghbdtn», stiskli {0} a dostali «привет», rozložení se přepnulo na ruské. Ještě jednou — a je to jako předtím."
+    IDS_HELLO_PANEL         "Tři věci na první den"
+    IDS_HELLO_ROW_1         "{0} převede poslední napsané slovo a přepne rozložení. Funguje v každém okně."
+    IDS_HELLO_ROW_2         "Ještě jednou {0}: slovo se vrátí do původní podoby, písmeno po písmenu."
+    IDS_HELLO_ROW_3         "Ikona v oznamovací oblasti: pauza, nastavení a «O programu», kde je oddíl «Jak to používat»."
+    IDS_HELLO_SETTINGS      "Otevřít nastavení"
+    IDS_HELLO_OK            "Rozumím"
+    IDS_THANKS_TITLE        "Uplynul měsíc. Děkuji!"
+    IDS_THANKS_LEAD         "Dobrý den, tady zase Panda. Před měsícem jste si nainstalovali Lang Switcher a doufám, že vám vyhovuje: dal jsem si hodně práce, aby byl program lehký a prostě fungoval."
+    IDS_THANKS_PARA         "Jestli se vám líbil, napište o tom na kanálu. Jestli něco nefunguje, napište mi: i kritika je důležitá — problém se dá opravit teprve tehdy, když o něm někdo ví. Průvodce je v nabídce ikony, položka «Napsat autorovi…»."
+    IDS_SUPPORT_PANEL       "Podpořit autora"
+    IDS_SUPPORT_TEXT        "Program je zdarma a zůstane takový. Jestli chcete poděkovat skutkem, na stránce podpory je několik možností. Je hezké, že si vážíte cizí práce ♥"
+    IDS_THANKS_SNOOZE       "Připomenout za týden"
+    IDS_THANKS_FOOT         "Tento dopis se ukáže jednou."
+    IDS_WHATSNEW_TITLE      "Co je nového ve verzi {0}"
+    IDS_WHATSNEW_FROM       "měli jste {0} · aktualizováno dnes"
+    IDS_WHATSNEW_TODAY      "aktualizováno dnes"
+    IDS_WHATSNEW_PANEL      "Tři změny"
+    IDS_WHATSNEW_1          "Dopisy od autora: «Dobrý den» při prvním spuštění, «Co je nového» po aktualizaci a «Děkuji» po měsíci."
+    IDS_WHATSNEW_2          "Okno «Od autora»: podpora, kanál a stav kanálu novinek."
+    IDS_WHATSNEW_3          "Ikona v oznamovací oblasti ukazuje tečku, dokud je dopis nepřečtený."
+    IDS_WHATSNEW_FULL       "Úplný seznam změn je zveřejněn na kanálu."
+    IDS_AUTHOR_CAPTION      "Od autora"
+    IDS_AUTHOR_VERSION      "verze {0} · Panda, známý též jako Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Autor"
+    IDS_AUTHOR_TEXT         "Program dělá jeden člověk ve volném čase. Je zdarma a zůstane takový. Jestli chcete poděkovat skutkem, na stránce podpory je několik možností. Je hezké, že si vážíte cizí práce ♥"
+    IDS_NEWS_PANEL          "Novinky a aktualizace"
+    IDS_NEWS_ABOUT_FEED     "Jednou za 15 dní program přečte jeden soubor ze stránek autora: dopisy a číslo nejnovější verze. Nic jiného neodesílá a nic nestahuje."
+    IDS_NEWS_NEVER_READ     "Kanál zatím nebyl čten."
+    IDS_NEWS_READ_ON        "Kanál přečten {0}, podpis autora souhlasí. Další čtení za {1} dní."
+    IDS_NEWS_LATEST         "Nainstalována verze {0}, je to poslední."
+    IDS_NEWS_AVAILABLE      "Nainstalována verze {0}, k dispozici je {1}."
+    IDS_NEWS_DOWNLOAD       "Otevřít stránku stahování"
+    IDS_NEWS_LETTERS        "Poslední dopisy"
+    IDS_NEWS_FILE_ONLY      "Vypíná se v souboru nastavení: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Informovat o aktualizacích a novinkách autora"
+    IDS_NEWS_SWITCH_SUB     "Jednou za 15 dní program přečte jeden soubor ze stránek autora. Nic jiného neodesílá a nic nestahuje."
+    IDS_FEEDBACK_PANEL      "Zpětná vazba"
+    IDS_FEEDBACK_TEXT       "Našli jste chybu nebo máte nápad? Průvodce sestaví zprávu v pěti krocích. Nic neodejde samo: text se dostane do schránky a vložíte ho vy."
+    IDS_WRITE_TO_AUTHOR     "Napsat autorovi…"
+    IDS_LETTERS_CAPTION     "Poslední dopisy"
+    IDS_LETTERS_FOOT        "Uchovávají se tři poslední novinky. Když přijde čtvrtá, nejstarší odejde, i nepřečtená."
+    IDS_LETTERS_OPEN        "Otevřít dopis"
+    IDS_NEWS_READ_BUTTON    "Přečteno"
+    IDS_MENU_UNREAD         "Nepřečtený dopis…"
+    IDS_MENU_UPDATE         "K dispozici verze {0}…"
+    IDS_TOAST_TITLE         "Dopis od autora"
+    IDS_TOAST_NEWS          "Panda pro vás má novinku. Klepnutím si ji přečtete, zabere to minutu."
+    IDS_TOAST_THANKS        "Od instalace uplynul měsíc. Panda by rád řekl pár slov. Klepnutím si je přečtete."
+    IDS_TOAST_UPDATE_TITLE  "Vyšla verze {0}"
+    IDS_TOAST_UPDATE        "Tři změny a odkaz ke stažení. Klepnutím si to přečtete."
+    IDS_ABOUT_AUTHOR        "Od autora…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1769,6 +2671,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc ya da dışarı tıklamak iptal eder"
     IDS_TIP_ACTIVE          "etkin"
     IDS_TIP_PAUSED          "duraklatıldı"
+    IDS_LETTER_CAPTION      "Yazardan bir mektup"
+    IDS_CLOSE               "Kapat"
+    IDS_CHANNEL_OPEN        "Kanalı aç"
+    IDS_SUPPORT_OPEN        "Destek sayfasını aç"
+    IDS_HELLO_TITLE         "Merhaba! Adım Panda."
+    IDS_HELLO_LEAD          "Lang Switcher'ı ben yaptım ve kurduğunuza sevindim. Program tek bir şey yapar: yanlış klavye düzeninde yazılmış bir kelimeyi düzeltir. Şöyle görünüyor:"
+    IDS_HELLO_DEMO_CAP      "«ghbdtn» yazdınız, {0} tuşuna bastınız ve «привет» oldu, düzen Rusçaya geçti. Bir kez daha — ve her şey eski haline döner."
+    IDS_HELLO_PANEL         "İlk gün için üç şey"
+    IDS_HELLO_ROW_1         "{0} son yazdığınız kelimeyi dönüştürür ve düzeni değiştirir. Her pencerede çalışır."
+    IDS_HELLO_ROW_2         "Bir kez daha {0}: kelime harfi harfine eski haline döner."
+    IDS_HELLO_ROW_3         "Bildirim alanındaki simge: duraklatma, ayarlar ve «Hakkında» — orada «Nasıl kullanılır» bölümü var."
+    IDS_HELLO_SETTINGS      "Ayarları aç"
+    IDS_HELLO_OK            "Anladım"
+    IDS_THANKS_TITLE        "Bir ay geçti. Teşekkürler!"
+    IDS_THANKS_LEAD         "Merhaba, yine Panda. Bir ay önce Lang Switcher'ı kurdunuz ve umarım size uygun gelmiştir: programın hafif olması ve sadece çalışması için çok emek verdim."
+    IDS_THANKS_PARA         "Beğendiyseniz kanalda anlatın. Bir şey ters gidiyorsa bana yazın: eleştiri de önemlidir — bir sorun ancak biri onu bildiğinde düzeltilebilir. Sihirbaz, simge menüsünde «Yazara yaz…» maddesinde."
+    IDS_SUPPORT_PANEL       "Yazarı destekleyin"
+    IDS_SUPPORT_TEXT        "Program ücretsizdir ve öyle kalacak. Teşekkürünüzü bir davranışla göstermek isterseniz destek sayfasında birkaç yol var. Başkasının emeğine değer vermeniz güzel ♥"
+    IDS_THANKS_SNOOZE       "Bir hafta sonra hatırlat"
+    IDS_THANKS_FOOT         "Bu mektup bir kez gösterilir."
+    IDS_WHATSNEW_TITLE      "{0} sürümünde neler yeni"
+    IDS_WHATSNEW_FROM       "önceki {0} · bugün güncellendi"
+    IDS_WHATSNEW_TODAY      "bugün güncellendi"
+    IDS_WHATSNEW_PANEL      "Üç değişiklik"
+    IDS_WHATSNEW_1          "Yazardan mektuplar: ilk çalıştırmada «Merhaba», güncellemeden sonra «Neler yeni» ve bir ay sonra «Teşekkürler»."
+    IDS_WHATSNEW_2          "«Yazardan» penceresi: destek, kanal ve haber akışının durumu."
+    IDS_WHATSNEW_3          "Okunmamış bir mektup varken bildirim alanındaki simgede bir nokta yanar."
+    IDS_WHATSNEW_FULL       "Değişikliklerin tam listesi kanalda yayımlandı."
+    IDS_AUTHOR_CAPTION      "Yazardan"
+    IDS_AUTHOR_VERSION      "sürüm {0} · Panda, namıdiğer Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Yazar"
+    IDS_AUTHOR_TEXT         "Programı boş zamanında tek bir kişi yapıyor. Ücretsizdir ve öyle kalacak. Teşekkürünüzü bir davranışla göstermek isterseniz destek sayfasında birkaç yol var. Başkasının emeğine değer vermeniz güzel ♥"
+    IDS_NEWS_PANEL          "Haberler ve güncellemeler"
+    IDS_NEWS_ABOUT_FEED     "Program 15 günde bir yazarın sitesinden tek bir dosya okur: mektuplar ve en yeni sürümün numarası. Bunun dışında hiçbir şey göndermez ve indirmez."
+    IDS_NEWS_NEVER_READ     "Akış henüz okunmadı."
+    IDS_NEWS_READ_ON        "Akış {0} tarihinde okundu, yazarın imzası doğru. Sonraki okuma {1} gün sonra."
+    IDS_NEWS_LATEST         "{0} sürümü kurulu, en yenisi bu."
+    IDS_NEWS_AVAILABLE      "{0} sürümü kurulu, {1} sürümü mevcut."
+    IDS_NEWS_DOWNLOAD       "İndirme sayfasını aç"
+    IDS_NEWS_LETTERS        "Son mektuplar"
+    IDS_NEWS_FILE_ONLY      "Ayar dosyasından kapatılır: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Yazarın güncelleme ve haberlerini bildir"
+    IDS_NEWS_SWITCH_SUB     "Program 15 günde bir yazarın sitesinden tek bir dosya okur. Bunun dışında hiçbir şey göndermez ve indirmez."
+    IDS_FEEDBACK_PANEL      "Geri bildirim"
+    IDS_FEEDBACK_TEXT       "Bir hata mı buldunuz, bir fikriniz mi var? Sihirbaz iletiyi beş adımda hazırlar. Hiçbir şey kendiliğinden gitmez: metin panoya gider, yapıştıran siz olursunuz."
+    IDS_WRITE_TO_AUTHOR     "Yazara yaz…"
+    IDS_LETTERS_CAPTION     "Son mektuplar"
+    IDS_LETTERS_FOOT        "Son üç haber saklanır. Dördüncüsü geldiğinde en eskisi okunmamış olsa bile gider."
+    IDS_LETTERS_OPEN        "Mektubu aç"
+    IDS_NEWS_READ_BUTTON    "Okundu"
+    IDS_MENU_UNREAD         "Okunmamış mektup…"
+    IDS_MENU_UPDATE         "{0} sürümü mevcut…"
+    IDS_TOAST_TITLE         "Yazardan bir mektup"
+    IDS_TOAST_NEWS          "Panda'nın size bir haberi var. Okumak için tıklayın, bir dakika sürer."
+    IDS_TOAST_THANKS        "Kurulumdan bu yana bir ay geçti. Panda birkaç söz söylemek istiyor. Okumak için tıklayın."
+    IDS_TOAST_UPDATE_TITLE  "{0} sürümü çıktı"
+    IDS_TOAST_UPDATE        "Üç değişiklik ve indirme bağlantısı. Okumak için tıklayın."
+    IDS_ABOUT_AUTHOR        "Yazardan…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1853,6 +2813,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc ή κλικ αλλού ακυρώνει"
     IDS_TIP_ACTIVE          "ενεργή"
     IDS_TIP_PAUSED          "σε παύση"
+    IDS_LETTER_CAPTION      "Ένα γράμμα από τον δημιουργό"
+    IDS_CLOSE               "Κλείσιμο"
+    IDS_CHANNEL_OPEN        "Άνοιγμα του καναλιού"
+    IDS_SUPPORT_OPEN        "Άνοιγμα της σελίδας υποστήριξης"
+    IDS_HELLO_TITLE         "Γεια σας! Με λένε Πάντα."
+    IDS_HELLO_LEAD          "Έφτιαξα το Lang Switcher και χαίρομαι που το εγκαταστήσατε. Το πρόγραμμα κάνει ένα πράγμα: διορθώνει μια λέξη γραμμένη σε λάθος διάταξη. Έτσι φαίνεται:"
+    IDS_HELLO_DEMO_CAP      "Γράψατε «ghbdtn», πατήσατε {0} και βγήκε «привет», η διάταξη άλλαξε σε ρωσική. Άλλη μια φορά — και όλα γίνονται όπως ήταν."
+    IDS_HELLO_PANEL         "Τρία πράγματα για την πρώτη μέρα"
+    IDS_HELLO_ROW_1         "Το {0} μετατρέπει την τελευταία λέξη που γράψατε και αλλάζει τη διάταξη. Λειτουργεί σε κάθε παράθυρο."
+    IDS_HELLO_ROW_2         "Άλλη μια φορά {0}: η λέξη επιστρέφει όπως ήταν, γράμμα προς γράμμα."
+    IDS_HELLO_ROW_3         "Το εικονίδιο στην περιοχή ειδοποιήσεων: παύση, ρυθμίσεις και «Σχετικά», όπου υπάρχει η ενότητα «Πώς χρησιμοποιείται»."
+    IDS_HELLO_SETTINGS      "Άνοιγμα ρυθμίσεων"
+    IDS_HELLO_OK            "Κατάλαβα"
+    IDS_THANKS_TITLE        "Πέρασε ένας μήνας. Ευχαριστώ!"
+    IDS_THANKS_LEAD         "Γεια σας, ο Πάντα πάλι. Πριν από έναν μήνα εγκαταστήσατε το Lang Switcher και ελπίζω να σας βολεύει: κατέβαλα πολύ κόπο ώστε το πρόγραμμα να είναι ελαφρύ και απλώς να δουλεύει."
+    IDS_THANKS_PARA         "Αν σας άρεσε, πείτε το στο κανάλι. Αν κάτι δεν πάει καλά, γράψτε μου: και η κριτική μετράει — ένα πρόβλημα διορθώνεται μόνο όταν κάποιος το μάθει. Ο οδηγός είναι στο μενού του εικονιδίου, στο «Γράψτε στον δημιουργό…»."
+    IDS_SUPPORT_PANEL       "Στηρίξτε τον δημιουργό"
+    IDS_SUPPORT_TEXT        "Το πρόγραμμα είναι δωρεάν και θα παραμείνει. Αν θέλετε να πείτε ευχαριστώ έμπρακτα, η σελίδα υποστήριξης έχει μερικούς τρόπους. Ωραίο που εκτιμάτε τον κόπο των άλλων ♥"
+    IDS_THANKS_SNOOZE       "Υπενθύμιση σε μία εβδομάδα"
+    IDS_THANKS_FOOT         "Αυτό το γράμμα εμφανίζεται μία φορά."
+    IDS_WHATSNEW_TITLE      "Τι νέο υπάρχει στην {0}"
+    IDS_WHATSNEW_FROM       "είχατε {0} · ενημερώθηκε σήμερα"
+    IDS_WHATSNEW_TODAY      "ενημερώθηκε σήμερα"
+    IDS_WHATSNEW_PANEL      "Τρεις αλλαγές"
+    IDS_WHATSNEW_1          "Γράμματα από τον δημιουργό: «Γεια σας» στην πρώτη εκκίνηση, «Τι νέο υπάρχει» μετά από ενημέρωση και «Ευχαριστώ» μετά από έναν μήνα."
+    IDS_WHATSNEW_2          "Το παράθυρο «Από τον δημιουργό»: υποστήριξη, κανάλι και κατάσταση της ροής ειδήσεων."
+    IDS_WHATSNEW_3          "Το εικονίδιο στην περιοχή ειδοποιήσεων δείχνει μια κουκκίδα όσο υπάρχει αδιάβαστο γράμμα."
+    IDS_WHATSNEW_FULL       "Ο πλήρης κατάλογος αλλαγών δημοσιεύεται στο κανάλι."
+    IDS_AUTHOR_CAPTION      "Από τον δημιουργό"
+    IDS_AUTHOR_VERSION      "έκδοση {0} · Πάντα, γνωστός και ως Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "Ο δημιουργός"
+    IDS_AUTHOR_TEXT         "Το πρόγραμμα το φτιάχνει ένας άνθρωπος στον ελεύθερο χρόνο του. Είναι δωρεάν και θα παραμείνει. Αν θέλετε να πείτε ευχαριστώ έμπρακτα, η σελίδα υποστήριξης έχει μερικούς τρόπους. Ωραίο που εκτιμάτε τον κόπο των άλλων ♥"
+    IDS_NEWS_PANEL          "Ειδήσεις και ενημερώσεις"
+    IDS_NEWS_ABOUT_FEED     "Μία φορά στις 15 μέρες το πρόγραμμα διαβάζει ένα αρχείο από τον ιστότοπο του δημιουργού: γράμματα και τον αριθμό της νεότερης έκδοσης. Τίποτε άλλο δεν στέλνει και τίποτε δεν κατεβάζει."
+    IDS_NEWS_NEVER_READ     "Η ροή δεν έχει διαβαστεί ακόμη."
+    IDS_NEWS_READ_ON        "Η ροή διαβάστηκε στις {0}, η υπογραφή του δημιουργού είναι σωστή. Επόμενη ανάγνωση σε {1} ημέρες."
+    IDS_NEWS_LATEST         "Είναι εγκατεστημένη η έκδοση {0}, και είναι η τελευταία."
+    IDS_NEWS_AVAILABLE      "Είναι εγκατεστημένη η έκδοση {0}, διατίθεται η {1}."
+    IDS_NEWS_DOWNLOAD       "Άνοιγμα της σελίδας λήψης"
+    IDS_NEWS_LETTERS        "Τελευταία γράμματα"
+    IDS_NEWS_FILE_ONLY      "Απενεργοποιείται στο αρχείο ρυθμίσεων: [letters] feed = false."
+    IDS_NEWS_SWITCH         "Να ενημερώνομαι για ενημερώσεις και ειδήσεις του δημιουργού"
+    IDS_NEWS_SWITCH_SUB     "Μία φορά στις 15 μέρες το πρόγραμμα διαβάζει ένα αρχείο από τον ιστότοπο του δημιουργού. Τίποτε άλλο δεν στέλνει και τίποτε δεν κατεβάζει."
+    IDS_FEEDBACK_PANEL      "Επικοινωνία"
+    IDS_FEEDBACK_TEXT       "Βρήκατε σφάλμα ή έχετε ιδέα; Ο οδηγός συνθέτει το μήνυμα σε πέντε βήματα. Τίποτε δεν φεύγει από μόνο του: το κείμενο πάει στο πρόχειρο και το επικολλάτε εσείς."
+    IDS_WRITE_TO_AUTHOR     "Γράψτε στον δημιουργό…"
+    IDS_LETTERS_CAPTION     "Τελευταία γράμματα"
+    IDS_LETTERS_FOOT        "Κρατούνται οι τρεις τελευταίες ειδήσεις. Όταν έρθει τέταρτη, η παλαιότερη φεύγει, ακόμη κι αδιάβαστη."
+    IDS_LETTERS_OPEN        "Άνοιγμα του γράμματος"
+    IDS_NEWS_READ_BUTTON    "Διαβάστηκε"
+    IDS_MENU_UNREAD         "Αδιάβαστο γράμμα…"
+    IDS_MENU_UPDATE         "Διαθέσιμη η έκδοση {0}…"
+    IDS_TOAST_TITLE         "Ένα γράμμα από τον δημιουργό"
+    IDS_TOAST_NEWS          "Ο Πάντα έχει μια είδηση για σας. Κάντε κλικ για να τη διαβάσετε, θα πάρει ένα λεπτό."
+    IDS_TOAST_THANKS        "Πέρασε ένας μήνας από την εγκατάσταση. Ο Πάντα θέλει να πει δυο λόγια. Κάντε κλικ για να τα διαβάσετε."
+    IDS_TOAST_UPDATE_TITLE  "Κυκλοφόρησε η έκδοση {0}"
+    IDS_TOAST_UPDATE        "Τρεις αλλαγές και ένας σύνδεσμος λήψης. Κάντε κλικ για να το διαβάσετε."
+    IDS_ABOUT_AUTHOR        "Από τον δημιουργό…"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1943,6 +2961,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc או קליק בחוץ מבטלים"
     IDS_TIP_ACTIVE          "פעילה"
     IDS_TIP_PAUSED          "מושהית"
+    IDS_LETTER_CAPTION      "מכתב מהמפתח"
+    IDS_CLOSE               "סגירה"
+    IDS_CHANNEL_OPEN        "פתיחת הערוץ"
+    IDS_SUPPORT_OPEN        "פתיחת עמוד התמיכה"
+    IDS_HELLO_TITLE         "שלום! קוראים לי פנדה."
+    IDS_HELLO_LEAD          "אני עשיתי את Lang Switcher ואני שמח שהתקנתם אותו. התוכנה עושה דבר אחד: מתקנת מילה שהוקלדה בפריסה הלא נכונה. כך זה נראה:"
+    IDS_HELLO_DEMO_CAP      "הקלדתם «ghbdtn», הקשתם {0} וקיבלתם «привет», והפריסה עברה לרוסית. עוד פעם אחת — והכול חוזר כפי שהיה."
+    IDS_HELLO_PANEL         "שלושה דברים ליום הראשון"
+    IDS_HELLO_ROW_1         "{0} ממיר את המילה האחרונה שהקלדתם ומחליף את הפריסה. עובד בכל חלון."
+    IDS_HELLO_ROW_2         "עוד פעם {0}: המילה חוזרת למקור, אות באות."
+    IDS_HELLO_ROW_3         "הסמל באזור ההודעות: השהיה, הגדרות ו«אודות», שבו יש הפרק «איך משתמשים»."
+    IDS_HELLO_SETTINGS      "פתיחת ההגדרות"
+    IDS_HELLO_OK            "הבנתי"
+    IDS_THANKS_TITLE        "עבר חודש. תודה!"
+    IDS_THANKS_LEAD         "שלום, זה שוב פנדה. לפני חודש התקנתם את Lang Switcher, ואני מקווה שנוח לכם איתו: השקעתי הרבה כדי שהתוכנה תהיה קלה ופשוט תעבוד."
+    IDS_THANKS_PARA         "אם אהבתם, ספרו על כך בערוץ. אם משהו לא בסדר, כתבו לי: גם ביקורת חשובה — אפשר לתקן בעיה רק אחרי שמישהו יודע עליה. האשף נמצא בתפריט הסמל, בפריט «כתיבה למפתח…»."
+    IDS_SUPPORT_PANEL       "תמיכה במפתח"
+    IDS_SUPPORT_TEXT        "התוכנה חינמית ותישאר כזאת. אם בא לכם להגיד תודה במעשה, בעמוד התמיכה יש כמה דרכים. נחמד שאתם מעריכים עבודה של אחרים ♥"
+    IDS_THANKS_SNOOZE       "להזכיר בעוד שבוע"
+    IDS_THANKS_FOOT         "המכתב הזה מוצג פעם אחת."
+    IDS_WHATSNEW_TITLE      "מה חדש בגרסה {0}"
+    IDS_WHATSNEW_FROM       "הייתה {0} · עודכן היום"
+    IDS_WHATSNEW_TODAY      "עודכן היום"
+    IDS_WHATSNEW_PANEL      "שלושה שינויים"
+    IDS_WHATSNEW_1          "מכתבים מהמפתח: «שלום» בהפעלה הראשונה, «מה חדש» אחרי עדכון ו«תודה» אחרי חודש."
+    IDS_WHATSNEW_2          "חלון «מהמפתח»: תמיכה, ערוץ ומצב הזנת החדשות."
+    IDS_WHATSNEW_3          "בסמל שבאזור ההודעות נדלקת נקודה כשיש מכתב שלא נקרא."
+    IDS_WHATSNEW_FULL       "הרשימה המלאה של השינויים מתפרסמת בערוץ."
+    IDS_AUTHOR_CAPTION      "מהמפתח"
+    IDS_AUTHOR_VERSION      "גרסה {0} · פנדה, הידוע גם כ־Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "המפתח"
+    IDS_AUTHOR_TEXT         "את התוכנה עושה אדם אחד בזמנו הפנוי. היא חינמית ותישאר כזאת. אם בא לכם להגיד תודה במעשה, בעמוד התמיכה יש כמה דרכים. נחמד שאתם מעריכים עבודה של אחרים ♥"
+    IDS_NEWS_PANEL          "חדשות ועדכונים"
+    IDS_NEWS_ABOUT_FEED     "פעם ב־15 ימים התוכנה קוראת קובץ אחד מאתר המפתח: מכתבים ומספר הגרסה החדשה. יותר מזה היא לא שולחת דבר ולא מורידה דבר."
+    IDS_NEWS_NEVER_READ     "ההזנה עדיין לא נקראה."
+    IDS_NEWS_READ_ON        "ההזנה נקראה בתאריך {0}, החתימה של המפתח תקינה. הקריאה הבאה בעוד {1} ימים."
+    IDS_NEWS_LATEST         "מותקנת גרסה {0}, וזו האחרונה."
+    IDS_NEWS_AVAILABLE      "מותקנת גרסה {0}, זמינה {1}."
+    IDS_NEWS_DOWNLOAD       "פתיחת עמוד ההורדה"
+    IDS_NEWS_LETTERS        "מכתבים אחרונים"
+    IDS_NEWS_FILE_ONLY      "מכובה בקובץ ההגדרות: [letters] feed = false."
+    IDS_NEWS_SWITCH         "לדווח על עדכונים וחדשות של המפתח"
+    IDS_NEWS_SWITCH_SUB     "פעם ב־15 ימים התוכנה קוראת קובץ אחד מאתר המפתח. יותר מזה היא לא שולחת דבר ולא מורידה דבר."
+    IDS_FEEDBACK_PANEL      "משוב"
+    IDS_FEEDBACK_TEXT       "מצאתם תקלה או שיש לכם רעיון? האשף יחבר פנייה בחמישה צעדים. שום דבר לא נשלח מעצמו: הטקסט מגיע ללוח, ואתם מדביקים אותו."
+    IDS_WRITE_TO_AUTHOR     "כתיבה למפתח…"
+    IDS_LETTERS_CAPTION     "מכתבים אחרונים"
+    IDS_LETTERS_FOOT        "נשמרות שלוש הידיעות האחרונות. כשמגיעה רביעית, הישנה ביותר יוצאת, גם אם לא נקראה."
+    IDS_LETTERS_OPEN        "פתיחת המכתב"
+    IDS_NEWS_READ_BUTTON    "נקרא"
+    IDS_MENU_UNREAD         "מכתב שלא נקרא…"
+    IDS_MENU_UPDATE         "זמינה גרסה {0}…"
+    IDS_TOAST_TITLE         "מכתב מהמפתח"
+    IDS_TOAST_NEWS          "לפנדה יש ידיעה בשבילכם. הקישו כדי לקרוא, זה ייקח דקה."
+    IDS_TOAST_THANKS        "עבר חודש מההתקנה. פנדה רוצה לומר כמה מילים. הקישו כדי לקרוא."
+    IDS_TOAST_UPDATE_TITLE  "יצאה גרסה {0}"
+    IDS_TOAST_UPDATE        "שלושה שינויים וקישור להורדה. הקישו כדי לקרוא."
+    IDS_ABOUT_AUTHOR        "מהמפתח…"
 END
 
 LANGUAGE 0x01, 0x01
@@ -2019,6 +3095,64 @@ BEGIN
     IDS_CAPTURE_HINT        "Esc أو نقرة خارجه تُلغي"
     IDS_TIP_ACTIVE          "نشط"
     IDS_TIP_PAUSED          "متوقف مؤقتًا"
+    IDS_LETTER_CAPTION      "رسالة من المؤلف"
+    IDS_CLOSE               "إغلاق"
+    IDS_CHANNEL_OPEN        "فتح القناة"
+    IDS_SUPPORT_OPEN        "فتح صفحة الدعم"
+    IDS_HELLO_TITLE         "مرحبًا! اسمي باندا."
+    IDS_HELLO_LEAD          "أنا صنعت Lang Switcher ويسعدني أنك ثبّته. يقوم البرنامج بشيء واحد: يصلح كلمة كُتبت بتخطيط خاطئ. هكذا يبدو الأمر:"
+    IDS_HELLO_DEMO_CAP      "كتبت «ghbdtn» وضغطت {0} فحصلت على «привет»، وتبدّل التخطيط إلى الروسية. مرة أخرى — ويعود كل شيء كما كان."
+    IDS_HELLO_PANEL         "ثلاثة أشياء لليوم الأول"
+    IDS_HELLO_ROW_1         "{0} يحوّل آخر كلمة كتبتها ويبدّل التخطيط. يعمل في أي نافذة."
+    IDS_HELLO_ROW_2         "اضغط {0} مرة أخرى: تعود الكلمة كما كانت، حرفًا بحرف."
+    IDS_HELLO_ROW_3         "الأيقونة في منطقة الإشعارات: إيقاف مؤقت وإعدادات و«حول»، وفيها قسم «طريقة الاستخدام»."
+    IDS_HELLO_SETTINGS      "فتح الإعدادات"
+    IDS_HELLO_OK            "فهمت"
+    IDS_THANKS_TITLE        "مضى شهر. شكرًا!"
+    IDS_THANKS_LEAD         "مرحبًا، باندا مرة أخرى. قبل شهر ثبّت Lang Switcher، وآمل أن يكون مريحًا لك: بذلت جهدًا كبيرًا ليكون البرنامج خفيفًا ويعمل ببساطة."
+    IDS_THANKS_PARA         "إن أعجبك فتحدث عنه في القناة. وإن كان هناك خلل فاكتب لي: النقد مهم أيضًا — لا تُصلَح المشكلة إلا بعد أن يعرف بها أحد. المعالج في قائمة الأيقونة، البند «الكتابة إلى المؤلف…»."
+    IDS_SUPPORT_PANEL       "ادعم المؤلف"
+    IDS_SUPPORT_TEXT        "البرنامج مجاني وسيبقى كذلك. إن أردت أن تشكر بفعل، ففي صفحة الدعم عدة طرق. جميل أنك تقدّر عمل الآخرين ♥"
+    IDS_THANKS_SNOOZE       "ذكّرني بعد أسبوع"
+    IDS_THANKS_FOOT         "تُعرض هذه الرسالة مرة واحدة."
+    IDS_WHATSNEW_TITLE      "ما الجديد في {0}"
+    IDS_WHATSNEW_FROM       "كانت {0} · حُدّث اليوم"
+    IDS_WHATSNEW_TODAY      "حُدّث اليوم"
+    IDS_WHATSNEW_PANEL      "ثلاثة تغييرات"
+    IDS_WHATSNEW_1          "رسائل من المؤلف: «مرحبًا» عند أول تشغيل، و«ما الجديد» بعد التحديث، و«شكرًا» بعد شهر."
+    IDS_WHATSNEW_2          "نافذة «من المؤلف»: الدعم والقناة وحالة تغذية الأخبار."
+    IDS_WHATSNEW_3          "تظهر نقطة على الأيقونة في منطقة الإشعارات ما دامت هناك رسالة غير مقروءة."
+    IDS_WHATSNEW_FULL       "قائمة التغييرات الكاملة منشورة في القناة."
+    IDS_AUTHOR_CAPTION      "من المؤلف"
+    IDS_AUTHOR_VERSION      "الإصدار {0} · باندا، المعروف أيضًا بـ Panda_Pishet_Kod"
+    IDS_AUTHOR_PANEL        "المؤلف"
+    IDS_AUTHOR_TEXT         "يصنع البرنامج شخص واحد في وقت فراغه. وهو مجاني وسيبقى كذلك. إن أردت أن تشكر بفعل، ففي صفحة الدعم عدة طرق. جميل أنك تقدّر عمل الآخرين ♥"
+    IDS_NEWS_PANEL          "الأخبار والتحديثات"
+    IDS_NEWS_ABOUT_FEED     "مرة كل 15 يومًا يقرأ البرنامج ملفًا واحدًا من موقع المؤلف: الرسائل ورقم أحدث إصدار. وما عدا ذلك لا يرسل شيئًا ولا ينزّل شيئًا."
+    IDS_NEWS_NEVER_READ     "لم تُقرأ التغذية بعد."
+    IDS_NEWS_READ_ON        "قُرئت التغذية في {0}، وتوقيع المؤلف صحيح. القراءة التالية بعد {1} يومًا."
+    IDS_NEWS_LATEST         "الإصدار {0} مثبّت، وهو الأحدث."
+    IDS_NEWS_AVAILABLE      "الإصدار {0} مثبّت، والإصدار {1} متاح."
+    IDS_NEWS_DOWNLOAD       "فتح صفحة التنزيل"
+    IDS_NEWS_LETTERS        "آخر الرسائل"
+    IDS_NEWS_FILE_ONLY      "يُعطَّل في ملف الإعدادات: [letters] feed = false."
+    IDS_NEWS_SWITCH         "أبلغني بتحديثات المؤلف وأخباره"
+    IDS_NEWS_SWITCH_SUB     "مرة كل 15 يومًا يقرأ البرنامج ملفًا واحدًا من موقع المؤلف. وما عدا ذلك لا يرسل شيئًا ولا ينزّل شيئًا."
+    IDS_FEEDBACK_PANEL      "ملاحظات"
+    IDS_FEEDBACK_TEXT       "وجدت خللًا أو لديك فكرة؟ يجمع المعالج الرسالة في خمس خطوات. لا يُرسَل شيء من تلقاء نفسه: يصل النص إلى الحافظة، وأنت من يلصقه."
+    IDS_WRITE_TO_AUTHOR     "الكتابة إلى المؤلف…"
+    IDS_LETTERS_CAPTION     "آخر الرسائل"
+    IDS_LETTERS_FOOT        "تُحفظ آخر ثلاث أخبار. وعند وصول الرابع يخرج الأقدم، ولو لم يُقرأ."
+    IDS_LETTERS_OPEN        "فتح الرسالة"
+    IDS_NEWS_READ_BUTTON    "مقروءة"
+    IDS_MENU_UNREAD         "رسالة غير مقروءة…"
+    IDS_MENU_UPDATE         "الإصدار {0} متاح…"
+    IDS_TOAST_TITLE         "رسالة من المؤلف"
+    IDS_TOAST_NEWS          "لدى باندا خبر لك. اضغط لقراءته، سيستغرق دقيقة."
+    IDS_TOAST_THANKS        "مضى شهر على التثبيت. يريد باندا أن يقول كلمتين. اضغط لقراءتهما."
+    IDS_TOAST_UPDATE_TITLE  "صدر الإصدار {0}"
+    IDS_TOAST_UPDATE        "ثلاثة تغييرات ورابط للتنزيل. اضغط للقراءة."
+    IDS_ABOUT_AUTHOR        "من المؤلف…"
 END
 
 // ---------------------------------------------------------------------------------------
