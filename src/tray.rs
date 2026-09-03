@@ -152,10 +152,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
     RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
     SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
-    SetWindowsHookExW, SystemParametersInfoW, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU, WM_DRAWITEM,
-    WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL, WM_QUERYENDSESSION,
-    WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
+    SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU,
+    WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_USER,
 };
 use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
 
@@ -3031,16 +3031,20 @@ fn show_menu(x: i32, y: i32) {
     // instead of posting `WM_COMMAND` — which is why this program has no `WM_COMMAND`
     // handler at all (SEC-05) — and `TPM_NONOTIFY` suppresses the notifications that would
     // otherwise accompany the choice.
-    let chosen = unsafe {
-        TrackPopupMenuEx(
-            menu.handle(),
-            (TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON).0,
-            x,
-            y,
-            hwnd,
-            None,
-        )
-    };
+    //
+    // **`TPM_LAYOUTRTL` — вопрос 97, task Т-30-2.** The one flag that mirrors this menu, asked
+    // for here and nowhere else. Measured on its own (`scratchpad-Э30\посылки-п1б.log`): with
+    // the flag the popup came back carrying `WS_EX_LAYOUTRTL` and a mirrored DC, without it it
+    // did not — so no process-wide `SetProcessDefaultLayout` is needed to get a mirrored menu,
+    // and none is set. That matters beyond tidiness: a process-wide layout outlives this call
+    // and would mirror the next window this program grows, by an inheritance nobody set.
+    let mut flags = (TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON).0;
+
+    if crate::settings::ui_language().is_rtl() {
+        flags |= TPM_LAYOUTRTL.0;
+    }
+
+    let chosen = unsafe { TrackPopupMenuEx(menu.handle(), flags, x, y, hwnd, None) };
 
     // Task T-12-9: out on **every** path, including the one where the call above failed —
     // `TrackPopupMenuEx` has returned by this line however it returned, and the popup window

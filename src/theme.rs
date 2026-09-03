@@ -86,12 +86,13 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CLEARTYPE_QUALITY, COLORONCOLOR,
     CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen,
     CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT,
-    DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
-    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetStockObject,
-    GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
-    IntersectClipRect, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, OBJ_FONT, PS_SOLID, Polyline,
-    RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode, SetStretchBltMode,
-    SetTextColor, SetWindowOrgEx, StretchBlt, TEXTMETRICW, TRANSPARENT, TextOutW,
+    DT_RTLREADING, DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
+    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetLayout,
+    GetStockObject, GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    IntersectClipRect, LAYOUT_RTL, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, OBJ_FONT, PS_SOLID,
+    Polyline, RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode,
+    SetStretchBltMode, SetTextColor, SetWindowOrgEx, StretchBlt, TEXTMETRICW, TRANSPARENT,
+    TextOutW,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::{PCWSTR, w};
@@ -2557,6 +2558,95 @@ pub(crate) unsafe fn restore_face(dc: HDC, previous: Option<HGDIOBJ>) {
 /// in under a change of smoothing.
 pub const LABEL_TEXT_FORMAT: DRAW_TEXT_FORMAT =
     DRAW_TEXT_FORMAT(DT_LEFT.0 | DT_TOP.0 | DT_WORDBREAK.0 | DT_EXPANDTABS.0);
+
+// =========================================================================================
+// Reading order — вопрос 97 п. 2, task Т-30-2. One place, and it comes out of a measurement.
+// =========================================================================================
+
+/// Whether `dc` is a **mirrored** device context.
+///
+/// Asked of the DC and not of [`crate::settings::ui_language`] on purpose: what decides how a
+/// run of text is laid out is the context it is drawn into, and a stand — or a window this
+/// program has not written yet — that mirrors itself for its own reasons gets the right answer
+/// without having to remember to tell anybody.
+///
+/// # Safety
+///
+/// `dc` is a live device context.
+pub unsafe fn dc_is_rtl(dc: HDC) -> bool {
+    // SAFETY: `dc` is live by the contract above; `GetLayout` reads no memory of ours.
+    let layout = unsafe { GetLayout(dc) };
+
+    layout & LAYOUT_RTL.0 != 0
+}
+
+/// The reading-order bit one piece of text needs — the **only** place this program decides it.
+///
+/// # What was measured, and why the formula is this short
+///
+/// `scratchpad-Э30\посылки-п2.log`, on the probe «a ב» — three characters whose glyphs cannot
+/// change, so only their **order** can:
+///
+/// | context | flag | order that came out |
+/// |---|---|---|
+/// | ordinary DC | none | left to right |
+/// | ordinary DC | `DT_RTLREADING` | right to left |
+/// | mirrored DC | none | **right to left** |
+/// | mirrored DC | `DT_RTLREADING` | **left to right** |
+///
+/// So a mirrored DC already reads right to left, which is what Hebrew and Arabic want, and the
+/// flag is not a way of asking for right-to-left at all — it is the way of asking for the
+/// **opposite of the context**. That is exactly what an island of Latin text needs (вопрос 97
+/// п. 2, task Т-30-4) and exactly what nothing else needs. Hence: the bit is set when, and only
+/// when, a left-to-right island is being drawn into a mirrored context.
+///
+/// ⚠ **Not a way to right-align anything.** Alignment in a mirrored context is already what it
+/// should be: `DT_LEFT` means «the logical left», which is the physical right. The two were
+/// measured apart on purpose — the first edition of the instrument confused them and answered
+/// «the flag does nothing» to every probe.
+///
+/// ⚠ Measured separately and worth knowing before reaching for this: «English (United States)»
+/// comes out **identical** under all four rows of the table. Modern bidi resolves a bracket
+/// **pair** to the direction of the text inside it, so the closing parenthesis of a Latin name
+/// does not jump when the paragraph direction changes. The jumping bracket this rule was
+/// expected to fix does not exist here.
+pub const fn reading_order(rtl: bool, island: bool) -> DRAW_TEXT_FORMAT {
+    if rtl && island {
+        DT_RTLREADING
+    } else {
+        DRAW_TEXT_FORMAT(0)
+    }
+}
+
+/// Whether a run of text is an **island** — read left to right whatever the window around it.
+///
+/// Named rather than passed as a bare `bool` because the two readings of `true` are opposite at
+/// the two ends of [`reading_order`], and a call site reading `reading_order(rtl, true)` says
+/// nothing about which of them it meant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reading {
+    /// Text of the interface language: it reads the way the window does.
+    Native,
+    /// An island of вопрос 97 п. 2 — a key name, a path, a process name, a layout name whose
+    /// first strong character is Latin or Cyrillic. It reads left to right even in a mirrored
+    /// window, and it still stands against the window's own edge.
+    LatinIsland,
+}
+
+/// [`LABEL_TEXT_FORMAT`] with the reading order this `dc` and this kind of run call for.
+///
+/// The one call the drawing sites make, so that the decision above is taken once rather than
+/// forty times.
+///
+/// # Safety
+///
+/// `dc` is a live device context.
+pub unsafe fn label_format(dc: HDC, reading: Reading) -> DRAW_TEXT_FORMAT {
+    // SAFETY: `dc` is live by the contract above.
+    let rtl = unsafe { dc_is_rtl(dc) };
+
+    LABEL_TEXT_FORMAT | reading_order(rtl, reading == Reading::LatinIsland)
+}
 
 /// The step from one line of a **wrapped** owner-drawn label to the next, in the pixels of the
 /// mock-ups — решение **В-6** (`DECISIONS.md`, вопрос 56), task T-12-12.

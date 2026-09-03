@@ -73,16 +73,15 @@ use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC,
-    CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC,
-    DeleteObject, DrawFocusRect, DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC,
-    GetObjectW, GetTextExtentPoint32W, GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
-    InvalidateRect, LOGFONTW, PAINTSTRUCT, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE,
-    RedrawWindow, ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode,
-    SetTextColor, TRANSPARENT, TextOutW,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DT_CALCRECT,
+    DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect,
+    DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetObjectW, GetTextExtentPoint32W,
+    GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW, PAINTSTRUCT,
+    RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, SRCCOPY, ScreenToClient,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
-    FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
+    FindResourceExW, FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE,
@@ -115,19 +114,20 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
     CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
-    DLGC_WANTALLKEYS, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxParamW,
-    EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC,
-    GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect, PostMessageW,
-    STM_SETICON, SW_SHOWNORMAL, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW,
-    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY,
-    WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon,
+    DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
+    GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
+    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
+    ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
+    LoadImageW, MapDialogRect, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL,
+    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
+    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2580,6 +2580,189 @@ pub const IDD_SETTINGS: u16 = 200;
 /// Kept equal by hand, exactly as [`IDD_SETTINGS`] above.
 pub const IDD_ABOUT: u16 = 201;
 
+// =========================================================================================
+// The mirror — вопрос 97, task Т-30-2. Both windows of the program go through here.
+// =========================================================================================
+
+/// Byte offset of `exStyle` inside a `DLGTEMPLATEEX`: `dlgVer` (2) + `signature` (2) +
+/// `helpID` (4).
+///
+/// `rc.exe` compiles a `DIALOGEX` statement — which both templates of this program are — into
+/// the extended form, whose first two fields are the version and the signature `0xFFFF` that
+/// tell it apart from the old `DLGTEMPLATE`. Both are checked before this offset is used, so a
+/// template that is somehow the old form is left alone rather than patched at the wrong place.
+const DLGTEMPLATEEX_EXSTYLE_AT: usize = 8;
+
+/// Runs one modal dialog of this program, **mirrored** when the interface locale reads right to
+/// left — вопрос 97, task Т-30-2.
+///
+/// # Why the template is copied instead of a process-wide switch being thrown
+///
+/// The obvious lever, `SetProcessDefaultLayout(LAYOUT_RTL)`, was measured first and does not do
+/// this job (`scratchpad-Э30\посылки-п1.log`). It is documented to change the default layout
+/// «when windows are created with **no parent or owner**», and that turns out to be exactly what
+/// it means: a window created after the call with no owner came back carrying `WS_EX_LAYOUTRTL`,
+/// the same window created with an owner did not, and the dialogs of this program always have an
+/// owner. Neither dialog mirrored, and neither did any of their forty-four children.
+///
+/// What does work — measured on this program's own `IDD_SETTINGS` in the same run — is a copy of
+/// the compiled template with `WS_EX_LAYOUTRTL` added to its `exStyle`, run through
+/// `DialogBoxIndirectParamW`: the dialog came back mirrored and **all forty-four children
+/// inherited it**, which is the half that matters. Children inherit the layout of the parent at
+/// creation, and the dialog manager creates them, so the style has to be on the window before
+/// they exist. There is no later moment to add it in.
+///
+/// A process-wide switch would also have been the wrong shape even if it had worked: it outlives
+/// the window, and the next window this program grows would be mirrored by an inheritance
+/// nobody remembers setting. The tray menu takes the same view — it asks for `TPM_LAYOUTRTL` at
+/// the one call that shows it (measured to be sufficient on its own,
+/// `scratchpad-Э30\посылки-п1б.log`) rather than reading a flag left lying about.
+///
+/// # Why every locale goes through the copy
+///
+/// One body (§6.2). The twelve left-to-right locales copy the same bytes and patch nothing, so
+/// what they get is the template they always got; running them through the same call means the
+/// path Hebrew and Arabic take is the path every test and every acceptance run exercises, rather
+/// than a branch reached by two locales out of fourteen.
+///
+/// NFR-13: any refusal along the way — the resource not found, not loadable, empty, or not the
+/// extended form — falls back to `DialogBoxParamW` on the resource itself. An unmirrored window
+/// is a poor answer for a Hebrew user and a far better one than no window at all.
+///
+/// # Safety
+///
+/// `owner` is a live window of this thread, `proc` is the dialog procedure that reads `param`,
+/// and `param` names something that outlives this call — which is every call, because the call
+/// is modal.
+unsafe fn show_modal_dialog(
+    instance: HINSTANCE,
+    template: u16,
+    owner: HWND,
+    proc: DLGPROC,
+    param: LPARAM,
+) -> isize {
+    let mirrored = ui_language().is_rtl();
+
+    if let Some(mut copy) = compiled_template(instance, template) {
+        if mirrored && mirror_template(&mut copy).is_none() {
+            // The template is not the extended form after all, so there is nothing safe to
+            // patch. Run it unmirrored rather than corrupt a style (NFR-13).
+            //
+            // SAFETY: as for the `DialogBoxParamW` below.
+            return unsafe {
+                DialogBoxParamW(
+                    Some(instance),
+                    resource_id(template),
+                    Some(owner),
+                    proc,
+                    param,
+                )
+            };
+        }
+
+        // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template, and
+        // the call is modal — it does not return until `EndDialog`, so the buffer outlives every
+        // use the dialog manager makes of it. The other three arguments are the caller's, under
+        // the contract above.
+        return unsafe {
+            DialogBoxIndirectParamW(
+                Some(instance),
+                copy.as_ptr().cast(),
+                Some(owner),
+                proc,
+                param,
+            )
+        };
+    }
+
+    // SAFETY: as above, with the template named by its integer identifier in the
+    // `MAKEINTRESOURCE` form — a value below 65536 carried inside the pointer and never
+    // dereferenced as a string.
+    unsafe {
+        DialogBoxParamW(
+            Some(instance),
+            resource_id(template),
+            Some(owner),
+            proc,
+            param,
+        )
+    }
+}
+
+/// Adds `WS_EX_LAYOUTRTL` to the `exStyle` of a compiled dialog template, in place — the pure
+/// half of [`show_modal_dialog`], task Т-30-2.
+///
+/// Answers what the extended style was and what it became, or `None` for a buffer that is not a
+/// `DLGTEMPLATEEX` — too short to hold the header, or carrying something other than the version
+/// and signature that mark the extended form. That refusal is the whole reason this is a
+/// function and not four lines at the call site: a `DLGTEMPLATE` of the **old** form keeps
+/// `style` where the extended one keeps `signature`, so patching at this offset without looking
+/// would quietly corrupt a window style instead of adding one.
+///
+/// Public so that a test can drive it over a template that is not this program's, which is the
+/// only way to check the refusal at all: both templates in `app.rc` are `DIALOGEX`.
+pub fn mirror_template(template: &mut [u8]) -> Option<(u32, u32)> {
+    let at = DLGTEMPLATEEX_EXSTYLE_AT;
+
+    // SEC-05: a length that came from somebody else is checked before it is indexed with.
+    if template.len() < at + 4 {
+        return None;
+    }
+
+    let version = u16::from_le_bytes([template[0], template[1]]);
+    let signature = u16::from_le_bytes([template[2], template[3]]);
+
+    if (version, signature) != (1, 0xFFFF) {
+        return None;
+    }
+
+    let before = u32::from_le_bytes([
+        template[at],
+        template[at + 1],
+        template[at + 2],
+        template[at + 3],
+    ]);
+    let after = before | WS_EX_LAYOUTRTL.0;
+
+    template[at..at + 4].copy_from_slice(&after.to_le_bytes());
+
+    Some((before, after))
+}
+
+/// The compiled bytes of one dialog template of this module's own binary, copied out so that
+/// they can be patched — task Т-30-2.
+///
+/// `None` for every refusal and for a template that is not the extended form: the caller then
+/// runs the resource itself, unpatched (NFR-13).
+fn compiled_template(instance: HINSTANCE, template: u16) -> Option<Vec<u8>> {
+    // SAFETY: `instance` is this program's module, whose resources carry both templates; the
+    // "name" is an integer identifier in the `MAKEINTRESOURCE` form, never dereferenced.
+    let found = unsafe { FindResourceW(Some(instance.into()), resource_id(template), RT_DIALOG) };
+
+    if found.is_invalid() {
+        return None;
+    }
+
+    // SAFETY: `found` is a resource of `instance`, just answered by `FindResourceW`.
+    let size = unsafe { SizeofResource(Some(instance.into()), found) } as usize;
+    // SAFETY: as above. A resource handle is not freed — the loader owns the image.
+    let loaded = unsafe { LoadResource(Some(instance.into()), found) }.ok()?;
+    // SAFETY: `loaded` was just answered for a resource of this image.
+    let raw = unsafe { LockResource(loaded) };
+
+    // A template shorter than its own header cannot be one, and the offset below would read
+    // past it. SEC-05: a length that came from somebody else is checked before it is trusted.
+    if raw.is_null() || size < DLGTEMPLATEEX_EXSTYLE_AT + 4 {
+        return None;
+    }
+
+    // SAFETY: `raw` and `size` are the address and the length `LockResource` and
+    // `SizeofResource` answered for this one resource, and the image outlives this frame.
+    let bytes = unsafe { std::slice::from_raw_parts(raw.cast::<u8>(), size) };
+
+    Some(bytes.to_vec())
+}
+
 // Control identifiers, mirrored from `app.rc`. Same rule as above.
 const IDC_AUTOSTART: i32 = 1001;
 const IDC_LANGUAGE: i32 = 1002;
@@ -3046,20 +3229,21 @@ pub fn show_dialog(
         }),
     };
 
-    // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`, and the
-    // "name" is an integer identifier in the `MAKEINTRESOURCE` form — a value below 65536
-    // carried inside the pointer, never dereferenced as a string. `owner` is a live window of
-    // this thread. The parameter is a pointer to `state`, which lives on this frame: the call
-    // is modal and does not return until `EndDialog`, so the pointer cannot outlive the value
-    // it names. `dialog_proc` is the only reader of it; the guarded half is read through the
-    // `RefCell` of the `state` field, so no two borrows can overlap however the dialog manager
-    // re-enters, and the check store beside it is `Cell`-based — mutation through a shared
-    // reference, no borrow to collide with (task T-11-5b-2).
+    // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`. `owner` is a
+    // live window of this thread. The parameter is a pointer to `state`, which lives on this
+    // frame: the call is modal and does not return until `EndDialog`, so the pointer cannot
+    // outlive the value it names. `dialog_proc` is the only reader of it; the guarded half is
+    // read through the `RefCell` of the `state` field, so no two borrows can overlap however the
+    // dialog manager re-enters, and the check store beside it is `Cell`-based — mutation through
+    // a shared reference, no borrow to collide with (task T-11-5b-2).
+    //
+    // Task Т-30-2: through `show_modal_dialog`, which mirrors the window for a right-to-left
+    // interface locale and is a plain `DialogBoxParamW` for the other twelve.
     let result = unsafe {
-        DialogBoxParamW(
-            Some(instance),
-            resource_id(IDD_SETTINGS),
-            Some(owner),
+        show_modal_dialog(
+            instance,
+            IDD_SETTINGS,
+            owner,
             Some(dialog_proc),
             LPARAM(std::ptr::from_ref(&state) as isize),
         )
@@ -4285,36 +4469,71 @@ fn child_rects(hwnd: HWND) -> Vec<(i32, RECT)> {
 /// coordinates of the dialog** — what the background drawing of task T-11-13 paints in.
 ///
 /// `GetWindowRect` speaks screen coordinates and a `WM_ERASEBKGND` DC speaks the client
-/// coordinates of the window being erased, so the whole set is shifted by one vector: the
-/// screen position of the dialog's own client origin, asked for once with `ClientToScreen`
-/// instead of once per child.
+/// coordinates of the window being erased, so every rectangle has to be carried across —
+/// **corner by corner, with `ScreenToClient`**, and the result put back in order.
 ///
-/// NFR-13: a refused `ClientToScreen` answers an empty list rather than a list in the wrong
-/// coordinate space — a background drawn at an offset would be worse than none at all, and
-/// the caller then leaves the erase to the dialog manager.
+/// # ⚠ Why not the one-vector shortcut, which is what stood here until task Т-30-2
+///
+/// Until вопрос 97 this asked `ClientToScreen` for the dialog's client origin **once** and
+/// subtracted it from all forty-four rectangles — the same answer for a fraction of the calls,
+/// and correct for as long as the two coordinate systems differed only by a translation.
+///
+/// A mirrored window is the case where they do not. Screen coordinates are never mirrored;
+/// client coordinates of a window carrying `WS_EX_LAYOUTRTL` run **right to left**. So the
+/// mapping is not a shift but a shift *and a reflection*, the subtraction produced negative
+/// coordinates mirrored about the client origin, and every panel of the settings window was
+/// painted off the left edge of it. Hebrew and Arabic came up with no panel backgrounds and no
+/// panel captions at all — found by **eye on the stand** (`scratchpad-Э30\ЖИВОЕ-he-*.png`),
+/// which is where this kind of defect keeps being found in this program.
+///
+/// `ScreenToClient` accounts for the mirroring; the reflection it applies is what swaps the two
+/// x's, so the corners come back in the wrong order and are put back in the right one below. In
+/// an ordinary window the swap is a no-op and the answer is what it always was.
+///
+/// NFR-13: a refused conversion drops that one child rather than the whole list — a panel
+/// missing is what a missing rectangle has always cost here, and the other five still get their
+/// background.
 fn child_rects_in_client(hwnd: HWND) -> Vec<(i32, RECT)> {
-    let mut origin = POINT { x: 0, y: 0 };
-
-    // SAFETY: `hwnd` is the live dialog and `origin` is a live local the call rewrites in
-    // place; nothing else is written.
-    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
-        return Vec::new();
-    }
-
     child_rects(hwnd)
         .into_iter()
-        .map(|(control, rect)| {
-            (
-                control,
-                RECT {
-                    left: rect.left - origin.x,
-                    top: rect.top - origin.y,
-                    right: rect.right - origin.x,
-                    bottom: rect.bottom - origin.y,
-                },
-            )
-        })
+        .filter_map(|(control, rect)| Some((control, screen_rect_in_client(hwnd, &rect)?)))
         .collect()
+}
+
+/// One screen rectangle in the client coordinates of `hwnd`, in order — task Т-30-2.
+///
+/// The one place this conversion is written down, because it is the one that a mirrored window
+/// turns from a subtraction into a reflection. See [`child_rects_in_client`] for what that cost
+/// when it was written out by hand.
+fn screen_rect_in_client(hwnd: HWND, rect: &RECT) -> Option<RECT> {
+    let mut corners = [
+        POINT {
+            x: rect.left,
+            y: rect.top,
+        },
+        POINT {
+            x: rect.right,
+            y: rect.bottom,
+        },
+    ];
+
+    for corner in &mut corners {
+        // SAFETY: `hwnd` is a live window and `corner` is a live local of this frame that the
+        // call rewrites in place; nothing else is written.
+        if !unsafe { ScreenToClient(hwnd, corner) }.as_bool() {
+            return None;
+        }
+    }
+
+    // ⚠ `min`/`max` and not «first corner, second corner»: in a mirrored window the two have
+    // just been swapped, and a `RECT` whose `left` is greater than its `right` is empty to every
+    // GDI call that takes one — the figure would silently not be drawn at all.
+    Some(RECT {
+        left: corners[0].x.min(corners[1].x),
+        top: corners[0].y.min(corners[1].y),
+        right: corners[0].x.max(corners[1].x),
+        bottom: corners[0].y.max(corners[1].y),
+    })
 }
 
 /// The four owner-drawn combo boxes of FR-92 — FR-92а, task T-11-6.
@@ -9005,29 +9224,20 @@ unsafe extern "system" fn button_proc(
 ///
 /// `None` on a refused call (NFR-13): the caller then paints nothing, which leaves the corners as
 /// the control drew them rather than putting a figure at a guessed place.
+///
+/// ⚠ **Task Т-30-2: both corners are carried across, not one corner plus a width.** Adding the
+/// window's width to a converted origin assumes the two coordinate systems run the same way, and
+/// in a mirrored control they run opposite: the converted top-left is the *logical right*, and
+/// the sum overshot the control by its own width — the rounded patch would have been drawn
+/// entirely outside the list. [`screen_rect_in_client`] does the conversion and puts the corners
+/// back in order.
 fn window_rect_in_client(control: HWND) -> Option<RECT> {
     let mut window = RECT::default();
 
     // SAFETY: `control` is the live control and `window` is a live local the call fills.
     unsafe { GetWindowRect(control, &mut window) }.ok()?;
 
-    let mut origin = POINT {
-        x: window.left,
-        y: window.top,
-    };
-
-    // SAFETY: `control` is the live control and `origin` is a live local of this frame that the
-    // call rewrites in place.
-    if !unsafe { ScreenToClient(control, &mut origin) }.as_bool() {
-        return None;
-    }
-
-    Some(RECT {
-        left: origin.x,
-        top: origin.y,
-        right: origin.x + (window.right - window.left),
-        bottom: origin.y + (window.bottom - window.top),
-    })
+    screen_rect_in_client(control, &window)
 }
 
 /// Identifier of the subclass this section puts on the two lists — the pair (procedure,
@@ -11929,18 +12139,19 @@ pub fn show_about_dialog(
         logo: None,
     });
 
-    // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`, and the
-    // "name" is an integer identifier in the `MAKEINTRESOURCE` form — a value below 65536
-    // carried inside the pointer, never dereferenced as a string. `owner` is a live window
-    // of this thread. The parameter is a pointer to `state`, which lives on this frame:
-    // the call is modal and does not return until `EndDialog`, so the pointer cannot
-    // outlive the value it names. `about_proc` is the only reader of it and reads it
-    // through the `RefCell`, so no two borrows can overlap however the manager re-enters.
+    // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`. `owner` is a live
+    // window of this thread. The parameter is a pointer to `state`, which lives on this frame:
+    // the call is modal and does not return until `EndDialog`, so the pointer cannot outlive the
+    // value it names. `about_proc` is the only reader of it and reads it through the `RefCell`,
+    // so no two borrows can overlap however the manager re-enters.
+    //
+    // Task Т-30-2: through the same `show_modal_dialog` the settings window uses — one body, so
+    // the two windows cannot come to disagree about which way they read.
     let result = unsafe {
-        DialogBoxParamW(
-            Some(instance),
-            resource_id(IDD_ABOUT),
-            Some(owner),
+        show_modal_dialog(
+            instance,
+            IDD_ABOUT,
+            owner,
             Some(about_proc),
             LPARAM(std::ptr::from_ref(&state) as isize),
         )

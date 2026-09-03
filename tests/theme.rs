@@ -12,14 +12,15 @@
 //! `AppsUseLightTheme` and is deliberately not compared with anything.
 
 use lang_switcher::theme::{
-    Brushes, FOG, GRAPHITE, PaintBuffer, Palette, ThemeSetting, resolve, system_is_light,
+    Brushes, FOG, GRAPHITE, LABEL_TEXT_FORMAT, PaintBuffer, Palette, Reading, ThemeSetting,
+    dc_is_rtl, label_format, reading_order, resolve, system_is_light,
 };
 use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DeleteDC, DeleteObject,
-    FillRect, GetCurrentObject, GetDC, GetObjectW, GetPixel, GetStockObject, HBITMAP, HBRUSH, HDC,
-    HGDIOBJ, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT, ReleaseDC, SRCCOPY, SYSTEM_FONT, SelectObject,
-    SetPixel,
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DRAW_TEXT_FORMAT,
+    DT_RTLREADING, DeleteDC, DeleteObject, FillRect, GetCurrentObject, GetDC, GetObjectW, GetPixel,
+    GetStockObject, HBITMAP, HBRUSH, HDC, HGDIOBJ, LAYOUT_RTL, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT,
+    ReleaseDC, SRCCOPY, SYSTEM_FONT, SelectObject, SetLayout, SetPixel,
 };
 use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
 
@@ -877,4 +878,103 @@ fn a_help_row_splits_at_the_placeholder_and_nowhere_else() {
         split.suffix, "",
         "with no chip there is nothing to split at"
     );
+}
+
+// =========================================================================================
+// Reading order — вопрос 97 п. 2, task Т-30-2
+// =========================================================================================
+
+/// **Т-30-2: the reading-order bit is the four rows of the measurement and nothing else.**
+///
+/// The table this checks is not a preference — it is `scratchpad-Э30\посылки-п2.log`, measured
+/// on the probe «a ב» whose three glyphs cannot change so that only their order can:
+///
+/// | context | flag | order measured |
+/// |---|---|---|
+/// | ordinary | none | left to right |
+/// | ordinary | `DT_RTLREADING` | right to left |
+/// | mirrored | none | right to left |
+/// | mirrored | `DT_RTLREADING` | left to right |
+///
+/// So the flag asks for **the opposite of the context**, which is why it is set for an island
+/// and only in a mirrored window: an island in an ordinary window already reads left to right
+/// and asking again would turn it round.
+#[test]
+fn the_reading_order_bit_is_asked_for_only_by_an_island_in_a_mirrored_window() {
+    let none = DRAW_TEXT_FORMAT(0);
+
+    assert_eq!(
+        reading_order(false, false),
+        none,
+        "ordinary window, native text: the context is already left to right"
+    );
+    assert_eq!(
+        reading_order(false, true),
+        none,
+        "ordinary window, Latin island: also already left to right — asking would REVERSE it"
+    );
+    assert_eq!(
+        reading_order(true, false),
+        none,
+        "mirrored window, native text: the context is already right to left"
+    );
+    assert_eq!(
+        reading_order(true, true),
+        DT_RTLREADING,
+        "mirrored window, Latin island: the one case that needs the opposite of its context"
+    );
+}
+
+/// **Т-30-2: a mirrored device context is recognised, and an ordinary one is not called one.**
+///
+/// The predicate is asked of the DC rather than of the interface locale, so it is checked on a
+/// DC — one made mirrored by hand with `SetLayout`, which is what `WS_EX_LAYOUTRTL` does to the
+/// context of a window. Both directions are asserted: a predicate that answered `true` always
+/// would pass a test that only tried the mirrored one.
+#[test]
+fn a_mirrored_device_context_is_told_from_an_ordinary_one() {
+    // SAFETY: a memory DC over the screen, deleted below on both paths.
+    let dc = unsafe { CreateCompatibleDC(None) };
+
+    assert!(
+        !dc.is_invalid(),
+        "a memory DC is needed for this measurement"
+    );
+
+    // SAFETY: `dc` is the live DC just made.
+    assert!(
+        !unsafe { dc_is_rtl(dc) },
+        "a fresh memory DC is not mirrored"
+    );
+
+    // SAFETY: as above; `SetLayout` takes a plain value.
+    unsafe { SetLayout(dc, LAYOUT_RTL) };
+
+    // SAFETY: as above.
+    assert!(
+        unsafe { dc_is_rtl(dc) },
+        "and it is once it has been told to be"
+    );
+
+    // And the format built from it carries the bit for an island and not for native text.
+    // SAFETY: as above.
+    let (native, island) = unsafe {
+        (
+            label_format(dc, Reading::Native),
+            label_format(dc, Reading::LatinIsland),
+        )
+    };
+
+    assert_eq!(
+        native, LABEL_TEXT_FORMAT,
+        "native text keeps the plain format"
+    );
+    assert_eq!(
+        island,
+        LABEL_TEXT_FORMAT | DT_RTLREADING,
+        "an island adds the one bit and nothing else"
+    );
+
+    // SAFETY: the DC made above, deleted exactly once.
+    let _ = unsafe { DeleteDC(dc) };
 }

@@ -8806,9 +8806,13 @@ fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
     let guard = show
         .find("let _open = AboutSession::open();")
         .expect("`show_about_dialog` must take the guard");
+    // ⚠ Task Т-30-2 renamed what stands here: the modal call is now `show_modal_dialog`, which
+    // is `DialogBoxIndirectParamW` on a copy of the template for a right-to-left locale and
+    // `DialogBoxParamW` for the other twelve. The sweep names the new call, because what it is
+    // really about is the **order** — the guard before the modal call — and that is unchanged.
     let modal = show
-        .find("DialogBoxParamW(")
-        .expect("`show_about_dialog` must still be the modal call");
+        .find("show_modal_dialog(")
+        .expect("`show_about_dialog` must still go through the modal call");
 
     assert!(
         guard < modal,
@@ -13108,6 +13112,121 @@ fn no_translation_carries_a_direction_mark() {
             .chars()
             .any(|unit| matches!(unit, '\u{200E}' | '\u{200F}')),
         "positive control: the predicate above finds a planted mark"
+    );
+}
+
+/// **Т-30-2: the mirror is added to the template, and only to a template that can carry it.**
+///
+/// The lever of вопрос 97: `SetProcessDefaultLayout` was measured first and does not mirror a
+/// dialog that has an owner — which both of this program's do — so the window is mirrored by
+/// the extended style of a **copy** of its compiled template, run through
+/// `DialogBoxIndirectParamW` (`scratchpad-Э30\посылки-п1.log`).
+///
+/// What is checked here is the patch itself, over a synthetic `DLGTEMPLATEEX` header: the bit
+/// goes in, the rest of the extended style is kept, and the whole thing is refused for a buffer
+/// that is not the extended form. That last half is the reason the function exists — the old
+/// `DLGTEMPLATE` keeps `style` where the extended one keeps `signature`, so a patch applied
+/// without looking would corrupt a window style instead of adding one, and there is no template
+/// in this program's own resources to catch that with.
+#[test]
+fn the_mirror_goes_into_the_template_and_only_into_an_extended_one() {
+    // `dlgVer` = 1, `signature` = 0xFFFF, `helpID` = 0, `exStyle` = WS_EX_APPWINDOW — the
+    // header `rc.exe` produces for both `DIALOGEX` statements of `app.rc`.
+    let header = |version: u16, signature: u16, exstyle: u32| {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&signature.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&exstyle.to_le_bytes());
+        bytes.extend_from_slice(&[0; 32]);
+        bytes
+    };
+
+    const WS_EX_LAYOUTRTL: u32 = 0x0040_0000;
+    const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+
+    let mut template = header(1, 0xFFFF, WS_EX_APPWINDOW);
+
+    assert_eq!(
+        settings::mirror_template(&mut template),
+        Some((WS_EX_APPWINDOW, WS_EX_APPWINDOW | WS_EX_LAYOUTRTL)),
+        "the bit is added and the style that was there is kept"
+    );
+
+    assert_eq!(
+        u32::from_le_bytes([template[8], template[9], template[10], template[11]]),
+        WS_EX_APPWINDOW | WS_EX_LAYOUTRTL,
+        "and it is written back into the buffer, not only reported"
+    );
+
+    // Idempotent: a template already carrying the bit is not disturbed by a second pass.
+    let before = template.clone();
+
+    settings::mirror_template(&mut template);
+
+    assert_eq!(
+        template, before,
+        "adding a bit that is already there changes nothing"
+    );
+
+    // The refusals, each of which is a corrupted style if it is not refused.
+    let mut old_form = header(0xFFFF, 0x0001, WS_EX_APPWINDOW);
+
+    assert_eq!(
+        settings::mirror_template(&mut old_form),
+        None,
+        "a DLGTEMPLATE of the old form is not patched at the extended offset"
+    );
+
+    let mut wrong_version = header(2, 0xFFFF, WS_EX_APPWINDOW);
+
+    assert_eq!(
+        settings::mirror_template(&mut wrong_version),
+        None,
+        "a version this code has not read the layout of is left alone"
+    );
+
+    let mut truncated = vec![1_u8, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0];
+
+    assert_eq!(
+        settings::mirror_template(&mut truncated),
+        None,
+        "SEC-05: a buffer too short for the field is refused rather than indexed into"
+    );
+
+    let mut empty: Vec<u8> = Vec::new();
+
+    assert_eq!(settings::mirror_template(&mut empty), None);
+}
+
+/// **Т-30-2: exactly the two right-to-left locales ask for a mirror, and no others.**
+///
+/// `Language::is_rtl` is the one place that knows it — the dialog template, the tray menu and
+/// the reading order of an island all read this and nothing else. A sweep over the whole array
+/// rather than two `assert!`s, so that a fifteenth locale added without a thought about
+/// direction shows up here rather than in a window.
+#[test]
+fn only_hebrew_and_arabic_are_read_right_to_left() {
+    let mirrored: Vec<&str> = Language::ALL
+        .into_iter()
+        .filter(|language| language.is_rtl())
+        .map(Language::tag)
+        .collect();
+
+    assert_eq!(
+        mirrored,
+        vec!["he", "ar"],
+        "вопрос 97 names two right-to-left locales and this build has exactly those"
+    );
+
+    // And the other twelve are not mirrored — stated from the other side so that a predicate
+    // that answered `true` for everything could not pass the check above by accident.
+    assert_eq!(
+        Language::ALL
+            .into_iter()
+            .filter(|language| !language.is_rtl())
+            .count(),
+        12
     );
 }
 
