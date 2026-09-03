@@ -112,11 +112,17 @@ fn a_thoroughly_customised_config() -> Config {
 fn defaults_match_section_7_field_by_field() {
     let config = Config::default();
 
-    // Schema 3 — FR-100 (task Т-21-5) added the section `[feedback]`. Schema 2 was FR-42а
-    // moving the default of `[replacement] method` to `auto`; both rungs are still on the
-    // ladder and both are asserted by the migration tests below.
-    assert_eq!(config.schema_version, 3);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 3);
+    // Schema 4 — task Т-29-1, вопрос 94.1: the twelve locales of решение 93 became a schema of
+    // their own, so that a build which knows two of them recognises a file of the twelve by its
+    // stamp instead of by failing to parse it. Schema 3 — FR-100 (task Т-21-5) added the section
+    // `[feedback]`. Schema 2 was FR-42а moving the default of `[replacement] method` to `auto`;
+    // every rung is still on the ladder and every one is asserted by the migration tests below.
+    //
+    // ⚠ **This is the one place the number is written as a literal**, and it is written twice on
+    // purpose: everywhere else in this file a file "of today" is stamped
+    // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
+    assert_eq!(config.schema_version, 4);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 4);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -207,21 +213,23 @@ fn the_four_settings_the_dialog_no_longer_shows_survive_the_round_trip() {
     // `[general] enabled` ride along as the family this joins.
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [general]\n\
-         enabled = false\n\
-         \n\
-         [replacement]\n\
-         method = \"selection\"\n\
-         inter_event_delay_ms = 13\n\
-         \n\
-         [selection]\n\
-         clipboard_timeout_ms = 987\n\
-         clipboard_restore_delay_ms = 654\n\
-         \n\
-         [buffer]\n\
-         capacity = 64\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             enabled = false\n\
+             \n\
+             [replacement]\n\
+             method = \"selection\"\n\
+             inter_event_delay_ms = 13\n\
+             \n\
+             [selection]\n\
+             clipboard_timeout_ms = 987\n\
+             clipboard_restore_delay_ms = 654\n\
+             \n\
+             [buffer]\n\
+             capacity = 64\n"
+        ),
     );
 
     let (config, outcome) = settings::read_from(&path).expect("the hand-written file reads");
@@ -273,18 +281,20 @@ fn unknown_fields_are_ignored_and_the_rest_is_read() {
     let dir = TestDir::new("unknown_fields");
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         unknown_top_level = 42\n\
-         \n\
-         [general]\n\
-         enabled = false\n\
-         unknown_field = \"whatever this is\"\n\
-         \n\
-         [buffer]\n\
-         capacity = 128\n\
-         \n\
-         [not_a_section_of_the_schema]\n\
-         anything = true\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             unknown_top_level = 42\n\
+             \n\
+             [general]\n\
+             enabled = false\n\
+             unknown_field = \"whatever this is\"\n\
+             \n\
+             [buffer]\n\
+             capacity = 128\n\
+             \n\
+             [not_a_section_of_the_schema]\n\
+             anything = true\n"
+        ),
     );
 
     let (config, outcome) = settings::read_from(&path).expect("unknown fields must not fail");
@@ -304,10 +314,12 @@ fn missing_field_falls_back_to_its_default() {
     let dir = TestDir::new("missing_field");
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [selection]\n\
-         clipboard_timeout_ms = 500\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [selection]\n\
+             clipboard_timeout_ms = 500\n"
+        ),
     );
 
     let (config, _) = settings::read_from(&path).expect("a partial section must be readable");
@@ -323,10 +335,12 @@ fn missing_section_falls_back_to_its_defaults() {
     let dir = TestDir::new("missing_section");
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [general]\n\
-         enabled = false\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             enabled = false\n"
+        ),
     );
 
     let (config, _) = settings::read_from(&path).expect("a file with one section must be readable");
@@ -356,6 +370,14 @@ fn empty_file_gives_the_default_configuration() {
 }
 
 // Criterion 15. A missing file gives the fully default configuration.
+//
+// ⚠ Task Т-29-3, вопрос 95: one field of those defaults is now chosen rather than fixed —
+// `general.language` is the interface language of Windows when this build has it, and `en`
+// when it has not. `Config::for_a_first_run` is that configuration, and the criterion is
+// asserted against it plus the statement that **only** that one field can differ from
+// `Config::default`. What the rule itself does is measured by the staged tests at the foot of
+// this file; on this machine the two configurations happen to be identical, and a criterion
+// written against `Config::default` would therefore have gone on passing while saying nothing.
 #[test]
 fn missing_file_gives_the_default_configuration() {
     let dir = TestDir::new("missing_file");
@@ -365,7 +387,15 @@ fn missing_file_gives_the_default_configuration() {
     let (config, outcome) =
         settings::read_from(&path).expect("a missing file must not be an error");
 
-    assert_eq!(config, Config::default());
+    assert_eq!(config, Config::for_a_first_run());
+
+    let mut everything_else = Config::default();
+    everything_else.general.language = config.general.language;
+    assert_eq!(
+        config, everything_else,
+        "`general.language` is the one field вопрос 95 may move"
+    );
+
     assert_eq!(outcome, ReadOutcome::NoFile);
     // Reading did not create it either.
     assert!(!path.exists(), "reading must not create the file");
@@ -556,7 +586,9 @@ fn a_newer_schema_is_recognised_even_when_this_build_cannot_parse_it() {
     let current = TestDir::new("current_unparsable");
     let broken = write_file(
         &current,
-        "schema_version = 3\n\n[replacement]\nmethod = \"smart\"\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[replacement]\nmethod = \"smart\"\n"
+        ),
     );
     let (_, outcome) = settings::read_or_default(&broken);
 
@@ -598,7 +630,10 @@ fn each_read_outcome_names_what_may_be_done_to_the_file() {
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
 
     // A current file: read whole, so writing the memory back loses none of it.
-    let current = write_file(&dir, "schema_version = 3\n\n[general]\nenabled = false\n");
+    let current = write_file(
+        &dir,
+        &format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nenabled = false\n"),
+    );
     let (_, outcome) = settings::read_or_default(&current);
     assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
@@ -614,7 +649,10 @@ fn each_read_outcome_names_what_may_be_done_to_the_file() {
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Allowed);
 
     // Malformed: the bytes are somebody's text and this build did not understand them.
-    let broken = write_file(&dir, "schema_version = 3\n\n[general\nenabled = = true\n");
+    let broken = write_file(
+        &dir,
+        &format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general\nenabled = = true\n"),
+    );
     let (_, outcome) = settings::read_or_default(&broken);
     assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::QuarantineFirst);
@@ -674,14 +712,16 @@ fn a_kept_configuration_is_the_original_bytes_and_nothing_else() {
 
     // CRLF, a comment, non-ASCII in a value, and a section the parser never reaches because
     // of the bracket above it — every one of them a thing a rewrite would lose.
-    let original = "schema_version = 3\r\n\
+    let original = &format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\r\n\
                     # моя правка\r\n\
                     \r\n\
                     [general\r\n\
                     enabled = = true\r\n\
                     \r\n\
                     [exclusions]\r\n\
-                    processes = [\"мой-редактор.exe\"]\r\n";
+                    processes = [\"мой-редактор.exe\"]\r\n"
+    );
     fs::write(&path, original).expect("the configuration file must be writable");
 
     assert_eq!(
@@ -858,10 +898,12 @@ fn backspace_in_a_current_file_is_an_explicit_override_and_stays() {
     let dir = TestDir::new("current_backspace");
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [replacement]\n\
-         method = \"backspace\"\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [replacement]\n\
+             method = \"backspace\"\n"
+        ),
     );
 
     let (config, outcome) = settings::read_from(&path).expect("a current file must be read");
@@ -883,10 +925,12 @@ fn auto_is_the_word_section_7_spells_it() {
     let dir = TestDir::new("auto_word");
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [replacement]\n\
-         method = \"auto\"\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [replacement]\n\
+             method = \"auto\"\n"
+        ),
     );
 
     let (config, outcome) = settings::read_from(&path).expect("the word auto must be admitted");
@@ -968,25 +1012,90 @@ fn a_file_of_schema_two_is_raised_to_three_with_the_sound_on() {
     );
 }
 
+/// **The rung of task Т-29-1, вопрос 94.1: schema 3 is raised to schema 4, and that is all.**
+///
+/// A schema 3 file was written by a build whose `Language` held two values and whose section 7
+/// was otherwise this one. Nothing in it means anything different under schema 4 — the twelve
+/// locales of решение 93 only *added* admissible values to a field that already existed — so the
+/// rung stamps the version and touches nothing else. That is the same decision
+/// [`step_2_to_3`](../src/settings.rs) took, and for the same reason: a section, or a value, that
+/// never existed carries no decision of anybody's to preserve.
+///
+/// What the raised stamp buys is written down at
+/// `a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining`: from schema 4
+/// on, a build that knows two locales recognises a file of the twelve by its **stamp** — before
+/// the parser ever refuses it — and so leaves it alone instead of moving it to `.bad`.
+///
+/// The fields below are deliberately not the defaults, so that damage would show.
+#[test]
+fn a_file_of_schema_three_is_raised_to_four_and_nothing_else_moves() {
+    let dir = TestDir::new("locale_schema_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 3\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"en\"\n\
+         \n\
+         [feedback]\n\
+         sound = false\n\
+         \n\
+         [exclusions]\n\
+         processes = [\"мой-редактор.exe\"]\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 3 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 3 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.schema_version, 4, "and that version is four");
+
+    assert!(
+        !config.general.enabled,
+        "the rung carried the switch through"
+    );
+    assert_eq!(
+        config.general.language,
+        Language::En,
+        "and the locale the person chose, untouched"
+    );
+    assert!(!config.feedback.sound, "and the sound they turned off");
+    assert_eq!(config.exclusions.processes, ["мой-редактор.exe"]);
+
+    // --- the round trip: written back, the file is a current one and reads as one ----------
+    let again = write_file(&dir, &config.to_toml_string().expect("serialises"));
+    let (back, outcome) = settings::read_from(&again).expect("the raised file must be read");
+
+    assert_eq!(
+        outcome,
+        ReadOutcome::Current,
+        "once written back, the file is of this schema and needs no rung"
+    );
+    assert_eq!(back, config, "and every field survived the round trip");
+}
+
 /// **Task T-19-4 through the bump: the file of a schema this build does not know is refused.**
 ///
 /// Written against `CURRENT_SCHEMA_VERSION + 1` rather than a fixed number, because that is the
-/// case the bump creates in the world: the build that goes out with schema 3 writes files an
-/// installed schema 2 build will meet. Its answer must be [`SavePolicy::Forbidden`] — read what
+/// case the bump creates in the world: the build that goes out with schema 4 writes files an
+/// installed schema 3 build will meet. Its answer must be [`SavePolicy::Forbidden`] — read what
 /// can be read, and **never write**, or the fields it does not understand are gone.
+///
+/// ⚠ Task Т-29-1 added the second half: **the file is still whole afterwards**. A policy that is
+/// right in memory and a file that has been moved to `.bad` all the same would satisfy every
+/// assertion this test used to make.
 #[test]
 fn a_file_of_the_next_schema_is_forbidden_to_be_written_back() {
     let dir = TestDir::new("feedback_downgrade");
     let newer = CURRENT_SCHEMA_VERSION + 1;
-    let path = write_file(
-        &dir,
-        &format!(
-            "schema_version = {newer}\n\
-             \n\
-             [general]\n\
-             enabled = false\n"
-        ),
+    let original = format!(
+        "schema_version = {newer}\n\
+         \n\
+         [general]\n\
+         enabled = false\n"
     );
+    let path = write_file(&dir, &original);
 
     let (config, outcome) = settings::read_or_default(&path);
 
@@ -997,6 +1106,14 @@ fn a_file_of_the_next_schema_is_forbidden_to_be_written_back() {
     );
     assert_eq!(config.schema_version, newer, "the stamp is left as it was");
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Forbidden);
+
+    // Task Т-29-1: and the bytes are exactly where they were, with no `.bad` beside them.
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original,
+        "a file from the future is read and never touched"
+    );
+    assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
 }
 
 // Criterion 20. The write is atomic, and no temporary file is left behind by it.
@@ -1124,7 +1241,7 @@ fn written_file_carries_every_section_of_section_7() {
         .to_toml_string()
         .expect("the defaults must serialise");
 
-    assert!(text.contains("schema_version = 3"));
+    assert!(text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")));
     assert!(text.contains("method = \"auto\""));
     for section in [
         "[general]",
@@ -1171,7 +1288,9 @@ fn each_of_the_three_theme_words_reads_as_its_setting() {
     ] {
         let path = write_file(
             &dir,
-            &format!("schema_version = 3\n\n[general]\ntheme = \"{word}\"\n"),
+            &format!(
+                "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\ntheme = \"{word}\"\n"
+            ),
         );
         let (config, outcome) =
             settings::read_from(&path).expect("a theme word of section 7 must be readable");
@@ -1189,7 +1308,10 @@ fn a_missing_or_unknown_theme_reads_as_system_and_fails_nothing() {
     let dir = TestDir::new("theme_default");
 
     // No `theme` key at all: the theme is the default, the field beside it is read.
-    let path = write_file(&dir, "schema_version = 3\n\n[general]\nenabled = false\n");
+    let path = write_file(
+        &dir,
+        &format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nenabled = false\n"),
+    );
     let (config, outcome) =
         settings::read_from(&path).expect("a file without the key must be readable");
     assert_eq!(config.general.theme, ThemeSetting::System);
@@ -1200,7 +1322,10 @@ fn a_missing_or_unknown_theme_reads_as_system_and_fails_nothing() {
     // arrives — so it was the word that was ignored, not the file.
     let path = write_file(
         &dir,
-        "schema_version = 3\n\n[general]\nenabled = false\ntheme = \"midnight\"\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\n\
+             [general]\nenabled = false\ntheme = \"midnight\"\n"
+        ),
     );
     let (config, outcome) =
         settings::read_from(&path).expect("an unknown theme word must not fail the file");
@@ -1245,17 +1370,19 @@ fn a_file_without_the_key_gains_an_explicit_system_and_loses_nothing() {
     // are present are deliberately not the defaults, so damage would show.
     let path = write_file(
         &dir,
-        "schema_version = 3\n\
-         \n\
-         [general]\n\
-         enabled = false\n\
-         language = \"en\"\n\
-         \n\
-         [hotkey]\n\
-         key = \"ScrollLock\"\n\
-         \n\
-         [exclusions]\n\
-         processes = [\"mstsc.exe\"]\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             enabled = false\n\
+             language = \"en\"\n\
+             \n\
+             [hotkey]\n\
+             key = \"ScrollLock\"\n\
+             \n\
+             [exclusions]\n\
+             processes = [\"mstsc.exe\"]\n"
+        ),
     );
 
     let (read, outcome) = settings::read_from(&path).expect("the file must be readable");
@@ -6619,7 +6746,7 @@ fn a_file_asking_for_u32_max_publishes_the_ceilings_and_is_left_byte_for_byte() 
     let path = write_file(
         &dir,
         &format!(
-            "schema_version = 3\n\n\
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\n\
              [replacement]\n\
              inter_event_delay_ms = {max}\n\n\
              [selection]\n\
@@ -12591,28 +12718,103 @@ fn every_locale_carries_every_interface_string() {
     );
 }
 
-/// **Т-28-2: what an *older* build does with a value it has never heard of — measured, not
-/// assumed.**
+/// The last schema a build that knew **two** locales could have stamped a file with.
 ///
-/// Решение 93 keeps `Language` closed and `CURRENT_SCHEMA_VERSION` where it is, so this is the
-/// case a downgrade creates in the world: a file written by the twelve-locale build, carrying
-/// `language = "de"` and the schema stamp **3**, read by an installed build that knows two
-/// values and the same stamp 3.
+/// Task Т-28-2 measured what such a build does when it meets one of the ten locales решение 93
+/// added: nothing in the file told it the file was newer, so the strict parse refused the
+/// document, `claimed_schema_version` answered the same 3 it carried itself, and the answer was
+/// [`SavePolicy::QuarantineFirst`] — the user's configuration moved to `.bad` and replaced by
+/// defaults. That was the measured downgrade cost of решение 93, and вопрос **94.1** is the
+/// decision to stop paying it.
+const LAST_TWO_LOCALE_SCHEMA: u32 = 3;
+
+/// **Т-29-1, вопрос 94.1 — the flip of the Т-28-2 measurement: a downgrade now refuses to write
+/// instead of quarantining.**
 ///
-/// The strict parse refuses the document — that is what a closed set is for — and
-/// `claimed_schema_version` then answers **3**, which is *not* newer than this build's own. So
-/// the file is [`ConfigError::Malformed`] and the policy is
-/// [`SavePolicy::QuarantineFirst`]: the user's configuration is moved to `.bad` and replaced
-/// by the defaults. It is **not** `FromNewerSchema` → `Forbidden`; that arm needs a stamp this
-/// build is too old for, and решение 93 does not raise the stamp.
+/// Three steps, and they are one contract.
 ///
-/// The test states the measured behaviour rather than the hoped-for one. If it is ever to
-/// change, what changes is the schema, not this assertion.
+/// 1. **This build stamps a twelve-locale file with a schema the two-locale builds never had.**
+///    That is the whole of what raising the schema buys, and it is the half that could not be
+///    true before this task: on schema 3 a file of the twelve was indistinguishable, by its
+///    stamp, from a file of the two.
+/// 2. **A reader too old for that stamp answers [`SavePolicy::Forbidden`] and leaves the bytes
+///    alone** — no rewrite, and no `.bad` beside them. Modelled with `CURRENT_SCHEMA_VERSION + 1`
+///    and a value no build of this line admits, because a test may not install an older build:
+///    the pair «a stamp I am too young for» + «a value I cannot parse» is exactly the shape a
+///    two-locale build sees in a file of the twelve, and `Config::from_toml_str` decides it by
+///    the stamp **before** the refused parse becomes a verdict.
+/// 3. **The control, which must not move**: the *same* stamp with a value this build does not
+///    admit is still `QuarantineFirst`. The stamp is what tells a file from the future apart
+///    from a file that is simply damaged, and raising the schema must not blur that.
 #[test]
-fn an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_write() {
-    let dir = TestDir::new("older_build_new_locale");
-    let path = write_file(
-        &dir,
+fn a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining() {
+    // --- 1. what this build writes for one of the ten locales решение 93 added --------------
+    let mut ours = Config::default();
+    ours.general.language = Language::De;
+
+    let text = ours.to_toml_string().expect("the file must serialise");
+
+    assert!(
+        text.contains("language = \"de\""),
+        "the file carries the locale it was given: {text}"
+    );
+    // A `const` block on purpose, and not only because clippy asks: both sides are constants,
+    // so the day somebody lowers the schema this stops being a red test and becomes a build
+    // that does not compile — which is the right weight for the one number вопрос 94.1 bought.
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_TWO_LOCALE_SCHEMA,
+            "a file of the twelve locales must be stamped with a schema no two-locale build \
+             had — that is вопрос 94.1, and without it the downgrade cost of Т-28-2 stands"
+        );
+    }
+    assert!(
+        text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+        "and the stamp is in the file, not merely in memory: {text}"
+    );
+
+    // --- 2. the reader that is too old for that stamp ---------------------------------------
+    let dir = TestDir::new("downgrade_meets_the_stamp");
+    let newer = CURRENT_SCHEMA_VERSION + 1;
+    let original = format!(
+        "schema_version = {newer}\n\
+         \n\
+         [general]\n\
+         language = \"zz\"\n"
+    );
+    let path = write_file(&dir, &original);
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: newer }),
+        "the stamp is read before the refused parse is called a verdict"
+    );
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::Forbidden,
+        "and a file from the future is never written back"
+    );
+    assert_eq!(
+        config.schema_version, newer,
+        "the stamp is carried, not reset"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original,
+        "the bytes are exactly where the person left them"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "and no `.bad` was made — this is what 94.1 bought"
+    );
+
+    // --- 3. the control: the same stamp, and a value this build does not admit ---------------
+    let damaged = TestDir::new("same_stamp_unknown_value");
+    let broken = write_file(
+        &damaged,
         &format!(
             "schema_version = {CURRENT_SCHEMA_VERSION}\n\
              \n\
@@ -12621,7 +12823,7 @@ fn an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_writ
         ),
     );
 
-    let (config, outcome) = settings::read_or_default(&path);
+    let (config, outcome) = settings::read_or_default(&broken);
 
     assert!(
         matches!(outcome, Err(ConfigError::Malformed { .. })),
@@ -12630,7 +12832,7 @@ fn an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_writ
     assert_eq!(
         SavePolicy::for_read(&outcome),
         SavePolicy::QuarantineFirst,
-        "and the refusal costs the file its place — this is the downgrade cost of решение 93"
+        "a damaged file of this schema is still damaged — the stamp is what tells the two apart"
     );
     assert_eq!(
         config.general.language.tag(),
@@ -12816,4 +13018,318 @@ fn the_product_name_is_untranslated_in_every_locale() {
             "locale `{tag}` renamed the product: «{caption}»"
         );
     }
+}
+
+/// **Т-29-2, сторож: the item the user picked in the language combo is the value that lands in
+/// the file — for every one of the twelve, and from every one of the twelve.**
+///
+/// The whole chain the settings dialog walks, expressed in the three contracts that make it up
+/// and driven over the full 12 × 12 matrix of «откуда → куда»:
+///
+/// 1. what `fill_dialog` selects when the dialog opens on a configuration — `Language::index`;
+/// 2. what `read_dialog` stores for the item that is selected when «ОК» is pressed —
+///    `Language::from_index` of the very same number;
+/// 3. what the file then says, and what a later start reads back out of it.
+///
+/// ⚠ **This guard was written after the reported defect turned out not to exist.** Три
+/// «находки о несохранении языка» (83.3, 94.4, м-Э29-1) were the readings of a broken
+/// instrument, not of the program — the stand of Э29 drove the real dialog through all 296
+/// cases of this matrix and every one of them wrote the file. There is therefore no red «до»
+/// behind this test and none is claimed. What it is here for is the **from**-half: the reports
+/// all said the failure depended on which locale the dialog was showing, and nothing in the
+/// chain may ever start depending on that. A test that only walked `to` could not say so.
+#[test]
+fn the_locale_picked_in_the_combo_is_the_locale_the_file_ends_up_carrying() {
+    let dir = TestDir::new("combo_to_file");
+
+    for from in Language::ALL {
+        for to in Language::ALL {
+            // 1. The dialog opens on a configuration carrying `from` and selects its position.
+            let mut config = Config::default();
+            config.general.language = from;
+
+            let selected = config.general.language.index();
+            assert_eq!(
+                selected,
+                from.index(),
+                "the combo opens on `{}`",
+                from.tag()
+            );
+
+            // 2. «ОК»: the item at the position the user left selected becomes the value.
+            let picked = to.index();
+            config.general.language = Language::from_index(picked);
+
+            assert_eq!(
+                config.general.language,
+                to,
+                "position {picked} must read back as `{}` (dialog showing `{}`)",
+                to.tag(),
+                from.tag()
+            );
+
+            // 3. The file, and the start that reads it again.
+            let path = write_file(&dir, &config.to_toml_string().expect("serialises"));
+
+            assert!(
+                fs::read_to_string(&path)
+                    .expect("readable")
+                    .contains(&format!("language = \"{}\"", to.tag())),
+                "the file must name `{}` in so many words (dialog showing `{}`)",
+                to.tag(),
+                from.tag()
+            );
+
+            let (back, outcome) = settings::read_from(&path).expect("the file must be read");
+
+            assert_eq!(outcome, ReadOutcome::Current);
+            assert_eq!(
+                back.general.language,
+                to,
+                "`{}` → `{}` did not survive the file",
+                from.tag(),
+                to.tag()
+            );
+            assert_eq!(
+                back.general.language.index(),
+                picked,
+                "and the next opening of the dialog selects the same item again"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Т-29-3, вопрос 95 — the locale a first run starts in
+// ---------------------------------------------------------------------------------------
+//
+// The order asked for, in the user's own words: «при установке программы у пользователя в
+// будущем, нужно автоматически проверять язык системы и устанавливать по умолчанию языком
+// интерфейса, если имеется; если нет в списке локализаций нашей программы — по умолчанию
+// ставить английский».
+//
+// ⚠ **This machine cannot accept it honestly.** Its Windows is Russian, so the rule answers
+// `ru` — which is also the old hard-coded default, and a green light that would be green
+// whatever the rule did. Every test below therefore drives the rule with **staged** tags, and
+// the one live test says only what a live test here honestly can: that the machine answers
+// *some* one of the twelve, through an instrument that is not able to answer nothing.
+
+/// **The mapping rule of вопрос 95, staged tag by tag.**
+///
+/// A Windows UI language is a BCP-47 tag — `de-DE`, `pt-BR`, `es-MX` — and section 7 spells a
+/// locale in two letters. The bridge is the **primary subtag** and nothing else, which is what
+/// makes `de-AT` German and `pt-PT` Portuguese without a table of regions that would have to be
+/// extended for every country Windows ships.
+#[test]
+fn a_system_tag_maps_onto_the_twelve_by_its_primary_subtag() {
+    for (tag, wanted) in [
+        // The plain case, all twelve, in the shape Windows actually hands out.
+        ("ru-RU", Language::Ru),
+        ("en-US", Language::En),
+        ("uk-UA", Language::Uk),
+        ("de-DE", Language::De),
+        ("fr-FR", Language::Fr),
+        ("es-ES", Language::Es),
+        ("pt-BR", Language::Pt),
+        ("it-IT", Language::It),
+        ("pl-PL", Language::Pl),
+        ("cs-CZ", Language::Cs),
+        ("tr-TR", Language::Tr),
+        ("el-GR", Language::El),
+        // The two the order names by hand: a region this build never enumerated.
+        ("de-AT", Language::De),
+        ("pt-PT", Language::Pt),
+        // And the rest of the same rule, which is the point of having a rule.
+        ("en-GB", Language::En),
+        ("es-MX", Language::Es),
+        ("fr-CA", Language::Fr),
+        // A bare primary tag is already the answer.
+        ("de", Language::De),
+        ("el", Language::El),
+        // A script subtag sits between the two and must not be mistaken for the region.
+        ("uk-Cyrl-UA", Language::Uk),
+        // Windows writes them with a hyphen; a file or a registry value may hold an underscore.
+        ("pt_BR", Language::Pt),
+        // Case is not part of a language tag's meaning.
+        ("DE-de", Language::De),
+    ] {
+        assert_eq!(
+            settings::language_of_ui_tag(tag),
+            Some(wanted),
+            "`{tag}` must map onto `{}`",
+            wanted.tag()
+        );
+    }
+
+    for tag in [
+        "zh-CN",
+        "ja-JP",
+        "ko-KR",
+        "ar-SA",
+        "he-IL",
+        "nl-NL",
+        "sv-SE",
+        "z",
+        "",
+        "-",
+        "---",
+        "не-тег",
+    ] {
+        assert_eq!(
+            settings::language_of_ui_tag(tag),
+            None,
+            "`{tag}` is not one of the twelve and must not be pretended to be"
+        );
+    }
+}
+
+/// **The fall-through, and the English at the end of it — вопрос 95.**
+///
+/// Windows keeps an **ordered list**, not one language: a person may have Japanese first and
+/// German second. Walking the list is the whole reason [`GetUserPreferredUILanguages`] was
+/// chosen over `GetUserDefaultUILanguage`, which answers one identifier and cannot say what the
+/// person would have taken instead.
+#[test]
+fn the_first_preference_this_build_has_wins_and_english_is_the_end_of_the_list() {
+    for (preferred, wanted) in [
+        // The ordinary case: the first is one of ours.
+        (vec!["de-DE", "en-US"], Language::De),
+        // The first is not; the second is. That is a better answer than English.
+        (vec!["zh-Hans-CN", "de-DE"], Language::De),
+        (vec!["ja-JP", "ko-KR", "el-GR"], Language::El),
+        // Nothing in the list is ours.
+        (vec!["ja-JP", "ko-KR"], Language::En),
+        // Windows answered nothing at all — a machine in a state this build cannot read.
+        (vec![], Language::En),
+        // And the order is respected, not the alphabet: both are ours, the first one wins.
+        (vec!["tr-TR", "de-DE"], Language::Tr),
+    ] {
+        assert_eq!(
+            settings::first_run_language(preferred.iter().copied()),
+            wanted,
+            "for {preferred:?}"
+        );
+    }
+}
+
+/// **The rule reaches the configuration only where there is no file — вопрос 95.**
+///
+/// Two halves, and the second is the ⚠ of the order: *«существующий конфиг не трогается
+/// никогда»*. A file that exists but says nothing about the language is **not** a first run; it
+/// is somebody's file, and the value it gets is the default of section 7, exactly as before.
+#[test]
+fn only_a_first_run_takes_the_language_of_the_system() {
+    // --- no file at all: the rule decides -------------------------------------------------
+    let dir = TestDir::new("first_run_language");
+    let missing = dir.config();
+    assert!(!missing.exists(), "the test must start without a file");
+
+    let (config, outcome) = settings::read_from(&missing).expect("a missing file is not an error");
+
+    assert_eq!(outcome, ReadOutcome::NoFile);
+    assert_eq!(
+        config.general.language,
+        settings::system_language_for_a_first_run(),
+        "a first run starts in the language of the system"
+    );
+    assert_eq!(
+        config,
+        Config::for_a_first_run(),
+        "and in nothing else — the rest of section 7 is untouched by вопрос 95"
+    );
+
+    // Every other field is the default of section 7. Written as a whole-structure comparison
+    // so that a field added later cannot slip through unasserted.
+    let mut as_before = Config::default();
+    as_before.general.language = config.general.language;
+    assert_eq!(config, as_before);
+
+    // --- a file that exists: the rule is not consulted ------------------------------------
+    let existing = write_file(
+        &dir,
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [general]\n\
+             enabled = false\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_from(&existing).expect("the file must be readable");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(
+        config.general.language,
+        Language::Ru,
+        "a file with no `language` line is somebody's file, and its missing values come from \
+         section 7 — never from the system"
+    );
+
+    // The same for a file of an older schema, which travels the ladder on the way in.
+    let old = write_file(&dir, "schema_version = 1\n\n[general]\nenabled = false\n");
+    let (config, outcome) = settings::read_from(&old).expect("an old file must be readable");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 1 });
+    assert_eq!(
+        config.general.language,
+        Language::Ru,
+        "a migration is not a first run either"
+    );
+
+    // And a file this build could not read at all falls back to the defaults of section 7,
+    // because those bytes are somebody's configuration and this is not a fresh machine.
+    let broken = dir.path.join("broken.toml");
+    fs::write(&broken, "[general\nenabled = = true\n").expect("writable");
+    let (config, outcome) = settings::read_or_default(&broken);
+
+    assert!(outcome.is_err());
+    assert_eq!(
+        config.general.language,
+        Language::Ru,
+        "a damaged file is not a first run"
+    );
+}
+
+/// **The live half, and the whole of what it can honestly claim on this machine.**
+///
+/// The Windows here is Russian, so the rule answers `ru` — the same value the hard-coded
+/// default answered before вопрос 95, which means a green light here proves nothing about the
+/// rule. What it *can* prove is that the two Win32 halves work at all: the list comes back
+/// non-empty, every tag in it is a plausible BCP-47 tag rather than rubbish, and the answer is
+/// one of the twelve. An instrument that cannot fail says nothing, so the emptiness of the list
+/// is asserted rather than tolerated.
+#[test]
+fn the_machine_answers_a_real_list_of_tags_and_one_of_the_twelve() {
+    let preferred = settings::preferred_ui_languages();
+
+    println!("preferred UI languages of this machine: {preferred:?}");
+
+    assert!(
+        !preferred.is_empty(),
+        "Windows always has at least one preferred UI language; an empty list means the call \
+         was not made or was not read"
+    );
+
+    for tag in &preferred {
+        assert!(
+            !tag.is_empty()
+                && tag.len() <= 85
+                && tag
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "`{tag}` is not a language tag — the multi-string was read wrongly"
+        );
+    }
+
+    let chosen = settings::system_language_for_a_first_run();
+
+    println!(
+        "this machine's first-run locale would be `{}`",
+        chosen.tag()
+    );
+
+    assert!(
+        Language::ALL.contains(&chosen),
+        "the answer is always one of the twelve"
+    );
 }

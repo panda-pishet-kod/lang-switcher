@@ -27,7 +27,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use lang_switcher::buffer::{self, Recorder, Stroke};
 use lang_switcher::diag;
 use lang_switcher::hook::{self, Edge, KeyEvent};
-use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession};
+use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession, Language};
 // Task T-14-3: the drawing library the menu paints with moved out of `settings` into its
 // owner, `theme` (§6.2) — the whole point being that the tray no longer goes to the
 // configuration module for pixels.
@@ -2800,6 +2800,74 @@ fn a_readable_configuration_is_written_back_exactly_as_before() {
         home.entries(),
         [CONFIG_FILE_NAME],
         "a readable file is not copied anywhere"
+    );
+}
+
+/// **Т-29-2, сторож: «ОК» writes the file — always, and not only when something changed.**
+///
+/// Три сообщения о том, что смена языка «не доходит до диска» (вопросы 83.3 и 94.4, находка
+/// м-Э29-1) all had the same shape: the file untouched, byte for byte and to the millisecond.
+/// The obvious cause would have been a «write only when it changed» rule somewhere on the road
+/// from the dialog to [`settings::write_to`]. **There is no such rule, and this test is what
+/// keeps it that way** — the reports turned out to be readings of a broken instrument, and the
+/// stand of Э29 measured all 296 «откуда → куда» cases writing the file.
+///
+/// The measurement is deliberately not «did the timestamp move»: the system clock ticks about
+/// every 15.6 ms, so two writes can honestly share one. Instead the file on the disk is
+/// **replaced by something else** between the two saves, and the question is whether
+/// [`Tray::replace_config`] puts the configuration back. It can only do that by writing, and it
+/// is handed a configuration equal to the one it already holds — so nothing in memory changed,
+/// and the file changed all the same.
+#[test]
+fn a_save_writes_the_file_even_when_the_configuration_did_not_change() {
+    let _turn = toggle_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("save-is-unconditional");
+
+    let mut tray = install(&window, &home);
+
+    // The first save: the language the person picked reaches the file.
+    let mut chosen = tray.config().clone();
+    chosen.general.language = Language::De;
+    tray.replace_config(chosen.clone());
+
+    let written = fs::read_to_string(home.config()).expect("the file must be readable");
+    assert!(
+        written.contains("language = \"de\""),
+        "the language of «ОК» must reach the file: {written}"
+    );
+
+    // Now the file says something else, and the tray does not know it. A rule that skipped a
+    // save because «nothing changed» would leave this text exactly where it is.
+    let meanwhile = "schema_version = 1\n\n[general]\nlanguage = \"en\"\nenabled = false\n";
+    fs::write(home.config(), meanwhile).expect("the file must be writable");
+
+    // The same configuration again — not a different one. This is «ОК» pressed on a dialog
+    // where the person changed nothing.
+    tray.replace_config(chosen.clone());
+
+    let (back, outcome) = settings::read_or_default(&home.config());
+
+    assert!(outcome.is_ok(), "the file must parse: {:?}", outcome.err());
+    assert_eq!(
+        back.general.language,
+        Language::De,
+        "an unchanged configuration is still written: the file was put back"
+    );
+    assert!(
+        back.general.enabled,
+        "and it was written whole, not patched field by field"
+    );
+    assert_eq!(
+        back.schema_version,
+        settings::CURRENT_SCHEMA_VERSION,
+        "with the stamp of this build, not the one the intervening text carried"
+    );
+
+    assert_eq!(
+        home.entries(),
+        [CONFIG_FILE_NAME],
+        "a readable file is written in place and copied nowhere"
     );
 }
 

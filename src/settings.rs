@@ -165,7 +165,14 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// Version 3 arrived with FR-100 and task Т-21-5: the section `[feedback]` and its one field.
 /// [`step_2_to_3`] carries the files of schema 2 over, and carries nothing but the stamp — see
 /// the rung for why that is the whole of it.
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+///
+/// Version 4 arrived with вопрос **94.1** and task Т-29-1: the ten locales решение 93 added to
+/// [`Language`] became a schema of their own. Nothing in the *file* changed meaning — that is
+/// why [`step_3_to_4`] is a bare stamp — and the whole of what the number buys is in the other
+/// direction: a build that knows two locales now recognises a file of the twelve by its stamp,
+/// **before** its parser refuses one of the ten values, and so leaves that file alone instead of
+/// moving it to `.bad`. See [`Language`], where the cost this pays off is written out.
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -186,24 +193,28 @@ fn pre_version_schema() -> u32 {
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
 ///
-/// # ⚠ What a closed set costs on a downgrade, and why the cost is accepted
+/// # ⚠ What a closed set cost on a downgrade, and how вопрос 94.1 stopped paying it
 ///
-/// Решение 93 adds ten **values** to this field and deliberately leaves
-/// [`CURRENT_SCHEMA_VERSION`] where it is: the values live inside the schema that already
-/// exists, and a new build reads every old file without a migration. The price is paid in the
-/// other direction. An installed build that knows two values, handed a file that says
-/// `language = "de"` under the same stamp `3`, refuses the strict parse — that is what «must
-/// not pass silently» means — and [`Config::from_toml_str`] then asks the document what schema
-/// it claims. The answer is `3`, which is **not** newer than that build's own, so the file is
-/// [`ConfigError::Malformed`] and the policy is [`SavePolicy::QuarantineFirst`]: the
-/// configuration is moved to `.bad` and replaced by defaults. It is *not*
-/// [`ReadOutcome::FromNewerSchema`] → [`SavePolicy::Forbidden`] — that arm needs a stamp the
-/// reading build is too old for.
+/// Решение 93 added ten **values** to this field and left [`CURRENT_SCHEMA_VERSION`] where it
+/// was: the values live inside a schema that already existed, and a new build reads every old
+/// file without a migration. The price was paid in the other direction, and task Т-28-2
+/// measured it. An installed build that knows two values, handed a file that said
+/// `language = "de"` under the same stamp `3`, refused the strict parse — that is what «must
+/// not pass silently» means — and [`Config::from_toml_str`] then asked the document what schema
+/// it claimed. The answer was `3`, which is **not** newer than that build's own, so the file was
+/// [`ConfigError::Malformed`] and the policy [`SavePolicy::QuarantineFirst`]: the configuration
+/// moved to `.bad` and replaced by defaults.
 ///
-/// The behaviour is measured and pinned by
-/// `an_older_build_meeting_a_newer_locale_quarantines_rather_than_refuses_to_write`, so that
-/// the day someone wants the gentler answer they change the schema and see this test go with
-/// it, rather than discovering the cost on a user's machine.
+/// **Вопрос 94.1, task Т-29-1, is the decision to stop paying that.** The schema is now `4`, and
+/// nothing about the file changed with it — see [`step_3_to_4`], a bare stamp. What changed is
+/// the answer an old build gives: the stamp in a file of the twelve is one no two-locale build
+/// ever wrote, so [`Config::from_toml_str`] reaches [`ReadOutcome::FromNewerSchema`] →
+/// [`SavePolicy::Forbidden`] and the file is **read and never touched** — no rewrite, no `.bad`.
+///
+/// Both halves are measured and pinned by
+/// `a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining`, whose
+/// control keeps the other half true: a file of the **current** stamp that will not parse is
+/// still damaged, and still quarantined.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -363,6 +374,177 @@ impl Language {
             .and_then(|at| Self::ALL.get(at).copied())
             .unwrap_or(Self::Ru)
     }
+}
+
+// =========================================================================================
+// Вопрос 95, task Т-29-3 — the locale a first run starts in
+// =========================================================================================
+
+/// The most UTF-16 units of the preferred-languages multi-string that are ever looked at.
+///
+/// A BCP-47 tag is at most 85 characters, and Windows keeps a handful of them; 1024 units is
+/// that with room to spare, and a list still running at 1024 is one this program was never
+/// going to find itself in. The bound is here for the same reason [`SETTING_NAME_CAP`] is in
+/// `tray`: the size comes back from a system call, and a read whose length is somebody else's
+/// number is a read with no length at all (SEC-05).
+///
+/// [`SETTING_NAME_CAP`]: crate::tray
+const PREFERRED_LANGUAGES_CAP: u32 = 1024;
+
+/// The primary subtag of a BCP-47 language tag — `de` of `de-AT`, `uk` of `uk-Cyrl-UA`.
+///
+/// The primary subtag is the first one by definition, so the rule is «everything before the
+/// first separator», and it needs to know nothing about scripts, regions or variants. The
+/// underscore is admitted beside the hyphen because a tag copied out of a registry value or an
+/// environment variable is often written `pt_BR`, and treating that as one long primary subtag
+/// would answer «not one of ours» to a language this build has.
+fn primary_subtag(tag: &str) -> &str {
+    match tag.find(['-', '_']) {
+        Some(at) => &tag[..at],
+        None => tag,
+    }
+}
+
+/// The locale one BCP-47 language tag names, if this build has it — **вопрос 95**.
+///
+/// The mapping is by [`primary_subtag`] and by nothing else: `de-DE`, `de-AT` and a bare `de`
+/// are all German, and `pt-PT` is the same `pt` as `pt-BR`. That is a decision and not a
+/// simplification. Section 7 spells a locale in two letters, this build ships one translation
+/// per language, and a table of regions would have to name every country Windows can be set to
+/// in order to say the same thing.
+///
+/// ⚠ **Deliberately not matched through [`Language::langid`].** Those numbers carry a
+/// *sublanguage*: `Pt` is `0x0416`, which is `pt-BR`, so a machine set to `pt-PT` (`0x0816`)
+/// would fail to match and fall to English — a person whose Windows is Portuguese would be
+/// handed an English program while the file `pt` was sitting in the build. The tag is the right
+/// joint here, and the identifier stays what it is: the number `app.rc` tags a string table
+/// with.
+///
+/// Case-insensitive, because case carries no meaning in a language tag: `DE-de` is the tag
+/// `de-DE` written by somebody who did not know the convention.
+pub fn language_of_ui_tag(tag: &str) -> Option<Language> {
+    let primary = primary_subtag(tag);
+
+    // An empty primary subtag is not «no preference», it is a tag that was never a tag —
+    // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for all twelve anyway;
+    // the early return says so on purpose rather than by luck.
+    if primary.is_empty() {
+        return None;
+    }
+
+    Language::ALL
+        .into_iter()
+        .find(|language| primary.eq_ignore_ascii_case(language.tag()))
+}
+
+/// The locale a **first run** starts in, given the preferred UI languages of Windows in order —
+/// **вопрос 95**, and the whole of the rule the user asked for.
+///
+/// «Автоматически проверять язык системы и устанавливать по умолчанию языком интерфейса, если
+/// имеется; если нет в списке локализаций нашей программы — по умолчанию ставить английский».
+///
+/// The list is walked in the order Windows keeps it and the **first** tag this build has wins.
+/// Walking rather than looking only at the head is the reason the ordered list is asked for at
+/// all: a person with Japanese first and German second gets the German program, which is a
+/// better answer than English for somebody who has said in so many words that they read German.
+///
+/// English is the end of the list and not a thirteenth case: an empty list — a machine whose
+/// answer this build could not read — takes the same road as a list of twelve languages none of
+/// which is ours, and both are «нет в списке локализаций нашей программы».
+///
+/// Pure, and public for that reason: `tests\settings.rs` drives it with staged tags, which is
+/// the only honest way to check it on a machine whose own Windows is Russian.
+pub fn first_run_language<'a>(preferred: impl IntoIterator<Item = &'a str>) -> Language {
+    preferred
+        .into_iter()
+        .find_map(language_of_ui_tag)
+        .unwrap_or(Language::En)
+}
+
+/// The interface languages of this user's Windows, most preferred first, as BCP-47 tags.
+///
+/// # Why this call and not `GetUserDefaultUILanguage`
+///
+/// Three reasons, and all three are about not inventing a table this program would then have to
+/// maintain:
+///
+/// * it answers **tags**, which is what [`language_of_ui_tag`] matches on. The older call
+///   answers one `LANGID`, and turning a `LANGID` into a two-letter tag means either a second
+///   call to the locale service or a hand-written table of primary language identifiers —
+///   a table that would have to be right for every language Windows ships, not only for the
+///   twelve this build has;
+/// * it answers the **ordered list** the user actually configured. A person may have set
+///   Japanese first and German second, and only a list can say so;
+/// * it is the call that answers what the interface is *displayed* in, language packs included,
+///   which is what вопрос 95 asks about.
+///
+/// # What a failure means here
+///
+/// An empty vector, and no more. NFR-13: the refusal is examined and journalled, and the
+/// direction it is acted on in is the one that changes nothing the user can lose — an empty
+/// list falls to `en` through [`first_run_language`], which is exactly the answer вопрос 95
+/// prescribes for «нет в списке локализаций нашей программы». There is no file yet on this
+/// road, so nothing whatever is at risk (this is the «файла нет» path and only that).
+pub fn preferred_ui_languages() -> Vec<String> {
+    let mut count = 0u32;
+    let mut units = 0u32;
+
+    // SAFETY: the sizing call of the documented two-call pattern. Both out-parameters are
+    // locals of this frame, and `None` for the buffer is what asks for the size: the call
+    // writes no characters at all on this road.
+    if let Err(error) = unsafe {
+        windows::Win32::Globalization::GetUserPreferredUILanguages(
+            windows::Win32::Globalization::MUI_LANGUAGE_NAME,
+            &raw mut count,
+            None,
+            &raw mut units,
+        )
+    } {
+        crate::app::report_non_critical("GetUserPreferredUILanguages", &error);
+        return Vec::new();
+    }
+
+    if units == 0 || units > PREFERRED_LANGUAGES_CAP {
+        return Vec::new();
+    }
+
+    let mut buffer = vec![0u16; units as usize];
+
+    // SAFETY: the fetching call. `buffer` is owned by this frame, is not moved or dropped
+    // until the call returns, and its length is the very number the sizing call above asked
+    // for and `units` still holds. The call writes at most that many units and terminates the
+    // multi-string itself.
+    if let Err(error) = unsafe {
+        windows::Win32::Globalization::GetUserPreferredUILanguages(
+            windows::Win32::Globalization::MUI_LANGUAGE_NAME,
+            &raw mut count,
+            Some(PWSTR(buffer.as_mut_ptr())),
+            &raw mut units,
+        )
+    } {
+        crate::app::report_non_critical("GetUserPreferredUILanguages", &error);
+        return Vec::new();
+    }
+
+    // A double-NUL-terminated multi-string: the runs between the zeros are the tags, and the
+    // empty run at the end is the second terminator. `units` is clamped to what was actually
+    // allocated — the second call reports the length it wrote, and a number larger than the
+    // buffer would be a number this code has no business trusting.
+    buffer[..(units as usize).min(buffer.len())]
+        .split(|unit| *unit == 0)
+        .filter(|run| !run.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+/// The locale a first run starts in **on this machine** — [`preferred_ui_languages`] handed to
+/// [`first_run_language`], and nothing else.
+///
+/// Split from the rule so that the rule can be tested without a machine and the machine can be
+/// asked without a rule: `tests\settings.rs` does both, and neither test can hide a mistake in
+/// the other half.
+pub fn system_language_for_a_first_run() -> Language {
+    first_run_language(preferred_ui_languages().iter().map(String::as_str))
 }
 
 /// Layout switching mode, `layouts.mode` of section 7. Values `pair` and `cycle`.
@@ -860,6 +1042,34 @@ fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
 }
 
 impl Config {
+    /// The configuration a machine that has **no file yet** starts with — **вопрос 95**, task
+    /// Т-29-3.
+    ///
+    /// [`Config::default`] with one field chosen instead of fixed: `general.language` is the
+    /// interface language of this user's Windows when this build has it, and `en` when it has
+    /// not — [`system_language_for_a_first_run`].
+    ///
+    /// ⚠ **This is the whole of where the system is consulted, and that is the point.** Every
+    /// other road into a configuration — a file that parses, a file that migrates, a file this
+    /// build could not read at all — goes on reaching [`Config::default`] and its hard `ru`,
+    /// because on every one of those roads a file already exists and it is somebody's. Вопрос 95
+    /// says «существующий конфиг не трогается никогда», and the way that is made true is by
+    /// there being exactly one caller of this function: the `NotFound` arm of [`read_from`].
+    ///
+    /// It is deliberately **not** `Default::default`. A `Default` that reads the operating
+    /// system is a `Default` that answers differently on two machines, and this type is
+    /// compared for equality all over the tests; the difference has to be visible at the call
+    /// site, which is what a named constructor gives.
+    pub fn for_a_first_run() -> Self {
+        Self {
+            general: General {
+                language: system_language_for_a_first_run(),
+                ..General::default()
+            },
+            ..Self::default()
+        }
+    }
+
     /// Parses a TOML document and brings it to the current schema version.
     ///
     /// Unknown fields are ignored and missing ones are filled from the defaults, both by
@@ -950,6 +1160,9 @@ impl Config {
         if self.schema_version < 3 {
             step_2_to_3(self);
         }
+        if self.schema_version < 4 {
+            step_3_to_4(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -1020,6 +1233,29 @@ fn step_2_to_3(config: &mut Config) {
     config.schema_version = 3;
 }
 
+/// Raises a file from schema 3 to schema 4 — **вопрос 94.1**, the twelve locales of решение 93.
+///
+/// **The stamp and nothing else, and — as with [`step_2_to_3`] — that is the whole decision
+/// rather than an omission.** Решение 93 added ten admissible **values** to `general.language`;
+/// it renamed no field, retyped none and changed the meaning of none. So every value a schema 3
+/// file can hold means under schema 4 exactly what it meant before, and there is nothing to
+/// raise: `ru` is still `ru`, and a file that says nothing about the language still gets the
+/// default of section 7.
+///
+/// The number is not therefore idle. It is spent entirely in the **other** direction, on a build
+/// that has *not* been updated: from here on a file of the twelve locales carries a stamp no
+/// two-locale build ever wrote, so such a build recognises it as a file from the future by the
+/// stamp — before its parser refuses one of the ten new words — and leaves it whole instead of
+/// moving it to `.bad`. That is the cost [`Language`] used to write down as accepted, and this
+/// rung is where it stops being paid.
+///
+/// Contrast [`step_1_to_2`], the one rung that does have surgery to do: `backspace` in an old
+/// file was a value the *program* had put there, so it had to be told apart from a decision a
+/// person made. A value that was already the person's own carries no such ambiguity.
+fn step_3_to_4(config: &mut Config) {
+    config.schema_version = 4;
+}
+
 /// Builds the configuration path inside an arbitrary application data directory.
 ///
 /// Split out from [`default_config_path`] so that the layout of the path can be asserted
@@ -1051,8 +1287,14 @@ pub fn default_config_path() -> Option<PathBuf> {
 pub fn read_from(path: &Path) -> Result<(Config, ReadOutcome), ConfigError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
+        // ⭐ **Вопрос 95, task Т-29-3 — the one road on which the system is consulted.** There
+        // is no file, so there is nothing of anybody's to preserve, and this is a first run:
+        // the language of the configuration becomes the language of the user's Windows if this
+        // build has it, and `en` if it has not. Every other arm of this function, and
+        // `read_or_default` underneath it, keeps `Config::default` and its hard `ru` — those
+        // are files that exist.
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Ok((Config::default(), ReadOutcome::NoFile));
+            return Ok((Config::for_a_first_run(), ReadOutcome::NoFile));
         }
         Err(err) => return Err(ConfigError::Io(err)),
     };

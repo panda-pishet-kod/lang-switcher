@@ -483,12 +483,17 @@ struct Stroke {
 Каталог программы (`%ProgramFiles%`) недоступен на запись обычному пользователю — конфигурация в нём не хранится.
 
 ```toml
-schema_version = 3
+schema_version = 4
 
 [general]
 enabled   = true
 autostart = true
 language  = "ru"              # ru | en | uk | de | fr | es | pt | it | pl | cs | tr | el
+                              # Умолчание ПЕРВОГО запуска (файла ещё нет) — язык интерфейса
+                              # Windows: первичный тег из GetUserPreferredUILanguages
+                              # (de-AT → de, pt-PT → pt), первый из списка, который у нас
+                              # есть; если ни одного — "en". Существующий файл не трогается:
+                              # в нём отсутствующий language по-прежнему даёт "ru".
 theme     = "system"          # system | light | dark
 
 [hotkey]

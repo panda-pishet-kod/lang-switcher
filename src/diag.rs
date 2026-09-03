@@ -314,6 +314,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("RegCloseKey", Kind::Process),
     ("FindResourceExW", Kind::Process),
     ("LoadResource", Kind::Process),
+    // Task Т-29-3, вопрос 95: the interface language of the user's Windows, asked once and only
+    // when there is no configuration file yet. `Kind::Process` for the same reason the two
+    // resource rows above take it — the subject is this process's own environment and not a
+    // window of it — and no new `Kind` is added, which is the rule every block here follows.
+    ("GetUserPreferredUILanguages", Kind::Process),
     // The debt task T-08-2 found and had no mandate to pay — its report, section 18, problem 2.
     // Seven operations reached the journal as `Operation::UNLISTED`; **four of them are here and
     // three are deliberately not**, and the reason is a requirement, not an oversight.
