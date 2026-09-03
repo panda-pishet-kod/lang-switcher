@@ -116,7 +116,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
     DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon,
     DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
-    GW_HWNDNEXT, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
+    GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
     GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
     ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
     LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
@@ -2727,6 +2727,57 @@ pub fn mirror_template(template: &mut [u8]) -> Option<(u32, u32)> {
     template[at..at + 4].copy_from_slice(&after.to_le_bytes());
 
     Some((before, after))
+}
+
+/// Takes `WS_EX_LAYOUTRTL` off one control of a mirrored dialog — вопрос 97, tasks Т-30-3 and
+/// Т-30-4.
+///
+/// A child of a mirrored window is created mirrored, and for most of this dialog that is exactly
+/// right. Three kinds of thing want the opposite:
+///
+/// * the logo of the about window (task Т-30-3, решение 97.1) — a picture carries a meaning and
+///   not a direction, the same reason the tick stays straight. GDI mirrors an icon drawn into a
+///   mirrored context (measured, `scratchpad-Э30\посылки-п3.log`), and this program's icon is a
+///   double-headed arrow, so today the reflection cannot be seen at all. It is undone anyway:
+///   what is right about the picture should not depend on the picture being symmetrical.
+/// * the key-name field and the process-name field (task Т-30-4, решение 97.2) — islands of
+///   Latin text, which read left to right and take a caret that moves rightwards.
+///
+/// **The control keeps its mirrored position.** Where a child sits is decided by the parent's
+/// mapping when the dialog is laid out; what this style governs is how the child draws its own
+/// inside. So the field stays against the right edge of a right-to-left window and the text in
+/// it reads the ordinary way — which is the whole of решение 97.2.
+///
+/// Does nothing at all in the twelve left-to-right locales: the style is not there to remove.
+/// NFR-13: a control that cannot be found or whose style cannot be read is left alone — an
+/// island that reads the wrong way round is a blemish, and refusing to open the window over it
+/// would be a fault.
+fn unmirror_control(hwnd: HWND, control: i32) {
+    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        return;
+    };
+
+    // SAFETY: `window` is the live control just answered for this dialog.
+    let styles = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
+
+    if styles == 0 {
+        return;
+    }
+
+    let wanted = styles & !(isize::try_from(WS_EX_LAYOUTRTL.0).unwrap_or(0));
+
+    if wanted == styles {
+        return;
+    }
+
+    // SAFETY: `window` is the live control and the value is its own extended style with one
+    // documented bit cleared; nothing else is written.
+    unsafe { SetWindowLongPtrW(window, GWL_EXSTYLE, wanted) };
+
+    // A style change is not a repaint, and this one changes how the control draws itself. The
+    // same rule as `repaint_control` beside every text write of this file (finding м-Э23-2: a
+    // write nobody asked to be shown is a write nobody sees).
+    repaint_control(hwnd, control);
 }
 
 /// The compiled bytes of one dialog template of this module's own binary, copied out so that
@@ -6053,7 +6104,109 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
 
     // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
     // `face` are objects the dialog's state owns for longer than this call.
-    unsafe { paint_label(dc, rect, &mut caption, ground, ink, face) }
+    unsafe {
+        paint_label(
+            dc,
+            rect,
+            &mut caption,
+            theme::LabelStyle {
+                ground,
+                ink,
+                face,
+                pitch: None,
+                reading: label_reading(control),
+            },
+        )
+    }
+}
+
+/// Which owner-drawn labels of this dialog are **islands of Latin text** — решение 97.2, task
+/// Т-30-4.
+///
+/// One control, and the list is short on purpose. The rule решение 97.2 lays down is not «Latin
+/// text reads left to right» — bidi already does that inside a sentence, and the mixed lines of
+/// the «Состояние» block, with their numbers and their registry path, are explicitly **left to
+/// bidi**. What an island is, is a run that is *entirely* somebody else's alphabet and is read
+/// as an object rather than as a sentence: a path, a key name, a process name.
+///
+/// [`IDC_LOG_DIR`] is the one such run this dialog draws itself. The key-name field and the
+/// process-name field are controls that draw their own text, so they are turned round by
+/// [`unmirror_control`] instead; the process list draws through `draw_list_item`, which asks
+/// this question in its own place.
+const fn label_reading(control: i32) -> theme::Reading {
+    if control == IDC_LOG_DIR {
+        theme::Reading::LatinIsland
+    } else {
+        theme::Reading::Native
+    }
+}
+
+/// Which way a **name** reads — решение 97.2 (г), task Т-30-4.
+///
+/// The rule the user gave in so many words: by the **first strong character**. A name is not
+/// text of the interface language — a layout is named in its own language and so is a locale in
+/// the language chooser — so the direction belongs to the name and not to the window. `English
+/// (United States)` and `Русский (Россия)` read left to right in a Hebrew window; `עברית` reads
+/// right to left in an English one, and a rule that said «names are islands» would force that
+/// one round the wrong way. This is the same rule the bidi algorithm uses to give a paragraph
+/// its direction, written down here because this program has to apply it to a **run** inside a
+/// window whose own direction is already decided.
+///
+/// A name of no strong characters at all — digits, punctuation, or nothing — is [`Native`]: it
+/// looks the same either way, and the window's own direction is the better default for a run
+/// that has no opinion.
+///
+/// ⚠ The strong right-to-left blocks are Hebrew (U+0590…U+05FF) and Arabic (U+0600…U+06FF, with
+/// the supplement and extended blocks up to U+08FF), which are the two вопрос 97 admits and the
+/// two `Language::is_rtl` names. A fifteenth locale in another right-to-left script would want
+/// this list extended, and it is one list.
+///
+/// Whether a panel caption may be drawn with the letter spacing of the mock-ups — task Т-30-4.
+///
+/// **No, for a caption carrying a strong right-to-left letter**, and the reason is not taste.
+/// The spacing is applied by drawing every character with a `TextOutW` of its own, and Arabic is
+/// a cursive script: a letter's shape depends on what it joins to, so a run cut into characters
+/// comes out as isolated forms with gaps — unreadable rather than merely wide. Found by eye on
+/// the stand, `scratchpad-Э30\ШАПКА2-ar.png`, where «الاستثناءات» came out as eleven letters.
+///
+/// Hebrew is not cursive and would survive the cutting, and it is refused all the same: neither
+/// script has capitals, so «capitals, spaced out» is a device with nothing to apply it to, and
+/// letter-spacing either of them is a typographic error and not a style. One rule for both, and
+/// it reads off the text rather than off the locale — a caption is what it is whoever is looking
+/// at it.
+pub fn caption_takes_tracking(caption: &str) -> bool {
+    !caption.chars().any(is_strong_rtl)
+}
+
+/// A character of one of the two right-to-left scripts вопрос 97 admits — the Hebrew and Arabic
+/// blocks, with the presentation forms a font may substitute into.
+///
+/// One list, read by [`caption_takes_tracking`] and by [`reading_of_name`]. A fifteenth locale
+/// in another right-to-left script would extend it here and nowhere else.
+const fn is_strong_rtl(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}'
+    )
+}
+
+/// Public because a test cannot check a rule it is not allowed to read, and this one is a rule
+/// of the interface rather than an implementation detail: it decides what a person sees in the
+/// two lists of layouts and in the language chooser.
+///
+/// [`Native`]: theme::Reading::Native
+pub fn reading_of_name(name: &str) -> theme::Reading {
+    for character in name.chars() {
+        if is_strong_rtl(character) {
+            return theme::Reading::Native;
+        }
+
+        if character.is_alphabetic() {
+            return theme::Reading::LatinIsland;
+        }
+    }
+
+    theme::Reading::Native
 }
 
 /// Draws one item of an owner-drawn combo box — a row of the dropped-down list or the
@@ -6217,12 +6370,26 @@ unsafe fn draw_combo_item(
             // SAFETY: the slice and `text_rect` are live locals of this frame; the format
             // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
             // and writes only pixels of the DC.
+            // Решение 97.2 (г), task Т-30-4: **by the first strong character of the name.**
+            // A combo box of this dialog shows names that are each in their own language — the
+            // layouts of the session, and the fourteen locales under their own spellings — so
+            // the direction cannot be a property of the control. `Русский (Россия)` and
+            // `English (United States)` read left to right in a mirrored window; `עברית` reads
+            // right to left in any window, and forcing it the other way would be the defect
+            // this rule exists to prevent.
+            let name = String::from_utf16_lossy(&buffer[..copied]);
+
             unsafe {
                 DrawTextW(
                     dc,
                     &mut buffer[..copied],
                     &mut text_rect,
-                    DT_SINGLELINE | DT_VCENTER,
+                    DT_SINGLELINE
+                        | DT_VCENTER
+                        | theme::reading_order(
+                            theme::dc_is_rtl(dc),
+                            reading_of_name(&name) == theme::Reading::LatinIsland,
+                        ),
                 )
             };
 
@@ -6446,10 +6613,18 @@ unsafe fn draw_list_item(
                 // font the dialog's state owns for longer than this call.
                 let previous_face = unsafe { select_face(target, face) };
 
+                // Решение 97.2 (в), task Т-30-4: a row of the exclusion list is a **process
+                // name** — `game.exe`, `notepad.exe` — and reads left to right in a mirrored
+                // window as it does in any other. The bit comes from `theme::reading_order`,
+                // the one place this program decides reading order.
+                //
                 // SAFETY: the slice and `text_rect` are live locals of this frame; the format
                 // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
                 // and writes only pixels of the DC.
-                unsafe { DrawTextW(target, &mut buffer[..copied], &mut text_rect, DT_SINGLELINE) };
+                let format =
+                    DT_SINGLELINE | theme::reading_order(unsafe { theme::dc_is_rtl(target) }, true);
+
+                unsafe { DrawTextW(target, &mut buffer[..copied], &mut text_rect, format) };
 
                 // SAFETY: `previous_face` is what `select_face` answered for this same DC.
                 unsafe { restore_face(target, previous_face) };
@@ -8359,6 +8534,35 @@ unsafe fn draw_panel_caption(
     let top = panel.top + scaled(PANEL_CAPTION_INSET_Y, dpi);
     let tracking = scaled(PANEL_CAPTION_TRACKING_TENTHS, dpi);
 
+    // ⛔ **Задача Т-30-4, найдено глазом на стенде: арабская шапка НЕ РАЗБИВАЕТСЯ НА ЗНАКИ.**
+    //
+    // The letter spacing below is a typographic device of the mock-ups for capitals — «ОБЩИЕ»,
+    // «GENERAL» — and it is applied by placing every character with a `TextOutW` of its own.
+    // That is harmless for an alphabet whose letters stand apart. Arabic is **cursive**: its
+    // letters change shape according to what they join to, and a run cut into single characters
+    // comes out as a row of isolated forms with gaps between them — not ugly, *unreadable*.
+    // Seen on the stand (`scratchpad-Э30\ШАПКА2-ar.png`): «الاستثناءات» came out as eleven
+    // separate letters.
+    //
+    // Neither Hebrew nor Arabic has capitals either, so there is no «capitals, spaced out» to
+    // render in the first place; letter-spacing them is not a style, it is a mistake. So a
+    // caption that carries a strong right-to-left letter is drawn as **one run**, and the whole
+    // of the device below is skipped. Everything else is drawn exactly as it was.
+    if !caption_takes_tracking(&caption) {
+        let units: Vec<u16> = caption.encode_utf16().collect();
+
+        // NFR-13: the `BOOL` is examined and deliberately dropped — see the block comment above.
+        //
+        // SAFETY: `units` is a live local of this frame and the DC is the caller's.
+        let _ = unsafe { TextOutW(dc, panel.left + inset_x, top, &units) };
+
+        // SAFETY: the handle was in the DC a moment ago; putting it back ends this function's
+        // use of the DC and leaves the caller free to delete `face`.
+        unsafe { SelectObject(dc, previous_font) };
+
+        return;
+    }
+
     // Tenths of a pixel — see the doc comment.
     let mut pen_tenths = (panel.left + inset_x) * 10;
 
@@ -9610,6 +9814,17 @@ fn localise_dialog(hwnd: HWND) {
 /// Puts the configuration into the controls — the whole of `WM_INITDIALOG`.
 fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     localise_dialog(hwnd);
+    // Решение 97.2, task Т-30-4 — the two islands that are **input fields**. Everything else in
+    // this window reads the way the window does; these two hold Latin text the user types or
+    // reads letter by letter (`Ctrl + Alt + Q`, `game.exe`), and a caret that walks leftwards
+    // through `game.exe` is not a stylistic matter. See [`unmirror_control`]: the field keeps
+    // its mirrored place against the right edge and only its inside turns round.
+    //
+    // The other two islands of решение 97.2 are drawn by this program rather than by a control,
+    // so they are turned round where they are drawn instead: the journal path and the process
+    // list ask `theme::label_format` for `Reading::LatinIsland`.
+    unmirror_control(hwnd, IDC_HOTKEY);
+    unmirror_control(hwnd, IDC_EXCLUSION_NAME);
     subclass_hotkey_field(hwnd);
     // FR-92а, task T-11-14. The other half of this pair — `unsubclass_combo_boxes` — is the
     // `WM_DESTROY` branch of `dialog_proc`, and nothing else in the file installs or removes
@@ -12259,6 +12474,13 @@ unsafe extern "system" fn about_proc(
                 let _ = send_to(hwnd, IDC_ABOUT_ICON, STM_SETICON, logo.0 as usize, 0);
             }
 
+            // Решение 97.1, task Т-30-3: the logo is a picture and pictures carry no direction,
+            // so it is drawn the same way round in a mirrored window as in any other. See
+            // [`unmirror_control`] — and note that this program's icon is symmetrical, so what
+            // this call buys today is not a visible difference but the removal of a dependence
+            // on the icon staying symmetrical.
+            unmirror_control(hwnd, IDC_ABOUT_ICON);
+
             // «ОК» is BS_OWNERDRAW, so the default identifier is handed to the dialog
             // manager by the documented replacement, `DM_SETDEFID` — *posted*, not sent,
             // for the reasons written down at the same message of `dialog_proc` (FR-72).
@@ -12748,7 +12970,23 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
 
     // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
     // `face` are objects this window's state owns for longer than this call.
-    unsafe { paint_label_at_pitch(dc, rect, &mut caption, ground, ink, face, pitch) }
+    // The about window has no island of its own: every label of it is a sentence of the
+    // interface language, and the one Latin run in it — the key name — is inside a chip that
+    // `paint_chip_row` lays out atom by atom (task Т-30-2 п. 4).
+    unsafe {
+        paint_label_at_pitch(
+            dc,
+            rect,
+            &mut caption,
+            theme::LabelStyle {
+                ground,
+                ink,
+                face,
+                pitch,
+                reading: theme::Reading::Native,
+            },
+        )
+    }
 }
 
 /// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.

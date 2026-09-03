@@ -3862,7 +3862,19 @@ fn every_row_of_the_reference_meets_the_constant_that_answers_it() {
     let cell = settings::check_cell(96, layout_row);
     let glyph_side = theme::scaled(settings::GLYPH_SIZE, 96);
     let dot_inset = theme::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, 96);
-    let glyph_mark = theme::check_mark_points((0, 0), settings::GLYPH_CHECK_MARK, 96);
+    // Task Т-30-3 gave this a rectangle and a mirror flag: the figure is the same one, asked
+    // for in a square at the origin and the way round every left-to-right locale draws it.
+    let glyph_mark = theme::check_mark_points(
+        &RECT {
+            left: 0,
+            top: 0,
+            right: glyph_side,
+            bottom: glyph_side,
+        },
+        settings::GLYPH_CHECK_MARK,
+        96,
+        false,
+    );
 
     // The radius and the frame are one number for five figures each, so the three rows that
     // ask for them in three different tables are answered by the same two expressions.
@@ -4377,7 +4389,7 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
     let body = function_body(&source, "fn draw_check_mark(");
 
     assert!(
-        body.contains("check_mark_points((glyph.left, glyph.top), mark, dpi)"),
+        body.contains("check_mark_points(glyph, mark, dpi, mirrored)"),
         "the strokes must come from the pure `check_mark_points`, not from literals"
     );
 
@@ -4409,7 +4421,14 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
         for dpi in [96, 120, 144, 192] {
             let square = theme::scaled(side, dpi);
 
-            for (x, y) in theme::check_mark_points((0, 0), mark, dpi) {
+            let box_of_the_glyph = RECT {
+                left: 0,
+                top: 0,
+                right: square,
+                bottom: square,
+            };
+
+            for (x, y) in theme::check_mark_points(&box_of_the_glyph, mark, dpi, false) {
                 assert!(
                     (0..=square).contains(&x) && (0..=square).contains(&y),
                     "at {dpi} DPI the point ({x}, {y}) is outside the {square}-pixel square"
@@ -10602,7 +10621,22 @@ fn paint_label_on(sheet: &Sheet, area: RECT, caption: &str) -> isize {
 
     // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
     // frame, and `ground` is live for the whole call. `None` leaves the DC's own font in place.
-    let answer = unsafe { theme::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, None) };
+    // Task Т-30-2 gave `paint_label` the reading order of its run. `Native` is what every label
+    // of this program asks for except the journal path, and it is what this measurement is of.
+    let answer = unsafe {
+        theme::paint_label(
+            sheet.dc,
+            area,
+            &mut text,
+            theme::LabelStyle {
+                ground,
+                ink: LABEL_INK,
+                face: None,
+                pitch: None,
+                reading: theme::Reading::Native,
+            },
+        )
+    };
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(ground.into()) };
@@ -12173,8 +12207,22 @@ fn paint_label_in_face(sheet: &Sheet, area: RECT, caption: &str, face: &Face) ->
 
     // SAFETY: `sheet.dc` holds this sheet's bitmap, `text` and `area` are live locals of this
     // frame, and both `ground` and the face outlive the call.
-    let answer =
-        unsafe { theme::paint_label(sheet.dc, area, &mut text, ground, LABEL_INK, Some(face.0)) };
+    // `Reading::Native`, as in every measurement of a label of this program that is not the
+    // journal path — task Т-30-2.
+    let answer = unsafe {
+        theme::paint_label(
+            sheet.dc,
+            area,
+            &mut text,
+            theme::LabelStyle {
+                ground,
+                ink: LABEL_INK,
+                face: Some(face.0),
+                pitch: None,
+                reading: theme::Reading::Native,
+            },
+        )
+    };
 
     // SAFETY: created above, handed to nobody, freed exactly once.
     let _ = unsafe { DeleteObject(ground.into()) };
@@ -13228,6 +13276,154 @@ fn only_hebrew_and_arabic_are_read_right_to_left() {
             .count(),
         12
     );
+}
+
+/// **Т-30-4, решение 97.2 (г): a name reads by its own first strong character.**
+///
+/// The rule the user gave in so many words, and the one that a blanket «names are islands»
+/// would break: a layout is named in its own language and so is a locale in the chooser, so a
+/// Hebrew name has to stay right to left in an English window exactly as an English name stays
+/// left to right in a Hebrew one.
+///
+/// The names here are not invented: the two layout names this machine actually produces were
+/// read off the live product in Э27 (`Русский (Россия)`, `English (United States)`), and the
+/// fourteen locale names are `Language::native_name`.
+#[test]
+fn a_name_reads_by_its_own_first_strong_character() {
+    for name in [
+        "English (United States)",
+        "Русский (Россия)",
+        "Ελληνικά",
+        "Deutsch",
+        "Português (Brasil)",
+        "Čeština",
+    ] {
+        assert_eq!(
+            settings::reading_of_name(name),
+            theme::Reading::LatinIsland,
+            "«{name}» begins with a strong left-to-right letter and reads that way"
+        );
+    }
+
+    for name in ["עברית", "العربية", "עברית (ישראל)", "العربية (السعودية)"]
+    {
+        assert_eq!(
+            settings::reading_of_name(name),
+            theme::Reading::Native,
+            "«{name}» begins with a strong right-to-left letter and keeps its own direction"
+        );
+    }
+
+    // A leading neutral is skipped, not treated as an answer: what decides is the first
+    // **strong** character, and a bracket or a space is neither.
+    assert_eq!(
+        settings::reading_of_name("  (עברית)"),
+        theme::Reading::Native,
+        "leading spaces and a bracket are neutral and are skipped"
+    );
+    assert_eq!(
+        settings::reading_of_name("(English)"),
+        theme::Reading::LatinIsland
+    );
+
+    // A name of no strong characters at all reads the way the window does — there is nothing
+    // in it that could look wrong either way, and the window's direction is the better default.
+    for name in ["", "   ", "123", "— · —"] {
+        assert_eq!(
+            settings::reading_of_name(name),
+            theme::Reading::Native,
+            "«{name}» has no strong character and takes no view"
+        );
+    }
+}
+
+/// **Т-30-4: a panel caption in a cursive script is not cut into letters.**
+///
+/// ⛔ Found by eye on the stand and by nothing else (`scratchpad-Э30\ШАПКА2-ar.png`). The letter
+/// spacing of the panel captions is applied by placing **every character with a `TextOutW` of
+/// its own**, which is harmless for an alphabet whose letters stand apart and destroys Arabic:
+/// its letters change shape according to what they join to, and a cut run comes out as a row of
+/// isolated forms. «الاستثناءات» arrived as eleven separate letters.
+///
+/// Hebrew is refused the spacing too, for the reason that covers both: neither script has
+/// capitals, so «capitals, spaced out» is a device with nothing to apply, and letter-spacing
+/// either of them is a typographic error rather than a style.
+///
+/// The captions here are the real ones — the six group headings of the settings window in the
+/// two new locales, and their Russian and English counterparts as the control.
+#[test]
+fn a_caption_in_a_cursive_script_is_drawn_as_one_run() {
+    for caption in [
+        "الاستثناءات",
+        "التخطيطات",
+        "عام",
+        "التشخيص",
+        "الحالة",
+        "مفتاح الاختصار",
+        "כללי",
+        "פריסות",
+        "חריגים",
+        "אבחון",
+        "מצב",
+        "מקש קיצור",
+    ] {
+        assert!(
+            !settings::caption_takes_tracking(caption),
+            "«{caption}» is written in a script that must not be cut into characters"
+        );
+    }
+
+    // The control: the captions that have always been spaced must go on being spaced, or the
+    // fix above would have quietly taken the mock-ups' typography away from twelve locales.
+    for caption in [
+        "ОБЩИЕ",
+        "GENERAL",
+        "ГОРЯЧАЯ КЛАВИША",
+        "DIAGNOSTICS",
+        "ΓΕΝΙΚΆ",
+        "AUSNAHMEN",
+    ] {
+        assert!(
+            settings::caption_takes_tracking(caption),
+            "«{caption}» keeps the letter spacing of the mock-ups"
+        );
+    }
+}
+
+/// **Т-30-4, замер: no direction mark reaches the configuration file, and none is needed.**
+///
+/// The mandate offered a trailing direction mark in the text of a list item as a way of keeping
+/// the closing bracket of `English (United States)` from jumping in a mirrored window, with the
+/// warning that such a mark must never reach `[layouts]` of `config.toml`.
+///
+/// **It was measured first and is not needed at all.** Modern bidi resolves a bracket *pair* to
+/// the direction of the text inside it, so the closing bracket does not jump: the same string
+/// came out identical under both reading orders (`scratchpad-Э30\посылки-п2.log`) and both
+/// layout names came out right on the stand, in the combo boxes and in the cycle list
+/// (`scratchpad-Э30\ЖИВОЕ-he-настройки.png`). So no mark is inserted anywhere, and this test is
+/// the guard that keeps it that way — the cheapest place for one to be added later «to be safe»
+/// is exactly the list item that is written back to the file.
+#[test]
+fn no_layout_name_carries_a_direction_mark_into_the_configuration() {
+    let source = settings_module_source();
+
+    for (at, line) in source.lines().enumerate() {
+        let line = line.trim();
+
+        if line.starts_with("//") || line.starts_with("///") {
+            continue;
+        }
+
+        for needle in ["\\u{200E}", "\\u{200F}", "\\u{2066}", "\\u{2069}"] {
+            assert!(
+                !line.contains(needle),
+                "line {}: a direction mark in the module would reach a layout name and, \
+                 through it, `[layouts]` of the configuration file — вопрос 97.2 leaves \
+                 direction to the code, and the code decides it with `theme::reading_order`",
+                at + 1
+            );
+        }
+    }
 }
 
 /// **Т-30-1: the arrow of the help line points the way the script reads.**

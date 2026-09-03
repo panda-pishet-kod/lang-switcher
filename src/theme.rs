@@ -2077,11 +2077,64 @@ pub struct CheckMark {
 /// Every offset goes through [`scaled_tenths_offset`], which is [`scaled`] for a length given
 /// with one decimal and without the floor of one a pen needs: a point may legitimately land on
 /// the corner itself.
-pub fn check_mark_points(corner: (i32, i32), mark: CheckMark, dpi: i32) -> [(i32, i32); 3] {
+///
+/// # The mirror — вопрос 97 п. 1, task Т-30-3
+///
+/// `mirrored` says the figure is going into a **mirrored** device context, and it is the whole
+/// of what this program does about the tick in a right-to-left window.
+///
+/// GDI mirrors everything drawn into such a context, strokes included: measured
+/// (`scratchpad-Э30\посылки-п3.log`) the tick came back as the exact reflection of itself, in
+/// all three of its sizes, and `LAYOUT_BITMAPORIENTATIONPRESERVED` did **not** undo it — that
+/// flag is about blits, and these are `Polyline` strokes. Seen by eye on the stand as well
+/// (`scratchpad-Э30\ДО-Т-30-3-галочка-he.png`): the long stroke ran down to the right.
+///
+/// The user's decision (97.1) is that the tick stays **straight**, as it is in Windows itself:
+/// the mark carries a meaning, not a direction. So the points are reflected here, about the
+/// vertical axis of the glyph square, and GDI reflects them back — the figure arrives the way
+/// it is drawn in the other twelve locales. One place, and it is the pure one: all three ticks
+/// of this program (the dialog glyph, the row of the cycle list, the tray menu) are drawn by
+/// [`draw_check_mark`], which is the only caller of this.
+///
+/// # The reflection is `width - dx`, and the one that reads more natural is wrong
+///
+/// `width - 1 - dx` is what a *pixel* reflection would be — column `x` of a mirrored context is
+/// column `width - 1 - x` — and it is the formula this task was written with. It came out one
+/// pixel to the right, measured (`scratchpad-Э30\посылки-п3-w-1.log`: the tick of the dialog
+/// occupied columns 3..10 where the straight one occupies 2..9).
+///
+/// The reason is that the figure does not reach the window as pixels. [`draw_check_mark`] draws
+/// it enlarged into a tile of memory and `BitBlt`s the tile over, and a **blit** is placed by
+/// the *edges* of its rectangle, not by the centres of its pixels: a tile of width `w` at
+/// logical `left` lands physically at `width - left - w`. Reflecting the points by `width - dx`
+/// is what carries the tile's edges onto the edges the straight tile has. Measured exact for the
+/// dialog glyph (columns 2..9 both ways) and for the tray menu (1..10 both ways).
+///
+/// ⚠ **And it is not exact for the third of the three, by one pixel** — the tick of the cycle
+/// list, whose stroke bounds run into the edge of its 13-pixel square and are clamped there;
+/// a clamp is not a reflection, and no single constant can undo it. Measured: 2..7 straight,
+/// 1..6 mirrored. One pixel inside a thirteen-pixel glyph, with the shape itself straight,
+/// which is what решение 97.1 is about. Named here rather than left to be rediscovered.
+///
+/// The antialiasing does not survive the reflection exactly either — supersampled coverage of a
+/// stroke is not mirror-symmetric — so a handful of edge pixels differ in every size. That is
+/// why the guard on the *drawn* tick asks whether it is straight and not whether it is
+/// identical, and why the exact guard is on the geometry, where exactness means something.
+pub fn check_mark_points(
+    glyph: &RECT,
+    mark: CheckMark,
+    dpi: i32,
+    mirrored: bool,
+) -> [(i32, i32); 3] {
+    let width = glyph.right - glyph.left;
+
     mark.points_tenths.map(|(x, y)| {
+        let across = scaled_tenths_offset(x, dpi);
+        let across = if mirrored { width - across } else { across };
+
         (
-            corner.0 + scaled_tenths_offset(x, dpi),
-            corner.1 + scaled_tenths_offset(y, dpi),
+            glyph.left + across,
+            glyph.top + scaled_tenths_offset(y, dpi),
         )
     })
 }
@@ -2100,8 +2153,13 @@ pub fn check_mark_points(corner: (i32, i32), mark: CheckMark, dpi: i32) -> [(i32
 /// the DPI the figure is being drawn for.
 pub fn draw_check_mark(dc: HDC, glyph: &RECT, ink: COLORREF, mark: CheckMark, dpi: i32) {
     // The two strokes of the generator: down into the corner, long up and out. The three
-    // points are `mark`'s own, measured from the corner of the square through the scale.
-    let points = check_mark_points((glyph.left, glyph.top), mark, dpi);
+    // points are `mark`'s own, measured from the corner of the square through the scale — and
+    // reflected within that square when the context is mirrored, so that GDI's own reflection
+    // brings the tick back the right way round (вопрос 97 п. 1, task Т-30-3).
+    //
+    // SAFETY: `dc` is painted into for the length of the send this call is inside of.
+    let mirrored = unsafe { dc_is_rtl(dc) };
+    let points = check_mark_points(glyph, mark, dpi, mirrored);
     let thickness = scaled_tenths(mark.pen_tenths, dpi);
 
     // The tile is the mark and nothing else — never the whole glyph. Two reasons, and both
@@ -2715,16 +2773,32 @@ pub const LABEL_LINE_PITCH: i32 = 23;
 /// Called with values copied out of the `WM_DRAWITEM` message the caller is inside of: `dc` is
 /// owned by the sender for the length of the send, and `ground` and `face` are objects
 /// somebody else owns for longer than the drawing.
-pub unsafe fn paint_label(
-    dc: HDC,
-    rect: RECT,
-    caption: &mut [u16],
-    ground: HBRUSH,
-    ink: COLORREF,
-    face: Option<HFONT>,
-) -> isize {
+pub unsafe fn paint_label(dc: HDC, rect: RECT, caption: &mut [u16], style: LabelStyle) -> isize {
     // SAFETY: the whole contract of this function, forwarded unchanged — see the doc comment.
-    unsafe { paint_label_at_pitch(dc, rect, caption, ground, ink, face, None) }
+    unsafe { paint_label_at_pitch(dc, rect, caption, style) }
+}
+
+/// Everything about a label except the words and where they go — task Т-30-2.
+///
+/// A record and not five more parameters: with the reading order of вопрос 97 added, the
+/// painter was carrying eight, which is one more than this project's `clippy` allows and two
+/// more than a reader can hold. The five here belong together — they are the answer to «what
+/// does this label look like», worked out once by the caller from the control it is drawing —
+/// and grouping them is what let [`paint_label`] and [`paint_label_at_pitch`] stay one body.
+#[derive(Clone, Copy)]
+pub struct LabelStyle {
+    /// The ground the caption is laid on, filled before anything is drawn — a live brush the
+    /// caller owns for longer than the paint.
+    pub ground: HBRUSH,
+    /// The colour of the caption.
+    pub ink: COLORREF,
+    /// The face to draw in, or `None` for whatever the DC already holds.
+    pub face: Option<HFONT>,
+    /// The step from one wrapped line to the next, in pixels of the window, or `None` for
+    /// [`LABEL_LINE_PITCH`] through [`scaled`] — задача Т-26-2, решение 85.
+    pub pitch: Option<i32>,
+    /// Which way this run reads — вопрос 97 п. 2. See [`reading_order`].
+    pub reading: Reading,
 }
 
 /// [`paint_label`] with the line pitch **named by the caller** — task Т-26-2, решение 85.
@@ -2748,11 +2822,16 @@ pub unsafe fn paint_label_at_pitch(
     dc: HDC,
     rect: RECT,
     caption: &mut [u16],
-    ground: HBRUSH,
-    ink: COLORREF,
-    face: Option<HFONT>,
-    pitch: Option<i32>,
+    style: LabelStyle,
 ) -> isize {
+    let LabelStyle {
+        ground,
+        ink,
+        face,
+        pitch,
+        reading,
+    } = style;
+
     // NFR-13, for the paint calls below: each answers a success flag or a previous value, and
     // every answer is deliberately dropped for the reason `paint_push_button` gives for its
     // own — the manager never hands a dead DC, only a forged message could (SEC-05), and the
@@ -2804,7 +2883,7 @@ pub unsafe fn paint_label_at_pitch(
         // SAFETY: see the caller — `dc` is the DC of the message and `rect` a live local of
         // the caller's frame; `caption` is a live local of `draw_label`'s.
         Some((lines, natural, pitch)) => unsafe {
-            paint_label_lines(dc, rect, caption, lines, natural, pitch)
+            paint_label_lines(dc, rect, caption, lines, natural, pitch, reading)
         },
         None => 0,
     };
@@ -2817,8 +2896,9 @@ pub unsafe fn paint_label_at_pitch(
 
         // SAFETY: `caption` and `text_rect` are live locals of this frame and the caller's;
         // the format has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the
-        // caption and writes only pixels of the DC.
-        unsafe { DrawTextW(dc, caption, &mut text_rect, LABEL_TEXT_FORMAT) };
+        // caption and writes only pixels of the DC. The format comes from `label_format`,
+        // which is where this program decides reading order and the only such place.
+        unsafe { DrawTextW(dc, caption, &mut text_rect, label_format(dc, reading)) };
     }
 
     // SAFETY: `previous_face` is what `select_face` answered for this same DC, and nothing
@@ -2924,6 +3004,7 @@ unsafe fn paint_label_lines(
     lines: i32,
     natural: i32,
     pitch: i32,
+    reading: Reading,
 ) -> i32 {
     let mut painted = 0;
 
@@ -2964,8 +3045,9 @@ unsafe fn paint_label_lines(
             // SAFETY: `caption` and `text_rect` are live locals of this frame and the
             // caller's; the format has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call
             // reads the caption and writes only pixels of the DC — and only the pixels of the
-            // band, because of the clip narrowed just above.
-            unsafe { DrawTextW(dc, caption, &mut text_rect, LABEL_TEXT_FORMAT) };
+            // band, because of the clip narrowed just above. The format is `label_format`'s,
+            // as in the single-line pass: one decision about reading order, not two.
+            unsafe { DrawTextW(dc, caption, &mut text_rect, label_format(dc, reading)) };
         }
 
         // SAFETY: `saved` is the state this loop pushed a few lines above, and nothing between

@@ -12,15 +12,17 @@
 //! `AppsUseLightTheme` and is deliberately not compared with anything.
 
 use lang_switcher::theme::{
-    Brushes, FOG, GRAPHITE, LABEL_TEXT_FORMAT, PaintBuffer, Palette, Reading, ThemeSetting,
-    dc_is_rtl, label_format, reading_order, resolve, system_is_light,
+    Brushes, CheckMark, FOG, GRAPHITE, LABEL_TEXT_FORMAT, PaintBuffer, Palette, Reading,
+    ThemeSetting, check_mark_points, combo_chevron_points, dc_is_rtl, draw_check_mark,
+    label_format, reading_order, resolve, system_is_light,
 };
 use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DRAW_TEXT_FORMAT,
-    DT_RTLREADING, DeleteDC, DeleteObject, FillRect, GetCurrentObject, GetDC, GetObjectW, GetPixel,
-    GetStockObject, HBITMAP, HBRUSH, HDC, HGDIOBJ, LAYOUT_RTL, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT,
-    ReleaseDC, SRCCOPY, SYSTEM_FONT, SelectObject, SetLayout, SetPixel,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
+    CreateDIBSection, CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_RTLREADING, DeleteDC,
+    DeleteObject, FillRect, GetCurrentObject, GetDC, GetObjectW, GetPixel, GetStockObject, HBITMAP,
+    HBRUSH, HDC, HGDIOBJ, LAYOUT_RTL, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT, ReleaseDC, SRCCOPY,
+    SYSTEM_FONT, SelectObject, SetLayout, SetPixel,
 };
 use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
 
@@ -877,6 +879,315 @@ fn a_help_row_splits_at_the_placeholder_and_nowhere_else() {
     assert_eq!(
         split.suffix, "",
         "with no chip there is nothing to split at"
+    );
+}
+
+// =========================================================================================
+// The straight tick in a mirrored window — вопрос 97 п. 1, task Т-30-3
+// =========================================================================================
+
+/// A 32-bit top-down surface with a white ground — the same shape `Supersample` draws into, so
+/// that what is compared is what a window would get.
+struct Sheet {
+    dc: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+    bits: *mut u32,
+    side: i32,
+}
+
+impl Sheet {
+    fn new(side: i32, mirrored: bool) -> Self {
+        // SAFETY: a memory DC over the screen; deleted in `Drop`.
+        let dc = unsafe { CreateCompatibleDC(None) };
+        assert!(!dc.is_invalid(), "a memory DC is needed for this test");
+
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: side,
+                biHeight: -side,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+
+        // SAFETY: the description is live and the pointer takes the address of the section.
+        let bitmap =
+            unsafe { CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0) }
+                .expect("a DIB section is needed for this test");
+
+        // SAFETY: the section was just made and this DC is its own.
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+
+        let sheet = Self {
+            dc,
+            bitmap,
+            previous,
+            bits: bits.cast(),
+            side,
+        };
+
+        // SAFETY: a plain colour in, a handle out, freed below.
+        let brush = unsafe { CreateSolidBrush(COLORREF(0x00FF_FFFF)) };
+        let whole = RECT {
+            left: 0,
+            top: 0,
+            right: side,
+            bottom: side,
+        };
+        // SAFETY: own DC, own rectangle, live brush.
+        unsafe { FillRect(dc, &whole, brush) };
+        // SAFETY: made above, handed to nobody, freed once.
+        let _ = unsafe { DeleteObject(brush.into()) };
+
+        if mirrored {
+            // What `WS_EX_LAYOUTRTL` does to the context of a window, asked for directly.
+            // SAFETY: own DC.
+            unsafe { SetLayout(dc, LAYOUT_RTL) };
+        }
+
+        sheet
+    }
+
+    fn pixels(&self) -> Vec<u32> {
+        let count = (self.side * self.side) as usize;
+        // SAFETY: the section is live and holds exactly `side * side` words by construction.
+        unsafe { std::slice::from_raw_parts(self.bits, count) }.to_vec()
+    }
+
+    fn inked(&self) -> usize {
+        self.pixels()
+            .iter()
+            .filter(|&&point| (point & 0x00FF_FFFF) != 0x00FF_FFFF)
+            .count()
+    }
+}
+
+impl Drop for Sheet {
+    fn drop(&mut self) {
+        // SAFETY: what was in the DC goes back; the section and the DC are freed once each.
+        unsafe { SelectObject(self.dc, self.previous) };
+        let _ = unsafe { DeleteObject(self.bitmap.into()) };
+        let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
+
+/// The tick of the settings dialog, in the size and the shape the product draws it.
+const GLYPH_TICK: CheckMark = CheckMark {
+    points_tenths: [(41, 88), (68, 115), (126, 57)],
+    pen_tenths: 21,
+};
+
+/// **Т-30-3, решение 97.1: the tick drawn into a mirrored context is straight, not reversed.**
+///
+/// The same figure is drawn twice — once into an ordinary surface, once into a mirrored one —
+/// and what is asked of the pair is the thing решение 97.1 decided: that the second is **not the
+/// reflection of the first**. GDI mirrors strokes drawn into a mirrored context, measured before
+/// any of this was written (`scratchpad-Э30\посылки-п3.log`) and seen by eye on the stand
+/// (`scratchpad-Э30\ДО-Т-30-3-галочка-he.png`, where the long stroke ran down to the right), so
+/// passing this is only possible if `check_mark_points` reflects the figure first.
+///
+/// # ⚠ Why this does not demand the two be identical
+///
+/// It was written that way and it failed, and the failure was **the test's** and not the
+/// product's. Two things make an exact match unreachable, and both were measured rather than
+/// argued: supersampled antialiasing of a stroke is not mirror-symmetric (a handful of edge
+/// pixels differ in every size), and the tick of the cycle list has its stroke bounds clamped by
+/// the edge of its own square, which no reflection can undo — that one lands a pixel across
+/// (`scratchpad-Э30\посылки-п3.log`). Demanding equality would have meant either a test that can
+/// only be satisfied by luck or a product bent to satisfy it.
+///
+/// So the two claims that **are** exact are made here: the ink is the same amount, and the
+/// figure is not its own reflection. The rest of the acceptance of the drawn form is the stand's
+/// screenshots and the user's eye, which is where решение 97.1 came from in the first place.
+///
+/// ⚠ The ink is counted before anything is compared. Two blank surfaces are neither equal nor
+/// reflections of each other in any interesting way, and a test that skipped this would pass a
+/// `draw_check_mark` that drew nothing at all.
+#[test]
+fn the_tick_drawn_in_a_mirrored_context_is_straight_and_not_reversed() {
+    let side = 17;
+
+    let plain = Sheet::new(side, false);
+    let mirrored = Sheet::new(side, true);
+
+    let glyph = RECT {
+        left: 0,
+        top: 0,
+        right: side,
+        bottom: side,
+    };
+
+    for sheet in [&plain, &mirrored] {
+        draw_check_mark(sheet.dc, &glyph, COLORREF(0x0000_0000), GLYPH_TICK, 96);
+    }
+
+    assert!(
+        plain.inked() > 0,
+        "the instrument must be drawing something at all before its silence means anything"
+    );
+    assert_eq!(
+        plain.inked(),
+        mirrored.inked(),
+        "the same figure carries the same amount of ink either way round"
+    );
+
+    // The reflection of the straight tick — what the window used to show, and what решение 97.1
+    // says it must not show.
+    let reflected: Vec<u32> = {
+        let straight = plain.pixels();
+        let mut out = vec![0_u32; straight.len()];
+
+        for y in 0..side {
+            for x in 0..side {
+                out[(y * side + (side - 1 - x)) as usize] = straight[(y * side + x) as usize];
+            }
+        }
+
+        out
+    };
+
+    assert_ne!(
+        mirrored.pixels(),
+        reflected,
+        "решение 97.1: the tick carries a meaning and not a direction — a mirrored window must \
+         not show the reversed figure"
+    );
+
+    // And it stands where the straight one stands: the columns the ink occupies are the same.
+    // This is the claim the reflection formula is chosen to satisfy, and the one the cycle
+    // list's clamped glyph misses by a pixel — so it is asserted for the dialog glyph, which is
+    // the one the eye meets on every check box of the window.
+    let columns = |points: &[u32]| {
+        let mut first = side;
+        let mut last = -1;
+
+        for x in 0..side {
+            let inked =
+                (0..side).any(|y| (points[(y * side + x) as usize] & 0x00FF_FFFF) != 0x00FF_FFFF);
+
+            if inked {
+                first = first.min(x);
+                last = last.max(x);
+            }
+        }
+
+        (first, last)
+    };
+
+    assert_eq!(
+        columns(&mirrored.pixels()),
+        columns(&plain.pixels()),
+        "and it occupies the same columns of its square"
+    );
+}
+
+/// **Т-30-3: the pure geometry — the mirrored figure is the reflection of the straight one.**
+///
+/// The half of the rule that needs no window at all, and the half that says *what* reflection:
+/// `width - x` about the square, which is the reflection that carries the **edges** of the tile
+/// onto the edges of the straight one. The pixel-centre form `width - 1 - x` reads more natural
+/// and was measured a pixel out (`scratchpad-Э30\посылки-п3-w-1.log`); `draw_check_mark` says
+/// why at length. An off-by-one here would not look like a mirrored tick — it would look like a
+/// tick one pixel out of its box, which is the harder kind of wrong to notice.
+#[test]
+fn the_mirrored_tick_is_the_reflection_of_the_straight_one() {
+    let glyph = RECT {
+        left: 0,
+        top: 0,
+        right: 17,
+        bottom: 17,
+    };
+    let width = glyph.right - glyph.left;
+
+    let straight = check_mark_points(&glyph, GLYPH_TICK, 96, false);
+    let mirrored = check_mark_points(&glyph, GLYPH_TICK, 96, true);
+
+    assert_ne!(
+        straight, mirrored,
+        "the tick of this program is not symmetrical, so the two must differ"
+    );
+
+    for (at, ((sx, sy), (mx, my))) in straight.iter().zip(&mirrored).enumerate() {
+        assert_eq!(*my, *sy, "point {at} does not move vertically");
+        assert_eq!(
+            *mx,
+            glyph.left + width - (sx - glyph.left),
+            "point {at} is reflected about the square, by edges and not by pixel centres"
+        );
+    }
+
+    // And the square is respected: the offset of the rectangle carries through, so a glyph that
+    // does not start at zero is not reflected about the wrong axis.
+    let moved = RECT {
+        left: 100,
+        top: 40,
+        right: 117,
+        bottom: 57,
+    };
+
+    let here = check_mark_points(&moved, GLYPH_TICK, 96, true);
+
+    for (at, (x, y)) in here.iter().enumerate() {
+        assert_eq!(*x, mirrored[at].0 + 100, "point {at} moved with the square");
+        assert_eq!(*y, mirrored[at].1 + 40);
+    }
+}
+
+/// **Т-30-3: the chevron of a combo box is symmetrical, so the mirror leaves it alone.**
+///
+/// The other figure this program strokes. It needs no reflection — and «needs none» is a claim
+/// about its geometry, so it is checked rather than asserted in prose.
+///
+/// ⚠ **The claim is about the figure and not about where it sits.** The first edition of this
+/// test asked whether the chevron stood at equal distances from the two edges of the area, and
+/// was answered `27` and `6`: it does not, and it should not — it is inset against one edge, and
+/// under the mirror that *position* moves to the other side, which is exactly what a
+/// right-to-left combo box wants. What must not change is the **shape**, and the shape is
+/// symmetrical when the two arms are of equal length. That is what is checked.
+///
+/// If somebody redraws the chevron as an arrow one day, this fails and решение 97.1 has to be
+/// extended to it.
+#[test]
+fn the_combo_chevron_is_symmetrical_and_needs_no_mirror() {
+    let area = RECT {
+        left: 0,
+        top: 0,
+        right: 40,
+        bottom: 24,
+    };
+
+    let points = combo_chevron_points(&area, 96);
+
+    assert_eq!(
+        points[1].0 - points[0].0,
+        points[2].0 - points[1].0,
+        "the two arms of the chevron are of equal length, so reflecting the figure about its \
+         own axis is the identity: «{points:?}»"
+    );
+    assert_eq!(
+        points[0].1, points[2].1,
+        "and they start at the same height, so the figure has a vertical axis at all"
+    );
+
+    // Stated from the other side: reflecting the three points about the figure's own centre
+    // gives the same three points back. That is the whole of «needs no mirror».
+    let centre = points[1].0;
+    let reflected = points.map(|(x, y)| (2 * centre - x, y));
+    let mut sorted = reflected;
+    sorted.sort_by_key(|(x, _)| *x);
+    let mut original = points;
+    original.sort_by_key(|(x, _)| *x);
+
+    assert_eq!(
+        sorted, original,
+        "the chevron is its own reflection, so the mirror has nothing to undo"
     );
 }
 

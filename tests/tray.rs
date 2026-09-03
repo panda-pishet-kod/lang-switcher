@@ -36,7 +36,7 @@ use lang_switcher::tray::{self, Attachment, Menu, Reaction, Tray};
 use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM,
+    ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{CLEARTYPE_QUALITY, LOGFONTW};
 use windows::Win32::System::LibraryLoader::{
@@ -1826,7 +1826,17 @@ fn the_smoothing_tile_of_the_check_mark_cuts_nothing_off_it() {
     // what `stroke_bounds` answers — has to fit inside the square at every scale.
     for dpi in [SCREEN_DPI, 120, 144, 192] {
         let side = theme::scaled(tray::MENU_CHECK_CELL, dpi);
-        let points = theme::check_mark_points((0, 0), tray::MENU_CHECK_MARK, dpi);
+        // Task Т-30-3: a rectangle and a mirror flag. The square is the cell the tick is drawn
+        // in, and `false` is the way round the twelve left-to-right locales draw it — the
+        // mirrored way round is the reflection of this one, so it fits the square exactly when
+        // this one does.
+        let cell = RECT {
+            left: 0,
+            top: 0,
+            right: side,
+            bottom: side,
+        };
+        let points = theme::check_mark_points(&cell, tray::MENU_CHECK_MARK, dpi, false);
         let thickness = theme::scaled_tenths(tray::MENU_CHECK_MARK.pen_tenths, dpi);
         let bounds = theme::stroke_bounds(&points, thickness);
 
