@@ -124,7 +124,24 @@ const FR_91_ENGLISH: [Option<&str>; 7] = [
 
 /// Serialises the tests that publish an interface locale — it is process-wide, and the tests of
 /// one binary run on parallel threads.
+///
+/// ⚠ **Since task Т-31-1 the family is larger than it looks.** «Применить» now publishes the
+/// locale too ([`tray::adopt_ui_language`]), so every test that calls `tray::apply_settings_via`
+/// belongs here as well — including the four of task T-13-24, whose configurations carry
+/// `language = "en"` and would otherwise move the locale under a neighbour reading a menu.
 static LOCALE: Mutex<()> = Mutex::new(());
+
+/// Takes the turn of [`LOCALE`], ignoring poisoning — the same medicine, and for the same
+/// reason, as [`toggle_turn`] below.
+///
+/// Separate from [`product_strings`] because the two askings differ: a test reading labels
+/// needs the string tables of the built binary *and* a published locale, while a test that
+/// merely applies a configuration needs only not to collide with it.
+fn locale_turn() -> MutexGuard<'static, ()> {
+    LOCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Serialises every test that moves the state through [`Tray::toggle_state`] — task **Т-13-7**.
 ///
@@ -157,9 +174,7 @@ static SHARED_IMAGE: OnceLock<usize> = OnceLock::new();
 /// its own — section 4.4 of STATE.md, the same barrier the icons above are loaded around. What
 /// the menu is checked against is therefore the table that ships.
 fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
-    let guard = LOCALE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = locale_turn();
 
     let raw = *SHARED_IMAGE.get_or_init(|| ProductImage::load().0 as usize);
 
@@ -2957,6 +2972,9 @@ fn assert_the_other_changes_are_in(text: &str) {
 /// an intention read out of the source would not have caught it.
 #[test]
 fn a_refused_run_key_keeps_the_autostart_of_the_file_and_stores_every_other_change() {
+    // Task Т-31-1: `dialog_produced` asks for `language = "en"`, and «Применить» now publishes
+    // the locale — see [`LOCALE`].
+    let _locale = locale_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-refused");
     let _attached = attach_ui(&window, &home);
@@ -3054,6 +3072,8 @@ fn a_refused_run_key_keeps_the_autostart_of_the_file_and_stores_every_other_chan
 /// and not about a value that could never have been written anyway.
 #[test]
 fn an_accepted_run_key_stores_the_autostart_the_user_asked_for() {
+    // Task Т-31-1 — see [`LOCALE`].
+    let _locale = locale_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-accepted");
     let _attached = attach_ui(&window, &home);
@@ -3108,6 +3128,8 @@ fn an_accepted_run_key_stores_the_autostart_the_user_asked_for() {
 /// the registry answer the dialog prints is the machine's own and did not move.
 #[test]
 fn a_refused_apply_leaves_the_two_readings_of_fr93_independent() {
+    // Task Т-31-1 — see [`LOCALE`].
+    let _locale = locale_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-disagreement");
     let _attached = attach_ui(&window, &home);
@@ -3165,6 +3187,8 @@ fn a_refused_apply_leaves_the_two_readings_of_fr93_independent() {
 /// change of the dialog, which is this task's answer and it is reached all the same.
 #[test]
 fn the_step_back_and_the_save_policy_of_t_13_6_answer_different_questions() {
+    // Task Т-31-1 — see [`LOCALE`].
+    let _locale = locale_turn();
     let window = TestWindow::new();
     let home = TestDir::new("refused-and-forbidden");
 
@@ -3341,6 +3365,176 @@ fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
         entry.contains("apply_settings_via(config, settings::set_autostart)"),
         "«Применить» must hand in `settings::set_autostart`, which is the one function that \
          writes the `Run` key of FR-93"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-94, task Т-31-1 — the interface language of the running process
+// ---------------------------------------------------------------------------------------
+//
+// Решение 99: the language chosen in the settings window takes effect **without a restart**.
+// The one place it is published in a running process is [`tray::adopt_ui_language`], and the
+// two callers of it are the start-up of `app` and «Применить» — one body, not two.
+//
+// ⚠ Every test in this block takes the turn of `LOCALE`: publishing a locale is process-wide
+// and the tests of one binary run on parallel threads. So do the four tests of task T-13-24
+// above, since this task made «Применить» publish the language as well.
+
+/// **Criterion 3 of task Т-31-1.** A configuration accepted by «Применить» publishes its
+/// `general.language` into the running process, and the very next menu is built in it.
+///
+/// The menu is the reader chosen deliberately: посылка П1 of the mandate says `Menu::build`
+/// takes its labels out of the string table of the locale in force at the moment of building,
+/// and this is the test that says it is so *after an apply* and not only at start-up.
+#[test]
+fn applying_a_configuration_publishes_its_language_into_the_running_process() {
+    let _locale = product_strings(Language::Ru);
+
+    let window = TestWindow::new();
+    let home = TestDir::new("live-language");
+    let _attached = attach_ui(&window, &home);
+
+    assert_eq!(
+        settings::ui_language(),
+        Language::Ru,
+        "the locale this test starts from"
+    );
+
+    let mut asked = live(|tray| tray.config().clone());
+    asked.general.language = Language::De;
+
+    // The registry answers yes: FR-93 is not what this test is about, and a real write into
+    // `HKCU\…\Run` belongs to whoever is running the tests.
+    tray::apply_settings_via(&asked, |_| Ok(()));
+
+    assert_eq!(
+        settings::ui_language(),
+        Language::De,
+        "«Применить» must publish the language of the configuration it accepted — решение 99"
+    );
+
+    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG).expect("the menu must build");
+    let labels: Vec<&str> = menu
+        .items()
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect();
+
+    println!("--- menu after «Применить» with language = de ---\n{labels:?}");
+
+    assert_eq!(
+        labels,
+        [
+            "Anhalten",
+            "Einstellungen…",
+            "Beim Anmelden starten",
+            "Über",
+            "Beenden",
+        ],
+        "the menu built after the apply carries the labels of the new locale"
+    );
+
+    // Back to where the rest of this binary expects to find the process.
+    settings::set_ui_language(Language::Ru);
+}
+
+/// **Criterion 1 of task Т-31-1 — one body, not two.**
+///
+/// The mandate allows the start-up publication to stay where it is *or* to go through the same
+/// function, and requires that there not be two of them. This sweep says which of the two the
+/// repair chose and holds it there: `settings::set_ui_language` is called from exactly one
+/// place in `src\`, and that place is [`tray::adopt_ui_language`].
+///
+/// ⚠ Э22's trap — a sweep that finds its own needle. It reads `src\` only; the needles are
+/// written here, in `tests\`, and this file is never among the files read.
+#[test]
+fn the_language_of_the_running_process_is_published_from_exactly_one_place() {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    let mut callers = Vec::new();
+
+    for entry in fs::read_dir(&src).expect("src\\ must be readable") {
+        let path = entry.expect("a directory entry").path();
+
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let text = fs::read_to_string(&path)
+            .expect("a source file must be readable")
+            .replace("\r\n", "\n");
+
+        // The definition itself lives in `settings.rs` and is not a call.
+        for line in text.lines() {
+            let line = line.trim();
+
+            if line.starts_with("//") || line.starts_with("///") {
+                continue;
+            }
+
+            if line.contains("set_ui_language(") && !line.contains("pub fn set_ui_language") {
+                callers.push(format!(
+                    "{}: {line}",
+                    path.file_name().expect("a file name").to_string_lossy()
+                ));
+            }
+        }
+    }
+
+    println!("--- calls of set_ui_language in src\\ ---\n{callers:#?}");
+
+    assert_eq!(
+        callers.len(),
+        1,
+        "решение 99 gives the running process one publication of the interface locale; a \
+         second call is a second answer to «на каком языке программа»"
+    );
+    assert!(
+        callers[0].starts_with("tray.rs:"),
+        "and it lives in `tray::adopt_ui_language`, which is what both the start-up and \
+         «Применить» go through"
+    );
+
+    let tray_source = fs::read_to_string(src.join("tray.rs"))
+        .expect("src\\tray.rs must be readable")
+        .replace("\r\n", "\n");
+
+    let at = tray_source
+        .find("pub fn adopt_ui_language()")
+        .expect("adopt_ui_language must be in this file");
+    let body = &tray_source[at..];
+    let end = body.find("\n}").expect("a function closes with its brace");
+    let body = &body[..end];
+
+    println!("--- adopt_ui_language ---\n{body}");
+
+    assert!(
+        body.contains("settings::set_ui_language("),
+        "the one body publishes the locale"
+    );
+    assert!(
+        body.contains("refresh_icon()"),
+        "…and brings the tooltip of the icon with it — NIM_MODIFY, решение 99.2"
+    );
+
+    let app_source = fs::read_to_string(src.join("app.rs"))
+        .expect("src\\app.rs must be readable")
+        .replace("\r\n", "\n");
+
+    assert!(
+        app_source.contains("crate::tray::adopt_ui_language()"),
+        "the start-up publication goes through the same body"
+    );
+
+    let at = tray_source
+        .find("pub fn apply_settings_via(")
+        .expect("apply_settings_via must be in this file");
+    let apply = &tray_source[at..];
+    let end = apply.find("\n}").expect("a function closes with its brace");
+
+    assert!(
+        apply[..end].contains("adopt_ui_language()"),
+        "and so does «Применить», after the configuration has been stored and written"
     );
 }
 

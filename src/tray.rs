@@ -3330,7 +3330,46 @@ pub fn apply_settings_via(config: &Config, write_run_key: impl FnOnce(bool) -> W
 
     with_tray(|tray| tray.replace_config(stored.clone()));
 
+    // FR-94, решение 99, task Т-31-1: the interface locale of the **running** process follows
+    // the configuration that has just been stored and written. Not a field like the others —
+    // it is published into a module rather than acted on by one — which is why it stands here
+    // beside `publish_configuration` and not inside it, and why the start-up publication of
+    // `app` goes through the very same body. One body, not two.
+    adopt_ui_language();
+
     app::publish_configuration(&stored);
+}
+
+/// Publishes the interface locale of the configuration the tray is living by — FR-94,
+/// решение 99, task Т-31-1.
+///
+/// **The one place a running process learns what language it speaks**, and the whole of what
+/// «без перезапуска» means in this program: `settings::text` reads the string table afresh on
+/// every call, the menu of FR-91 is built afresh on every showing, and both windows are built
+/// afresh on every opening — so the moment this atomic moves, everything opened afterwards is
+/// in the new locale. What is already on the screen is the business of [`crate::settings`]:
+/// the open settings window relabels or reopens itself (task Т-31-2), and the icon's tooltip
+/// is brought along here.
+///
+/// **Why it reads the tray instead of taking an argument.** Section 6.1 makes the tray the
+/// in-memory owner of the configuration, and both callers stand immediately after that owner
+/// has been given the value in force — [`apply_settings_via`] after `replace_config`, `app`
+/// after `attach`. Reading the owner rather than a copy is what makes it impossible for the
+/// published locale and the stored one to disagree.
+///
+/// `None` — a thread with no tray — publishes nothing, which is the right answer on the input
+/// and watcher threads: the locale belongs to the UI thread's configuration (section 6.1).
+pub fn adopt_ui_language() {
+    let Some(language) = with_tray(|tray| tray.config().general.language) else {
+        return;
+    };
+
+    settings::set_ui_language(language);
+
+    // FR-90, решение 99.2: the tooltip is «Lang Switcher — {состояние}», and the state word is
+    // a string of the locale. `NIM_MODIFY` in a second borrow, after the first has ended —
+    // the discipline of this module, and cheap: the shell is told the icon it already has.
+    with_tray(|tray| tray.refresh_icon());
 }
 
 /// The check mark of FR-91, made to do what FR-93 says.
