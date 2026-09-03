@@ -245,17 +245,28 @@ pub enum Language {
     Tr,
     /// Greek.
     El,
+    /// Hebrew — **read right to left**, вопрос 97. The first locale of this program whose
+    /// windows are mirrored; [`Self::is_rtl`] is the one place that knows it.
+    He,
+    /// Arabic — read right to left, вопрос 97. One table for the standard language, tagged
+    /// `ar-SA`, and not one table per country: section 7 spells a locale in two letters, and
+    /// this build ships one translation per language exactly as it does for `pt`.
+    Ar,
 }
 
 impl Language {
-    /// Every locale, in the order the language combo box shows them — Russian, English, then
-    /// the ten of решение 93.
+    /// Every locale, in the order the language combo box shows them — Russian, English, the
+    /// ten of решение 93, and then the two right-to-left locales of вопрос 97.
     ///
     /// The one place that order is written down. [`Self::index`] is a position in this array,
     /// the atomic of [`set_ui_language`] stores that position, and the dialog fills the combo
     /// by walking this array — so the three cannot drift apart the way three hand-written
     /// `match` arms could.
-    pub const ALL: [Self; 12] = [
+    ///
+    /// ⚠ Hebrew and Arabic go on the **end** and not into alphabetical place (вопрос 97): the
+    /// position of a locale is a stored number, and moving `el` from eleven to nine would hand
+    /// every configuration that names it the wrong language on the next start.
+    pub const ALL: [Self; 14] = [
         Self::Ru,
         Self::En,
         Self::Uk,
@@ -268,6 +279,8 @@ impl Language {
         Self::Cs,
         Self::Tr,
         Self::El,
+        Self::He,
+        Self::Ar,
     ];
 
     /// The Windows language identifier of this locale — the number `app.rc` tags its string
@@ -276,10 +289,13 @@ impl Language {
     /// A primary language identifier from `winnt.h` with a sublanguage in the high six bits,
     /// which is how a `LANGID` is built: `LANG_RUSSIAN` (0x19) with `SUBLANG_DEFAULT` (0x01) is
     /// 0x0419. Spelled out rather than computed for the same reason `app.rc` spells them out:
-    /// the two files have no shared header, and these twelve numbers are the joint between them.
+    /// the two files have no shared header, and these fourteen numbers are the joint between
+    /// them.
     ///
     /// ⚠ Every number below was read back from `LCIDToLocaleName` before it was written here —
-    /// `scratchpad-Э28\прибор-langid.log`, positive control on the impossible `0x0FFF`. Two of
+    /// `scratchpad-Э28\прибор-langid.log` for the twelve and `scratchpad-Э30\прибор-langid.log`
+    /// for `He` (0x040D, `he-IL`) and `Ar` (0x0401, `ar-SA`), positive control on the
+    /// impossible `0x0FFF` in both. Two of
     /// them are worth naming: `Pt` is **0x0416**, `pt-BR`, and not the 0x0816 of Portugal; `Es`
     /// is 0x040A, which Windows answers as `es-ES_tradnl`.
     pub const fn langid(self) -> u16 {
@@ -296,12 +312,28 @@ impl Language {
             Self::Cs => 0x0405,
             Self::Tr => 0x041F,
             Self::El => 0x0408,
+            Self::He => 0x040D,
+            Self::Ar => 0x0401,
         }
+    }
+
+    /// Whether this locale is read **right to left** — вопрос 97, task Т-30-2.
+    ///
+    /// The one place that knows it. Everything the mirroring does — the extended style the
+    /// dialog template is created with, the `TPM_LAYOUTRTL` of the tray menu, the reading order
+    /// of an island of Latin text — asks this and nothing else, so a fifteenth locale that
+    /// happens to be Persian is one arm here rather than a hunt through three modules.
+    ///
+    /// Deliberately **not** asked of Windows through `GetLocaleInfoEx` and
+    /// `LOCALE_IREADINGLAYOUT`: the direction of an interface this program ships is a property
+    /// of the translation in `app.rc`, which is written once and does not vary by machine.
+    pub const fn is_rtl(self) -> bool {
+        matches!(self, Self::He | Self::Ar)
     }
 
     /// The two-letter name of section 7, for a message and for a test.
     ///
-    /// The same twelve words `#[serde(rename_all = "lowercase")]` produces from the variants
+    /// The same fourteen words `#[serde(rename_all = "lowercase")]` produces from the variants
     /// above, written out rather than derived: this is the vocabulary of the configuration
     /// file, and a reader of section 7 should find it spelled here and not inferred.
     pub const fn tag(self) -> &'static str {
@@ -318,6 +350,8 @@ impl Language {
             Self::Cs => "cs",
             Self::Tr => "tr",
             Self::El => "el",
+            Self::He => "he",
+            Self::Ar => "ar",
         }
     }
 
@@ -328,10 +362,12 @@ impl Language {
     /// the name of an interface language is a piece of this program's interface, and it must
     /// read the same on every machine whatever Windows itself is set to. The capital first
     /// letter is the rule решение 92 established for the layout list, applied here by writing
-    /// the names that way rather than by lifting a letter at run time — these twelve strings
-    /// never change, so there is nothing to lift.
+    /// the names that way rather than by lifting a letter at run time — these fourteen strings
+    /// never change, so there is nothing to lift. ⚠ Hebrew and Arabic have **no case at all**,
+    /// so «עברית» and «العربية» carry no capital and cannot: the rule is «as the language writes
+    /// its own name», and for these two that is what it says.
     ///
-    /// ⚠ **Not localised, on purpose:** the list reads the same in all twelve locales. A person
+    /// ⚠ **Not localised, on purpose:** the list reads the same in all fourteen locales. A person
     /// who has the program in a language they cannot read has to find their own language in it,
     /// and «Deutsch» is the only spelling that helps them.
     pub const fn native_name(self) -> &'static str {
@@ -348,13 +384,15 @@ impl Language {
             Self::Cs => "Čeština",
             Self::Tr => "Türkçe",
             Self::El => "Ελληνικά",
+            Self::He => "עברית",
+            Self::Ar => "العربية",
         }
     }
 
     /// This locale as its position in [`Self::ALL`] — the number [`UI_LANGUAGE`] stores and the
     /// item index of the language combo box.
     ///
-    /// Public since task Т-28-2: with twelve positions the order is worth a test of its own,
+    /// Public since task Т-28-2: with fourteen positions the order is worth a test of its own,
     /// and a test cannot check a contract it is not allowed to read.
     pub fn index(self) -> u32 {
         // A locale is always in `ALL` — the array is the enumeration itself — but NFR-13 asks
@@ -426,7 +464,7 @@ pub fn language_of_ui_tag(tag: &str) -> Option<Language> {
     let primary = primary_subtag(tag);
 
     // An empty primary subtag is not «no preference», it is a tag that was never a tag —
-    // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for all twelve anyway;
+    // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for all fourteen anyway;
     // the early return says so on purpose rather than by luck.
     if primary.is_empty() {
         return None;
@@ -448,9 +486,9 @@ pub fn language_of_ui_tag(tag: &str) -> Option<Language> {
 /// all: a person with Japanese first and German second gets the German program, which is a
 /// better answer than English for somebody who has said in so many words that they read German.
 ///
-/// English is the end of the list and not a thirteenth case: an empty list — a machine whose
-/// answer this build could not read — takes the same road as a list of twelve languages none of
-/// which is ours, and both are «нет в списке локализаций нашей программы».
+/// English is the end of the list and not a fifteenth case: an empty list — a machine whose
+/// answer this build could not read — takes the same road as a list of fourteen languages none
+/// of which is ours, and both are «нет в списке локализаций нашей программы».
 ///
 /// Pure, and public for that reason: `tests\settings.rs` drives it with staged tags, which is
 /// the only honest way to check it on a machine whose own Windows is Russian.
@@ -472,7 +510,7 @@ pub fn first_run_language<'a>(preferred: impl IntoIterator<Item = &'a str>) -> L
 ///   answers one `LANGID`, and turning a `LANGID` into a two-letter tag means either a second
 ///   call to the locale service or a hand-written table of primary language identifiers —
 ///   a table that would have to be right for every language Windows ships, not only for the
-///   twelve this build has;
+///   fourteen this build has;
 /// * it answers the **ordered list** the user actually configured. A person may have set
 ///   Japanese first and German second, and only a list can say so;
 /// * it is the call that answers what the interface is *displayed* in, language packs included,
@@ -2678,8 +2716,8 @@ pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
 /// here exists in **both** tables of it.
 ///
 /// The caption of the window is not in the table — it is not a control — and neither are the
-/// twelve entries of the language combo box: a language is named in its own language in a
-/// language chooser, so «Русский», «English» and «Ελληνικά» stand as they are in all twelve
+/// fourteen entries of the language combo box: a language is named in its own language in a
+/// language chooser, so «Русский», «English» and «עברית» stand as they are in all fourteen
 /// locales. They live in [`Language::native_name`] instead.
 pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_GENERAL, IDS_GROUP_GENERAL),
@@ -9410,7 +9448,8 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
     // timings that stood beside it are in `config.toml` and on no control (решение 81).
     set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
-    // FR-94, task Т-28-2, решение 93: twelve locales, each named in its own language. The
+    // FR-94, task Т-28-2, решение 93 and вопрос 97: fourteen locales, each named in its own
+    // language. The
     // list is `Language::ALL` walked in order and nothing else — the array is the one place
     // the order of this combo is written down, and `Language::index` below reads the same
     // array, so the selected item and the stored value cannot come apart.

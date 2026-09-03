@@ -12580,21 +12580,27 @@ fn gdi_objects() -> u32 {
 }
 
 // =========================================================================================
-// FR-94, task Т-28-2 and Т-28-5 — the twelve locales of tier one, решение 93.
+// FR-94, tasks Т-28-2, Т-28-5 and Т-30-1 — the fourteen locales: tier one of решение 93 plus
+// the two right-to-left locales of вопрос 97.
 // =========================================================================================
 
-/// The twelve locales of tier one: the value section 7 stores, the `LANGID` `app.rc` tags the
-/// string table with, and the name the language combo box shows.
+/// Every locale: the value section 7 stores, the `LANGID` `app.rc` tags the string table with,
+/// and the name the language combo box shows.
 ///
 /// Written out here rather than imported from the crate on purpose, exactly as the interface
 /// strings are: what a test must not borrow from the code under test is the **answer**. The
-/// order is the order of the combo box — Russian, English, then the ten of решение 93 — and it
-/// is a contract, not a preference: `Language::index` encodes it and the atomic of
-/// `set_ui_language` stores it.
+/// order is the order of the combo box — Russian, English, the ten of решение 93, then Hebrew
+/// and Arabic — and it is a contract, not a preference: `Language::index` encodes it and the
+/// atomic of `set_ui_language` stores it.
+///
+/// ⚠ The **length** is taken from `Language::ALL` on purpose, and the number itself is asserted
+/// in exactly one place — `the_language_combo_offers_native_names_in_the_order_of_the_array`.
+/// A count repeated in seven tests is a count that gets fixed in six of them.
 ///
 /// ⚠ Every `LANGID` here was taken from `LCIDToLocaleName` and not from memory
-/// (`scratchpad-Э28\прибор-langid.log`, with a positive control on `0x0FFF`).
-const TWELVE_LOCALES: [(&str, u16, &str); 12] = [
+/// (`scratchpad-Э28\прибор-langid.log` for the twelve, `scratchpad-Э30\прибор-langid.log` for
+/// `he` and `ar`, both with a positive control on `0x0FFF`).
+const ALL_LOCALES: [(&str, u16, &str); Language::ALL.len()] = [
     ("ru", 0x0419, "Русский"),
     ("en", 0x0409, "English"),
     ("uk", 0x0422, "Українська"),
@@ -12607,6 +12613,8 @@ const TWELVE_LOCALES: [(&str, u16, &str); 12] = [
     ("cs", 0x0405, "Čeština"),
     ("tr", 0x041F, "Türkçe"),
     ("el", 0x0408, "Ελληνικά"),
+    ("he", 0x040D, "עברית"),
+    ("ar", 0x0401, "العربية"),
 ];
 
 /// The `Language` a configuration naming `tag` reads back as — through the file, deliberately.
@@ -12637,13 +12645,13 @@ fn language_of_tag(tag: &str) -> Language {
     config.general.language
 }
 
-/// **Т-28-2: all twelve values of `general.language` survive the file, both ways.**
+/// **Т-28-2, Т-30-1: all fourteen values of `general.language` survive the file, both ways.**
 ///
 /// Round trip and not just a read: the value has to come back out of `to_toml_string` spelled
-/// the same way it went in, or a build that merely *reads* twelve values would write two.
+/// the same way it went in, or a build that merely *reads* fourteen values would write two.
 #[test]
-fn every_one_of_the_twelve_language_values_survives_a_round_trip() {
-    for (tag, _, _) in TWELVE_LOCALES {
+fn every_one_of_the_language_values_survives_a_round_trip() {
+    for (tag, _, _) in ALL_LOCALES {
         let language = language_of_tag(tag);
 
         assert_eq!(
@@ -12679,7 +12687,7 @@ fn every_one_of_the_twelve_language_values_survives_a_round_trip() {
 /// two files share no header — so the test states them itself.
 #[test]
 fn every_locale_carries_the_langid_its_string_table_is_tagged_with() {
-    for (tag, langid, _) in TWELVE_LOCALES {
+    for (tag, langid, _) in ALL_LOCALES {
         assert_eq!(
             language_of_tag(tag).langid(),
             langid,
@@ -12700,7 +12708,7 @@ fn every_locale_carries_every_interface_string() {
     let product = ProductImage::shared();
     let mut empty: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in TWELVE_LOCALES {
+    for (tag, langid, _) in ALL_LOCALES {
         for id in settings::INTERFACE_STRINGS {
             let string = product.string_of_langid(langid, id);
 
@@ -12841,22 +12849,26 @@ fn a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining
     );
 }
 
-/// **Т-28-2: the language combo offers the twelve native names, in the order of the array.**
+/// **Т-28-2, Т-30-1: the combo offers the native names, in the order of the array.**
 ///
 /// Three things at once, and they are one contract: the name shown, the position it stands at,
 /// and the value that position reads back as. A build that showed «Deutsch» at position three
 /// and stored Ukrainian for it would pass any two of the three checks separately.
+///
+/// ⚠ **The one place the count itself is a literal.** Everything else takes its length from
+/// `Language::ALL`; here the number is the thing under test, so it is typed out — twelve of
+/// решение 93 plus the two of вопрос 97.
 #[test]
-fn the_language_combo_offers_twelve_native_names_in_the_order_of_the_array() {
+fn the_language_combo_offers_native_names_in_the_order_of_the_array() {
     assert_eq!(
         Language::ALL.len(),
-        12,
-        "решение 93 names twelve locales for tier one"
+        14,
+        "решение 93 names twelve locales for tier one, вопрос 97 adds Hebrew and Arabic"
     );
 
-    for (position, (tag, _, native)) in TWELVE_LOCALES.iter().enumerate() {
+    for (position, (tag, _, native)) in ALL_LOCALES.iter().enumerate() {
         let language = language_of_tag(tag);
-        let index = u32::try_from(position).expect("twelve fits");
+        let index = u32::try_from(position).expect("a locale count fits a u32");
 
         assert_eq!(
             language.native_name(),
@@ -12882,28 +12894,52 @@ fn the_language_combo_offers_twelve_native_names_in_the_order_of_the_array() {
 
     // Out of range in both directions is the default of section 7, not a panic and not a
     // neighbouring language: this is what a `CB_ERR` of −1 arrives as.
-    assert_eq!(Language::from_index(12), Language::Ru);
+    assert_eq!(Language::from_index(14), Language::Ru);
     assert_eq!(Language::from_index(u32::MAX), Language::Ru);
 }
 
-/// **Т-28-2: the twelve names are twelve, and every one of them starts with a capital.**
+/// **Т-28-2, Т-30-1: the names are distinct, and each starts the way its own script can.**
 ///
 /// Решение 92 established the capital first letter for the *layout* list; решение 93 keeps the
 /// rule for the *language* list, where the names are literals and the capital is simply typed.
 /// A duplicate would be worse than ugly — two rows of a chooser reading the same word give the
 /// user no way to pick.
+///
+/// ⚠ **Rewritten honestly by task Т-30-1.** Hebrew and Arabic have **no case at all**:
+/// `is_uppercase` is `false` for «ע» and «ا» not because the name is mis-typed but because the
+/// question does not apply to those scripts. Demanding a capital of them would be a test that
+/// can only be satisfied by writing the name wrong. So the rule is split at the only line that
+/// is real: a script that *has* case must use it, and a script that has none must still start
+/// with a letter **of its own block** — which is the half that catches a name gone to Latin or
+/// to question marks, and that is what the capital check was really buying.
 #[test]
-fn the_twelve_native_names_are_distinct_and_capitalised() {
+fn the_native_names_are_distinct_and_start_in_their_own_script() {
     let mut seen: Vec<&str> = Vec::new();
 
     for language in Language::ALL {
         let name = language.native_name();
         let first = name.chars().next().expect("a name is not empty");
 
-        assert!(
-            first.is_uppercase(),
-            "«{name}» must start with a capital: решение 92, kept by решение 93"
-        );
+        if language.is_rtl() {
+            // The two blocks of вопрос 97: Hebrew U+0590…U+05FF, Arabic U+0600…U+06FF.
+            let own_block = matches!(first, '\u{0590}'..='\u{05FF}' | '\u{0600}'..='\u{06FF}');
+
+            assert!(
+                own_block,
+                "«{name}» must begin with a letter of its own script, not `{first}`"
+            );
+            assert!(
+                !first.is_uppercase() && !first.is_lowercase(),
+                "`{first}` is expected to be caseless — if this fails, the name is not the \
+                 script it claims to be"
+            );
+        } else {
+            assert!(
+                first.is_uppercase(),
+                "«{name}» must start with a capital: решение 92, kept by решение 93"
+            );
+        }
+
         assert!(
             !seen.contains(&name),
             "«{name}» appears twice in the language chooser"
@@ -12912,7 +12948,7 @@ fn the_twelve_native_names_are_distinct_and_capitalised() {
         seen.push(name);
     }
 
-    assert_eq!(seen.len(), 12);
+    assert_eq!(seen.len(), Language::ALL.len());
 }
 
 /// **Т-28-2: the dialog fills the combo from the array rather than from a list of its own.**
@@ -12950,7 +12986,7 @@ fn the_dialog_names_no_language_of_its_own() {
 fn the_autostart_row_reads_the_same_in_the_dialog_and_in_the_menu() {
     let product = ProductImage::shared();
 
-    for (tag, langid, _) in TWELVE_LOCALES {
+    for (tag, langid, _) in ALL_LOCALES {
         assert_eq!(
             product.string_of_langid(langid, settings::IDS_AUTOSTART),
             product.string_of_langid(langid, settings::IDS_MENU_AUTOSTART),
@@ -12974,7 +13010,7 @@ fn every_locale_keeps_the_placeholders_of_the_row_it_translates() {
         let russian = product.string_of_langid(0x0419, id);
         let wanted = placeholders_of(&russian);
 
-        for (tag, langid, _) in TWELVE_LOCALES {
+        for (tag, langid, _) in ALL_LOCALES {
             let mine = placeholders_of(&product.string_of_langid(langid, id));
 
             if mine != wanted {
@@ -13001,21 +13037,107 @@ fn placeholders_of(text: &str) -> Vec<&'static str> {
         .collect()
 }
 
-/// **Т-28-3: the product name is not translated in any of the twelve.**
+/// **Т-28-3, Т-30-1: the product name is not translated in any of the fourteen.**
 ///
-/// The decision on question 7, now with ten more chances to be broken: «Lang Switcher» is the
+/// The decision on question 7, now with twelve more chances to be broken: «Lang Switcher» is the
 /// display name of the product, and it is the same three words under `HKCU\…\Run` and in the
 /// caption of every locale.
 #[test]
 fn the_product_name_is_untranslated_in_every_locale() {
     let product = ProductImage::shared();
 
-    for (tag, langid, _) in TWELVE_LOCALES {
+    for (tag, langid, _) in ALL_LOCALES {
         let caption = product.string_of_langid(langid, settings::IDS_DIALOG_CAPTION);
 
         assert!(
             caption.starts_with("Lang Switcher"),
             "locale `{tag}` renamed the product: «{caption}»"
+        );
+    }
+}
+
+/// **Т-30-1: not one translation carries a direction mark — the guard the glossary asks for.**
+///
+/// Direction is decided by the **code**: the window is mirrored by the extended style its
+/// template is created with (Т-30-2), and an island of Latin text is turned back to left-to-
+/// right reading by one function (Т-30-4). A `U+200E` or `U+200F` buried in a translation would
+/// make an island silently — the string would look perfectly ordinary in the `.rc` and in every
+/// other sweep, and the one place it showed would be a window nobody thought to look at.
+///
+/// The isolates `U+2066…U+2069` and the deprecated embedding controls `U+202A…U+202E` are here
+/// for the same reason: they are the other ways to say the same thing invisibly.
+///
+/// ⚠ This sweep reads the **built binary**, not the `.rc` — a mark that survived the resource
+/// compiler is the one that matters, and a mark the compiler ate never reaches a user.
+#[test]
+fn no_translation_carries_a_direction_mark() {
+    let product = ProductImage::shared();
+    let mut marked: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        for id in settings::INTERFACE_STRINGS {
+            let string = product.string_of_langid(langid, id);
+
+            for (at, unit) in string.char_indices() {
+                let bad = matches!(
+                    unit,
+                    '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+                );
+
+                if bad {
+                    marked.push(format!(
+                        "{tag}: string {id} carries U+{:04X} at byte {at}",
+                        unit as u32
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        marked.is_empty(),
+        "direction belongs to the code, not to the strings; found:\n{}",
+        marked.join("\n")
+    );
+
+    // The instrument must be able to fail: a mark in a string it *would* look at is caught.
+    let planted = "Lang Switcher \u{200F}— הגדרות";
+
+    assert!(
+        planted
+            .chars()
+            .any(|unit| matches!(unit, '\u{200E}' | '\u{200F}')),
+        "positive control: the predicate above finds a planted mark"
+    );
+}
+
+/// **Т-30-1: the arrow of the help line points the way the script reads.**
+///
+/// `IDS_ABOUT_HELP_5` names two places in order — «Settings» and then «Hotkey» — and the arrow
+/// between them leads the eye from the first to the second. In a right-to-left line the first
+/// of them stands on the **right**, so the arrow that leads to the second is «←». The rest keep
+/// «→». Nothing else in the tables carries an arrow, so this is the whole of the rule.
+#[test]
+fn the_help_arrow_follows_the_direction_of_the_script() {
+    let product = ProductImage::shared();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let line = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_5);
+        let language = language_of_tag(tag);
+
+        let (wanted, unwanted) = if language.is_rtl() {
+            ('←', '→')
+        } else {
+            ('→', '←')
+        };
+
+        assert!(
+            line.contains(wanted),
+            "locale `{tag}` must lead the eye with `{wanted}`: «{line}»"
+        );
+        assert!(
+            !line.contains(unwanted),
+            "locale `{tag}` points the wrong way with `{unwanted}`: «{line}»"
         );
     }
 }
@@ -13121,7 +13243,7 @@ fn the_locale_picked_in_the_combo_is_the_locale_the_file_ends_up_carrying() {
 /// makes `de-AT` German and `pt-PT` Portuguese without a table of regions that would have to be
 /// extended for every country Windows ships.
 #[test]
-fn a_system_tag_maps_onto_the_twelve_by_its_primary_subtag() {
+fn a_system_tag_maps_onto_a_locale_by_its_primary_subtag() {
     for (tag, wanted) in [
         // The plain case, all twelve, in the shape Windows actually hands out.
         ("ru-RU", Language::Ru),
@@ -13136,6 +13258,16 @@ fn a_system_tag_maps_onto_the_twelve_by_its_primary_subtag() {
         ("cs-CZ", Language::Cs),
         ("tr-TR", Language::Tr),
         ("el-GR", Language::El),
+        // Т-30-1, вопрос 97 — the two right-to-left locales, by the same rule as the rest.
+        ("he-IL", Language::He),
+        ("ar-SA", Language::Ar),
+        // Arabic is one table for the standard language, so every Arabic region is `ar`. This
+        // is the `pt` decision applied a second time, and it is the reason the mapping goes by
+        // the tag and not through `langid`: `Ar` is 0x0401, which is `ar-SA` alone.
+        ("ar-EG", Language::Ar),
+        ("ar-MA", Language::Ar),
+        ("he", Language::He),
+        ("ar", Language::Ar),
         // The two the order names by hand: a region this build never enumerated.
         ("de-AT", Language::De),
         ("pt-PT", Language::Pt),
@@ -13165,10 +13297,15 @@ fn a_system_tag_maps_onto_the_twelve_by_its_primary_subtag() {
         "zh-CN",
         "ja-JP",
         "ko-KR",
-        "ar-SA",
-        "he-IL",
         "nl-NL",
         "sv-SE",
+        // ⚠ Т-30-1, recorded as a **fact and not a defect**: `iw` is the retired ISO 639-1 code
+        // for Hebrew, which some systems still hand out. This build does not have it, so a
+        // machine that answers `iw` gets English by the rule of вопрос 95 — the same road as a
+        // language this build never translated. Whether that is worth an alias is a question
+        // for the user, not a thing to fix inside a task about mirroring.
+        "iw",
+        "iw-IL",
         "z",
         "",
         "-",
@@ -13178,9 +13315,15 @@ fn a_system_tag_maps_onto_the_twelve_by_its_primary_subtag() {
         assert_eq!(
             settings::language_of_ui_tag(tag),
             None,
-            "`{tag}` is not one of the twelve and must not be pretended to be"
+            "`{tag}` is not one of the fourteen and must not be pretended to be"
         );
     }
+
+    // And the consequence of the line above, stated where it is visible: the retired code does
+    // not fall to Hebrew, it falls to the end of the list.
+    assert_eq!(settings::first_run_language(["iw-IL"]), Language::En);
+    assert_eq!(settings::first_run_language(["he-IL"]), Language::He);
+    assert_eq!(settings::first_run_language(["ar-EG"]), Language::Ar);
 }
 
 /// **The fall-through, and the English at the end of it — вопрос 95.**
@@ -13296,10 +13439,10 @@ fn only_a_first_run_takes_the_language_of_the_system() {
 /// default answered before вопрос 95, which means a green light here proves nothing about the
 /// rule. What it *can* prove is that the two Win32 halves work at all: the list comes back
 /// non-empty, every tag in it is a plausible BCP-47 tag rather than rubbish, and the answer is
-/// one of the twelve. An instrument that cannot fail says nothing, so the emptiness of the list
-/// is asserted rather than tolerated.
+/// one of the fourteen. An instrument that cannot fail says nothing, so the emptiness of the
+/// list is asserted rather than tolerated.
 #[test]
-fn the_machine_answers_a_real_list_of_tags_and_one_of_the_twelve() {
+fn the_machine_answers_a_real_list_of_tags_and_one_of_the_locales() {
     let preferred = settings::preferred_ui_languages();
 
     println!("preferred UI languages of this machine: {preferred:?}");

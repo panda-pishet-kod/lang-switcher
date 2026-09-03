@@ -1822,6 +1822,170 @@ BEGIN
 END
 
 // ---------------------------------------------------------------------------------------
+// Hebrew and Arabic, the two right-to-left locales of вопрос 97. Task Т-30-1.
+// ---------------------------------------------------------------------------------------
+//
+// The tables themselves carry **no direction marks** — no U+200E, no U+200F, no isolates.
+// Direction is decided by the code: the window is mirrored by the extended style its template
+// is created with (task Т-30-2) and an island of Latin text is turned back to left-to-right
+// reading by one function (task Т-30-4). A mark buried in a translation would make an island
+// silently, and no sweep over these tables would ever see it — the string would look ordinary.
+// The sweep `no_translation_carries_a_direction_mark` in `tests\settings.rs` is the guard.
+//
+// The arrow of IDS_ABOUT_HELP_5 is «←» and not «→»: it leads the eye from the first place
+// named to the second, and in a right-to-left line the first of them stands on the right.
+
+LANGUAGE 0x0D, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — הגדרות"
+    IDS_GROUP_GENERAL       "כללי"
+    IDS_AUTOSTART           "הפעלה עם הכניסה למערכת"
+    IDS_LANGUAGE_LABEL      "שפת הממשק:"
+    IDS_LANGUAGE_RESTART    "ייכנס לתוקף לאחר הפעלה מחדש"
+    IDS_GROUP_HOTKEY        "מקש קיצור"
+    IDS_HOTKEY_LABEL        "מקש:"
+    IDS_HOTKEY_SET          "הגדר"
+    IDS_HOTKEY_STOP         "ביטול"
+    IDS_GROUP_LAYOUTS       "פריסות"
+    IDS_MODE_PAIR           "זוג"
+    IDS_MODE_CYCLE          "כמה פריסות"
+    IDS_PAIR_SOURCE         "מקור:"
+    IDS_PAIR_TARGET         "יעד:"
+    IDS_CYCLE_HINT          "מחזור: הסימון משתתף, הכפתורים קובעים סדר"
+    IDS_CYCLE_UP            "למעלה"
+    IDS_CYCLE_DOWN          "למטה"
+    IDS_SELECTION_ENABLED   "המרת הטקסט המסומן"
+    IDS_GROUP_EXCLUSIONS    "חריגים"
+    IDS_EXCLUSION_REMOVE    "הסר"
+    IDS_EXCLUSION_ADD       "הוסף"
+    IDS_EXCLUSION_HINT      "שם תהליך, למשל game.exe"
+    IDS_GROUP_DIAGNOSTICS   "אבחון"
+    IDS_LOG_ENABLED         "ניהול יומן"
+    // ⚠ Э28 §4 и глоссарий Э30 §3.2: «פתיחת תיקיית היומן» длиннее кнопки. Какой именно папки —
+    // сказано подписью прямо под кнопкой.
+    IDS_LOG_OPEN            "פתיחת התיקייה"
+    IDS_LOG_DIR_LABEL       "תיקייה:"
+    IDS_GROUP_STATE         "מצב"
+    IDS_OK                  "אישור"
+    IDS_CANCEL              "ביטול"
+    IDS_APPLY               "החל"
+    IDS_NOTE_TEXT_KEY       "זהו מקש כתיבה: כל עוד התוכנית פעילה, הוא יפסיק להקליד את התו שלו."
+    IDS_NOTE_UNKNOWN_KEY    "שם המקש לא זוהה — פועל מקש ברירת המחדל, Pause."
+    IDS_CAPTURE_PROMPT      "הקישו על מקש…"
+    IDS_CAPTURE_MODIFIER    "מקש צירוף לבדו אינו יכול לשמש מקש קיצור."
+    IDS_CAPTURE_COMBINATION "צירופים עם מקשי צירוף אינם נתמכים: בקובץ ההגדרות נשמר מקש אחד."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 היא יציאת חירום, והצירוף הזה אינו ניתן להקצאה."
+    IDS_CAPTURE_NAMELESS    "למקש הזה אין שם בקובץ ההגדרות — בחרו אחר."
+    IDS_CAPTURE_RESERVED    "המערכת תופסת את המקש הזה — בחרו אחר."
+    IDS_STATE_HOOK          "מעקב מקלדת: {0} · שחזורים: {1} · כשלים: {2}"
+    IDS_HOOK_UP             "פעיל"
+    // ⚠ Глоссарий Э30 §0-RTL.11: у иврита нет регистра, кричать заглавными нечем — усиление
+    // несёт само слово.
+    IDS_HOOK_DOWN           "לא פעיל"
+    IDS_STATE_LAYOUTS       "פריסות בהפעלה: {0} · חריגים שפורסמו: {1} · רשומות ביומן: {2}"
+    IDS_STATE_AUTOSTART     "הפעלה אוטומטית ברישום (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "כן, {0}"
+    IDS_AUTOSTART_ABSENT    "לא"
+    IDS_LAYOUT_NOTE         "בהפעלה אין את הפריסה הרשומה בקובץ ({0}) — בחרו מחדש."
+    IDS_LAYOUT_WORD_SOURCE  "מקור"
+    IDS_LAYOUT_WORD_TARGET  "יעד"
+    IDS_LOG_DIR_MISSING     "%APPDATA% לא הוגדר — אין לאן לכתוב את היומן"
+    IDS_THEME_LABEL         "מראה:"
+    IDS_THEME_SYSTEM        "כמו במערכת"
+    IDS_THEME_LIGHT         "בהיר"
+    IDS_THEME_DARK          "כהה"
+    IDS_SOUND               "משוב קולי"
+    IDS_ABOUT_CAPTION       "אודות"
+    IDS_ABOUT_VERSION       "גרסה {0}"
+    IDS_ABOUT_LINE_1        "מתקנת טקסט שהוקלד בפריסה שגויה."
+    IDS_ABOUT_LINE_2        "ההמרה עולה הקשה אחת."
+    IDS_ABOUT_OK            "אישור"
+    IDS_ABOUT_HELP          "איך משתמשים"
+    IDS_ABOUT_HELP_1        "הקלדתם מילה בפריסה שגויה — הקישו {0}: המילה מומרת והפריסה מתחלפת."
+    IDS_ABOUT_HELP_2        "הקשה נוספת על {0} מחזירה את הטקסט המקורי."
+    IDS_ABOUT_HELP_3        "סמנו טקסט והקישו {0} — המסומן מומר."
+    IDS_ABOUT_HELP_4        "השהיה, הגדרות ויציאה נמצאים בסמל אזור ההודעות."
+    IDS_ABOUT_HELP_5        "החלפת מקש: הגדרות ← מקש קיצור."
+    IDS_CAPTURE_HINT        "Esc או קליק בחוץ מבטלים"
+END
+
+LANGUAGE 0x01, 0x01
+STRINGTABLE
+BEGIN
+    IDS_DIALOG_CAPTION      "Lang Switcher — الإعدادات"
+    IDS_GROUP_GENERAL       "عام"
+    IDS_AUTOSTART           "التشغيل عند تسجيل الدخول"
+    IDS_LANGUAGE_LABEL      "لغة الواجهة:"
+    IDS_LANGUAGE_RESTART    "يسري بعد إعادة التشغيل"
+    IDS_GROUP_HOTKEY        "مفتاح الاختصار"
+    IDS_HOTKEY_LABEL        "المفتاح:"
+    IDS_HOTKEY_SET          "تعيين"
+    IDS_HOTKEY_STOP         "إلغاء"
+    IDS_GROUP_LAYOUTS       "التخطيطات"
+    IDS_MODE_PAIR           "زوج"
+    IDS_MODE_CYCLE          "عدة تخطيطات"
+    IDS_PAIR_SOURCE         "المصدر:"
+    IDS_PAIR_TARGET         "الهدف:"
+    IDS_CYCLE_HINT          "الدورة: العلامة تعني المشاركة، والأزرار تحدد الترتيب"
+    IDS_CYCLE_UP            "أعلى"
+    IDS_CYCLE_DOWN          "أسفل"
+    IDS_SELECTION_ENABLED   "تحويل النص المحدد"
+    IDS_GROUP_EXCLUSIONS    "الاستثناءات"
+    IDS_EXCLUSION_REMOVE    "إزالة"
+    IDS_EXCLUSION_ADD       "إضافة"
+    IDS_EXCLUSION_HINT      "اسم العملية، مثل game.exe"
+    IDS_GROUP_DIAGNOSTICS   "التشخيص"
+    IDS_LOG_ENABLED         "حفظ السجل"
+    // ⚠ То же основание, что у иврита выше: «فتح مجلد السجل» длиннее кнопки.
+    IDS_LOG_OPEN            "فتح المجلد"
+    IDS_LOG_DIR_LABEL       "المجلد:"
+    IDS_GROUP_STATE         "الحالة"
+    IDS_OK                  "موافق"
+    IDS_CANCEL              "إلغاء"
+    IDS_APPLY               "تطبيق"
+    IDS_NOTE_TEXT_KEY       "هذا مفتاح كتابة: ما دام البرنامج نشطًا، سيتوقف عن إدخال حرفه."
+    IDS_NOTE_UNKNOWN_KEY    "لم يتم التعرف على اسم المفتاح — يعمل المفتاح الافتراضي Pause."
+    IDS_CAPTURE_PROMPT      "اضغط مفتاحًا…"
+    IDS_CAPTURE_MODIFIER    "مفتاح التعديل وحده لا يصلح مفتاح اختصار."
+    IDS_CAPTURE_COMBINATION "التركيبات مع مفاتيح التعديل غير مدعومة: ملف الإعدادات يحفظ مفتاحًا واحدًا."
+    IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 هو مخرج الطوارئ، ولا يمكن تعيين هذه التركيبة."
+    IDS_CAPTURE_NAMELESS    "هذا المفتاح بلا اسم في ملف الإعدادات — اختر غيره."
+    IDS_CAPTURE_RESERVED    "النظام يحجز هذا المفتاح — اختر غيره."
+    IDS_STATE_HOOK          "مراقبة لوحة المفاتيح: {0} · عمليات الاستعادة: {1} · حالات الإخفاق: {2}"
+    IDS_HOOK_UP             "نشطة"
+    // ⚠ То же, что у иврита: регистра нет, усиление несёт слово.
+    IDS_HOOK_DOWN           "غير نشطة"
+    IDS_STATE_LAYOUTS       "التخطيطات في الجلسة: {0} · الاستثناءات المنشورة: {1} · إدخالات السجل: {2}"
+    // ⚠ Глоссарий Э30 §3.1: реестр — «سجل النظام», журнал — «السجل». Одно арабское слово на два
+    // русских понятия разведено ЗДЕСЬ, а не по месту.
+    IDS_STATE_AUTOSTART     "التشغيل التلقائي في سجل النظام (HKCU\\…\\Run): {0}"
+    IDS_AUTOSTART_PRESENT   "نعم، {0}"
+    IDS_AUTOSTART_ABSENT    "لا"
+    IDS_LAYOUT_NOTE         "الجلسة لا تحتوي على التخطيط المذكور في الملف ({0}) — اختر من جديد."
+    IDS_LAYOUT_WORD_SOURCE  "المصدر"
+    IDS_LAYOUT_WORD_TARGET  "الهدف"
+    IDS_LOG_DIR_MISSING     "%APPDATA% غير محدد — لا مكان لكتابة السجل"
+    IDS_THEME_LABEL         "المظهر:"
+    IDS_THEME_SYSTEM        "حسب النظام"
+    IDS_THEME_LIGHT         "فاتح"
+    IDS_THEME_DARK          "داكن"
+    IDS_SOUND               "استجابة صوتية"
+    IDS_ABOUT_CAPTION       "حول"
+    IDS_ABOUT_VERSION       "الإصدار {0}"
+    IDS_ABOUT_LINE_1        "يصحح النص المكتوب بتخطيط خاطئ."
+    IDS_ABOUT_LINE_2        "التحويل يكلف ضغطة واحدة."
+    IDS_ABOUT_OK            "موافق"
+    IDS_ABOUT_HELP          "طريقة الاستخدام"
+    IDS_ABOUT_HELP_1        "كتبت كلمة بتخطيط خاطئ — اضغط {0}: تتحول الكلمة ويتبدل التخطيط."
+    IDS_ABOUT_HELP_2        "ضغطة أخرى على {0} تعيد النص الأصلي."
+    IDS_ABOUT_HELP_3        "حدد نصًا واضغط {0} — يتحول المحدد."
+    IDS_ABOUT_HELP_4        "الإيقاف المؤقت والإعدادات والخروج في أيقونة منطقة الإشعارات."
+    IDS_ABOUT_HELP_5        "تغيير المفتاح: الإعدادات ← مفتاح الاختصار."
+    IDS_CAPTURE_HINT        "Esc أو نقرة خارجه تُلغي"
+END
+
+// ---------------------------------------------------------------------------------------
 // The menu of FR-91, both locales. Task T-08-2.
 // ---------------------------------------------------------------------------------------
 //
@@ -1974,4 +2138,26 @@ BEGIN
     IDS_MENU_AUTOSTART      "Εκκίνηση με τη σύνδεση"
     IDS_MENU_ABOUT          "Σχετικά"
     IDS_MENU_EXIT           "Έξοδος"
+END
+
+LANGUAGE 0x0D, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "השהה"
+    IDS_MENU_RESUME         "המשך"
+    IDS_MENU_SETTINGS       "הגדרות…"
+    IDS_MENU_AUTOSTART      "הפעלה עם הכניסה למערכת"
+    IDS_MENU_ABOUT          "אודות"
+    IDS_MENU_EXIT           "יציאה"
+END
+
+LANGUAGE 0x01, 0x01
+STRINGTABLE
+BEGIN
+    IDS_MENU_SUSPEND        "إيقاف مؤقت"
+    IDS_MENU_RESUME         "استئناف"
+    IDS_MENU_SETTINGS       "الإعدادات…"
+    IDS_MENU_AUTOSTART      "التشغيل عند تسجيل الدخول"
+    IDS_MENU_ABOUT          "حول"
+    IDS_MENU_EXIT           "خروج"
 END
