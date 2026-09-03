@@ -309,6 +309,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("EndDialog", Kind::Window),
     ("DialogBoxParamW", Kind::Window),
     ("SetWindowLongPtrW", Kind::Window),
+    // Task Т-31-2, решение 99.1(б): the two calls that put a rebuilt settings window back where
+    // the previous one stood. `Kind::Window` like every row of this block, and for the same
+    // reason — the subject of both is a window of this program.
+    ("GetWindowRect", Kind::Window),
+    ("SetWindowPos", Kind::Window),
     ("ShellExecuteW", Kind::Window),
     ("RegSetValueExW", Kind::Process),
     ("RegCloseKey", Kind::Process),

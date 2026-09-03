@@ -3206,11 +3206,25 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
 /// dispatches back into this module, exactly as `TrackPopupMenuEx` does. The configuration the
 /// dialog starts from is therefore *copied* out of the tray first, and what comes back arrives
 /// through [`apply_settings`].
+///
+/// # The loop — решение 99.1(б), task Т-31-2
+///
+/// «Применить» that changed the **direction of writing** answers
+/// [`settings::DialogOutcome::Reopen`] instead of closing: the mirror of task Т-30-2 is a style
+/// of the template a window is created from, and there is no later moment to put it on. So the
+/// window is built again, in the rectangle the previous one stood in, out of a configuration
+/// that has already been written to the file — there is nothing to lose and nothing to carry
+/// across.
+///
+/// **The loop stands here and not inside the dialog procedure**, at the very depth the first
+/// showing was made from and with no borrow of the tray held — посылка П2 of the mandate,
+/// measured before this was written (`scratchpad-Э31\посылки-п2.log`): two showings out of one
+/// call, and `with_tray` answering between them.
+///
+/// It cannot spin: the second showing starts in the language the first one published, so
+/// `language_switch` there answers `Unchanged` until a person picks another language and presses
+/// «Применить» again. Every turn of this loop is a press of a button.
 fn open_settings(hwnd: HWND) {
-    let Some(config) = with_tray(|tray| tray.config().clone()) else {
-        return;
-    };
-
     // SAFETY: `None` asks for the handle of the file used to create the calling process, which
     // is the running executable — the module `app.rc` was linked into, and therefore the one
     // holding the dialog template. The handle is borrowed and must not be freed; nothing here
@@ -3223,12 +3237,28 @@ fn open_settings(hwnd: HWND) {
         }
     };
 
-    let mut apply = apply_settings;
+    let mut opening = settings::Opening::Fresh;
 
-    if let Err(error) = settings::show_dialog(hwnd, HINSTANCE(module.0), &config, &mut apply) {
-        // NFR-13. The dialog either came up or it did not, and if it did not the user is told
-        // by the absence of a window; the reason goes to the journal.
-        app::report_non_critical("DialogBoxParamW", &error);
+    loop {
+        // Read afresh on every turn: the previous showing wrote its «Применить» through
+        // `apply_settings` into this very tray, and the window that comes up next must start
+        // from what is in force and not from a copy taken before it.
+        let Some(config) = with_tray(|tray| tray.config().clone()) else {
+            return;
+        };
+
+        let mut apply = apply_settings;
+
+        match settings::show_dialog(hwnd, HINSTANCE(module.0), &config, &mut apply, opening) {
+            Ok(settings::DialogOutcome::Closed) => return,
+            Ok(settings::DialogOutcome::Reopen(at)) => opening = settings::Opening::Again(at),
+            Err(error) => {
+                // NFR-13. The dialog either came up or it did not, and if it did not the user is
+                // told by the absence of a window; the reason goes to the journal.
+                app::report_non_critical("DialogBoxParamW", &error);
+                return;
+            }
+        }
     }
 }
 

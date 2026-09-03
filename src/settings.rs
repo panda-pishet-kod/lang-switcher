@@ -120,14 +120,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
     ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
     LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
-    LoadImageW, MapDialogRect, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL,
-    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowTextW, UISF_HIDEFOCUS,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
-    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
-    WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WNDPROC, WS_EX_LAYOUTRTL,
+    LoadImageW, MapDialogRect, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE,
+    SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY,
+    WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2978,6 +2978,41 @@ pub fn theme_from_combo_index(index: isize) -> ThemeSetting {
     }
 }
 
+/// What a change of the interface language asks of a settings window that is **already open** —
+/// решение 99.1, task Т-31-2.
+///
+/// Три исхода, и они не про язык, а про направление письма: подписи меняются словами, а зеркало
+/// ставится один раз, при создании окна (`WS_EX_LAYOUTRTL` в копии шаблона — task Т-30-2,
+/// другого момента поставить стиль нет). Отсюда и два механизма, которых просил пользователь.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LanguageSwitch {
+    /// Язык не менялся: окну не нужно ничего.
+    #[default]
+    Unchanged,
+    /// Язык другой, направление письма то же — окно **перезаполняется на месте**, тем же телом,
+    /// которым заполняется при создании ([`relabel_dialog`]).
+    Relabel,
+    /// Направление письма сменилось — окно **пересоздаётся** в том же экранном прямоугольнике.
+    Reopen,
+}
+
+/// Какой из двух механизмов нужен при переходе `old` → `new` — чистая функция, решение 99.1.
+///
+/// Публичная, как пара [`theme_combo_index`] / [`theme_from_combo_index`] рядом, и по той же
+/// причине: тест обязан звать **ту самую** функцию, которую зовёт диалог, а не её копию.
+/// Единственное место в программе, где написано, отчего зависит выбор механизма.
+pub fn language_switch(old: Language, new: Language) -> LanguageSwitch {
+    if old == new {
+        return LanguageSwitch::Unchanged;
+    }
+
+    if old.is_rtl() == new.is_rtl() {
+        LanguageSwitch::Relabel
+    } else {
+        LanguageSwitch::Reopen
+    }
+}
+
 /// Every control of the dialog whose text is a fixed string of the interface, and the string
 /// that belongs in it — FR-94.
 ///
@@ -3254,19 +3289,68 @@ pub fn effective_hotkey_name(key: &str) -> String {
 /// ⚠ **Modal.** `DialogBoxParamW` runs a message loop until the dialog ends, so the caller must
 /// hold no borrow of anything the window procedure of this thread can reach — the same rule the
 /// tray states for `TrackPopupMenuEx` and `MessageBoxW`.
+/// Why a settings window is being put on the screen — решение 99.1, task Т-31-2.
+///
+/// The ordinary opening and the one that follows a change of the direction of writing differ in
+/// two visible ways, and both are the решение: where the window goes, and where the focus is.
+// ⚠ No `Eq`: `RECT` of the crate derives `PartialEq` and not `Eq`, and a rectangle is what the
+// second variant carries. Nothing here needs the stronger one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Opening {
+    /// A person asked for the settings. `DS_CENTER` places the window and the dialog manager
+    /// chooses the focus, exactly as they always have.
+    #[default]
+    Fresh,
+    /// «Применить» changed the direction of writing, so the window is being built again.
+    ///
+    /// It sits down in the rectangle the previous one occupied — `Some`, the ordinary case —
+    /// and the focus goes on the language combo, where the hand that caused this left it. A
+    /// `None` rectangle is the degraded path of [`DialogState::reopen_at`]: the window is
+    /// still rebuilt, and `DS_CENTER` decides where.
+    Again(Option<RECT>),
+}
+
+/// How a showing of the settings window ended — решение 99.1, task Т-31-2.
+///
+/// A third answer beside «ОК» and «Отмена», and the only one the caller has to act on: the two
+/// ways of closing are both «the window is gone», and the loop of [`crate::tray::open_settings`]
+/// leaves on either.
+// ⚠ No `Eq`, for the reason [`Opening`] above has none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DialogOutcome {
+    /// The window was closed — «ОК», «Отмена», `Esc` or the cross.
+    Closed,
+    /// The direction of writing changed under it: show it again, in this rectangle.
+    Reopen(Option<RECT>),
+}
+
+/// What `EndDialog` is called with on the reopen path — task Т-31-2.
+///
+/// Ninety-nine is the number of the решение that introduced this outcome. It has to be none of
+/// the values the manager and this window already use: `IDOK` is 1, `IDCANCEL` is 2, and −1 is
+/// what `DialogBoxParamW` itself answers when the window could not be created at all.
+const DIALOG_REOPEN: isize = 99;
+
 pub fn show_dialog(
     owner: HWND,
     instance: HINSTANCE,
     config: &Config,
     apply: &mut dyn FnMut(&Config),
-) -> windows::core::Result<()> {
+    opening: Opening,
+) -> windows::core::Result<DialogOutcome> {
     // ⚠ One dialog at a time. A modal dialog runs a message loop that keeps dispatching to the
     // *other* windows of this thread, so the tray icon can be clicked while this window is up
     // and would otherwise open a second copy of it on top of the first — two windows editing
     // two copies of one configuration, of which the last one applied would win. The guard is a
     // thread-local because the dialog belongs to the UI thread and to no other (section 6.1).
+    //
+    // ⚠ The reopen loop of task Т-31-2 does **not** meet this guard: it calls this function
+    // again only after the previous call has returned, and the guard is given up by
+    // `DialogSession::drop` on the way out. Measured before the task was written — посылка П2,
+    // `scratchpad-Э31\посылки-п2.log`: two showings out of one call, and `with_tray` answering
+    // between them.
     if dialog_is_open() {
-        return Ok(());
+        return Ok(DialogOutcome::Closed);
     }
 
     // The list view of the cycle lives in `comctl32`, whose window classes are registered on
@@ -3314,6 +3398,10 @@ pub fn show_dialog(
             // FR-92а, task T-12-1: loaded before the window exists, because a resource does
             // not need one; shown on `WM_INITDIALOG`, which is where a window does.
             icon: CaptionIcons::load(),
+            // Решение 99.1, task Т-31-2: the caller's, read once on `WM_INITDIALOG`.
+            opening,
+            // …and the answer that travels back out, written only by `reopen_in_place`.
+            reopen_at: None,
         }),
     };
 
@@ -3344,7 +3432,15 @@ pub fn show_dialog(
         return Err(WinError::from_thread());
     }
 
-    Ok(())
+    // Task Т-31-2. The window is gone by now — `EndDialog` unwound the manager's loop and the
+    // manager destroyed it — so the rectangle it asked to be rebuilt in cannot be read off it
+    // any more. It was written into the state, which lives on **this** frame and outlived the
+    // call, and this is where it is taken out.
+    if result == DIALOG_REOPEN {
+        return Ok(DialogOutcome::Reopen(state.state.borrow().reopen_at));
+    }
+
+    Ok(DialogOutcome::Closed)
 }
 
 /// Whether a settings dialog of FR-92 is on the screen of **this** thread — task T-13-14.
@@ -3846,6 +3942,18 @@ struct DialogState<'a> {
     /// returned. `None` — a refused `LoadImageW` — leaves the caption without an icon, which
     /// is the caption every task before this one had (NFR-13).
     icon: Option<CaptionIcons>,
+    /// Why this window is being shown — решение 99.1, task Т-31-2. Read once, on
+    /// `WM_INITDIALOG`, and never written.
+    opening: Opening,
+    /// Where this window stood when it asked to be shown again — the other half of the same
+    /// решение, and the only field of this state the *caller* reads.
+    ///
+    /// Written by [`reopen_in_place`] immediately before `EndDialog`, and read by
+    /// [`show_dialog`] after the modal call has returned, off the value on its own frame.
+    /// `None` while the window has not asked, and `None` too when `GetWindowRect` refused
+    /// (NFR-13) — the new window then goes where `DS_CENTER` puts it, which is a worse place
+    /// but not a lost window.
+    reopen_at: Option<RECT>,
 }
 
 /// The dialog procedure of FR-92.
@@ -3951,6 +4059,46 @@ unsafe extern "system" fn dialog_proc(
                 // fallback of the dialog manager rather than by the named default, and
                 // the journal is told.
                 crate::app::report_non_critical("PostMessageW", &error);
+            }
+
+            // Решение 99.1(б), task Т-31-2: a window rebuilt because the direction of writing
+            // changed sits down where the previous one stood, and takes the focus back to the
+            // combo the hand was on.
+            //
+            // SAFETY: as above — the pointer was stored at the top of this arm.
+            let opening = unsafe { with_state(hwnd, |state| state.opening) };
+
+            if let Some(Opening::Again(at)) = opening {
+                // The place. `DS_CENTER` has already centred the window — the manager positions
+                // it before this message — and the window is not on the screen yet: it is shown
+                // when this procedure returns. So the move lands before the first paint, and
+                // there is no blink. Measured both ways in посылка П3.
+                if let Some(rect) = at {
+                    // SAFETY: `hwnd` is the live dialog being initialised; the call is given
+                    // plain numbers and keeps no pointer.
+                    if let Err(error) = unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            None,
+                            rect.left,
+                            rect.top,
+                            rect.right - rect.left,
+                            rect.bottom - rect.top,
+                            SWP_NOZORDER | SWP_NOACTIVATE,
+                        )
+                    } {
+                        // NFR-13: the window opens where `DS_CENTER` left it, which is a worse
+                        // place and not a lost window.
+                        crate::app::report_non_critical("SetWindowPos", &error);
+                    }
+                }
+
+                // The focus. `focus_control` is the one road to a control's focus in this file —
+                // see it for why `SetFocus` and not `WM_NEXTDLGCTL`.
+                focus_control(hwnd, IDC_LANGUAGE);
+
+                // FALSE: the focus is ours, the manager must not put it somewhere else.
+                return 0;
             }
 
             // TRUE: let the dialog manager choose the focus.
@@ -9848,9 +9996,117 @@ fn localise_dialog(hwnd: HWND) {
     }
 }
 
-/// Puts the configuration into the controls — the whole of `WM_INITDIALOG`.
-fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
+/// Puts the interface strings of the locale in force into the window — FR-94, решение 99.1,
+/// task Т-31-2.
+///
+/// **One body, two occasions.** It runs at the end of [`fill_dialog`], while the window is
+/// being built and before it is first painted, and it runs again when «Применить» changed the
+/// language of a window that is already up and the direction of writing did not change. That
+/// is the whole of механизм (а) решения 99.1: the window keeps its handle, its place, its
+/// selections and the focus, and puts on the other language.
+///
+/// What is in it is exactly what is a *string of the interface*: the caption, the thirty
+/// `(IDC, IDS)` pairs of FR-94, the items of the appearance combo, the note under the hotkey
+/// field, the note of the layouts section, the journal folder line and the three lines of
+/// «Состояние». What is deliberately **not** in it: the fourteen entries of the language combo
+/// (every language names itself — [`Language::native_name`]), the names of the layouts (the
+/// system gives those), the process names of FR-84 and every check box's *state*.
+///
+/// ⚠ **The caller repaints, this function does not.** Two of the three ways text of this window
+/// reaches the screen answer differently to a write, and both were measured on a live window
+/// before this task was written (`scratchpad-Э31\посылки-п4-механизм.log`):
+///
+/// * an `SS_OWNERDRAW` static invalidates itself on `WM_SETTEXT` and comes back repainted —
+///   636 pixels moved with nobody asking;
+/// * a **panel caption** does not move at all, and does not move on an invalidation of the
+///   whole window either. It is not drawn by a control: [`on_erase_background`] draws it into a
+///   **cached picture** out of the group box's text, and the key of that cache is the size, the
+///   palette and the frame of the hotkey field — never the text. Invalidating merely blits the
+///   old picture back.
+///
+/// So the picture has to be thrown away, and that is what [`relabel_in_place`] does around this
+/// call. It is not written here because [`fill_dialog`] must not do it: on `WM_INITDIALOG`
+/// there is no picture yet.
+fn relabel_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     localise_dialog(hwnd);
+
+    // The appearance combo is the one list of this window whose items are translated, and
+    // `CB_RESETCONTENT` takes the selection away with them — so the chosen position is read
+    // first and put back after. The **setting** is the source of it, not `CB_GETCURSEL`: the
+    // working configuration is what the window is showing, and it has just been read back by
+    // `read_dialog` on the «Применить» path.
+    let chosen = theme_combo_index(state.working.general.theme);
+
+    send_to(hwnd, IDC_THEME, CB_RESETCONTENT, 0, 0);
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_SYSTEM));
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_LIGHT));
+    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_DARK));
+    send_to(hwnd, IDC_THEME, CB_SETCURSEL, chosen, 0);
+
+    // The key name is not a string of the interface; the note under it is — FR-94, and it is
+    // also what a capture writes into. A capture cannot be armed here: `apply_now` cancels one
+    // before it publishes, and on `WM_INITDIALOG` there is nothing to cancel.
+    show_hotkey(hwnd, &state.working.hotkey.key);
+
+    show_layout_note(hwnd, state);
+    show_log_dir(hwnd);
+
+    fill_state_lines(hwnd, state);
+}
+
+/// The note of the layouts section — the sentence FR-92 asks for when a layout named in
+/// section 7 is not in this session.
+///
+/// Its own function since task Т-31-2 because it is a string of the interface and has to be
+/// put in again when the language changes, while everything else [`fill_layouts`] does is a
+/// value or a selection and must not be touched.
+fn show_layout_note(hwnd: HWND, state: &DialogState<'_>) {
+    let source = LayoutSpec::parse(&state.working.layouts.pair_source);
+    let target = LayoutSpec::parse(&state.working.layouts.pair_target);
+
+    let unresolved = [
+        (source, IDS_LAYOUT_WORD_SOURCE),
+        (target, IDS_LAYOUT_WORD_TARGET),
+    ]
+    .into_iter()
+    .filter(|(spec, _)| spec.resolve(&state.session).is_none())
+    .map(|(_, word)| text(word))
+    .collect::<Vec<_>>();
+
+    set_text(
+        hwnd,
+        IDC_LAYOUT_NOTE,
+        &if unresolved.is_empty() {
+            String::new()
+        } else {
+            format_text(IDS_LAYOUT_NOTE, &[&unresolved.join(", ")])
+        },
+    );
+}
+
+/// The journal folder line — a path, which no locale changes, or the one sentence that says
+/// there is nowhere to write, which every locale does. Task Т-31-2, for the reason above.
+fn show_log_dir(hwnd: HWND) {
+    set_text(
+        hwnd,
+        IDC_LOG_DIR,
+        &crate::diag::log_dir().map_or_else(
+            || text(IDS_LOG_DIR_MISSING),
+            |dir| dir.display().to_string(),
+        ),
+    );
+}
+
+/// Puts the configuration into the controls — the whole of `WM_INITDIALOG`.
+///
+/// Three parts in this order since task Т-31-2, and the order is load-bearing: the **structure**
+/// (subclasses, margins, the closed height of the combo boxes, the faces of the controls that
+/// draw their own text), then the **values**, then the **text** — [`relabel_dialog`], the half
+/// that runs a second time when the language changes under an open window. The structural part
+/// has to be first because two of its steps say so in their own documentation («before anything
+/// is put into any of them»), and the text part is last because it is the one that also stands
+/// alone.
+fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // Решение 97.2, task Т-30-4 — the two islands that are **input fields**. Everything else in
     // this window reads the way the window does; these two hold Latin text the user types or
     // reads letter by letter (`Ctrl + Alt + Q`, `game.exe`), and a caret that walks leftwards
@@ -9927,29 +10183,6 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
         0,
     );
 
-    // The appearance combo of FR-92а, task T-11-3. The three items go in in the order the
-    // pair `theme_combo_index` / `theme_from_combo_index` writes down — `system`, `light`,
-    // `dark` — and unlike the language combo the items are localised, so they come out of
-    // the string table of the locale in force. This element only stores the choice: what
-    // the palette does to the windows is the business of tasks T-11-4 and later.
-    send_to(hwnd, IDC_THEME, CB_RESETCONTENT, 0, 0);
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_SYSTEM));
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_LIGHT));
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_DARK));
-    send_to(
-        hwnd,
-        IDC_THEME,
-        CB_SETCURSEL,
-        theme_combo_index(state.working.general.theme),
-        0,
-    );
-
-    // Section «Горячая клавиша» of FR-92 and FR-94. The field is read-only because the key is
-    // not typed into it: the button beside it arms a capture and the field then shows the name
-    // of the key that was pressed. The note under it is the "предупреждение" the requirement
-    // asks for, and while a capture is armed it is what says what went wrong.
-    show_hotkey(hwnd, &state.working.hotkey.key);
-
     // Section «Раскладки» of FR-92 — FR-30, FR-31, FR-35.
     fill_layouts(hwnd, state);
 
@@ -9962,16 +10195,13 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 
     // Section «Диагностика» of FR-92 — SEC-07.
     set_check(hwnd, IDC_LOG_ENABLED, state.working.diagnostics.log_enabled);
-    set_text(
-        hwnd,
-        IDC_LOG_DIR,
-        &crate::diag::log_dir().map_or_else(
-            || text(IDS_LOG_DIR_MISSING),
-            |dir| dir.display().to_string(),
-        ),
-    );
 
-    fill_state_lines(hwnd, state);
+    // The text half, and the one part of this function that also stands alone — task Т-31-2.
+    // It carries the appearance combo (whose items are localised, unlike the language combo's),
+    // the note under the hotkey field, the note of the layouts section, the journal folder line
+    // and the three lines of «Состояние». Last, so that the faces and the closed heights above
+    // are already on the controls it writes into.
+    relabel_dialog(hwnd, state);
 }
 
 /// Fills the layouts section and the list view of the cycle.
@@ -10001,26 +10231,11 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     select_layout(hwnd, IDC_PAIR_SOURCE, source, &state.session);
     select_layout(hwnd, IDC_PAIR_TARGET, target, &state.session);
 
-    // The note of FR-92 for this section: a field of section 7 that names no layout of this
-    // session is otherwise silent — `layouts::LayoutSpec` says as much and points here.
-    let unresolved = [
-        (source, IDS_LAYOUT_WORD_SOURCE),
-        (target, IDS_LAYOUT_WORD_TARGET),
-    ]
-    .into_iter()
-    .filter(|(spec, _)| spec.resolve(&state.session).is_none())
-    .map(|(_, word)| text(word))
-    .collect::<Vec<_>>();
-
-    set_text(
-        hwnd,
-        IDC_LAYOUT_NOTE,
-        &if unresolved.is_empty() {
-            String::new()
-        } else {
-            format_text(IDS_LAYOUT_NOTE, &[&unresolved.join(", ")])
-        },
-    );
+    // The note of FR-92 for this section — a field of section 7 that names no layout of this
+    // session is otherwise silent — lives in [`show_layout_note`] since task Т-31-2, because a
+    // string of the interface has to be written again when the language changes and everything
+    // else here is a value or a selection that must not be touched. [`relabel_dialog`] calls
+    // it, and this function is called from [`fill_dialog`], which ends with that call.
 
     prepare_cycle_list(hwnd);
 
@@ -10223,15 +10438,29 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
     match control {
         // Applying and leaving are one operation followed by the other, which is why «ОК»
         // makes the same call «Применить» makes and then ends the dialog.
+        //
+        // Решение 99: «ОК» — записать и закрыть, ничего сверх. The answer `apply_now` gives
+        // about the language is deliberately dropped here: this window has a moment to live,
+        // and relabelling or rebuilding it in that moment would be a flash and nothing else.
+        // Everything opened afterwards — the menu, «О программе», these settings again — is
+        // built in the new locale, which task Т-31-1 published before this line was reached.
         OK_COMMAND => {
             // SAFETY: see the caller.
-            unsafe { apply_now(hwnd) };
+            let _ = unsafe { apply_now(hwnd) };
             end_dialog(hwnd, isize::try_from(OK_COMMAND).unwrap_or(0));
         }
 
+        // …and «Применить» is the button that stays in the window, so the window has to become
+        // the one the new language asks for — решение 99.1, the two mechanisms.
         IDC_APPLY => {
             // SAFETY: see the caller.
-            unsafe { apply_now(hwnd) };
+            match unsafe { apply_now(hwnd) } {
+                // The language did not move. Pressing «Применить» twice must not blink.
+                LanguageSwitch::Unchanged => {}
+                // SAFETY: see the caller.
+                LanguageSwitch::Relabel => unsafe { relabel_in_place(hwnd) },
+                LanguageSwitch::Reopen => reopen_in_place(hwnd),
+            }
         }
 
         // Nothing was written to the file and nothing was published, so there is nothing to
@@ -10324,10 +10553,15 @@ fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
 
 /// Reads the controls and hands the result to the caller of [`show_dialog`].
 ///
+/// Answers **what the language did**, and nothing more: acting on it is [`on_command`]'s, because
+/// the two buttons that come here want different things of it. «Применить» relabels or rebuilds
+/// the window (решение 99.1); «ОК» does neither — it writes and closes, and everything opened
+/// afterwards is in the new language anyway.
+///
 /// # Safety
 ///
 /// Called from [`dialog_proc`] only.
-unsafe fn apply_now(hwnd: HWND) {
+unsafe fn apply_now(hwnd: HWND) -> LanguageSwitch {
     // FR-94. A capture still armed when «Применить» is pressed is a capture the user has
     // abandoned, and it has to end here rather than survive the publication: `apply` publishes
     // `general.enabled` into the callback, and a capture ending afterwards would then publish
@@ -10335,6 +10569,11 @@ unsafe fn apply_now(hwnd: HWND) {
     //
     // SAFETY: see the caller.
     unsafe { with_state(hwnd, |state| cancel_capture(hwnd, state)) };
+
+    // Task Т-31-2: the locale this window was **built** in, read before the publication below
+    // moves it. `ui_language()` and not a field of the state, because it is the atomic the
+    // whole process renders by, and the window on the screen is a picture of it.
+    let was = ui_language();
 
     // The callback runs inside the borrow because it *is* part of the state — see
     // `DialogState`. It writes a file, stores into atomics and touches the registry; it does
@@ -10362,6 +10601,65 @@ unsafe fn apply_now(hwnd: HWND) {
     //
     // SAFETY: see the caller.
     unsafe { with_state(hwnd, |state| fill_state_lines(hwnd, state)) };
+
+    language_switch(was, ui_language())
+}
+
+/// Механизм (а) решения 99.1 — the window keeps its handle, its place and its selections, and
+/// puts on the other language.
+///
+/// Two steps, and the second is the one that was **measured** rather than reasoned about
+/// (`scratchpad-Э31\посылки-п4-механизм.log`, and see [`relabel_dialog`]): the cached picture of
+/// the background has to be thrown away, because the eight panel captions are drawn into it out
+/// of the group boxes' text and the key of the cache knows nothing about text. Without this line
+/// «Применить» would leave a window translated by halves — every label new, every panel caption
+/// old — and invalidating the whole window would not have mended it.
+///
+/// # Safety
+///
+/// Called from [`on_command`] only, with the `hwnd` of the dialog it belongs to.
+unsafe fn relabel_in_place(hwnd: HWND) {
+    // SAFETY: see the caller.
+    unsafe {
+        with_state(hwnd, |state| {
+            relabel_dialog(hwnd, state);
+            state.background = None;
+        })
+    };
+
+    repaint_whole_window(hwnd);
+}
+
+/// Механизм (б) решения 99.1 — the direction of writing changed, so the window is rebuilt.
+///
+/// The mirror of task Т-30-2 is a style of the **template the window was created from**, and a
+/// child inherits the layout at creation: there is no later moment to put `WS_EX_LAYOUTRTL` on
+/// forty-four controls. So the window goes and another comes in its place, in the same screen
+/// rectangle — and nothing is lost by it, because the configuration has already been written
+/// and the new window reads it back.
+///
+/// Nothing here shows a window: `EndDialog` unwinds the manager's loop, [`show_dialog`] answers
+/// [`DialogOutcome::Reopen`], and the loop that shows it again is in
+/// [`crate::tray::open_settings`] — at the depth the first showing was made from, with no borrow
+/// of the tray held (посылка П2).
+fn reopen_in_place(hwnd: HWND) {
+    let mut rect = RECT::default();
+
+    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call fills.
+    let at = if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
+        Some(rect)
+    } else {
+        // NFR-13: a window whose rectangle cannot be read is still rebuilt — losing the place
+        // is a blemish, losing the window would be the defect. The journal is told.
+        crate::app::report_non_critical("GetWindowRect", &WinError::from_thread());
+        None
+    };
+
+    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is alive for the
+    // whole of this modal call — `show_dialog` reads this field after the call returns.
+    unsafe { with_state(hwnd, |state| state.reopen_at = at) };
+
+    end_dialog(hwnd, DIALOG_REOPEN);
 }
 
 /// Adds the name in the edit field to the exclusion list — FR-84.

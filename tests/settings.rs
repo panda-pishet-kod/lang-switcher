@@ -1512,6 +1512,200 @@ fn the_theme_combo_order_is_the_order_of_the_theme_setting_values() {
 }
 
 // =========================================================================================
+// FR-94, решение 99.1 — which of the two mechanisms a language change asks for. Task Т-31-2.
+// =========================================================================================
+
+/// **Criterion 1 of task Т-31-2.** All four combinations of direction, plus «the language did
+/// not change», through the very function the dialog calls.
+///
+/// The rule the user asked for is not «other language → rebuild the window»: it is «other
+/// **direction of writing** → rebuild», because the mirror is set once, when the window is
+/// created (task Т-30-2 — a copy of the template with `WS_EX_LAYOUTRTL`, and there is no later
+/// moment to put the style on). Words can be changed in place; a direction cannot.
+#[test]
+fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
+    use settings::LanguageSwitch::{Relabel, Reopen, Unchanged};
+
+    // Left to right → left to right: the words move, the window does not.
+    assert_eq!(
+        settings::language_switch(Language::Ru, Language::De),
+        Relabel
+    );
+    // Right to left → right to left: the same, and this is the pair that would be lost by a
+    // rule written on «is the new language right-to-left» instead of on the change.
+    assert_eq!(
+        settings::language_switch(Language::He, Language::Ar),
+        Relabel
+    );
+    // The two crossings — the only cases that cost a window.
+    assert_eq!(
+        settings::language_switch(Language::Ru, Language::He),
+        Reopen
+    );
+    assert_eq!(
+        settings::language_switch(Language::Ar, Language::En),
+        Reopen
+    );
+
+    // And the language that did not change asks for nothing at all: «Применить» pressed twice
+    // must not blink the window the second time.
+    for language in Language::ALL {
+        assert_eq!(
+            settings::language_switch(language, language),
+            Unchanged,
+            "{language:?} → {language:?} changes nothing"
+        );
+    }
+
+    // The whole square, so that no pair is decided by an accident of the two above: every
+    // ordered pair of the fourteen locales, checked against the predicate that owns the fact.
+    let mut relabel = 0;
+    let mut reopen = 0;
+
+    for old in Language::ALL {
+        for new in Language::ALL {
+            let wanted = match (old == new, old.is_rtl() == new.is_rtl()) {
+                (true, _) => Unchanged,
+                (false, true) => Relabel,
+                (false, false) => Reopen,
+            };
+
+            assert_eq!(
+                settings::language_switch(old, new),
+                wanted,
+                "{old:?} → {new:?}"
+            );
+
+            match wanted {
+                Relabel => relabel += 1,
+                Reopen => reopen += 1,
+                Unchanged => {}
+            }
+        }
+    }
+
+    println!("--- 14 × 14 pairs: relabel {relabel}, reopen {reopen} ---");
+
+    // Twelve left-to-right locales and two right-to-left ones: 12 × 11 + 2 × 1 = 134 pairs
+    // keep the direction, and 12 × 2 + 2 × 12 = 48 cross it. A number, so that a mechanism
+    // quietly claiming every pair could not pass this test.
+    assert_eq!(relabel, 134, "pairs that keep the direction of writing");
+    assert_eq!(reopen, 48, "pairs that cross it");
+}
+
+/// **Criterion 2 of task Т-31-2, and the guard over a line a measurement paid for.**
+///
+/// Three claims about the shape, swept over the source, because none of them can be driven from
+/// a test without a raised window — the acceptance of the behaviour itself is the stand of §3 of
+/// the mandate, which compares the relabelled window with a fresh one pixel by pixel.
+///
+/// 1. **One body, two occasions.** `relabel_dialog` is called from `fill_dialog` (the window is
+///    being built) and from `relabel_in_place` (the language changed under it) — решение 99.1
+///    asks for the very same filling, not for a second one that would drift.
+/// 2. **The cached picture is thrown away** before the repaint. This is the line the mandate did
+///    not ask for and the measurement did: `scratchpad-Э31\красное-до-2-кэш-фона.log` — with the
+///    line taken out, the relabelled window differs from a fresh one by **3444 pixels**, in six
+///    bands that are exactly the six panel captions, because `on_erase_background` draws them
+///    into a picture whose key knows nothing about text. With the line in, the difference is 0.
+/// 3. **«ОК» does not relabel and does not rebuild** — решение 99: записать и закрыть.
+///
+/// ⚠ Э22's trap: a sweep that finds its own needle. This one reads `src\settings.rs` and nothing
+/// else, and cuts the product half off at the test module before looking.
+#[test]
+fn the_two_mechanisms_of_the_language_change_are_written_where_the_measurement_put_them() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let product = source
+        .split_once("\n#[cfg(test)]\nmod tests {")
+        .map_or(source.as_str(), |(before, _)| before);
+
+    let calls = product.matches("relabel_dialog(hwnd, state)").count();
+
+    println!("--- relabel_dialog is called {calls} times ---");
+
+    assert_eq!(
+        calls, 2,
+        "the text half of the window is filled in by one body on both occasions — when the \
+         window is built and when the language changes under it"
+    );
+
+    for caller in ["fn fill_dialog(", "unsafe fn relabel_in_place("] {
+        let at = product
+            .find(caller)
+            .unwrap_or_else(|| panic!("{caller} must be in this file"));
+        let body = &product[at..];
+        let end = body.find("\n}").expect("a function closes with its brace");
+        let body = &body[..end];
+
+        println!("--- {caller} ---\n{body}");
+
+        assert!(
+            body.contains("relabel_dialog(hwnd, state)"),
+            "{caller} must fill the text half through the one body"
+        );
+    }
+
+    // The line the measurement paid for, in the one function that may hold it: `fill_dialog`
+    // must **not** hold it — on `WM_INITDIALOG` there is no picture to throw away.
+    let at = product
+        .find("unsafe fn relabel_in_place(")
+        .expect("relabel_in_place must be in this file");
+    let relabel = &product[at..];
+    let end = relabel
+        .find("\n}")
+        .expect("a function closes with its brace");
+    let relabel = &relabel[..end];
+
+    assert!(
+        relabel.contains("state.background = None;"),
+        "the cached picture of the background carries the six panel captions and its key knows \
+         nothing about their text: without this line «Применить» leaves the window translated \
+         by halves — measured, 3444 pixels in six bands"
+    );
+    assert!(
+        relabel.contains("repaint_whole_window(hwnd)"),
+        "…and the window is repainted whole afterwards"
+    );
+
+    // «ОК» applies and closes, and does neither of the two mechanisms — решение 99.
+    let at = product
+        .find("unsafe fn on_command(")
+        .expect("on_command must be in this file");
+    let commands = &product[at..];
+    let end = commands
+        .find("\n/// Whether one of the four arrow keys")
+        .unwrap_or(commands.len());
+    let commands = &commands[..end];
+
+    let ok_at = commands
+        .find("OK_COMMAND => {")
+        .expect("the «ОК» arm must be in on_command");
+    let apply_at = commands
+        .find("IDC_APPLY => {")
+        .expect("the «Применить» arm must be in on_command");
+
+    let ok_arm = &commands[ok_at..apply_at];
+
+    println!("--- the «ОК» arm ---\n{ok_arm}");
+
+    assert!(
+        ok_arm.contains("end_dialog(hwnd,"),
+        "«ОК» writes and closes"
+    );
+    assert!(
+        !ok_arm.contains("relabel_in_place") && !ok_arm.contains("reopen_in_place"),
+        "…and does neither mechanism: the window has a moment to live, and relabelling or \
+         rebuilding it in that moment would be a flash and nothing else"
+    );
+}
+
+// =========================================================================================
 // FR-92а — the painting half of the dialog: colour roles and the title bar. Task T-11-4.
 // =========================================================================================
 //
