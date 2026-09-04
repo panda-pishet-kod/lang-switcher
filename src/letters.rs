@@ -8149,14 +8149,43 @@ fn wizard_harvest(hwnd: HWND) {
 /// `WM_SETREDRAW` — документированный способ сказать окну «пока не рисуй»: вся перестановка
 /// проходит вслепую, и один `RedrawWindow` в конце показывает готовый шаг целиком.
 /// `RDW_ALLCHILDREN` обязателен — без него перерисуется фон, а дети останутся прежними.
+///
+/// # ⛔ Почему здесь `SendMessageTimeoutW`, а не `SendMessage` — задача Т-33а-0
+///
+/// Первая редакция этой функции слала `WM_SETREDRAW` голым `SendMessageW`, и сторож FR-72
+/// (`tests\guard.rs`) от этого падал: запрет голого `SendMessage` в этой программе стоит **на
+/// всей** `src\`, а не на одном модуле `guard`, — ровно чтобы будущая правка не могла завести
+/// его тихо. Красный уехал в поставку e43 вместе с правкой. Окно здесь своё и поток свой,
+/// повиснуть не на чем, но правило от этого не перестаёт быть правилом: сторож, который падает,
+/// не сторожит уже ничего.
 fn wizard_refresh(hwnd: HWND) {
     use windows::Win32::Graphics::Gdi::{
         RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETREDRAW};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETREDRAW,
+    };
 
-    // SAFETY: `hwnd` is the live dialog; the message carries two numbers and no pointer.
-    unsafe { SendMessageW(hwnd, WM_SETREDRAW, Some(WPARAM(0)), Some(LPARAM(0))) };
+    /// Сколько ждать ответа на `WM_SETREDRAW` — величина номинальная и никогда не тратится:
+    /// адресат этих двух сообщений живёт в **этом же** потоке, а такому адресату система зовёт
+    /// оконную процедуру прямо внутри вызова, не заводя ожидания вовсе. Число существует затем,
+    /// чтобы в программе не осталось ни одного вызова без верхней границы (FR-72).
+    const REDRAW_TIMEOUT_MS: u32 = 50;
+
+    // SAFETY: `hwnd` is the live dialog of this very thread; the message carries two numbers and
+    // no pointer, and the out-parameter is `None`, so nothing of ours is dereferenced. NFR-13: a
+    // refused switch leaves the window drawing as it did, which is the state before the call.
+    let _ = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_SETREDRAW,
+            WPARAM(0),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            REDRAW_TIMEOUT_MS,
+            None,
+        )
+    };
 
     // ⚠ `WM_SETREDRAW` у родителя гасит только его собственное рисование: у каждого ребёнка
     // свой флаг, и `SetWindowPos`/`ShowWindow` по ним перерисовываются сразу. Флаг ниже — вторая
@@ -8174,7 +8203,17 @@ fn wizard_refresh(hwnd: HWND) {
     QUIET_LAYOUT.with(|quiet| quiet.set(false));
 
     // SAFETY: as above.
-    unsafe { SendMessageW(hwnd, WM_SETREDRAW, Some(WPARAM(1)), Some(LPARAM(0))) };
+    let _ = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_SETREDRAW,
+            WPARAM(1),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            REDRAW_TIMEOUT_MS,
+            None,
+        )
+    };
 
     // NFR-13: a refused redraw leaves the window to the next `WM_PAINT`, which arrives anyway.
     //
