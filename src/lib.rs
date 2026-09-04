@@ -27,6 +27,7 @@ pub mod switch;
 pub mod theme;
 pub mod tray;
 pub mod watchdog;
+pub mod widgets;
 
 /// SEC-04a debug control channel, the single documented exception to SEC-04.
 ///

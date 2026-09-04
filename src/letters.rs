@@ -1576,6 +1576,9 @@ use windows::core::{Error as WinError, PCWSTR, w};
 
 use crate::settings::{self, Language};
 use crate::theme::{self, StaticColorRole, ThemeSetting};
+// Общий слой элементов окон — задача Т-45-2, решение 107.1. Мастер и окна писем берут элементы
+// здесь: в этом и состоит принцип пользователя «один механизм на все окна».
+use crate::widgets;
 
 /// The identifier of the timer that drives the demonstration of «Привет».
 ///
@@ -3077,20 +3080,22 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
             // ⚠ Многострочное поле держит свои строки от верха клиентской области, и центровать
             // вокруг него нечего: воздух ему даёт `EM_SETRECT` внутри, а рамка стоит на одной
             // толщине — та же развилка, что у списков окна настроек (`FRAMED_LISTS`).
-            let (above, below) = if WIZARD_AREAS.contains(control) {
+            let air = if WIZARD_AREAS.contains(control) {
                 (thickness, thickness)
             } else {
-                field_box_air(box_height, rect.bottom - rect.top, thickness)
+                widgets::field::air(
+                    box_height,
+                    rect.bottom - rect.top,
+                    thickness,
+                    // Мастер равняет коробку с кнопкой рядом, поэтому лишний пиксель — вниз
+                    // (задача Т-33а-2); окно настроек его теряет и остаётся при своём.
+                    widgets::field::OddPixel::Below,
+                )
             };
 
             theme::paint_rounded(
                 dc,
-                &RECT {
-                    left: rect.left - thickness,
-                    top: rect.top - above,
-                    right: rect.right + thickness,
-                    bottom: rect.bottom + below,
-                },
+                &widgets::field::frame(*rect, air, thickness),
                 theme::scaled(theme::CORNER_RADIUS, dpi),
                 line,
                 field,
@@ -3117,35 +3122,12 @@ fn is_shown(hwnd: HWND, control: i32) -> bool {
 /// around a control one em box tall (задача Т-33-7).
 const WIZARD_FIELDS: [i32; 3] = [IDC_WZ_PROGRAM, IDC_WZ_EXPECTED, IDC_WZ_GOT];
 
-/// Воздух над контролом поля и под ним — так, чтобы коробка вышла РОВНО в `box_height`
-/// пикселей. Задача Т-33а-2.
-///
-/// [`theme::field_frame_air`] отвечает **одним** числом на обе стороны, и этого хватало окну
-/// настроек, где коробку не с чем равнять. Здесь равнять есть с чем — с кнопкой рядом, — и на
-/// нечётном остатке одно число даёт коробку на пиксель ниже кнопки: при коробке 26 и контроле
-/// 15 половина остатка равна 5, а 15 + 5 + 5 = 25. Глаз ловит и один пиксель, когда две вещи
-/// стоят рядом, поэтому лишний пиксель кладётся вниз, а не теряется.
-///
-/// Пол — толщина рамки: контрол, уже равный коробке или выше её, носит прежнюю рамку в одну
-/// толщину, как и при отказе `MapDialogRect` (NFR-13).
-///
-/// Открыта по той же причине, что и [`theme::field_frame_air`]: она чистая, и её арифметика —
-/// таблица в `tests\wizard.rs`, а не картинка, которую надо разглядывать.
-pub fn field_box_air(box_height: Option<i32>, control_height: i32, border: i32) -> (i32, i32) {
-    let Some(box_height) = box_height else {
-        return (border, border);
-    };
-
-    let extra = box_height - control_height;
-
-    if extra < border * 2 {
-        return (border, border);
-    }
-
-    let above = extra / 2;
-
-    (above, extra - above)
-}
+// ⚠ **`field_box_air` уехала в `widgets::field::air` — задача Т-45-2, решение 107.4.**
+//
+// Здесь она стояла с задачи Т-33а-2 и была ВТОРОЙ копией арифметики окна настроек: та
+// (`theme::field_frame_air`) отвечала одним числом на обе стороны и на нечётном остатке теряла
+// пиксель, эта клала его вниз — чтобы коробка вышла ровно вровень с кнопкой рядом. Теперь тело
+// одно, и различие названо параметром `widgets::field::OddPixel`, а не двумя телами.
 
 /// Places a single-line field so that its **box** stands centred in a row `row` pixels tall.
 ///
@@ -3907,7 +3889,7 @@ unsafe extern "system" fn letter_proc(
             };
 
             if ticked == Some(true) {
-                settings::repaint_control(hwnd, IDC_LETTER_DEMO);
+                widgets::repaint::control(hwnd, IDC_LETTER_DEMO);
             }
 
             0
@@ -3952,7 +3934,7 @@ unsafe extern "system" fn letter_proc(
                     usize::from(wanted),
                     0,
                 );
-                settings::repaint_control(hwnd, IDC_NEWS_SWITCH);
+                widgets::repaint::control(hwnd, IDC_NEWS_SWITCH);
 
                 return 0;
             }
@@ -4050,7 +4032,7 @@ unsafe extern "system" fn letter_proc(
                     })
                 };
 
-                settings::repaint_whole_window(hwnd);
+                widgets::repaint::whole(hwnd);
             }
 
             0
@@ -5804,7 +5786,7 @@ pub fn language_changed(owner: HWND) {
                     })
                 };
 
-                settings::repaint_whole_window(hwnd);
+                widgets::repaint::whole(hwnd);
             }
 
             settings::LanguageSwitch::Reopen => {

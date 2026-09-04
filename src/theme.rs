@@ -3815,24 +3815,15 @@ pub fn list_frame_box(client: &RECT, dpi: i32) -> RECT {
     }
 }
 
-/// Half of what the `settings::FIELD_BOX_DLU` box has left over after the control inside it —
-/// the distance the frame of a field is drawn above its rectangle, and the same below it.
-///
-/// `box_height` is that box in the pixels of the window (`None` when `MapDialogRect` was
-/// refused — NFR-13), `control_height` the height the dialog manager gave the control, and
-/// `border` the thickness of the frame itself, which is the floor: a control already as tall
-/// as the box, or taller, keeps exactly the one-thickness-outside frame it wore before task
-/// T-12-3, and so does a refused measurement. That is what makes the rule **degenerate into
-/// the old one** rather than replace it.
-///
-/// Pure, so the arithmetic is a table in `tests\settings.rs` and not a picture to be read.
-pub fn field_frame_air(box_height: Option<i32>, control_height: i32, border: i32) -> i32 {
-    let Some(box_height) = box_height else {
-        return border;
-    };
-
-    ((box_height - control_height) / 2).max(border)
-}
+// ⚠ **`field_frame_air` уехала в `widgets::field::air` — задача Т-45-2, решение 107.4.**
+//
+// Здесь она стояла с задачи T-12-3 и считала воздух вокруг однострочного поля. Уехала не
+// потому, что плоха, а потому, что таких арифметик в программе было ДВЕ: эта у окна настроек
+// и `letters::field_box_air` у мастера, и различались они одним — куда девать лишний пиксель
+// нечётного остатка. Теперь тело одно, а различие названо параметром `OddPixel`.
+//
+// Место у неё было здесь по праву: `theme` — краски и примитивы. Но у поля есть **устройство**,
+// а не только цвет, и устройство элемента — это `widgets`.
 
 // =========================================================================================
 // Роли цветов: словарь, которым рисование называет поля палитры, и его разрешение

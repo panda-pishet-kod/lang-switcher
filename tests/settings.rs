@@ -1878,7 +1878,9 @@ fn the_two_mechanisms_of_the_language_change_are_written_where_the_measurement_p
          by halves — measured, 3444 pixels in six bands"
     );
     assert!(
-        relabel.contains("repaint_whole_window(hwnd)"),
+        // ⚠ Имя сменилось задачей Т-45-2: тело переехало в `widgets::repaint::whole`, не
+        // изменившись ни на строку. Утверждение теста прежнее — окно перерисовывается целиком.
+        relabel.contains("widgets::repaint::whole(hwnd)"),
         "…and the window is repainted whole afterwards"
     );
 
@@ -5389,6 +5391,18 @@ fn settings_module_source() -> String {
     .replace("\r\n", "\n")
 }
 
+/// The source of `widgets`, the same way — задача **Т-45-2**: общий слой элементов окон, куда
+/// уехали механизмы, которые до него были у одного окна.
+fn widgets_module_source() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("widgets.rs"),
+    )
+    .expect("the module source must be readable")
+    .replace("\r\n", "\n")
+}
+
 /// The source of `theme`, the same way — task **T-14-3**.
 fn theme_module_source() -> String {
     fs::read_to_string(
@@ -6201,14 +6215,15 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
 
     // The closed part is set apart by the documented lever, on all four combo boxes, and the
     // refusal of the send is examined (NFR-13) rather than dropped.
+    // ⚠ **Задача Т-45-2: посылка уехала в `widgets::combo::set_closed_height`.** У окна остался
+    // список СВОИХ комбобоксов, у слоя — рычаг и разбор отказа. Утверждение прежнее, проверяется
+    // теперь в двух местах, потому что и живёт оно в двух местах.
     let closed = function_body(&source, "fn set_combo_closed_height(");
 
     for shape in [
         "combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA)",
         "for control in COMBO_BOXES",
-        "CB_SETITEMHEIGHT",
-        "CB_SELECTION_FIELD",
-        "if answer == CB_ERR as isize",
+        "widgets::combo::set_closed_height(hwnd, control)",
     ] {
         assert!(
             closed.contains(shape),
@@ -6216,11 +6231,21 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
         );
     }
 
-    // −1 is the documented `wParam` for the selection field, and it is a name here.
-    assert!(
-        source.contains("const CB_SELECTION_FIELD: usize = usize::MAX;"),
-        "the −1 of CB_SETITEMHEIGHT must be a named constant and not a bare cast"
-    );
+    let layer = widgets_module_source();
+
+    for shape in [
+        "CB_SETITEMHEIGHT",
+        "SELECTION_FIELD,",
+        "answer != CB_ERR as isize",
+        // −1 is the documented `wParam` for the selection field, and it is a name there.
+        "const SELECTION_FIELD: usize = usize::MAX;",
+    ] {
+        assert!(
+            layer.contains(shape),
+            "`widgets::combo` must carry `{shape}` — the lever and the refusal live with the \
+             one body of the mechanism"
+        );
+    }
 
     // And it is sent once, from `WM_INITDIALOG`, where the four controls exist.
     let filled = function_body(&source, "fn fill_dialog(");
@@ -9573,7 +9598,8 @@ fn the_field_shows_no_caret_and_no_selection_while_a_capture_is_armed() {
         "`set_note` must write the note"
     );
     assert!(
-        note.contains("repaint_control(hwnd, IDC_HOTKEY_NOTE);"),
+        // ⚠ Имя сменилось задачей Т-45-2 — `widgets::repaint::control`, то же тело.
+        note.contains("widgets::repaint::control(hwnd, IDC_HOTKEY_NOTE);"),
         "…and invalidate it, or the text it wrote stays invisible on a raised window"
     );
 
@@ -10057,8 +10083,8 @@ fn the_about_window_answers_the_nudge_by_re_reading_the_system() {
         "if !std::ptr::eq(fresh, state.palette)",
         // The caption of the window: the one shared road (п. 3), not a second DWM path.
         "apply_title_bar_theme(hwnd, fresh);",
-        // And the visible half.
-        "repaint_whole_window(hwnd);",
+        // And the visible half. ⚠ Имя сменилось задачей Т-45-2 — общий слой, то же тело.
+        "widgets::repaint::whole(hwnd);",
     ] {
         assert!(
             refresh.contains(line),
@@ -13181,7 +13207,11 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
     let base = vertical_base_unit();
     let field_box = vertical_units(settings::FIELD_BOX_DLU, base);
     let control = vertical_units(settings::DIALOG_FONT_HEIGHT_DLU, base);
-    let air = theme::field_frame_air(Some(field_box), control, 1);
+    // ⚠ Задача Т-45-2: арифметика переехала в `widgets::field::air`, тело не менялось. Правило
+    // этого окна — `OddPixel::Dropped`, то самое «поровну, лишний пиксель теряется», которым
+    // отвечала `theme::field_frame_air`. Утверждения ниже прежние.
+    let dropped = lang_switcher::widgets::field::OddPixel::Dropped;
+    let air = lang_switcher::widgets::field::air(Some(field_box), control, 1, dropped).0;
     let outer = control + 2 * air;
 
     println!(
@@ -13194,6 +13224,12 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
         (field_box - control) / 2,
         "the air is half of what the box has left over"
     );
+    assert_eq!(
+        lang_switcher::widgets::field::air(Some(field_box), control, 1, dropped),
+        (air, air),
+        "this window puts the same number above and below — it is the wizard that puts the odd \
+         pixel below (`OddPixel::Below`, task Т-33а-2)"
+    );
     assert!(
         outer <= field_box && outer >= field_box - 1,
         "the box round the control is {outer} px against the {field_box} px of the mock-ups — \
@@ -13202,7 +13238,10 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
 
     // The same table with the numbers of 96 DPI written out, so the derivation is held even on
     // a machine that measures something else: box 23, control 15, air 4, outer 23.
-    assert_eq!(theme::field_frame_air(Some(23), 15, 1), 4);
+    assert_eq!(
+        lang_switcher::widgets::field::air(Some(23), 15, 1, dropped),
+        (4, 4)
+    );
     assert_eq!(15 + 2 * 4, 23);
 
     // **The rule degenerates into the old one.** A control already as tall as the box, one
@@ -13214,22 +13253,27 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
         ("MapDialogRect refused", None, 15),
     ] {
         assert_eq!(
-            theme::field_frame_air(box_height, control_height, 1),
-            1,
+            lang_switcher::widgets::field::air(box_height, control_height, 1, dropped),
+            (1, 1),
             "«{name}» must fall back to one border thickness"
         );
     }
 
     // A thicker border at a higher DPI is the floor, not the answer.
-    assert_eq!(theme::field_frame_air(Some(23), 23, 2), 2);
+    assert_eq!(
+        lang_switcher::widgets::field::air(Some(23), 23, 2, dropped),
+        (2, 2)
+    );
 
     // The pass draws it: the same number above and below a field, and the list branch keeps
     // the air of the mock-ups above its first row.
     let pass = function_body(&source, "unsafe fn paint_background(");
 
     for part in [
-        "field_frame_air(field_box, rect.bottom - rect.top, border)",
-        "(air, air)",
+        // ⚠ Задача Т-45-2: имя и форма вызова сменились, арифметика — нет.
+        "widgets::field::air(",
+        "widgets::field::OddPixel::Dropped",
+        "widgets::field::frame(*rect, (top, bottom), border)",
         "(list_top, border)",
         "FRAMED_LISTS.contains(control)",
         "dialog_units(hwnd, 0, FIELD_BOX_DLU)",

@@ -78,8 +78,8 @@ use windows::Win32::Graphics::Gdi::{
     DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect,
     DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetObjectW, GetTextExtentPoint32W,
     GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW, PAINTSTRUCT,
-    RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, ReleaseDC, SRCCOPY, ScreenToClient,
-    SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
+    ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor,
+    TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -113,24 +113,23 @@ use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
-    CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
-    CreateDialogIndirectParamW, CreateDialogParamW, DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC,
-    DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW,
-    DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE,
-    GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
-    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
-    IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
-    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect,
-    PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER,
-    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM,
-    WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
+    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
+    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW,
+    DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW,
+    DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN,
+    EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
+    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING,
+    LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT,
+    LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, PostMessageW, RT_DIALOG, STM_SETICON,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW,
+    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP,
+    WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
+    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
+    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT,
+    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -142,6 +141,10 @@ use crate::layouts::{self, LayoutId, LayoutSpec};
 // `theme` is: a field of the schema reads as `letters::Date`, and where it came from is part of
 // what it says.
 use crate::letters;
+// ⚠ Общий слой элементов окон — задача Т-45-2, решение 107.1. Импортируется по имени модуля, а
+// не по именам функций, ровно затем, чтобы на каждом вызове было видно, что элемент рисует
+// общий слой, а не это окно: `widgets::repaint::control` читается иначе, чем `repaint_control`.
+use crate::widgets;
 // ⚠ The names after `ThemeSetting` are the drawing library task T-14-3 moved out of this file
 // into its owner (§6.2, finding 24 of the audit of 2026-08-24). They are imported by name — not
 // called as `theme::…` — so that the change of address stayed a change of address: every call
@@ -153,11 +156,11 @@ use crate::theme::{
     GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting, caption_advance,
     check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles, combo_fill_brush,
     combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
-    draw_combo_chevron, field_frame_air, glyph_color_roles, label_ink, list_frame_air,
-    list_frame_box, list_item_color_roles, paint_caption_underline, paint_chip_row, paint_ellipse,
-    paint_label, paint_label_at_pitch, paint_rounded, paint_rounded_corners,
-    paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
-    select_face, smoothed_logfont, title_bar_is_dark,
+    draw_combo_chevron, glyph_color_roles, label_ink, list_frame_air, list_frame_box,
+    list_item_color_roles, paint_caption_underline, paint_chip_row, paint_ellipse, paint_label,
+    paint_label_at_pitch, paint_rounded, paint_rounded_corners, paint_selection_stripe,
+    resolve_button_colors, restore_face, scaled, scaled_tenths_offset, select_face,
+    smoothed_logfont, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -3640,7 +3643,7 @@ pub(crate) fn unmirror_control(hwnd: HWND, control: i32) {
     // A style change is not a repaint, and this one changes how the control draws itself. The
     // same rule as `repaint_control` beside every text write of this file (finding м-Э23-2: a
     // write nobody asked to be shown is a write nobody sees).
-    repaint_control(hwnd, control);
+    widgets::repaint::control(hwnd, control);
 }
 
 /// The compiled bytes of one dialog template of this module's own binary, copied out so that
@@ -5887,41 +5890,10 @@ impl Drop for CaptionIcons {
     }
 }
 
-/// Repaints a window of this module and every child in it, background included.
-///
-/// Two occasions, one body. **A palette change** — [`refresh_palette`] for the settings dialog
-/// and [`refresh_about_palette`] for the about window (task T-13-17) — and, since task Т-23-5,
-/// **arming or ending a capture**: the frame of the hotkey field is drawn by the window's own
-/// background and changes colour with the capture, and that background is a cached picture
-/// which has to be painted again for the change to be seen.
-///
-/// Named for what it does rather than for the first reason it was written: it was
-/// `repaint_after_palette_change` until the second caller arrived.
-pub(crate) fn repaint_whole_window(hwnd: HWND) {
-    // NFR-13: both answers are examined in words and deliberately dropped. Either call
-    // refuses only for a window that is not alive, and `hwnd` is the dialog whose
-    // procedure is running; there is nothing to do about a refused invalidation beyond the
-    // next `WM_PAINT` arriving anyway, and the journal has no row for it
-    // (reviews\T-11-1.md).
-    //
-    // SAFETY: `hwnd` is the live dialog; a null rectangle means the whole client area, and
-    // neither call keeps a pointer.
-    let _ = unsafe { InvalidateRect(Some(hwnd), None, true) };
-
-    // `RDW_ALLCHILDREN` is the half `InvalidateRect` does not reach: the controls repaint
-    // too, so the person who pressed «Применить» sees one whole dialog in the new palette,
-    // not a new background behind stale controls.
-    //
-    // SAFETY: as above.
-    let _ = unsafe {
-        RedrawWindow(
-            Some(hwnd),
-            None,
-            None,
-            RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN,
-        )
-    };
-}
+// ⚠ **Полная перерисовка окна переехала в `widgets::repaint::whole` — задача Т-45-2.** Тело не
+// менялось; здесь стояла `repaint_whole_window`. Названа она была за то, что делает, а не за
+// первый повод, ради которого написана: до появления второго вызывающего это была
+// `repaint_after_palette_change`.
 
 /// The answer to one `WM_CTLCOLOR*` question — a colour choice and a brush, nothing else.
 ///
@@ -6092,7 +6064,9 @@ pub(crate) fn apply_ctl_color(dc: HDC, choice: Option<CtlColorChoice>) -> isize 
 ///
 /// The rows of the exclusion list are **not** measured by it — they have had
 /// [`EXCLUSION_ROW_HEIGHT_DLU`] of their own since task T-11-16.
-pub const COMBO_LIST_ITEM_EXTRA: i32 = 12;
+// ⚠ **Значение уехало в `widgets::combo::LIST_ITEM_EXTRA` — задача Т-45-2.** Здесь осталось
+// прежнее имя, чтобы вызовы и тесты этого окна читались как читались; число одно и живёт в слое.
+pub use crate::widgets::combo::LIST_ITEM_EXTRA as COMBO_LIST_ITEM_EXTRA;
 
 /// Air added to the dialog font's height to make the **closed part** of a combo box — the
 /// selection field — in the pixels of the mock-ups; task T-12-2, finding F3/R-04 of the
@@ -6125,7 +6099,8 @@ pub const COMBO_LIST_ITEM_EXTRA: i32 = 12;
 /// The height of the list items is not the subject of T-12-2, so the two are set apart by the
 /// documented lever instead — [`set_combo_closed_height`] sends `CB_SETITEMHEIGHT` with
 /// `wParam = -1`, which names the selection field alone.
-pub const COMBO_CLOSED_ITEM_EXTRA: i32 = 2;
+// ⚠ Как и соседняя: значение уехало в `widgets::combo::CLOSED_ITEM_EXTRA` задачей Т-45-2.
+pub use crate::widgets::combo::CLOSED_ITEM_EXTRA as COMBO_CLOSED_ITEM_EXTRA;
 
 /// Whether this `CtlType`/`CtlID` pair is one of the dialog's own owner-drawn item holders —
 /// the identifier gate SEC-05 asks for, written down once and shared by `WM_MEASUREITEM` and
@@ -6252,30 +6227,16 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
 /// `None` for a refused `MapDialogRect` (NFR-13: examined; both callers then keep the height
 /// the control had). A refused `GetDC` is survived one level down: [`dc_dpi`] answers 96 for a
 /// DC that will not say, which is the 100 % air and a legal height.
+// ⚠ **Тело уехало в `widgets::combo::row_height` — задача Т-45-2, решение 107.3.** Здесь имя
+// осталось тонкой обёрткой: вызовов у него два, оба в этом файле, и оба читаются как читались.
+// Мастер FR-104 зовёт слой напрямую — до Э45 он этой арифметики не звал вовсе и отвечал
+// `body_height + 8` без масштаба DPI.
 fn combo_row_height(hwnd: HWND, air: i32) -> Option<i32> {
-    let (_, font_height) = dialog_units(hwnd, 0, DIALOG_FONT_HEIGHT_DLU)?;
-
-    // SAFETY: `hwnd` is the dialog — a live window either being built (`WM_MEASUREITEM`) or
-    // filled in (`WM_INITDIALOG`); the call answers its DC or an invalid handle, and the DC is
-    // released below on both paths.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    // NFR-13: examined — see the doc comment above.
-    let extra = scaled(air, dc_dpi(dc));
-
-    if !dc.is_invalid() {
-        // SAFETY: releases exactly the DC taken above, once.
-        unsafe { ReleaseDC(Some(hwnd), dc) };
-    }
-
-    Some(font_height + extra)
+    widgets::combo::row_height(hwnd, air)
 }
 
-/// The `wParam` of `CB_SETITEMHEIGHT` and `CB_GETITEMHEIGHT` that names the **selection
-/// field** — the closed part — instead of an item of the list: the documented −1, spelled as
-/// the unsigned word a message parameter is, the way `CB_SETCURSEL` is already handed its
-/// «nothing chosen» in [`select_layout`].
-const CB_SELECTION_FIELD: usize = usize::MAX;
+// ⚠ **`CB_SELECTION_FIELD` уехала в `widgets::combo` — задача Т-45-2.** Документированная −1,
+// названная беззнаковым словом, каким и бывает параметр сообщения; шлёт её теперь слой.
 
 /// Brings the closed part of the four combo boxes to the 12 dialog units of the mock-ups —
 /// FR-92, FR-92а, task T-12-2 (findings F3 and R-04 of the Э12 protocol).
@@ -6316,28 +6277,24 @@ const CB_SELECTION_FIELD: usize = usize::MAX;
 /// Answers how many of the four took the height — for the tests, and for the sentence above to
 /// be a measurement and not a hope.
 fn set_combo_closed_height(hwnd: HWND) -> usize {
-    let Some(height) = combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA) else {
+    // ⚠ **Само сообщение шлёт `widgets::combo::set_closed_height` — задача Т-45-2.** У окна
+    // осталось ровно то, что у окна и должно остаться: СПИСОК своих комбобоксов. Высота одна,
+    // арифметика одна, и мастер FR-104 получает ту же — через `widgets::combo::attach`, который
+    // ставит её сам и забыть её не даёт.
+    //
+    // `combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA)` спрашивается здесь же — числом оно
+    // никуда не идёт, но отказ `MapDialogRect` обязан дать тот же ноль, что давал раньше.
+    if combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA).is_none() {
         return 0;
-    };
+    }
 
     let mut taken = 0;
 
     for control in COMBO_BOXES {
-        // `wParam` names the selection field; `lParam` is the height it is to stand.
-        let answer = send_to(
-            hwnd,
-            control,
-            CB_SETITEMHEIGHT,
-            CB_SELECTION_FIELD,
-            isize::try_from(height).unwrap_or(0),
-        );
-
         // NFR-13: examined right here — see the doc comment above.
-        if answer == CB_ERR as isize {
-            continue;
+        if widgets::combo::set_closed_height(hwnd, control) {
+            taken += 1;
         }
-
-        taken += 1;
     }
 
     taken
@@ -8084,20 +8041,11 @@ unsafe fn draw_glyph_element(
 /// copied (§6.2), and that function now calls this one.
 ///
 /// `None` for a refused call (NFR-13: examined; every caller then keeps the default it had).
-fn dialog_units(hwnd: HWND, horizontal: i32, vertical: i32) -> Option<(i32, i32)> {
-    let mut rect = RECT {
-        left: 0,
-        top: 0,
-        right: horizontal,
-        bottom: vertical,
-    };
-
-    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call rewrites in
-    // place; nothing else is written.
-    unsafe { MapDialogRect(hwnd, &mut rect) }.ok()?;
-
-    Some((rect.right, rect.bottom))
-}
+// ⚠ **Тело уехало в `widgets::dialog_units` — задача Т-45-2.** Единица диалога есть мера
+// ЭЛЕМЕНТОВ окна, и на ней стоит вся геометрия общего слоя; здесь она осталась только именем,
+// внесённым `use` в шапке файла, — чтобы все три десятка вызовов этого файла читались так же,
+// как читались.
+use crate::widgets::dialog_units;
 
 /// Corner radius of the check-box square, in the pixels of the mock-ups — `FillRectPx $g $px
 /// $by $bs $bs $S.Mark 3` of the `'check'` arm.
@@ -8766,19 +8714,22 @@ unsafe fn paint_background(
         // A list keeps its own two distances — the air of the picture above, one thickness
         // below — because its rows are laid out by the control from the top of its client
         // area and centring the frame would move the frame away from the first row.
+        // ⚠ Арифметика воздуха переехала в `widgets::field::air` задачей Т-45-2 и не изменилась
+        // ни на пиксель: `OddPixel::Dropped` — это ровно прежняя `theme::field_frame_air`,
+        // делившая остаток поровну и терявшая лишний пиксель нечётного остатка. Мастер зовёт ту
+        // же функцию с `OddPixel::Below`; различие двух окон теперь видно в одном месте.
         let (top, bottom) = if FRAMED_LISTS.contains(control) {
             (list_top, border)
         } else {
-            let air = field_frame_air(field_box, rect.bottom - rect.top, border);
-            (air, air)
+            widgets::field::air(
+                field_box,
+                rect.bottom - rect.top,
+                border,
+                widgets::field::OddPixel::Dropped,
+            )
         };
 
-        let frame = RECT {
-            left: rect.left - border,
-            top: rect.top - top,
-            right: rect.right + border,
-            bottom: rect.bottom + bottom,
-        };
+        let frame = widgets::field::frame(*rect, (top, bottom), border);
 
         paint_rounded(
             dc,
@@ -11454,7 +11405,7 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
             // The muted or full row paints are custom-draw state, not window state: with
             // `EnableWindow` gone from the list (task T-11-7-2) nothing else would repaint
             // it on a mode flip.
-            repaint_control(hwnd, IDC_CYCLE_LIST);
+            widgets::repaint::control(hwnd, IDC_CYCLE_LIST);
         }
 
         // FR-94. The one button of the dialog that is a mode and not an action: pressing it
@@ -11531,7 +11482,7 @@ fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
         // repaint by `draw_cycle_row`.
         paint_cycle_list(hwnd, fresh);
 
-        repaint_whole_window(hwnd);
+        widgets::repaint::whole(hwnd);
     }
 }
 
@@ -11611,7 +11562,7 @@ unsafe fn relabel_in_place(hwnd: HWND) {
         })
     };
 
-    repaint_whole_window(hwnd);
+    widgets::repaint::whole(hwnd);
 }
 
 /// Механизм (б) решения 99.1 — the direction of writing changed, so the window is rebuilt.
@@ -11794,7 +11745,7 @@ fn show_hotkey(hwnd: HWND, key: &str) {
 /// «writing a store changes no pixels by itself» — and it is a single invalidation.
 fn set_note(hwnd: HWND, note: &str) {
     set_text(hwnd, IDC_HOTKEY_NOTE, note);
-    repaint_control(hwnd, IDC_HOTKEY_NOTE);
+    widgets::repaint::control(hwnd, IDC_HOTKEY_NOTE);
 }
 
 /// Puts this module's window procedure in front of the hotkey field's own.
@@ -12029,7 +11980,7 @@ unsafe fn toggle_capture(hwnd: HWND) {
     // cached picture: arming changes the colour that picture is painted with, so the picture
     // has to be built again. Both directions — the frame goes to `box_border` on arming and
     // back to `field_border` on cancelling.
-    repaint_whole_window(hwnd);
+    widgets::repaint::whole(hwnd);
 }
 
 /// Arms a capture: the conversion path stops, the field shows the invitation, the note shows
@@ -12137,7 +12088,7 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
     };
 
     if ends {
-        repaint_whole_window(dialog);
+        widgets::repaint::whole(dialog);
     }
 }
 
@@ -13342,7 +13293,7 @@ fn set_check(hwnd: HWND, control: i32, checked: bool) {
     let stored = unsafe { with_glyph_checks(hwnd, |checks| checks.set(control, checked)) };
 
     if stored.is_some() {
-        repaint_control(hwnd, control);
+        widgets::repaint::control(hwnd, control);
     }
 }
 
@@ -13368,7 +13319,7 @@ fn check_radio(hwnd: HWND, first: i32, last: i32, chosen: i32) {
         unsafe { with_glyph_checks(hwnd, |checks| checks.check_radio(first, last, chosen)) };
 
     if stored.is_some() {
-        repaint_control_range(hwnd, first, last);
+        widgets::repaint::range(hwnd, first, last);
     }
 }
 
@@ -13386,33 +13337,10 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
     let _ = unsafe { EnableWindow(window, enabled) };
 }
 
-/// Repaints one control now — task T-11-5b: writing check state changes no pixels of an
-/// owner-drawn button, so [`set_check`] asks for the repaint the moment it writes the
-/// store (task T-11-5b-2).
-pub(crate) fn repaint_control(hwnd: HWND, control: i32) {
-    // SAFETY: `hwnd` is the live dialog and `control` names a control of its template;
-    // the crate turns a missing control into an error, which is the `Ok` guard below.
-    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // NFR-13: examined in words and deliberately dropped — the call refuses only for a
-    // window that is not alive, this one was found the line above, and the journal has no
-    // row for GDI refusals (reviews\T-11-1.md).
-    //
-    // SAFETY: `window` is the live control just found; a null rectangle means its whole
-    // client area, and the call keeps no pointer.
-    let _ = unsafe { InvalidateRect(Some(window), None, true) };
-}
-
-/// Repaints every control of one contiguous identifier range — the radio ranges of task
-/// T-11-5b, the same runs [`check_radio`] walks in the store.
-fn repaint_control_range(hwnd: HWND, first: i32, last: i32) {
-    for control in first..=last {
-        repaint_control(hwnd, control);
-    }
-}
+// ⚠ **Точечная перерисовка переехала в `widgets::repaint` — задача Т-45-2.** Тела не менялись;
+// здесь стояли `repaint_control` и `repaint_control_range`, теперь это
+// `widgets::repaint::control` и `widgets::repaint::range`. Таблица переименований — в
+// `reports\ИТОГ-Э45.md`.
 
 /// Limits how much text one edit control accepts.
 fn limit_text(hwnd: HWND, control: i32, characters: usize) {
@@ -14007,7 +13935,7 @@ fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
 
         apply_title_bar_theme(hwnd, fresh);
 
-        repaint_whole_window(hwnd);
+        widgets::repaint::whole(hwnd);
     }
 }
 

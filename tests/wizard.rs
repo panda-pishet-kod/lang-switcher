@@ -529,7 +529,14 @@ fn the_box_of_a_wizard_field_is_exactly_the_height_it_is_asked_for() {
     ];
 
     for ((box_height, control, border), want) in table {
-        let got = letters::field_box_air(box_height, control, border);
+        // ⚠ Задача Т-45-2: тело переехало в общий слой элементов и не изменилось; правило
+        // «лишний пиксель вниз» стало явным значением `OddPixel::Below`.
+        let got = lang_switcher::widgets::field::air(
+            box_height,
+            control,
+            border,
+            lang_switcher::widgets::field::OddPixel::Below,
+        );
 
         println!("коробка {box_height:?}, контрол {control}, рамка {border} → {got:?}");
 
