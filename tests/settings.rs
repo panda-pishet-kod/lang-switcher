@@ -8500,8 +8500,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Список раскладок в мастере стал того же размера, что и списки в настройках.",
-        "The layout list in the wizard is now the size of the lists in the settings window.",
+        "Строки в списке раскладок мастера стали выше: их высоту задаёт общая мерка программы.",
+        "The rows of the wizard's layout list are taller: their height comes from the program's common rule.",
     ),
     (
         settings::IDS_WHATSNEW_3,

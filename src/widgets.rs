@@ -322,6 +322,28 @@ pub mod repaint {
     ///
     /// Перенесено из `settings::repaint_control` задачей Т-45-2, тело не менялось.
     pub fn control(hwnd: HWND, control: i32) {
+        invalidate(hwnd, control, true);
+    }
+
+    /// То же, но **без стирания фона перед рисованием** — задача Т-45-3, находка прибором.
+    ///
+    /// ⛔ **Стирание и есть тот кадр, в котором элемента нет.** Owner-draw кнопка на
+    /// `WM_ERASEBKGND` спрашивает у родителя кисть (`WM_CTLCOLORBTN`), а родитель отвечает
+    /// кистью **фона окна**: карточка мастера на один кадр заливается фоном окна и только потом
+    /// приходит `WM_DRAWITEM`, который рисует её целиком. Пойман снимком на живом продукте:
+    /// на худшем кадре первой карточки в окне НЕТ ВОВСЕ, расхождение 27 700 пикселей.
+    ///
+    /// Элементу, который рисует **весь свой прямоугольник** сам — а таковы и карточки, и глифы,
+    /// и подписи этой программы, — стирание не нужно ни для чего. `bErase = FALSE` убирает
+    /// промежуточный кадр, не меняя ни одного устоявшегося пикселя.
+    ///
+    /// ⚠ Дверь отдельная, а не флаг у общей: окно настроек ходит прежней дорогой и остаётся при
+    /// своём поведении до пикселя и до кадра (решение 107.2).
+    pub fn control_no_erase(hwnd: HWND, control: i32) {
+        invalidate(hwnd, control, false);
+    }
+
+    fn invalidate(hwnd: HWND, control: i32, erase: bool) {
         // SAFETY: `hwnd` is the live dialog and `control` names a control of its template;
         // the crate turns a missing control into an error, which is the `Ok` guard below.
         let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
@@ -335,7 +357,7 @@ pub mod repaint {
         //
         // SAFETY: `window` is the live control just found; a null rectangle means its whole
         // client area, and the call keeps no pointer.
-        let _ = unsafe { InvalidateRect(Some(window), None, true) };
+        let _ = unsafe { InvalidateRect(Some(window), None, erase) };
     }
 
     /// Repaints every control of one contiguous identifier range — the radio ranges of task
