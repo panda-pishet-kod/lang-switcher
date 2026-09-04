@@ -2882,11 +2882,12 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
                 state.palette.cap,
                 state.fonts.as_ref().map(|faces| faces.caption),
                 state.kind,
+                brushes.field_bg(),
             ))
         })
     };
 
-    let Some(Some((ground, line, panel, border, caption, face, kind))) = choice else {
+    let Some(Some((ground, line, panel, border, caption, face, kind, field))) = choice else {
         return 0;
     };
 
@@ -2941,9 +2942,154 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
         }
     }
 
+    // ⛔ **Рамка поля — задача Т-33-7, находка глазом пользователя.** До неё поля мастера не
+    // имели рамки вовсе: коробкой выглядела собственная заливка контрола, а он был высотой в
+    // кнопку — и текст стоял по его ВЕРХНЕМУ краю, оставляя под собой одиннадцать пикселей
+    // пустоты. Однострочный `EDIT` кладёт текст по верху своей клиентской области, и ни одно
+    // документированное сообщение его оттуда не двигает (`EM_SETRECT` — для многострочных,
+    // `EM_SETMARGINS` двигает бока). Задача T-12-3 решила это для окна настроек ровно так:
+    // контролу — одна кегельная строка, а коробку рисует фон **вокруг него, по центру**, и
+    // воздух ложится над текстом и под ним поровну. Здесь — то же самое тело и та же
+    // `theme::field_frame_air`.
+    if kind == Kind::Wizard {
+        let box_height = Some(Metrics::of(hwnd).y(settings::FIELD_BOX_DLU));
+        let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
+
+        for (control, rect) in &rects {
+            if !WIZARD_FIELDS.contains(control) && !WIZARD_AREAS.contains(control) {
+                continue;
+            }
+
+            if rect.right <= rect.left || rect.bottom <= rect.top {
+                continue;
+            }
+
+            // ⛔ **Только видимые.** Окно настроек этой проверки не знает — там видно всё, — а у
+            // мастера каждый шаг прячет чужие слоты, и прямоугольник из шаблона у них остаётся.
+            // Без этой строки фон рисовал рамки полей ЧУЖИХ шагов: пустые белые коробки по
+            // всему окну, и это увидел глаз на первом же снимке.
+            if !is_shown(hwnd, *control) {
+                continue;
+            }
+
+            // ⚠ Многострочное поле держит свои строки от верха клиентской области, и центровать
+            // вокруг него нечего: воздух ему даёт `EM_SETRECT` внутри, а рамка стоит на одной
+            // толщине — та же развилка, что у списков окна настроек (`FRAMED_LISTS`).
+            let air = if WIZARD_AREAS.contains(control) {
+                thickness
+            } else {
+                theme::field_frame_air(box_height, rect.bottom - rect.top, thickness)
+            };
+
+            theme::paint_rounded(
+                dc,
+                &RECT {
+                    left: rect.left - thickness,
+                    top: rect.top - air,
+                    right: rect.right + thickness,
+                    bottom: rect.bottom + air,
+                },
+                theme::scaled(theme::CORNER_RADIUS, dpi),
+                line,
+                field,
+                dpi,
+            );
+        }
+    }
+
     // TRUE — the background is drawn; the manager must not erase over it.
     1
 }
+
+/// Whether a child of this window is on the screen right now.
+fn is_shown(hwnd: HWND, control: i32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, IsWindowVisible};
+
+    // SAFETY: `hwnd` is the live window; the crate turns a missing control into an error, and
+    // `IsWindowVisible` reads a flag of the window it is handed.
+    unsafe { GetDlgItem(Some(hwnd), control) }
+        .is_ok_and(|child| unsafe { IsWindowVisible(child) }.as_bool())
+}
+
+/// The three **single-line** fields of the wizard — the ones whose box the background draws
+/// around a control one em box tall (задача Т-33-7).
+const WIZARD_FIELDS: [i32; 3] = [IDC_WZ_PROGRAM, IDC_WZ_EXPECTED, IDC_WZ_GOT];
+
+/// Places a single-line field so that its **box** stands centred in a row `row` pixels tall.
+///
+/// The control itself gets one em box — [`settings::DIALOG_FONT_HEIGHT_DLU`], exactly the line
+/// its text needs — and the frame the background draws around it (see [`on_erase`]) puts the
+/// leftover air above and below in equal halves. Giving the control the whole row instead is
+/// what pinned the text to the top edge, which is what the eye found on 0.43.0.
+///
+/// The sides are handed to the control itself: `EM_SETMARGINS` is the documented way to inset
+/// the text of an `EDIT`, and it is the same inset the settings window uses.
+fn place_field(hwnd: HWND, metrics: Metrics, control: i32, x: i32, y: i32, width: i32, row: i32) {
+    use windows::Win32::UI::Controls::EM_SETMARGINS;
+    use windows::Win32::UI::WindowsAndMessaging::{EC_LEFTMARGIN, EC_RIGHTMARGIN};
+
+    let line = metrics.y(settings::DIALOG_FONT_HEIGHT_DLU);
+
+    place(hwnd, control, x, y + (row - line).max(0) / 2, width, line);
+
+    let inset = metrics.x(settings::FIELD_TEXT_INSET_DLU).max(0);
+    let margins = isize::try_from((inset as u32) | ((inset as u32) << 16)).unwrap_or(0);
+
+    settings::send_to(
+        hwnd,
+        control,
+        EM_SETMARGINS,
+        usize::try_from(EC_LEFTMARGIN | EC_RIGHTMARGIN).unwrap_or(0),
+        margins,
+    );
+}
+
+/// Gives a **multi-line** field the air its text stands in — `EM_SETRECT`, the one message that
+/// moves the formatting rectangle of an edit control, and the one that is documented for
+/// multiline controls only.
+///
+/// Without it the words start in the very corner of the box, against the frame: the mock-up
+/// insets them (`textarea.field { padding: 8px 10px }`), and this is that inset.
+fn inset_area(hwnd: HWND, metrics: Metrics, control: i32) {
+    use windows::Win32::UI::Controls::EM_SETRECT;
+
+    let Ok(child) =
+        (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
+    else {
+        return;
+    };
+
+    let mut client = RECT::default();
+
+    // SAFETY: `child` is the live control and `client` a live local the call fills.
+    if unsafe { GetClientRect(child, &mut client) }.is_err() {
+        return;
+    }
+
+    let side = metrics.x(settings::FIELD_TEXT_INSET_DLU).max(0);
+    let top = metrics.y(air::TIGHT).max(0);
+
+    let formatting = RECT {
+        left: client.left + side,
+        top: client.top + top,
+        right: (client.right - side).max(client.left + side),
+        bottom: (client.bottom - top).max(client.top + top),
+    };
+
+    // SAFETY: the pointer names a live local of this frame and the control only reads it for
+    // the length of the send — the documented shape of `EM_SETRECT`.
+    settings::send_to(
+        hwnd,
+        control,
+        EM_SETRECT,
+        0,
+        std::ptr::from_ref(&formatting) as isize,
+    );
+}
+
+/// The three **multi-line** fields of the wizard. Their box is the control's own rectangle plus
+/// one thickness, and the air around their text comes from `EM_SETRECT` inside them.
+const WIZARD_AREAS: [i32; 3] = [IDC_WZ_IDEA, IDC_WZ_HELPS, IDC_WZ_PREVIEW];
 
 /// The `WM_CTLCOLOR*` answers of these windows — the choosing half; the applying half is the
 /// shared `settings::apply_ctl_color` (§6.2).
@@ -6735,8 +6881,9 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
                 label_width,
                 step_height,
             );
-            place(
+            place_field(
                 hwnd,
+                metrics,
                 IDC_WZ_PROGRAM,
                 pad + label_width,
                 y,
@@ -6834,7 +6981,7 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
             ] {
                 place(hwnd, label, pad, y, width, step_height);
                 y += step_height + tight;
-                place(hwnd, field, pad, y, width, button);
+                place_field(hwnd, metrics, field, pad, y, width, button);
                 y += button + gap;
             }
 
@@ -6867,6 +7014,7 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
                 place(hwnd, label, pad, y, width, step_height);
                 y += step_height + tight;
                 place(hwnd, field, pad, y, width, each);
+                inset_area(hwnd, metrics, field);
                 y += each + gap;
             }
         }
@@ -6964,6 +7112,7 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
                 (bottom - y - button * rows - step_height - tight * (rows + 1)).max(metrics.y(40));
 
             place(hwnd, IDC_WZ_PREVIEW, pad, y, width, room);
+            inset_area(hwnd, metrics, IDC_WZ_PREVIEW);
             y += room + tight;
 
             place(hwnd, IDC_WZ_COPY, pad, y, copy_width, button);
