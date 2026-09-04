@@ -13,10 +13,16 @@
 
     The two gates task T-22-11 added stand where the thing they are about exists. The version
     check is FIRST, because a tree whose nine version values disagree must not be compiled at
-    all; the NFR-07 and criterion 4 gate is LAST, because NFR-07 is about the SIGNED file and
-    the signature is appended to it. Before that task neither was checked by anything: the
-    size was printed as information beside the artifact, and the dependency list was compared
-    only by its line count.
+    all; the criterion 4 gate is LAST together with the NFR-07 measurement, because NFR-07 is
+    about the SIGNED file and the signature is appended to it. Before that task neither was
+    checked by anything: the size was printed as information beside the artifact, and the
+    dependency list was compared only by its line count.
+
+    Since decision 106.2 (2026-09-04, task T-45-0) NFR-07 has NO ceiling: the size of the
+    signed artifact is measured and printed at every delivery, and the growth over the previous
+    delivery goes into the report. So the last step no longer refuses a build for being large;
+    it refuses one whose artifact cannot be measured at all, and one that fails criterion 4 or
+    the SEC-03 address gate.
 
     Both build configurations write the same LangSwitcher.exe (fact 8 of section 9 of
     STATE.md), so "sign whatever is on disk" is a way to ship the build WITH the `testing`
@@ -45,8 +51,8 @@
 
     Exit code: 0 only if the nine version values agree, the build succeeded, criterion 8
     passed, the copy was made, -- unless -SkipSign was given -- the signature was applied and
-    verified, and NFR-07 and criterion 4 both hold. 8 is the version gate, 9 the perimeter
-    gate; 1 to 7 are as they were.
+    verified, the artifact could be measured for NFR-07, and criterion 4 holds. 8 is the
+    version gate, 9 the perimeter gate; 1 to 7 are as they were.
 
     Examples:
       .\release.ps1
@@ -63,7 +69,11 @@ param(
     # people's artifacts from the setup stage; this script touches this one file and nothing
     # else in it.
     [string]$Artifact = '<dev>\artifacts\LangSwitcher.exe',
-    [string]$TimestampUrl = 'http://timestamp.digicert.com'
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
+    # verify-perimeter.ps1, which turns it into the growth line decision 106.2 asks every
+    # delivery report to carry. Zero means "not given".
+    [long]$PreviousSize = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -212,12 +222,14 @@ if ($SkipSign) {
 # file the user runs, a signature is appended to that file, and the unsigned build is therefore
 # the easier case. Under -SkipSign the artifact is unsigned and the gate says so rather than
 # pretending the measurement was the right one.
-Write-Section 'Step 6: NFR-07 and criterion 4 of section 13'
+# Task T-45-0, decision 106.2: the NFR-07 half of this step is a MEASUREMENT, not a limit --
+# it prints the size and, with -PreviousSize, the growth over the previous delivery.
+Write-Section 'Step 6: NFR-07 measurement and criterion 4 of section 13'
 if ($SkipSign) {
     Write-Host '  NOTE: -SkipSign was given, so the file measured below is UNSIGNED and is'
-    Write-Host '  smaller than the product will be. The gate is informative on this run.'
+    Write-Host '  smaller than the product will be. The size below is not the shipping one.'
 }
-& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $Artifact
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $Artifact -Previous $PreviousSize
 $perimeter = $LASTEXITCODE
 if ($perimeter -ne 0) {
     Write-Host ''

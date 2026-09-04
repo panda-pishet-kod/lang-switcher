@@ -6,13 +6,22 @@
     information beside it, and the dependency list was compared only by its LINE COUNT --
     which a crate swapped for another crate passes without a murmur.
 
-    GATE 1 -- NFR-07, "Razmer ispolnyaemogo fayla < 1.5 MB".
+    GATE 1 -- NFR-07, "Razmer ispolnyaemogo fayla": INFORMATION ONLY since decision 106.2.
 
-        The letter of the requirement is 1.5 MB and the binary reading of it is
-        1.5 * 1024 * 1024 = 1572864 bytes. The measurement is taken over the SIGNED artifact,
-        which is the file the user runs: a signature is appended to the file, so the unsigned
-        build is the smaller of the two and measuring it would be measuring the easier case.
-        The comparison is strict, as the requirement writes it.
+        The ceiling of 1.5 MB was REMOVED by the user on 2026-09-04 -- "snyat potolok, on
+        ogranichivaet, a ne pomogaet" (decision 106.2, task T-45-0). The requirement now reads
+        "predela net; razmer podpisannogo artefakta izmeryaetsya i pechataetsya pri kazhdoy
+        postavke, prirost protiv prezhney postavki -- v otchet".
+
+        So this gate MEASURES and PRINTS, and never fails on the number itself. The size is
+        still taken over the SIGNED artifact, which is the file the user runs: a signature is
+        appended to the file, so the unsigned build is the smaller of the two and measuring it
+        would be measuring the easier case. -Previous <bytes> adds the growth line the report
+        asks for; without it the growth is printed as "not given".
+
+        The one thing that still FAILS here is a measurement that could not be taken at all:
+        a missing artifact. That is what keeps the gate honest -- an instrument that cannot
+        fail under any circumstance has not measured anything.
 
     GATE 2 -- criterion 4 of section 13, "cargo tree ne soderzhit kreytov s setevymi
     vozmozhnostyami", and SEC-03 behind it.
@@ -29,9 +38,11 @@
 
     THE POSITIVE CONTROLS, and why neither needs a file to be edited:
 
-        .\verify-perimeter.ps1 -MaxBytes 1
-            the size gate must FAIL. An instrument that answers "under the ceiling" whatever
-            the ceiling is has not measured anything.
+        .\verify-perimeter.ps1 -Artifact <dev>\artifacts\no-such-file.exe
+            gate 1 must FAIL, naming the file it could not measure. This replaced the old
+            `-MaxBytes 1` control when the ceiling went away (task T-45-0): the gate no longer
+            judges the number, so the only thing left to prove is that it really opens the
+            file and really reads its length.
 
         .\verify-perimeter.ps1 -ExtraMarkers serde
             the crate gate must FAIL and must name `serde`, which really is in the tree. That
@@ -43,20 +54,22 @@
     Written without a single Cyrillic character and for Windows PowerShell 5.1: no `&&`, no
     `??`, no ternary. Decision R-05, as release.ps1 states it.
 
-    Exit code: 0 only if both gates pass -- or, under a control, only if the gate under
-    control really failed.
+    Exit code: 0 only if the artifact could be measured and gates 2 and 3 pass -- or, under a
+    control, only if the gate under control really failed.
 
     Examples:
       .\verify-perimeter.ps1
       .\verify-perimeter.ps1 -Artifact <dev>\artifacts\LangSwitcher.exe
-      .\verify-perimeter.ps1 -MaxBytes 1 -ExtraMarkers serde   # both controls: must PASS
+      .\verify-perimeter.ps1 -Previous 1413240              # prints the growth over e44
+      .\verify-perimeter.ps1 -ExtraMarkers serde            # crate control: must PASS
 #>
 [CmdletBinding()]
 param(
     # The file NFR-07 is about: the signed product the user runs.
     [string]$Artifact = '<dev>\artifacts\LangSwitcher.exe',
-    # NFR-07: 1.5 MB, read as 1.5 * 1024 * 1024. A small value is the positive control.
-    [long]$MaxBytes = 1572864,
+    # Size of the artifact of the PREVIOUS delivery, in bytes. Given, it turns into the growth
+    # line decision 106.2 asks every delivery report to carry. Zero means "not given".
+    [long]$Previous = 0,
     # Crate names added to the marker list. `serde` is the positive control: it is in the
     # tree, so the gate has to fire on it.
     [string[]]$ExtraMarkers = @()
@@ -87,7 +100,6 @@ if ($ExtraMarkers.Count -gt 0) {
     $Markers = $Markers + $ExtraMarkers
 }
 
-$sizeControl = ($MaxBytes -ne 1572864)
 $crateControl = ($ExtraMarkers.Count -gt 0)
 
 Write-Host ''
@@ -96,13 +108,12 @@ Write-Host ' Lang_Switcher -- NFR-07 and criterion 4 of section 13'
 Write-Host '======================================================================'
 Write-Host ("Project   {0}" -f $ProjectDir)
 Write-Host ("Artifact  {0}" -f $Artifact)
-Write-Host ("Ceiling   {0} bytes" -f $MaxBytes)
-if ($sizeControl)  { Write-Host '          *** POSITIVE CONTROL: the size gate must FAIL ***' }
+Write-Host 'Ceiling   none -- NFR-07 has no limit since decision 106.2'
 if ($crateControl) { Write-Host ("Markers   + {0}  *** POSITIVE CONTROL: the crate gate must FAIL ***" -f ($ExtraMarkers -join ', ')) }
 
 # --- Gate 1: NFR-07 --------------------------------------------------------------------------
 Write-Host ''
-Write-Host '--- Gate 1: NFR-07, the size of the signed product --------------------'
+Write-Host '--- Gate 1: NFR-07, the size of the signed product (information) ------'
 
 if (-not (Test-Path $Artifact)) {
     Write-Host ("FAIL: the artifact is missing: {0}" -f $Artifact)
@@ -111,17 +122,18 @@ if (-not (Test-Path $Artifact)) {
 }
 
 $size = (Get-Item $Artifact).Length
-$sizeFailed = ($size -ge $MaxBytes)
 
 Write-Host ("  size    {0} bytes" -f $size)
-Write-Host ("  ceiling {0} bytes (strict)" -f $MaxBytes)
-Write-Host ("  headroom {0} bytes" -f ($MaxBytes - $size))
-
-if ($sizeFailed) {
-    Write-Host '  RESULT: FAIL -- the product is at or over the ceiling of NFR-07'
+if ($Previous -gt 0) {
+    $growth = $size - $Previous
+    $sign = '+'
+    if ($growth -lt 0) { $sign = '' }
+    Write-Host ("  previous {0} bytes" -f $Previous)
+    Write-Host ("  growth   {0}{1} bytes" -f $sign, $growth)
 } else {
-    Write-Host '  RESULT: pass'
+    Write-Host '  previous not given -- pass -Previous <bytes> to print the growth'
 }
+Write-Host '  RESULT: information only -- NFR-07 has no ceiling (decision 106.2)'
 
 # --- Gate 2: criterion 4 ----------------------------------------------------------------------
 Write-Host ''
@@ -269,34 +281,24 @@ if ($addressFailed) {
 Write-Host ''
 Write-Host '======================================================================'
 
-if ($sizeControl -or $crateControl) {
-    $ok = $true
-
-    if ($sizeControl -and (-not $sizeFailed)) {
-        Write-Host ' POSITIVE CONTROL FAILED: the size gate passed a ceiling nothing can fit under'
-        $ok = $false
-    }
-    if ($crateControl -and (-not $crateFailed)) {
-        Write-Host ' POSITIVE CONTROL FAILED: the crate gate missed a crate that is in the tree'
-        $ok = $false
-    }
-
-    if ($ok) {
-        Write-Host ' POSITIVE CONTROL PASSED: every gate under control really failed'
+if ($crateControl) {
+    if ($crateFailed) {
+        Write-Host ' POSITIVE CONTROL PASSED: the gate under control really failed'
         Write-Host '======================================================================'
         exit 0
     }
 
+    Write-Host ' POSITIVE CONTROL FAILED: the crate gate missed a crate that is in the tree'
     Write-Host '======================================================================'
     exit 1
 }
 
-if ($sizeFailed -or $crateFailed -or $addressFailed) {
+if ($crateFailed -or $addressFailed) {
     Write-Host ' RESULT: FAIL'
     Write-Host '======================================================================'
     exit 1
 }
 
-Write-Host ' RESULT: PASS -- NFR-07, criterion 4 and SEC-03 addresses all hold'
+Write-Host ' RESULT: PASS -- criterion 4 and SEC-03 addresses hold; NFR-07 measured above'
 Write-Host '======================================================================'
 exit 0
