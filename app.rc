@@ -1476,6 +1476,13 @@ END
 #define IDS_THANKYOU_IDEA_TITLE 3209
 #define IDS_THANKYOU_BUG_TEXT   3210
 #define IDS_THANKYOU_IDEA_TEXT  3211
+// ⛔ **Задача Т-33а-4, решение 104.4.** Уведомление письма «Что нового» несло слова уведомления
+// «Обновления» — «Вышла версия 0.43.0 · Три изменения и ссылка на загрузку». У «Что нового»
+// загружать нечего: версия уже стоит, письмо рассказывает, что в ней. Тело у него теперь своё.
+// ⭐ **Заголовок НЕ новый:** его несёт `IDS_WHATSNEW_TITLE` (3102) — те же слова «Что нового
+// в {0}», уже переведённые на четырнадцать языков, и шар с письмом обязаны говорить одно и то
+// же. Новая строка ровно одна.
+#define IDS_TOAST_WHATSNEW      3212
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -1618,6 +1625,7 @@ BEGIN
     IDS_TOAST_THANKS        "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать."
     IDS_TOAST_UPDATE_TITLE  "Вышла версия {0}"
     IDS_TOAST_UPDATE        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать."
+    IDS_TOAST_WHATSNEW      "Три изменения. Нажмите, чтобы прочитать."
     IDS_ABOUT_AUTHOR        "От автора…"
     IDS_ENTRY_UPDATE_MARK   "{0} · обновление · у вас {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
@@ -1831,6 +1839,7 @@ BEGIN
     IDS_TOAST_THANKS        "It has been a month since you installed it. Panda would like a word. Click to read it."
     IDS_TOAST_UPDATE_TITLE  "Version {0} is out"
     IDS_TOAST_UPDATE        "Three changes and a link to the download. Click to read it."
+    IDS_TOAST_WHATSNEW      "Three changes. Click to read them."
     IDS_ABOUT_AUTHOR        "From the author…"
     IDS_ENTRY_UPDATE_MARK   "{0} · update · you have {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · not read"
@@ -2057,6 +2066,7 @@ BEGIN
     IDS_TOAST_THANKS        "Минув місяць від встановлення. Панда хоче сказати кілька слів. Натисніть, щоб прочитати."
     IDS_TOAST_UPDATE_TITLE  "Вийшла версія {0}"
     IDS_TOAST_UPDATE        "Три зміни і посилання на завантаження. Натисніть, щоб прочитати."
+    IDS_TOAST_WHATSNEW      "Три зміни. Натисніть, щоб прочитати."
     IDS_ABOUT_AUTHOR        "Від автора…"
     IDS_ENTRY_UPDATE_MARK   "{0} · оновлення · у вас {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
@@ -2266,6 +2276,7 @@ BEGIN
     IDS_TOAST_THANKS        "Seit der Installation ist ein Monat vergangen. Panda möchte ein paar Worte sagen. Klicken Sie, um sie zu lesen."
     IDS_TOAST_UPDATE_TITLE  "Version {0} ist da"
     IDS_TOAST_UPDATE        "Drei Änderungen und ein Link zum Download. Klicken Sie, um es zu lesen."
+    IDS_TOAST_WHATSNEW      "Drei Änderungen. Klicken Sie, um sie zu lesen."
     IDS_ABOUT_AUTHOR        "Vom Autor…"
     IDS_ENTRY_UPDATE_MARK   "{0} · Update · Sie haben {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · ungelesen"
@@ -2477,6 +2488,7 @@ BEGIN
     IDS_TOAST_THANKS        "Un mois a passé depuis l'installation. Panda voudrait dire deux mots. Cliquez pour les lire."
     IDS_TOAST_UPDATE_TITLE  "La version {0} est sortie"
     IDS_TOAST_UPDATE        "Trois changements et un lien de téléchargement. Cliquez pour lire."
+    IDS_TOAST_WHATSNEW      "Trois changements. Cliquez pour lire."
     IDS_ABOUT_AUTHOR        "De l'auteur…"
     IDS_ENTRY_UPDATE_MARK   "{0} · mise à jour · vous avez la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · non lue"
@@ -2685,6 +2697,7 @@ BEGIN
     IDS_TOAST_THANKS        "Ha pasado un mes desde la instalación. Panda quiere decirle un par de cosas. Pulse para leerlas."
     IDS_TOAST_UPDATE_TITLE  "Ha salido la versión {0}"
     IDS_TOAST_UPDATE        "Tres cambios y un enlace de descarga. Pulse para leerlo."
+    IDS_TOAST_WHATSNEW      "Tres cambios. Pulse para leerlos."
     IDS_ABOUT_AUTHOR        "Del autor…"
     IDS_ENTRY_UPDATE_MARK   "{0} · actualización · usted tiene la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · sin leer"
@@ -2891,6 +2904,7 @@ BEGIN
     IDS_TOAST_THANKS        "Passou um mês desde a instalação. O Panda quer dizer duas palavras. Clique para ler."
     IDS_TOAST_UPDATE_TITLE  "Saiu a versão {0}"
     IDS_TOAST_UPDATE        "Três mudanças e um link para o download. Clique para ler."
+    IDS_TOAST_WHATSNEW      "Três mudanças. Clique para ler."
     IDS_ABOUT_AUTHOR        "Do autor…"
     IDS_ENTRY_UPDATE_MARK   "{0} · atualização · você tem a {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · não lida"
@@ -3102,6 +3116,7 @@ BEGIN
     IDS_TOAST_THANKS        "È passato un mese dall'installazione. Panda vuole dirti due parole. Fai clic per leggerle."
     IDS_TOAST_UPDATE_TITLE  "È uscita la versione {0}"
     IDS_TOAST_UPDATE        "Tre cambiamenti e un collegamento al download. Fai clic per leggere."
+    IDS_TOAST_WHATSNEW      "Tre cambiamenti. Fai clic per leggere."
     IDS_ABOUT_AUTHOR        "Dall'autore…"
     IDS_ENTRY_UPDATE_MARK   "{0} · aggiornamento · hai la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · non letta"
@@ -3313,6 +3328,7 @@ BEGIN
     IDS_TOAST_THANKS        "Minął miesiąc od instalacji. Panda chce powiedzieć parę słów. Kliknij, żeby przeczytać."
     IDS_TOAST_UPDATE_TITLE  "Wyszła wersja {0}"
     IDS_TOAST_UPDATE        "Trzy zmiany i link do pobrania. Kliknij, żeby przeczytać."
+    IDS_TOAST_WHATSNEW      "Trzy zmiany. Kliknij, żeby przeczytać."
     IDS_ABOUT_AUTHOR        "Od autora…"
     IDS_ENTRY_UPDATE_MARK   "{0} · aktualizacja · masz {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · nieprzeczytane"
@@ -3520,6 +3536,7 @@ BEGIN
     IDS_TOAST_THANKS        "Od instalace uplynul měsíc. Panda by rád řekl pár slov. Klepnutím si je přečtete."
     IDS_TOAST_UPDATE_TITLE  "Vyšla verze {0}"
     IDS_TOAST_UPDATE        "Tři změny a odkaz ke stažení. Klepnutím si to přečtete."
+    IDS_TOAST_WHATSNEW      "Tři změny. Klepnutím si je přečtete."
     IDS_ABOUT_AUTHOR        "Od autora…"
     IDS_ENTRY_UPDATE_MARK   "{0} · aktualizace · máte {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · nepřečteno"
@@ -3730,6 +3747,7 @@ BEGIN
     IDS_TOAST_THANKS        "Kurulumdan bu yana bir ay geçti. Panda birkaç söz söylemek istiyor. Okumak için tıklayın."
     IDS_TOAST_UPDATE_TITLE  "{0} sürümü çıktı"
     IDS_TOAST_UPDATE        "Üç değişiklik ve indirme bağlantısı. Okumak için tıklayın."
+    IDS_TOAST_WHATSNEW      "Üç değişiklik. Okumak için tıklayın."
     IDS_ABOUT_AUTHOR        "Yazardan…"
     IDS_ENTRY_UPDATE_MARK   "{0} · güncelleme · sizde {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · okunmadı"
@@ -3944,6 +3962,7 @@ BEGIN
     IDS_TOAST_THANKS        "Πέρασε ένας μήνας από την εγκατάσταση. Ο Πάντα θέλει να πει δυο λόγια. Κάντε κλικ για να τα διαβάσετε."
     IDS_TOAST_UPDATE_TITLE  "Κυκλοφόρησε η έκδοση {0}"
     IDS_TOAST_UPDATE        "Τρεις αλλαγές και ένας σύνδεσμος λήψης. Κάντε κλικ για να το διαβάσετε."
+    IDS_TOAST_WHATSNEW      "Τρεις αλλαγές. Κάντε κλικ για να τις διαβάσετε."
     IDS_ABOUT_AUTHOR        "Από τον δημιουργό…"
     IDS_ENTRY_UPDATE_MARK   "{0} · ενημέρωση · έχετε την {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · αδιάβαστο"
@@ -4164,6 +4183,7 @@ BEGIN
     IDS_TOAST_THANKS        "עבר חודש מההתקנה. פנדה רוצה לומר כמה מילים. הקישו כדי לקרוא."
     IDS_TOAST_UPDATE_TITLE  "יצאה גרסה {0}"
     IDS_TOAST_UPDATE        "שלושה שינויים וקישור להורדה. הקישו כדי לקרוא."
+    IDS_TOAST_WHATSNEW      "שלושה שינויים. הקישו כדי לקרוא."
     IDS_ABOUT_AUTHOR        "מהמפתח…"
     IDS_ENTRY_UPDATE_MARK   "{0} · עדכון · אצלכם {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · לא נקרא"
@@ -4370,6 +4390,7 @@ BEGIN
     IDS_TOAST_THANKS        "مضى شهر على التثبيت. يريد باندا أن يقول كلمتين. اضغط لقراءتهما."
     IDS_TOAST_UPDATE_TITLE  "صدر الإصدار {0}"
     IDS_TOAST_UPDATE        "ثلاثة تغييرات ورابط للتنزيل. اضغط للقراءة."
+    IDS_TOAST_WHATSNEW      "ثلاثة تغييرات. اضغط للقراءة."
     IDS_ABOUT_AUTHOR        "من المؤلف…"
     IDS_ENTRY_UPDATE_MARK   "{0} · تحديث · لديك {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · غير مقروءة"

@@ -5708,19 +5708,49 @@ fn show(owner: HWND, letter: Letter, today: Date, version: &str, activate: bool)
     true
 }
 
-/// Knocks once with the balloon of the icon — FR-101, every letter but «Привет».
-fn announce(letter: Letter, version: &str) {
+/// Which two strings each letter knocks with — FR-101, задача Т-33а-4.
+///
+/// `None` for «Привет»: FR-101 shows it at once and never announces it.
+///
+/// # ⛔ Почему это отдельная таблица, а не `match` внутри `announce`
+///
+/// До этой задачи «Что нового» стучалось словами «Обновления»: «Вышла версия 0.43.0 · Три
+/// изменения **и ссылка на загрузку**». Обе половины были неправдой — версия не «вышла», она
+/// уже стоит и работает, а загружать по этому письму нечего. Нашлось это глазом на снимке
+/// пользователя, потому что проверить было нечем: строки выбирались внутри функции, которой
+/// нужен живой трей. Теперь выбор — чистая функция, и `tests\letters.rs` перебирает по ней все
+/// пять писем разом.
+///
+/// ⭐ Заголовок «Что нового» — тот же [`IDS_WHATSNEW_TITLE`], которым подписано само письмо:
+/// слова там те же и уже переведены на четырнадцать языков, а стук и письмо обязаны говорить
+/// одно и то же.
+pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
     use crate::settings::{
         IDS_TOAST_NEWS, IDS_TOAST_THANKS, IDS_TOAST_TITLE, IDS_TOAST_UPDATE,
-        IDS_TOAST_UPDATE_TITLE, format_text, text,
+        IDS_TOAST_UPDATE_TITLE, IDS_TOAST_WHATSNEW, IDS_WHATSNEW_TITLE,
     };
 
-    let (title, body) = match letter {
-        // «Привет» is never announced: FR-101 shows it at once, and this function is not
-        // reached for it.
-        Letter::Welcome => return,
-        Letter::Thanks => (text(IDS_TOAST_TITLE), text(IDS_TOAST_THANKS)),
-        Letter::News(_) => (text(IDS_TOAST_TITLE), text(IDS_TOAST_NEWS)),
+    match letter {
+        Letter::Welcome => None,
+        Letter::Thanks => Some((IDS_TOAST_TITLE, IDS_TOAST_THANKS)),
+        Letter::News(_) => Some((IDS_TOAST_TITLE, IDS_TOAST_NEWS)),
+        Letter::Update => Some((IDS_TOAST_UPDATE_TITLE, IDS_TOAST_UPDATE)),
+        Letter::WhatsNew => Some((IDS_WHATSNEW_TITLE, IDS_TOAST_WHATSNEW)),
+    }
+}
+
+/// Knocks once with the balloon of the icon — FR-101, every letter but «Привет».
+fn announce(letter: Letter, version: &str) {
+    use crate::settings::{format_text, text};
+
+    // «Привет» is never announced: FR-101 shows it at once, and this function is not reached
+    // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks.
+    let Some((title_id, body_id)) = toast_strings(letter) else {
+        return;
+    };
+
+    let title = match letter {
+        // The version in the update's title is the one the **feed** named, not the one running.
         Letter::Update => {
             let newer = with_feed(|feed| {
                 update_is_pending(version, feed)
@@ -5728,21 +5758,14 @@ fn announce(letter: Letter, version: &str) {
                     .unwrap_or_default()
             });
 
-            (
-                format_text(IDS_TOAST_UPDATE_TITLE, &[&newer]),
-                text(IDS_TOAST_UPDATE),
-            )
+            format_text(title_id, &[&newer])
         }
-        // «Что нового» is about the version the person has just installed, and the balloon
-        // says so with the same two lines the update uses — the letter behind it differs, the
-        // knock does not.
-        Letter::WhatsNew => (
-            format_text(IDS_TOAST_UPDATE_TITLE, &[version]),
-            text(IDS_TOAST_UPDATE),
-        ),
+        // And in «Что нового» — the one just installed.
+        Letter::WhatsNew => format_text(title_id, &[version]),
+        _ => text(title_id),
     };
 
-    crate::tray::announce_letter(&title, &body);
+    crate::tray::announce_letter(&title, &text(body_id));
 }
 
 /// FR-94, решение 99.1 — the interface language changed while one of these windows was open.

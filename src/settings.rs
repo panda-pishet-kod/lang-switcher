@@ -2371,6 +2371,15 @@ pub const IDS_TOAST_THANKS: u16 = 3136;
 pub const IDS_TOAST_UPDATE_TITLE: u16 = 3137;
 /// The balloon's text before «Обновление».
 pub const IDS_TOAST_UPDATE: u16 = 3138;
+/// The balloon's text before «Что нового» — задача Т-33а-4, решение 104.4.
+///
+/// ⛔ Своя, потому что до этой задачи «Что нового» брало текст «Обновления» — «Три изменения и
+/// **ссылка на загрузку**», — а загружать ему нечего: версия уже стоит, письмо рассказывает,
+/// что в ней. Нашёл это контролёр на снимке пользователя, а не тест.
+///
+/// ⭐ Заголовок остался общий с письмом — [`IDS_WHATSNEW_TITLE`]: слова там те же, они уже
+/// переведены на четырнадцать языков, и шар с письмом обязаны говорить одно и то же.
+pub const IDS_TOAST_WHATSNEW: u16 = 3212;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -2564,7 +2573,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 203] = [
+pub const INTERFACE_STRINGS: [u16; 204] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2695,6 +2704,7 @@ pub const INTERFACE_STRINGS: [u16; 203] = [
     IDS_TOAST_THANKS,
     IDS_TOAST_UPDATE_TITLE,
     IDS_TOAST_UPDATE,
+    IDS_TOAST_WHATSNEW,
     IDS_ABOUT_AUTHOR,
     IDS_ENTRY_UPDATE_MARK,
     IDS_ENTRY_UNREAD_MARK,

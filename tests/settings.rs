@@ -6612,6 +6612,76 @@ fn the_help_of_the_about_window_names_the_key_that_is_really_in_force() {
     );
 }
 
+/// **Задача Т-33а-4** — пределы оболочки для шара уведомления, по всем четырнадцати языкам.
+///
+/// `szInfoTitle` держит 63 единицы UTF-16, `szInfo` — 255, и обрезание у оболочки **молчаливое**.
+/// Этот проект на молчаливом обрезании уже обжигался — текст контрола на 511-м знаке, Э32, — и
+/// мерить два языка из четырнадцати значит не мерить ничего.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса, и перебор
+/// четырнадцати языков без него сбивал бы соседние тесты, читающие слова.
+#[test]
+fn every_balloon_string_fits_the_shell_in_all_fourteen_languages() {
+    use lang_switcher::letters::{self, Letter};
+
+    const TITLE_LIMIT: usize = 63;
+    const BODY_LIMIT: usize = 255;
+
+    let _guard = with_product_strings();
+
+    let mut worst_title = 0;
+    let mut worst_body = 0;
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for letter in [
+            Letter::WhatsNew,
+            Letter::Update,
+            Letter::News(1),
+            Letter::Thanks,
+        ] {
+            let Some((title_id, body_id)) = letters::toast_strings(letter) else {
+                continue;
+            };
+
+            // Заголовок с подставленной версией — самое длинное, что туда попадает.
+            let title = settings::format_text(title_id, &["10.10.10"]);
+            let body = settings::text(body_id);
+
+            let title_units = title.encode_utf16().count();
+            let body_units = body.encode_utf16().count();
+
+            worst_title = worst_title.max(title_units);
+            worst_body = worst_body.max(body_units);
+
+            assert!(
+                title_units <= TITLE_LIMIT,
+                "{language:?} {letter:?}: заголовок {title_units} единиц при пределе \
+                 {TITLE_LIMIT} — оболочка обрежет молча: «{title}»"
+            );
+            assert!(
+                body_units <= BODY_LIMIT,
+                "{language:?} {letter:?}: тело {body_units} единиц при пределе {BODY_LIMIT} — \
+                 оболочка обрежет молча: «{body}»"
+            );
+        }
+    }
+
+    println!(
+        "самый длинный заголовок {worst_title} из {TITLE_LIMIT}, тело {worst_body} из {BODY_LIMIT}"
+    );
+
+    // Контроль прибора: измеренные строки не пусты. Ноль означал бы, что ресурс не открылся, и
+    // «влезает» тогда значило бы «мерить было нечего».
+    assert!(
+        worst_title > 0 && worst_body > 0,
+        "строки не загрузились: прибор мерил пустоту"
+    );
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Т-23-4** — the five rows of the help substitute the key name, and only the first three
 /// have a place for it.
 ///
@@ -8034,7 +8104,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 203] = [
+const FR_94_STRINGS: [(u16, &str, &str); 204] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8555,6 +8625,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 203] = [
         settings::IDS_TOAST_UPDATE,
         "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать.",
         "Three changes and a link to the download. Click to read it.",
+    ),
+    // Задача Т-33а-4: у «Что нового» своё тело. Строка над этой — «Обновления», и они обязаны
+    // отличаться: сравнение этих двух литералов и есть красное «до» задачи.
+    (
+        settings::IDS_TOAST_WHATSNEW,
+        "Три изменения. Нажмите, чтобы прочитать.",
+        "Three changes. Click to read them.",
     ),
     (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
     (
@@ -14032,12 +14109,13 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        203,
-        "two hundred and three identifiers in use — the mandate of Э32 authorised the canon \
+        204,
+        "two hundred and four identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
-         ten of the two letters out of the feed (Т-32-6) and the fifty-nine of the wizard \
-         (FR-104, Т-32-8)"
+         ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
+         (FR-104, Т-32-8) and the ONE the balloon of «Что нового» gained by задача Т-33а-4 — \
+         its own body, because it was knocking with the words of the update"
     );
 
     let product = ProductImage::shared();
