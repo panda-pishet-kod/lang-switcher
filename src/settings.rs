@@ -2408,21 +2408,162 @@ pub const IDS_NEWS_OPEN_LINK: u16 = 3151;
 /// «Позже» and the cross do instead.
 pub const IDS_NEWS_FOOT: u16 = 3152;
 
+// =========================================================================================
+// The wizard «Написать автору» — FR-104, task Т-32-8, ступень В
+// =========================================================================================
+//
+// Fifty-seven strings and not the «≈45» the mandate estimated; the difference is written down
+// in the report with what it bought. Two economies were made and are worth naming here: the
+// **report** of FR-104 is labelled with the wizard's own strings rather than a second set of
+// its own, and the buttons that already exist («Закрыть», «Открыть канал») are reused.
+
+/// The caption of the wizard window.
+pub const IDS_WIZARD_CAPTION: u16 = 3153;
+/// «Шаг {0} из {1}» — the line over the heading of every step.
+pub const IDS_WIZARD_STEP: u16 = 3154;
+/// «Отмена» — the button that closes the wizard without writing anything.
+pub const IDS_WIZARD_CANCEL: u16 = 3155;
+/// «Назад».
+pub const IDS_WIZARD_BACK: u16 = 3156;
+/// «Далее».
+pub const IDS_WIZARD_NEXT: u16 = 3157;
+/// «Готово» — the same button on the last step.
+pub const IDS_WIZARD_DONE: u16 = 3158;
+
+/// Step 1: «Что случилось?».
+pub const IDS_WIZARD_WHAT_TITLE: u16 = 3159;
+/// Its note — why the question is asked first.
+pub const IDS_WIZARD_WHAT_NOTE: u16 = 3160;
+/// The first card: «Программа сделала не то».
+pub const IDS_WIZARD_CARD_WRONG: u16 = 3161;
+/// Its second line.
+pub const IDS_WIZARD_CARD_WRONG_SUB: u16 = 3162;
+/// The second card: «Ничего не произошло».
+pub const IDS_WIZARD_CARD_NOTHING: u16 = 3163;
+/// Its second line.
+pub const IDS_WIZARD_CARD_NOTHING_SUB: u16 = 3164;
+/// The third card: «Хочу предложить улучшение» — the short road.
+pub const IDS_WIZARD_CARD_IDEA: u16 = 3165;
+/// Its second line.
+pub const IDS_WIZARD_CARD_IDEA_SUB: u16 = 3166;
+
+/// Step 2: «Где это случилось?».
+pub const IDS_WIZARD_WHERE_TITLE: u16 = 3167;
+/// Its note — why the window matters.
+pub const IDS_WIZARD_WHERE_NOTE: u16 = 3168;
+/// «Программа:» — the label of the field the capture fills.
+pub const IDS_WIZARD_PROGRAM: u16 = 3169;
+/// «Взять из активного окна».
+pub const IDS_WIZARD_CAPTURE: u16 = 3170;
+/// What the capture takes and what it deliberately does not.
+pub const IDS_WIZARD_CAPTURE_NOTE: u16 = 3171;
+/// The count-down while it waits — «Переключитесь в нужное окно… {0}».
+pub const IDS_WIZARD_CAPTURE_COUNT: u16 = 3172;
+/// The label of the report line for the kind of field — the radio group has none on screen.
+pub const IDS_WIZARD_WHERE_FIELD: u16 = 3173;
+/// «Обычное поле ввода».
+pub const IDS_WIZARD_FIELD_NORMAL: u16 = 3174;
+/// «Поле пароля».
+pub const IDS_WIZARD_FIELD_PASSWORD: u16 = 3175;
+/// Why that answer already explains a great deal — SEC-02.
+pub const IDS_WIZARD_FIELD_PASSWORD_SUB: u16 = 3176;
+/// «Не знаю».
+pub const IDS_WIZARD_FIELD_UNKNOWN: u16 = 3177;
+
+/// Step 3: «Что вы делали?».
+pub const IDS_WIZARD_DID_TITLE: u16 = 3178;
+/// Its note — write an example, the program keeps no keystrokes.
+pub const IDS_WIZARD_DID_NOTE: u16 = 3179;
+/// «Набрали слово в раскладке».
+pub const IDS_WIZARD_TYPED_IN: u16 = 3180;
+/// «и нажали» — the words before the key chip.
+pub const IDS_WIZARD_AND_PRESSED: u16 = 3181;
+/// «Ожидали:».
+pub const IDS_WIZARD_EXPECTED: u16 = 3182;
+/// «Получили:».
+pub const IDS_WIZARD_GOT: u16 = 3183;
+/// «Повторяется?».
+pub const IDS_WIZARD_REPEAT: u16 = 3184;
+/// «каждый раз».
+pub const IDS_WIZARD_REPEAT_ALWAYS: u16 = 3185;
+/// «иногда».
+pub const IDS_WIZARD_REPEAT_SOMETIMES: u16 = 3186;
+/// «один раз».
+pub const IDS_WIZARD_REPEAT_ONCE: u16 = 3187;
+
+/// The idea road's only step: «Опишите идею».
+pub const IDS_WIZARD_IDEA_TITLE: u16 = 3188;
+/// Its note.
+pub const IDS_WIZARD_IDEA_NOTE: u16 = 3189;
+/// «Что предлагаете?».
+pub const IDS_WIZARD_IDEA_WHAT: u16 = 3190;
+/// «Чем это поможет?».
+pub const IDS_WIZARD_IDEA_HELPS: u16 = 3191;
+
+/// Step 4: «Что приложить?».
+pub const IDS_WIZARD_ATTACH_TITLE: u16 = 3192;
+/// Its note — every box can be taken off, and what each adds is written beside it.
+pub const IDS_WIZARD_ATTACH_NOTE: u16 = 3193;
+/// «Версия программы и сборка Windows».
+pub const IDS_WIZARD_ATTACH_MACHINE: u16 = 3194;
+/// «Раскладки в системе».
+pub const IDS_WIZARD_ATTACH_LAYOUTS: u16 = 3195;
+/// «Настройки».
+pub const IDS_WIZARD_ATTACH_SETTINGS: u16 = 3196;
+/// «Журнал программы из памяти».
+pub const IDS_WIZARD_ATTACH_JOURNAL: u16 = 3197;
+/// What that journal holds — «{0} записей. Только имена операций и коды ошибок…».
+pub const IDS_WIZARD_ATTACH_JOURNAL_SUB: u16 = 3198;
+/// The line under the four boxes: why no journal **file** is needed.
+pub const IDS_WIZARD_ATTACH_FOOT: u16 = 3199;
+
+/// The last step: «Проверьте и отправьте».
+pub const IDS_WIZARD_PREVIEW_TITLE: u16 = 3200;
+/// Its note — nothing leaves the machine until the person pastes it.
+pub const IDS_WIZARD_PREVIEW_NOTE: u16 = 3201;
+/// «Скопировать и открыть канал».
+pub const IDS_WIZARD_COPY: u16 = 3202;
+/// «Сохранить в папку журнала».
+pub const IDS_WIZARD_SAVE: u16 = 3203;
+/// What the status line says when the address of the channel is still a placeholder (П7).
+pub const IDS_WIZARD_COPIED_ONLY: u16 = 3204;
+/// And when it is not.
+pub const IDS_WIZARD_COPIED: u16 = 3205;
+/// «Сохранено: {0}» — the file that was written.
+pub const IDS_WIZARD_SAVED: u16 = 3206;
+/// The one thing that can go wrong on that step and be worth saying out loud.
+pub const IDS_WIZARD_FAILED: u16 = 3207;
+
+/// The window after «Готово» — its heading for a trouble.
+pub const IDS_THANKYOU_BUG_TITLE: u16 = 3208;
+/// And for an idea.
+pub const IDS_THANKYOU_IDEA_TITLE: u16 = 3209;
+/// Its text for a trouble.
+pub const IDS_THANKYOU_BUG_TEXT: u16 = 3210;
+/// And for an idea.
+pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
+
+// ⚠ The button that opens the wizard from the «Диагностика» section of the settings window
+// has **no string of its own**: it says exactly what the tray entry says, and that is
+// [`IDS_WRITE_TO_AUTHOR`]. Two strings obliged to stay identical in fourteen tables are two
+// chances to drift apart.
+
 /// Every identifier above, so that a test can walk the whole vocabulary of the interface.
 ///
 /// Exported rather than rebuilt in the test: what the test must not import is the *text*, and
 /// it does not — it writes every string out itself. The list of identifiers is the contract
 /// between `app.rc` and this file, and a test that walked a list of its own would not be
 /// checking that contract at all.
-/// ⚠ **A hundred and forty-four since task Т-32-6**, and the canon of «seventy-three» that
+/// ⚠ **Two hundred and three since task Т-32-8**, and the canon of «seventy-three» that
 /// stood here is authorised away by the mandate of Э32 («канон `INTERFACE_STRINGS` растёт с
 /// 73 — цифру в отчёт»): the sixty-one strings of the letters from the author arrived with
-/// Т-32-3 (FR-101, FR-102, FR-103), and ten more with the two letters out of the feed
-/// (Т-32-6, ступень Б). Before that it was seventy-three since task Т-31-4, and
+/// Т-32-3 (FR-101, FR-102, FR-103), ten more with the two letters out of the feed
+/// (Т-32-6, ступень Б), and fifty-nine with the wizard of FR-104 (Т-32-8, ступень В).
+/// Before that it was seventy-three since task Т-31-4, and
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 144] = [
+pub const INTERFACE_STRINGS: [u16; 203] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2567,6 +2708,65 @@ pub const INTERFACE_STRINGS: [u16; 144] = [
     IDS_NEWS_LATER,
     IDS_NEWS_OPEN_LINK,
     IDS_NEWS_FOOT,
+    IDS_WIZARD_CAPTION,
+    IDS_WIZARD_STEP,
+    IDS_WIZARD_CANCEL,
+    IDS_WIZARD_BACK,
+    IDS_WIZARD_NEXT,
+    IDS_WIZARD_DONE,
+    IDS_WIZARD_WHAT_TITLE,
+    IDS_WIZARD_WHAT_NOTE,
+    IDS_WIZARD_CARD_WRONG,
+    IDS_WIZARD_CARD_WRONG_SUB,
+    IDS_WIZARD_CARD_NOTHING,
+    IDS_WIZARD_CARD_NOTHING_SUB,
+    IDS_WIZARD_CARD_IDEA,
+    IDS_WIZARD_CARD_IDEA_SUB,
+    IDS_WIZARD_WHERE_TITLE,
+    IDS_WIZARD_WHERE_NOTE,
+    IDS_WIZARD_PROGRAM,
+    IDS_WIZARD_CAPTURE,
+    IDS_WIZARD_CAPTURE_NOTE,
+    IDS_WIZARD_CAPTURE_COUNT,
+    IDS_WIZARD_WHERE_FIELD,
+    IDS_WIZARD_FIELD_NORMAL,
+    IDS_WIZARD_FIELD_PASSWORD,
+    IDS_WIZARD_FIELD_PASSWORD_SUB,
+    IDS_WIZARD_FIELD_UNKNOWN,
+    IDS_WIZARD_DID_TITLE,
+    IDS_WIZARD_DID_NOTE,
+    IDS_WIZARD_TYPED_IN,
+    IDS_WIZARD_AND_PRESSED,
+    IDS_WIZARD_EXPECTED,
+    IDS_WIZARD_GOT,
+    IDS_WIZARD_REPEAT,
+    IDS_WIZARD_REPEAT_ALWAYS,
+    IDS_WIZARD_REPEAT_SOMETIMES,
+    IDS_WIZARD_REPEAT_ONCE,
+    IDS_WIZARD_IDEA_TITLE,
+    IDS_WIZARD_IDEA_NOTE,
+    IDS_WIZARD_IDEA_WHAT,
+    IDS_WIZARD_IDEA_HELPS,
+    IDS_WIZARD_ATTACH_TITLE,
+    IDS_WIZARD_ATTACH_NOTE,
+    IDS_WIZARD_ATTACH_MACHINE,
+    IDS_WIZARD_ATTACH_LAYOUTS,
+    IDS_WIZARD_ATTACH_SETTINGS,
+    IDS_WIZARD_ATTACH_JOURNAL,
+    IDS_WIZARD_ATTACH_JOURNAL_SUB,
+    IDS_WIZARD_ATTACH_FOOT,
+    IDS_WIZARD_PREVIEW_TITLE,
+    IDS_WIZARD_PREVIEW_NOTE,
+    IDS_WIZARD_COPY,
+    IDS_WIZARD_SAVE,
+    IDS_WIZARD_COPIED_ONLY,
+    IDS_WIZARD_COPIED,
+    IDS_WIZARD_SAVED,
+    IDS_WIZARD_FAILED,
+    IDS_THANKYOU_BUG_TITLE,
+    IDS_THANKYOU_IDEA_TITLE,
+    IDS_THANKYOU_BUG_TEXT,
+    IDS_THANKYOU_IDEA_TEXT,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -3500,6 +3700,8 @@ const IDC_EXCLUSION_REMOVE: i32 = 1053;
 const IDC_LOG_ENABLED: i32 = 1060;
 const IDC_LOG_OPEN: i32 = 1061;
 const IDC_LOG_DIR: i32 = 1062;
+/// The way into the wizard of FR-104 from «Диагностика» — task Т-32-8.
+const IDC_WRITE_AUTHOR: i32 = 1063;
 const IDC_STATE_HOOK: i32 = 1070;
 const IDC_STATE_LAYOUTS: i32 = 1071;
 const IDC_STATE_AUTOSTART: i32 = 1072;
@@ -3674,6 +3876,7 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_DIAGNOSTICS, IDS_GROUP_DIAGNOSTICS),
     (IDC_LOG_ENABLED, IDS_LOG_ENABLED),
     (IDC_LOG_OPEN, IDS_LOG_OPEN),
+    (IDC_WRITE_AUTHOR, IDS_WRITE_TO_AUTHOR),
     (IDC_LOG_DIR_LABEL, IDS_LOG_DIR_LABEL),
     (IDC_GROUP_STATE, IDS_GROUP_STATE),
     (OK_COMMAND, IDS_OK),
@@ -9447,6 +9650,63 @@ pub(crate) unsafe fn draw_panel_caption(
 /// enough because the key is per window.
 const COMBO_SUBCLASS_ID: usize = 1;
 
+/// The reference datum of a subclass installed on a combo box that is **not** on this window.
+///
+/// Task Т-32-8, and it is what lets the wizard of FR-104 wear the same closed face as the four
+/// combo boxes here without a second copy of the two hundred lines that draw it (§6.2, «шов
+/// один»). The whole difference between the two cases is where the colours come from:
+///
+/// * `0` — the combo is one of [`COMBO_BOXES`] on **this** dialog, and the look is read out of
+///   its [`DialogState`] as it always was;
+/// * [`COMBO_FOREIGN`] — the combo belongs to another window of this program, and the look is
+///   built on the spot out of the palette the configuration resolves to. That is the very
+///   palette the other window built itself from (`theme::resolve` of the same setting), so the
+///   two cannot disagree.
+///
+/// ⛔ The datum is **not** a pointer and never becomes one: a subclass reference that outlived
+/// the thing it named would be a use-after-free reachable from a window message.
+pub(crate) const COMBO_FOREIGN: usize = 1;
+
+/// Puts [`combo_box_proc`] in front of one combo box of **another** window of this program —
+/// task Т-32-8, the wizard of FR-104.
+///
+/// The far half is [`unsubclass_foreign_combo`], and the procedure additionally takes itself
+/// off on `WM_NCDESTROY`, exactly as it does for the four of this dialog.
+pub(crate) fn subclass_foreign_combo(hwnd: HWND, control: i32) {
+    // SAFETY: `hwnd` is a live window of this thread; the crate turns a missing control into
+    // an error.
+    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `combo` is a live control created by the dialog manager on this thread, and
+    // `combo_box_proc` has exactly the signature `SUBCLASSPROC` names. The reference datum is a
+    // plain number. ⚠ NFR-13: the `BOOL` is dropped for the reason `subclass_combo_boxes`
+    // gives at its own — a refusal leaves that one combo box painted by the system, which is
+    // visible rather than silent.
+    let _ = unsafe {
+        SetWindowSubclass(
+            combo,
+            Some(combo_box_proc),
+            COMBO_SUBCLASS_ID,
+            COMBO_FOREIGN,
+        )
+    };
+}
+
+/// Takes [`combo_box_proc`] back off a combo box of another window — the far half of the pair.
+pub(crate) fn unsubclass_foreign_combo(hwnd: HWND, control: i32) {
+    // SAFETY: as above.
+    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        return;
+    };
+
+    // SAFETY: the procedure and the identifier are the pair the subclass was installed with;
+    // a window that no longer carries it answers `FALSE` and nothing happens.
+    let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
+}
+
 /// Puts [`combo_box_proc`] in front of each of the four combo boxes — FR-92а, task T-11-14.
 ///
 /// **The pair.** Called exactly once, from [`fill_dialog`] on `WM_INITDIALOG`; the other half
@@ -9532,7 +9792,7 @@ unsafe extern "system" fn combo_box_proc(
     wparam: WPARAM,
     lparam: LPARAM,
     _subclass_id: usize,
-    _reference_data: usize,
+    reference_data: usize,
 ) -> LRESULT {
     match message {
         // The whole reason this procedure exists — see the ⚠ above.
@@ -9540,7 +9800,7 @@ unsafe extern "system" fn combo_box_proc(
         // SAFETY: `combo` is the control this procedure is installed on, and the call is
         // inside the window's own `WM_PAINT`, which is where `BeginPaint` may be used.
         WM_PAINT => {
-            if unsafe { paint_combo_closed_part(combo) } {
+            if unsafe { paint_combo_closed_part(combo, reference_data) } {
                 return LRESULT(0);
             }
         }
@@ -9585,7 +9845,7 @@ unsafe extern "system" fn combo_box_proc(
 /// # Safety
 ///
 /// Called from [`combo_box_proc`] alone, inside the `WM_PAINT` of the window it names.
-unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
+unsafe fn paint_combo_closed_part(combo: HWND, reference_data: usize) -> bool {
     let mut paint = PAINTSTRUCT::default();
 
     // SAFETY: `combo` is the live control inside its own `WM_PAINT`, and `paint` is a live
@@ -9599,7 +9859,7 @@ unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
     }
 
     // SAFETY: `dc` is the DC `BeginPaint` has just answered, owned until `EndPaint` below.
-    unsafe { draw_combo_closed_part(combo, dc) };
+    unsafe { draw_combo_closed_part(combo, dc, reference_data) };
 
     // SAFETY: the same window and the very `PAINTSTRUCT` `BeginPaint` filled in. The `BOOL`
     // is dropped for the reason the paint calls of this file drop theirs.
@@ -9639,7 +9899,60 @@ unsafe fn paint_combo_closed_part(combo: HWND) -> bool {
 /// # Safety
 ///
 /// Called from [`paint_combo_closed_part`] alone, with the DC of the paint it is inside of.
-unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
+/// Everything the closed face of a combo box is drawn with — the one place the colour table is
+/// turned into handles and inks, so that this dialog's four and the wizard's one cannot come
+/// out different (§6.2).
+///
+/// The second element of the tuple is the fill brush and the third **owns** it when the fill is
+/// the transient hover colour: a `_` there would free the brush before the first pixel.
+type ComboLook = (
+    HBRUSH,
+    HBRUSH,
+    Option<HotBrush>,
+    COLORREF,
+    COLORREF,
+    COLORREF,
+    Option<HFONT>,
+);
+
+/// Builds that look out of the roles, the palette, a brush set and the ground the corners stand
+/// on.
+fn combo_look(
+    roles: theme::ComboClosedColors,
+    palette: &theme::Palette,
+    brushes: &theme::Brushes,
+    ground: HBRUSH,
+    face: Option<HFONT>,
+) -> ComboLook {
+    // The hot fill is the one colour of the table a window's brush set does not hold — see
+    // [`HotBrush`]. `None` for every other role, and also for a refused `CreateSolidBrush`, in
+    // which case the fill falls back to the quiet `field_bg` and the closed part simply does
+    // not light up (NFR-13).
+    let hot = match roles.fill {
+        ComboFillRole::HoverBg => HotBrush::new(palette.hover_bg),
+        ComboFillRole::FieldBg | ComboFillRole::SelBg => None,
+    };
+
+    let fill = hot
+        .as_ref()
+        .map_or_else(|| combo_fill_brush(roles.fill, brushes), HotBrush::brush);
+
+    (
+        ground,
+        fill,
+        hot,
+        match roles.border {
+            ComboBorderRole::FieldBorder => palette.field_border,
+        },
+        combo_text_ink(roles.text, palette),
+        match roles.chevron {
+            ComboChevronRole::TextMuted => palette.text_muted,
+        },
+        face,
+    )
+}
+
+unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC, reference_data: usize) {
     // The dialog is the parent of its own control; everything below is read through it, by
     // identifier, exactly as every other drawing of this file reads what it draws.
     //
@@ -9652,9 +9965,15 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
     // ours.
     let control = unsafe { GetDlgCtrlID(combo) };
 
+    let foreign = reference_data == COMBO_FOREIGN;
+
     // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
     // be reached on a window it was installed on: one list of four, checked before any work.
-    if !COMBO_BOXES.contains(&control) {
+    //
+    // ⛔ A combo of **another** window of this program is exempt from the list and from
+    // nothing else — and the exemption is the reference datum the subclass was installed with,
+    // which no message can forge: `SetWindowSubclass` is the only thing that writes it.
+    if !foreign && !COMBO_BOXES.contains(&control) {
         return;
     }
 
@@ -9692,54 +10011,66 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC) {
     //
     // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
     // window `show_dialog` created — the contract of `with_state`.
-    let choice = unsafe {
-        with_state(dialog, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
+    // A combo of another window builds its look out of the palette the configuration resolves
+    // to — the very palette that window built itself from — and owns the brushes for the
+    // length of this paint. Nothing of this dialog's state is touched, which is what makes the
+    // borrow above safe to skip: `with_state` would reinterpret **another** window's user data.
+    let borrowed = if foreign {
+        let setting = crate::tray::with_tray(|tray| tray.config().general.theme)
+            .unwrap_or(theme::ThemeSetting::System);
+        let palette = theme::resolve(setting, theme::system_is_light());
 
-            // The hot fill is the one colour of the table the window's brush set does not hold
-            // — see [`HotBrush`]. `None` for every other role, and also for a refused
-            // `CreateSolidBrush`, in which case the fill below falls back to the quiet
-            // `field_bg` and the closed part simply does not light up (NFR-13).
-            let hot = match roles.fill {
-                ComboFillRole::HoverBg => HotBrush::new(palette.hover_bg),
-                ComboFillRole::FieldBg | ComboFillRole::SelBg => None,
-            };
+        theme::Brushes::new(palette).map(|brushes| (palette, brushes))
+    } else {
+        None
+    };
 
-            let fill = hot
-                .as_ref()
-                .map_or_else(|| combo_fill_brush(roles.fill, brushes), HotBrush::brush);
+    let choice = if let Some((palette, brushes)) = borrowed.as_ref() {
+        Some(combo_look(
+            roles,
+            palette,
+            brushes,
+            brushes.window_bg(),
+            None,
+        ))
+    } else {
+        // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
+        // window `show_dialog` created — the contract of `with_state`.
+        unsafe {
+            with_state(dialog, |state| {
+                // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
+                let brushes = state.brushes.as_ref()?;
+                let palette = state.palette;
 
-            // The ground the corners the rounding cuts away are left standing on — the very
-            // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with: the panel brush for a
-            // control lying on one of the eight group panels, the window brush elsewhere.
-            // All four combo boxes do lie on a panel, but the rule is asked and not assumed.
-            let ground = if state.panel_children.contains(&control) {
-                brushes.panel_bg()
-            } else {
-                brushes.window_bg()
-            };
+                // The ground the corners the rounding cuts away are left standing on — the very
+                // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with: the panel brush for a
+                // control lying on one of the eight group panels, the window brush elsewhere.
+                // All four combo boxes do lie on a panel, but the rule is asked and not assumed.
+                //
+                // ⚠ The fill, the hot brush and the three inks are **not** chosen here since task
+                // Т-32-8: they are `combo_look`'s, and the wizard of FR-104 asks the same body for
+                // the same answers. What is still this dialog's own is the ground and the face.
+                let ground = if state.panel_children.contains(&control) {
+                    brushes.panel_bg()
+                } else {
+                    brushes.window_bg()
+                };
 
-            Some((
-                ground,
-                fill,
-                hot,
-                match roles.border {
-                    ComboBorderRole::FieldBorder => palette.field_border,
-                },
-                combo_text_ink(roles.text, palette),
-                match roles.chevron {
-                    ComboChevronRole::TextMuted => palette.text_muted,
-                },
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
+                Some(combo_look(
+                    roles,
+                    palette,
+                    brushes,
+                    ground,
+                    state.fonts.as_ref().map(DialogFonts::text),
+                ))
+            })
+        }
+        .flatten()
     };
 
     // `_hot` is named and not discarded on purpose: it owns the transient brush `fill` may name,
     // and a `_` would have freed it before the first pixel was drawn.
-    let Some(Some((ground, fill, _hot, border, ink, chevron_ink, face))) = choice else {
+    let Some((ground, fill, _hot, border, ink, chevron_ink, face)) = choice else {
         return;
     };
 
@@ -10066,13 +10397,14 @@ fn invalidate_hot(window: HWND) {
 /// ground — and a panel is the *background* of its block since task T-11-13 and takes no
 /// clicks at all. Subclassing either would arm a notification for a repaint that changes
 /// nothing.
-const PUSH_BUTTONS: [i32; 9] = [
+const PUSH_BUTTONS: [i32; 10] = [
     IDC_HOTKEY_CAPTURE,
     IDC_CYCLE_UP,
     IDC_CYCLE_DOWN,
     IDC_EXCLUSION_REMOVE,
     IDC_EXCLUSION_ADD,
     IDC_LOG_OPEN,
+    IDC_WRITE_AUTHOR,
     OK_COMMAND,
     CANCEL_COMMAND,
     IDC_APPLY,
@@ -11129,6 +11461,24 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
         IDC_CYCLE_DOWN => unsafe { move_cycle_row(hwnd, 1) },
 
         IDC_LOG_OPEN => open_log_folder(hwnd),
+
+        // FR-104, task Т-32-8: the third way into the wizard, beside the tray entry and the
+        // «От автора» window. It opens a **modeless** window and returns at once — the settings
+        // dialog stays where it is, which is what a person who is about to describe a defect
+        // needs: the two windows are side by side and the settings can be read off while the
+        // appeal is written.
+        IDC_WRITE_AUTHOR => {
+            // SAFETY: `hwnd` is the live dialog; asking for its owner reads a field of that
+            // window and no memory of ours.
+            let owner = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetWindow(
+                    hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::GW_OWNER,
+                )
+            };
+
+            crate::letters::open_wizard(owner.unwrap_or(hwnd));
+        }
 
         _ => {}
     }

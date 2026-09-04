@@ -5605,12 +5605,27 @@ fn the_combo_subclass_is_one_pair_and_wm_paint_never_falls_through() {
         1,
         "exactly one SetWindowSubclass, with the procedure and the identifier of the pair"
     );
+
+    // ⚠ **Since task Т-32-8 there are two pairs and not one**, and the canon of «two removals»
+    // is raised to three with the reason written down rather than worked around: the wizard of
+    // FR-104 has a combo box of its own, on another window, and it wears this dialog's closed
+    // face rather than a copy of it (§6.2). Its install carries `COMBO_FOREIGN` instead of `0`,
+    // which is what the assertion above still counts as one; its removal is the third match
+    // here. The `WM_NCDESTROY` safety net inside the procedure serves both pairs.
+    // ⚠ Matched on the **argument** and not on a one-line call: `cargo fmt` broke that install
+    // across five lines the moment it was written, and a needle shaped like a single line went
+    // on answering «none». The install is the only place in the file that passes this name.
+    assert_eq!(
+        source.matches("COMBO_FOREIGN,").count(),
+        1,
+        "exactly one foreign install — the wizard's combo box and no other"
+    );
     assert_eq!(
         source
             .matches("RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID)")
             .count(),
-        2,
-        "the removal of the pair and the WM_NCDESTROY safety net, and nothing else"
+        3,
+        "the removals of the two pairs and the WM_NCDESTROY safety net, and nothing else"
     );
 
     let body = function_body(&source, "unsafe extern \"system\" fn combo_box_proc(");
@@ -5627,8 +5642,10 @@ fn the_combo_subclass_is_one_pair_and_wm_paint_never_falls_through() {
     println!("--- the WM_PAINT arm of combo_box_proc ---\n{paint_arm}");
 
     assert!(
-        paint_arm.contains("paint_combo_closed_part(combo)"),
-        "the WM_PAINT arm must draw the closed part itself"
+        paint_arm.contains("paint_combo_closed_part(combo, reference_data)"),
+        "the WM_PAINT arm must draw the closed part itself — and since task Т-32-8 it hands on \
+         the reference datum, which is what tells a combo of another window from the four of \
+         this one"
     );
     assert!(
         paint_arm.contains("return LRESULT(0);"),
@@ -7992,7 +8009,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 144] = [
+const FR_94_STRINGS: [(u16, &str, &str); 203] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8355,23 +8372,19 @@ const FR_94_STRINGS: [(u16, &str, &str); 144] = [
     ),
     (
         settings::IDS_WHATSNEW_1,
-        "Лента автора: раз в 15 дней программа читает подписанный файл новостей и ничего не \
-         отправляет.",
-        "The author's feed: once in fifteen days the program reads a signed news file and sends \
-         nothing.",
+        "Мастер «Написать автору»: пять шагов для ошибки и три для пожелания.",
+        "The «Write to the author» wizard: five steps for a bug and three for an idea.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Из ленты приходят письма «Новость» и «Обновление», а кнопка «Прочитано» гасит точку на \
-         значке.",
-        "The «News» and «Update» letters come from it, and «Read» puts out the dot on the icon.",
+        "Он сам соберёт версию, сборку Windows, раскладки и журнал — каждый пункт можно снять.",
+        "It collects the version, the Windows build, the layouts and the journal — every item \
+         can be taken off.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Чтение ленты отключается: в файле настроек сразу, а после первого письма — в окне «От \
-         автора».",
-        "The reading can be turned off: in the settings file at once, later in the «From the \
-         author» window.",
+        "Ничего не отправляется само: текст попадёт в буфер обмена, а вставите его вы.",
+        "Nothing is sent by itself: the text goes to the clipboard and you paste it.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
@@ -8580,6 +8593,278 @@ const FR_94_STRINGS: [(u16, &str, &str); 144] = [
          раз через две, потом только точка на значке.",
         "«Mark as read» closes the letter for good. «Later» or the cross: I will remind you in \
          a week and once more in two, after that only the dot on the icon.",
+    ),
+    (
+        settings::IDS_WIZARD_CAPTION,
+        "Написать автору",
+        "Write to the author",
+    ),
+    (
+        settings::IDS_WIZARD_STEP,
+        "Шаг {0} из {1}",
+        "Step {0} of {1}",
+    ),
+    (settings::IDS_WIZARD_CANCEL, "Отмена", "Cancel"),
+    (settings::IDS_WIZARD_BACK, "Назад", "Back"),
+    (settings::IDS_WIZARD_NEXT, "Далее", "Next"),
+    (settings::IDS_WIZARD_DONE, "Готово", "Done"),
+    (
+        settings::IDS_WIZARD_WHAT_TITLE,
+        "Что случилось?",
+        "What happened?",
+    ),
+    (
+        settings::IDS_WIZARD_WHAT_NOTE,
+        "От ответа зависит, о чём мастер спросит дальше.",
+        "The answer decides what the wizard asks about next.",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_WRONG,
+        "Программа сделала не то",
+        "The program did the wrong thing",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_WRONG_SUB,
+        "слово перекодировалось неправильно, пропали буквы, раскладка не та",
+        "the word came out converted wrongly, letters went missing, the layout was not the one",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_NOTHING,
+        "Ничего не произошло",
+        "Nothing happened",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_NOTHING_SUB,
+        "нажали клавишу, а текст остался как был",
+        "you pressed the key and the text stayed as it was",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_IDEA,
+        "Хочу предложить улучшение",
+        "I would like to suggest an improvement",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_IDEA_SUB,
+        "идея, пожелание, неудобство",
+        "an idea, a wish, an inconvenience",
+    ),
+    (
+        settings::IDS_WIZARD_WHERE_TITLE,
+        "Где это случилось?",
+        "Where did it happen?",
+    ),
+    (
+        settings::IDS_WIZARD_WHERE_NOTE,
+        "Поведение зависит от окна: консоль, браузер и редактор получают текст по-разному. \
+         Переключитесь в то окно, и мастер запишет имя программы сам.",
+        "The behaviour depends on the window: a console, a browser and an editor take text in \
+         different ways. Switch to that window and the wizard writes the program's name itself.",
+    ),
+    (settings::IDS_WIZARD_PROGRAM, "Программа:", "Program:"),
+    (
+        settings::IDS_WIZARD_CAPTURE,
+        "Взять из активного окна",
+        "Take from the active window",
+    ),
+    (
+        settings::IDS_WIZARD_CAPTURE_NOTE,
+        "Берётся имя процесса и класс окна. Заголовок окна не берётся: в нём бывает имя \
+         документа.",
+        "The process name and the window class are taken. The window title is not: it often \
+         holds the name of a document.",
+    ),
+    (
+        settings::IDS_WIZARD_CAPTURE_COUNT,
+        "Переключитесь в нужное окно… {0}",
+        "Switch to the window you need… {0}",
+    ),
+    (
+        settings::IDS_WIZARD_WHERE_FIELD,
+        "Поле ввода",
+        "Input field",
+    ),
+    (
+        settings::IDS_WIZARD_FIELD_NORMAL,
+        "Обычное поле ввода",
+        "An ordinary input field",
+    ),
+    (
+        settings::IDS_WIZARD_FIELD_PASSWORD,
+        "Поле пароля",
+        "A password field",
+    ),
+    (
+        settings::IDS_WIZARD_FIELD_PASSWORD_SUB,
+        "в полях пароля программа не работает нарочно: нажатия там не запоминаются",
+        "in password fields the program does not work on purpose: keystrokes there are not \
+         remembered",
+    ),
+    (
+        settings::IDS_WIZARD_FIELD_UNKNOWN,
+        "Не знаю",
+        "I do not know",
+    ),
+    (
+        settings::IDS_WIZARD_DID_TITLE,
+        "Что вы делали?",
+        "What were you doing?",
+    ),
+    (
+        settings::IDS_WIZARD_DID_NOTE,
+        "Пишите пример вместо настоящего текста. Программа не хранит нажатий, поэтому в \
+         обращение попадёт только то, что вы напишете здесь.",
+        "Write an example instead of the real text. The program keeps no keystrokes, so the \
+         appeal carries only what you write here.",
+    ),
+    (
+        settings::IDS_WIZARD_TYPED_IN,
+        "Набрали слово в раскладке",
+        "Typed a word in the layout",
+    ),
+    (settings::IDS_WIZARD_AND_PRESSED, "и нажали", "and pressed"),
+    (settings::IDS_WIZARD_EXPECTED, "Ожидали:", "Expected:"),
+    (settings::IDS_WIZARD_GOT, "Получили:", "Got:"),
+    (
+        settings::IDS_WIZARD_REPEAT,
+        "Повторяется?",
+        "Does it repeat?",
+    ),
+    (
+        settings::IDS_WIZARD_REPEAT_ALWAYS,
+        "каждый раз",
+        "every time",
+    ),
+    (settings::IDS_WIZARD_REPEAT_SOMETIMES, "иногда", "sometimes"),
+    (settings::IDS_WIZARD_REPEAT_ONCE, "один раз", "once"),
+    (
+        settings::IDS_WIZARD_IDEA_TITLE,
+        "Опишите идею",
+        "Describe the idea",
+    ),
+    (
+        settings::IDS_WIZARD_IDEA_NOTE,
+        "Два вопроса. Чем конкретнее пример, тем проще понять, что именно сделать.",
+        "Two questions. The more concrete the example, the easier it is to see what exactly to \
+         do.",
+    ),
+    (
+        settings::IDS_WIZARD_IDEA_WHAT,
+        "Что предлагаете?",
+        "What do you suggest?",
+    ),
+    (
+        settings::IDS_WIZARD_IDEA_HELPS,
+        "Чем это поможет?",
+        "How would it help?",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_TITLE,
+        "Что приложить?",
+        "What to attach?",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_NOTE,
+        "Каждый пункт можно снять. Ниже написано, что именно попадёт в текст.",
+        "Every item can be taken off. What each of them adds is written beside it.",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_MACHINE,
+        "Версия программы и сборка Windows",
+        "The program's version and the Windows build",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_LAYOUTS,
+        "Раскладки в системе",
+        "The layouts in the system",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_SETTINGS,
+        "Настройки",
+        "The settings",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_JOURNAL,
+        "Журнал программы из памяти",
+        "The program's journal, out of memory",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_JOURNAL_SUB,
+        "{0} записей. Только имена операций и коды ошибок, ни одной клавиши: так устроен сам \
+         журнал",
+        "{0} entries. Only operation names and error codes, not a single keystroke: that is how \
+         the journal itself is built",
+    ),
+    (
+        settings::IDS_WIZARD_ATTACH_FOOT,
+        "Файл журнала не нужен: записи есть в памяти, пока программа запущена. Если проблема \
+         повторяется, включите журнал в настройках, тогда записи переживут перезапуск.",
+        "No journal file is needed: the entries are in memory while the program runs. If the \
+         problem repeats, turn the journal on in the settings and the entries will survive a \
+         restart.",
+    ),
+    (
+        settings::IDS_WIZARD_PREVIEW_TITLE,
+        "Проверьте и отправьте",
+        "Check it and send",
+    ),
+    (
+        settings::IDS_WIZARD_PREVIEW_NOTE,
+        "Это весь текст обращения. Правьте что угодно. Отправляете вы сами: текст попадёт в \
+         буфер обмена, а канал откроется в браузере.",
+        "This is the whole text of the appeal. Edit anything you like. You send it yourself: \
+         the text goes to the clipboard and the channel opens in the browser.",
+    ),
+    (
+        settings::IDS_WIZARD_COPY,
+        "Скопировать и открыть канал",
+        "Copy and open the channel",
+    ),
+    (
+        settings::IDS_WIZARD_SAVE,
+        "Сохранить в папку журнала",
+        "Save to the journal folder",
+    ),
+    (
+        settings::IDS_WIZARD_COPIED_ONLY,
+        "Скопировано. Адрес канала появится в следующей версии.",
+        "Copied. The address of the channel will appear in the next version.",
+    ),
+    (
+        settings::IDS_WIZARD_COPIED,
+        "Скопировано, канал открыт.",
+        "Copied, the channel is open.",
+    ),
+    (settings::IDS_WIZARD_SAVED, "Сохранено: {0}", "Saved: {0}"),
+    (
+        settings::IDS_WIZARD_FAILED,
+        "Не получилось. Текст остался в окне — скопируйте его вручную.",
+        "It did not work. The text is still in the window — copy it by hand.",
+    ),
+    (
+        settings::IDS_THANKYOU_BUG_TITLE,
+        "Спасибо за сообщение об ошибке",
+        "Thank you for the bug report",
+    ),
+    (
+        settings::IDS_THANKYOU_IDEA_TITLE,
+        "Спасибо за идею",
+        "Thank you for the idea",
+    ),
+    (
+        settings::IDS_THANKYOU_BUG_TEXT,
+        "Я читаю каждое обращение сам. Ошибки чиню, а о важном для всех рассказываю письмом в \
+         программе или в канале. Здорово, что вы нашли на это время 🖤",
+        "I read every appeal myself. Bugs I fix, and what matters to everybody I tell about in \
+         a letter in the program or in the channel. It is good that you found the time 🖤",
+    ),
+    (
+        settings::IDS_THANKYOU_IDEA_TEXT,
+        "Я читаю каждое обращение сам. Идеи складываю в план и лучшие из них делаю, а о важном \
+         для всех рассказываю письмом в программе или в канале. Здорово, что вы нашли на это \
+         время 🖤",
+        "I read every appeal myself. Ideas go into the plan and the best of them get made, and \
+         what matters to everybody I tell about in a letter in the program or in the channel. \
+         It is good that you found the time 🖤",
     ),
 ];
 
@@ -13669,11 +13954,12 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        144,
-        "a hundred and forty-four identifiers in use — the mandate of Э32 authorised the canon \
+        203,
+        "two hundred and three identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
-         sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3) plus \
-         the ten of the two letters out of the feed (same task, ступень Б)"
+         sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
+         ten of the two letters out of the feed (Т-32-6) and the fifty-nine of the wizard \
+         (FR-104, Т-32-8)"
     );
 
     let product = ProductImage::shared();

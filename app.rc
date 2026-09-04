@@ -63,6 +63,9 @@
 #define IDD_LETTER 202
 #define IDD_LETTERS_LIST 203
 #define IDD_AUTHOR 204
+// The wizard of FR-104 — task Т-32-8. Six steps in one window, five of them on the road of a
+// trouble and three on the road of an idea.
+#define IDD_WIZARD 205
 
 // The two identifiers the dialog manager itself acts on. Named here for the same reason
 // VS_VERSION_INFO is defined above: they are macros of windows.h, this script deliberately
@@ -111,6 +114,10 @@
 #define IDC_LOG_ENABLED        1060
 #define IDC_LOG_OPEN           1061
 #define IDC_LOG_DIR            1062
+// The way into the wizard of FR-104 from «Диагностика» — task Т-32-8, §4 В-2 of the mandate
+// («Диагностика» → кнопка рядом с «Открыть папку журнала»). It says exactly what the tray
+// entry says and shares its string, IDS_WRITE_TO_AUTHOR.
+#define IDC_WRITE_AUTHOR       1063
 #define IDC_STATE_HOOK         1070
 #define IDC_STATE_LAYOUTS      1071
 #define IDC_STATE_AUTOSTART    1072
@@ -266,6 +273,75 @@
 #define IDC_FEEDBACK_WRITE     1278
 #define IDC_AUTHOR_CLOSE       1279
 
+// Controls of the wizard IDD_WIZARD — FR-104, task Т-32-8. A block of their own from 1300,
+// with the gap after 1279 left deliberately: the three windows above may still grow a slot,
+// and a number that once meant one control must never come to mean another.
+//
+// ⚠ **A pool of slots, exactly as IDD_LETTER is.** Six steps share one window; each step shows
+// its own set and hides the rest, and every rectangle is computed at run time by
+// `letters::layout_wizard` from the text actually put into it. What the template fixes is the
+// window — its width, its height and its font — and which slots exist.
+#define IDC_WZ_STEP            1300
+#define IDC_WZ_PROGRESS        1301
+#define IDC_WZ_TITLE           1302
+#define IDC_WZ_NOTE            1303
+// Step «Что случилось?»: three cards, each a button with two lines of text on it.
+#define IDC_WZ_CARD_1          1304
+#define IDC_WZ_CARD_2          1305
+#define IDC_WZ_CARD_3          1306
+#define IDC_WZ_CARD_T1         1307
+#define IDC_WZ_CARD_T2         1308
+#define IDC_WZ_CARD_T3         1309
+#define IDC_WZ_CARD_S1         1310
+#define IDC_WZ_CARD_S2         1311
+#define IDC_WZ_CARD_S3         1312
+// Step «Где это случилось?».
+#define IDC_WZ_PROGRAM_LABEL   1313
+#define IDC_WZ_PROGRAM         1314
+#define IDC_WZ_CAPTURE         1315
+#define IDC_WZ_CAPTURE_NOTE    1316
+#define IDC_WZ_FIELD_1         1317
+#define IDC_WZ_FIELD_2         1318
+#define IDC_WZ_FIELD_3         1319
+#define IDC_WZ_FIELD_2_SUB     1320
+// Step «Что вы делали?».
+#define IDC_WZ_TYPED_LABEL     1321
+#define IDC_WZ_LAYOUT          1322
+#define IDC_WZ_PRESSED_LABEL   1323
+#define IDC_WZ_CHIP            1324
+#define IDC_WZ_EXPECTED_LABEL  1325
+#define IDC_WZ_EXPECTED        1326
+#define IDC_WZ_GOT_LABEL       1327
+#define IDC_WZ_GOT             1328
+#define IDC_WZ_REPEAT_LABEL    1329
+#define IDC_WZ_REPEAT_1        1330
+#define IDC_WZ_REPEAT_2        1331
+#define IDC_WZ_REPEAT_3        1332
+// Step «Опишите идею» — the short road.
+#define IDC_WZ_IDEA_LABEL      1333
+#define IDC_WZ_IDEA            1334
+#define IDC_WZ_HELPS_LABEL     1335
+#define IDC_WZ_HELPS           1336
+// Step «Что приложить?»: four boxes, each with the value it would add written beside it.
+#define IDC_WZ_ATTACH_1        1337
+#define IDC_WZ_ATTACH_2        1338
+#define IDC_WZ_ATTACH_3        1339
+#define IDC_WZ_ATTACH_4        1340
+#define IDC_WZ_ATTACH_V1       1341
+#define IDC_WZ_ATTACH_V2       1342
+#define IDC_WZ_ATTACH_V3       1343
+#define IDC_WZ_ATTACH_V4       1344
+#define IDC_WZ_ATTACH_FOOT     1345
+// Step «Проверьте и отправьте».
+#define IDC_WZ_PREVIEW         1346
+#define IDC_WZ_COPY            1347
+#define IDC_WZ_SAVE            1348
+#define IDC_WZ_STATUS          1349
+// The three buttons at the bottom, on every step.
+#define IDC_WZ_CANCEL          1350
+#define IDC_WZ_BACK            1351
+#define IDC_WZ_NEXT            1352
+
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
 // undefined symbol. The values are those of winuser.h and commctrl.h and cannot change --
@@ -304,6 +380,11 @@
 // itself on arrival, and the dialog procedure of src\settings.rs (task T-11-5b) needs to
 // hear about the arrival to do the same by hand.
 #define BS_NOTIFY              0x4000
+#define ES_MULTILINE           0x0004
+// ⚠ ES_WANTRETURN is load-bearing in a **dialog**: without it Enter inside a multi-line edit
+// goes to the dialog manager and presses the default button instead of adding a line. The four
+// multi-line fields of the wizard carry it (task Т-32-8).
+#define ES_WANTRETURN          0x1000
 #define ES_AUTOHSCROLL         0x0080
 #define ES_READONLY            0x0800
 #define ES_NUMBER              0x2000
@@ -374,8 +455,8 @@ IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
 
 // Values fixed by decision 8 of DECISIONS.md.
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,40,0,0
-  PRODUCTVERSION  0,40,0,0
+  FILEVERSION     0,41,0,0
+  PRODUCTVERSION  0,41,0,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L
@@ -388,12 +469,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Panda_Pishet_Kod"
             VALUE "FileDescription",  "Lang Switcher"
-            VALUE "FileVersion",      "0.40.0.0"
+            VALUE "FileVersion",      "0.41.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
             VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
-            VALUE "ProductVersion",   "0.40.0.0"
+            VALUE "ProductVersion",   "0.41.0.0"
         END
     END
     BLOCK "VarFileInfo"
@@ -660,6 +741,9 @@ BEGIN
     // Nine units under its own caption, which is the generator's own step (ui.ps1: y = 264
     // and y = 273 in the numbering of the window this group had before Т-23-2).
     LTEXT           "", IDC_LOG_DIR, 230, 252, 186, 16, SS_OWNERDRAW
+    // The way into the wizard of FR-104 — task Т-32-8. Under the path and inside the group:
+    // 270 + 14 = 284 against the group's own bottom edge at 289.
+    PUSHBUTTON      "", IDC_WRITE_AUTHOR, 230, 270, 110, 14, BS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     //
@@ -950,6 +1034,81 @@ BEGIN
     PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 296, 41, 14, BS_OWNERDRAW
 END
 
+// The wizard «Написать автору» — FR-104, task Т-32-8.
+//
+// 256 × 250 dialog units ≈ 470 × 460 px at 100 %, the size the mock-up settled on: wide enough
+// for two fields side by side and tall enough for the tallest step («Что приложить?»), which
+// is what fixes the height. The **height does not change with the step** — a window that grew
+// and shrank as a person pressed «Далее» would jump under the mouse, and the mock-up says so
+// too («кнопки прижаты к низу на всех шагах»).
+//
+// ⚠ Every slot below is hidden or shown by `letters::fill_wizard` and placed by
+// `letters::layout_wizard`; the numbers here are a starting shape and not a layout.
+// ⚠ 268 units tall and not the 250 the first draft had: the fitting instrument measured the
+// step «Что приложить?» in **Greek** — the longest of the fourteen — and its footnote ran
+// through the button row. Eighteen units is what the four values of that step need there, and
+// on every shorter locale they become air above the buttons, which are pinned to the bottom.
+IDD_WIZARD DIALOGEX 0, 0, 256, 268
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE 0x00040000
+CAPTION "Написать автору"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT           "", IDC_WZ_STEP, 16, 12, 224, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_PROGRESS, 16, 23, 224, 3, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_TITLE, 16, 30, 224, 16, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_NOTE, 16, 48, 224, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_CARD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 72, 224, 30
+    CONTROL         "", IDC_WZ_CARD_2, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 106, 224, 30
+    CONTROL         "", IDC_WZ_CARD_3, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 140, 224, 30
+    LTEXT           "", IDC_WZ_CARD_T1, 26, 78, 206, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_T2, 26, 112, 206, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_T3, 26, 146, 206, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_S1, 26, 89, 206, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_S2, 26, 123, 206, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_S3, 26, 157, 206, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_PROGRAM_LABEL, 16, 72, 60, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_PROGRAM, 78, 70, 100, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "", IDC_WZ_CAPTURE, 182, 70, 58, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CAPTURE_NOTE, 16, 88, 224, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_FIELD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 16, 112, 224, 10
+    CONTROL         "", IDC_WZ_FIELD_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 126, 224, 10
+    LTEXT           "", IDC_WZ_FIELD_2_SUB, 29, 137, 211, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_FIELD_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 160, 224, 10
+    LTEXT           "", IDC_WZ_TYPED_LABEL, 16, 72, 100, 10, SS_OWNERDRAW
+    COMBOBOX        IDC_WZ_LAYOUT, 16, 84, 150, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | CBS_OWNERDRAWFIXED | WS_TABSTOP | WS_VSCROLL
+    LTEXT           "", IDC_WZ_PRESSED_LABEL, 172, 86, 30, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CHIP, 204, 84, 36, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_EXPECTED_LABEL, 16, 104, 100, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_EXPECTED, 16, 116, 224, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_GOT_LABEL, 16, 134, 100, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_GOT, 16, 146, 224, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_REPEAT_LABEL, 16, 166, 100, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_REPEAT_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 16, 178, 70, 10
+    CONTROL         "", IDC_WZ_REPEAT_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 92, 178, 70, 10
+    CONTROL         "", IDC_WZ_REPEAT_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 168, 178, 70, 10
+    LTEXT           "", IDC_WZ_IDEA_LABEL, 16, 72, 224, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_IDEA, 16, 84, 224, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_HELPS_LABEL, 16, 140, 224, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_HELPS, 16, 152, 224, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    CONTROL         "", IDC_WZ_ATTACH_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 72, 224, 10
+    LTEXT           "", IDC_WZ_ATTACH_V1, 29, 83, 211, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 96, 224, 10
+    LTEXT           "", IDC_WZ_ATTACH_V2, 29, 107, 211, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 120, 224, 10
+    LTEXT           "", IDC_WZ_ATTACH_V3, 29, 131, 211, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_4, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 144, 224, 10
+    LTEXT           "", IDC_WZ_ATTACH_V4, 29, 155, 211, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_ATTACH_FOOT, 16, 178, 224, 30, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_PREVIEW, 16, 72, 224, 120, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "", IDC_WZ_COPY, 16, 196, 130, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_SAVE, 150, 196, 90, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_WZ_STATUS, 16, 213, 224, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_CANCEL, 16, 228, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_BACK, 130, 228, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_NEXT, 186, 228, 54, 14, BS_OWNERDRAW
+END
+
 // =======================================================================================
 // FR-94 -- the interface strings, one string table per locale. Task T-08-2.
 // =======================================================================================
@@ -1222,6 +1381,71 @@ END
 #define IDS_NEWS_OPEN_LINK      3151
 #define IDS_NEWS_FOOT           3152
 
+// The wizard «Написать автору» — FR-104, task Т-32-8, ступень В. Fifty-nine strings: the
+// window, its six steps, the two outcomes and the window of thanks. The **report** the wizard
+// writes is labelled out of these same strings rather than a second set of its own, and the
+// button in «Диагностика» reuses IDS_WRITE_TO_AUTHOR — two strings obliged to be identical are
+// two chances to drift apart.
+#define IDS_WIZARD_CAPTION      3153
+#define IDS_WIZARD_STEP         3154
+#define IDS_WIZARD_CANCEL       3155
+#define IDS_WIZARD_BACK         3156
+#define IDS_WIZARD_NEXT         3157
+#define IDS_WIZARD_DONE         3158
+#define IDS_WIZARD_WHAT_TITLE   3159
+#define IDS_WIZARD_WHAT_NOTE    3160
+#define IDS_WIZARD_CARD_WRONG   3161
+#define IDS_WIZARD_CARD_WRONG_SUB 3162
+#define IDS_WIZARD_CARD_NOTHING 3163
+#define IDS_WIZARD_CARD_NOTHING_SUB 3164
+#define IDS_WIZARD_CARD_IDEA    3165
+#define IDS_WIZARD_CARD_IDEA_SUB 3166
+#define IDS_WIZARD_WHERE_TITLE  3167
+#define IDS_WIZARD_WHERE_NOTE   3168
+#define IDS_WIZARD_PROGRAM      3169
+#define IDS_WIZARD_CAPTURE      3170
+#define IDS_WIZARD_CAPTURE_NOTE 3171
+#define IDS_WIZARD_CAPTURE_COUNT 3172
+#define IDS_WIZARD_WHERE_FIELD  3173
+#define IDS_WIZARD_FIELD_NORMAL 3174
+#define IDS_WIZARD_FIELD_PASSWORD 3175
+#define IDS_WIZARD_FIELD_PASSWORD_SUB 3176
+#define IDS_WIZARD_FIELD_UNKNOWN 3177
+#define IDS_WIZARD_DID_TITLE    3178
+#define IDS_WIZARD_DID_NOTE     3179
+#define IDS_WIZARD_TYPED_IN     3180
+#define IDS_WIZARD_AND_PRESSED  3181
+#define IDS_WIZARD_EXPECTED     3182
+#define IDS_WIZARD_GOT          3183
+#define IDS_WIZARD_REPEAT       3184
+#define IDS_WIZARD_REPEAT_ALWAYS 3185
+#define IDS_WIZARD_REPEAT_SOMETIMES 3186
+#define IDS_WIZARD_REPEAT_ONCE  3187
+#define IDS_WIZARD_IDEA_TITLE   3188
+#define IDS_WIZARD_IDEA_NOTE    3189
+#define IDS_WIZARD_IDEA_WHAT    3190
+#define IDS_WIZARD_IDEA_HELPS   3191
+#define IDS_WIZARD_ATTACH_TITLE 3192
+#define IDS_WIZARD_ATTACH_NOTE  3193
+#define IDS_WIZARD_ATTACH_MACHINE 3194
+#define IDS_WIZARD_ATTACH_LAYOUTS 3195
+#define IDS_WIZARD_ATTACH_SETTINGS 3196
+#define IDS_WIZARD_ATTACH_JOURNAL 3197
+#define IDS_WIZARD_ATTACH_JOURNAL_SUB 3198
+#define IDS_WIZARD_ATTACH_FOOT  3199
+#define IDS_WIZARD_PREVIEW_TITLE 3200
+#define IDS_WIZARD_PREVIEW_NOTE 3201
+#define IDS_WIZARD_COPY         3202
+#define IDS_WIZARD_SAVE         3203
+#define IDS_WIZARD_COPIED_ONLY  3204
+#define IDS_WIZARD_COPIED       3205
+#define IDS_WIZARD_SAVED        3206
+#define IDS_WIZARD_FAILED       3207
+#define IDS_THANKYOU_BUG_TITLE  3208
+#define IDS_THANKYOU_IDEA_TITLE 3209
+#define IDS_THANKYOU_BUG_TEXT   3210
+#define IDS_THANKYOU_IDEA_TEXT  3211
+
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
 // ---------------------------------------------------------------------------------------
@@ -1330,9 +1554,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "было {0} · обновлено сегодня"
     IDS_WHATSNEW_TODAY      "обновлено сегодня"
     IDS_WHATSNEW_PANEL      "Три изменения"
-    IDS_WHATSNEW_1          "Лента автора: раз в 15 дней программа читает подписанный файл новостей и ничего не отправляет."
-    IDS_WHATSNEW_2          "Из ленты приходят письма «Новость» и «Обновление», а кнопка «Прочитано» гасит точку на значке."
-    IDS_WHATSNEW_3          "Чтение ленты отключается: в файле настроек сразу, а после первого письма — в окне «От автора»."
+    IDS_WHATSNEW_1          "Мастер «Написать автору»: пять шагов для ошибки и три для пожелания."
+    IDS_WHATSNEW_2          "Он сам соберёт версию, сборку Windows, раскладки и журнал — каждый пункт можно снять."
+    IDS_WHATSNEW_3          "Ничего не отправляется само: текст попадёт в буфер обмена, а вставите его вы."
     IDS_WHATSNEW_FULL       "Полный список изменений опубликован в канале."
     IDS_AUTHOR_CAPTION      "От автора"
     IDS_AUTHOR_VERSION      "версия {0} · Панда, он же Panda_Pishet_Kod"
@@ -1377,6 +1601,65 @@ BEGIN
     IDS_NEWS_LATER          "Позже"
     IDS_NEWS_OPEN_LINK      "Открыть ссылку"
     IDS_NEWS_FOOT           "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё раз через две, потом только точка на значке."
+    IDS_WIZARD_CAPTION      "Написать автору"
+    IDS_WIZARD_STEP         "Шаг {0} из {1}"
+    IDS_WIZARD_CANCEL       "Отмена"
+    IDS_WIZARD_BACK         "Назад"
+    IDS_WIZARD_NEXT         "Далее"
+    IDS_WIZARD_DONE         "Готово"
+    IDS_WIZARD_WHAT_TITLE   "Что случилось?"
+    IDS_WIZARD_WHAT_NOTE    "От ответа зависит, о чём мастер спросит дальше."
+    IDS_WIZARD_CARD_WRONG   "Программа сделала не то"
+    IDS_WIZARD_CARD_WRONG_SUB "слово перекодировалось неправильно, пропали буквы, раскладка не та"
+    IDS_WIZARD_CARD_NOTHING "Ничего не произошло"
+    IDS_WIZARD_CARD_NOTHING_SUB "нажали клавишу, а текст остался как был"
+    IDS_WIZARD_CARD_IDEA    "Хочу предложить улучшение"
+    IDS_WIZARD_CARD_IDEA_SUB "идея, пожелание, неудобство"
+    IDS_WIZARD_WHERE_TITLE  "Где это случилось?"
+    IDS_WIZARD_WHERE_NOTE   "Поведение зависит от окна: консоль, браузер и редактор получают текст по-разному. Переключитесь в то окно, и мастер запишет имя программы сам."
+    IDS_WIZARD_PROGRAM      "Программа:"
+    IDS_WIZARD_CAPTURE      "Взять из активного окна"
+    IDS_WIZARD_CAPTURE_NOTE "Берётся имя процесса и класс окна. Заголовок окна не берётся: в нём бывает имя документа."
+    IDS_WIZARD_CAPTURE_COUNT "Переключитесь в нужное окно… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Поле ввода"
+    IDS_WIZARD_FIELD_NORMAL "Обычное поле ввода"
+    IDS_WIZARD_FIELD_PASSWORD "Поле пароля"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "в полях пароля программа не работает нарочно: нажатия там не запоминаются"
+    IDS_WIZARD_FIELD_UNKNOWN "Не знаю"
+    IDS_WIZARD_DID_TITLE    "Что вы делали?"
+    IDS_WIZARD_DID_NOTE     "Пишите пример вместо настоящего текста. Программа не хранит нажатий, поэтому в обращение попадёт только то, что вы напишете здесь."
+    IDS_WIZARD_TYPED_IN     "Набрали слово в раскладке"
+    IDS_WIZARD_AND_PRESSED  "и нажали"
+    IDS_WIZARD_EXPECTED     "Ожидали:"
+    IDS_WIZARD_GOT          "Получили:"
+    IDS_WIZARD_REPEAT       "Повторяется?"
+    IDS_WIZARD_REPEAT_ALWAYS "каждый раз"
+    IDS_WIZARD_REPEAT_SOMETIMES "иногда"
+    IDS_WIZARD_REPEAT_ONCE  "один раз"
+    IDS_WIZARD_IDEA_TITLE   "Опишите идею"
+    IDS_WIZARD_IDEA_NOTE    "Два вопроса. Чем конкретнее пример, тем проще понять, что именно сделать."
+    IDS_WIZARD_IDEA_WHAT    "Что предлагаете?"
+    IDS_WIZARD_IDEA_HELPS   "Чем это поможет?"
+    IDS_WIZARD_ATTACH_TITLE "Что приложить?"
+    IDS_WIZARD_ATTACH_NOTE  "Каждый пункт можно снять. Ниже написано, что именно попадёт в текст."
+    IDS_WIZARD_ATTACH_MACHINE "Версия программы и сборка Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Раскладки в системе"
+    IDS_WIZARD_ATTACH_SETTINGS "Настройки"
+    IDS_WIZARD_ATTACH_JOURNAL "Журнал программы из памяти"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} записей. Только имена операций и коды ошибок, ни одной клавиши: так устроен сам журнал"
+    IDS_WIZARD_ATTACH_FOOT  "Файл журнала не нужен: записи есть в памяти, пока программа запущена. Если проблема повторяется, включите журнал в настройках, тогда записи переживут перезапуск."
+    IDS_WIZARD_PREVIEW_TITLE "Проверьте и отправьте"
+    IDS_WIZARD_PREVIEW_NOTE "Это весь текст обращения. Правьте что угодно. Отправляете вы сами: текст попадёт в буфер обмена, а канал откроется в браузере."
+    IDS_WIZARD_COPY         "Скопировать и открыть канал"
+    IDS_WIZARD_SAVE         "Сохранить в папку журнала"
+    IDS_WIZARD_COPIED_ONLY  "Скопировано. Адрес канала появится в следующей версии."
+    IDS_WIZARD_COPIED       "Скопировано, канал открыт."
+    IDS_WIZARD_SAVED        "Сохранено: {0}"
+    IDS_WIZARD_FAILED       "Не получилось. Текст остался в окне — скопируйте его вручную."
+    IDS_THANKYOU_BUG_TITLE  "Спасибо за сообщение об ошибке"
+    IDS_THANKYOU_IDEA_TITLE "Спасибо за идею"
+    IDS_THANKYOU_BUG_TEXT   "Я читаю каждое обращение сам. Ошибки чиню, а о важном для всех рассказываю письмом в программе или в канале. Здорово, что вы нашли на это время 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Я читаю каждое обращение сам. Идеи складываю в план и лучшие из них делаю, а о важном для всех рассказываю письмом в программе или в канале. Здорово, что вы нашли на это время 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1484,9 +1767,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "you had {0} · updated today"
     IDS_WHATSNEW_TODAY      "updated today"
     IDS_WHATSNEW_PANEL      "Three changes"
-    IDS_WHATSNEW_1          "The author's feed: once in fifteen days the program reads a signed news file and sends nothing."
-    IDS_WHATSNEW_2          "The «News» and «Update» letters come from it, and «Read» puts out the dot on the icon."
-    IDS_WHATSNEW_3          "The reading can be turned off: in the settings file at once, later in the «From the author» window."
+    IDS_WHATSNEW_1          "The «Write to the author» wizard: five steps for a bug and three for an idea."
+    IDS_WHATSNEW_2          "It collects the version, the Windows build, the layouts and the journal — every item can be taken off."
+    IDS_WHATSNEW_3          "Nothing is sent by itself: the text goes to the clipboard and you paste it."
     IDS_WHATSNEW_FULL       "The full list of changes is published in the channel."
     IDS_AUTHOR_CAPTION      "From the author"
     IDS_AUTHOR_VERSION      "version {0} · Panda, also known as Panda_Pishet_Kod"
@@ -1531,6 +1814,65 @@ BEGIN
     IDS_NEWS_LATER          "Later"
     IDS_NEWS_OPEN_LINK      "Open the link"
     IDS_NEWS_FOOT           "«Mark as read» closes the letter for good. «Later» or the cross: I will remind you in a week and once more in two, after that only the dot on the icon."
+    IDS_WIZARD_CAPTION      "Write to the author"
+    IDS_WIZARD_STEP         "Step {0} of {1}"
+    IDS_WIZARD_CANCEL       "Cancel"
+    IDS_WIZARD_BACK         "Back"
+    IDS_WIZARD_NEXT         "Next"
+    IDS_WIZARD_DONE         "Done"
+    IDS_WIZARD_WHAT_TITLE   "What happened?"
+    IDS_WIZARD_WHAT_NOTE    "The answer decides what the wizard asks about next."
+    IDS_WIZARD_CARD_WRONG   "The program did the wrong thing"
+    IDS_WIZARD_CARD_WRONG_SUB "the word came out converted wrongly, letters went missing, the layout was not the one"
+    IDS_WIZARD_CARD_NOTHING "Nothing happened"
+    IDS_WIZARD_CARD_NOTHING_SUB "you pressed the key and the text stayed as it was"
+    IDS_WIZARD_CARD_IDEA    "I would like to suggest an improvement"
+    IDS_WIZARD_CARD_IDEA_SUB "an idea, a wish, an inconvenience"
+    IDS_WIZARD_WHERE_TITLE  "Where did it happen?"
+    IDS_WIZARD_WHERE_NOTE   "The behaviour depends on the window: a console, a browser and an editor take text in different ways. Switch to that window and the wizard writes the program's name itself."
+    IDS_WIZARD_PROGRAM      "Program:"
+    IDS_WIZARD_CAPTURE      "Take from the active window"
+    IDS_WIZARD_CAPTURE_NOTE "The process name and the window class are taken. The window title is not: it often holds the name of a document."
+    IDS_WIZARD_CAPTURE_COUNT "Switch to the window you need… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Input field"
+    IDS_WIZARD_FIELD_NORMAL "An ordinary input field"
+    IDS_WIZARD_FIELD_PASSWORD "A password field"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "in password fields the program does not work on purpose: keystrokes there are not remembered"
+    IDS_WIZARD_FIELD_UNKNOWN "I do not know"
+    IDS_WIZARD_DID_TITLE    "What were you doing?"
+    IDS_WIZARD_DID_NOTE     "Write an example instead of the real text. The program keeps no keystrokes, so the appeal carries only what you write here."
+    IDS_WIZARD_TYPED_IN     "Typed a word in the layout"
+    IDS_WIZARD_AND_PRESSED  "and pressed"
+    IDS_WIZARD_EXPECTED     "Expected:"
+    IDS_WIZARD_GOT          "Got:"
+    IDS_WIZARD_REPEAT       "Does it repeat?"
+    IDS_WIZARD_REPEAT_ALWAYS "every time"
+    IDS_WIZARD_REPEAT_SOMETIMES "sometimes"
+    IDS_WIZARD_REPEAT_ONCE  "once"
+    IDS_WIZARD_IDEA_TITLE   "Describe the idea"
+    IDS_WIZARD_IDEA_NOTE    "Two questions. The more concrete the example, the easier it is to see what exactly to do."
+    IDS_WIZARD_IDEA_WHAT    "What do you suggest?"
+    IDS_WIZARD_IDEA_HELPS   "How would it help?"
+    IDS_WIZARD_ATTACH_TITLE "What to attach?"
+    IDS_WIZARD_ATTACH_NOTE  "Every item can be taken off. What each of them adds is written beside it."
+    IDS_WIZARD_ATTACH_MACHINE "The program's version and the Windows build"
+    IDS_WIZARD_ATTACH_LAYOUTS "The layouts in the system"
+    IDS_WIZARD_ATTACH_SETTINGS "The settings"
+    IDS_WIZARD_ATTACH_JOURNAL "The program's journal, out of memory"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entries. Only operation names and error codes, not a single keystroke: that is how the journal itself is built"
+    IDS_WIZARD_ATTACH_FOOT  "No journal file is needed: the entries are in memory while the program runs. If the problem repeats, turn the journal on in the settings and the entries will survive a restart."
+    IDS_WIZARD_PREVIEW_TITLE "Check it and send"
+    IDS_WIZARD_PREVIEW_NOTE "This is the whole text of the appeal. Edit anything you like. You send it yourself: the text goes to the clipboard and the channel opens in the browser."
+    IDS_WIZARD_COPY         "Copy and open the channel"
+    IDS_WIZARD_SAVE         "Save to the journal folder"
+    IDS_WIZARD_COPIED_ONLY  "Copied. The address of the channel will appear in the next version."
+    IDS_WIZARD_COPIED       "Copied, the channel is open."
+    IDS_WIZARD_SAVED        "Saved: {0}"
+    IDS_WIZARD_FAILED       "It did not work. The text is still in the window — copy it by hand."
+    IDS_THANKYOU_BUG_TITLE  "Thank you for the bug report"
+    IDS_THANKYOU_IDEA_TITLE "Thank you for the idea"
+    IDS_THANKYOU_BUG_TEXT   "I read every appeal myself. Bugs I fix, and what matters to everybody I tell about in a letter in the program or in the channel. It is good that you found the time 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "I read every appeal myself. Ideas go into the plan and the best of them get made, and what matters to everybody I tell about in a letter in the program or in the channel. It is good that you found the time 🖤"
 END
 
 // =======================================================================================
@@ -1651,9 +1993,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "було {0} · оновлено сьогодні"
     IDS_WHATSNEW_TODAY      "оновлено сьогодні"
     IDS_WHATSNEW_PANEL      "Три зміни"
-    IDS_WHATSNEW_1          "Стрічка автора: раз на 15 днів програма читає підписаний файл новин і нічого не надсилає."
-    IDS_WHATSNEW_2          "Зі стрічки приходять листи «Новина» й «Оновлення», а кнопка «Прочитано» гасить крапку на значку."
-    IDS_WHATSNEW_3          "Читання стрічки вимикається: у файлі налаштувань одразу, а після першого листа — у вікні «Від автора»."
+    IDS_WHATSNEW_1          "Майстер «Написати автору»: п'ять кроків для помилки і три для побажання."
+    IDS_WHATSNEW_2          "Він сам збере версію, збірку Windows, розкладки та журнал — кожен пункт можна зняти."
+    IDS_WHATSNEW_3          "Нічого не надсилається саме: текст потрапить у буфер обміну, а вставите його ви."
     IDS_WHATSNEW_FULL       "Повний список змін опубліковано в каналі."
     IDS_AUTHOR_CAPTION      "Від автора"
     IDS_AUTHOR_VERSION      "версія {0} · Панда, він же Panda_Pishet_Kod"
@@ -1698,6 +2040,65 @@ BEGIN
     IDS_NEWS_LATER          "Пізніше"
     IDS_NEWS_OPEN_LINK      "Відкрити посилання"
     IDS_NEWS_FOOT           "«Прочитано» закриває лист назавжди. «Пізніше» або хрестик: нагадаю через тиждень і ще раз через два, потім лише крапка на значку."
+    IDS_WIZARD_CAPTION      "Написати автору"
+    IDS_WIZARD_STEP         "Крок {0} з {1}"
+    IDS_WIZARD_CANCEL       "Скасувати"
+    IDS_WIZARD_BACK         "Назад"
+    IDS_WIZARD_NEXT         "Далі"
+    IDS_WIZARD_DONE         "Готово"
+    IDS_WIZARD_WHAT_TITLE   "Що сталося?"
+    IDS_WIZARD_WHAT_NOTE    "Від відповіді залежить, про що майстер запитає далі."
+    IDS_WIZARD_CARD_WRONG   "Програма зробила не те"
+    IDS_WIZARD_CARD_WRONG_SUB "слово перекодувалося неправильно, зникли букви, розкладка не та"
+    IDS_WIZARD_CARD_NOTHING "Нічого не сталося"
+    IDS_WIZARD_CARD_NOTHING_SUB "натиснули клавішу, а текст лишився як був"
+    IDS_WIZARD_CARD_IDEA    "Хочу запропонувати поліпшення"
+    IDS_WIZARD_CARD_IDEA_SUB "ідея, побажання, незручність"
+    IDS_WIZARD_WHERE_TITLE  "Де це сталося?"
+    IDS_WIZARD_WHERE_NOTE   "Поведінка залежить від вікна: консоль, браузер і редактор отримують текст по-різному. Перейдіть у те вікно, і майстер запише ім'я програми сам."
+    IDS_WIZARD_PROGRAM      "Програма:"
+    IDS_WIZARD_CAPTURE      "Узяти з активного вікна"
+    IDS_WIZARD_CAPTURE_NOTE "Береться ім'я процесу та клас вікна. Заголовок вікна не береться: у ньому буває ім'я документа."
+    IDS_WIZARD_CAPTURE_COUNT "Перейдіть у потрібне вікно… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Поле введення"
+    IDS_WIZARD_FIELD_NORMAL "Звичайне поле введення"
+    IDS_WIZARD_FIELD_PASSWORD "Поле пароля"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "у полях пароля програма не працює навмисно: натискання там не запам'ятовуються"
+    IDS_WIZARD_FIELD_UNKNOWN "Не знаю"
+    IDS_WIZARD_DID_TITLE    "Що ви робили?"
+    IDS_WIZARD_DID_NOTE     "Пишіть приклад замість справжнього тексту. Програма не зберігає натискань, тому у звернення потрапить лише те, що ви напишете тут."
+    IDS_WIZARD_TYPED_IN     "Набрали слово в розкладці"
+    IDS_WIZARD_AND_PRESSED  "і натиснули"
+    IDS_WIZARD_EXPECTED     "Очікували:"
+    IDS_WIZARD_GOT          "Отримали:"
+    IDS_WIZARD_REPEAT       "Повторюється?"
+    IDS_WIZARD_REPEAT_ALWAYS "щоразу"
+    IDS_WIZARD_REPEAT_SOMETIMES "інколи"
+    IDS_WIZARD_REPEAT_ONCE  "один раз"
+    IDS_WIZARD_IDEA_TITLE   "Опишіть ідею"
+    IDS_WIZARD_IDEA_NOTE    "Два питання. Чим конкретніший приклад, тим простіше зрозуміти, що саме зробити."
+    IDS_WIZARD_IDEA_WHAT    "Що пропонуєте?"
+    IDS_WIZARD_IDEA_HELPS   "Чим це допоможе?"
+    IDS_WIZARD_ATTACH_TITLE "Що додати?"
+    IDS_WIZARD_ATTACH_NOTE  "Кожен пункт можна зняти. Нижче написано, що саме потрапить у текст."
+    IDS_WIZARD_ATTACH_MACHINE "Версія програми та збірка Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Розкладки в системі"
+    IDS_WIZARD_ATTACH_SETTINGS "Налаштування"
+    IDS_WIZARD_ATTACH_JOURNAL "Журнал програми з пам'яті"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} записів. Тільки імена операцій і коди помилок, жодної клавіші: так влаштований сам журнал"
+    IDS_WIZARD_ATTACH_FOOT  "Файл журналу не потрібен: записи є в пам'яті, доки програма запущена. Якщо проблема повторюється, увімкніть журнал у налаштуваннях, тоді записи переживуть перезапуск."
+    IDS_WIZARD_PREVIEW_TITLE "Перевірте та надішліть"
+    IDS_WIZARD_PREVIEW_NOTE "Це весь текст звернення. Правте що завгодно. Надсилаєте ви самі: текст потрапить у буфер обміну, а канал відкриється у браузері."
+    IDS_WIZARD_COPY         "Скопіювати та відкрити канал"
+    IDS_WIZARD_SAVE         "Зберегти в папку журналу"
+    IDS_WIZARD_COPIED_ONLY  "Скопійовано. Адреса каналу з'явиться в наступній версії."
+    IDS_WIZARD_COPIED       "Скопійовано, канал відкрито."
+    IDS_WIZARD_SAVED        "Збережено: {0}"
+    IDS_WIZARD_FAILED       "Не вийшло. Текст лишився у вікні — скопіюйте його вручну."
+    IDS_THANKYOU_BUG_TITLE  "Дякую за повідомлення про помилку"
+    IDS_THANKYOU_IDEA_TITLE "Дякую за ідею"
+    IDS_THANKYOU_BUG_TEXT   "Я читаю кожне звернення сам. Помилки лагоджу, а про важливе для всіх розповідаю листом у програмі або в каналі. Чудово, що ви знайшли на це час 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Я читаю кожне звернення сам. Ідеї складаю в план і найкращі з них роблю, а про важливе для всіх розповідаю листом у програмі або в каналі. Чудово, що ви знайшли на це час 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1801,9 +2202,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vorher {0} · heute aktualisiert"
     IDS_WHATSNEW_TODAY      "heute aktualisiert"
     IDS_WHATSNEW_PANEL      "Drei Änderungen"
-    IDS_WHATSNEW_1          "Kanal des Autors: alle 15 Tage liest das Programm eine signierte Nachrichtendatei und sendet nichts."
-    IDS_WHATSNEW_2          "Von dort kommen die Briefe «Neuigkeit» und «Update»; «Gelesen» löscht den Punkt am Symbol."
-    IDS_WHATSNEW_3          "Das Lesen lässt sich abschalten: sofort in der Einstellungsdatei, später im Fenster «Vom Autor»."
+    IDS_WHATSNEW_1          "Der Assistent «Dem Autor schreiben»: fünf Schritte für einen Fehler, drei für eine Idee."
+    IDS_WHATSNEW_2          "Er sammelt Version, Windows-Build, Layouts und Journal — jeder Punkt lässt sich abwählen."
+    IDS_WHATSNEW_3          "Nichts geht von selbst hinaus: der Text kommt in die Zwischenablage, einfügen tun Sie ihn."
     IDS_WHATSNEW_FULL       "Die vollständige Liste der Änderungen ist im Kanal veröffentlicht."
     IDS_AUTHOR_CAPTION      "Vom Autor"
     IDS_AUTHOR_VERSION      "Version {0} · Panda, auch bekannt als Panda_Pishet_Kod"
@@ -1848,6 +2249,65 @@ BEGIN
     IDS_NEWS_LATER          "Später"
     IDS_NEWS_OPEN_LINK      "Link öffnen"
     IDS_NEWS_FOOT           "«Gelesen» schließt den Brief endgültig. «Später» oder das Kreuz: ich erinnere in einer Woche und noch einmal in zwei, danach bleibt nur der Punkt am Symbol."
+    IDS_WIZARD_CAPTION      "Dem Autor schreiben"
+    IDS_WIZARD_STEP         "Schritt {0} von {1}"
+    IDS_WIZARD_CANCEL       "Abbrechen"
+    IDS_WIZARD_BACK         "Zurück"
+    IDS_WIZARD_NEXT         "Weiter"
+    IDS_WIZARD_DONE         "Fertig"
+    IDS_WIZARD_WHAT_TITLE   "Was ist passiert?"
+    IDS_WIZARD_WHAT_NOTE    "Von der Antwort hängt ab, wonach der Assistent als Nächstes fragt."
+    IDS_WIZARD_CARD_WRONG   "Das Programm hat das Falsche getan"
+    IDS_WIZARD_CARD_WRONG_SUB "das Wort wurde falsch umgesetzt, Buchstaben fehlen, das Layout war nicht das richtige"
+    IDS_WIZARD_CARD_NOTHING "Es ist nichts passiert"
+    IDS_WIZARD_CARD_NOTHING_SUB "Sie haben die Taste gedrückt, und der Text blieb, wie er war"
+    IDS_WIZARD_CARD_IDEA    "Ich möchte eine Verbesserung vorschlagen"
+    IDS_WIZARD_CARD_IDEA_SUB "eine Idee, ein Wunsch, etwas Unbequemes"
+    IDS_WIZARD_WHERE_TITLE  "Wo ist es passiert?"
+    IDS_WIZARD_WHERE_NOTE   "Das Verhalten hängt vom Fenster ab: Konsole, Browser und Editor nehmen Text unterschiedlich entgegen. Wechseln Sie in jenes Fenster, und der Assistent notiert den Programmnamen selbst."
+    IDS_WIZARD_PROGRAM      "Programm:"
+    IDS_WIZARD_CAPTURE      "Aus dem aktiven Fenster übernehmen"
+    IDS_WIZARD_CAPTURE_NOTE "Übernommen werden Prozessname und Fensterklasse. Der Fenstertitel nicht: darin steht oft ein Dokumentname."
+    IDS_WIZARD_CAPTURE_COUNT "Wechseln Sie in das gewünschte Fenster… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Eingabefeld"
+    IDS_WIZARD_FIELD_NORMAL "Ein gewöhnliches Eingabefeld"
+    IDS_WIZARD_FIELD_PASSWORD "Ein Kennwortfeld"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "in Kennwortfeldern arbeitet das Programm absichtlich nicht: Tastendrücke werden dort nicht gemerkt"
+    IDS_WIZARD_FIELD_UNKNOWN "Ich weiß es nicht"
+    IDS_WIZARD_DID_TITLE    "Was haben Sie getan?"
+    IDS_WIZARD_DID_NOTE     "Schreiben Sie ein Beispiel statt des echten Textes. Das Programm speichert keine Tastendrücke, daher steht in der Meldung nur, was Sie hier schreiben."
+    IDS_WIZARD_TYPED_IN     "Wort getippt im Layout"
+    IDS_WIZARD_AND_PRESSED  "und gedrückt"
+    IDS_WIZARD_EXPECTED     "Erwartet:"
+    IDS_WIZARD_GOT          "Bekommen:"
+    IDS_WIZARD_REPEAT       "Wiederholt es sich?"
+    IDS_WIZARD_REPEAT_ALWAYS "jedes Mal"
+    IDS_WIZARD_REPEAT_SOMETIMES "manchmal"
+    IDS_WIZARD_REPEAT_ONCE  "einmal"
+    IDS_WIZARD_IDEA_TITLE   "Beschreiben Sie die Idee"
+    IDS_WIZARD_IDEA_NOTE    "Zwei Fragen. Je konkreter das Beispiel, desto leichter ist zu erkennen, was genau zu tun ist."
+    IDS_WIZARD_IDEA_WHAT    "Was schlagen Sie vor?"
+    IDS_WIZARD_IDEA_HELPS   "Wobei hilft das?"
+    IDS_WIZARD_ATTACH_TITLE "Was anhängen?"
+    IDS_WIZARD_ATTACH_NOTE  "Jeder Punkt kann abgewählt werden. Daneben steht, was genau in den Text kommt."
+    IDS_WIZARD_ATTACH_MACHINE "Programmversion und Windows-Build"
+    IDS_WIZARD_ATTACH_LAYOUTS "Layouts im System"
+    IDS_WIZARD_ATTACH_SETTINGS "Einstellungen"
+    IDS_WIZARD_ATTACH_JOURNAL "Programmjournal aus dem Speicher"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} Einträge. Nur Namen von Operationen und Fehlercodes, keine einzige Taste: so ist das Journal gebaut"
+    IDS_WIZARD_ATTACH_FOOT  "Eine Journaldatei ist nicht nötig: die Einträge liegen im Speicher, solange das Programm läuft. Wiederholt sich das Problem, schalten Sie das Journal in den Einstellungen ein, dann überleben die Einträge einen Neustart."
+    IDS_WIZARD_PREVIEW_TITLE "Prüfen und senden"
+    IDS_WIZARD_PREVIEW_NOTE "Das ist der ganze Text der Meldung. Ändern Sie, was Sie möchten. Gesendet wird von Ihnen: der Text kommt in die Zwischenablage, und der Kanal öffnet sich im Browser."
+    IDS_WIZARD_COPY         "Kopieren und Kanal öffnen"
+    IDS_WIZARD_SAVE         "In den Journalordner speichern"
+    IDS_WIZARD_COPIED_ONLY  "Kopiert. Die Adresse des Kanals kommt in der nächsten Version."
+    IDS_WIZARD_COPIED       "Kopiert, der Kanal ist offen."
+    IDS_WIZARD_SAVED        "Gespeichert: {0}"
+    IDS_WIZARD_FAILED       "Es hat nicht geklappt. Der Text steht noch im Fenster — kopieren Sie ihn von Hand."
+    IDS_THANKYOU_BUG_TITLE  "Danke für die Fehlermeldung"
+    IDS_THANKYOU_IDEA_TITLE "Danke für die Idee"
+    IDS_THANKYOU_BUG_TEXT   "Ich lese jede Meldung selbst. Fehler behebe ich, und worüber alle Bescheid wissen sollten, erzähle ich in einem Brief im Programm oder im Kanal. Schön, dass Sie sich die Zeit genommen haben 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Ich lese jede Meldung selbst. Ideen kommen in den Plan und die besten davon setze ich um, und worüber alle Bescheid wissen sollten, erzähle ich in einem Brief im Programm oder im Kanal. Schön, dass Sie sich die Zeit genommen haben 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1953,9 +2413,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vous aviez {0} · mis à jour aujourd'hui"
     IDS_WHATSNEW_TODAY      "mis à jour aujourd'hui"
     IDS_WHATSNEW_PANEL      "Trois changements"
-    IDS_WHATSNEW_1          "Le flux de l'auteur : tous les 15 jours le programme lit un fichier de nouvelles signé et n'envoie rien."
-    IDS_WHATSNEW_2          "Les lettres « Nouvelle » et « Mise à jour » en viennent ; « Lu » éteint le point sur l'icône."
-    IDS_WHATSNEW_3          "La lecture se désactive : dans le fichier de réglages tout de suite, puis dans « De l'auteur »."
+    IDS_WHATSNEW_1          "L'assistant « Écrire à l'auteur » : cinq étapes pour une erreur, trois pour une idée."
+    IDS_WHATSNEW_2          "Il réunit la version, le build de Windows, les dispositions et le journal — chaque point se décoche."
+    IDS_WHATSNEW_3          "Rien ne part tout seul : le texte va dans le presse-papiers et c'est vous qui le collez."
     IDS_WHATSNEW_FULL       "La liste complète des changements est publiée dans la chaîne."
     IDS_AUTHOR_CAPTION      "De l'auteur"
     IDS_AUTHOR_VERSION      "version {0} · Panda, alias Panda_Pishet_Kod"
@@ -2000,6 +2460,65 @@ BEGIN
     IDS_NEWS_LATER          "Plus tard"
     IDS_NEWS_OPEN_LINK      "Ouvrir le lien"
     IDS_NEWS_FOOT           "« Lu » ferme la lettre pour de bon. « Plus tard » ou la croix : je vous rappelle dans une semaine et encore dans deux, ensuite il ne reste que le point sur l'icône."
+    IDS_WIZARD_CAPTION      "Écrire à l'auteur"
+    IDS_WIZARD_STEP         "Étape {0} sur {1}"
+    IDS_WIZARD_CANCEL       "Annuler"
+    IDS_WIZARD_BACK         "Retour"
+    IDS_WIZARD_NEXT         "Suivant"
+    IDS_WIZARD_DONE         "Terminer"
+    IDS_WIZARD_WHAT_TITLE   "Que s'est-il passé ?"
+    IDS_WIZARD_WHAT_NOTE    "La réponse décide de ce que l'assistant demandera ensuite."
+    IDS_WIZARD_CARD_WRONG   "Le programme a fait autre chose"
+    IDS_WIZARD_CARD_WRONG_SUB "le mot a été mal converti, des lettres ont disparu, la disposition n'était pas la bonne"
+    IDS_WIZARD_CARD_NOTHING "Rien ne s'est passé"
+    IDS_WIZARD_CARD_NOTHING_SUB "vous avez appuyé sur la touche et le texte est resté tel quel"
+    IDS_WIZARD_CARD_IDEA    "Je voudrais proposer une amélioration"
+    IDS_WIZARD_CARD_IDEA_SUB "une idée, un souhait, une gêne"
+    IDS_WIZARD_WHERE_TITLE  "Où cela s'est-il passé ?"
+    IDS_WIZARD_WHERE_NOTE   "Le comportement dépend de la fenêtre : une console, un navigateur et un éditeur reçoivent le texte différemment. Passez dans cette fenêtre et l'assistant notera le nom du programme lui-même."
+    IDS_WIZARD_PROGRAM      "Programme :"
+    IDS_WIZARD_CAPTURE      "Prendre depuis la fenêtre active"
+    IDS_WIZARD_CAPTURE_NOTE "Sont pris le nom du processus et la classe de la fenêtre. Le titre de la fenêtre, non : il contient souvent un nom de document."
+    IDS_WIZARD_CAPTURE_COUNT "Passez dans la fenêtre voulue… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Champ de saisie"
+    IDS_WIZARD_FIELD_NORMAL "Un champ de saisie ordinaire"
+    IDS_WIZARD_FIELD_PASSWORD "Un champ de mot de passe"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "dans les champs de mot de passe le programme ne travaille pas exprès : les frappes n'y sont pas mémorisées"
+    IDS_WIZARD_FIELD_UNKNOWN "Je ne sais pas"
+    IDS_WIZARD_DID_TITLE    "Que faisiez-vous ?"
+    IDS_WIZARD_DID_NOTE     "Écrivez un exemple à la place du vrai texte. Le programme ne garde aucune frappe : le message ne contiendra que ce que vous écrivez ici."
+    IDS_WIZARD_TYPED_IN     "Mot tapé dans la disposition"
+    IDS_WIZARD_AND_PRESSED  "et appuyé sur"
+    IDS_WIZARD_EXPECTED     "Attendu :"
+    IDS_WIZARD_GOT          "Obtenu :"
+    IDS_WIZARD_REPEAT       "Cela se répète ?"
+    IDS_WIZARD_REPEAT_ALWAYS "chaque fois"
+    IDS_WIZARD_REPEAT_SOMETIMES "parfois"
+    IDS_WIZARD_REPEAT_ONCE  "une fois"
+    IDS_WIZARD_IDEA_TITLE   "Décrivez l'idée"
+    IDS_WIZARD_IDEA_NOTE    "Deux questions. Plus l'exemple est concret, plus il est simple de voir quoi faire exactement."
+    IDS_WIZARD_IDEA_WHAT    "Que proposez-vous ?"
+    IDS_WIZARD_IDEA_HELPS   "En quoi cela aiderait-il ?"
+    IDS_WIZARD_ATTACH_TITLE "Que joindre ?"
+    IDS_WIZARD_ATTACH_NOTE  "Chaque point peut être décoché. À côté est écrit ce qui ira exactement dans le texte."
+    IDS_WIZARD_ATTACH_MACHINE "Version du programme et build de Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Dispositions installées"
+    IDS_WIZARD_ATTACH_SETTINGS "Réglages"
+    IDS_WIZARD_ATTACH_JOURNAL "Journal du programme, depuis la mémoire"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entrées. Seulement des noms d'opérations et des codes d'erreur, pas une seule touche : c'est ainsi qu'est fait le journal"
+    IDS_WIZARD_ATTACH_FOOT  "Aucun fichier de journal n'est nécessaire : les entrées sont en mémoire tant que le programme tourne. Si le problème se répète, activez le journal dans les réglages et les entrées survivront à un redémarrage."
+    IDS_WIZARD_PREVIEW_TITLE "Vérifiez et envoyez"
+    IDS_WIZARD_PREVIEW_NOTE "Voici tout le texte du message. Modifiez ce que vous voulez. C'est vous qui l'envoyez : le texte ira dans le presse-papiers et la chaîne s'ouvrira dans le navigateur."
+    IDS_WIZARD_COPY         "Copier et ouvrir la chaîne"
+    IDS_WIZARD_SAVE         "Enregistrer dans le dossier du journal"
+    IDS_WIZARD_COPIED_ONLY  "Copié. L'adresse de la chaîne arrivera dans la prochaine version."
+    IDS_WIZARD_COPIED       "Copié, la chaîne est ouverte."
+    IDS_WIZARD_SAVED        "Enregistré : {0}"
+    IDS_WIZARD_FAILED       "Cela n'a pas marché. Le texte est resté dans la fenêtre — copiez-le à la main."
+    IDS_THANKYOU_BUG_TITLE  "Merci pour le signalement"
+    IDS_THANKYOU_IDEA_TITLE "Merci pour l'idée"
+    IDS_THANKYOU_BUG_TEXT   "Je lis chaque message moi-même. Je répare les erreurs, et ce qui compte pour tous, je le raconte dans une lettre du programme ou dans la chaîne. C'est bien que vous ayez pris ce temps 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Je lis chaque message moi-même. Les idées vont dans le plan et les meilleures se font, et ce qui compte pour tous, je le raconte dans une lettre du programme ou dans la chaîne. C'est bien que vous ayez pris ce temps 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2102,9 +2621,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "tenía {0} · actualizado hoy"
     IDS_WHATSNEW_TODAY      "actualizado hoy"
     IDS_WHATSNEW_PANEL      "Tres cambios"
-    IDS_WHATSNEW_1          "El canal del autor: cada 15 días el programa lee un archivo de noticias firmado y no envía nada."
-    IDS_WHATSNEW_2          "De ahí llegan las cartas «Noticia» y «Actualización»; «Leído» apaga el punto del icono."
-    IDS_WHATSNEW_3          "La lectura se desactiva: en el archivo de ajustes desde el primer día y luego en «Del autor»."
+    IDS_WHATSNEW_1          "El asistente «Escribir al autor»: cinco pasos para un error y tres para una idea."
+    IDS_WHATSNEW_2          "Reúne la versión, la compilación de Windows, las distribuciones y el registro — cada punto se puede quitar."
+    IDS_WHATSNEW_3          "Nada sale solo: el texto va al portapapeles y lo pega usted."
     IDS_WHATSNEW_FULL       "La lista completa de cambios está publicada en el canal."
     IDS_AUTHOR_CAPTION      "Del autor"
     IDS_AUTHOR_VERSION      "versión {0} · Panda, alias Panda_Pishet_Kod"
@@ -2149,6 +2668,65 @@ BEGIN
     IDS_NEWS_LATER          "Más tarde"
     IDS_NEWS_OPEN_LINK      "Abrir el enlace"
     IDS_NEWS_FOOT           "«Leída» cierra la carta para siempre. «Más tarde» o la cruz: le recuerdo en una semana y otra vez en dos, después solo queda el punto en el icono."
+    IDS_WIZARD_CAPTION      "Escribir al autor"
+    IDS_WIZARD_STEP         "Paso {0} de {1}"
+    IDS_WIZARD_CANCEL       "Cancelar"
+    IDS_WIZARD_BACK         "Atrás"
+    IDS_WIZARD_NEXT         "Siguiente"
+    IDS_WIZARD_DONE         "Listo"
+    IDS_WIZARD_WHAT_TITLE   "¿Qué ha pasado?"
+    IDS_WIZARD_WHAT_NOTE    "De la respuesta depende lo que el asistente preguntará después."
+    IDS_WIZARD_CARD_WRONG   "El programa hizo algo distinto"
+    IDS_WIZARD_CARD_WRONG_SUB "la palabra se convirtió mal, faltan letras, la distribución no era la correcta"
+    IDS_WIZARD_CARD_NOTHING "No pasó nada"
+    IDS_WIZARD_CARD_NOTHING_SUB "pulsó la tecla y el texto quedó como estaba"
+    IDS_WIZARD_CARD_IDEA    "Quiero proponer una mejora"
+    IDS_WIZARD_CARD_IDEA_SUB "una idea, un deseo, una incomodidad"
+    IDS_WIZARD_WHERE_TITLE  "¿Dónde ocurrió?"
+    IDS_WIZARD_WHERE_NOTE   "El comportamiento depende de la ventana: una consola, un navegador y un editor reciben el texto de maneras distintas. Cambie a esa ventana y el asistente anotará el nombre del programa por su cuenta."
+    IDS_WIZARD_PROGRAM      "Programa:"
+    IDS_WIZARD_CAPTURE      "Tomar de la ventana activa"
+    IDS_WIZARD_CAPTURE_NOTE "Se toman el nombre del proceso y la clase de la ventana. El título de la ventana no: suele llevar el nombre de un documento."
+    IDS_WIZARD_CAPTURE_COUNT "Cambie a la ventana que necesita… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Campo de entrada"
+    IDS_WIZARD_FIELD_NORMAL "Un campo de entrada normal"
+    IDS_WIZARD_FIELD_PASSWORD "Un campo de contraseña"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "en los campos de contraseña el programa no trabaja a propósito: allí las pulsaciones no se recuerdan"
+    IDS_WIZARD_FIELD_UNKNOWN "No lo sé"
+    IDS_WIZARD_DID_TITLE    "¿Qué estaba haciendo?"
+    IDS_WIZARD_DID_NOTE     "Escriba un ejemplo en lugar del texto real. El programa no guarda pulsaciones, así que en el mensaje solo irá lo que escriba aquí."
+    IDS_WIZARD_TYPED_IN     "Escribió una palabra en la distribución"
+    IDS_WIZARD_AND_PRESSED  "y pulsó"
+    IDS_WIZARD_EXPECTED     "Esperaba:"
+    IDS_WIZARD_GOT          "Obtuvo:"
+    IDS_WIZARD_REPEAT       "¿Se repite?"
+    IDS_WIZARD_REPEAT_ALWAYS "cada vez"
+    IDS_WIZARD_REPEAT_SOMETIMES "a veces"
+    IDS_WIZARD_REPEAT_ONCE  "una vez"
+    IDS_WIZARD_IDEA_TITLE   "Describa la idea"
+    IDS_WIZARD_IDEA_NOTE    "Dos preguntas. Cuanto más concreto el ejemplo, más fácil es ver qué hacer exactamente."
+    IDS_WIZARD_IDEA_WHAT    "¿Qué propone?"
+    IDS_WIZARD_IDEA_HELPS   "¿En qué ayudaría?"
+    IDS_WIZARD_ATTACH_TITLE "¿Qué adjuntar?"
+    IDS_WIZARD_ATTACH_NOTE  "Cada punto se puede quitar. Al lado está escrito qué irá exactamente al texto."
+    IDS_WIZARD_ATTACH_MACHINE "Versión del programa y compilación de Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Distribuciones del sistema"
+    IDS_WIZARD_ATTACH_SETTINGS "Ajustes"
+    IDS_WIZARD_ATTACH_JOURNAL "Registro del programa, desde la memoria"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entradas. Solo nombres de operaciones y códigos de error, ni una sola tecla: así está hecho el registro"
+    IDS_WIZARD_ATTACH_FOOT  "No hace falta un archivo de registro: las entradas están en memoria mientras el programa se ejecuta. Si el problema se repite, active el registro en los ajustes y las entradas sobrevivirán a un reinicio."
+    IDS_WIZARD_PREVIEW_TITLE "Revise y envíe"
+    IDS_WIZARD_PREVIEW_NOTE "Este es todo el texto del mensaje. Edite lo que quiera. Lo envía usted: el texto irá al portapapeles y el canal se abrirá en el navegador."
+    IDS_WIZARD_COPY         "Copiar y abrir el canal"
+    IDS_WIZARD_SAVE         "Guardar en la carpeta del registro"
+    IDS_WIZARD_COPIED_ONLY  "Copiado. La dirección del canal llegará en la próxima versión."
+    IDS_WIZARD_COPIED       "Copiado, el canal está abierto."
+    IDS_WIZARD_SAVED        "Guardado: {0}"
+    IDS_WIZARD_FAILED       "No funcionó. El texto sigue en la ventana: cópielo a mano."
+    IDS_THANKYOU_BUG_TITLE  "Gracias por avisar del error"
+    IDS_THANKYOU_IDEA_TITLE "Gracias por la idea"
+    IDS_THANKYOU_BUG_TEXT   "Leo cada mensaje yo mismo. Los errores los arreglo, y lo importante para todos lo cuento en una carta del programa o en el canal. Qué bien que haya encontrado el tiempo 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Leo cada mensaje yo mismo. Las ideas van al plan y las mejores se hacen, y lo importante para todos lo cuento en una carta del programa o en el canal. Qué bien que haya encontrado el tiempo 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2249,9 +2827,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "você tinha {0} · atualizado hoje"
     IDS_WHATSNEW_TODAY      "atualizado hoje"
     IDS_WHATSNEW_PANEL      "Três mudanças"
-    IDS_WHATSNEW_1          "O canal do autor: a cada 15 dias o programa lê um ficheiro de notícias assinado e não envia nada."
-    IDS_WHATSNEW_2          "De lá vêm as cartas «Notícia» e «Atualização»; «Lido» apaga o ponto no ícone."
-    IDS_WHATSNEW_3          "A leitura pode ser desligada: no ficheiro de definições desde já e depois em «Do autor»."
+    IDS_WHATSNEW_1          "O assistente «Escrever ao autor»: cinco passos para um erro e três para uma ideia."
+    IDS_WHATSNEW_2          "Reúne a versão, a compilação do Windows, os esquemas e o registo — cada ponto pode ser retirado."
+    IDS_WHATSNEW_3          "Nada sai sozinho: o texto vai para a área de transferência e é você que o cola."
     IDS_WHATSNEW_FULL       "A lista completa de mudanças está publicada no canal."
     IDS_AUTHOR_CAPTION      "Do autor"
     IDS_AUTHOR_VERSION      "versão {0} · Panda, também conhecido como Panda_Pishet_Kod"
@@ -2296,6 +2874,65 @@ BEGIN
     IDS_NEWS_LATER          "Mais tarde"
     IDS_NEWS_OPEN_LINK      "Abrir a ligação"
     IDS_NEWS_FOOT           "«Lida» fecha a carta para sempre. «Mais tarde» ou a cruz: lembro daqui a uma semana e outra vez daqui a duas, depois fica só o ponto no ícone."
+    IDS_WIZARD_CAPTION      "Escrever ao autor"
+    IDS_WIZARD_STEP         "Passo {0} de {1}"
+    IDS_WIZARD_CANCEL       "Cancelar"
+    IDS_WIZARD_BACK         "Voltar"
+    IDS_WIZARD_NEXT         "Seguinte"
+    IDS_WIZARD_DONE         "Concluir"
+    IDS_WIZARD_WHAT_TITLE   "O que aconteceu?"
+    IDS_WIZARD_WHAT_NOTE    "Da resposta depende o que o assistente perguntará a seguir."
+    IDS_WIZARD_CARD_WRONG   "O programa fez outra coisa"
+    IDS_WIZARD_CARD_WRONG_SUB "a palavra foi convertida mal, faltam letras, o esquema não era o certo"
+    IDS_WIZARD_CARD_NOTHING "Não aconteceu nada"
+    IDS_WIZARD_CARD_NOTHING_SUB "carregou na tecla e o texto ficou como estava"
+    IDS_WIZARD_CARD_IDEA    "Quero propor uma melhoria"
+    IDS_WIZARD_CARD_IDEA_SUB "uma ideia, um desejo, um incómodo"
+    IDS_WIZARD_WHERE_TITLE  "Onde aconteceu?"
+    IDS_WIZARD_WHERE_NOTE   "O comportamento depende da janela: uma consola, um navegador e um editor recebem o texto de maneiras diferentes. Passe para essa janela e o assistente anota o nome do programa sozinho."
+    IDS_WIZARD_PROGRAM      "Programa:"
+    IDS_WIZARD_CAPTURE      "Obter da janela ativa"
+    IDS_WIZARD_CAPTURE_NOTE "São obtidos o nome do processo e a classe da janela. O título da janela não: costuma ter o nome de um documento."
+    IDS_WIZARD_CAPTURE_COUNT "Passe para a janela que precisa… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Campo de entrada"
+    IDS_WIZARD_FIELD_NORMAL "Um campo de entrada normal"
+    IDS_WIZARD_FIELD_PASSWORD "Um campo de palavra-passe"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "nos campos de palavra-passe o programa não trabalha de propósito: as teclas não são guardadas"
+    IDS_WIZARD_FIELD_UNKNOWN "Não sei"
+    IDS_WIZARD_DID_TITLE    "O que estava a fazer?"
+    IDS_WIZARD_DID_NOTE     "Escreva um exemplo em vez do texto real. O programa não guarda teclas, por isso na mensagem irá apenas o que escrever aqui."
+    IDS_WIZARD_TYPED_IN     "Escreveu uma palavra no esquema"
+    IDS_WIZARD_AND_PRESSED  "e carregou em"
+    IDS_WIZARD_EXPECTED     "Esperava:"
+    IDS_WIZARD_GOT          "Obteve:"
+    IDS_WIZARD_REPEAT       "Repete-se?"
+    IDS_WIZARD_REPEAT_ALWAYS "todas as vezes"
+    IDS_WIZARD_REPEAT_SOMETIMES "às vezes"
+    IDS_WIZARD_REPEAT_ONCE  "uma vez"
+    IDS_WIZARD_IDEA_TITLE   "Descreva a ideia"
+    IDS_WIZARD_IDEA_NOTE    "Duas perguntas. Quanto mais concreto o exemplo, mais simples é ver o que fazer exatamente."
+    IDS_WIZARD_IDEA_WHAT    "O que propõe?"
+    IDS_WIZARD_IDEA_HELPS   "Em que ajudaria?"
+    IDS_WIZARD_ATTACH_TITLE "O que anexar?"
+    IDS_WIZARD_ATTACH_NOTE  "Cada ponto pode ser retirado. Ao lado está escrito o que irá exatamente para o texto."
+    IDS_WIZARD_ATTACH_MACHINE "Versão do programa e compilação do Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Esquemas no sistema"
+    IDS_WIZARD_ATTACH_SETTINGS "Definições"
+    IDS_WIZARD_ATTACH_JOURNAL "Registo do programa, da memória"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entradas. Apenas nomes de operações e códigos de erro, nem uma única tecla: é assim que o registo é feito"
+    IDS_WIZARD_ATTACH_FOOT  "Não é preciso ficheiro de registo: as entradas estão na memória enquanto o programa corre. Se o problema se repetir, ligue o registo nas definições e as entradas sobrevivem a um reinício."
+    IDS_WIZARD_PREVIEW_TITLE "Verifique e envie"
+    IDS_WIZARD_PREVIEW_NOTE "Este é todo o texto da mensagem. Edite o que quiser. É você que envia: o texto vai para a área de transferência e o canal abre no navegador."
+    IDS_WIZARD_COPY         "Copiar e abrir o canal"
+    IDS_WIZARD_SAVE         "Guardar na pasta do registo"
+    IDS_WIZARD_COPIED_ONLY  "Copiado. O endereço do canal chega na próxima versão."
+    IDS_WIZARD_COPIED       "Copiado, o canal está aberto."
+    IDS_WIZARD_SAVED        "Guardado: {0}"
+    IDS_WIZARD_FAILED       "Não resultou. O texto ficou na janela — copie-o à mão."
+    IDS_THANKYOU_BUG_TITLE  "Obrigado pelo relato do erro"
+    IDS_THANKYOU_IDEA_TITLE "Obrigado pela ideia"
+    IDS_THANKYOU_BUG_TEXT   "Leio cada mensagem eu próprio. Os erros arranjo, e o que importa a todos conto numa carta do programa ou no canal. Que bom que arranjou tempo para isto 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Leio cada mensagem eu próprio. As ideias vão para o plano e as melhores são feitas, e o que importa a todos conto numa carta do programa ou no canal. Que bom que arranjou tempo para isto 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2401,9 +3038,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "avevi la {0} · aggiornato oggi"
     IDS_WHATSNEW_TODAY      "aggiornato oggi"
     IDS_WHATSNEW_PANEL      "Tre cambiamenti"
-    IDS_WHATSNEW_1          "Il canale dell'autore: ogni 15 giorni il programma legge un file di notizie firmato e non invia nulla."
-    IDS_WHATSNEW_2          "Da lì arrivano le lettere «Novità» e «Aggiornamento»; «Letto» spegne il punto sull'icona."
-    IDS_WHATSNEW_3          "La lettura si disattiva: subito nel file delle impostazioni e poi in «Dall'autore»."
+    IDS_WHATSNEW_1          "L'assistente «Scrivere all'autore»: cinque passi per un errore e tre per un'idea."
+    IDS_WHATSNEW_2          "Raccoglie la versione, la build di Windows, i layout e il registro — ogni voce si può togliere."
+    IDS_WHATSNEW_3          "Niente parte da solo: il testo va negli appunti e sei tu a incollarlo."
     IDS_WHATSNEW_FULL       "L'elenco completo dei cambiamenti è pubblicato nel canale."
     IDS_AUTHOR_CAPTION      "Dall'autore"
     IDS_AUTHOR_VERSION      "versione {0} · Panda, alias Panda_Pishet_Kod"
@@ -2448,6 +3085,65 @@ BEGIN
     IDS_NEWS_LATER          "Più tardi"
     IDS_NEWS_OPEN_LINK      "Apri il collegamento"
     IDS_NEWS_FOOT           "«Letta» chiude la lettera per sempre. «Più tardi» o la crocetta: te lo ricordo fra una settimana e ancora fra due, poi resta solo il punto sull'icona."
+    IDS_WIZARD_CAPTION      "Scrivere all'autore"
+    IDS_WIZARD_STEP         "Passo {0} di {1}"
+    IDS_WIZARD_CANCEL       "Annulla"
+    IDS_WIZARD_BACK         "Indietro"
+    IDS_WIZARD_NEXT         "Avanti"
+    IDS_WIZARD_DONE         "Fine"
+    IDS_WIZARD_WHAT_TITLE   "Che cosa è successo?"
+    IDS_WIZARD_WHAT_NOTE    "Dalla risposta dipende che cosa chiederà l'assistente dopo."
+    IDS_WIZARD_CARD_WRONG   "Il programma ha fatto la cosa sbagliata"
+    IDS_WIZARD_CARD_WRONG_SUB "la parola è stata convertita male, mancano lettere, il layout non era quello giusto"
+    IDS_WIZARD_CARD_NOTHING "Non è successo nulla"
+    IDS_WIZARD_CARD_NOTHING_SUB "hai premuto il tasto e il testo è rimasto com'era"
+    IDS_WIZARD_CARD_IDEA    "Vorrei proporre un miglioramento"
+    IDS_WIZARD_CARD_IDEA_SUB "un'idea, un desiderio, una scomodità"
+    IDS_WIZARD_WHERE_TITLE  "Dove è successo?"
+    IDS_WIZARD_WHERE_NOTE   "Il comportamento dipende dalla finestra: una console, un browser e un editor ricevono il testo in modi diversi. Passa a quella finestra e l'assistente annota il nome del programma da solo."
+    IDS_WIZARD_PROGRAM      "Programma:"
+    IDS_WIZARD_CAPTURE      "Prendi dalla finestra attiva"
+    IDS_WIZARD_CAPTURE_NOTE "Vengono presi il nome del processo e la classe della finestra. Il titolo della finestra no: spesso contiene il nome di un documento."
+    IDS_WIZARD_CAPTURE_COUNT "Passa alla finestra che ti serve… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Campo di immissione"
+    IDS_WIZARD_FIELD_NORMAL "Un normale campo di immissione"
+    IDS_WIZARD_FIELD_PASSWORD "Un campo password"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "nei campi password il programma non lavora di proposito: i tasti lì non vengono ricordati"
+    IDS_WIZARD_FIELD_UNKNOWN "Non lo so"
+    IDS_WIZARD_DID_TITLE    "Che cosa stavi facendo?"
+    IDS_WIZARD_DID_NOTE     "Scrivi un esempio invece del testo vero. Il programma non conserva i tasti, quindi nel messaggio finirà solo quello che scrivi qui."
+    IDS_WIZARD_TYPED_IN     "Hai scritto una parola nel layout"
+    IDS_WIZARD_AND_PRESSED  "e premuto"
+    IDS_WIZARD_EXPECTED     "Ti aspettavi:"
+    IDS_WIZARD_GOT          "Hai ottenuto:"
+    IDS_WIZARD_REPEAT       "Si ripete?"
+    IDS_WIZARD_REPEAT_ALWAYS "ogni volta"
+    IDS_WIZARD_REPEAT_SOMETIMES "a volte"
+    IDS_WIZARD_REPEAT_ONCE  "una volta"
+    IDS_WIZARD_IDEA_TITLE   "Descrivi l'idea"
+    IDS_WIZARD_IDEA_NOTE    "Due domande. Più l'esempio è concreto, più è semplice capire che cosa fare esattamente."
+    IDS_WIZARD_IDEA_WHAT    "Che cosa proponi?"
+    IDS_WIZARD_IDEA_HELPS   "In che cosa aiuterebbe?"
+    IDS_WIZARD_ATTACH_TITLE "Che cosa allegare?"
+    IDS_WIZARD_ATTACH_NOTE  "Ogni voce si può togliere. Accanto è scritto che cosa finirà esattamente nel testo."
+    IDS_WIZARD_ATTACH_MACHINE "Versione del programma e build di Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Layout nel sistema"
+    IDS_WIZARD_ATTACH_SETTINGS "Impostazioni"
+    IDS_WIZARD_ATTACH_JOURNAL "Registro del programma, dalla memoria"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} voci. Solo nomi di operazioni e codici di errore, nemmeno un tasto: è così che è fatto il registro"
+    IDS_WIZARD_ATTACH_FOOT  "Non serve un file di registro: le voci stanno in memoria finché il programma è in esecuzione. Se il problema si ripete, accendi il registro nelle impostazioni e le voci sopravvivranno a un riavvio."
+    IDS_WIZARD_PREVIEW_TITLE "Controlla e invia"
+    IDS_WIZARD_PREVIEW_NOTE "Questo è tutto il testo del messaggio. Modifica quello che vuoi. Lo invii tu: il testo va negli appunti e il canale si apre nel browser."
+    IDS_WIZARD_COPY         "Copia e apri il canale"
+    IDS_WIZARD_SAVE         "Salva nella cartella del registro"
+    IDS_WIZARD_COPIED_ONLY  "Copiato. L'indirizzo del canale arriverà nella prossima versione."
+    IDS_WIZARD_COPIED       "Copiato, il canale è aperto."
+    IDS_WIZARD_SAVED        "Salvato: {0}"
+    IDS_WIZARD_FAILED       "Non ha funzionato. Il testo è rimasto nella finestra — copialo a mano."
+    IDS_THANKYOU_BUG_TITLE  "Grazie per la segnalazione"
+    IDS_THANKYOU_IDEA_TITLE "Grazie per l'idea"
+    IDS_THANKYOU_BUG_TEXT   "Leggo ogni messaggio io stesso. Gli errori li riparo, e ciò che conta per tutti lo racconto in una lettera nel programma o nel canale. È bello che tu abbia trovato il tempo 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Leggo ogni messaggio io stesso. Le idee vanno nel piano e le migliori le realizzo, e ciò che conta per tutti lo racconto in una lettera nel programma o nel canale. È bello che tu abbia trovato il tempo 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2553,9 +3249,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "było {0} · zaktualizowano dzisiaj"
     IDS_WHATSNEW_TODAY      "zaktualizowano dzisiaj"
     IDS_WHATSNEW_PANEL      "Trzy zmiany"
-    IDS_WHATSNEW_1          "Kanał autora: raz na 15 dni program czyta podpisany plik z nowościami i niczego nie wysyła."
-    IDS_WHATSNEW_2          "Stamtąd przychodzą listy «Nowość» i «Aktualizacja»; «Przeczytane» gasi kropkę na ikonie."
-    IDS_WHATSNEW_3          "Czytanie można wyłączyć: od razu w pliku ustawień, a później w oknie «Od autora»."
+    IDS_WHATSNEW_1          "Kreator «Napisz do autora»: pięć kroków dla błędu i trzy dla pomysłu."
+    IDS_WHATSNEW_2          "Sam zbierze wersję, kompilację Windows, układy i dziennik — każdą pozycję można odznaczyć."
+    IDS_WHATSNEW_3          "Nic nie wychodzi samo: tekst trafi do schowka, a wkleisz go ty."
     IDS_WHATSNEW_FULL       "Pełna lista zmian jest opublikowana na kanale."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "wersja {0} · Panda, znany też jako Panda_Pishet_Kod"
@@ -2600,6 +3296,65 @@ BEGIN
     IDS_NEWS_LATER          "Później"
     IDS_NEWS_OPEN_LINK      "Otwórz odnośnik"
     IDS_NEWS_FOOT           "«Przeczytane» zamyka list na zawsze. «Później» lub krzyżyk: przypomnę za tydzień i jeszcze raz za dwa, potem zostanie tylko kropka na ikonie."
+    IDS_WIZARD_CAPTION      "Napisz do autora"
+    IDS_WIZARD_STEP         "Krok {0} z {1}"
+    IDS_WIZARD_CANCEL       "Anuluj"
+    IDS_WIZARD_BACK         "Wstecz"
+    IDS_WIZARD_NEXT         "Dalej"
+    IDS_WIZARD_DONE         "Gotowe"
+    IDS_WIZARD_WHAT_TITLE   "Co się stało?"
+    IDS_WIZARD_WHAT_NOTE    "Od odpowiedzi zależy, o co kreator zapyta dalej."
+    IDS_WIZARD_CARD_WRONG   "Program zrobił coś innego"
+    IDS_WIZARD_CARD_WRONG_SUB "słowo przekodowało się źle, zniknęły litery, układ był nie ten"
+    IDS_WIZARD_CARD_NOTHING "Nic się nie stało"
+    IDS_WIZARD_CARD_NOTHING_SUB "nacisnąłeś klawisz, a tekst został taki, jaki był"
+    IDS_WIZARD_CARD_IDEA    "Chcę zaproponować ulepszenie"
+    IDS_WIZARD_CARD_IDEA_SUB "pomysł, życzenie, niewygoda"
+    IDS_WIZARD_WHERE_TITLE  "Gdzie to się stało?"
+    IDS_WIZARD_WHERE_NOTE   "Zachowanie zależy od okna: konsola, przeglądarka i edytor przyjmują tekst inaczej. Przejdź do tamtego okna, a kreator sam zapisze nazwę programu."
+    IDS_WIZARD_PROGRAM      "Program:"
+    IDS_WIZARD_CAPTURE      "Pobierz z aktywnego okna"
+    IDS_WIZARD_CAPTURE_NOTE "Pobierana jest nazwa procesu i klasa okna. Tytuł okna nie: bywa w nim nazwa dokumentu."
+    IDS_WIZARD_CAPTURE_COUNT "Przejdź do potrzebnego okna… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Pole wprowadzania"
+    IDS_WIZARD_FIELD_NORMAL "Zwykłe pole wprowadzania"
+    IDS_WIZARD_FIELD_PASSWORD "Pole hasła"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "w polach hasła program celowo nie działa: naciśnięcia nie są tam zapamiętywane"
+    IDS_WIZARD_FIELD_UNKNOWN "Nie wiem"
+    IDS_WIZARD_DID_TITLE    "Co robiłeś?"
+    IDS_WIZARD_DID_NOTE     "Napisz przykład zamiast prawdziwego tekstu. Program nie przechowuje naciśnięć, więc do zgłoszenia trafi tylko to, co napiszesz tutaj."
+    IDS_WIZARD_TYPED_IN     "Napisano słowo w układzie"
+    IDS_WIZARD_AND_PRESSED  "i naciśnięto"
+    IDS_WIZARD_EXPECTED     "Oczekiwano:"
+    IDS_WIZARD_GOT          "Otrzymano:"
+    IDS_WIZARD_REPEAT       "Powtarza się?"
+    IDS_WIZARD_REPEAT_ALWAYS "za każdym razem"
+    IDS_WIZARD_REPEAT_SOMETIMES "czasami"
+    IDS_WIZARD_REPEAT_ONCE  "raz"
+    IDS_WIZARD_IDEA_TITLE   "Opisz pomysł"
+    IDS_WIZARD_IDEA_NOTE    "Dwa pytania. Im konkretniejszy przykład, tym łatwiej zrozumieć, co dokładnie zrobić."
+    IDS_WIZARD_IDEA_WHAT    "Co proponujesz?"
+    IDS_WIZARD_IDEA_HELPS   "W czym to pomoże?"
+    IDS_WIZARD_ATTACH_TITLE "Co dołączyć?"
+    IDS_WIZARD_ATTACH_NOTE  "Każdą pozycję można odznaczyć. Obok napisano, co dokładnie trafi do tekstu."
+    IDS_WIZARD_ATTACH_MACHINE "Wersja programu i kompilacja Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Układy w systemie"
+    IDS_WIZARD_ATTACH_SETTINGS "Ustawienia"
+    IDS_WIZARD_ATTACH_JOURNAL "Dziennik programu z pamięci"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} wpisów. Tylko nazwy operacji i kody błędów, ani jednego klawisza: tak zbudowany jest sam dziennik"
+    IDS_WIZARD_ATTACH_FOOT  "Plik dziennika nie jest potrzebny: wpisy są w pamięci, dopóki program działa. Jeśli problem się powtarza, włącz dziennik w ustawieniach, wtedy wpisy przetrwają ponowne uruchomienie."
+    IDS_WIZARD_PREVIEW_TITLE "Sprawdź i wyślij"
+    IDS_WIZARD_PREVIEW_NOTE "To cały tekst zgłoszenia. Popraw, co chcesz. Wysyłasz je ty: tekst trafi do schowka, a kanał otworzy się w przeglądarce."
+    IDS_WIZARD_COPY         "Skopiuj i otwórz kanał"
+    IDS_WIZARD_SAVE         "Zapisz w folderze dziennika"
+    IDS_WIZARD_COPIED_ONLY  "Skopiowano. Adres kanału pojawi się w następnej wersji."
+    IDS_WIZARD_COPIED       "Skopiowano, kanał otwarty."
+    IDS_WIZARD_SAVED        "Zapisano: {0}"
+    IDS_WIZARD_FAILED       "Nie udało się. Tekst został w oknie — skopiuj go ręcznie."
+    IDS_THANKYOU_BUG_TITLE  "Dziękuję za zgłoszenie błędu"
+    IDS_THANKYOU_IDEA_TITLE "Dziękuję za pomysł"
+    IDS_THANKYOU_BUG_TEXT   "Czytam każde zgłoszenie sam. Błędy naprawiam, a o tym, co ważne dla wszystkich, opowiadam listem w programie albo w kanale. Świetnie, że znalazłeś na to czas 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Czytam każde zgłoszenie sam. Pomysły trafiają do planu i najlepsze z nich robię, a o tym, co ważne dla wszystkich, opowiadam listem w programie albo w kanale. Świetnie, że znalazłeś na to czas 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2701,9 +3456,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "měli jste {0} · aktualizováno dnes"
     IDS_WHATSNEW_TODAY      "aktualizováno dnes"
     IDS_WHATSNEW_PANEL      "Tři změny"
-    IDS_WHATSNEW_1          "Kanál autora: jednou za 15 dní program přečte podepsaný soubor novinek a nic neodesílá."
-    IDS_WHATSNEW_2          "Odtud přicházejí dopisy «Novinka» a «Aktualizace»; «Přečteno» zhasne tečku na ikoně."
-    IDS_WHATSNEW_3          "Čtení lze vypnout: hned v souboru nastavení a později v okně «Od autora»."
+    IDS_WHATSNEW_1          "Průvodce «Napsat autorovi»: pět kroků pro chybu a tři pro nápad."
+    IDS_WHATSNEW_2          "Sám sesbírá verzi, sestavení Windows, rozložení a deník — každou položku lze odebrat."
+    IDS_WHATSNEW_3          "Nic neodchází samo: text půjde do schránky a vložíte ho vy."
     IDS_WHATSNEW_FULL       "Úplný seznam změn je zveřejněn na kanálu."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "verze {0} · Panda, známý též jako Panda_Pishet_Kod"
@@ -2748,6 +3503,65 @@ BEGIN
     IDS_NEWS_LATER          "Později"
     IDS_NEWS_OPEN_LINK      "Otevřít odkaz"
     IDS_NEWS_FOOT           "«Přečteno» zavře dopis natrvalo. «Později» nebo křížek: připomenu za týden a ještě jednou za dva, potom zůstane jen tečka na ikoně."
+    IDS_WIZARD_CAPTION      "Napsat autorovi"
+    IDS_WIZARD_STEP         "Krok {0} z {1}"
+    IDS_WIZARD_CANCEL       "Zrušit"
+    IDS_WIZARD_BACK         "Zpět"
+    IDS_WIZARD_NEXT         "Další"
+    IDS_WIZARD_DONE         "Hotovo"
+    IDS_WIZARD_WHAT_TITLE   "Co se stalo?"
+    IDS_WIZARD_WHAT_NOTE    "Na odpovědi závisí, na co se průvodce zeptá dál."
+    IDS_WIZARD_CARD_WRONG   "Program udělal něco jiného"
+    IDS_WIZARD_CARD_WRONG_SUB "slovo se převedlo špatně, zmizela písmena, rozložení nebylo to pravé"
+    IDS_WIZARD_CARD_NOTHING "Nestalo se nic"
+    IDS_WIZARD_CARD_NOTHING_SUB "stiskli jste klávesu a text zůstal, jak byl"
+    IDS_WIZARD_CARD_IDEA    "Chci navrhnout vylepšení"
+    IDS_WIZARD_CARD_IDEA_SUB "nápad, přání, nepohodlí"
+    IDS_WIZARD_WHERE_TITLE  "Kde se to stalo?"
+    IDS_WIZARD_WHERE_NOTE   "Chování závisí na okně: konzole, prohlížeč a editor přijímají text různě. Přepněte do toho okna a průvodce si název programu zapíše sám."
+    IDS_WIZARD_PROGRAM      "Program:"
+    IDS_WIZARD_CAPTURE      "Vzít z aktivního okna"
+    IDS_WIZARD_CAPTURE_NOTE "Bere se název procesu a třída okna. Titulek okna ne: bývá v něm název dokumentu."
+    IDS_WIZARD_CAPTURE_COUNT "Přepněte do potřebného okna… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Vstupní pole"
+    IDS_WIZARD_FIELD_NORMAL "Běžné vstupní pole"
+    IDS_WIZARD_FIELD_PASSWORD "Pole pro heslo"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "v polích pro heslo program záměrně nepracuje: stisky se tam nepamatují"
+    IDS_WIZARD_FIELD_UNKNOWN "Nevím"
+    IDS_WIZARD_DID_TITLE    "Co jste dělali?"
+    IDS_WIZARD_DID_NOTE     "Napište příklad místo skutečného textu. Program stisky neuchovává, takže do hlášení se dostane jen to, co napíšete zde."
+    IDS_WIZARD_TYPED_IN     "Napsali jste slovo v rozložení"
+    IDS_WIZARD_AND_PRESSED  "a stiskli"
+    IDS_WIZARD_EXPECTED     "Čekali jste:"
+    IDS_WIZARD_GOT          "Dostali jste:"
+    IDS_WIZARD_REPEAT       "Opakuje se to?"
+    IDS_WIZARD_REPEAT_ALWAYS "pokaždé"
+    IDS_WIZARD_REPEAT_SOMETIMES "občas"
+    IDS_WIZARD_REPEAT_ONCE  "jednou"
+    IDS_WIZARD_IDEA_TITLE   "Popište nápad"
+    IDS_WIZARD_IDEA_NOTE    "Dvě otázky. Čím konkrétnější příklad, tím snáz je vidět, co přesně udělat."
+    IDS_WIZARD_IDEA_WHAT    "Co navrhujete?"
+    IDS_WIZARD_IDEA_HELPS   "Čemu to pomůže?"
+    IDS_WIZARD_ATTACH_TITLE "Co přiložit?"
+    IDS_WIZARD_ATTACH_NOTE  "Každou položku lze odebrat. Vedle je napsáno, co přesně se dostane do textu."
+    IDS_WIZARD_ATTACH_MACHINE "Verze programu a sestavení Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Rozložení v systému"
+    IDS_WIZARD_ATTACH_SETTINGS "Nastavení"
+    IDS_WIZARD_ATTACH_JOURNAL "Deník programu z paměti"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} záznamů. Jen názvy operací a kódy chyb, ani jedna klávesa: tak je deník udělaný"
+    IDS_WIZARD_ATTACH_FOOT  "Soubor deníku není potřeba: záznamy jsou v paměti, dokud program běží. Pokud se problém opakuje, zapněte deník v nastavení, pak záznamy přežijí restart."
+    IDS_WIZARD_PREVIEW_TITLE "Zkontrolujte a odešlete"
+    IDS_WIZARD_PREVIEW_NOTE "Toto je celý text hlášení. Upravte cokoli chcete. Odesíláte vy: text půjde do schránky a kanál se otevře v prohlížeči."
+    IDS_WIZARD_COPY         "Zkopírovat a otevřít kanál"
+    IDS_WIZARD_SAVE         "Uložit do složky deníku"
+    IDS_WIZARD_COPIED_ONLY  "Zkopírováno. Adresa kanálu přijde v příští verzi."
+    IDS_WIZARD_COPIED       "Zkopírováno, kanál je otevřen."
+    IDS_WIZARD_SAVED        "Uloženo: {0}"
+    IDS_WIZARD_FAILED       "Nepovedlo se. Text zůstal v okně — zkopírujte ho ručně."
+    IDS_THANKYOU_BUG_TITLE  "Děkuji za hlášení chyby"
+    IDS_THANKYOU_IDEA_TITLE "Děkuji za nápad"
+    IDS_THANKYOU_BUG_TEXT   "Každé hlášení čtu sám. Chyby opravuji a o tom, co je důležité pro všechny, vyprávím dopisem v programu nebo v kanálu. Je skvělé, že jste si na to našli čas 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Každé hlášení čtu sám. Nápady zakládám do plánu a ty nejlepší dělám, a o tom, co je důležité pro všechny, vyprávím dopisem v programu nebo v kanálu. Je skvělé, že jste si na to našli čas 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -2852,9 +3666,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "önceki {0} · bugün güncellendi"
     IDS_WHATSNEW_TODAY      "bugün güncellendi"
     IDS_WHATSNEW_PANEL      "Üç değişiklik"
-    IDS_WHATSNEW_1          "Yazarın akışı: program 15 günde bir imzalı bir haber dosyası okur ve hiçbir şey göndermez."
-    IDS_WHATSNEW_2          "«Haber» ve «Güncelleme» mektupları oradan gelir; «Okundu» simgedeki noktayı söndürür."
-    IDS_WHATSNEW_3          "Okuma kapatılabilir: hemen ayar dosyasından, ilk mektuptan sonra «Yazardan» penceresinden."
+    IDS_WHATSNEW_1          "«Yazara yaz» sihirbazı: hata için beş adım, fikir için üç adım."
+    IDS_WHATSNEW_2          "Sürümü, Windows yapısını, düzenleri ve günlüğü kendisi toplar — her madde kaldırılabilir."
+    IDS_WHATSNEW_3          "Hiçbir şey kendiliğinden gitmez: metin panoya gider, yapıştıran sizsiniz."
     IDS_WHATSNEW_FULL       "Değişikliklerin tam listesi kanalda yayımlandı."
     IDS_AUTHOR_CAPTION      "Yazardan"
     IDS_AUTHOR_VERSION      "sürüm {0} · Panda, namıdiğer Panda_Pishet_Kod"
@@ -2899,6 +3713,65 @@ BEGIN
     IDS_NEWS_LATER          "Daha sonra"
     IDS_NEWS_OPEN_LINK      "Bağlantıyı aç"
     IDS_NEWS_FOOT           "«Okundu» mektubu tamamen kapatır. «Daha sonra» ya da çarpı: bir hafta sonra, bir kez de iki hafta sonra hatırlatırım, ardından yalnızca simgedeki nokta kalır."
+    IDS_WIZARD_CAPTION      "Yazara yaz"
+    IDS_WIZARD_STEP         "Adım {0} / {1}"
+    IDS_WIZARD_CANCEL       "İptal"
+    IDS_WIZARD_BACK         "Geri"
+    IDS_WIZARD_NEXT         "İleri"
+    IDS_WIZARD_DONE         "Bitti"
+    IDS_WIZARD_WHAT_TITLE   "Ne oldu?"
+    IDS_WIZARD_WHAT_NOTE    "Sihirbazın bundan sonra ne soracağı bu yanıta bağlı."
+    IDS_WIZARD_CARD_WRONG   "Program yanlış bir şey yaptı"
+    IDS_WIZARD_CARD_WRONG_SUB "kelime yanlış dönüştü, harfler kayboldu, düzen istenen değildi"
+    IDS_WIZARD_CARD_NOTHING "Hiçbir şey olmadı"
+    IDS_WIZARD_CARD_NOTHING_SUB "tuşa bastınız ve metin olduğu gibi kaldı"
+    IDS_WIZARD_CARD_IDEA    "Bir iyileştirme önermek istiyorum"
+    IDS_WIZARD_CARD_IDEA_SUB "fikir, istek, rahatsızlık"
+    IDS_WIZARD_WHERE_TITLE  "Nerede oldu?"
+    IDS_WIZARD_WHERE_NOTE   "Davranış pencereye bağlıdır: konsol, tarayıcı ve düzenleyici metni farklı biçimde alır. O pencereye geçin, sihirbaz program adını kendisi yazsın."
+    IDS_WIZARD_PROGRAM      "Program:"
+    IDS_WIZARD_CAPTURE      "Etkin pencereden al"
+    IDS_WIZARD_CAPTURE_NOTE "Süreç adı ve pencere sınıfı alınır. Pencere başlığı alınmaz: içinde belge adı olabilir."
+    IDS_WIZARD_CAPTURE_COUNT "Gereken pencereye geçin… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Giriş alanı"
+    IDS_WIZARD_FIELD_NORMAL "Sıradan bir giriş alanı"
+    IDS_WIZARD_FIELD_PASSWORD "Parola alanı"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "parola alanlarında program bilerek çalışmaz: oradaki tuşlar hatırlanmaz"
+    IDS_WIZARD_FIELD_UNKNOWN "Bilmiyorum"
+    IDS_WIZARD_DID_TITLE    "Ne yapıyordunuz?"
+    IDS_WIZARD_DID_NOTE     "Gerçek metin yerine bir örnek yazın. Program tuşları saklamaz; bildirime yalnızca burada yazdığınız girer."
+    IDS_WIZARD_TYPED_IN     "Şu düzende bir kelime yazdınız"
+    IDS_WIZARD_AND_PRESSED  "ve bastınız"
+    IDS_WIZARD_EXPECTED     "Beklenen:"
+    IDS_WIZARD_GOT          "Alınan:"
+    IDS_WIZARD_REPEAT       "Tekrarlanıyor mu?"
+    IDS_WIZARD_REPEAT_ALWAYS "her seferinde"
+    IDS_WIZARD_REPEAT_SOMETIMES "bazen"
+    IDS_WIZARD_REPEAT_ONCE  "bir kez"
+    IDS_WIZARD_IDEA_TITLE   "Fikri anlatın"
+    IDS_WIZARD_IDEA_NOTE    "İki soru. Örnek ne kadar somut olursa, tam olarak ne yapılacağını görmek o kadar kolay olur."
+    IDS_WIZARD_IDEA_WHAT    "Ne öneriyorsunuz?"
+    IDS_WIZARD_IDEA_HELPS   "Bu neye yarar?"
+    IDS_WIZARD_ATTACH_TITLE "Ne eklensin?"
+    IDS_WIZARD_ATTACH_NOTE  "Her madde kaldırılabilir. Yanında tam olarak metne neyin gireceği yazılıdır."
+    IDS_WIZARD_ATTACH_MACHINE "Program sürümü ve Windows yapısı"
+    IDS_WIZARD_ATTACH_LAYOUTS "Sistemdeki düzenler"
+    IDS_WIZARD_ATTACH_SETTINGS "Ayarlar"
+    IDS_WIZARD_ATTACH_JOURNAL "Programın bellekteki günlüğü"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} kayıt. Yalnızca işlem adları ve hata kodları, tek bir tuş bile yok: günlüğün kendisi böyle kurulmuştur"
+    IDS_WIZARD_ATTACH_FOOT  "Günlük dosyası gerekmez: program çalıştığı sürece kayıtlar bellektedir. Sorun yinelenirse günlüğü ayarlardan açın, o zaman kayıtlar yeniden başlatmayı atlatır."
+    IDS_WIZARD_PREVIEW_TITLE "Denetleyin ve gönderin"
+    IDS_WIZARD_PREVIEW_NOTE "Bu, bildirimin tüm metnidir. İstediğinizi değiştirin. Gönderen sizsiniz: metin panoya gider, kanal da tarayıcıda açılır."
+    IDS_WIZARD_COPY         "Kopyala ve kanalı aç"
+    IDS_WIZARD_SAVE         "Günlük klasörüne kaydet"
+    IDS_WIZARD_COPIED_ONLY  "Kopyalandı. Kanal adresi bir sonraki sürümde gelecek."
+    IDS_WIZARD_COPIED       "Kopyalandı, kanal açıldı."
+    IDS_WIZARD_SAVED        "Kaydedildi: {0}"
+    IDS_WIZARD_FAILED       "Olmadı. Metin pencerede duruyor — elle kopyalayın."
+    IDS_THANKYOU_BUG_TITLE  "Hata bildirimi için teşekkürler"
+    IDS_THANKYOU_IDEA_TITLE "Fikir için teşekkürler"
+    IDS_THANKYOU_BUG_TEXT   "Her bildirimi kendim okurum. Hataları onarırım, herkesi ilgilendireni de programdaki bir mektupla ya da kanalda anlatırım. Buna vakit ayırmanız çok güzel 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Her bildirimi kendim okurum. Fikirleri plana koyarım ve en iyilerini yaparım, herkesi ilgilendireni de programdaki bir mektupla ya da kanalda anlatırım. Buna vakit ayırmanız çok güzel 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -3007,9 +3880,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "είχατε {0} · ενημερώθηκε σήμερα"
     IDS_WHATSNEW_TODAY      "ενημερώθηκε σήμερα"
     IDS_WHATSNEW_PANEL      "Τρεις αλλαγές"
-    IDS_WHATSNEW_1          "Η ροή του δημιουργού: κάθε 15 ημέρες το πρόγραμμα διαβάζει ένα υπογεγραμμένο αρχείο ειδήσεων και δεν στέλνει τίποτα."
-    IDS_WHATSNEW_2          "Από εκεί έρχονται τα γράμματα «Νέο» και «Ενημέρωση»· το «Διαβάστηκε» σβήνει την κουκκίδα."
-    IDS_WHATSNEW_3          "Η ανάγνωση απενεργοποιείται: αμέσως στο αρχείο ρυθμίσεων και αργότερα στο «Από τον δημιουργό»."
+    IDS_WHATSNEW_1          "Ο οδηγός «Γράψτε στον δημιουργό»: πέντε βήματα για σφάλμα και τρία για ιδέα."
+    IDS_WHATSNEW_2          "Μαζεύει μόνος του την έκδοση, το build των Windows, τις διατάξεις και το ημερολόγιο — κάθε στοιχείο αφαιρείται."
+    IDS_WHATSNEW_3          "Τίποτα δεν φεύγει μόνο του: το κείμενο πάει στο πρόχειρο και το επικολλάτε εσείς."
     IDS_WHATSNEW_FULL       "Ο πλήρης κατάλογος αλλαγών δημοσιεύεται στο κανάλι."
     IDS_AUTHOR_CAPTION      "Από τον δημιουργό"
     IDS_AUTHOR_VERSION      "έκδοση {0} · Πάντα, γνωστός και ως Panda_Pishet_Kod"
@@ -3054,6 +3927,65 @@ BEGIN
     IDS_NEWS_LATER          "Αργότερα"
     IDS_NEWS_OPEN_LINK      "Άνοιγμα του συνδέσμου"
     IDS_NEWS_FOOT           "Το «Διαβάστηκε» κλείνει το γράμμα οριστικά. Το «Αργότερα» ή ο σταυρός: θυμίζω σε μία εβδομάδα και άλλη μία σε δύο, μετά μένει μόνο η κουκκίδα στο εικονίδιο."
+    IDS_WIZARD_CAPTION      "Γράψτε στον δημιουργό"
+    IDS_WIZARD_STEP         "Βήμα {0} από {1}"
+    IDS_WIZARD_CANCEL       "Άκυρο"
+    IDS_WIZARD_BACK         "Πίσω"
+    IDS_WIZARD_NEXT         "Επόμενο"
+    IDS_WIZARD_DONE         "Τέλος"
+    IDS_WIZARD_WHAT_TITLE   "Τι συνέβη;"
+    IDS_WIZARD_WHAT_NOTE    "Από την απάντηση εξαρτάται τι θα ρωτήσει ο οδηγός στη συνέχεια."
+    IDS_WIZARD_CARD_WRONG   "Το πρόγραμμα έκανε κάτι άλλο"
+    IDS_WIZARD_CARD_WRONG_SUB "η λέξη μετατράπηκε λάθος, χάθηκαν γράμματα, η διάταξη δεν ήταν η σωστή"
+    IDS_WIZARD_CARD_NOTHING "Δεν συνέβη τίποτα"
+    IDS_WIZARD_CARD_NOTHING_SUB "πατήσατε το πλήκτρο και το κείμενο έμεινε όπως ήταν"
+    IDS_WIZARD_CARD_IDEA    "Θέλω να προτείνω μια βελτίωση"
+    IDS_WIZARD_CARD_IDEA_SUB "μια ιδέα, μια επιθυμία, μια δυσκολία"
+    IDS_WIZARD_WHERE_TITLE  "Πού συνέβη;"
+    IDS_WIZARD_WHERE_NOTE   "Η συμπεριφορά εξαρτάται από το παράθυρο: η κονσόλα, ο περιηγητής και ο επεξεργαστής δέχονται το κείμενο διαφορετικά. Μεταβείτε σε εκείνο το παράθυρο και ο οδηγός θα γράψει μόνος του το όνομα του προγράμματος."
+    IDS_WIZARD_PROGRAM      "Πρόγραμμα:"
+    IDS_WIZARD_CAPTURE      "Λήψη από το ενεργό παράθυρο"
+    IDS_WIZARD_CAPTURE_NOTE "Λαμβάνονται το όνομα της διεργασίας και η κλάση του παραθύρου. Ο τίτλος του παραθύρου όχι: συχνά περιέχει όνομα εγγράφου."
+    IDS_WIZARD_CAPTURE_COUNT "Μεταβείτε στο παράθυρο που θέλετε… {0}"
+    IDS_WIZARD_WHERE_FIELD  "Πεδίο εισαγωγής"
+    IDS_WIZARD_FIELD_NORMAL "Συνηθισμένο πεδίο εισαγωγής"
+    IDS_WIZARD_FIELD_PASSWORD "Πεδίο κωδικού"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "στα πεδία κωδικού το πρόγραμμα δεν δουλεύει επίτηδες: εκεί τα πατήματα δεν κρατιούνται"
+    IDS_WIZARD_FIELD_UNKNOWN "Δεν ξέρω"
+    IDS_WIZARD_DID_TITLE    "Τι κάνατε;"
+    IDS_WIZARD_DID_NOTE     "Γράψτε ένα παράδειγμα αντί για το πραγματικό κείμενο. Το πρόγραμμα δεν κρατά πατήματα, οπότε στο μήνυμα θα μπει μόνο ό,τι γράψετε εδώ."
+    IDS_WIZARD_TYPED_IN     "Γράψατε λέξη στη διάταξη"
+    IDS_WIZARD_AND_PRESSED  "και πατήσατε"
+    IDS_WIZARD_EXPECTED     "Περιμένατε:"
+    IDS_WIZARD_GOT          "Πήρατε:"
+    IDS_WIZARD_REPEAT       "Επαναλαμβάνεται;"
+    IDS_WIZARD_REPEAT_ALWAYS "κάθε φορά"
+    IDS_WIZARD_REPEAT_SOMETIMES "μερικές φορές"
+    IDS_WIZARD_REPEAT_ONCE  "μία φορά"
+    IDS_WIZARD_IDEA_TITLE   "Περιγράψτε την ιδέα"
+    IDS_WIZARD_IDEA_NOTE    "Δύο ερωτήσεις. Όσο πιο συγκεκριμένο το παράδειγμα, τόσο ευκολότερα φαίνεται τι ακριβώς πρέπει να γίνει."
+    IDS_WIZARD_IDEA_WHAT    "Τι προτείνετε;"
+    IDS_WIZARD_IDEA_HELPS   "Σε τι θα βοηθούσε;"
+    IDS_WIZARD_ATTACH_TITLE "Τι να επισυναφθεί;"
+    IDS_WIZARD_ATTACH_NOTE  "Κάθε στοιχείο μπορεί να αφαιρεθεί. Δίπλα γράφεται τι ακριβώς θα μπει στο κείμενο."
+    IDS_WIZARD_ATTACH_MACHINE "Έκδοση προγράμματος και build των Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "Διατάξεις στο σύστημα"
+    IDS_WIZARD_ATTACH_SETTINGS "Ρυθμίσεις"
+    IDS_WIZARD_ATTACH_JOURNAL "Ημερολόγιο του προγράμματος από τη μνήμη"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} εγγραφές. Μόνο ονόματα λειτουργιών και κωδικοί σφαλμάτων, ούτε ένα πλήκτρο: έτσι είναι φτιαγμένο το ίδιο το ημερολόγιο"
+    IDS_WIZARD_ATTACH_FOOT  "Αρχείο ημερολογίου δεν χρειάζεται: οι εγγραφές είναι στη μνήμη όσο τρέχει το πρόγραμμα. Αν το πρόβλημα επαναλαμβάνεται, ανοίξτε το ημερολόγιο στις ρυθμίσεις και οι εγγραφές θα επιβιώσουν μιας επανεκκίνησης."
+    IDS_WIZARD_PREVIEW_TITLE "Ελέγξτε και στείλτε"
+    IDS_WIZARD_PREVIEW_NOTE "Αυτό είναι όλο το κείμενο του μηνύματος. Αλλάξτε ό,τι θέλετε. Το στέλνετε εσείς: το κείμενο πάει στο πρόχειρο και το κανάλι ανοίγει στον περιηγητή."
+    IDS_WIZARD_COPY         "Αντιγραφή και άνοιγμα του καναλιού"
+    IDS_WIZARD_SAVE         "Αποθήκευση στον φάκελο του ημερολογίου"
+    IDS_WIZARD_COPIED_ONLY  "Αντιγράφηκε. Η διεύθυνση του καναλιού θα έρθει στην επόμενη έκδοση."
+    IDS_WIZARD_COPIED       "Αντιγράφηκε, το κανάλι άνοιξε."
+    IDS_WIZARD_SAVED        "Αποθηκεύτηκε: {0}"
+    IDS_WIZARD_FAILED       "Δεν έγινε. Το κείμενο έμεινε στο παράθυρο — αντιγράψτε το με το χέρι."
+    IDS_THANKYOU_BUG_TITLE  "Ευχαριστώ για την αναφορά σφάλματος"
+    IDS_THANKYOU_IDEA_TITLE "Ευχαριστώ για την ιδέα"
+    IDS_THANKYOU_BUG_TEXT   "Διαβάζω κάθε μήνυμα ο ίδιος. Τα σφάλματα τα διορθώνω, και για ό,τι αφορά όλους μιλώ με ένα γράμμα στο πρόγραμμα ή στο κανάλι. Ωραία που βρήκατε τον χρόνο 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "Διαβάζω κάθε μήνυμα ο ίδιος. Τις ιδέες τις βάζω στο σχέδιο και τις καλύτερες τις κάνω, και για ό,τι αφορά όλους μιλώ με ένα γράμμα στο πρόγραμμα ή στο κανάλι. Ωραία που βρήκατε τον χρόνο 🖤"
 END
 
 // ---------------------------------------------------------------------------------------
@@ -3168,9 +4100,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "הייתה {0} · עודכן היום"
     IDS_WHATSNEW_TODAY      "עודכן היום"
     IDS_WHATSNEW_PANEL      "שלושה שינויים"
-    IDS_WHATSNEW_1          "ערוץ המפתח: אחת ל־15 ימים התוכנה קוראת קובץ חדשות חתום ואינה שולחת דבר."
-    IDS_WHATSNEW_2          "משם מגיעים המכתבים «חדשה» ו«עדכון»; «נקרא» מכבה את הנקודה שעל הסמל."
-    IDS_WHATSNEW_3          "אפשר לכבות את הקריאה: בקובץ ההגדרות מיד, ואחרי המכתב הראשון בחלון «מהמפתח»."
+    IDS_WHATSNEW_1          "אשף «כתיבה למפתח»: חמישה שלבים לתקלה ושלושה לרעיון."
+    IDS_WHATSNEW_2          "הוא אוסף בעצמו את הגרסה, בניית Windows, הפריסות והיומן — כל פריט אפשר להסיר."
+    IDS_WHATSNEW_3          "שום דבר לא נשלח מעצמו: הטקסט ייכנס ללוח, ואתם מדביקים אותו."
     IDS_WHATSNEW_FULL       "הרשימה המלאה של השינויים מתפרסמת בערוץ."
     IDS_AUTHOR_CAPTION      "מהמפתח"
     IDS_AUTHOR_VERSION      "גרסה {0} · פנדה, הידוע גם כ־Panda_Pishet_Kod"
@@ -3215,6 +4147,65 @@ BEGIN
     IDS_NEWS_LATER          "מאוחר יותר"
     IDS_NEWS_OPEN_LINK      "פתיחת הקישור"
     IDS_NEWS_FOOT           "«נקרא» סוגר את המכתב לתמיד. «מאוחר יותר» או הסגירה: אזכיר בעוד שבוע ועוד פעם בעוד שבועיים, ואחר כך תישאר רק הנקודה על הסמל."
+    IDS_WIZARD_CAPTION      "כתיבה למפתח"
+    IDS_WIZARD_STEP         "שלב {0} מתוך {1}"
+    IDS_WIZARD_CANCEL       "ביטול"
+    IDS_WIZARD_BACK         "חזרה"
+    IDS_WIZARD_NEXT         "הבא"
+    IDS_WIZARD_DONE         "סיום"
+    IDS_WIZARD_WHAT_TITLE   "מה קרה?"
+    IDS_WIZARD_WHAT_NOTE    "התשובה קובעת על מה האשף ישאל בהמשך."
+    IDS_WIZARD_CARD_WRONG   "התוכנה עשתה משהו אחר"
+    IDS_WIZARD_CARD_WRONG_SUB "המילה הומרה לא נכון, נעלמו אותיות, הפריסה לא הייתה הנכונה"
+    IDS_WIZARD_CARD_NOTHING "לא קרה כלום"
+    IDS_WIZARD_CARD_NOTHING_SUB "לחצתם על המקש והטקסט נשאר כפי שהיה"
+    IDS_WIZARD_CARD_IDEA    "אני רוצה להציע שיפור"
+    IDS_WIZARD_CARD_IDEA_SUB "רעיון, בקשה, אי־נוחות"
+    IDS_WIZARD_WHERE_TITLE  "איפה זה קרה?"
+    IDS_WIZARD_WHERE_NOTE   "ההתנהגות תלויה בחלון: מסוף, דפדפן ועורך מקבלים טקסט אחרת. עברו לאותו חלון, והאשף ירשום את שם התוכנה בעצמו."
+    IDS_WIZARD_PROGRAM      "תוכנה:"
+    IDS_WIZARD_CAPTURE      "לקיחה מהחלון הפעיל"
+    IDS_WIZARD_CAPTURE_NOTE "נלקחים שם התהליך ומחלקת החלון. כותרת החלון לא: לעיתים יש בה שם של מסמך."
+    IDS_WIZARD_CAPTURE_COUNT "עברו לחלון הדרוש… {0}"
+    IDS_WIZARD_WHERE_FIELD  "שדה קלט"
+    IDS_WIZARD_FIELD_NORMAL "שדה קלט רגיל"
+    IDS_WIZARD_FIELD_PASSWORD "שדה סיסמה"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "בשדות סיסמה התוכנה אינה פועלת בכוונה: הקשות שם אינן נזכרות"
+    IDS_WIZARD_FIELD_UNKNOWN "לא יודע"
+    IDS_WIZARD_DID_TITLE    "מה עשיתם?"
+    IDS_WIZARD_DID_NOTE     "כתבו דוגמה במקום הטקסט האמיתי. התוכנה אינה שומרת הקשות, ולכן לפנייה ייכנס רק מה שתכתבו כאן."
+    IDS_WIZARD_TYPED_IN     "הקלדתם מילה בפריסה"
+    IDS_WIZARD_AND_PRESSED  "ולחצתם"
+    IDS_WIZARD_EXPECTED     "ציפיתם:"
+    IDS_WIZARD_GOT          "קיבלתם:"
+    IDS_WIZARD_REPEAT       "חוזר על עצמו?"
+    IDS_WIZARD_REPEAT_ALWAYS "בכל פעם"
+    IDS_WIZARD_REPEAT_SOMETIMES "לפעמים"
+    IDS_WIZARD_REPEAT_ONCE  "פעם אחת"
+    IDS_WIZARD_IDEA_TITLE   "תארו את הרעיון"
+    IDS_WIZARD_IDEA_NOTE    "שתי שאלות. ככל שהדוגמה מוחשית יותר, כך קל יותר להבין מה בדיוק לעשות."
+    IDS_WIZARD_IDEA_WHAT    "מה אתם מציעים?"
+    IDS_WIZARD_IDEA_HELPS   "במה זה יעזור?"
+    IDS_WIZARD_ATTACH_TITLE "מה לצרף?"
+    IDS_WIZARD_ATTACH_NOTE  "כל פריט אפשר להסיר. לידו כתוב מה בדיוק ייכנס לטקסט."
+    IDS_WIZARD_ATTACH_MACHINE "גרסת התוכנה ובניית Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "פריסות במערכת"
+    IDS_WIZARD_ATTACH_SETTINGS "הגדרות"
+    IDS_WIZARD_ATTACH_JOURNAL "יומן התוכנה מהזיכרון"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} רשומות. רק שמות פעולות וקודי שגיאה, ולא מקש אחד: כך בנוי היומן עצמו"
+    IDS_WIZARD_ATTACH_FOOT  "קובץ יומן אינו נחוץ: הרשומות בזיכרון כל עוד התוכנה פועלת. אם הבעיה חוזרת, הפעילו את היומן בהגדרות, ואז הרשומות ישרדו הפעלה מחדש."
+    IDS_WIZARD_PREVIEW_TITLE "בדקו ושלחו"
+    IDS_WIZARD_PREVIEW_NOTE "זה כל הטקסט של הפנייה. ערכו מה שתרצו. אתם השולחים: הטקסט ייכנס ללוח, והערוץ ייפתח בדפדפן."
+    IDS_WIZARD_COPY         "העתקה ופתיחת הערוץ"
+    IDS_WIZARD_SAVE         "שמירה לתיקיית היומן"
+    IDS_WIZARD_COPIED_ONLY  "הועתק. כתובת הערוץ תגיע בגרסה הבאה."
+    IDS_WIZARD_COPIED       "הועתק, הערוץ נפתח."
+    IDS_WIZARD_SAVED        "נשמר: {0}"
+    IDS_WIZARD_FAILED       "לא הצליח. הטקסט נשאר בחלון — העתיקו אותו ידנית."
+    IDS_THANKYOU_BUG_TITLE  "תודה על הדיווח על התקלה"
+    IDS_THANKYOU_IDEA_TITLE "תודה על הרעיון"
+    IDS_THANKYOU_BUG_TEXT   "אני קורא כל פנייה בעצמי. תקלות אני מתקן, ועל מה שחשוב לכולם אני מספר במכתב בתוכנה או בערוץ. נהדר שמצאתם לכך זמן 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "אני קורא כל פנייה בעצמי. רעיונות אני מכניס לתוכנית ואת הטובים שבהם עושה, ועל מה שחשוב לכולם אני מספר במכתב בתוכנה או בערוץ. נהדר שמצאתם לכך זמן 🖤"
 END
 
 LANGUAGE 0x01, 0x01
@@ -3315,9 +4306,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "كانت {0} · حُدّث اليوم"
     IDS_WHATSNEW_TODAY      "حُدّث اليوم"
     IDS_WHATSNEW_PANEL      "ثلاثة تغييرات"
-    IDS_WHATSNEW_1          "قناة المؤلف: مرة كل 15 يومًا يقرأ البرنامج ملف أخبار موقّعًا ولا يرسل شيئًا."
-    IDS_WHATSNEW_2          "من هناك تصل رسالتا «خبر» و«تحديث»؛ و«مقروء» يطفئ النقطة على الأيقونة."
-    IDS_WHATSNEW_3          "يمكن إيقاف القراءة: في ملف الإعدادات فورًا، وبعد أول رسالة من نافذة «من المؤلف»."
+    IDS_WHATSNEW_1          "معالج «مراسلة المؤلف»: خمس خطوات للخطأ وثلاث للفكرة."
+    IDS_WHATSNEW_2          "يجمع بنفسه الإصدار وبنية Windows والتخطيطات والسجل — ويمكن إزالة كل بند."
+    IDS_WHATSNEW_3          "لا يُرسل شيء من تلقاء نفسه: يذهب النص إلى الحافظة وأنت من يلصقه."
     IDS_WHATSNEW_FULL       "قائمة التغييرات الكاملة منشورة في القناة."
     IDS_AUTHOR_CAPTION      "من المؤلف"
     IDS_AUTHOR_VERSION      "الإصدار {0} · باندا، المعروف أيضًا بـ Panda_Pishet_Kod"
@@ -3362,6 +4353,65 @@ BEGIN
     IDS_NEWS_LATER          "لاحقًا"
     IDS_NEWS_OPEN_LINK      "فتح الرابط"
     IDS_NEWS_FOOT           "«مقروءة» تغلق الرسالة نهائيًا. «لاحقًا» أو علامة الإغلاق: أذكّرك بعد أسبوع ومرة أخرى بعد أسبوعين، ثم تبقى النقطة على الأيقونة فقط."
+    IDS_WIZARD_CAPTION      "مراسلة المؤلف"
+    IDS_WIZARD_STEP         "الخطوة {0} من {1}"
+    IDS_WIZARD_CANCEL       "إلغاء"
+    IDS_WIZARD_BACK         "رجوع"
+    IDS_WIZARD_NEXT         "التالي"
+    IDS_WIZARD_DONE         "إنهاء"
+    IDS_WIZARD_WHAT_TITLE   "ماذا حدث؟"
+    IDS_WIZARD_WHAT_NOTE    "على الإجابة يتوقف ما سيسأل عنه المعالج بعد ذلك."
+    IDS_WIZARD_CARD_WRONG   "فعل البرنامج شيئًا آخر"
+    IDS_WIZARD_CARD_WRONG_SUB "تحوّلت الكلمة على نحو خاطئ، اختفت حروف، لم يكن التخطيط هو المطلوب"
+    IDS_WIZARD_CARD_NOTHING "لم يحدث شيء"
+    IDS_WIZARD_CARD_NOTHING_SUB "ضغطت المفتاح وبقي النص كما هو"
+    IDS_WIZARD_CARD_IDEA    "أريد اقتراح تحسين"
+    IDS_WIZARD_CARD_IDEA_SUB "فكرة أو رغبة أو أمر غير مريح"
+    IDS_WIZARD_WHERE_TITLE  "أين حدث ذلك؟"
+    IDS_WIZARD_WHERE_NOTE   "يعتمد السلوك على النافذة: الطرفية والمتصفح والمحرر تتلقى النص بطرق مختلفة. انتقل إلى تلك النافذة وسيكتب المعالج اسم البرنامج بنفسه."
+    IDS_WIZARD_PROGRAM      "البرنامج:"
+    IDS_WIZARD_CAPTURE      "الأخذ من النافذة النشطة"
+    IDS_WIZARD_CAPTURE_NOTE "يُؤخذ اسم العملية وفئة النافذة. أما عنوان النافذة فلا: كثيرًا ما يحمل اسم مستند."
+    IDS_WIZARD_CAPTURE_COUNT "انتقل إلى النافذة المطلوبة… {0}"
+    IDS_WIZARD_WHERE_FIELD  "حقل الإدخال"
+    IDS_WIZARD_FIELD_NORMAL "حقل إدخال عادي"
+    IDS_WIZARD_FIELD_PASSWORD "حقل كلمة مرور"
+    IDS_WIZARD_FIELD_PASSWORD_SUB "في حقول كلمات المرور لا يعمل البرنامج عمدًا: لا تُحفظ الضغطات هناك"
+    IDS_WIZARD_FIELD_UNKNOWN "لا أعرف"
+    IDS_WIZARD_DID_TITLE    "ماذا كنت تفعل؟"
+    IDS_WIZARD_DID_NOTE     "اكتب مثالًا بدل النص الحقيقي. البرنامج لا يحفظ الضغطات، لذا لن يدخل في الرسالة إلا ما تكتبه هنا."
+    IDS_WIZARD_TYPED_IN     "كتبت كلمة في التخطيط"
+    IDS_WIZARD_AND_PRESSED  "ثم ضغطت"
+    IDS_WIZARD_EXPECTED     "توقعت:"
+    IDS_WIZARD_GOT          "حصلت على:"
+    IDS_WIZARD_REPEAT       "هل يتكرر؟"
+    IDS_WIZARD_REPEAT_ALWAYS "في كل مرة"
+    IDS_WIZARD_REPEAT_SOMETIMES "أحيانًا"
+    IDS_WIZARD_REPEAT_ONCE  "مرة واحدة"
+    IDS_WIZARD_IDEA_TITLE   "صف الفكرة"
+    IDS_WIZARD_IDEA_NOTE    "سؤالان. كلما كان المثال أوضح، سهل أن نرى ما ينبغي عمله بالضبط."
+    IDS_WIZARD_IDEA_WHAT    "ما الذي تقترحه؟"
+    IDS_WIZARD_IDEA_HELPS   "بماذا سيساعد ذلك؟"
+    IDS_WIZARD_ATTACH_TITLE "ماذا تُرفق؟"
+    IDS_WIZARD_ATTACH_NOTE  "يمكن إزالة كل بند. بجانبه مكتوب ما الذي سيدخل في النص بالضبط."
+    IDS_WIZARD_ATTACH_MACHINE "إصدار البرنامج وبنية Windows"
+    IDS_WIZARD_ATTACH_LAYOUTS "التخطيطات في النظام"
+    IDS_WIZARD_ATTACH_SETTINGS "الإعدادات"
+    IDS_WIZARD_ATTACH_JOURNAL "سجل البرنامج من الذاكرة"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} سجلات. أسماء العمليات ورموز الأخطاء فقط، ولا مفتاح واحد: هكذا بُني السجل نفسه"
+    IDS_WIZARD_ATTACH_FOOT  "لا حاجة إلى ملف سجل: السجلات في الذاكرة ما دام البرنامج يعمل. إن تكررت المشكلة فشغّل السجل من الإعدادات، عندئذ تبقى السجلات بعد إعادة التشغيل."
+    IDS_WIZARD_PREVIEW_TITLE "راجع وأرسل"
+    IDS_WIZARD_PREVIEW_NOTE "هذا نص الرسالة كله. عدّل ما تشاء. أنت من يرسلها: يذهب النص إلى الحافظة وتُفتح القناة في المتصفح."
+    IDS_WIZARD_COPY         "نسخ وفتح القناة"
+    IDS_WIZARD_SAVE         "الحفظ في مجلد السجل"
+    IDS_WIZARD_COPIED_ONLY  "نُسخ. سيأتي عنوان القناة في الإصدار القادم."
+    IDS_WIZARD_COPIED       "نُسخ، وفُتحت القناة."
+    IDS_WIZARD_SAVED        "حُفظ: {0}"
+    IDS_WIZARD_FAILED       "لم ينجح الأمر. بقي النص في النافذة — انسخه يدويًا."
+    IDS_THANKYOU_BUG_TITLE  "شكرًا على الإبلاغ عن الخطأ"
+    IDS_THANKYOU_IDEA_TITLE "شكرًا على الفكرة"
+    IDS_THANKYOU_BUG_TEXT   "أقرأ كل رسالة بنفسي. الأخطاء أصلحها، وما يهم الجميع أرويه في رسالة داخل البرنامج أو في القناة. رائع أنك وجدت الوقت لذلك 🖤"
+    IDS_THANKYOU_IDEA_TEXT  "أقرأ كل رسالة بنفسي. الأفكار أضعها في الخطة وأنفّذ أفضلها، وما يهم الجميع أرويه في رسالة داخل البرنامج أو في القناة. رائع أنك وجدت الوقت لذلك 🖤"
 END
 
 // ---------------------------------------------------------------------------------------

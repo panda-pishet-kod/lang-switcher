@@ -1796,7 +1796,7 @@ pub struct MenuItem {
 /// FR-91's addition.
 ///
 /// A value rather than two arguments, and it carries the **version** rather than a flag because
-/// the entry names it: «Доступна версия 0.40.0…».
+/// the entry names it: «Доступна версия 0.41.0…».
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pending {
     /// A news item of the feed is unread — FR-101, and the same fact the dot on the icon shows.
@@ -3403,11 +3403,11 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         // borrow of anything: unlike the two arms above, these do not pump a message loop of
         // their own.
         //
-        // ⚠ `CMD_WRITE` is the permanent entry «Написать автору…» of FR-91. Until the wizard of
-        // FR-104 exists (stage В) it opens «От автора», where the button that will hold the
-        // wizard already stands — see the report of Э32 for the contradiction between FR-103
-        // and §4 В-2 of the mandate and how it was resolved.
-        CMD_WRITE | CMD_AUTHOR => crate::letters::open_author(hwnd),
+        // ⚠ The two entries part company in stage В, and that is what the two numbers were
+        // kept apart for: «Написать автору…» opens the wizard of FR-104, «От автора» opens the
+        // window of FR-103. Until Т-32-8 both went to the second one.
+        CMD_WRITE => crate::letters::open_wizard(hwnd),
+        CMD_AUTHOR => crate::letters::open_author(hwnd),
 
         // The two temporary entries: the unread letter and the newer version. Both are present
         // in the menu only while there is a reason for them (FR-91), and both open the letter
