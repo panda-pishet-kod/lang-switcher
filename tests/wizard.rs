@@ -383,6 +383,40 @@ fn the_saved_file_is_named_by_the_day() {
     );
 }
 
+/// **«Windows 10 Pro» on a build of Windows 11 is corrected to 11** — the registry value
+/// Microsoft left behind, and what the live acceptance of Э32 wrote into a real appeal from a
+/// machine running 26100.
+#[test]
+fn the_name_of_windows_is_corrected_by_its_build_number() {
+    use lang_switcher::letters::report::eleven;
+
+    assert_eq!(
+        eleven("Windows 10 Pro", "26100"),
+        "Windows 11 Pro",
+        "twenty-two thousand and above is Windows 11, whatever the key says"
+    );
+    assert_eq!(
+        eleven("Windows 10 Pro", "22000"),
+        "Windows 11 Pro",
+        "the first build of 11 is 11"
+    );
+
+    // Below the line nothing is corrected — a real Windows 10 keeps its name.
+    assert_eq!(eleven("Windows 10 Pro", "19045"), "Windows 10 Pro");
+    assert_eq!(eleven("Windows 10 Home", "19045"), "Windows 10 Home");
+
+    // A name that is already right is left alone, and so is one this rule knows nothing about.
+    assert_eq!(eleven("Windows 11 Pro", "26100"), "Windows 11 Pro");
+    assert_eq!(
+        eleven("Windows Server 2022", "20348"),
+        "Windows Server 2022"
+    );
+
+    // A build that is not a number decides nothing (NFR-13).
+    assert_eq!(eleven("Windows 10 Pro", ""), "Windows 10 Pro");
+    assert_eq!(eleven("Windows 10 Pro", "not a number"), "Windows 10 Pro");
+}
+
 /// **What the first box of «Что приложить?» shows is what the appeal writes** — the promise of
 /// that step in one assertion.
 #[test]

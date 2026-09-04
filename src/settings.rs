@@ -13244,8 +13244,32 @@ pub(crate) fn set_text(hwnd: HWND, control: i32, text: &str) {
 }
 
 /// Reads the text of one control.
+/// The text of one control of a window of this program — the reader the stand of Э32 uses to
+/// check that the appeal of FR-104 reaches the field whole.
+///
+/// Public only for that: the module's own callers use [`get_text`], which this is.
+pub fn text_of(hwnd: HWND, control: i32) -> String {
+    get_text(hwnd, control)
+}
+
 pub(crate) fn get_text(hwnd: HWND, control: i32) -> String {
-    let mut buffer = [0u16; 512];
+    // ⛔ **The buffer is asked of the control and is not a fixed 512.** It was 512 units until
+    // task Т-32-10, which was enough for every field of this dialog and **silently cut the
+    // appeal of FR-104 at 511 characters** — the live acceptance found it as a file that ended
+    // in the middle of a row of dashes (`scratchpad-Э32\живое-В`, 511 знаков of 2400). A
+    // reader that truncates without saying so is the worst kind: everything downstream of it
+    // looks correct.
+    let length =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) }
+            .map(|child| {
+                // SAFETY: `child` is the live control just answered for this dialog.
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(child) }
+            })
+            .unwrap_or(0);
+
+    // One for the terminator `GetDlgItemTextW` always writes, and a floor of 512 so that a
+    // control which answers zero still behaves as it did before.
+    let mut buffer = vec![0u16; usize::try_from(length).unwrap_or(0).max(511) + 1];
 
     // SAFETY: `buffer` is owned by this frame and its length is what bounds the copy; the call
     // is given the slice and cannot write past its end. It answers the number of units written,

@@ -5969,7 +5969,34 @@ pub mod report {
         // SAFETY: `key` came from a successful `RegOpenKeyExW` above and is closed exactly once.
         let _ = unsafe { RegCloseKey(key) };
 
-        join(" ", &[product.as_str(), display.as_str(), build.as_str()])
+        join(
+            " ",
+            &[
+                eleven(&product, &build).as_str(),
+                display.as_str(),
+                build.as_str(),
+            ],
+        )
+    }
+
+    /// ⛔ **`ProductName` says «Windows 10 Pro» on Windows 11**, and the live acceptance of Э32
+    /// wrote exactly that into an appeal from a machine running build 26100. Microsoft left the
+    /// value behind at the change of name, and every reader of that key has to correct it the
+    /// way `winver` does — by the build number. Twenty-two thousand is where 11 begins.
+    ///
+    /// Pure, and separate for that reason: the rule is a rule about two strings, and a test can
+    /// walk it without a registry.
+    pub fn eleven(product: &str, build: &str) -> String {
+        let is_eleven = build
+            .trim()
+            .parse::<u32>()
+            .is_ok_and(|number| number >= 22000);
+
+        if is_eleven && product.contains("Windows 10") {
+            product.replacen("Windows 10", "Windows 11", 1)
+        } else {
+            product.to_owned()
+        }
     }
 
     /// «масштаб 100 %» — the scale of the screen this program's window is on.
