@@ -1061,12 +1061,21 @@ BEGIN
     CONTROL         "", IDC_WZ_CARD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 72, 224, 30
     CONTROL         "", IDC_WZ_CARD_2, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 106, 224, 30
     CONTROL         "", IDC_WZ_CARD_3, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 140, 224, 30
-    LTEXT           "", IDC_WZ_CARD_T1, 26, 78, 206, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CARD_T2, 26, 112, 206, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CARD_T3, 26, 146, 206, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CARD_S1, 26, 89, 206, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CARD_S2, 26, 123, 206, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CARD_S3, 26, 157, 206, 10, SS_OWNERDRAW
+    // ⛔ **Носители строк, а не элементы окна — задача Т-33-2, решение 103.2.** Шесть подписей
+    // карточек `NOT WS_VISIBLE`: слова в них живут, а рисует их сама карточка (`draw_card`).
+    // Пока они были видимыми статиками, наведение на карточку стирало их с экрана — кнопка
+    // стоит В Z-ORDER ВЫШЕ своих подписей (порядок шаблона и есть z-order), `WS_CLIPSIBLINGS`
+    // в этом окне нет ни у одного контрола, и слова были видны только потому, что рисовались
+    // ПОСЛЕДНИМИ. При наведении перерисовывалась одна кнопка — и закрашивала их собой.
+    // Замер: чернил внутри карточки 3030 → 0 (`scratchpad-Э33\причина-2-наведение.log`).
+    // Тот же приём, что у панелей писем и у «Как пользоваться»: строка живёт в ресурсе,
+    // рисует владелец.
+    LTEXT           "", IDC_WZ_CARD_T1, 26, 78, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_T2, 26, 112, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_T3, 26, 146, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S1, 26, 89, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S2, 26, 123, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S3, 26, 157, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
     LTEXT           "", IDC_WZ_PROGRAM_LABEL, 16, 72, 60, 10, SS_OWNERDRAW
     EDITTEXT        IDC_WZ_PROGRAM, 78, 70, 100, 14, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "", IDC_WZ_CAPTURE, 182, 70, 58, 14, BS_OWNERDRAW

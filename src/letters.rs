@@ -3284,7 +3284,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         // SAFETY: see the caller — `dc` and `rect` are the values of the message.
         return unsafe {
             with_state(hwnd, |state| {
-                draw_card(dc, rect, state, control, hot, focused)
+                draw_card(hwnd, dc, rect, state, control, hot, focused)
             })
         }
         .unwrap_or(0);
@@ -6673,34 +6673,24 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
     match wizard.current() {
         Step::What => {
             for index in 0..3 {
-                let title = settings::get_text(hwnd, IDC_WZ_CARD_T1 + index);
-                let sub = settings::get_text(hwnd, IDC_WZ_CARD_S1 + index);
-                let inner = width - metrics.x(air::PANEL_PAD) * 2;
-
+                // ⚠ **The two lines are not placed here and never were controls on the
+                // screen** — see `card_lines` and `draw_card`. The statics that carry their
+                // words are `NOT WS_VISIBLE`; what this loop needs of them is the height they
+                // make the card, and that is the third answer of the shared arithmetic.
+                //
                 // SAFETY: as above.
-                let title_height = unsafe { measure(dc, faces.text, inner, &title, None) };
-                // SAFETY: as above.
-                let sub_height = unsafe { measure(dc, faces.body, inner, &sub, pitch) };
-
-                let card_height = metrics.y(air::TIGHT) * 2 + title_height + sub_height + tight;
+                let (_, _, card_height) = unsafe {
+                    card_lines(
+                        dc,
+                        faces,
+                        metrics,
+                        width,
+                        &settings::get_text(hwnd, IDC_WZ_CARD_T1 + index),
+                        &settings::get_text(hwnd, IDC_WZ_CARD_S1 + index),
+                    )
+                };
 
                 place(hwnd, IDC_WZ_CARD_1 + index, pad, y, width, card_height);
-                place(
-                    hwnd,
-                    IDC_WZ_CARD_T1 + index,
-                    pad + metrics.x(air::PANEL_PAD),
-                    y + metrics.y(air::TIGHT),
-                    inner,
-                    title_height,
-                );
-                place(
-                    hwnd,
-                    IDC_WZ_CARD_S1 + index,
-                    pad + metrics.x(air::PANEL_PAD),
-                    y + metrics.y(air::TIGHT) + title_height + tight,
-                    inner,
-                    sub_height,
-                );
 
                 y += card_height + gap;
             }
@@ -7265,17 +7255,83 @@ unsafe fn draw_chip(dc: HDC, rect: RECT, state: &WindowState, key: &str) -> isiz
     }
 }
 
-/// Draws one card of «Что случилось?» — a block with a heading and a line under it, and the
-/// chosen one framed in the accent.
+/// Where the two lines of a card stand **inside it**, and how tall the card therefore is.
 ///
-/// The two lines of text are **separate statics** standing on the card, so this draws the
-/// block and nothing else: an owner-drawn button answers for its whole rectangle, and the
-/// labels on top of it answer for theirs.
+/// **The one place this arithmetic lives.** [`layout_wizard`] asks it for the height and
+/// [`draw_card`] asks it for the two rectangles; a second copy of the formula would be a card
+/// whose words drift out of the block the moment either half is touched.
+///
+/// The rectangles are in the card's own coordinates — origin at its top-left corner — which is
+/// exactly the space `WM_DRAWITEM` hands the drawing, and which is the same space in a mirrored
+/// window as in an ordinary one (ИТОГ-Э30 §9.7: an offset is safe where an absolute corner is
+/// not).
 ///
 /// # Safety
 ///
-/// As [`draw_progress`].
+/// `dc` is a live DC of this window and `faces` the fonts it owns — the contract of
+/// [`measure`].
+unsafe fn card_lines(
+    dc: HDC,
+    faces: &Faces,
+    metrics: Metrics,
+    width: i32,
+    title: &str,
+    sub: &str,
+) -> (RECT, RECT, i32) {
+    let pad = metrics.x(air::PANEL_PAD);
+    let tight = metrics.y(air::TIGHT);
+    let inner = width - pad * 2;
+
+    // SAFETY: see the contract.
+    let title_height = unsafe { measure(dc, faces.text, inner, title, None) };
+    // SAFETY: see the contract.
+    let sub_height = unsafe { measure(dc, faces.body, inner, sub, Some(faces.body_pitch())) };
+
+    let title_rect = RECT {
+        left: pad,
+        top: tight,
+        right: pad + inner,
+        bottom: tight + title_height,
+    };
+    let sub_rect = RECT {
+        left: pad,
+        top: tight + title_height + tight,
+        right: pad + inner,
+        bottom: tight + title_height + tight + sub_height,
+    };
+
+    (title_rect, sub_rect, tight * 3 + title_height + sub_height)
+}
+
+/// Draws one card of «Что случилось?» — a block with a heading and a line under it, and the
+/// chosen one framed in the accent.
+///
+/// # ⛔ Why the card draws its own words — задача Т-33-2, решение 103.2
+///
+/// The two lines used to be **visible statics standing on the card**, and hovering the card
+/// wiped them off the screen. Measured rather than reasoned
+/// (`scratchpad-Э33\причина-2-наведение.log`):
+///
+/// * in the z-order of the dialog the three cards stand **above** their own six labels — the
+///   template lists the buttons first, and the order of a template *is* the z-order;
+/// * **not one control of this window carries `WS_CLIPSIBLINGS`** (every style read off the
+///   live window is `0x5001400B` or `0x5002000D`);
+/// * so at a full repaint the children paint from the top of the z-order downwards: the card
+///   fills its rectangle and the labels, being **below** it, paint afterwards and land on top.
+///   The words were visible only because they were painted **last**;
+/// * on hover `settings::invalidate_hot` invalidates **the button alone**. It fills its whole
+///   rectangle again and nothing ever asks the labels to repaint. Ink inside a card measured
+///   3030 → **0**.
+///
+/// So the card is one body of drawing now: the statics are `NOT WS_VISIBLE` carriers of the
+/// two strings — the arrangement the panels of a letter and «Как пользоваться» have always
+/// used — and everything inside this rectangle is painted here, in one pass, by one owner.
+///
+/// # Safety
+///
+/// As [`draw_progress`]; `hwnd` is the live window the item belongs to.
 unsafe fn draw_card(
+    hwnd: HWND,
     dc: HDC,
     rect: RECT,
     state: &WindowState,
@@ -7283,7 +7339,11 @@ unsafe fn draw_card(
     hot: bool,
     focused: bool,
 ) -> isize {
-    let (Some(brushes), Some(wizard)) = (state.brushes.as_ref(), state.wizard.as_deref()) else {
+    let (Some(brushes), Some(faces), Some(wizard)) = (
+        state.brushes.as_ref(),
+        state.fonts.as_ref(),
+        state.wizard.as_deref(),
+    ) else {
         return 0;
     };
 
@@ -7291,9 +7351,9 @@ unsafe fn draw_card(
     let dpi = theme::dc_dpi(dc);
     let chosen = wizard_is_checked(wizard, control);
 
-    // ⚠ The **fill** never changes: the two lines of text on this card are separate statics
-    // painted with the panel brush, and a card that changed its ground under the pointer would
-    // show two grounds at once. What answers to the pointer and to the focus is the frame.
+    // ⚠ The **fill** never changes: the ground of a card is the panel brush whatever the
+    // pointer is doing, because the words above it are drawn on that ground. What answers to
+    // the pointer and to the focus is the frame.
     theme::paint_rounded(
         dc,
         &rect,
@@ -7308,6 +7368,68 @@ unsafe fn draw_card(
         brushes.panel_bg(),
         dpi,
     );
+
+    let index = control - IDC_WZ_CARD_1;
+    let title = settings::get_text(hwnd, IDC_WZ_CARD_T1 + index);
+    let sub = settings::get_text(hwnd, IDC_WZ_CARD_S1 + index);
+
+    // SAFETY: `dc` is the DC of the message and `faces` the fonts of this window's state.
+    let (title_rect, sub_rect, _) = unsafe {
+        card_lines(
+            dc,
+            faces,
+            Metrics::of(hwnd),
+            rect.right - rect.left,
+            &title,
+            &sub,
+        )
+    };
+
+    for (line, box_of, role, face, pitch) in [
+        (
+            &title,
+            title_rect,
+            label_color_role(IDC_WZ_CARD_T1),
+            faces.text,
+            None,
+        ),
+        (
+            &sub,
+            sub_rect,
+            label_color_role(IDC_WZ_CARD_S1),
+            faces.body,
+            Some(faces.body_pitch()),
+        ),
+    ] {
+        let mut wide: Vec<u16> = line.encode_utf16().collect();
+
+        // The rectangle comes back in the card's own coordinates; `rcItem` is (0,0)-based for
+        // a button, and the shift is written out anyway so that the two spaces are never
+        // silently assumed to be the same one.
+        let placed = RECT {
+            left: rect.left + box_of.left,
+            top: rect.top + box_of.top,
+            right: rect.left + box_of.right,
+            bottom: rect.top + box_of.bottom,
+        };
+
+        // SAFETY: `dc` and `placed` are live; the brush and the face belong to this window's
+        // state for longer than the call.
+        unsafe {
+            theme::paint_label_at_pitch(
+                dc,
+                placed,
+                &mut wide,
+                theme::LabelStyle {
+                    ground: brushes.panel_bg(),
+                    ink: theme::label_ink(role, palette),
+                    face: Some(face),
+                    pitch,
+                    reading: theme::Reading::Native,
+                },
+            );
+        }
+    }
 
     1
 }

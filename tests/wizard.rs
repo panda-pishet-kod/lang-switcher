@@ -433,3 +433,55 @@ fn the_line_beside_the_box_is_the_line_in_the_appeal() {
         "the appeal must carry the very sentence the box showed:\n{beside}\n---\n{appeal}"
     );
 }
+
+/// **Т-33-2, решение 103.2** — the six labels of the three cards are carriers of strings and
+/// not elements of the window.
+///
+/// The defect this guards against was found by the eye and measured by the stand: while the
+/// labels were visible statics, hovering a card wiped its two lines off the screen. The cards
+/// stand **above** their labels in the z-order of the template, no control of the window
+/// carries `WS_CLIPSIBLINGS`, and a repaint of the button alone therefore painted over words
+/// nobody would ask to be painted again — ink inside a card measured 3030 → 0
+/// (`scratchpad-Э33\причина-2-наведение.log`).
+///
+/// The cure is one body of drawing: `draw_card` paints the card and its two lines together,
+/// and the statics keep only the words. `NOT WS_VISIBLE` is what makes that true, and it is
+/// read here out of `app.rc` — the file that decides it — because a label shown again would
+/// bring the whole defect back and nothing else in the battery would notice.
+#[test]
+fn the_six_labels_of_the_cards_are_invisible_carriers_of_their_words() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
+    let text = std::fs::read_to_string(&script).expect("app.rc must be readable");
+
+    for label in [
+        "IDC_WZ_CARD_T1",
+        "IDC_WZ_CARD_T2",
+        "IDC_WZ_CARD_T3",
+        "IDC_WZ_CARD_S1",
+        "IDC_WZ_CARD_S2",
+        "IDC_WZ_CARD_S3",
+    ] {
+        let line = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("LTEXT") && line.contains(label))
+            .unwrap_or_else(|| panic!("app.rc has no LTEXT for {label}"));
+
+        println!("{line}");
+
+        assert!(
+            line.contains("NOT WS_VISIBLE"),
+            "{label} is a visible static again — hovering its card will wipe it: {line}"
+        );
+    }
+
+    // And the three cards themselves are still shown: a card hidden with them would be a step
+    // with nothing on it.
+    for card in ["IDC_WZ_CARD_1", "IDC_WZ_CARD_2", "IDC_WZ_CARD_3"] {
+        let line = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("CONTROL") && line.contains(card))
+            .unwrap_or_else(|| panic!("app.rc has no CONTROL for {card}"));
+
+        assert!(!line.contains("NOT WS_VISIBLE"), "{card} is hidden: {line}");
+    }
+}
