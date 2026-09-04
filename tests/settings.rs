@@ -8372,19 +8372,19 @@ const FR_94_STRINGS: [(u16, &str, &str); 203] = [
     ),
     (
         settings::IDS_WHATSNEW_1,
-        "Мастер «Написать автору»: пять шагов для ошибки и три для пожелания.",
-        "The «Write to the author» wizard: five steps for a bug and three for an idea.",
+        "Даты в письмах печатаются по григорианскому календарю при любом языке интерфейса.",
+        "Dates in the letters are printed in the Gregorian calendar at every interface language.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Он сам соберёт версию, сборку Windows, раскладки и журнал — каждый пункт можно снять.",
-        "It collects the version, the Windows build, the layouts and the journal — every item \
-         can be taken off.",
+        "В мастере «Написать автору» строки карточек больше не пропадают под указателем.",
+        "In the «Write to the author» wizard the lines of the cards no longer vanish under the \
+         pointer.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Ничего не отправляется само: текст попадёт в буфер обмена, а вставите его вы.",
-        "Nothing is sent by itself: the text goes to the clipboard and you paste it.",
+        "Благодарность стала последним шагом мастера — в том же окне, а не отдельным.",
+        "The thanks is the wizard's last step now — in the same window instead of a separate one.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
