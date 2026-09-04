@@ -142,8 +142,8 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, ODT_MENU};
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_USER, NIM_ADD, NIM_DELETE,
-    NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NIN_SELECT, NOTIFYICON_VERSION_4,
+    NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_LARGE_ICON, NIIF_USER, NIM_ADD,
+    NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NIN_SELECT, NOTIFYICON_VERSION_4,
     NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -151,12 +151,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetSystemMetrics, HHOOK, HICON, HMENU, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
     MENUINFO, MF_CHECKED, MF_DISABLED, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR,
     MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
-    RegisterWindowMessageW, SM_CXMENUCHECK, SM_CXSMICON, SM_CYMENU, SM_CYSMICON,
-    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo,
-    SetTimer, SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU,
-    WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
+    RegisterWindowMessageW, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYMENU,
+    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
+    SetMenuInfo, SetTimer, SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP,
+    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE,
+    WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
 };
 use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
 
@@ -543,6 +543,10 @@ pub struct Tray {
     active_unread: Icon,
     /// The "suspended, and a letter is unread" icon.
     paused_unread: Icon,
+    /// The same four icons at [`large_icon_size`], for the balloon of [`Tray::announce`] —
+    /// задача Т-33а-1. `None` when the system refused to load them, and then the balloon goes
+    /// out exactly as it did before (NFR-13): a letter must not be lost over its picture.
+    balloon: Option<BalloonIcons>,
     /// The configuration; `general.enabled` *is* the state of FR-90.
     config: Config,
     /// Where the configuration is written back to. `None` when `%APPDATA%` is not set.
@@ -599,6 +603,11 @@ impl Tray {
         let active_unread = Icon::load(instance, IDI_APP_ACTIVE_UNREAD, icon_size)?;
         let paused_unread = Icon::load(instance, IDI_APP_PAUSED_UNREAD, icon_size)?;
 
+        // Задача Т-33а-1: те же четыре значка ещё раз, крупным кадром — для шара уведомления.
+        // ⚠ Без `?`: значок уведомления — украшение письма, а письмо — нет. Отказ загрузки
+        // стоит одной записи в журнале и возвращает шару прежний вид (NFR-13).
+        let balloon = BalloonIcons::load(instance);
+
         let (config, save_policy) = match config_path.as_deref() {
             Some(path) => {
                 let (config, outcome) = settings::read_or_default(path);
@@ -653,6 +662,7 @@ impl Tray {
             paused,
             active_unread,
             paused_unread,
+            balloon,
             config,
             config_path,
             save_policy,
@@ -1090,6 +1100,21 @@ impl Tray {
         }
     }
 
+    /// The same choice as [`Tray::state_icon`], but out of the large set — задача Т-33а-1.
+    ///
+    /// `None` means the large icons never loaded, and the caller then leaves the balloon as it
+    /// was before this task (NFR-13).
+    fn balloon_icon(&self) -> Option<HICON> {
+        let large = self.balloon.as_ref()?;
+
+        Some(match (self.enabled(), self.has_unread()) {
+            (true, false) => large.active.handle,
+            (false, false) => large.paused.handle,
+            (true, true) => large.active_unread.handle,
+            (false, true) => large.paused_unread.handle,
+        })
+    }
+
     /// Whether a news item of the feed is unread — the fact the dot of FR-90 shows and the
     /// entry «Непрочитанное письмо…» of FR-91 stands on.
     ///
@@ -1187,6 +1212,18 @@ impl Tray {
     /// The two fields are truncated by [`write_field`] rather than refused: `szInfo` holds 255
     /// UTF-16 units and `szInfoTitle` 63, and a sentence of the string tables in a language
     /// nobody measured must never be able to stop a letter being announced (NFR-13).
+    ///
+    /// # ⛔ Почему значок был размытым — задача Т-33а-1, находка глазом пользователя
+    ///
+    /// `NIIF_USER` без `NIIF_LARGE_ICON` означает «возьми `hIcon` этой записи», а `hIcon` здесь
+    /// — значок области уведомлений, загруженный при [`small_icon_size`] (16 px при 100 %).
+    /// Шар уведомления оболочка рисует ЗАМЕТНО КРУПНЕЕ, и 16 px в нём растягиваются: это и
+    /// была «размытая иконка» на снимке пользователя. `NIIF_LARGE_ICON` говорит оболочке брать
+    /// **`hBalloonIcon`**, и туда кладётся тот же ресурс, загруженный при [`large_icon_size`];
+    /// кадры 32/48/64 в `.ico` для этого уже были — добавлять в ресурсы ничего не пришлось.
+    ///
+    /// Малый значок трея не меняется: `NIF_ICON` и `hIcon` остаются прежними, и в области
+    /// уведомлений стоит ровно то, что стояло.
     fn announce(&mut self, title: &str, body: &str) {
         if !self.icon_present {
             return;
@@ -1195,7 +1232,15 @@ impl Tray {
         let mut data = self.notify_data();
 
         data.uFlags |= NIF_INFO;
-        data.dwInfoFlags = NIIF_USER;
+
+        data.dwInfoFlags = match self.balloon_icon() {
+            Some(icon) => {
+                data.hBalloonIcon = icon;
+                NIIF_USER | NIIF_LARGE_ICON
+            }
+            // NFR-13: без большого значка уведомление уходит как прежде, а не молчит.
+            None => NIIF_USER,
+        };
 
         write_field(&mut data.szInfo, body);
         write_field(&mut data.szInfoTitle, title);
@@ -3936,6 +3981,46 @@ impl Icon {
     }
 }
 
+/// The four state icons at [`large_icon_size`] — the balloon's set, задача Т-33а-1.
+///
+/// A type of its own so that the whole set is either there or absent: a balloon that showed the
+/// large «active» icon and the small «paused» one would be worse than one that showed neither.
+struct BalloonIcons {
+    /// The "active" icon, large.
+    active: Icon,
+    /// The "suspended" icon, large.
+    paused: Icon,
+    /// The "active, and a letter is unread" icon, large.
+    active_unread: Icon,
+    /// The "suspended, and a letter is unread" icon, large.
+    paused_unread: Icon,
+}
+
+impl BalloonIcons {
+    /// Loads all four, or none — NFR-13.
+    ///
+    /// The failure is journaled once and is not an error of the tray: everything the tray does
+    /// works without these, and only the picture in the balloon is poorer for it.
+    fn load(instance: HINSTANCE) -> Option<Self> {
+        let size = large_icon_size();
+
+        let load = |id: u16| match Icon::load(instance, id, size) {
+            Ok(icon) => Some(icon),
+            Err(error) => {
+                app::report_non_critical("LoadImageW(SM_CXICON)", &error);
+                None
+            }
+        };
+
+        Some(Self {
+            active: load(IDI_APP_ACTIVE)?,
+            paused: load(IDI_APP_PAUSED)?,
+            active_unread: load(IDI_APP_ACTIVE_UNREAD)?,
+            paused_unread: load(IDI_APP_PAUSED_UNREAD)?,
+        })
+    }
+}
+
 impl Drop for Icon {
     fn drop(&mut self) {
         // SAFETY: `handle` came from a successful `LoadImageW` without `LR_SHARED`, so it is
@@ -3966,6 +4051,25 @@ pub fn small_icon_size() -> (i32, i32) {
     // A metric that came back zero or negative is unusable. Sixteen is what the small-icon
     // metric is at 100% scale and is the safe fallback.
     let usable = |value: i32| if value > 0 { value } else { 16 };
+
+    (usable(width), usable(height))
+}
+
+/// The size the shell draws the icon of a **balloon** at — задача Т-33а-1.
+///
+/// `SM_CXICON` and not a fixed 32: like the small metric it follows the display scale — 32 px at
+/// 100 %, 40 at 125 %, 48 at 150 %, — and the four `.ico` files carry 32, 48 and 64 px frames,
+/// so `LoadImageW` has an exact frame to hand back at each of those and nothing is stretched.
+pub fn large_icon_size() -> (i32, i32) {
+    // SAFETY: as in `small_icon_size` — a system-wide read that takes no pointer. A zero would
+    // ask `LoadImageW` for the resource's own size, so the result is examined (NFR-13).
+    let width = unsafe { GetSystemMetrics(SM_CXICON) };
+
+    // SAFETY: as above.
+    let height = unsafe { GetSystemMetrics(SM_CYICON) };
+
+    // Thirty-two is what the large-icon metric is at 100% scale and is the safe fallback.
+    let usable = |value: i32| if value > 0 { value } else { 32 };
 
     (usable(width), usable(height))
 }

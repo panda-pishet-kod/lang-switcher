@@ -48,9 +48,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
     GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
     MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
-    RT_DIALOG, RT_VERSION, SM_CXMENUCHECK, SM_CXSMICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_DRAWITEM, WM_ENDSESSION,
-    WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WS_EX_TOOLWINDOW, WS_POPUP,
+    RT_DIALOG, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
+    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -2337,6 +2338,85 @@ fn the_icon_is_loaded_at_the_size_the_system_asks_for() {
         tray.icon_size(),
         expected,
         "FR-90: the size comes from SM_CXSMICON and is not hard-wired"
+    );
+}
+
+/// **Задача Т-33а-1, находка глазом пользователя: «размытая иконка в уведомлении».**
+///
+/// Причина, измеренная приборами `значок-резкость.ps1` и `красное-до-1-значок.log`: шар
+/// уведомления оболочка рисует размером `SM_CXICON` (32 px при 96 DPI), а `announce` отдавал ей
+/// значок области уведомлений — `SM_CXSMICON`, 16 px. Растянуть 16 в 32 без потери резкости
+/// нельзя, и это арифметика, а не мнение.
+///
+/// Тест держит обе половины лечения: величина берётся у системы, а не написана числом, и она
+/// не меньше малой — иначе «большой значок» перестал бы быть большим и никто бы не заметил.
+#[test]
+fn the_balloon_icon_is_the_large_metric_and_not_the_small_one() {
+    // SAFETY: `GetSystemMetrics` reads a system-wide value and touches no memory of ours.
+    let expected = unsafe { (GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)) };
+
+    println!("SM_CXICON={} SM_CYICON={}", expected.0, expected.1);
+    println!("large_icon_size()={:?}", tray::large_icon_size());
+    println!("small_icon_size()={:?}", tray::small_icon_size());
+
+    assert_eq!(
+        tray::large_icon_size(),
+        expected,
+        "Т-33а-1: размер значка шара идёт от SM_CXICON и не написан числом"
+    );
+
+    assert!(
+        tray::large_icon_size().0 > tray::small_icon_size().0,
+        "Т-33а-1: большой значок обязан быть больше малого — иначе лечения нет"
+    );
+}
+
+/// **Та же задача, вторая половина: чем именно `announce` просит большой значок.**
+///
+/// `NIIF_USER` без `NIIF_LARGE_ICON` означает «возьми `hIcon` записи», а это и есть малый
+/// значок трея. Оба имени обязаны стоять рядом в `announce`, и `hBalloonIcon` обязан
+/// заполняться — без него флаг просит несуществующее и оболочка снова берёт малый.
+///
+/// Нечувствителен к концам строк по той же причине, что и соседи.
+#[test]
+fn the_balloon_asks_for_the_large_icon_by_name() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let announce = source
+        .split_once("fn announce(&mut self, title: &str, body: &str) {")
+        .expect("announce must be there")
+        .1
+        .split_once("\n    /// ")
+        .map_or_else(String::new, |(body, _)| body.to_owned());
+
+    println!("длина тела announce: {} знаков", announce.len());
+
+    for needle in ["NIIF_LARGE_ICON", "hBalloonIcon", "NIIF_USER"] {
+        assert!(
+            announce.contains(needle),
+            "Т-33а-1: `{needle}` обязан стоять в `announce` — без него шар снова берёт малый \
+             значок"
+        );
+    }
+
+    // NFR-13: отказ загрузки большого значка не должен отменять само уведомление.
+    assert!(
+        announce.contains("None => NIIF_USER"),
+        "NFR-13: без большого значка уведомление уходит как прежде, а не молчит"
+    );
+
+    // И набор либо целиком есть, либо целиком отсутствует — иначе шар показал бы «активна»
+    // большим значком, а «пауза» малым.
+    assert_eq!(
+        source.matches("struct BalloonIcons {").count(),
+        1,
+        "набор больших значков — один тип, и он один"
     );
 }
 
