@@ -7863,14 +7863,12 @@ unsafe fn draw_glyph_element(
     // The glyph: at the left edge, centred vertically, [`GLYPH_SIZE`] mock-up pixels a side
     // through the scale — the `$bs = 17` of the generator, and `$by = $py + [int](($ph -
     // $bs)/2)` for the centring (task T-11-16).
-    let side = scaled(GLYPH_SIZE, dpi);
-    let glyph_top = rect.top + (rect.bottom - rect.top - side) / 2;
-    let glyph = RECT {
-        left: rect.left,
-        top: glyph_top,
-        right: rect.left + side,
-        bottom: glyph_top + side,
-    };
+    //
+    // ⚠ Задача Т-45-2: арифметика клетки уехала в `widgets::glyph::cell` — она была тождественна
+    // у этого окна и у мастера, слово в слово, и потому слита. Всё остальное в этом теле
+    // (земля, подпись, рамка фокуса, перо круга) у двух окон различается и оставлено; чем
+    // именно — сказано в доктексте `widgets::glyph`.
+    let glyph = widgets::glyph::cell(rect, dpi);
 
     // NFR-13, for every paint call below: each answers a success flag or a previous
     // value, and every answer is deliberately dropped for the reason `on_draw_item` gives

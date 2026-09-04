@@ -2011,6 +2011,20 @@ mod air {
     pub(super) const TEXT_X: i32 = 42;
     /// The air between two things that belong together.
     pub(super) const TIGHT: i32 = 3;
+    /// **Зазор между текстом подписи и кромкой рамки поля, в пикселях макета** — решение 107.4,
+    /// задача Т-45-3.
+    ///
+    /// ⭐ **Число названо пользователем 2026-09-04: «10px».** Оно взято из макета мастера
+    /// (`.lblrow { gap: 10px }`) и сверено с окном настроек, где тот же зазор вышел **9 px** у
+    /// самой тесной пары («Язык интерфейса:» → комбо) и 15 px у «Клавиши:». Разница у настроек
+    /// не замысел, а остаток: подпись там стоит в прямоугольнике постоянной ширины из шаблона,
+    /// и до кромки остаётся столько, сколько не занял текст. Три числа не сошлись, поэтому
+    /// выбор был вынесен пользователю с макетом, а не сделан исполнителем.
+    ///
+    /// ⚠ **Пиксель макета, а не единица диалога.** Единица диалога у мастера равна 1,75 px по
+    /// горизонтали, и ни одно целое их число не даёт 10: пять дают 9, шесть — 11. Зазор здесь —
+    /// длина макета, а длины макета в этой программе ездят через `theme::scaled`.
+    pub(super) const LABEL_TO_FIELD: i32 = 10;
     /// The air between two blocks.
     pub(super) const GAP: i32 = 8;
     /// The inset of everything that stands on a panel.
@@ -3375,13 +3389,10 @@ unsafe fn draw_switch(
     // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
     unsafe { FillRect(dc, &rect, brushes.panel_bg()) };
 
-    let size = theme::scaled(settings::GLYPH_SIZE, dpi);
-    let cell = RECT {
-        left: rect.left,
-        top: rect.top + ((rect.bottom - rect.top) - size) / 2,
-        right: rect.left + size,
-        bottom: rect.top + ((rect.bottom - rect.top) - size) / 2 + size,
-    };
+    // ⚠ Задача Т-45-2: та же клетка, что у окна настроек, и теперь одним телом
+    // (`widgets::glyph::cell`). Всё остальное здесь у двух окон различается — см. доктекст
+    // `widgets::glyph`.
+    let cell = widgets::glyph::cell(rect, dpi);
 
     let fill = match colors.fill {
         theme::GlyphFillRole::FieldBg => brushes.field_bg(),
@@ -3792,8 +3803,15 @@ unsafe extern "system" fn letter_proc(
             // FR-104: the closed face of the layout combo is drawn by this program and not by
             // the system — the very body the four combo boxes of the settings window are drawn
             // by, asked for through the seam of task Т-32-8 rather than copied (§6.2).
+            //
+            // ⭐ **Задача Т-45-3: через общий слой, и слой ставит ЗАКРЫТУЮ ВЫСОТУ сам.** До Э45
+            // мастер брал у окна настроек подкласс, а высоты — нет, и `CB_SETITEMHEIGHT(−1)` не
+            // звал вовсе. Замер на живом 0.44.0: строка выпадающего списка мастера **16 px**
+            // против **26 px** у всех четырёх комбо окна настроек — это и есть «нестандартный
+            // для моей программы размер» из слов пользователя. `widgets::combo::attach` делает
+            // обе половины одним вызовом, и забыть вторую больше негде.
             if kind == Kind::Wizard {
-                settings::subclass_foreign_combo(hwnd, IDC_WZ_LAYOUT);
+                widgets::combo::attach(hwnd, IDC_WZ_LAYOUT);
             }
 
             if let Some(frames) = frames {
@@ -3965,7 +3983,7 @@ unsafe extern "system" fn letter_proc(
                 // The far half of the pair installed on `WM_INITDIALOG` — while the children
                 // are still alive, which is what makes it exact.
                 if kind == Kind::Wizard {
-                    settings::unsubclass_foreign_combo(hwnd, IDC_WZ_LAYOUT);
+                    widgets::combo::detach(hwnd, IDC_WZ_LAYOUT);
                 }
             }
 
@@ -7024,7 +7042,7 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
         Step::Where => {
             let label = settings::get_text(hwnd, IDC_WZ_PROGRAM_LABEL);
             // SAFETY: as above.
-            let label_width = unsafe { text_width(dc, faces.text, &label) } + metrics.x(air::TIGHT);
+            let label_width = unsafe { text_width(dc, faces.text, &label) };
             // SAFETY: as above.
             let capture_width = unsafe {
                 button_width(
@@ -7034,6 +7052,24 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
                     &settings::get_text(hwnd, IDC_WZ_CAPTURE),
                 )
             };
+
+            // ⭐ **МЕСТО ПОД КРОМКУ И ЗАЗОР — задача Т-45-3, решение 107.4.** Слово
+            // пользователя: «„Поле ввода программы:“ слишком прижато к окну ввода, и часть окна
+            // ввода не дорисована со стороны текста». Обе половины жалобы — одна причина.
+            //
+            // Прежде подпись занимала прямоугольник `текст + 3 единицы диалога`, а поле
+            // начиналось СРАЗУ за ним. Коробку поля рисует фон окна на `left − толщина`, то
+            // есть **внутри прямоугольника подписи**, а подпись — owner-draw статик: она
+            // грунтует свой прямоугольник целиком и кромку стирает. Замер на живом 0.44.0
+            // (`красное-рамка-мастер-e44.log`): пикселей кромки слева **4 из 19 = 21 %** при
+            // 100 % справа и 100 % у обоих полей окна настроек; зазор «текст → кромка» — 4 px.
+            //
+            // Теперь прямоугольник подписи равен её тексту, а между текстом и полем
+            // резервируется зазор макета плюс толщина кромки. Число зазора — [`LABEL_TO_FIELD`],
+            // и оно названо пользователем.
+            let dpi = theme::dc_dpi(dc);
+            let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
+            let field_x = pad + label_width + theme::scaled(air::LABEL_TO_FIELD, dpi) + thickness;
 
             place(
                 hwnd,
@@ -7047,9 +7083,9 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
                 hwnd,
                 metrics,
                 IDC_WZ_PROGRAM,
-                pad + label_width,
+                field_x,
                 y,
-                width - label_width - capture_width - metrics.x(air::BUTTON_GAP),
+                pad + width - capture_width - metrics.x(air::BUTTON_GAP) - field_x,
                 button,
             );
             place(
@@ -7451,16 +7487,16 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return 0;
     }
 
-    // SAFETY: the state pointer is live for the length of the window.
-    let height = unsafe {
-        with_state(hwnd, |state| {
-            state
-                .fonts
-                .as_ref()
-                .map(|faces| faces.body_height.abs() + 8)
-        })
-    }
-    .flatten();
+    // ⭐ **Задача Т-45-3: высоту строки списка считает общий слой.** Здесь стояло
+    // `faces.body_height.abs() + 8` — своё число, без масштаба DPI и без связи с окном
+    // настроек. Замер на живом 0.44.0 (`красное-высоты-комбо-e44.log`): строка списка мастера
+    // **16 px**, строка списка каждого из четырёх комбо окна настроек — **26 px**. Теперь
+    // формула одна на все окна: высота шрифта диалога плюс `LIST_ITEM_EXTRA` через масштаб.
+    //
+    // ⚠ Закрытую часть это сообщение не задаёт и задавать не должно: одно `WM_MEASUREITEM`
+    // красит обе высоты сразу, поэтому закрытую двигает `CB_SETITEMHEIGHT(−1)` из
+    // `widgets::combo::attach`.
+    let height = widgets::combo::row_height(hwnd, widgets::combo::LIST_ITEM_EXTRA);
 
     let Some(height) = height else {
         return 0;
@@ -7937,13 +7973,10 @@ unsafe fn draw_wizard_glyph(
     // belongs to this window's state.
     unsafe { FillRect(target, &rect, brushes.window_bg()) };
 
-    let size = theme::scaled(settings::GLYPH_SIZE, dpi);
-    let cell = RECT {
-        left: rect.left,
-        top: rect.top + ((rect.bottom - rect.top) - size) / 2,
-        right: rect.left + size,
-        bottom: rect.top + ((rect.bottom - rect.top) - size) / 2 + size,
-    };
+    // ⚠ Задача Т-45-2: та же клетка, что у окна настроек, и теперь одним телом
+    // (`widgets::glyph::cell`). Всё остальное здесь у двух окон различается — см. доктекст
+    // `widgets::glyph`.
+    let cell = widgets::glyph::cell(rect, dpi);
 
     let fill = match colors.fill {
         theme::GlyphFillRole::FieldBg => brushes.field_bg(),
@@ -8142,9 +8175,21 @@ fn wizard_command(hwnd: HWND, control: i32) -> bool {
         return false;
     }
 
-    // A card of the first step changes the **road**, so the whole window is rebuilt; everything
-    // else needs no more than its own repaint. Rebuilding always is the cheaper rule to hold.
-    wizard_refresh(hwnd);
+    // ⭐ **ЗДЕСЬ И БЫЛО МОРГАНИЕ — задача Т-45-3, решение 107.5.** До Э45 эта строка звала
+    // `wizard_refresh`, то есть на КАЖДЫЙ щелчок по карточке, радио или галке гасила окно
+    // `WM_SETREDRAW`, переставляла все контролы шага и стирала окно целиком
+    // `RedrawWindow(RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW)`. Комментарий рядом честно
+    // говорил, почему так: «Rebuilding always is the cheaper rule to hold».
+    //
+    // Цена правила измерена на живом продукте 0.44.0 (`красное-моргание-e44.log`): при щелчках
+    // по карточкам **5 кадров из 1087** не равны ни одному устоявшемуся виду, два из них
+    // расходятся больше чем на процент окна, худший — на **27 700 пикселей**: на сохранённом
+    // кадре первой карточки в окне НЕТ ВОВСЕ. У той же дороги в окне настроек — галка «Звуковой
+    // отклик», которая зовёт `set_check` + перерисовку ОДНОГО контрола, — 1 кадр из 1114 при
+    // худшем расхождении 697 пикселей.
+    //
+    // Смена шага по-прежнему идёт полной дорогой: там контролы вправду переезжают.
+    wizard_refresh_controls(hwnd);
     true
 }
 
@@ -8205,6 +8250,57 @@ fn wizard_harvest(hwnd: HWND) {
 /// его тихо. Красный уехал в поставку e43 вместе с правкой. Окно здесь своё и поток свой,
 /// повиснуть не на чем, но правило от этого не перестаёт быть правилом: сторож, который падает,
 /// не сторожит уже ничего.
+/// **Состояние элемента внутри шага сменилось** — перерисовать затронутое и ничего больше.
+///
+/// Решение 107.5, задача Т-45-3. Дорога щелчка по карточке, радио, галке и выбора в списке
+/// раскладок: черновик уже изменён, тексты надо перечитать, а **окно трогать нельзя**.
+///
+/// # Что делается и чего НЕ делается
+///
+/// Делается: [`fill_wizard`] — состояние черновика становится текстами и отметками контролов, —
+/// и затем `widgets::repaint::control` по каждому контролу текущего шага плюс полоса хода,
+/// строка «Шаг N из M» и кнопки: их вид зависит от черновика (карточка «идея» укорачивает
+/// дорогу с пяти шагов до трёх, и полоса с надписью обязаны это показать).
+///
+/// НЕ делается: [`layout_wizard`]. Внутри одного шага **ни один контрол не переезжает** — высоты
+/// карточек считаются по их текстам, а тексты карточек черновиком не меняются; ширины кнопок
+/// считаются по подписям, а подпись «Далее» становится «Готово» только со сменой шага. Именно
+/// перестановка и стирание окна под неё и давали моргание.
+///
+/// НЕ делается и `WM_SETREDRAW`: гасить рисование незачем, когда рисуется только то, что
+/// изменилось.
+fn wizard_refresh_controls(hwnd: HWND) {
+    // SAFETY: the state pointer is live for the length of the window.
+    let step = unsafe {
+        with_state(hwnd, |state| {
+            fill_wizard(hwnd, state);
+            state.wizard.as_deref().map(Wizard::current)
+        })
+    }
+    .flatten();
+
+    let Some(step) = step else {
+        return;
+    };
+
+    for control in controls_of(step) {
+        widgets::repaint::control(hwnd, *control);
+    }
+
+    // Полоса хода, счётчик шагов и кнопки — вне таблицы шага, но от черновика зависят.
+    for control in [
+        IDC_WZ_STEP,
+        IDC_WZ_PROGRESS,
+        IDC_WZ_TITLE,
+        IDC_WZ_NOTE,
+        IDC_WZ_CANCEL,
+        IDC_WZ_BACK,
+        IDC_WZ_NEXT,
+    ] {
+        widgets::repaint::control(hwnd, control);
+    }
+}
+
 fn wizard_refresh(hwnd: HWND) {
     use windows::Win32::Graphics::Gdi::{
         RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
@@ -8353,7 +8449,8 @@ fn wizard_start_capture(hwnd: HWND) {
         crate::app::report_non_critical("SetTimer", &WinError::from_thread());
     }
 
-    wizard_refresh(hwnd);
+    // Задача Т-45-3: меняется одна подпись — перерисовывается затронутое, а не окно.
+    wizard_refresh_controls(hwnd);
 }
 
 /// One second of the count-down; at zero it looks at the foreground window and stops.
@@ -8370,7 +8467,9 @@ fn wizard_tick(hwnd: HWND) {
     .flatten();
 
     if now != Some(0) {
-        wizard_refresh(hwnd);
+        // ⭐ Тик отсчёта каждую секунду перерисовывал ОКНО ЦЕЛИКОМ. Задача Т-45-3: только
+        // затронутое — на экране меняется одна цифра.
+        wizard_refresh_controls(hwnd);
         return;
     }
 
@@ -8390,7 +8489,8 @@ fn wizard_tick(hwnd: HWND) {
         })
     };
 
-    wizard_refresh(hwnd);
+    // Задача Т-45-3: шаг тот же, меняется имя в поле — точечно.
+    wizard_refresh_controls(hwnd);
 }
 
 /// **What the capture takes** — «имя.exe · КлассОкна», and nothing else.
@@ -8557,7 +8657,8 @@ fn wizard_say(hwnd: HWND, said: String) {
         })
     };
 
-    wizard_refresh(hwnd);
+    // Задача Т-45-3: строка состояния — одна подпись, и перерисовывается она одна.
+    wizard_refresh_controls(hwnd);
 }
 
 /// The ink of a glyph's mark, by the role the table names.
