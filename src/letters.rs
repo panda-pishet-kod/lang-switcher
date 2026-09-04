@@ -7429,11 +7429,32 @@ unsafe fn draw_card(
     let dpi = theme::dc_dpi(dc);
     let chosen = wizard_is_checked(wizard, control);
 
+    // ⚠ **Один кадр вместо череды — задача Т-33-5, находка глазом пользователя.** Тело ниже
+    // кладёт заливку, потом рамку, потом две строки, и, пока оно писало прямо в DC сообщения,
+    // DWM успевал снять окно между заливкой и текстом: карточка **моргала** при наведении.
+    // Замерено на живом продукте, а не выведено — очередь кадров с качающимся указателем,
+    // чернила текста 1852 → **0** → 1852 в **21 кадре из 160** (`scratchpad-Э33\моргание-до.log`;
+    // положительный контроль, указатель вне окна, — ровный ряд 1852). Это тот же дефект, ради
+    // которого задача T-15-1 сделала [`theme::PaintBuffer`] для кнопок настроек, и лечится он
+    // теми же тремя строками: поверхность своего размера, тело пишет в неё, готовый элемент
+    // переходит на экран одним `BitBlt`.
+    //
+    // `None` — GDI отказал (NFR-13): `map_or` тогда отдаёт телу DC сообщения, и карточка
+    // рисуется ровно как до этой задачи — с морганием, то есть ухудшенно, но живо.
+    //
+    // ⚠ DPI берётся **у DC сообщения**, а не у поверхности: `GetDeviceCaps` буфера отвечает про
+    // память, и радиус, посчитанный по нему, был бы неверен на любом масштабе кроме 100 %.
+    //
+    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер читает его глубину цвета и
+    // освобождает свои DC и растр, когда кончится этот кадр.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // ⚠ The **fill** never changes: the ground of a card is the panel brush whatever the
     // pointer is doing, because the words above it are drawn on that ground. What answers to
     // the pointer and to the focus is the frame.
     theme::paint_rounded(
-        dc,
+        target,
         &rect,
         theme::scaled(theme::CORNER_RADIUS, dpi),
         if chosen {
@@ -7451,6 +7472,10 @@ unsafe fn draw_card(
     let title = settings::get_text(hwnd, IDC_WZ_CARD_T1 + index);
     let sub = settings::get_text(hwnd, IDC_WZ_CARD_S1 + index);
 
+    // ⚠ Мерится по **DC сообщения**, а не по буферу: `measure` выбирает начертание в тот DC,
+    // которому его дали, и обе поверхности несут одно и то же начертание — но правило «у окна
+    // спрашивают про окно» стоит держать в одном месте, а не вспоминать.
+    //
     // SAFETY: `dc` is the DC of the message and `faces` the fonts of this window's state.
     let (title_rect, sub_rect, _) = unsafe {
         card_lines(
@@ -7491,11 +7516,12 @@ unsafe fn draw_card(
             bottom: rect.top + box_of.bottom,
         };
 
-        // SAFETY: `dc` and `placed` are live; the brush and the face belong to this window's
-        // state for longer than the call.
+        // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message;
+        // `placed` is live, and the brush and the face belong to this window's state for longer
+        // than the call.
         unsafe {
             theme::paint_label_at_pitch(
-                dc,
+                target,
                 placed,
                 &mut wide,
                 theme::LabelStyle {
@@ -7507,6 +7533,16 @@ unsafe fn draw_card(
                 },
             );
         }
+    }
+
+    // The one moment any of this becomes visible. A refused blit leaves the card showing the
+    // picture the window already had there — its previous state and never a hole; painting the
+    // body a second time into the DC of the message would be the very flicker this removes.
+    //
+    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it
+    // goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
 
     1
@@ -7543,8 +7579,19 @@ unsafe fn draw_wizard_glyph(
     let checked = wizard_is_checked(wizard, control);
     let colors = theme::glyph_color_roles(kind, checked, disabled);
 
-    // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
-    unsafe { FillRect(dc, &rect, brushes.window_bg()) };
+    // ⚠ **Один кадр вместо череды — задача Т-33-5.** То же, что у [`draw_card`], и по той же
+    // измеренной причине: заливка, глиф и подпись писались прямо в DC сообщения, и радиокнопка
+    // **моргала** под указателем — чернила 738 → **0** → 738 в 13 кадрах из 120 и 474 → **0** →
+    // 474 в 25 из 120 (`scratchpad-Э33\моргание-до.log`). Кнопки этого окна не моргали никогда
+    // именно потому, что `settings::paint_push_button` носит эту поверхность с задачи T-15-1.
+    //
+    // SAFETY: как в [`draw_card`].
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
+    // SAFETY: `target` is the buffer of this frame or the DC of the message, and the brush
+    // belongs to this window's state.
+    unsafe { FillRect(target, &rect, brushes.window_bg()) };
 
     let size = theme::scaled(settings::GLYPH_SIZE, dpi);
     let cell = RECT {
@@ -7570,7 +7617,7 @@ unsafe fn draw_wizard_glyph(
     match kind {
         theme::GlyphKind::CheckBox => {
             theme::paint_rounded(
-                dc,
+                target,
                 &cell,
                 theme::scaled(settings::GLYPH_CORNER_RADIUS, dpi),
                 outline,
@@ -7580,7 +7627,7 @@ unsafe fn draw_wizard_glyph(
 
             if let Some(mark) = colors.mark {
                 theme::draw_check_mark(
-                    dc,
+                    target,
                     &cell,
                     glyph_ink(mark, palette),
                     settings::GLYPH_CHECK_MARK,
@@ -7589,7 +7636,7 @@ unsafe fn draw_wizard_glyph(
             }
         }
         theme::GlyphKind::RadioButton => {
-            theme::paint_ellipse(dc, &cell, Some(outline), fill, dpi);
+            theme::paint_ellipse(target, &cell, Some(outline), fill, dpi);
 
             if colors.mark.is_some() {
                 let inset = theme::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, dpi);
@@ -7600,7 +7647,7 @@ unsafe fn draw_wizard_glyph(
                     bottom: cell.bottom - inset,
                 };
 
-                theme::paint_ellipse(dc, &dot, None, brushes.accent_bg(), dpi);
+                theme::paint_ellipse(target, &dot, None, brushes.accent_bg(), dpi);
             }
         }
     }
@@ -7614,10 +7661,10 @@ unsafe fn draw_wizard_glyph(
 
     let mut caption: Vec<u16> = label.encode_utf16().collect();
 
-    // SAFETY: `dc` and `text` are live; the face belongs to this window's state.
-    unsafe {
+    // SAFETY: `target` and `text` are live; the face belongs to this window's state.
+    let drawn = unsafe {
         theme::paint_label(
-            dc,
+            target,
             text,
             &mut caption,
             theme::LabelStyle {
@@ -7631,7 +7678,17 @@ unsafe fn draw_wizard_glyph(
                 reading: theme::Reading::Native,
             },
         )
+    };
+
+    // The one moment any of this becomes visible — see the head of this body.
+    //
+    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it
+    // goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
+
+    drawn
 }
 
 /// **What a press does in the wizard** — FR-104, and the answer is whether it was handled here.

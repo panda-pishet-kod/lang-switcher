@@ -8372,19 +8372,18 @@ const FR_94_STRINGS: [(u16, &str, &str); 203] = [
     ),
     (
         settings::IDS_WHATSNEW_1,
-        "Даты в письмах печатаются по григорианскому календарю при любом языке интерфейса.",
-        "Dates in the letters are printed in the Gregorian calendar at every interface language.",
+        "Строки карточек и радиокнопок мастера больше не моргают при наведении.",
+        "The lines of the wizard's cards and radio buttons no longer blink under the pointer.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "В мастере «Написать автору» строки карточек больше не пропадают под указателем.",
-        "In the «Write to the author» wizard the lines of the cards no longer vanish under the \
-         pointer.",
+        "Элемент под указателем перерисовывается целиком, одним кадром.",
+        "An element under the pointer is now repainted whole, in a single frame.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Благодарность стала последним шагом мастера — в том же окне, а не отдельным.",
-        "The thanks is the wizard's last step now — in the same window instead of a separate one.",
+        "Больше в этой версии ничего не изменилось.",
+        "Nothing else changed in this version.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
