@@ -496,6 +496,62 @@ fn the_six_labels_of_the_cards_are_invisible_carriers_of_their_words() {
 /// thanks is where the wizard ends, not the sixth of five. What this test holds is the whole of
 /// that arrangement — the roads keep their five and three, the last step has slots of its own,
 /// and the pool still adds up.
+/// **Задача Т-33а-2, находка глазом пользователя: «строки ввода как будто стали ниже».**
+///
+/// Коробку однострочного поля рисует фон окна вокруг контрола, и её высота обязана совпасть с
+/// высотой кнопки рядом — так стоит в макете (поле и кнопка 30 px при 96 DPI). До ремонта
+/// коробку задавала константа окна настроек (12 DLU), а кнопка мастера — 14 DLU, и на снимке
+/// вышло 19 px против 25 (`scratchpad-Э33а\красное-до-2-высоты.log`).
+///
+/// Таблица держит то, чего снимок держать не может: **сумма** воздуха и контрола равна коробке
+/// РОВНО, включая нечётный остаток. Одно число на обе стороны — то, чем отвечает
+/// `theme::field_frame_air`, — на нечётном остатке теряет пиксель, и коробка выходит ниже
+/// кнопки на единицу.
+#[test]
+fn the_box_of_a_wizard_field_is_exactly_the_height_it_is_asked_for() {
+    // (коробка, контрол, толщина) → (сверху, снизу)
+    let table = [
+        // Чётный остаток: поровну.
+        ((Some(26), 16, 1), (5, 5)),
+        // ⭐ Нечётный остаток: лишний пиксель ВНИЗ, сумма всё равно ровно коробка.
+        ((Some(26), 15, 1), (5, 6)),
+        ((Some(25), 16, 1), (4, 5)),
+        // Контрол уже с коробку или выше — прежняя рамка в одну толщину.
+        ((Some(16), 16, 1), (1, 1)),
+        ((Some(14), 16, 1), (1, 1)),
+        // Остаток меньше двух толщин — тоже прежняя рамка: коробка не может быть тоньше рамки.
+        ((Some(17), 16, 1), (1, 1)),
+        // NFR-13: `MapDialogRect` отказал — рамка в одну толщину, как до задачи Т-33-7.
+        ((None, 15, 1), (1, 1)),
+        // Толщина больше единицы — на 125 % и 150 % экрана.
+        ((Some(32), 18, 2), (7, 7)),
+        ((Some(33), 18, 2), (7, 8)),
+    ];
+
+    for ((box_height, control, border), want) in table {
+        let got = letters::field_box_air(box_height, control, border);
+
+        println!("коробка {box_height:?}, контрол {control}, рамка {border} → {got:?}");
+
+        assert_eq!(
+            got, want,
+            "коробка {box_height:?}, контрол {control}, рамка {border}"
+        );
+
+        // И главное свойство, ради которого функция существует: сумма равна коробке ровно —
+        // всякий раз, когда коробка вообще больше контрола на две толщины.
+        if let Some(box_height) = box_height
+            && box_height - control >= border * 2
+        {
+            assert_eq!(
+                control + got.0 + got.1,
+                box_height,
+                "коробка обязана выйти ровно {box_height} px — иначе поле не вровень с кнопкой"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_thanks_is_a_step_of_the_wizard_and_no_road_counts_it() {
     // The two roads are unchanged: the thanks is not a step of either.

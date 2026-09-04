@@ -2016,6 +2016,15 @@ mod air {
     pub(super) const PANEL_HEAD: i32 = 20;
     /// The height of a push button.
     pub(super) const BUTTON: i32 = 14;
+    /// The height of the **box** of a single-line field — задача Т-33а-2.
+    ///
+    /// ⭐ **Ровно [`BUTTON`], и выведено из него, а не написано числом.** В макете поле и кнопка
+    /// одной высоты (30 px при 96 DPI), и поле «Программа:» стоит вровень с кнопкой рядом. Пока
+    /// коробку рисовала константа окна настроек — `settings::FIELD_BOX_DLU`, 12 DLU, — поле
+    /// выходило на шесть пикселей ниже кнопки: 19 против 25 (`красное-до-2-высоты.log`), и это
+    /// то самое «строки ввода как будто стали ниже», что увидел глаз на 0.43.0. Число, выведенное
+    /// из соседа, не может с ним разойтись при следующей правке.
+    pub(super) const FIELD_BOX: i32 = BUTTON;
     /// The air inside a button, at each end of its caption.
     pub(super) const BUTTON_PAD: i32 = 10;
     /// The narrowest a button may be.
@@ -3042,7 +3051,10 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
     // воздух ложится над текстом и под ним поровну. Здесь — то же самое тело и та же
     // `theme::field_frame_air`.
     if kind == Kind::Wizard {
-        let box_height = Some(Metrics::of(hwnd).y(settings::FIELD_BOX_DLU));
+        // ⛔ **Не `settings::FIELD_BOX_DLU` — задача Т-33а-2.** Т-33-7 взяла коробку у окна
+        // настроек (12 DLU), а кнопка мастера — 14, и поле вышло на шесть пикселей ниже соседа.
+        // Окно настроек при этом не трогается: там 12 DLU принято глазом в Э23/Э26.
+        let box_height = Some(Metrics::of(hwnd).y(air::FIELD_BOX));
         let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
 
         for (control, rect) in &rects {
@@ -3065,19 +3077,19 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
             // ⚠ Многострочное поле держит свои строки от верха клиентской области, и центровать
             // вокруг него нечего: воздух ему даёт `EM_SETRECT` внутри, а рамка стоит на одной
             // толщине — та же развилка, что у списков окна настроек (`FRAMED_LISTS`).
-            let air = if WIZARD_AREAS.contains(control) {
-                thickness
+            let (above, below) = if WIZARD_AREAS.contains(control) {
+                (thickness, thickness)
             } else {
-                theme::field_frame_air(box_height, rect.bottom - rect.top, thickness)
+                field_box_air(box_height, rect.bottom - rect.top, thickness)
             };
 
             theme::paint_rounded(
                 dc,
                 &RECT {
                     left: rect.left - thickness,
-                    top: rect.top - air,
+                    top: rect.top - above,
                     right: rect.right + thickness,
-                    bottom: rect.bottom + air,
+                    bottom: rect.bottom + below,
                 },
                 theme::scaled(theme::CORNER_RADIUS, dpi),
                 line,
@@ -3104,6 +3116,36 @@ fn is_shown(hwnd: HWND, control: i32) -> bool {
 /// The three **single-line** fields of the wizard — the ones whose box the background draws
 /// around a control one em box tall (задача Т-33-7).
 const WIZARD_FIELDS: [i32; 3] = [IDC_WZ_PROGRAM, IDC_WZ_EXPECTED, IDC_WZ_GOT];
+
+/// Воздух над контролом поля и под ним — так, чтобы коробка вышла РОВНО в `box_height`
+/// пикселей. Задача Т-33а-2.
+///
+/// [`theme::field_frame_air`] отвечает **одним** числом на обе стороны, и этого хватало окну
+/// настроек, где коробку не с чем равнять. Здесь равнять есть с чем — с кнопкой рядом, — и на
+/// нечётном остатке одно число даёт коробку на пиксель ниже кнопки: при коробке 26 и контроле
+/// 15 половина остатка равна 5, а 15 + 5 + 5 = 25. Глаз ловит и один пиксель, когда две вещи
+/// стоят рядом, поэтому лишний пиксель кладётся вниз, а не теряется.
+///
+/// Пол — толщина рамки: контрол, уже равный коробке или выше её, носит прежнюю рамку в одну
+/// толщину, как и при отказе `MapDialogRect` (NFR-13).
+///
+/// Открыта по той же причине, что и [`theme::field_frame_air`]: она чистая, и её арифметика —
+/// таблица в `tests\wizard.rs`, а не картинка, которую надо разглядывать.
+pub fn field_box_air(box_height: Option<i32>, control_height: i32, border: i32) -> (i32, i32) {
+    let Some(box_height) = box_height else {
+        return (border, border);
+    };
+
+    let extra = box_height - control_height;
+
+    if extra < border * 2 {
+        return (border, border);
+    }
+
+    let above = extra / 2;
+
+    (above, extra - above)
+}
 
 /// Places a single-line field so that its **box** stands centred in a row `row` pixels tall.
 ///
