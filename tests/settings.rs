@@ -8467,18 +8467,18 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
     ),
     (
         settings::IDS_WHATSNEW_1,
-        "Строки карточек и радиокнопок мастера больше не моргают при наведении.",
-        "The lines of the wizard's cards and radio buttons no longer blink under the pointer.",
+        "Значок в уведомлении о письме стал резким: он больше не растягивается.",
+        "The icon in a letter's notification is sharp now: it is no longer stretched.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Элемент под указателем перерисовывается целиком, одним кадром.",
-        "An element under the pointer is now repainted whole, in a single frame.",
+        "Поля ввода в мастере «Написать автору» снова одной высоты с кнопками.",
+        "The input fields of the «Write to the author» wizard are the height of the buttons again.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Больше в этой версии ничего не изменилось.",
-        "Nothing else changed in this version.",
+        "Поле горячей клавиши больше не показывает каретку: клавишу задаёт кнопка «Задать».",
+        "The hotkey field no longer shows a caret: the key is set by the «Set» button.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,

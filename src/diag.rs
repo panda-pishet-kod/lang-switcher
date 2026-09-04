@@ -281,6 +281,10 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("SetForegroundWindow", Kind::Tray),
     ("PostMessageW(WM_NULL)", Kind::Tray),
     ("DestroyIcon", Kind::Tray),
+    // Задача Т-33а-1: большой значок для шара уведомления. Отдельное имя от прочих загрузок
+    // значка потому, что и последствие у отказа своё — уведомление уходит со старым, малым
+    // значком, а не пропадает (NFR-13); журнал обязан различать эти два случая.
+    ("LoadImageW(SM_CXICON)", Kind::Tray),
     // `control` — SEC-04a, `testing` builds only.
     ("control::start", Kind::Channel),
     ("CloseHandle(token)", Kind::Channel),
