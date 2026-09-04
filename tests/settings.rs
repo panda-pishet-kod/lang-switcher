@@ -8490,20 +8490,23 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
         "Три изменения",
         "Three changes",
     ),
+    // ⚠ Три строки «Что нового» меняются КАЖДОЙ поставкой — это их назначение. Здесь стоят
+    // слова 0.45.0 (задача Т-45-5); прежние, слова 0.44.0, были про значок уведомления, высоту
+    // полей и каретку.
     (
         settings::IDS_WHATSNEW_1,
-        "Значок в уведомлении о письме стал резким: он больше не растягивается.",
-        "The icon in a letter's notification is sharp now: it is no longer stretched.",
+        "Мастер «Написать автору» больше не моргает при выборе карточек, радио и галок.",
+        "The «Write to the author» wizard no longer blinks when a card, a radio or a box is picked.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Поля ввода в мастере «Написать автору» снова одной высоты с кнопками.",
-        "The input fields of the «Write to the author» wizard are the height of the buttons again.",
+        "Список раскладок в мастере стал того же размера, что и списки в настройках.",
+        "The layout list in the wizard is now the size of the lists in the settings window.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Поле горячей клавиши больше не показывает каретку: клавишу задаёт кнопка «Задать».",
-        "The hotkey field no longer shows a caret: the key is set by the «Set» button.",
+        "Подпись «Программа:» отодвинута от поля, и рамка поля дорисована целиком.",
+        "The «Program:» caption stands clear of the field, and the field's frame is drawn whole.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
