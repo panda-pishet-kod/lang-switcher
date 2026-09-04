@@ -1565,8 +1565,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     DM_SETDEFID, DestroyWindow, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDCANCEL,
-    KillTimer, MSG, MapDialogRect, PostMessageW, SW_HIDE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    KillTimer, MSG, MapDialogRect, PostMessageW, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
+    SW_SHOWNORMAL, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
     SetWindowTextW, ShowWindow, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
     WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
     WM_INITDIALOG, WM_MEASUREITEM, WM_NCDESTROY, WM_TIMER,
@@ -2232,7 +2233,7 @@ fn place(hwnd: HWND, control: i32, x: i32, y: i32, width: i32, height: i32) {
             y,
             width.max(0),
             height.max(0),
-            SWP_NOZORDER | SWP_NOACTIVATE,
+            SWP_NOZORDER | SWP_NOACTIVATE | quiet_flag(),
         )
     };
 
@@ -2242,8 +2243,62 @@ fn place(hwnd: HWND, control: i32, x: i32, y: i32, width: i32, height: i32) {
     // is exactly what the stand photographed before this line named all five panels instead of
     // one (`scratchpad-Э32\снимки`, the first «От автора»).
     if !PANELS.contains(&control) {
-        // SAFETY: `child` is the live control; the call takes no pointer.
-        let _ = unsafe { ShowWindow(child, SW_SHOWNOACTIVATE) };
+        if quiet_layout() {
+            // Показать БЕЗ перерисовки — см. [`QUIET_LAYOUT`]. `ShowWindow` такого флага не
+            // знает, а `SetWindowPos` знает, и это единственная причина второго вызова.
+            //
+            // SAFETY: as above.
+            let _ = unsafe {
+                SetWindowPos(
+                    child,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOZORDER
+                        | SWP_NOACTIVATE
+                        | SWP_NOMOVE
+                        | SWP_NOSIZE
+                        | SWP_SHOWWINDOW
+                        | SWP_NOREDRAW,
+                )
+            };
+        } else {
+            // SAFETY: `child` is the live control; the call takes no pointer.
+            let _ = unsafe { ShowWindow(child, SW_SHOWNOACTIVATE) };
+        }
+    }
+}
+
+thread_local! {
+    /// Идёт ли сейчас **тихая** перестановка — задача Т-33-8.
+    ///
+    /// ⛔ Переключение шага мастера двигает, показывает и прячет несколько десятков контролов, и
+    /// каждый `SetWindowPos`/`ShowWindow` сам просит перерисовать то, что из-под него открылось.
+    /// `WM_SETREDRAW` у окна-родителя эти перерисовки НЕ гасит — у ребёнка свой флаг, — и на
+    /// экран попадали кадры, которые не были ни прежним шагом, ни новым: замерено 24 и 34 кадра
+    /// из 250 при худшем расхождении около 31 000 пикселей из 251 488 уже ПОСЛЕ `WM_SETREDRAW`
+    /// и `WS_CLIPCHILDREN` (`scratchpad-Э33\моргание-шагов-после.log`).
+    ///
+    /// Пока флаг поднят, [`place`] и [`hide`] добавляют `SWP_NOREDRAW`: перестановка идёт
+    /// вслепую, и один `RedrawWindow` в конце [`wizard_refresh`] показывает готовый шаг целиком.
+    /// Флаг поднимает и опускает **только** `wizard_refresh`, вокруг одного вызова вёрстки; все
+    /// прочие вёрстки этих окон идут как прежде.
+    static QUIET_LAYOUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Идёт ли тихая перестановка — см. [`QUIET_LAYOUT`].
+fn quiet_layout() -> bool {
+    QUIET_LAYOUT.with(std::cell::Cell::get)
+}
+
+/// `SWP_NOREDRAW` во время тихой перестановки и ничего в остальное время.
+fn quiet_flag() -> SET_WINDOW_POS_FLAGS {
+    if quiet_layout() {
+        SWP_NOREDRAW
+    } else {
+        SET_WINDOW_POS_FLAGS(0)
     }
 }
 
@@ -2271,7 +2326,17 @@ fn hide(hwnd: HWND, control: i32) {
         if let Ok(panel) =
             unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) }
         {
-            let _ = unsafe { SetWindowPos(panel, None, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE) };
+            let _ = unsafe {
+                SetWindowPos(
+                    panel,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOACTIVATE | quiet_flag(),
+                )
+            };
         }
     }
 
@@ -2280,6 +2345,31 @@ fn hide(hwnd: HWND, control: i32) {
     else {
         return;
     };
+
+    if quiet_layout() {
+        // Спрятать БЕЗ перерисовки — см. [`QUIET_LAYOUT`]: иначе родитель тут же стирает то,
+        // что из-под контрола открылось, и этот кадр видит глаз.
+        //
+        // SAFETY: `child` is the live control; the call takes no pointer.
+        let _ = unsafe {
+            SetWindowPos(
+                child,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOZORDER
+                    | SWP_NOACTIVATE
+                    | SWP_NOMOVE
+                    | SWP_NOSIZE
+                    | SWP_HIDEWINDOW
+                    | SWP_NOREDRAW,
+            )
+        };
+
+        return;
+    }
 
     // SAFETY: `child` is the live control; the call takes no pointer.
     let _ = unsafe { ShowWindow(child, SW_HIDE) };
@@ -3548,14 +3638,25 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
     // Read after the borrow ends — the discipline of every drawing of `settings`.
     let caption = settings::get_text(hwnd, control);
 
+    // ⛔ **Один кадр вместо двух — задача Т-33-8.** Подпись кладёт заливку, потом слова, и, пока
+    // это шло прямо в DC сообщения, между ними на экран попадал кадр с пустой землёй. На
+    // переключении шага подписей перерисовывается сразу десяток, и это последняя доля того
+    // моргания, которое видно глазом: карточки и глифы поверхность получили задачей Т-33-5,
+    // кнопки — задачей T-15-1, а подписи оставались.
+    //
+    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер освобождает свои DC и растр,
+    // когда кончится этот кадр.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // A row that names the hotkey is laid word by word with a chip around the name — решение
     // 85 п. 1, the same body the help rows of «О программе» are drawn by.
     if caption.contains(theme::KEY_PLACEHOLDER) && !key.is_empty() {
-        // SAFETY: `dc` and `rect` are the values of the message; every handle is an object the
-        // state owns for longer than the call.
-        return unsafe {
+        // SAFETY: `target` is the buffer of this frame or the DC of the message; every handle
+        // is an object the state owns for longer than the call.
+        let drawn = unsafe {
             theme::paint_chip_row(
-                dc,
+                target,
                 rect,
                 theme::chip_row(&caption, &key),
                 theme::ChipRowStyle {
@@ -3577,15 +3678,22 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
                 },
             )
         };
+
+        // SAFETY: `dc` is the DC of the message; the buffer is this frame's own.
+        if let Some(buffer) = buffer {
+            let _ = unsafe { buffer.blit(dc) };
+        }
+
+        return drawn;
     }
 
     let mut wide: Vec<u16> = caption.encode_utf16().collect();
 
-    // SAFETY: `dc` and `rect` are the values of the message; `ground` and `face` are objects
-    // the state owns for longer than the call.
-    unsafe {
+    // SAFETY: `target` is the buffer of this frame or the DC of the message; `ground` and
+    // `face` are objects the state owns for longer than the call.
+    let drawn = unsafe {
         theme::paint_label_at_pitch(
-            dc,
+            target,
             rect,
             &mut wide,
             theme::LabelStyle {
@@ -3596,7 +3704,14 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
                 reading: theme::Reading::Native,
             },
         )
+    };
+
+    // SAFETY: as above.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
+
+    drawn
 }
 
 /// The dialog procedure of the three windows of FR-101 and FR-103 — **one procedure, three
@@ -7217,7 +7332,6 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
         )
     };
 
-    place(hwnd, IDC_WZ_CANCEL, pad, row_y, cancel_width, button);
     place(
         hwnd,
         IDC_WZ_NEXT,
@@ -7226,24 +7340,37 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
         next_width,
         button,
     );
-    place(
-        hwnd,
-        IDC_WZ_BACK,
-        pad + width - next_width - metrics.x(air::BUTTON_GAP) - back_width,
-        row_y,
-        back_width,
-        button,
-    );
 
-    // ⚠ «Назад» keeps its **place** and loses its visibility on the first step — the mock-up
-    // asks for exactly that, and a button that moved would move the one beside it.
-    if wizard.step == 0 || wizard.done {
+    // ⛔ **Решается ДО размещения, а не после — задача Т-33-8, находка глазом пользователя.**
+    // «Назад» на первом шаге нет вовсе, и раньше её сперва ставили (а `place` показывает
+    // контрол), и только следующей строкой прятали: кнопка успевала мелькнуть. Замерено —
+    // семь кадров из восьмидесяти на первом шаге показывали её прямоугольник непустым
+    // (`scratchpad-Э33\моргание-шагов-до.log`). Показанный и тут же спрятанный контрол — это
+    // всегда мелькание, сколько бы миллисекунд ни прошло между двумя вызовами.
+    //
+    // ⚠ Место «Назад» держит по-прежнему: она не двигается, она отсутствует — макет просит
+    // именно этого, и кнопка, которая переезжала бы, двигала соседнюю.
+    let back_shown = wizard.step > 0 && !wizard.done;
+    let cancel_shown = !wizard.done;
+
+    if back_shown {
+        place(
+            hwnd,
+            IDC_WZ_BACK,
+            pad + width - next_width - metrics.x(air::BUTTON_GAP) - back_width,
+            row_y,
+            back_width,
+            button,
+        );
+    } else {
         hide(hwnd, IDC_WZ_BACK);
     }
 
     // On «Готово» there is nothing to cancel and nowhere to go back to: both leave, «Закрыть»
     // stays where «Далее» stood, and no button moves a pixel (задача Т-33-3, решение 103.3).
-    if wizard.done {
+    if cancel_shown {
+        place(hwnd, IDC_WZ_CANCEL, pad, row_y, cancel_width, button);
+    } else {
         hide(hwnd, IDC_WZ_CANCEL);
     }
 
@@ -8009,7 +8136,33 @@ fn wizard_harvest(hwnd: HWND) {
 }
 
 /// Fills and lays out the wizard again, and repaints it.
+///
+/// # ⛔ Один кадр вместо череды — задача Т-33-8, находка глазом пользователя
+///
+/// Переключение шага двигает, показывает и прячет **несколько десятков** контролов, и каждый
+/// `SetWindowPos`/`ShowWindow` сам просит перерисовать то, что из-под него открылось. Пока это
+/// шло с включённой перерисовкой, на экран попадали кадры, которые не были ни прежним шагом,
+/// ни новым: замерено — **19 кадров из 100**, худший расходился с обеими картинками на
+/// 73 230 пикселей из 251 488 (`scratchpad-Э33\моргание-шагов-до.log`). Это и есть то
+/// моргание, которое видно глазом.
+///
+/// `WM_SETREDRAW` — документированный способ сказать окну «пока не рисуй»: вся перестановка
+/// проходит вслепую, и один `RedrawWindow` в конце показывает готовый шаг целиком.
+/// `RDW_ALLCHILDREN` обязателен — без него перерисуется фон, а дети останутся прежними.
 fn wizard_refresh(hwnd: HWND) {
+    use windows::Win32::Graphics::Gdi::{
+        RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETREDRAW};
+
+    // SAFETY: `hwnd` is the live dialog; the message carries two numbers and no pointer.
+    unsafe { SendMessageW(hwnd, WM_SETREDRAW, Some(WPARAM(0)), Some(LPARAM(0))) };
+
+    // ⚠ `WM_SETREDRAW` у родителя гасит только его собственное рисование: у каждого ребёнка
+    // свой флаг, и `SetWindowPos`/`ShowWindow` по ним перерисовываются сразу. Флаг ниже — вторая
+    // половина тишины, без неё моргание оставалось (см. [`QUIET_LAYOUT`]).
+    QUIET_LAYOUT.with(|quiet| quiet.set(true));
+
     // SAFETY: the state pointer is live for the length of the window.
     unsafe {
         with_state(hwnd, |state| {
@@ -8018,7 +8171,25 @@ fn wizard_refresh(hwnd: HWND) {
         })
     };
 
-    settings::repaint_whole_window(hwnd);
+    QUIET_LAYOUT.with(|quiet| quiet.set(false));
+
+    // SAFETY: as above.
+    unsafe { SendMessageW(hwnd, WM_SETREDRAW, Some(WPARAM(1)), Some(LPARAM(0))) };
+
+    // NFR-13: a refused redraw leaves the window to the next `WM_PAINT`, which arrives anyway.
+    //
+    // SAFETY: `hwnd` is the live dialog; both region arguments are `None`, which is the
+    // documented «the whole window», and the call keeps no pointer.
+    let _ = unsafe {
+        RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            // `RDW_UPDATENOW` — чтобы всё нарисовалось ЗДЕСЬ, одним заходом, а не отдельными
+            // `WM_PAINT` фона и каждого ребёнка: между такими проходами и виден чужой кадр.
+            RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW,
+        )
+    };
 }
 
 /// «Далее», «Готово» on the last step of the road, and «Закрыть» on the thanks — FR-104.
