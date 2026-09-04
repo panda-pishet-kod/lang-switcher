@@ -72,13 +72,17 @@ fn the_road_of_an_idea_is_shorter_than_the_road_of_a_trouble() {
 /// would be a control that never goes away.
 #[test]
 fn no_slot_of_the_pool_belongs_to_two_steps() {
-    const STEPS: [Step; 6] = [
+    // ⚠ Seven and not six since task Т-33-3: «Готово» is a step of this window with two slots
+    // of its own, and a step left out of this list is a step whose slots look like slots
+    // belonging to nobody.
+    const STEPS: [Step; 7] = [
         Step::What,
         Step::Where,
         Step::Did,
         Step::Idea,
         Step::Attach,
         Step::Preview,
+        Step::Done,
     ];
 
     let mut seen: Vec<i32> = Vec::new();
@@ -483,5 +487,47 @@ fn the_six_labels_of_the_cards_are_invisible_carriers_of_their_words() {
             .unwrap_or_else(|| panic!("app.rc has no CONTROL for {card}"));
 
         assert!(!line.contains("NOT WS_VISIBLE"), "{card} is hidden: {line}");
+    }
+}
+
+/// **Т-33-3, решение 103.3** — «Готово» is a step of this window and not a second window.
+///
+/// The road is what «Шаг N из M» counts, and [`Step::Done`] is deliberately **not** in it: the
+/// thanks is where the wizard ends, not the sixth of five. What this test holds is the whole of
+/// that arrangement — the roads keep their five and three, the last step has slots of its own,
+/// and the pool still adds up.
+#[test]
+fn the_thanks_is_a_step_of_the_wizard_and_no_road_counts_it() {
+    // The two roads are unchanged: the thanks is not a step of either.
+    assert_eq!(Trouble::WrongResult.steps(), 5);
+    assert_eq!(Trouble::Idea.steps(), 3);
+
+    let done = letters::controls_of(Step::Done);
+
+    println!("{done:?}");
+
+    assert_eq!(
+        done.len(),
+        2,
+        "«Готово» shows the paragraph and the one button"
+    );
+
+    // The slots of the thanks belong to no other step — the assertion
+    // `no_slot_of_the_pool_belongs_to_two_steps` walks that whole table, and this is the half
+    // of it that names the new step out loud.
+    for step in [
+        Step::What,
+        Step::Where,
+        Step::Did,
+        Step::Idea,
+        Step::Attach,
+        Step::Preview,
+    ] {
+        for control in letters::controls_of(step) {
+            assert!(
+                !done.contains(control),
+                "{control} is shown by {step:?} and by the thanks as well"
+            );
+        }
     }
 }

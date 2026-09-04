@@ -978,11 +978,13 @@ const IDC_WZ_STATUS: i32 = 1349;
 const IDC_WZ_CANCEL: i32 = 1350;
 const IDC_WZ_BACK: i32 = 1351;
 const IDC_WZ_NEXT: i32 = 1352;
+const IDC_WZ_THANKS: i32 = 1353;
+const IDC_WZ_CHANNEL: i32 = 1354;
 
 /// Every owner-drawn **static** of the wizard — the gate of `WM_DRAWITEM`, and it is written
 /// out in full for the reason [`LETTER_LABELS`] carries in its own comment: a run written short
 /// is a row that never gets painted, and the screenshot is what finds it.
-const WIZARD_LABELS: [i32; 22] = [
+const WIZARD_LABELS: [i32; 23] = [
     IDC_WZ_STEP,
     IDC_WZ_PROGRESS,
     IDC_WZ_TITLE,
@@ -1005,6 +1007,7 @@ const WIZARD_LABELS: [i32; 22] = [
     IDC_WZ_IDEA_LABEL,
     IDC_WZ_HELPS_LABEL,
     IDC_WZ_STATUS,
+    IDC_WZ_THANKS,
 ];
 
 /// The four labels that stand beside the four boxes of «Что приложить?» — a run, and the
@@ -1019,7 +1022,8 @@ const WIZARD_ATTACH_LABELS: [i32; 5] = [
 
 /// Every owner-drawn **button** of the wizard: the three cards, the two radio runs, the four
 /// boxes and the five push buttons.
-const WIZARD_BUTTONS: [i32; 19] = [
+const WIZARD_BUTTONS: [i32; 20] = [
+    IDC_WZ_CHANNEL,
     IDC_WZ_CARD_1,
     IDC_WZ_CARD_1 + 1,
     IDC_WZ_CARD_1 + 2,
@@ -1599,11 +1603,11 @@ pub enum Kind {
     /// «От автора» — `IDD_AUTHOR`.
     Author,
     /// The wizard «Написать автору» — `IDD_WIZARD`, FR-104.
+    ///
+    /// ⛔ There used to be a fourth kind here — `Thanks`, the window the wizard left behind
+    /// after «Готово». Задача Т-33-3 (решение 103.3) made the thanks the wizard's own last
+    /// step, [`Step::Done`], so there is no second window to be a kind of.
     Wizard,
-    /// The window of thanks the wizard leaves behind — `IDD_LETTER` again, filled with a plan
-    /// of its own and no `Letter` behind it. A sixth template for four lines of text would be
-    /// four lines of text and a sixth template.
-    Thanks,
 }
 
 /// One step of the wizard — FR-104.
@@ -1624,6 +1628,13 @@ pub enum Step {
     Attach,
     /// «Проверьте и отправьте» — the whole text, and the two ways out.
     Preview,
+    /// «Готово» — the thanks, **in this same window** (задача Т-33-3, решение 103.3).
+    ///
+    /// Not a member of [`Wizard::road`] and deliberately so: the road is what the progress bar
+    /// counts and what «Шаг N из M» says, and the thanks is neither a step of the appeal nor a
+    /// number in that count — it is where the wizard ends. [`Wizard::done`] is what says the
+    /// window is on it.
+    Done,
 }
 
 /// **The state of the wizard window** — what the person has filled in and where they are.
@@ -1648,6 +1659,8 @@ pub struct Wizard {
     layouts: Vec<String>,
     /// The appeal as the field holds it — the truth from the last step onwards.
     text: String,
+    /// Whether «Готово» has been pressed and the window is showing the thanks — задача Т-33-3.
+    done: bool,
 }
 
 impl Wizard {
@@ -1668,6 +1681,10 @@ impl Wizard {
 
     /// Which step is on the screen.
     fn current(&self) -> Step {
+        if self.done {
+            return Step::Done;
+        }
+
         let road = self.road();
 
         road[self.step.min(road.len() - 1)]
@@ -1822,7 +1839,7 @@ impl WindowState {
         match self.kind {
             // The window of thanks is a letter in everything but its name — the same template
             // and the same accented button.
-            Kind::Letter | Kind::Thanks => IDC_LETTER_ACCENT,
+            Kind::Letter => IDC_LETTER_ACCENT,
             Kind::List => IDC_LETTERS_CLOSE,
             Kind::Author => IDC_AUTHOR_CLOSE,
             // «Далее» — and on the last step it says «Готово». Enter presses it on every step,
@@ -2513,27 +2530,13 @@ unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
     // SAFETY: releases exactly the DC taken at the top of this function, once.
     unsafe { ReleaseDC(Some(hwnd), dc) };
 
-    // ⚠ **The window of thanks is the one letter whose height its content decides**, and the
-    // live acceptance is what asked for it: four lines of text in a window built for a letter
-    // left three hundred pixels of empty ground under them
-    // (`scratchpad-Э32\живое-В\мастер-6-спасибо.png`, the frame before this line). Every other
-    // letter keeps the height of the template — they fill it.
-    //
-    // ⚠ And the layout is run **again** after the resize, once. The buttons of this window are
-    // placed from the bottom edge upwards, so a window that shrank under them left them where
-    // the old edge was — outside the new client, and invisible. The second pass finds
-    // `wanted == client.bottom` and stops there, so the recursion is exactly one deep.
-    if state.kind == Kind::Thanks {
-        let wanted = top + metrics.y(air::GAP) + (client.bottom - bottom);
-
-        if wanted > 0 && wanted != client.bottom {
-            resize_client(hwnd, client.bottom, wanted);
-
-            // SAFETY: the same window and the same state the caller holds; the pass below
-            // cannot resize again, which is what ends the recursion.
-            unsafe { layout_letter(hwnd, state) };
-        }
-    }
+    // ⛔ **The one letter whose height its content decided is gone — задача Т-33-3.** It was
+    // the window of thanks, and Т-32-10 had to give it a height of its own because four lines
+    // of text in a window built for a letter left three hundred pixels of empty ground under
+    // them. Решение 103.3 made the thanks the wizard's last step instead, in the wizard's own
+    // window and at the wizard's own size, and every letter that is left keeps the height of
+    // the template — they fill it.
+    let _ = bottom;
 }
 
 /// Lays out the panel of a letter and everything standing on it — the second half of
@@ -2895,7 +2898,7 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
 
     let dpi = theme::dc_dpi(dc);
     let panels: &[i32] = match kind {
-        Kind::Letter | Kind::Thanks => &[IDC_LETTER_PANEL],
+        Kind::Letter => &[IDC_LETTER_PANEL],
         Kind::List => &[IDC_LETTERS_PANEL],
         Kind::Author => &[IDC_AUTHOR_PANEL, IDC_NEWS_PANEL, IDC_FEEDBACK_PANEL],
         // ⚠ The wizard has **no panel**: its steps stand on the window's own ground, and the
@@ -3758,7 +3761,7 @@ unsafe extern "system" fn letter_proc(
 /// `WM_DRAWITEM`, and the answer to «is this identifier one of ours» (SEC-05).
 fn owner_drawn_labels(kind: Kind) -> &'static [i32] {
     match kind {
-        Kind::Letter | Kind::Thanks => &LETTER_LABELS,
+        Kind::Letter => &LETTER_LABELS,
         Kind::List => &LIST_LABELS,
         Kind::Author => &AUTHOR_LABELS,
         Kind::Wizard => &WIZARD_LABELS,
@@ -3808,7 +3811,7 @@ const AUTHOR_LABELS: [i32; 9] = [
 /// The owner-drawn buttons of one kind of window — the list `subclass_buttons` walks.
 fn buttons_of(kind: Kind) -> &'static [i32] {
     match kind {
-        Kind::Letter | Kind::Thanks => &LETTER_BUTTONS,
+        Kind::Letter => &LETTER_BUTTONS,
         Kind::List => &LIST_BUTTONS,
         Kind::Author => &AUTHOR_BUTTONS,
         Kind::Wizard => &WIZARD_BUTTONS,
@@ -4036,7 +4039,7 @@ fn gregorian_month_name(locale: &[u16], month: u32) -> Option<String> {
 /// has just been created or has just been handed a new locale (FR-94, решение 99.1).
 fn fill_window(hwnd: HWND, state: &WindowState) {
     match state.kind {
-        Kind::Letter | Kind::Thanks => fill_letter(hwnd, state),
+        Kind::Letter => fill_letter(hwnd, state),
         Kind::List => fill_list(hwnd, state),
         Kind::Author => fill_author(hwnd, state),
         Kind::Wizard => fill_wizard(hwnd, state),
@@ -4050,7 +4053,7 @@ fn fill_window(hwnd: HWND, state: &WindowState) {
 /// `hwnd` is the live window and `state` its own state.
 unsafe fn layout_window(hwnd: HWND, state: &WindowState) {
     match state.kind {
-        Kind::Letter | Kind::Thanks => unsafe { layout_letter(hwnd, state) },
+        Kind::Letter => unsafe { layout_letter(hwnd, state) },
         Kind::List => unsafe { layout_list(hwnd, state) },
         Kind::Author => unsafe { layout_author(hwnd, state) },
         Kind::Wizard => unsafe { layout_wizard(hwnd, state) },
@@ -5042,7 +5045,7 @@ fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> 
         };
 
     let template = match kind {
-        Kind::Letter | Kind::Thanks => IDD_LETTER,
+        Kind::Letter => IDD_LETTER,
         Kind::List => IDD_LETTERS_LIST,
         Kind::Author => IDD_AUTHOR,
         Kind::Wizard => IDD_WIZARD,
@@ -5539,7 +5542,7 @@ fn refresh_plan(state: &mut WindowState) {
         }
         // Nothing to rebuild: the list is built out of the feed by `fill_list` on every fill,
         // and the window of thanks carries a plan that was made for it once.
-        Kind::List | Kind::Thanks => {}
+        Kind::List => {}
         // The wizard's text is the person's own and is **not** rebuilt: a change of interface
         // language in the middle of an appeal must not throw away what they wrote. What is
         // rebuilt is every label around it, by `fill_wizard`, which the caller runs next.
@@ -6177,47 +6180,18 @@ pub fn open_wizard(owner: HWND) {
         status: String::new(),
         layouts,
         text: String::new(),
+        done: false,
     }));
 
     open_window(owner, state, true);
 }
 
-/// **Opens the window of thanks** — FR-104, after «Готово».
-///
-/// The letter template with a plan of four lines. No `Letter` stands behind it, which is why
-/// it is a kind of its own: a window nothing in [`due`] can ever ask for, and one that must not
-/// take the place of a letter in [`OPEN`].
-pub fn open_thanks(owner: HWND, idea: bool) {
-    use crate::settings::{
-        IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_THANKYOU_BUG_TEXT, IDS_THANKYOU_BUG_TITLE,
-        IDS_THANKYOU_IDEA_TEXT, IDS_THANKYOU_IDEA_TITLE, IDS_WIZARD_CAPTION, text,
-    };
-
-    let mut state = fresh_state(owner, Kind::Thanks);
-
-    state.plan = LetterPlan {
-        caption: text(IDS_WIZARD_CAPTION),
-        title: text(if idea {
-            IDS_THANKYOU_IDEA_TITLE
-        } else {
-            IDS_THANKYOU_BUG_TITLE
-        }),
-        lead: text(if idea {
-            IDS_THANKYOU_IDEA_TEXT
-        } else {
-            IDS_THANKYOU_BUG_TEXT
-        }),
-        left: Some(Button::link(
-            text(IDS_CHANNEL_OPEN),
-            Action::OpenChannel,
-            links::CHANNEL_URL,
-        )),
-        accent: Some(Button::live(text(IDS_CLOSE), Action::Close)),
-        ..LetterPlan::default()
-    };
-
-    open_window(owner, state, true);
-}
+// ⛔ **`open_thanks` is gone — задача Т-33-3, решение 103.3.** «Готово» used to close the
+// wizard and open a window of its own on `IDD_LETTER` with four lines of text in it. The user
+// asked for the thanks to be the wizard's last step, in the same window and at the same size:
+// «Окно спасибо в конце было бы логично сделать того же размера, что и мастер, и сделать
+// финальным шагом мастера, а не отдельным всплывающим окном». What that window said is said by
+// [`Step::Done`] now, out of the very same four strings, and `Kind::Thanks` went with it.
 
 /// Which controls one step shows — every other slot of the pool is hidden.
 ///
@@ -6278,6 +6252,7 @@ pub fn controls_of(step: Step) -> &'static [i32] {
             IDC_WZ_ATTACH_FOOT,
         ],
         Step::Preview => &[IDC_WZ_PREVIEW, IDC_WZ_COPY, IDC_WZ_SAVE, IDC_WZ_STATUS],
+        Step::Done => &[IDC_WZ_THANKS, IDC_WZ_CHANNEL],
     }
 }
 
@@ -6339,13 +6314,18 @@ const WIZARD_SLOTS_TAIL: [i32; 18] = [
 /// the three at the bottom, and the eye reads them as chrome — but they are chrome of **one
 /// step**, and a slot missing from the pool is a control that never gets hidden: «Скопировать
 /// и открыть канал» would have stood on every step of the wizard.
-const WIZARD_SLOTS_VALUES: [i32; 6] = [
+const WIZARD_SLOTS_VALUES: [i32; 8] = [
     IDC_WZ_ATTACH_V1 + 1,
     IDC_WZ_ATTACH_V1 + 2,
     IDC_WZ_ATTACH_V1 + 3,
     IDC_WZ_STATUS,
     IDC_WZ_COPY,
     IDC_WZ_SAVE,
+    // The two slots of «Готово» — задача Т-33-3. They belong to the pool for the same reason
+    // the two buttons above it do: a slot missing from the pool is a control that never gets
+    // hidden, and the thanks would then stand on every step of the wizard.
+    IDC_WZ_THANKS,
+    IDC_WZ_CHANNEL,
 ];
 
 /// How many slots the wizard's pool holds — what a test compares the sum of the six steps
@@ -6397,6 +6377,12 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
         IDS_WIZARD_WHAT_NOTE, IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHERE_NOTE, IDS_WIZARD_WHERE_TITLE,
         format_text, text,
     };
+    // The words of «Готово» — every one of them a string the abolished window of thanks already
+    // had (задача Т-33-3): not one row was added to the tables of FR-94.
+    use crate::settings::{
+        IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_THANKYOU_BUG_TEXT, IDS_THANKYOU_BUG_TITLE,
+        IDS_THANKYOU_IDEA_TEXT, IDS_THANKYOU_IDEA_TITLE,
+    };
 
     let Some(wizard) = state.wizard.as_deref() else {
         return;
@@ -6412,13 +6398,26 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
     let step = wizard.current();
     let road = wizard.road();
 
+    let idea = wizard.draft.trouble.is_idea();
+
     let (title, note) = match step {
-        Step::What => (IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHAT_NOTE),
-        Step::Where => (IDS_WIZARD_WHERE_TITLE, IDS_WIZARD_WHERE_NOTE),
-        Step::Did => (IDS_WIZARD_DID_TITLE, IDS_WIZARD_DID_NOTE),
-        Step::Idea => (IDS_WIZARD_IDEA_TITLE, IDS_WIZARD_IDEA_NOTE),
-        Step::Attach => (IDS_WIZARD_ATTACH_TITLE, IDS_WIZARD_ATTACH_NOTE),
-        Step::Preview => (IDS_WIZARD_PREVIEW_TITLE, IDS_WIZARD_PREVIEW_NOTE),
+        Step::What => (IDS_WIZARD_WHAT_TITLE, Some(IDS_WIZARD_WHAT_NOTE)),
+        Step::Where => (IDS_WIZARD_WHERE_TITLE, Some(IDS_WIZARD_WHERE_NOTE)),
+        Step::Did => (IDS_WIZARD_DID_TITLE, Some(IDS_WIZARD_DID_NOTE)),
+        Step::Idea => (IDS_WIZARD_IDEA_TITLE, Some(IDS_WIZARD_IDEA_NOTE)),
+        Step::Attach => (IDS_WIZARD_ATTACH_TITLE, Some(IDS_WIZARD_ATTACH_NOTE)),
+        Step::Preview => (IDS_WIZARD_PREVIEW_TITLE, Some(IDS_WIZARD_PREVIEW_NOTE)),
+        // «Готово» — задача Т-33-3: the heading is the one the abolished window carried, and
+        // there is no explanation line, because the thanks is a paragraph of its own and a
+        // muted sentence above it would be a second voice saying the same thing.
+        Step::Done => (
+            if idea {
+                IDS_THANKYOU_IDEA_TITLE
+            } else {
+                IDS_THANKYOU_BUG_TITLE
+            },
+            None,
+        ),
     };
 
     let entries = wizard.facts.journal_entries.to_string();
@@ -6426,13 +6425,29 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
     for (control, caption) in [
         (
             IDC_WZ_STEP,
-            format_text(
-                IDS_WIZARD_STEP,
-                &[&(wizard.step + 1).to_string(), &road.len().to_string()],
-            ),
+            // ⚠ **The last step is not numbered.** «Готово» is where the wizard ends, not the
+            // sixth of five — the mock-up puts that word in the place of «Шаг N из M», and it
+            // is the very string the button carried up to it.
+            if step == Step::Done {
+                text(IDS_WIZARD_DONE)
+            } else {
+                format_text(
+                    IDS_WIZARD_STEP,
+                    &[&(wizard.step + 1).to_string(), &road.len().to_string()],
+                )
+            },
         ),
+        (
+            IDC_WZ_THANKS,
+            text(if idea {
+                IDS_THANKYOU_IDEA_TEXT
+            } else {
+                IDS_THANKYOU_BUG_TEXT
+            }),
+        ),
+        (IDC_WZ_CHANNEL, text(IDS_CHANNEL_OPEN)),
         (IDC_WZ_TITLE, text(title)),
-        (IDC_WZ_NOTE, text(note)),
+        (IDC_WZ_NOTE, note.map(text).unwrap_or_default()),
         (IDC_WZ_CARD_T1, text(IDS_WIZARD_CARD_WRONG)),
         (IDC_WZ_CARD_T1 + 1, text(IDS_WIZARD_CARD_NOTHING)),
         (IDC_WZ_CARD_T1 + 2, text(IDS_WIZARD_CARD_IDEA)),
@@ -6483,10 +6498,12 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
         (IDC_WZ_BACK, text(IDS_WIZARD_BACK)),
         (
             IDC_WZ_NEXT,
-            text(if wizard.is_last() {
-                IDS_WIZARD_DONE
-            } else {
-                IDS_WIZARD_NEXT
+            // Three faces of one button: «Далее», «Готово» on the last step of the road, and
+            // «Закрыть» on the thanks — where it is the only button left (задача Т-33-3).
+            text(match step {
+                Step::Done => IDS_CLOSE,
+                _ if wizard.is_last() => IDS_WIZARD_DONE,
+                _ => IDS_WIZARD_NEXT,
             }),
         ),
     ] {
@@ -6968,6 +6985,54 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
             y += button + tight;
             place(hwnd, IDC_WZ_STATUS, pad, y, width, step_height);
         }
+
+        // «Готово» — задача Т-33-3. The paragraph gets the height its own words need, and the
+        // one button stands a block under it: the window keeps the size every other step has,
+        // and the air below is air.
+        Step::Done => {
+            // SAFETY: as above.
+            let thanks = unsafe {
+                measure(
+                    dc,
+                    faces.body,
+                    width,
+                    &settings::get_text(hwnd, IDC_WZ_THANKS),
+                    pitch,
+                )
+            };
+
+            let room = (bottom_of_body(client, metrics) - y - button - gap).max(0);
+
+            place(hwnd, IDC_WZ_THANKS, pad, y, width, thanks.min(room));
+            y += thanks.min(room) + gap;
+
+            // SAFETY: as above.
+            let channel_width = unsafe {
+                button_width(
+                    dc,
+                    faces.text,
+                    metrics,
+                    &settings::get_text(hwnd, IDC_WZ_CHANNEL),
+                )
+            };
+
+            place(
+                hwnd,
+                IDC_WZ_CHANNEL,
+                pad,
+                y,
+                channel_width.min(width),
+                button,
+            );
+
+            // ⚠ **The address is still a placeholder (П7), so the button is drawn and dead** —
+            // the same rule «От автора» keeps for the same address.
+            enable(
+                hwnd,
+                IDC_WZ_CHANNEL,
+                !links::is_placeholder(links::CHANNEL_URL),
+            );
+        }
     }
 
     let _ = top_of_body;
@@ -7023,8 +7088,14 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
 
     // ⚠ «Назад» keeps its **place** and loses its visibility on the first step — the mock-up
     // asks for exactly that, and a button that moved would move the one beside it.
-    if wizard.step == 0 {
+    if wizard.step == 0 || wizard.done {
         hide(hwnd, IDC_WZ_BACK);
+    }
+
+    // On «Готово» there is nothing to cancel and nowhere to go back to: both leave, «Закрыть»
+    // stays where «Далее» stood, and no button moves a pixel (задача Т-33-3, решение 103.3).
+    if wizard.done {
+        hide(hwnd, IDC_WZ_CANCEL);
     }
 
     // SAFETY: releases exactly the DC taken above, once.
@@ -7184,7 +7255,14 @@ unsafe fn draw_progress(dc: HDC, rect: RECT, state: &WindowState) -> isize {
     unsafe { FillRect(dc, &rect, brushes.window_bg()) };
 
     let steps = i32::try_from(wizard.road().len()).unwrap_or(1).max(1);
-    let done = i32::try_from(wizard.step + 1).unwrap_or(1).clamp(1, steps);
+
+    // On «Готово» the line is full and keeps the number of cells the road had: the thanks is
+    // where the road ends, not a sixth cell in a row of five (задача Т-33-3).
+    let done = if wizard.done {
+        steps
+    } else {
+        i32::try_from(wizard.step + 1).unwrap_or(1).clamp(1, steps)
+    };
     let width = rect.right - rect.left;
     let gap = theme::scaled(4, theme::dc_dpi(dc));
     let each = (width - gap * (steps - 1)) / steps;
@@ -7603,6 +7681,12 @@ fn wizard_command(hwnd: HWND, control: i32) -> bool {
             wizard_save(hwnd);
             return true;
         }
+        // «Открыть канал» on the thanks — задача Т-33-3. Dead while the address is a
+        // placeholder, and the button is disabled to say so (П7).
+        IDC_WZ_CHANNEL => {
+            open_link(hwnd, links::CHANNEL_URL);
+            return true;
+        }
         _ => {}
     }
 
@@ -7710,17 +7794,30 @@ fn wizard_refresh(hwnd: HWND) {
     settings::repaint_whole_window(hwnd);
 }
 
-/// «Далее», and «Готово» on the last step — FR-104.
+/// «Далее», «Готово» on the last step of the road, and «Закрыть» on the thanks — FR-104.
+///
+/// ⚠ **The thanks is a step and not a second window** (задача Т-33-3, решение 103.3). «Готово»
+/// used to close this window and open one on `IDD_LETTER`; the user asked for the same window
+/// at the same size, and what changes now is a flag.
 fn wizard_forward(hwnd: HWND) {
     wizard_harvest(hwnd);
 
     // SAFETY: the state pointer is live for the length of the window.
-    let done = unsafe {
+    let close = unsafe {
         with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref_mut()?;
+            let Some(wizard) = state.wizard.as_deref_mut() else {
+                return false;
+            };
+
+            // The thanks is the end of the road: its one button closes the window.
+            if wizard.done {
+                return true;
+            }
 
             if wizard.is_last() {
-                return Some(wizard.draft.trouble.is_idea());
+                wizard.done = true;
+                wizard.status.clear();
+                return false;
             }
 
             wizard.step += 1;
@@ -7732,21 +7829,16 @@ fn wizard_forward(hwnd: HWND) {
                 wizard.text = report::build(&wizard.draft, &wizard.facts);
             }
 
-            None
+            false
         })
-    }
-    .flatten();
+    };
 
-    match done {
-        Some(idea) => {
-            // SAFETY: as above.
-            let owner = unsafe { with_state(hwnd, |state| state.owner) }.unwrap_or_default();
-
-            close_window(hwnd);
-            open_thanks(owner, idea);
-        }
-        None => wizard_refresh(hwnd),
+    if close == Some(true) {
+        close_window(hwnd);
+        return;
     }
+
+    wizard_refresh(hwnd);
 }
 
 /// «Взять из активного окна» — starts the five-second count-down of FR-104.

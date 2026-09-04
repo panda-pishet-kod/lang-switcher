@@ -341,6 +341,13 @@
 #define IDC_WZ_CANCEL          1350
 #define IDC_WZ_BACK            1351
 #define IDC_WZ_NEXT            1352
+// Step «Готово» — the thanks, task Т-33-3, решение 103.3. It used to be a window of its own on
+// IDD_LETTER; the user asked for it to be the wizard's last step, in the same window and at the
+// same size. Two slots and not one string more: the caption of the step is IDS_WIZARD_DONE
+// (the same word the button carried), the heading and the paragraph are the two pairs the
+// abolished window already had, and the button is IDS_CHANNEL_OPEN.
+#define IDC_WZ_THANKS          1353
+#define IDC_WZ_CHANNEL         1354
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -1113,6 +1120,10 @@ BEGIN
     PUSHBUTTON      "", IDC_WZ_COPY, 16, 196, 130, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_SAVE, 150, 196, 90, 14, BS_OWNERDRAW
     LTEXT           "", IDC_WZ_STATUS, 16, 213, 224, 10, SS_OWNERDRAW
+    // Step «Готово» — задача Т-33-3. The paragraph and the one button of the thanks; both are
+    // laid out at run time like every other slot of this pool.
+    LTEXT           "", IDC_WZ_THANKS, 16, 72, 224, 60, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_CHANNEL, 16, 140, 90, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_CANCEL, 16, 228, 50, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_BACK, 130, 228, 50, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_NEXT, 186, 228, 54, 14, BS_OWNERDRAW
