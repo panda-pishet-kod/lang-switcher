@@ -4054,7 +4054,12 @@ fn no_field_or_list_of_the_dialog_carries_the_system_border() {
     // is the bit that must still be there next to the border that must not. Seven until
     // task Т-23-2 took the three `ES_NUMBER` millisecond fields out of the window.
     const FIELDS: [(u32, &str, u32, &str); 4] = [
-        (1010, "поле горячей клавиши", 0x0001_0000, "WS_TABSTOP"),
+        // ⚠ **У поля клавиши сторожевой бит СМЕНЁН — задача Т-33а-3, решение 104.3.** Он был
+        // `WS_TABSTOP`, и это было верно, пока Tab на этом поле имел смысл. Теперь поле вне
+        // захвата не принимает фокус ни мышью, ни клавишей, `WS_TABSTOP` снят НАМЕРЕННО, и его
+        // отсутствие проверяется отдельным утверждением ниже. Сторожить «остальной стиль цел»
+        // здесь стало `ES_AUTOHSCROLL` — бит из той же строки шаблона.
+        (1010, "поле горячей клавиши", 0x0080, "ES_AUTOHSCROLL"),
         (1051, "имя процесса", 0x0080, "ES_AUTOHSCROLL"),
         (1050, "список исключений", 0x0020_0000, "WS_VSCROLL"),
         (1024, "список раскладок", 0x0001, "LVS_REPORT"),
@@ -4079,6 +4084,26 @@ fn no_field_or_list_of_the_dialog_carries_the_system_border() {
              {style:#010x}"
         );
     }
+
+    // **Задача Т-33а-3, решение 104.3 — и это утверждение противоположно тому, что стояло
+    // здесь до неё.** Поле клавиши обязано НЕ иметь `WS_TABSTOP`: вне захвата оно только
+    // показывает клавишу, и Tab, останавливающийся на нём, обещает набор, которого не будет.
+    // Слово пользователя: «При нажатии на окно горячей клавиши появляется черта, как будто
+    // текст можно стереть и ввести новый, это неправильное поведение».
+    //
+    // Замер до правки (`scratchpad-Э33а\красное-до-3-каретка.log`): щелчок в поле →
+    // `GetGUIThreadInfo` отвечает `GUI_CARETBLINKING`, `hwndCaret` и `hwndFocus` — это поле;
+    // Tab с подписи «Клавиша» вёл на поле. После: каретки нет, фокуса нет, Tab ведёт на «Задать».
+    let hotkey = template.style_of(1010, "поле горячей клавиши");
+
+    println!("«поле горячей клавиши» (1010): style {hotkey:#010x}, WS_TABSTOP снят");
+
+    assert_eq!(
+        hotkey & 0x0001_0000,
+        0,
+        "поле клавиши обязано быть без WS_TABSTOP — единственный вход в захват это «Задать»; \
+         стиль {hotkey:#010x}"
+    );
 
     // And the seven are the seven the module names: a field added to the template without
     // being added to `FRAMED_FIELDS` would keep a system border nobody draws a frame for.
@@ -9330,6 +9355,60 @@ fn an_armed_capture_is_cancelled_by_escape_by_a_click_beside_and_by_a_lost_focus
         settings::CaptureStep::Ignore,
         "the capture button may take the focus without ending the capture"
     );
+}
+
+/// **Т-33а-3, решение 104.3** — вне захвата поле клавиши тоже не притворяется полем ввода.
+///
+/// Решение 82.6 убрало каретку и выделение **в** захвате; вне его они оставались, и глаз
+/// пользователя нашёл их первым: «При нажатии на окно горячей клавиши появляется черта, как
+/// будто текст можно стереть и ввести новый, это неправильное поведение».
+///
+/// Три двери, и все три заперты в одной ветке `else`: мышь (`WM_LBUTTONDOWN` у `EDIT` зовёт
+/// `SetFocus` на себя), фокус сам по себе (`WM_SETFOCUS` создаёт каретку) и клавиатура
+/// (`WM_GETDLGCODE` → `DLGC_STATIC`, плюс `NOT WS_TABSTOP` в шаблоне).
+///
+/// ⭐ **Щелчок по полю НЕ взводит захват** — отдельный вопрос, заданный пользователю прямо, и
+/// его ответ «нет» (решение 104.3). Единственный вход в захват остаётся «Задать».
+#[test]
+fn outside_a_capture_the_key_field_takes_no_focus_from_the_mouse_or_the_keyboard() {
+    let source = settings_module_source();
+    let field = function_body(&source, "unsafe extern \"system\" fn hotkey_field_proc(");
+
+    // Ветка «вне захвата» существует: до Т-33а-3 её не было вовсе, и всякое сообщение уходило
+    // прежней процедуре контрола.
+    assert!(
+        field.contains("} else {"),
+        "у процедуры поля обязана быть ветка «вне захвата» — до Т-33а-3 её не было"
+    );
+
+    let outside = field
+        .split_once("} else {")
+        .expect("ветка «вне захвата» только что проверена")
+        .1;
+
+    for needle in [
+        "WM_LBUTTONDOWN",
+        "WM_LBUTTONUP",
+        "WM_LBUTTONDBLCLK",
+        "WM_RBUTTONDOWN",
+        "WM_SETFOCUS => return LRESULT(0),",
+        "WM_GETDLGCODE => return LRESULT(DLGC_STATIC as isize),",
+    ] {
+        assert!(
+            outside.contains(needle),
+            "вне захвата поле обязано глотать `{needle}` — иначе каретка возвращается"
+        );
+    }
+
+    // И ровно то, чего пользователь НЕ захотел: щелчок не взводит захват. Ни одного вызова
+    // взведения из ветки «вне захвата».
+    for forbidden in ["arm_capture(", "toggle_capture(", "run_capture_step("] {
+        assert!(
+            !outside.contains(forbidden),
+            "щелчок по полю не взводит захват — решение 104.3, слово пользователя «нет»; \
+             а `{forbidden}` из ветки «вне захвата» его бы взвёл"
+        );
+    }
 }
 
 /// **Т-23-5, решение 82.6** — the field does not pretend to be a text field.

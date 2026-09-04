@@ -696,7 +696,12 @@ BEGIN
     // «Нажмите клавишу…» **into this field**, and at 64 units that sentence ran into its own
     // frame — measured on the raised window, not predicted. The mock-up draws the same shape:
     // a field that takes the width and a button at the end of the row.
-    EDITTEXT        IDC_HOTKEY, 56, 120, 104, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER
+    // ⛔ **`NOT WS_TABSTOP` — задача Т-33а-3, решение 104.3.** `EDITTEXT` по умолчанию несёт
+    // `WS_TABSTOP`, и Tab останавливался на поле, которое нечем заполнить: клавиша берётся
+    // захватом, а не набором. Теперь Tab с подписи «Клавиша» идёт сразу на «Задать» — она и
+    // есть единственный вход в захват. Второй замок на той же двери — `DLGC_STATIC` в
+    // `hotkey_field_proc` вне захвата.
+    EDITTEXT        IDC_HOTKEY, 56, 120, 104, 8, ES_AUTOHSCROLL | ES_READONLY | NOT WS_BORDER | NOT WS_TABSTOP
     PUSHBUTTON      "Задать", IDC_HOTKEY_CAPTURE, 164, 117, 46, 14, BS_OWNERDRAW
     LTEXT           "", IDC_HOTKEY_NOTE, 14, 134, 196, 16, SS_OWNERDRAW
 

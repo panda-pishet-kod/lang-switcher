@@ -115,21 +115,22 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_ERR, CB_GETCURSEL, CB_GETLBTEXT,
     CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL, CB_SETITEMHEIGHT, CallWindowProcW,
-    CreateDialogIndirectParamW, CreateDialogParamW, DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID,
-    DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW,
-    EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
-    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
-    LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect, PostMessageW,
-    RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW,
-    SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN,
-    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
-    WM_RBUTTONDOWN, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WNDPROC, WS_EX_LAYOUTRTL,
+    CreateDialogIndirectParamW, CreateDialogParamW, DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC,
+    DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW,
+    DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE,
+    GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
+    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
+    IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
+    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MapDialogRect,
+    PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER,
+    SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM,
+    WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK,
+    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -11923,6 +11924,41 @@ unsafe extern "system" fn hotkey_field_proc(
                     )
                 };
             }
+
+            _ => {}
+        }
+    } else {
+        // ⛔ **Вне захвата поле — ТОЛЬКО ПОКАЗ, задача Т-33а-3, решение 104.3.**
+        //
+        // Слово пользователя: «При нажатии на окно горячей клавиши появляется черта, как будто
+        // текст можно стереть и ввести новый, это неправильное поведение». Он прав дважды:
+        // стереть и ввести там нечего — поле `ES_READONLY`, клавиша берётся захватом, — и сама
+        // каретка обещает то, чего не будет. Решение 82.6 убрало её В захвате; здесь та же
+        // болезнь оставалась ВНЕ него, и нашёл её опять глаз.
+        //
+        // Прибор до лечения (`красное-до-3-каретка.log`): щелчок в поле → `GetGUIThreadInfo`
+        // отвечает `GUI_CARETBLINKING`, `hwndCaret` — это поле, `hwndFocus` — это поле.
+        //
+        // ⚠ **Щелчок НЕ взводит захват** — это отдельный вопрос, и он задан пользователю прямо:
+        // «должен ли щелчок по полю клавиши сам взводить захват вместо „Задать“». Ответ —
+        // «нет» (решение 104.3). Единственный вход в захват остаётся кнопка «Задать» и Enter
+        // на ней.
+        match message {
+            // Мышь до контрола не доходит вовсе: `WM_LBUTTONDOWN` у `EDIT` зовёт `SetFocus` на
+            // себя, и всё остальное — следствие. Проглатываются обе половины каждого щелчка:
+            // отпускание без нажатия оставило бы контрол в состоянии «тащу выделение».
+            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP
+            | WM_RBUTTONDBLCLK | WM_MBUTTONDOWN => return LRESULT(0),
+
+            // Вторая дверь: фокус может прийти и не от мыши. Проглатывается ровно тем же
+            // движением, что и в захвате, и по той же причине — каретку и выделение создаёт
+            // собственный обработчик контрола.
+            WM_SETFOCUS => return LRESULT(0),
+
+            // Третья дверь — клавиатура. `DLGC_STATIC` говорит менеджеру диалога, что это
+            // подпись, а не поле; Tab через него не останавливается. `WS_TABSTOP` снят и в
+            // шаблоне (`app.rc`), так что это второй замок на той же двери, а не единственный.
+            WM_GETDLGCODE => return LRESULT(DLGC_STATIC as isize),
 
             _ => {}
         }
