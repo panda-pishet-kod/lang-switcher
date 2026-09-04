@@ -2241,7 +2241,23 @@ const PANELS: [i32; 5] = [
 ];
 
 /// Hides one child — a slot this letter does not use.
+///
+/// ⚠ **A panel is hidden by collapsing its rectangle and not by `ShowWindow`**, because it is
+/// never shown to begin with: what draws the block is `WM_ERASEBKGND`, out of the panel's
+/// *rectangle*, and a panel left at the size the template gave it goes on being drawn. The
+/// window of thanks is where this showed — an empty frame in the middle of four lines of text
+/// (`scratchpad-Э32\живое-В\мастер-6-спасибо.png`, the frame before this rule).
 fn hide(hwnd: HWND, control: i32) {
+    if PANELS.contains(&control) {
+        // SAFETY: the control is a live child of this dialog; the five numbers are plain
+        // values and no pointer is passed.
+        if let Ok(panel) =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) }
+        {
+            let _ = unsafe { SetWindowPos(panel, None, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE) };
+        }
+    }
+
     let Ok(child) =
         (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
     else {
@@ -2496,6 +2512,28 @@ unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
 
     // SAFETY: releases exactly the DC taken at the top of this function, once.
     unsafe { ReleaseDC(Some(hwnd), dc) };
+
+    // ⚠ **The window of thanks is the one letter whose height its content decides**, and the
+    // live acceptance is what asked for it: four lines of text in a window built for a letter
+    // left three hundred pixels of empty ground under them
+    // (`scratchpad-Э32\живое-В\мастер-6-спасибо.png`, the frame before this line). Every other
+    // letter keeps the height of the template — they fill it.
+    //
+    // ⚠ And the layout is run **again** after the resize, once. The buttons of this window are
+    // placed from the bottom edge upwards, so a window that shrank under them left them where
+    // the old edge was — outside the new client, and invisible. The second pass finds
+    // `wanted == client.bottom` and stops there, so the recursion is exactly one deep.
+    if state.kind == Kind::Thanks {
+        let wanted = top + metrics.y(air::GAP) + (client.bottom - bottom);
+
+        if wanted > 0 && wanted != client.bottom {
+            resize_client(hwnd, client.bottom, wanted);
+
+            // SAFETY: the same window and the same state the caller holds; the pass below
+            // cannot resize again, which is what ends the recursion.
+            unsafe { layout_letter(hwnd, state) };
+        }
+    }
 }
 
 /// Lays out the panel of a letter and everything standing on it — the second half of
@@ -2876,6 +2914,13 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
         else {
             continue;
         };
+
+        // A panel a letter does not use is collapsed to nothing by `hide`, and nothing is what
+        // gets drawn for it — the second half of that rule, kept here so that neither half can
+        // be removed on its own.
+        if rect.right <= rect.left || rect.bottom <= rect.top {
+            continue;
+        }
 
         theme::paint_rounded(
             dc,
@@ -7689,10 +7734,16 @@ fn wizard_save(hwnd: HWND) {
         return;
     }
 
-    wizard_say(
-        hwnd,
-        format_text(IDS_WIZARD_SAVED, &[&path.display().to_string()]),
-    );
+    // ⚠ The **name** of the file and not its path: the live acceptance showed the whole path
+    // running off the one line the status is (`живое-В\мастер-5-сохранено.png` — «Сохранено:»
+    // and nothing after it). The folder opens a moment later, so the name is what a person
+    // needs to find it there.
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    wizard_say(hwnd, format_text(IDS_WIZARD_SAVED, &[&name]));
 
     open_folder(&folder);
 }
