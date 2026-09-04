@@ -3929,52 +3929,103 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
     }
 }
 
-/// A date as a person reads it — «14 октября» — in the language of the interface.
+/// A date as a person reads it — «14 октября» — in the language of the interface, **and always
+/// in the Gregorian calendar** (FR-101, решение 103.1).
 ///
-/// `GetDateFormatEx` with the locale of `general.language`, so the month is named in the
-/// language the window is written in and nothing has to be translated by hand. The picture is
-/// this file's own (`d MMMM`), so the shape does not depend on what the user's Windows prefers.
+/// The month is named by the locale of `general.language`, so nothing has to be translated by
+/// hand, and the shape is this file's own — the day, a space, the name of the month — so it
+/// does not depend on what the user's Windows prefers.
+///
+/// # Why the name is asked of the calendar and not of `GetDateFormatEx`
+///
+/// `GetDateFormatEx` prints a date in the locale's **own** calendar, and for `ar` that is Umm
+/// al-Qura: 2026-09-04 came out «22 ربيع الأول», a day of the Hijri year for what the release
+/// notes call the fourth of September. A letter is dated by an event of this program, so the
+/// number and the month have to be the ones the version was released on.
+///
+/// The two ways out were measured rather than believed (`scratchpad-Э33\календарь.log`):
+///
+/// * `DATE_USE_ALT_CALENDAR` — **refused**. It does not move `ar` at all (its alternative
+///   calendar is Hijri, another lunar one), and it moves `he` into the Hebrew calendar
+///   («כ"ב אלול») and `tr` into Umm al-Qura. It fixes nothing and breaks two.
+/// * asking the **Gregorian** calendar for the name of the month by number — taken. With
+///   `CAL_RETURN_GENITIVE_NAMES` it gives the very word `GetDateFormatEx` used to put after the
+///   day: «сентября» and not «Сентябрь», «вересня» and not «вересень». Measured across all
+///   fourteen locales on three days: the thirteen whose own calendar is already Gregorian print
+///   the same string byte for byte, and `ar` becomes «4 سبتمبر».
+///
+/// ⚠ **The digits are European.** `GetDateFormatEx` substituted native digits when the locale
+/// asked for them; a number written by `to_string` never does. On every one of the fourteen
+/// `LOCALE_IDIGITSUBSTITUTION` is 1 («нет») or 0 («по контексту»), so nothing changes today —
+/// and this line is here because a machine set otherwise would see Western digits where the old
+/// road would have shown Arabic-Indic ones.
 ///
 /// NFR-13: a refusal falls back to the ISO form the configuration file is written in, which is
 /// readable everywhere and wrong nowhere.
 pub fn format_date(date: Date) -> String {
-    use windows::Win32::Foundation::SYSTEMTIME;
-    use windows::Win32::Globalization::{ENUM_DATE_FORMATS_FLAGS, GetDateFormatEx};
-
-    let system = SYSTEMTIME {
-        wYear: u16::try_from(date.year()).unwrap_or(0),
-        wMonth: u16::try_from(date.month()).unwrap_or(1),
-        wDay: u16::try_from(date.day()).unwrap_or(1),
-        ..SYSTEMTIME::default()
-    };
-
     let locale = settings::wide(settings::ui_language().tag());
-    let mut buffer = [0u16; 64];
 
-    // SAFETY: `locale` is a NUL-terminated buffer of this frame, `system` a live local, the
-    // picture a static literal of this image, and the buffer a live local whose length the call
-    // is told. `PCWSTR::null()` is the documented value of the reserved calendar argument.
-    let written = unsafe {
-        GetDateFormatEx(
-            PCWSTR(locale.as_ptr()),
-            ENUM_DATE_FORMATS_FLAGS(0),
-            Some(&system),
-            w!("d MMMM"),
-            Some(&mut buffer),
-            PCWSTR::null(),
-        )
+    match gregorian_month_name(&locale, date.month()) {
+        Some(month) => format!("{} {month}", date.day()),
+        None => date.to_string(),
+    }
+}
+
+/// The name of a month of the **Gregorian** calendar in the named locale, in the form a date
+/// puts it in.
+///
+/// The genitive form is asked for first and the plain one is the fallback: the modifier is
+/// documented as «return the genitive forms of month names», and a locale that has no separate
+/// genitive answers with the plain name anyway — but a locale that refuses the modifier
+/// outright would otherwise leave the date with no month at all.
+///
+/// `None` when both refusals happen or the month is not a month, which is what sends
+/// [`format_date`] to the ISO form.
+fn gregorian_month_name(locale: &[u16], month: u32) -> Option<String> {
+    use windows::Win32::Globalization::{
+        CAL_GREGORIAN, CAL_RETURN_GENITIVE_NAMES, CAL_SMONTHNAME1, GetCalendarInfoEx,
     };
 
-    if written <= 0 {
-        return date.to_string();
+    if !(1..=12).contains(&month) {
+        return None;
     }
 
-    let units = usize::try_from(written).unwrap_or(1).saturating_sub(1);
+    let name = CAL_SMONTHNAME1 + month - 1;
 
-    buffer
-        .get(..units)
-        .and_then(|slice| String::from_utf16(slice).ok())
-        .unwrap_or_else(|| date.to_string())
+    for kind in [name | CAL_RETURN_GENITIVE_NAMES, name] {
+        let mut buffer = [0u16; 64];
+
+        // SAFETY: `locale` is a NUL-terminated buffer owned by the caller's frame, the buffer
+        // is a live local whose length the call is told, and `PCWSTR::null()` is the documented
+        // value of the reserved argument. `None` for the numeric answer is what asks for the
+        // string one.
+        let written = unsafe {
+            GetCalendarInfoEx(
+                PCWSTR(locale.as_ptr()),
+                CAL_GREGORIAN,
+                PCWSTR::null(),
+                kind,
+                Some(&mut buffer),
+                None,
+            )
+        };
+
+        if written <= 0 {
+            continue;
+        }
+
+        let units = usize::try_from(written).unwrap_or(1).saturating_sub(1);
+
+        if let Some(name) = buffer
+            .get(..units)
+            .and_then(|slice| String::from_utf16(slice).ok())
+            && !name.is_empty()
+        {
+            return Some(name);
+        }
+    }
+
+    None
 }
 
 // -----------------------------------------------------------------------------------------
