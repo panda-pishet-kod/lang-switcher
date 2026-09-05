@@ -8495,18 +8495,18 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
     // полей и каретку.
     (
         settings::IDS_WHATSNEW_1,
-        "Мастер «Написать автору» больше не моргает при выборе карточек, радио и галок.",
-        "The «Write to the author» wizard no longer blinks when a card, a radio or a box is picked.",
+        "Галочки в мастере «Написать автору» ставятся и снимаются с первого щелчка.",
+        "The boxes of the «Write to the author» wizard tick and untick on the first click.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Строки в списке раскладок мастера стали выше: их высоту задаёт общая мерка программы.",
-        "The rows of the wizard's layout list are taller: their height comes from the program's common rule.",
+        "Текст в полях мастера больше не пропадает при выборе переключателей.",
+        "The text in the wizard's fields no longer disappears when a radio is picked.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Подпись «Программа:» отодвинута от поля, и рамка поля дорисована целиком.",
-        "The «Program:» caption stands clear of the field, and the field's frame is drawn whole.",
+        "Слово в строке списка раскладок встало по центру строки, как в настройках.",
+        "The word in a row of the layout list is centred in its row now, as in the settings window.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
