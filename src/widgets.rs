@@ -75,10 +75,11 @@ pub fn dialog_units(hwnd: HWND, horizontal: i32, vertical: i32) -> Option<(i32, 
 ///
 /// Поэтому [`attach`] ставит закрытую высоту **сам**: забыть её теперь нельзя.
 pub mod combo {
-    use super::{HWND, dialog_units};
+    use super::{HWND, RECT, dialog_units};
     use crate::settings::{DIALOG_FONT_HEIGHT_DLU, send_to};
     use crate::theme::{dc_dpi, scaled};
-    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::Graphics::Gdi::{GetDC, HDC, HFONT, ReleaseDC};
     use windows::Win32::UI::WindowsAndMessaging::{CB_ERR, CB_SETITEMHEIGHT};
 
     /// Воздух над строкой выпадающего списка и под ней, в пикселях макета — задача T-11-15.
@@ -172,6 +173,100 @@ pub mod combo {
     /// Снимает подкласс — дальняя половина пары [`attach`].
     pub fn detach(hwnd: HWND, control: i32) {
         crate::settings::unsubclass_foreign_combo(hwnd, control);
+    }
+
+    /// **Слово одной строки комбобокса** — одно тело на все окна программы, задача Т-46-4,
+    /// решение 109.4.
+    ///
+    /// # ⛔ Что показал замер Т-46-1, и чем он опроверг посылку ТЗ
+    ///
+    /// ТЗ Э46 предполагало, что у мастера расходится **высота раскрытого окна**. Замер пяти
+    /// комбобоксов программы (`scratchpad-Э46\красное-списки-e45.log`) это опроверг: правило у
+    /// всех пяти одно — `min(строк, потолок шаблона) × высоту строки + 2` на рамку, — и мастер
+    /// ему подчиняется. Разошлось **положение слова внутри строки**:
+    ///
+    /// ```text
+    /// строка списка мастера   (24 px): воздух 3 сверху, 9 снизу — слово прижато к ВЕРХУ
+    /// строка списка настроек  (26 px): воздух 8 сверху, 5 снизу — слово ОТЦЕНТРОВАНО
+    /// ```
+    ///
+    /// Причина: окно настроек рисует строку `DrawTextW` с `DT_VCENTER`, а мастер звал
+    /// `theme::paint_label`, у которого формат `DT_TOP` (он для многострочных подписей, и там
+    /// это верно). Эталон механики — окно настроек (решение 109.1), поэтому его тело переехало
+    /// сюда, и мастер встал на него. Тела рисования строки Э45 назвал неслитыми — теперь они
+    /// слиты.
+    ///
+    /// # Что делает и чего не делает
+    ///
+    /// Пишет **слово** в уже загрунтованный прямоугольник: земля, цвет чернил, шрифт и отступ
+    /// приходят параметрами, потому что «состояние приходит параметром» — граница слоя. Ни
+    /// заливки, ни рамки фокуса, ни ворот SEC-05 здесь нет: заливка у окон разная по роли
+    /// (закрытая часть, выбранная строка), а ворота — обязанность окна.
+    ///
+    /// Порядок чтения — по **первому сильному знаку имени**: строки этих списков каждая на
+    /// своём языке (раскладки сеанса и четырнадцать локалей под собственными написаниями), и
+    /// направление не может быть свойством контрола (решение 97.2 (г), задача Т-30-4).
+    ///
+    /// # Safety
+    ///
+    /// `dc` — контекст сообщения `WM_DRAWITEM`, живой на время посылки; `face` — живой шрифт
+    /// окна, который переживает вызов; `caption` — живой срез вызывающего.
+    pub unsafe fn draw_row(
+        dc: HDC,
+        rect: RECT,
+        caption: &mut [u16],
+        ink: COLORREF,
+        face: Option<HFONT>,
+        inset: i32,
+    ) {
+        use windows::Win32::Graphics::Gdi::{
+            DT_SINGLELINE, DT_VCENTER, DrawTextW, SetBkMode, SetTextColor, TRANSPARENT,
+        };
+
+        if caption.is_empty() {
+            return;
+        }
+
+        // SAFETY: `dc` is a handle passed by value; both calls write an attribute of the DC and
+        // touch no memory of this process.
+        unsafe { SetBkMode(dc, TRANSPARENT) };
+        // SAFETY: as above.
+        unsafe { SetTextColor(dc, ink) };
+
+        // Тот же отступ, что у закрытой части над списком: строка стоит прямо под ней и делит с
+        // ней левый край, поэтому второй отступ заставил бы слово прыгать при раскрытии
+        // (задача T-11-16).
+        let mut text = RECT {
+            left: rect.left + inset,
+            ..rect
+        };
+
+        let name = String::from_utf16_lossy(caption);
+
+        // SAFETY: `dc` is the DC of the message and `face` is a live font the window owns for
+        // longer than this call; the previous handle is put back below.
+        let previous = unsafe { crate::theme::select_face(dc, face) };
+
+        // SAFETY: the slice and `text` are live locals of this frame; the format has no
+        // `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text and writes only
+        // pixels of the DC.
+        unsafe {
+            DrawTextW(
+                dc,
+                caption,
+                &mut text,
+                DT_SINGLELINE
+                    | DT_VCENTER
+                    | crate::theme::reading_order(
+                        crate::theme::dc_is_rtl(dc),
+                        crate::settings::reading_of_name(&name)
+                            == crate::theme::Reading::LatinIsland,
+                    ),
+            )
+        };
+
+        // SAFETY: `previous` is what `select_face` answered for this same DC.
+        unsafe { crate::theme::restore_face(dc, previous) };
     }
 }
 

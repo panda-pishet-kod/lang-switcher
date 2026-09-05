@@ -7590,36 +7590,42 @@ unsafe fn draw_combo_row(
         .unwrap_or(buffer.len());
     let mut caption = buffer[..end].to_vec();
 
-    let text = RECT {
-        left: rect.left + theme::scaled(6, theme::dc_dpi(dc)),
-        ..rect
+    // ⭐ **Строка рисуется телом окна настроек — задача Т-46-4, решение 109.4.**
+    //
+    // Здесь стоял `theme::paint_label`, и он верен для подписей: его формат — `DT_TOP` с
+    // переносом, потому что подпись бывает многострочной. Строке списка это не подходит, и
+    // замер Т-46-1 сказал числом: в строке 24 px слово стояло с воздухом **3 сверху и 9
+    // снизу**, а в окне настроек — **8 и 5**, то есть отцентровано (`DT_VCENTER`). Глазу это
+    // видно, и пользователь это увидел. Эталон механики — окно настроек (решение 109.1).
+    //
+    // Земля остаётся за окном: у выбранной строки она своя, и роли красок этих двух окон
+    // разные. Слой красок не знает — они приходят разрешёнными.
+    let (ground, ink) = if selected {
+        (brushes.sel_bg(), palette.sel_fg)
+    } else {
+        (brushes.field_bg(), palette.text)
     };
 
-    // SAFETY: `dc` and `text` are live; the face belongs to this window's state.
+    // SAFETY: `dc` is the DC of the message and `ground` is a live brush of this window's state.
+    unsafe { FillRect(dc, &rect, ground) };
+
+    // SAFETY: `dc` is live for the length of the message; `faces.text` is a font this window's
+    // state owns for longer than the call; `caption` is a live local of this frame.
     unsafe {
-        theme::paint_label(
+        widgets::combo::draw_row(
             dc,
-            text,
+            rect,
             &mut caption,
-            theme::LabelStyle {
-                ground: if selected {
-                    brushes.sel_bg()
-                } else {
-                    brushes.field_bg()
-                },
-                ink: if selected {
-                    palette.sel_fg
-                } else {
-                    palette.text
-                },
-                face: Some(faces.text),
-                pitch: None,
-                // A layout name is a name of a language, and its own script decides how it
-                // reads — «English (United States)» and «עברית» alike.
-                reading: theme::Reading::Native,
-            },
-        )
+            ink,
+            Some(faces.text),
+            // Тот же отступ, что был: три единицы диалога окна настроек — это ≈5 px, и шесть
+            // пикселей макета через масштаб дают столько же. Число не трогается (решение
+            // 109.9: палитра и строки списка раскладок — вне этапа).
+            theme::scaled(6, theme::dc_dpi(dc)),
+        );
     }
+
+    1
 }
 
 /// Draws the progress line of the wizard — the steps behind in the accent, the steps ahead in

@@ -7324,12 +7324,6 @@ unsafe fn draw_combo_item(
         let copied = usize::try_from(copied).unwrap_or(0).min(length);
 
         if copied > 0 {
-            // SAFETY: `dc` is a handle passed by value; both calls write an attribute of
-            // the DC and touch no memory of this process.
-            unsafe { SetBkMode(dc, TRANSPARENT) };
-            // SAFETY: as above.
-            unsafe { SetTextColor(dc, ink) };
-
             // The same three dialog units the closed face above it uses — an item of the
             // dropped-down list stands directly under the closed part and shares its left
             // edge, so a second inset would make the word jump on opening (task T-11-16).
@@ -7337,47 +7331,18 @@ unsafe fn draw_combo_item(
                 .map(|(horizontal, _)| horizontal)
                 .unwrap_or(FIELD_TEXT_INSET_DLU);
 
-            let mut text_rect = RECT {
-                left: rect.left + inset,
-                top: rect.top,
-                right: rect.right,
-                bottom: rect.bottom,
-            };
-
-            // Our own face, grey-antialiased — task T-11-17.
+            // ⭐ **Тело строки переехало в `widgets::combo::draw_row` — задача Т-46-4,
+            // решение 109.4.** Оно стояло здесь с задачи T-11-6 и не изменилось ни на пиксель;
+            // уехало потому, что таких тел в программе было ДВА, и второе — у мастера —
+            // рисовало слово `theme::paint_label`, то есть форматом `DT_TOP`. Замер Т-46-1:
+            // в строке списка мастера воздух 3 сверху и 9 снизу против 8 и 5 здесь. Эталон
+            // механики — это окно (решение 109.1), поэтому мастер встал на его тело.
             //
-            // SAFETY: `dc` is the DC of the message and `face` is a live font the dialog's
-            // state owns for longer than this call; the previous handle is put back below.
-            let previous_face = unsafe { select_face(dc, face) };
-
-            // SAFETY: the slice and `text_rect` are live locals of this frame; the format
-            // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
-            // and writes only pixels of the DC.
-            // Решение 97.2 (г), task Т-30-4: **by the first strong character of the name.**
-            // A combo box of this dialog shows names that are each in their own language — the
-            // layouts of the session, and the fourteen locales under their own spellings — so
-            // the direction cannot be a property of the control. `Русский (Россия)` and
-            // `English (United States)` read left to right in a mirrored window; `עברית` reads
-            // right to left in any window, and forcing it the other way would be the defect
-            // this rule exists to prevent.
-            let name = String::from_utf16_lossy(&buffer[..copied]);
-
+            // SAFETY: `dc` is the DC of the message; `face` is a live font the dialog's state
+            // owns for longer than this call; the slice is a live local of this frame.
             unsafe {
-                DrawTextW(
-                    dc,
-                    &mut buffer[..copied],
-                    &mut text_rect,
-                    DT_SINGLELINE
-                        | DT_VCENTER
-                        | theme::reading_order(
-                            theme::dc_is_rtl(dc),
-                            reading_of_name(&name) == theme::Reading::LatinIsland,
-                        ),
-                )
-            };
-
-            // SAFETY: `previous_face` is what `select_face` answered for this same DC.
-            unsafe { restore_face(dc, previous_face) };
+                widgets::combo::draw_row(dc, rect, &mut buffer[..copied], ink, face, inset);
+            }
         }
     }
 
