@@ -104,32 +104,32 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
-    TrackMouseEvent, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END,
-    VK_ESCAPE, VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
-    VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT,
-    VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_UP,
+    TrackMouseEvent, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE,
+    VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT,
+    VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    VK_SNAPSHOT,
 };
 use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_CLICKED, BN_DBLCLK, BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN,
-    CB_RESETCONTENT, CB_SETCURSEL, CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW,
-    DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW,
-    DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN,
-    EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect,
-    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, LB_ADDSTRING,
-    LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT,
-    LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, PostMessageW, RT_DIALOG, STM_SETICON,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW,
-    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP,
-    WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
-    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
-    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT,
-    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
+    CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL,
+    CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW, DLGC_STATIC, DLGC_WANTALLKEYS,
+    DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW,
+    DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE,
+    GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
+    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
+    IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
+    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, PostMessageW,
+    RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW,
+    SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY,
+    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
+    WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2996,7 +2996,11 @@ impl Modifiers {
 }
 
 /// Whether one virtual key is down, as the message queue sees it.
-fn key_is_down(key: VIRTUAL_KEY) -> bool {
+///
+/// `pub(crate)` с задачи Т-46-2: правило нажатия глифа живёт теперь в `widgets::glyph`, и его
+/// `arrow_is_down` спрашивает то же самое тем же телом — второго спрашивающего у этой мерки
+/// не заводится.
+pub(crate) fn key_is_down(key: VIRTUAL_KEY) -> bool {
     // SAFETY: takes a virtual-key code by value and touches no memory of ours. The high bit of
     // the `i16` it answers is "down", which for a signed value is "negative".
     unsafe { GetKeyState(i32::from(key.0)) < 0 }
@@ -11308,20 +11312,21 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
 /// [`set_check`], [`is_checked`] and [`check_radio`] — their signatures untouched — write
 /// and read the store, and everything that reads the dialog keeps reading the one truth.
 fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
-    let notification = u32::from(notification);
-    let clicked = notification == BN_CLICKED || notification == BN_DBLCLK;
+    use crate::widgets::glyph::{Answer, Kind, answer};
 
-    // A radio answers a click, and it answers the focus arrival an arrow key caused — the
-    // two ways the automatic type checked itself. `key_is_down` is queue-synchronised, so
-    // the answer is the state as of the keystroke whose focus move is being handled.
-    let radio_checks = clicked || (notification == BN_SETFOCUS && arrow_key_is_down());
-
+    // ⭐ **Правило нажатия переехало в слой — задача Т-46-2, решение 109.1.** Тело, стоявшее
+    // здесь с задачи T-11-5b, теперь живёт в `widgets::glyph::answer` и служит всем окнам
+    // программы: мастер FR-104 и «От автора» зовут его же. Поведение этого окна не менялось —
+    // замер Т-46-1 на 44 щелчках настоящей дорогой дал 0 несработавших и 0 сдвинутых соседок
+    // и до переноса, и после.
     match control {
-        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED if clicked => {
+        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED
+            if answer(Kind::Check, notification) == Answer::Toggle =>
+        {
             set_check(hwnd, control, !is_checked(hwnd, control));
         }
 
-        IDC_MODE_PAIR | IDC_MODE_CYCLE if radio_checks => {
+        IDC_MODE_PAIR | IDC_MODE_CYCLE if answer(Kind::Radio, notification) == Answer::Choose => {
             check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, control);
         }
 
@@ -11329,14 +11334,8 @@ fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
     }
 }
 
-/// Whether one of the four arrow keys is down right now — the keys the dialog manager
-/// walks a `WS_GROUP` run with. The same queue-synchronised [`key_is_down`] the capture
-/// uses, for the same reason: the state wanted is the one of the keystroke being handled.
-fn arrow_key_is_down() -> bool {
-    [VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN]
-        .into_iter()
-        .any(key_is_down)
-}
+// ⚠ **`arrow_key_is_down` переехал в `widgets::glyph` — задача Т-46-2.** Он был частью правила
+// нажатия, а правило теперь одно на все окна: тело стоит рядом с `answer`, которое его зовёт.
 
 /// One command from the dialog.
 ///
@@ -13198,7 +13197,10 @@ pub(crate) fn low_word(value: usize) -> u16 {
 }
 
 /// The next 16 bits of a message parameter.
-fn high_word(value: usize) -> u16 {
+///
+/// `pub(crate)` с задачи Т-46-2: код уведомления `WM_COMMAND` читают теперь оба окна с глифами
+/// — это окно и окна писем, — и читают его одним телом.
+pub(crate) fn high_word(value: usize) -> u16 {
     u16::try_from((value >> 16) & 0xFFFF).unwrap_or(0)
 }
 

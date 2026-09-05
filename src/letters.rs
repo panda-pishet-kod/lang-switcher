@@ -3928,6 +3928,11 @@ unsafe extern "system" fn letter_proc(
         WM_COMMAND => {
             let control = i32::from(settings::low_word(wparam.0));
 
+            // ⭐ **Код уведомления читается — задача Т-46-2, решение 109.1.** До Э46 он не
+            // читался вовсе, и глифы этих окон переключались на каждое уведомление очереди
+            // настоящего щелчка: `BN_KILLFOCUS` соседке, `BN_SETFOCUS` и `BN_CLICKED` своей.
+            let notification = settings::high_word(wparam.0);
+
             // Esc, which the dialog manager sends whether or not the window has the button.
             if control == IDCANCEL.0 {
                 close_window(hwnd);
@@ -3938,14 +3943,24 @@ unsafe extern "system" fn letter_proc(
             // live for the length of the window.
             let is_wizard = unsafe { with_state(hwnd, |state| state.kind) } == Some(Kind::Wizard);
 
-            if is_wizard && wizard_command(hwnd, control) {
+            if is_wizard && wizard_command(hwnd, control, notification) {
                 return 0;
             }
 
             // **FR-102: the switch writes the file at once.** Not on «Закрыть» and not on a
             // later save — a person who turns the feed off has turned it off, and a window
             // they close some other way must not undo that.
-            if control == IDC_NEWS_SWITCH {
+            //
+            // ⛔ **Задача Т-46-2: и здесь фильтр слоя, по той же причине.** Выключатель ленты —
+            // `BS_OWNERDRAW | BS_NOTIFY`, то есть шлёт ту же очередь из трёх уведомлений, что и
+            // галки мастера. Без фильтра щелчок по нему с переходом фокуса переключал ленту
+            // дважды — **и дважды писал файл**, потому что FR-102 пишет немедленно. Пикселей
+            // это не меняет; замер находки 3 (`scratchpad-Э46\красное-галки-e45.log`) показал,
+            // что болезнь была общей.
+            if control == IDC_NEWS_SWITCH
+                && widgets::glyph::answer(widgets::glyph::Kind::Check, notification)
+                    == widgets::glyph::Answer::Toggle
+            {
                 let wanted = !state_now().feed;
 
                 update_state(|state| state.feed = wanted);
@@ -3959,6 +3974,13 @@ unsafe extern "system" fn letter_proc(
                 );
                 widgets::repaint::control(hwnd, IDC_NEWS_SWITCH);
 
+                return 0;
+            }
+
+            // Кнопки писем: подписанные действия делает щелчок и ничего кроме (Т-46-2).
+            if widgets::glyph::answer(widgets::glyph::Kind::Button, notification)
+                != widgets::glyph::Answer::Act
+            {
                 return 0;
             }
 
@@ -8075,26 +8097,45 @@ unsafe fn draw_wizard_glyph(
 
 /// **What a press does in the wizard** — FR-104, and the answer is whether it was handled here.
 ///
-/// Every branch that changes what is on the screen ends the same way: the record is changed,
-/// the window is filled and laid out again, and it is repainted. One road and not three, so
-/// that a step added later cannot forget one of them.
-fn wizard_command(hwnd: HWND, control: i32) -> bool {
+/// # ⛔ Задача Т-46-2, решение 109.1: КОД УВЕДОМЛЕНИЯ ЧИТАЕТСЯ, и это ремонт находки пользователя
+///
+/// До Э46 эта функция брала из `WM_COMMAND` только идентификатор, а код уведомления не читала
+/// вовсе. Все глифы шаблона `IDD_WIZARD` — `BS_OWNERDRAW | BS_NOTIFY`, поэтому на один
+/// настоящий щелчок мышью приходит **очередь из трёх уведомлений**, и замер Т-46-1 её напечатал
+/// (`scratchpad-Э46\красное-галки-e45.log`): `1337/BN_KILLFOCUS`, `1338/BN_SETFOCUS`,
+/// `1338/BN_CLICKED`. Отвечая на каждое, окно переключало соседку и переключало свою **дважды**
+/// — 36 несработавших щелчков и 35 сдвинутых соседок из 44. Слова пользователя: «то не ставятся
+/// с первого раза, то не снимаются с первого раза».
+///
+/// Теперь решает [`widgets::glyph::answer`] — **то же тело, что у окна настроек** (эталон
+/// механики, решение 109.1). Галка отвечает на щелчок, радио — ещё на приход фокуса от стрелки,
+/// карточка и кнопка — только на щелчок, комбобокс — только на `CBN_SELCHANGE`.
+fn wizard_command(hwnd: HWND, control: i32, notification: u16) -> bool {
+    use crate::widgets::glyph::{Answer, Kind, answer};
     use report::{Field, Repeat, Trouble};
     use windows::Win32::UI::WindowsAndMessaging::{CB_GETCURSEL, CBN_SELCHANGE};
 
-    let _ = CBN_SELCHANGE;
+    // Кнопки шаблона `BS_NOTIFY` не несут и шлют один `BN_CLICKED`, но правило одно на все
+    // элементы окна и здесь: то, что за кнопкой написано, делает щелчок и ничего кроме.
+    let pressed = answer(Kind::Button, notification) == Answer::Act;
 
     // The three that do not touch the draft.
     match control {
-        IDC_WZ_CANCEL => {
+        IDC_WZ_CANCEL if pressed => {
             close_window(hwnd);
             return true;
         }
-        IDC_WZ_NEXT => {
+        IDC_WZ_NEXT if pressed => {
             wizard_forward(hwnd);
             return true;
         }
-        IDC_WZ_BACK => {
+        IDC_WZ_BACK if pressed => {
+            // ⭐ **Черновик собирается и на шаге НАЗАД — задача Т-46-3, решение 109.3.** Поля
+            // есть правда, пока шаг на экране; уходя с него в любую сторону, эту правду надо
+            // забрать, иначе набранное потеряется. Вперёд это делал `wizard_forward` с самого
+            // начала, назад — не делал никто.
+            wizard_harvest(hwnd);
+
             // SAFETY: the state pointer is live for the length of the window.
             unsafe {
                 with_state(hwnd, |state| {
@@ -8129,56 +8170,93 @@ fn wizard_command(hwnd: HWND, control: i32) -> bool {
         _ => {}
     }
 
-    // The choices. Each of them reads the field it belongs to out of the window first, so that
-    // a person who typed and then pressed a radio does not lose what they typed.
+    // Выбор внутри шага. **Что именно считать нажатием, решает слой** (`widgets::glyph::answer`,
+    // решение 109.1) — и по роду элемента: карточка отвечает щелчку, радио ещё и приходу фокуса
+    // от стрелки, галка щелчку, список — только `CBN_SELCHANGE`.
     let chosen = settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_GETCURSEL, 0, 0);
 
+    let card_pressed = pressed;
+    let radio_chosen = answer(Kind::Radio, notification) == Answer::Choose;
+    let check_toggled = answer(Kind::Check, notification) == Answer::Toggle;
+    let list_changed = u32::from(notification) == CBN_SELCHANGE;
+
     // SAFETY: as above.
-    let changed = unsafe {
+    let touched = unsafe {
         with_state(hwnd, |state| {
-            let Some(wizard) = state.wizard.as_deref_mut() else {
-                return false;
+            let wizard = state.wizard.as_deref_mut()?;
+
+            let touched = match control {
+                c if (IDC_WZ_CARD_1..=IDC_WZ_CARD_1 + 2).contains(&c) && card_pressed => {
+                    // Прежняя карточка нужна, чтобы перерисовать ровно две: ту, что теряет
+                    // выбор, и ту, что его получает.
+                    let was = IDC_WZ_CARD_1
+                        + match wizard.draft.trouble {
+                            Trouble::WrongResult => 0,
+                            Trouble::NothingHappened => 1,
+                            Trouble::Idea => 2,
+                        };
+
+                    wizard.draft.trouble = match control - IDC_WZ_CARD_1 {
+                        0 => Trouble::WrongResult,
+                        1 => Trouble::NothingHappened,
+                        _ => Trouble::Idea,
+                    };
+
+                    Touched::Cards(was, control)
+                }
+
+                c if (IDC_WZ_FIELD_1..=IDC_WZ_FIELD_1 + 2).contains(&c) && radio_chosen => {
+                    wizard.draft.field = match control - IDC_WZ_FIELD_1 {
+                        0 => Field::Normal,
+                        1 => Field::Password,
+                        _ => Field::Unknown,
+                    };
+
+                    Touched::Range(IDC_WZ_FIELD_1, IDC_WZ_FIELD_1 + 2)
+                }
+
+                c if (IDC_WZ_REPEAT_1..=IDC_WZ_REPEAT_1 + 2).contains(&c) && radio_chosen => {
+                    wizard.draft.repeat = match control - IDC_WZ_REPEAT_1 {
+                        0 => Repeat::Always,
+                        1 => Repeat::Sometimes,
+                        _ => Repeat::Once,
+                    };
+
+                    Touched::Range(IDC_WZ_REPEAT_1, IDC_WZ_REPEAT_1 + 2)
+                }
+
+                c if (IDC_WZ_ATTACH_1..=IDC_WZ_ATTACH_1 + 3).contains(&c) && check_toggled => {
+                    let attach = &mut wizard.draft.attach;
+
+                    match control - IDC_WZ_ATTACH_1 {
+                        0 => attach.machine = !attach.machine,
+                        1 => attach.layouts = !attach.layouts,
+                        2 => attach.settings = !attach.settings,
+                        _ => attach.journal = !attach.journal,
+                    }
+
+                    Touched::Glyph(control)
+                }
+
+                IDC_WZ_LAYOUT if list_changed => {
+                    let index = usize::try_from(chosen).ok()?;
+                    wizard.draft.layout = wizard.layouts.get(index)?.clone();
+
+                    // Комбобокс перерисовывает закрытую часть сам, выбирая строку.
+                    Touched::Nothing
+                }
+
+                _ => return None,
             };
 
-            match control {
-                IDC_WZ_CARD_1 => wizard.draft.trouble = Trouble::WrongResult,
-                c if c == IDC_WZ_CARD_1 + 1 => wizard.draft.trouble = Trouble::NothingHappened,
-                c if c == IDC_WZ_CARD_1 + 2 => wizard.draft.trouble = Trouble::Idea,
-                IDC_WZ_FIELD_1 => wizard.draft.field = Field::Normal,
-                c if c == IDC_WZ_FIELD_1 + 1 => wizard.draft.field = Field::Password,
-                c if c == IDC_WZ_FIELD_1 + 2 => wizard.draft.field = Field::Unknown,
-                IDC_WZ_REPEAT_1 => wizard.draft.repeat = Repeat::Always,
-                c if c == IDC_WZ_REPEAT_1 + 1 => wizard.draft.repeat = Repeat::Sometimes,
-                c if c == IDC_WZ_REPEAT_1 + 2 => wizard.draft.repeat = Repeat::Once,
-                IDC_WZ_ATTACH_1 => {
-                    wizard.draft.attach.machine = !wizard.draft.attach.machine;
-                }
-                c if c == IDC_WZ_ATTACH_1 + 1 => {
-                    wizard.draft.attach.layouts = !wizard.draft.attach.layouts;
-                }
-                c if c == IDC_WZ_ATTACH_1 + 2 => {
-                    wizard.draft.attach.settings = !wizard.draft.attach.settings;
-                }
-                c if c == IDC_WZ_ATTACH_1 + 3 => {
-                    wizard.draft.attach.journal = !wizard.draft.attach.journal;
-                }
-                IDC_WZ_LAYOUT => {
-                    if let Ok(index) = usize::try_from(chosen)
-                        && let Some(name) = wizard.layouts.get(index)
-                    {
-                        wizard.draft.layout = name.clone();
-                    }
-                }
-                _ => return false,
-            }
-
-            true
+            Some(touched)
         })
-    };
-
-    if changed != Some(true) {
-        return false;
     }
+    .flatten();
+
+    let Some(touched) = touched else {
+        return false;
+    };
 
     // ⭐ **ЗДЕСЬ И БЫЛО МОРГАНИЕ — задача Т-45-3, решение 107.5.** До Э45 эта строка звала
     // `wizard_refresh`, то есть на КАЖДЫЙ щелчок по карточке, радио или галке гасила окно
@@ -8189,12 +8267,171 @@ fn wizard_command(hwnd: HWND, control: i32) -> bool {
     // Цена правила измерена на живом продукте 0.44.0 (`красное-моргание-e44.log`): при щелчках
     // по карточкам **5 кадров из 1087** не равны ни одному устоявшемуся виду, два из них
     // расходятся больше чем на процент окна, худший — на **27 700 пикселей**: на сохранённом
-    // кадре первой карточки в окне НЕТ ВОВСЕ. У той же дороги в окне настроек — галка «Звуковой
-    // отклик», которая зовёт `set_check` + перерисовку ОДНОГО контрола, — 1 кадр из 1114 при
-    // худшем расхождении 697 пикселей.
+    // кадре первой карточки в окне НЕТ ВОВСЕ.
+    //
+    // ⭐ **Задача Т-46-3, решение 109.2:** и `wizard_refresh_controls`, который перерисовывал
+    // ВЕСЬ шаг и ещё семь контролов на каждый щелчок, тоже ушёл. Перерисовывается только
+    // затронутое, и **по роду элемента**, как в окне настроек.
     //
     // Смена шага по-прежнему идёт полной дорогой: там контролы вправду переезжают.
-    wizard_refresh_controls(hwnd);
+    wizard_after_choice(hwnd, touched);
+    true
+}
+
+/// Что именно затронул выбор внутри шага — задача Т-46-3, решение 109.2.
+///
+/// Перерисовка идёт **по роду элемента, как в окне настроек**: глиф — дорогой `set_check`
+/// (со стиранием), карточка — дорогой `invalidate_hot` (без стирания). Список перерисовывает
+/// себя сам.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Touched {
+    /// Одна галка.
+    Glyph(i32),
+    /// Ряд радио: диапазон идентификаторов, тот же, что ходит `check_radio`.
+    Range(i32, i32),
+    /// Две карточки: прежняя и новая.
+    Cards(i32, i32),
+    /// Ничего своего.
+    Nothing,
+}
+
+/// **Состояние элемента внутри шага сменилось** — перерисовать затронутое и ничего больше.
+///
+/// Решение 109.2, задача Т-46-3. Пришло на смену `wizard_refresh_controls`, который звал
+/// [`fill_wizard`] (а тот **переписывал поля устаревшим черновиком** — находка пользователя) и
+/// инвалидировал все контролы шага плюс ещё семь на каждый щелчок.
+///
+/// # Что делается
+///
+/// 1. **Затронутый элемент** — по роду: галка и ряд радио через `widgets::repaint::control` и
+///    `range` (со стиранием, ровно как `set_check`/`check_radio` окна настроек); две карточки
+///    через `control_no_erase` (без стирания, ровно как `invalidate_hot`).
+/// 2. **Подписи, чей текст вправду изменился.** Выбор карточки «идея» укорачивает дорогу с пяти
+///    шагов до трёх, и «Шаг N из M», заголовок, пояснение и подпись кнопки обязаны это
+///    показать. Пишутся только те, у кого текст стал другим: `SetDlgItemTextW` сам просит
+///    перерисовку, и запись того же слова была бы лишним кадром.
+/// 3. **Полоса хода** — только если строка шага изменилась: полоса рисует длину дороги, и
+///    другой у неё причины меняться нет.
+///
+/// # Чего НЕ делается
+///
+/// [`fill_wizard`] — ни целиком, ни частью: **поля есть правда, пока шаг на экране**
+/// (решение 109.3), и смена состояния их не касается. [`layout_wizard`] — внутри одного шага ни
+/// один контрол не переезжает.
+fn wizard_after_choice(hwnd: HWND, touched: Touched) {
+    match touched {
+        Touched::Glyph(control) => widgets::repaint::control(hwnd, control),
+        Touched::Range(first, last) => widgets::repaint::range(hwnd, first, last),
+        Touched::Cards(was, now) => {
+            widgets::repaint::control_no_erase(hwnd, was);
+
+            if now != was {
+                widgets::repaint::control_no_erase(hwnd, now);
+            }
+        }
+        Touched::Nothing => {}
+    }
+
+    // Подписи, зависящие от черновика. `road()` и `is_last()` читаются здесь, чтобы дорога
+    // «идеи» короче пяти шагов стала видна сразу.
+    //
+    // SAFETY: the state pointer is live for the length of the window.
+    let words = unsafe {
+        with_state(hwnd, |state| {
+            let wizard = state.wizard.as_deref()?;
+            Some(wizard_choice_words(wizard))
+        })
+    }
+    .flatten();
+
+    let Some(words) = words else {
+        return;
+    };
+
+    let mut step_changed = false;
+
+    for (control, text) in words {
+        let changed = set_text_if_changed(hwnd, control, &text);
+
+        if control == IDC_WZ_STEP {
+            step_changed = changed;
+        }
+    }
+
+    if step_changed {
+        widgets::repaint::control_no_erase(hwnd, IDC_WZ_PROGRESS);
+    }
+}
+
+/// Четыре подписи, которые зависят от черновика и потому могут смениться внутри шага.
+///
+/// Слова берутся теми же строками, что и в [`fill_wizard`], — второй таблицы не заводится:
+/// одна и та же строка ресурса читается там и здесь.
+fn wizard_choice_words(wizard: &Wizard) -> [(i32, String); 4] {
+    use crate::settings::{
+        IDS_CLOSE, IDS_THANKYOU_BUG_TITLE, IDS_THANKYOU_IDEA_TITLE, IDS_WIZARD_ATTACH_NOTE,
+        IDS_WIZARD_ATTACH_TITLE, IDS_WIZARD_DID_NOTE, IDS_WIZARD_DID_TITLE, IDS_WIZARD_DONE,
+        IDS_WIZARD_IDEA_NOTE, IDS_WIZARD_IDEA_TITLE, IDS_WIZARD_NEXT, IDS_WIZARD_PREVIEW_NOTE,
+        IDS_WIZARD_PREVIEW_TITLE, IDS_WIZARD_STEP, IDS_WIZARD_WHAT_NOTE, IDS_WIZARD_WHAT_TITLE,
+        IDS_WIZARD_WHERE_NOTE, IDS_WIZARD_WHERE_TITLE, format_text, text,
+    };
+
+    let step = wizard.current();
+    let road = wizard.road();
+    let idea = wizard.draft.trouble.is_idea();
+
+    let (title, note) = match step {
+        Step::What => (IDS_WIZARD_WHAT_TITLE, Some(IDS_WIZARD_WHAT_NOTE)),
+        Step::Where => (IDS_WIZARD_WHERE_TITLE, Some(IDS_WIZARD_WHERE_NOTE)),
+        Step::Did => (IDS_WIZARD_DID_TITLE, Some(IDS_WIZARD_DID_NOTE)),
+        Step::Idea => (IDS_WIZARD_IDEA_TITLE, Some(IDS_WIZARD_IDEA_NOTE)),
+        Step::Attach => (IDS_WIZARD_ATTACH_TITLE, Some(IDS_WIZARD_ATTACH_NOTE)),
+        Step::Preview => (IDS_WIZARD_PREVIEW_TITLE, Some(IDS_WIZARD_PREVIEW_NOTE)),
+        Step::Done => (
+            if idea {
+                IDS_THANKYOU_IDEA_TITLE
+            } else {
+                IDS_THANKYOU_BUG_TITLE
+            },
+            None,
+        ),
+    };
+
+    [
+        (
+            IDC_WZ_STEP,
+            if step == Step::Done {
+                text(IDS_WIZARD_DONE)
+            } else {
+                format_text(
+                    IDS_WIZARD_STEP,
+                    &[&(wizard.step + 1).to_string(), &road.len().to_string()],
+                )
+            },
+        ),
+        (IDC_WZ_TITLE, text(title)),
+        (IDC_WZ_NOTE, note.map(text).unwrap_or_default()),
+        (
+            IDC_WZ_NEXT,
+            text(match step {
+                Step::Done => IDS_CLOSE,
+                _ if wizard.is_last() => IDS_WIZARD_DONE,
+                _ => IDS_WIZARD_NEXT,
+            }),
+        ),
+    ]
+}
+
+/// Пишет подпись, **только если она вправду другая**, и отвечает, писала ли.
+///
+/// Решение 109.2: `SetDlgItemTextW` сам просит перерисовку контрола, поэтому запись того же
+/// слова — это лишний кадр и ничего больше.
+fn set_text_if_changed(hwnd: HWND, control: i32, text: &str) -> bool {
+    if settings::get_text(hwnd, control) == text {
+        return false;
+    }
+
+    settings::set_text(hwnd, control, text);
     true
 }
 
@@ -8255,60 +8492,71 @@ fn wizard_harvest(hwnd: HWND) {
 /// его тихо. Красный уехал в поставку e43 вместе с правкой. Окно здесь своё и поток свой,
 /// повиснуть не на чем, но правило от этого не перестаёт быть правилом: сторож, который падает,
 /// не сторожит уже ничего.
-/// **Состояние элемента внутри шага сменилось** — перерисовать затронутое и ничего больше.
+
+// ⚠ **`wizard_refresh_controls` убран — задача Т-46-3, решение 109.2.** Он звал `fill_wizard`
+// на КАЖДЫЙ щелчок, и тот переписывал поля устаревшим черновиком (находка пользователя: «текст
+// в полях сбрасывается при нажатии любого переключателя»), а затем инвалидировал все контролы
+// шага и ещё семь. Дорога щелчка теперь — `wizard_after_choice` с перерисовкой затронутого по
+// роду элемента; отсчёт, состояние и захват — три подписи ниже.
+
+/// Подпись кнопки «Взять из активного окна» — она одна и меняется отсчётом, задача Т-46-3.
 ///
-/// Решение 107.5, задача Т-45-3. Дорога щелчка по карточке, радио, галке и выбора в списке
-/// раскладок: черновик уже изменён, тексты надо перечитать, а **окно трогать нельзя**.
-///
-/// # Что делается и чего НЕ делается
-///
-/// Делается: [`fill_wizard`] — состояние черновика становится текстами и отметками контролов, —
-/// и затем `widgets::repaint::control` по каждому контролу текущего шага плюс полоса хода,
-/// строка «Шаг N из M» и кнопки: их вид зависит от черновика (карточка «идея» укорачивает
-/// дорогу с пяти шагов до трёх, и полоса с надписью обязаны это показать).
-///
-/// НЕ делается: [`layout_wizard`]. Внутри одного шага **ни один контрол не переезжает** — высоты
-/// карточек считаются по их текстам, а тексты карточек черновиком не меняются; ширины кнопок
-/// считаются по подписям, а подпись «Далее» становится «Готово» только со сменой шага. Именно
-/// перестановка и стирание окна под неё и давали моргание.
-///
-/// НЕ делается и `WM_SETREDRAW`: гасить рисование незачем, когда рисуется только то, что
-/// изменилось.
-fn wizard_refresh_controls(hwnd: HWND) {
+/// ⛔ **Пришло на смену `wizard_refresh_controls`, который звал [`fill_wizard`]** — а тот
+/// переписывал ПОЛЯ устаревшим черновиком (решение 109.3, находка пользователя). Отсчёт меняет
+/// одну надпись, и трогать он обязан одну надпись.
+fn wizard_show_capture(hwnd: HWND) {
+    use crate::settings::{IDS_WIZARD_CAPTURE, IDS_WIZARD_CAPTURE_COUNT, format_text, text};
+
     // SAFETY: the state pointer is live for the length of the window.
-    let step = unsafe {
+    let caption = unsafe {
         with_state(hwnd, |state| {
-            fill_wizard(hwnd, state);
-            state.wizard.as_deref().map(Wizard::current)
+            let wizard = state.wizard.as_deref()?;
+
+            Some(if wizard.countdown > 0 {
+                format_text(IDS_WIZARD_CAPTURE_COUNT, &[&wizard.countdown.to_string()])
+            } else {
+                text(IDS_WIZARD_CAPTURE)
+            })
         })
     }
     .flatten();
 
-    let Some(step) = step else {
-        return;
-    };
-
-    // ⛔ **БЕЗ СТИРАНИЯ.** Первая редакция этой функции звала `widgets::repaint::control`, и
-    // прибор на живом 0.45.0 ответил ХУЖЕ, чем на 0.44.0: 19 кадров «ни до, ни после» из 1109
-    // против 5 из 1087. Причина — стирание: owner-draw карточка на `WM_ERASEBKGND` заливается
-    // кистью ФОНА ОКНА, и на кадре между стиранием и `WM_DRAWITEM` карточки нет вовсе (худший
-    // кадр обеих поставок — один и тот же, 27 700 пикселей). Точечная перерисовка без стирания
-    // этот кадр убирает: элемент рисует весь свой прямоугольник сам.
-    for control in controls_of(step) {
-        widgets::repaint::control_no_erase(hwnd, *control);
+    if let Some(caption) = caption {
+        set_text_if_changed(hwnd, IDC_WZ_CAPTURE, &caption);
     }
+}
 
-    // Полоса хода, счётчик шагов и кнопки — вне таблицы шага, но от черновика зависят.
-    for control in [
-        IDC_WZ_STEP,
-        IDC_WZ_PROGRESS,
-        IDC_WZ_TITLE,
-        IDC_WZ_NOTE,
-        IDC_WZ_CANCEL,
-        IDC_WZ_BACK,
-        IDC_WZ_NEXT,
-    ] {
-        widgets::repaint::control_no_erase(hwnd, control);
+/// Строка состояния под кнопками «Скопировать» и «Сохранить» — одна подпись, задача Т-46-3.
+fn wizard_show_status(hwnd: HWND) {
+    // SAFETY: the state pointer is live for the length of the window.
+    let said = unsafe {
+        with_state(hwnd, |state| {
+            state.wizard.as_deref().map(|w| w.status.clone())
+        })
+    }
+    .flatten();
+
+    if let Some(said) = said {
+        set_text_if_changed(hwnd, IDC_WZ_STATUS, &said);
+    }
+}
+
+/// Имя пойманной программы — в поле «Программа:», задача Т-46-3.
+///
+/// ⚠ **Единственное место, где программа пишет в поле, пока шаг на экране,** и это не
+/// нарушение решения 109.3, а его смысл: захват для того и нажат, чтобы поле заполнилось.
+/// Пишется, только если имя вправду другое, — иначе каретка человека уехала бы ни за чем.
+fn wizard_show_program(hwnd: HWND) {
+    // SAFETY: the state pointer is live for the length of the window.
+    let name = unsafe {
+        with_state(hwnd, |state| {
+            state.wizard.as_deref().map(|w| w.draft.program.clone())
+        })
+    }
+    .flatten();
+
+    if let Some(name) = name {
+        set_text_if_changed(hwnd, IDC_WZ_PROGRAM, &name);
     }
 }
 
@@ -8460,8 +8708,8 @@ fn wizard_start_capture(hwnd: HWND) {
         crate::app::report_non_critical("SetTimer", &WinError::from_thread());
     }
 
-    // Задача Т-45-3: меняется одна подпись — перерисовывается затронутое, а не окно.
-    wizard_refresh_controls(hwnd);
+    // Задачи Т-45-3 и Т-46-3: меняется одна подпись — перерисовывается она одна.
+    wizard_show_capture(hwnd);
 }
 
 /// One second of the count-down; at zero it looks at the foreground window and stops.
@@ -8479,8 +8727,8 @@ fn wizard_tick(hwnd: HWND) {
 
     if now != Some(0) {
         // ⭐ Тик отсчёта каждую секунду перерисовывал ОКНО ЦЕЛИКОМ. Задача Т-45-3: только
-        // затронутое — на экране меняется одна цифра.
-        wizard_refresh_controls(hwnd);
+        // затронутое — на экране меняется одна цифра (Т-46-3: одна подпись).
+        wizard_show_capture(hwnd);
         return;
     }
 
@@ -8500,8 +8748,9 @@ fn wizard_tick(hwnd: HWND) {
         })
     };
 
-    // Задача Т-45-3: шаг тот же, меняется имя в поле — точечно.
-    wizard_refresh_controls(hwnd);
+    // Задачи Т-45-3 и Т-46-3: шаг тот же, меняются имя в поле и подпись кнопки — точечно.
+    wizard_show_program(hwnd);
+    wizard_show_capture(hwnd);
 }
 
 /// **What the capture takes** — «имя.exe · КлассОкна», and nothing else.
@@ -8668,8 +8917,8 @@ fn wizard_say(hwnd: HWND, said: String) {
         })
     };
 
-    // Задача Т-45-3: строка состояния — одна подпись, и перерисовывается она одна.
-    wizard_refresh_controls(hwnd);
+    // Задачи Т-45-3 и Т-46-3: строка состояния — одна подпись, и пишется она одна.
+    wizard_show_status(hwnd);
 }
 
 /// The ink of a glyph's mark, by the role the table names.
