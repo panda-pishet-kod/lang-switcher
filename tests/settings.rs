@@ -13210,42 +13210,48 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
     let base = vertical_base_unit();
     let field_box = vertical_units(settings::FIELD_BOX_DLU, base);
     let control = vertical_units(settings::DIALOG_FONT_HEIGHT_DLU, base);
-    // ⚠ Задача Т-45-2: арифметика переехала в `widgets::field::air`, тело не менялось. Правило
-    // этого окна — `OddPixel::Dropped`, то самое «поровну, лишний пиксель теряется», которым
-    // отвечала `theme::field_frame_air`. Утверждения ниже прежние.
-    let dropped = lang_switcher::widgets::field::OddPixel::Dropped;
-    let air = lang_switcher::widgets::field::air(Some(field_box), control, 1, dropped).0;
-    let outer = control + 2 * air;
+    // ⭐ **Задача Т-46-5, решение 109.6: один стандарт без вариантов.** Т-45-2 перенёс
+    // арифметику в `widgets::field::air` и назвал различие двух окон параметром `OddPixel`;
+    // Т-46-5 параметр убрал. Прежнее правило этого окна — «поровну, лишний пиксель теряется» —
+    // было **записью того, что вышло** (T-12-3 так и говорил: «centring may lose the odd
+    // pixel»), и пользователь его отменил словами «нужен общий вариант, мы же приводим все к
+    // одному стандарту, а не подстраиваемся под мастера». Теперь коробка равна заказанной
+    // высоте в точности: остаток пополам, нечётный пиксель — вниз. Замер до правки —
+    // 25 px против заказанных 26 (`scratchpad-Э46\красное-коробки-e45.log`).
+    let (above, below) = lang_switcher::widgets::field::air(Some(field_box), control, 1);
+    let outer = control + above + below;
 
     println!(
-        "base unit {base}: box {field_box} px, control {control} px, air {air} px, outer \
-         {outer} px"
+        "base unit {base}: box {field_box} px, control {control} px, air {above}/{below} px, \
+         outer {outer} px"
     );
 
     assert_eq!(
-        air,
+        above,
         (field_box - control) / 2,
-        "the air is half of what the box has left over"
+        "the air above is half of what the box has left over"
     );
     assert_eq!(
-        lang_switcher::widgets::field::air(Some(field_box), control, 1, dropped),
-        (air, air),
-        "this window puts the same number above and below — it is the wizard that puts the odd \
-         pixel below (`OddPixel::Below`, task Т-33а-2)"
+        below,
+        field_box - control - above,
+        "and the air below is the rest of it — the odd pixel goes down, решение 109.6"
     );
-    assert!(
-        outer <= field_box && outer >= field_box - 1,
-        "the box round the control is {outer} px against the {field_box} px of the mock-ups — \
-         centring may lose the odd pixel of an odd remainder and nothing more"
+    assert_eq!(
+        outer, field_box,
+        "the box round the control is exactly the {field_box} px it was asked for — no pixel \
+         of an odd remainder is lost any more (решение 109.6, задача Т-46-5)"
     );
 
     // The same table with the numbers of 96 DPI written out, so the derivation is held even on
-    // a machine that measures something else: box 23, control 15, air 4, outer 23.
-    assert_eq!(
-        lang_switcher::widgets::field::air(Some(23), 15, 1, dropped),
-        (4, 4)
-    );
-    assert_eq!(15 + 2 * 4, 23);
+    // a machine that measures something else: box 23, control 15, air 4/4, outer 23. An even
+    // remainder divides evenly and this rule changes nothing for it.
+    assert_eq!(lang_switcher::widgets::field::air(Some(23), 15, 1), (4, 4));
+    assert_eq!(15 + 4 + 4, 23);
+
+    // …and an ODD remainder is the case the rule is about: box 26, control 17, air 4/5,
+    // outer 26 — the numbers of this very machine (замер Т-46-1).
+    assert_eq!(lang_switcher::widgets::field::air(Some(26), 17, 1), (4, 5));
+    assert_eq!(17 + 4 + 5, 26);
 
     // **The rule degenerates into the old one.** A control already as tall as the box, one
     // taller than it, and a refused `MapDialogRect` all keep the one-thickness frame every
@@ -13256,26 +13262,23 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
         ("MapDialogRect refused", None, 15),
     ] {
         assert_eq!(
-            lang_switcher::widgets::field::air(box_height, control_height, 1, dropped),
+            lang_switcher::widgets::field::air(box_height, control_height, 1),
             (1, 1),
             "«{name}» must fall back to one border thickness"
         );
     }
 
     // A thicker border at a higher DPI is the floor, not the answer.
-    assert_eq!(
-        lang_switcher::widgets::field::air(Some(23), 23, 2, dropped),
-        (2, 2)
-    );
+    assert_eq!(lang_switcher::widgets::field::air(Some(23), 23, 2), (2, 2));
 
-    // The pass draws it: the same number above and below a field, and the list branch keeps
-    // the air of the mock-ups above its first row.
+    // The pass draws it: the air the box was asked for, and the list branch keeps the air of
+    // the mock-ups above its first row.
     let pass = function_body(&source, "unsafe fn paint_background(");
 
     for part in [
-        // ⚠ Задача Т-45-2: имя и форма вызова сменились, арифметика — нет.
-        "widgets::field::air(",
-        "widgets::field::OddPixel::Dropped",
+        // ⚠ Задача Т-45-2: имя и форма вызова сменились, арифметика — нет. Задача Т-46-5:
+        // параметр `OddPixel` убран — стандарт один на все окна (решение 109.6).
+        "widgets::field::air(field_box, rect.bottom - rect.top, border)",
         "widgets::field::frame(*rect, (top, bottom), border)",
         "(list_top, border)",
         "FRAMED_LISTS.contains(control)",

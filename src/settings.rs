@@ -8716,19 +8716,19 @@ unsafe fn paint_background(
         // A list keeps its own two distances — the air of the picture above, one thickness
         // below — because its rows are laid out by the control from the top of its client
         // area and centring the frame would move the frame away from the first row.
-        // ⚠ Арифметика воздуха переехала в `widgets::field::air` задачей Т-45-2 и не изменилась
-        // ни на пиксель: `OddPixel::Dropped` — это ровно прежняя `theme::field_frame_air`,
-        // делившая остаток поровну и терявшая лишний пиксель нечётного остатка. Мастер зовёт ту
-        // же функцию с `OddPixel::Below`; различие двух окон теперь видно в одном месте.
+        // ⭐ **Коробка стала 26 вместо 25 — задача Т-46-5, решение 109.6.** Арифметика воздуха
+        // переехала в `widgets::field::air` задачей Т-45-2 с параметром `OddPixel`, которым и
+        // различались два окна: здесь остаток делился поровну и лишний пиксель **терялся**
+        // (задача T-12-3, `theme::field_frame_air`), у мастера уходил вниз. Слово пользователя
+        // 2026-09-05: «нужен общий вариант, мы же приводим все к одному стандарту, а не
+        // подстраиваемся под мастера». Параметра больше нет; коробка каждого однострочного поля
+        // этого окна стала равна заказанным 12 единицам диалога — на этой машине 26 px вместо
+        // 25 (замер `scratchpad-Э46\красное-коробки-e45.log`). Это **единственная намеренная
+        // перемена пикселей окна настроек** за этап Э46.
         let (top, bottom) = if FRAMED_LISTS.contains(control) {
             (list_top, border)
         } else {
-            widgets::field::air(
-                field_box,
-                rect.bottom - rect.top,
-                border,
-                widgets::field::OddPixel::Dropped,
-            )
+            widgets::field::air(field_box, rect.bottom - rect.top, border)
         };
 
         let frame = widgets::field::frame(*rect, (top, bottom), border);

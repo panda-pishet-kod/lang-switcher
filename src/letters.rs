@@ -3102,14 +3102,10 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
             let air = if WIZARD_AREAS.contains(control) {
                 (thickness, thickness)
             } else {
-                widgets::field::air(
-                    box_height,
-                    rect.bottom - rect.top,
-                    thickness,
-                    // Мастер равняет коробку с кнопкой рядом, поэтому лишний пиксель — вниз
-                    // (задача Т-33а-2); окно настроек его теряет и остаётся при своём.
-                    widgets::field::OddPixel::Below,
-                )
+                // Задача Т-46-5: параметра `OddPixel` больше нет — коробка равна заказанной
+                // высоте у всех окон программы (решение 109.6). У мастера число не менялось:
+                // он клал лишний пиксель вниз с задачи Т-33а-2, и это стало стандартом.
+                widgets::field::air(box_height, rect.bottom - rect.top, thickness)
             };
 
             theme::paint_rounded(
