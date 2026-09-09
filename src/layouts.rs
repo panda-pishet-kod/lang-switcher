@@ -1073,6 +1073,39 @@ impl LayoutCache {
     pub fn contains(&self, layout: LayoutId) -> bool {
         self.get(layout).is_some()
     }
+
+    /// Whether **any** layout of the cache puts a character on this physical key — task T-52-1.
+    ///
+    /// The second half of the emptiness test of FR-10: a stroke is empty only when no layout
+    /// the session has can write with the key. The first half — "the active layout wrote
+    /// nothing" — is [`LayoutMap::lookup`] through [`crate::buffer::Recorder::lookup`], and the
+    /// gate that keeps this function off the ordinary path is there: it is asked **only** after
+    /// that lookup came back empty, so a letter pays nothing for it at all.
+    ///
+    /// # Why the question is about every layout and not about the active one
+    ///
+    /// FR-22 converts by the **scan code**, not by the character: a key blank in the layout the
+    /// user is typing in and significant in the one they meant to be typing in is exactly the
+    /// stroke FR-23 exists to carry over. Flushing it would contradict FR-23 from the other
+    /// side, and the two requirements would each be right on their own.
+    ///
+    /// A **dead key** of FR-24 is not empty and never reaches this function: `ToUnicodeEx`
+    /// answers it with the dead character itself, so [`KeyMapping::is_empty`] is already false
+    /// for the active layout. Here the same rule applies to the other layouts — a key that is
+    /// dead somewhere is a key that writes somewhere.
+    ///
+    /// # NFR-01 to NFR-05
+    ///
+    /// One [`LayoutMap::lookup`] — an index computation and an array read — per layout of the
+    /// session, stopping at the first that answers. The cache holds one map per installed
+    /// layout without an IME, which is two on the machine this was written on and a handful on
+    /// any machine. No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05) and no Win32 call
+    /// of any kind (NFR-02): safe from inside the hook callback, which is where it is called.
+    pub fn produces_in_any_map(&self, scan: u16, extended: bool, mods: Mods) -> bool {
+        self.maps
+            .iter()
+            .any(|map| !map.lookup(scan, extended, mods).is_empty())
+    }
 }
 
 // ---------------------------------------------------------------------------------------

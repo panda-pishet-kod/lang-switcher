@@ -140,6 +140,51 @@ const SCAN_Z: u16 = 0x2C;
 /// Scan code of the space bar — the `Space` of `Win+Space`, task T-03-3b.
 const SCAN_SPACE: u16 = 0x39;
 
+// ⭐ **The six keys of `ghbdtn` — task T-52-1.** The word of section 11.3 and of the live
+// acceptance list, spelled by the physical keys that give `привет` on the Russian half below,
+// so that the tests of the new flush rule read in the same words the requirement is written in
+// and a buffer of six strokes is a *word* rather than six copies of one letter.
+/// Scan code of the `G` key — `п` in Russian.
+const SCAN_G: u16 = 0x22;
+/// Scan code of the `H` key — `р`.
+const SCAN_H: u16 = 0x23;
+/// Scan code of the `B` key — `и`.
+const SCAN_B: u16 = 0x30;
+/// Scan code of the `D` key — `в`.
+const SCAN_D: u16 = 0x20;
+/// Scan code of the `T` key — `е`.
+const SCAN_T: u16 = 0x14;
+/// Scan code of the `N` key — `т`.
+const SCAN_N: u16 = 0x31;
+
+/// Scan code of the `[{` key: **empty in English and carried by Russian** — task T-52-1.
+///
+/// The one key of the stand that is blank in the active layout and significant in another
+/// layout of the same cache. Before task T-52-1 that made it merely the "no mapping" outcome
+/// of FR-06; since T-52-1 it is also the counter-example the new flush rule is measured
+/// against, because a key that writes *somewhere* in the cache is text and must be recorded —
+/// FR-23 converts it by its scan code.
+const SCAN_BRACKET: u16 = 0x1A;
+
+/// Scan code of the `]}` key, a **dead** key in the English half — FR-24, task T-52-1.
+const SCAN_CIRCUMFLEX: u16 = 0x1B;
+/// Scan code of the grave key — the `Ctrl+Shift+гравис` of FR-11, task T-52-2.
+const SCAN_GRAVE: u16 = 0x29;
+
+/// Scan code of `F5` — the key of the live acceptance list, task T-52-1.
+const SCAN_F5: u16 = 0x3F;
+/// Scan code of `F10` — the `Shift+F10` of the same task.
+const SCAN_F10: u16 = 0x44;
+/// Scan code of the `Application` key, the twin of the right mouse button.
+const SCAN_APPS: u16 = 0x5D;
+/// Scan code of `NumLock`.
+const SCAN_NUMLOCK: u16 = 0x45;
+/// Scan code of `PrintScreen`.
+const SCAN_SNAPSHOT: u16 = 0x37;
+/// Scan code the volume keys arrive under on this keyboard. Any value does: the seven keys of
+/// task T-52-1 are decided by their virtual key alone, before any scan code is consulted.
+const SCAN_MEDIA: u16 = 0x20;
+
 /// A key of the main block: the `LLKHF_EXTENDED` of FR-05 is clear.
 const MAIN_BLOCK: bool = false;
 /// A key of the keypad: the flag is set.
@@ -167,6 +212,14 @@ fn english() -> LayoutMap {
             (SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a')),
             (SCAN_A, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('A')),
             (SCAN_A, MAIN_BLOCK, Mods::CAPS, KeyMapping::from_char('A')),
+            // ⭐ **`AltGr+A`, and the stand was missing it — found by task T-52-1.** Two tests
+            // below state in their own words that `AltGr` "must still produce text" and that
+            // reading it as a command "would break every layout that puts characters on
+            // `AltGr`" — and until this row there was no such character anywhere in the stand,
+            // so both of them passed on a stroke that produced nothing. The new boundary row of
+            // FR-10 made the gap visible by flushing on it. The character is what those two
+            // tests were always about.
+            (SCAN_A, MAIN_BLOCK, Mods::ALTGR, KeyMapping::from_char('á')),
             (SCAN_2, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('2')),
             (SCAN_2, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('@')),
             (
@@ -195,6 +248,32 @@ fn english() -> LayoutMap {
                 Mods::NONE,
                 KeyMapping::from_char(' '),
             ),
+            // The six keys of `ghbdtn` — task T-52-1.
+            (SCAN_G, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('g')),
+            (SCAN_H, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('h')),
+            (SCAN_B, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('b')),
+            (SCAN_D, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('d')),
+            (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('t')),
+            (SCAN_N, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('n')),
+            // ⭐ **A dead key of FR-24 — task T-52-1.** It is what makes "produced nothing" and
+            // "is not text" two different questions: `ToUnicodeEx` returns a negative number
+            // here, the stroke carries a character and a mark, and the new flush rule must let
+            // it through.
+            (
+                SCAN_CIRCUMFLEX,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::dead('^'),
+            ),
+            // The grave key — the `Ctrl+Shift+гравис` of FR-11, task T-52-2. Without modifiers
+            // it is an ordinary character and is recorded as one.
+            (
+                SCAN_GRAVE,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('`'),
+            ),
+            // ⚠ [`SCAN_BRACKET`] is deliberately **absent** here and present in Russian below.
         ],
     )
 }
@@ -223,6 +302,23 @@ fn russian() -> LayoutMap {
                 MAIN_BLOCK,
                 Mods::NONE,
                 KeyMapping::from_char(' '),
+            ),
+            // `ghbdtn` is `привет` on these six keys — task T-52-1.
+            (SCAN_G, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('п')),
+            (SCAN_H, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('р')),
+            (SCAN_B, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('и')),
+            (SCAN_D, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('в')),
+            (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('е')),
+            (SCAN_N, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('т')),
+            // ⭐ **The key that is blank in English and writes here** — task T-52-1. It is the
+            // whole of the second half of the emptiness test: a stroke is "empty" only when
+            // *no* layout of the cache puts a character on the key, because FR-22 converts by
+            // the scan code and a key significant in the target layout is text.
+            (
+                SCAN_BRACKET,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('х'),
             ),
         ],
     )
@@ -271,6 +367,38 @@ const VK_RWIN: u16 = 0x5C;
 const VK_CAPITAL: u16 = 0x14;
 /// `Pause`, the default hotkey of section 7.
 const VK_PAUSE: u16 = 0x13;
+
+// The keys of task T-52-1. The letters of `ghbdtn` are their own codes, as the letters above.
+const VK_G: u16 = 0x47;
+const VK_H: u16 = 0x48;
+const VK_D: u16 = 0x44;
+const VK_T: u16 = 0x54;
+const VK_N: u16 = 0x4E;
+/// The `[{` key — [`SCAN_BRACKET`].
+const VK_OEM_4: u16 = 0xDB;
+/// The `]}` key — [`SCAN_CIRCUMFLEX`], the dead key of FR-24.
+const VK_OEM_6: u16 = 0xDD;
+/// `F5`, and `F1` and `F24` beside it for the ends of the row; `F10` for `Shift+F10`.
+const VK_F1: u16 = 0x70;
+const VK_F5: u16 = 0x74;
+const VK_F10: u16 = 0x79;
+const VK_F24: u16 = 0x87;
+/// `PrintScreen`, `NumLock` and `ScrollLock` — the служебные keys of the FR-10 row.
+const VK_SNAPSHOT: u16 = 0x2C;
+const VK_NUMLOCK: u16 = 0x90;
+const VK_SCROLL: u16 = 0x91;
+/// The `Application` key, the twin of the right mouse button.
+const VK_APPS: u16 = 0x5D;
+/// The browser keys `Back`, `Forward` and `Home` — 0xA6 to 0xAC.
+const VK_BROWSER_BACK: u16 = 0xA6;
+const VK_BROWSER_FORWARD: u16 = 0xA7;
+const VK_BROWSER_HOME: u16 = 0xAC;
+/// The numeric-keypad `5` with `NumLock` off.
+const VK_CLEAR: u16 = 0x0C;
+/// `VK_PACKET` — the foreign Unicode injection of task T-52-1.
+const VK_PACKET: u16 = 0xE7;
+/// The seven volume and media keys of task T-52-1, in the order of section 4.10.
+const MEDIA_KEYS: [u16; 7] = [0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3];
 
 /// `dwExtraInfo` of a stroke that is not ours — anything but [`INJECTED_SIGNATURE`].
 const FOREIGN_SIGNATURE: usize = 0x00CA_FE01;
@@ -470,16 +598,23 @@ fn characters_come_from_the_cache_and_a_ligature_is_kept_whole() {
 fn a_combination_the_cache_has_no_answer_for_is_stored_empty() {
     // A key the layout carries nothing on: stored, with `len` zero. An outcome, not an error —
     // FR-23 carries such a stroke through conversion unchanged.
+    //
+    // ⭐ **Task T-52-1 moved the key this is shown on and left the statement standing.** The
+    // stand's `B` became one of the six keys of `ghbdtn` and writes in both layouts now, so the
+    // blank key here is `[{`, which the Russian half carries and the English half does not.
+    // That is deliberate rather than incidental: since T-52-1 a stroke blank in *every* layout
+    // of the cache flushes the buffer, and this test is the boundary of that rule — blank
+    // **here** and significant **there** is still text, because FR-22 converts by the scan code.
     let mut recorder = fresh();
 
-    assert_eq!(press(&mut recorder, VK_B, 0x30), Recorded::Stored);
+    assert_eq!(press(&mut recorder, VK_OEM_4, SCAN_BRACKET), Recorded::Stored);
 
     let stroke = recorder.stroke(0).expect("the stroke was stored anyway");
 
     assert_eq!(stroke.len(), 0);
     assert!(stroke.is_empty());
     assert_eq!(stroke.chars(), [0; MAX_UNITS]);
-    assert_eq!(stroke.scan(), 0x30, "what was typed is still known");
+    assert_eq!(stroke.scan(), SCAN_BRACKET, "what was typed is still known");
 
     // The same when the active layout is not in the cache, and when there is no cache at all.
     let mut recorder = fresh();
@@ -3386,4 +3521,348 @@ fn the_zeroing_helper_outside_the_ring_is_a_volatile_fenced_write() {
         ring.contains("ptr::write_volatile(slot, Stroke::ZEROED)"),
         "the ring path of SEC-02 is unchanged"
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-52-1 — FR-10: a stroke that writes nowhere flushes; seven keys get a role
+// -------------------------------------------------------------------------------------
+
+/// Types `ghbdtn` — the six keys of section 11.3, `привет` in Russian.
+///
+/// Returns nothing and checks everything: six strokes in, six strokes held, and the word the
+/// stand's English half spells. A test that starts from a *word* rather than from six copies of
+/// one letter is the difference between "the buffer holds something" and "the user was in the
+/// middle of typing", which is what every rule of task T-52-1 is about.
+fn type_ghbdtn(recorder: &mut Recorder) {
+    for (vk, scan) in [
+        (VK_G, SCAN_G),
+        (VK_H, SCAN_H),
+        (VK_B, SCAN_B),
+        (VK_D, SCAN_D),
+        (VK_T, SCAN_T),
+        (VK_N, SCAN_N),
+    ] {
+        assert_eq!(press(recorder, vk, scan), Recorded::Stored);
+    }
+
+    assert_eq!(recorder.len(), 6);
+    assert_eq!(typed(recorder), "ghbdtn");
+}
+
+#[test]
+fn f5_after_a_word_flushes_the_buffer() {
+    // ⭐ **The finding of task T-52-1, in the words of the live acceptance list.** The user
+    // types `ghbdtn` in the address bar of a browser, presses `F5`, the page reloads — and
+    // before this task the six strokes were still in the ring and `F5` had been *added* to
+    // them as a seventh. The next `Pause` then sent seven `Backspace` into whatever text the
+    // reloaded page had put under the caret.
+    //
+    // `F5` produces no character in any layout there is, and it has no role in the FR-10
+    // table: not a modifier, not a command, not `Backspace`, not a space, and not one of the
+    // thirteen keys of `BOUNDARY_KEYS` and `EDITING_KEYS`. That is the whole of the new rule.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    let outcome = press(&mut recorder, VK_F5, SCAN_F5);
+
+    assert_eq!(
+        outcome,
+        Recorded::Flushed,
+        "F5 после ghbdtn: буфер жив, len = {}, штрих F5 лёг в кольцо седьмым",
+        recorder.len()
+    );
+    assert_eq!(
+        recorder.len(),
+        0,
+        "F5 после ghbdtn: кольцо не пусто, len = {}",
+        recorder.len()
+    );
+}
+
+#[test]
+fn the_application_key_flushes_like_the_right_mouse_button() {
+    // The `Application` key opens the very menu the right mouse button opens, and the right
+    // button already flushes: `watchdog::BUTTON_DOWN_BITS` carries it into `reset_up_to`. Two
+    // keys of the same effect answered differently — the mouse one emptied the buffer, the
+    // keyboard one was recorded as text — and FR-10 has no reason for the difference.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        press(&mut recorder, VK_APPS, SCAN_APPS),
+        Recorded::Flushed,
+        "клавиша меню после ghbdtn: буфер жив, len = {} — а правый щелчок его сбрасывает",
+        recorder.len()
+    );
+    assert_eq!(recorder.len(), 0);
+}
+
+#[test]
+fn a_foreign_unicode_injection_flushes_and_leaves_no_phantom() {
+    // ⭐ **`VK_PACKET`, and it is worse than a surviving buffer.** A password manager, a second
+    // switcher or an AutoHotkey script puts text on the screen with `KEYEVENTF_UNICODE`, and
+    // the hook reports every one of those events as `VK_PACKET` with the **code unit of the
+    // character** in `wScan` — not a scan code at all.
+    //
+    // So the old `lookup` read that code unit as if it were a physical key and sometimes found
+    // one: `!` is U+0021, and scan 0x21 is a letter key of the main block. A character the
+    // program never saw typed became a *letter* in the ring.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    // The stand answers for this code unit as if it were a scan code, which is what makes the
+    // phantom visible in `typed` below. In the product the collision is the same accident.
+    let phantom_unit = SCAN_B;
+
+    let outcome = deliver(
+        &mut recorder,
+        VK_PACKET,
+        phantom_unit,
+        0,
+        SOME_TIME,
+        Edge::Down,
+    );
+
+    assert_eq!(
+        outcome,
+        Recorded::Flushed,
+        "чужой Unicode-инжект не сбросил буфер: len = {}, в кольце теперь «{}» — последний знак программа выдумала из кодовой единицы",
+        recorder.len(),
+        typed(&recorder)
+    );
+    assert_eq!(
+        recorder.len(),
+        0,
+        "чужой Unicode-инжект оставил в кольце «{}»",
+        typed(&recorder)
+    );
+}
+
+#[test]
+fn the_seven_volume_and_media_keys_neither_write_nor_flush() {
+    // The user's decision: turning the volume down in the middle of a word is not writing and
+    // is not a command over the text, so the word survives it. Seven codes, all documented by
+    // Windows, and the list is closed — it cannot grow without another decision.
+    for vk in MEDIA_KEYS {
+        let mut recorder = fresh();
+        type_ghbdtn(&mut recorder);
+
+        // A modifier is held across the media key, so that the pin covers `held` as well: the
+        // seven keys are not modifiers and must not touch what is held.
+        assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+
+        assert_eq!(
+            press(&mut recorder, vk, SCAN_MEDIA),
+            Recorded::Ignored,
+            "клавиша 0x{vk:02X} громкости или медиа не осталась в стороне"
+        );
+        assert_eq!(
+            recorder.len(),
+            6,
+            "клавиша 0x{vk:02X}: кольцо изменилось, в нём «{}»",
+            typed(&recorder)
+        );
+        assert_eq!(typed(&recorder), "ghbdtn");
+
+        // The release is as quiet as the press.
+        assert_eq!(
+            deliver(&mut recorder, vk, SCAN_MEDIA, 0, SOME_TIME, Edge::Up),
+            Recorded::Ignored
+        );
+        assert_eq!(recorder.len(), 6);
+
+        // And `held` is exactly what it was: the `Shift` above is still down, so the next
+        // letter is still a capital.
+        assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+        assert_eq!(
+            typed(&recorder),
+            "ghbdtnA",
+            "клавиша 0x{vk:02X} тронула held: Shift потерян"
+        );
+    }
+}
+
+#[test]
+fn every_key_without_a_character_and_without_a_role_flushes() {
+    // The consequences the rule is *meant* to have, named one by one so that a later reading of
+    // the table does not have to re-derive them. Every key here produces nothing in any layout
+    // and none of them has a row of its own in FR-10.
+    for (vk, scan, what) in [
+        (VK_F1, 0x3B, "F1"),
+        (VK_F24, 0x76, "F24"),
+        (VK_SNAPSHOT, SCAN_SNAPSHOT, "PrintScreen"),
+        (VK_NUMLOCK, SCAN_NUMLOCK, "NumLock"),
+        (VK_SCROLL, 0x46, "ScrollLock"),
+        (VK_BROWSER_BACK, 0x6A, "браузерная «назад»"),
+        (VK_BROWSER_FORWARD, 0x69, "браузерная «вперёд»"),
+        (VK_BROWSER_HOME, 0x32, "браузерная «домой»"),
+        (VK_CLEAR, 0x4C, "цифровая 5 при погашенном NumLock"),
+        // The old hotkey after the user has moved the hotkey elsewhere: `classify` no longer
+        // takes it, so it arrives here as an ordinary key — and it writes nothing.
+        (VK_PAUSE, 0x45, "прежняя горячая клавиша после переназначения"),
+    ] {
+        let mut recorder = fresh();
+        type_ghbdtn(&mut recorder);
+
+        assert_eq!(
+            press(&mut recorder, vk, scan),
+            Recorded::Flushed,
+            "{what} после ghbdtn: буфер жив, len = {}",
+            recorder.len()
+        );
+        assert_eq!(recorder.len(), 0, "{what}: кольцо не пусто");
+    }
+}
+
+#[test]
+fn shift_f10_flushes_like_the_application_key_it_stands_for() {
+    // `Shift+F10` is the other way to open the context menu, and it is not a command of FR-10:
+    // `Shift` is not `Ctrl`, `Alt` or `Win`, so the command row does not take it. It reaches
+    // the new rule as an `F10` with `Shift` in the mask, produces nothing, and flushes.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_F10, SCAN_F10),
+        Recorded::Flushed,
+        "Shift+F10 после ghbdtn: буфер жив, len = {}",
+        recorder.len()
+    );
+}
+
+#[test]
+fn caps_lock_is_still_a_modifier_and_not_an_empty_stroke() {
+    // The one key that produces no character and must **not** flush: `CapsLock` has a role of
+    // its own in the table above the new rule, and the new rule never sees it.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(press(&mut recorder, VK_CAPITAL, 0x3A), Recorded::Modifier);
+    assert_eq!(recorder.len(), 6, "CapsLock сбросил буфер");
+
+    // And it still does what a `CapsLock` does.
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(typed(&recorder), "ghbdtnA");
+}
+
+#[test]
+fn a_dead_key_is_written_and_never_read_as_empty() {
+    // FR-24. `ToUnicodeEx` answers a dead key with a *negative* number and the dead character
+    // itself, so the stroke carries a character and a mark. "Produced nothing" and "is not
+    // text" are two different questions, and the new rule asks the second one.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        press(&mut recorder, VK_OEM_6, SCAN_CIRCUMFLEX),
+        Recorded::Stored,
+        "мёртвая клавиша FR-24 прочитана как пустой штрих"
+    );
+    assert_eq!(recorder.len(), 7);
+
+    let stroke = recorder.stroke(6).expect("the dead stroke");
+    assert!(stroke.produced().is_dead(), "и она всё ещё мёртвая");
+}
+
+#[test]
+fn a_key_blank_here_and_writing_in_another_layout_of_the_cache_is_recorded() {
+    // ⭐ **The second half of the criterion, and the reason it is not "the active layout says
+    // nothing".** FR-23 converts by the scan code: a key blank in the source layout and
+    // significant in the target one is exactly the stroke the conversion of FR-22 exists to
+    // carry over. Flushing it would contradict FR-23 from the other side.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        press(&mut recorder, VK_OEM_4, SCAN_BRACKET),
+        Recorded::Stored,
+        "клавиша, пустая в английской и значащая в русской раскладке кэша, сброшена"
+    );
+    assert_eq!(recorder.len(), 7);
+
+    // Blank **here** is still recorded, blank **everywhere** is the flush — the two halves of
+    // the same criterion, on two keys of the same stand.
+    assert_eq!(press(&mut recorder, VK_F5, SCAN_F5), Recorded::Flushed);
+    assert_eq!(recorder.len(), 0);
+}
+
+#[test]
+fn without_a_cache_a_stroke_without_a_character_is_recorded_as_before() {
+    // Strokes made before the cache of FR-20 is ready. The criterion is not computable — no
+    // layout can be asked — and "I do not know" is not "nothing", so the rule stands aside and
+    // the stroke is recorded exactly as it was before this task.
+    let mut bare = Recorder::with_capacity(8);
+    assert!(!bare.has_cache());
+
+    assert_eq!(press(&mut bare, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        press(&mut bare, VK_F5, SCAN_F5),
+        Recorded::Stored,
+        "без кэша правило применилось, хотя критерий не вычислим"
+    );
+    assert_eq!(bare.len(), 2);
+}
+
+#[test]
+fn a_flush_by_an_empty_stroke_is_not_an_edit_of_fr14() {
+    // FR-14, task Т-48-2: the exemption is for a user who **was typing**. A flush is the
+    // opposite of typing, and every other flush of the table already forgets the moment
+    // through `clear_ring`. The new one must not be the exception that remembers it.
+    let mut recorder = fresh();
+
+    assert_eq!(
+        deliver(&mut recorder, VK_A, SCAN_A, 0, 1_000, Edge::Down),
+        Recorded::Stored
+    );
+    assert!(recorder.edited_within(1_000, 100));
+
+    assert_eq!(
+        deliver(&mut recorder, VK_F5, SCAN_F5, 0, 2_000, Edge::Down),
+        Recorded::Flushed
+    );
+    assert!(
+        !recorder.edited_within(2_000, 100),
+        "сброс пустым штрихом записался как правка FR-14"
+    );
+}
+
+#[test]
+fn our_own_unicode_injection_never_reaches_the_recorder() {
+    // ⚠ **The pin the `VK_PACKET` rule needs most.** Our own replacement text of FR-22 is sent
+    // with `KEYEVENTF_UNICODE`, and the hook reports every one of those events as `VK_PACKET`
+    // too — the same code the rule above flushes on. What tells the two apart is FR-03 and
+    // nothing else: `classify` drops a stroke carrying [`INJECTED_SIGNATURE`] before the buffer
+    // is ever reached, so our own injection cannot flush the buffer it has just refilled.
+    buffer::install_recorder(fresh());
+    assert!(buffer::is_installed());
+
+    let mut state = HotkeyState::default();
+
+    assert_eq!(
+        through_the_hook(&mut state, VK_A, SCAN_A, FOREIGN_SIGNATURE),
+        Decision::Pass
+    );
+    assert_eq!(buffer::len(), 1);
+
+    // Ours: passed on to the application, and invisible to the buffer.
+    assert_eq!(
+        through_the_hook(&mut state, VK_PACKET, u16::from(b'a'), INJECTED_SIGNATURE),
+        Decision::Pass
+    );
+    assert_eq!(
+        buffer::len(),
+        1,
+        "FR-03: собственный Unicode-инжект дошёл до буфера и сбросил его"
+    );
+
+    // Somebody else's: ordinary input, and the flush of task T-52-1.
+    assert_eq!(
+        through_the_hook(&mut state, VK_PACKET, u16::from(b'a'), 0),
+        Decision::Pass
+    );
+    assert_eq!(buffer::len(), 0, "чужой инжект обязан сбросить буфер");
+
+    buffer::uninstall();
+    assert!(!buffer::is_installed());
 }

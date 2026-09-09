@@ -134,8 +134,10 @@ use std::cell::RefCell;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT,
-    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RCONTROL,
-    VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MEDIA_NEXT_TRACK,
+    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU, VK_NEXT, VK_PACKET,
+    VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
+    VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{LLKHF_ALTDOWN, LLKHF_EXTENDED};
 
@@ -854,6 +856,39 @@ const fn modifier_role(vk: u16) -> Option<Role> {
         v if v == VK_CAPITAL.0 => Some(Role::Caps),
         _ => None,
     }
+}
+
+/// The seven volume and media keys of FR-10 — task **T-52-1**.
+///
+/// ⭐ **The user's decision of 2026-09-09.** Turning the volume down in the middle of a word is
+/// neither writing nor a command over the text: the key changes nothing on the screen and moves
+/// no caret, so the word the user is in the middle of typing has to survive it. Without a role
+/// of their own these seven would fall into the emptiness rule below and end the word, which is
+/// the one consequence of that rule the user did not want.
+///
+/// **The list is closed.** Seven codes, every one of them documented by Windows, and it cannot
+/// grow without another decision: `VK_LAUNCH_*` and `VK_BROWSER_*` are deliberately *not* here —
+/// they start an application or move a page, which is a boundary in exactly the sense the right
+/// mouse button is.
+const MEDIA_KEYS: [u16; 7] = [
+    VK_VOLUME_MUTE.0,
+    VK_VOLUME_DOWN.0,
+    VK_VOLUME_UP.0,
+    VK_MEDIA_NEXT_TRACK.0,
+    VK_MEDIA_PREV_TRACK.0,
+    VK_MEDIA_STOP.0,
+    VK_MEDIA_PLAY_PAUSE.0,
+];
+
+/// Whether `vk` is one of the seven keys of [`MEDIA_KEYS`].
+///
+/// Beside [`modifier_role`] and asked the same way, because it answers the same kind of
+/// question: what *role* the key has in the FR-10 table, before anything about characters is
+/// consulted. Seven comparisons on the path of an ordinary letter, no allocation (NFR-03), no
+/// lock (NFR-04), no I/O (NFR-05) and no Win32 call (NFR-02) — the same terms `modifier_role`
+/// has been paying since task T-03-2.
+fn is_media_key(vk: u16) -> bool {
+    MEDIA_KEYS.contains(&vk)
 }
 
 /// What the input thread believes is held down right now.
@@ -1648,6 +1683,17 @@ impl Recorder {
             return Recorded::Modifier;
         }
 
+        // ⭐ **The seven keys of task T-52-1, and they stand exactly here.** The row is beside
+        // the modifier row because it is the same kind of row: a *role*, decided before
+        // anything about characters or commands is asked. Standing here it also answers for
+        // both edges at once and for a media key pressed while a modifier is held — which is
+        // deliberate. `Ctrl` plus the volume key is not a command over the text either; the
+        // user's decision names the seven keys without conditions, and a condition invented
+        // here would be one this file cannot justify. See [`MEDIA_KEYS`].
+        if is_media_key(key.vk) {
+            return Recorded::Ignored;
+        }
+
         // FR-04 records presses. A release adds nothing to what was typed, and recording both
         // edges would double every character in the buffer.
         if matches!(key.edge, Edge::Up) {
@@ -1846,6 +1892,40 @@ impl Recorder {
         }
 
         // ---------------------------------------------------------------------------------
+        // ⭐ **`VK_PACKET` — task T-52-1, and it is the one row of FR-10 that never asks what
+        // the key produced.**
+        //
+        // `VK_PACKET` is not a key. It is how the system reports an event sent with
+        // `KEYEVENTF_UNICODE`: a password manager filling a field, a second switcher replacing
+        // a word, an AutoHotkey script expanding an abbreviation. The text on the screen has
+        // just changed by characters this program cannot decode, so whatever the ring holds no
+        // longer describes what is in the field — and an FR-22 conversion over a buffer that
+        // has drifted from the screen sends `Backspace` into somebody else's text. That is the
+        // same reason the right mouse button flushes.
+        //
+        // ⚠ **And the lookup below would not merely be useless on it — it was wrong.** In a
+        // `KEYEVENTF_UNICODE` event `wScan` carries the **UTF-16 code unit of the character**,
+        // not a scan code, and [`Recorder::lookup`] read it as one. `!` is U+0021, scan 0x21 is
+        // the `F` key, and the ring gained an `f` nobody had typed. So the row stands before
+        // the lookup, and skipping the lookup is the point rather than an optimisation.
+        //
+        // ⚠ **Our own injection of FR-22 arrives as `VK_PACKET` too, and never gets here.**
+        // [`crate::hook::classify`] drops a stroke carrying `INJECTED_SIGNATURE` before the
+        // buffer is reached — FR-03, and the signature rather than `LLKHF_INJECTED` is what
+        // tells ours from everybody else's. Pinned by
+        // `our_own_unicode_injection_never_reaches_the_recorder` in `tests\buffer.rs`, because
+        // without that pin this row would empty the buffer the program had just refilled.
+        //
+        // **Where it stands.** After the conversion-session row and the command row above, so
+        // that a session is closed exactly once and `Ctrl`+anything is still a command; before
+        // the lookup, for the reason above. One comparison on the path of an ordinary letter.
+        // ---------------------------------------------------------------------------------
+        if key.vk == VK_PACKET.0 {
+            self.clear_ring();
+            return Recorded::Flushed;
+        }
+
+        // ---------------------------------------------------------------------------------
         // ⭐ **Defect E — the repair.** Task T-10-14.
         //
         // The layout is read **here**, where it is used, instead of being believed from a value
@@ -1898,6 +1978,42 @@ impl Recorder {
         // FR-06 through the cache of FR-20, and FR-04: what the key gave, at the moment it was
         // pressed, in the layout that was active then.
         let produced = self.lookup(key.scan, mods);
+
+        // ---------------------------------------------------------------------------------
+        // ⭐ **The empty stroke — task T-52-1, the last row of FR-10 to be added and the one
+        // that finally makes the table a rule instead of a list.**
+        //
+        // Until this task everything that was not a modifier, not a command, not `Backspace`,
+        // not a space and not one of the thirteen keys of [`BOUNDARY_KEYS`] and
+        // [`EDITING_KEYS`] went **into the ring**. `F5` reloaded the page and was recorded as
+        // the seventh letter of the word; `F2` renamed the file, the browser's `Back` key left
+        // the page, and the `Application` key opened the very menu the right mouse button opens
+        // — which the program already treats as a boundary (`watchdog::BUTTON_DOWN_BITS`). The
+        // buffer went on living over text that was no longer there, and the next conversion
+        // sent N `Backspace` into somebody else's field.
+        //
+        // A list of key codes would have to be maintained for ever and would be wrong on the
+        // next keyboard. [`Recorder::stroke_writes_nowhere`] asks the question the list was
+        // approximating: **did this stroke write anything, anywhere?** A key that writes is
+        // text and belongs in the ring; a key that writes nowhere and has no role of its own in
+        // the table is an action, and an action ends the word.
+        //
+        // **NFR-01 and NFR-02, and this is the whole cost argument.** For an ordinary letter
+        // `produced` carries a character, the first test of `stroke_writes_nowhere` is false and
+        // the function returns — one comparison, nothing else, and the other layouts of the
+        // cache are never consulted. Only a stroke that came back empty from the active layout
+        // pays the scan of the cache, and such a stroke is by definition not part of a word.
+        // No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), no Win32 call (NFR-02).
+        //
+        // **The flush is the ordinary one**: `clear_ring` zeroes the slots (SEC-02), resets the
+        // position counter of FR-32 and — FR-14, task Т-48-2 — forgets the moment of the last
+        // edit, because a flush is the opposite of editing and an exemption resting on typing
+        // the program has just thrown away would be an exemption for nothing.
+        // ---------------------------------------------------------------------------------
+        if self.stroke_writes_nowhere(produced, key.scan, mods) {
+            self.clear_ring();
+            return Recorded::Flushed;
+        }
 
         let stroke = Stroke::new(key.vk, key.scan, mods, self.active, key.time, produced);
 
@@ -2239,6 +2355,48 @@ impl Recorder {
     /// The map of the active layout, if there is a cache and the layout is in it.
     fn active_map(&self) -> Option<&crate::layouts::LayoutMap> {
         self.cache.as_ref()?.map_at(self.active_index?)
+    }
+
+    /// Whether this stroke wrote **nothing, in any layout the session has** — task T-52-1.
+    ///
+    /// The criterion of the new boundary row of FR-10. `produced` is what
+    /// [`Recorder::lookup`] has just answered for the active layout, handed in rather than
+    /// looked up again, so the row costs no second lookup.
+    ///
+    /// # The three answers, in the order they are cheapest
+    ///
+    /// * **The key wrote here.** `produced` carries characters — a letter, a digit, a space, or
+    ///   the dead character of a dead key, which `ToUnicodeEx` reports with a negative return
+    ///   and which [`KeyMapping::is_empty`] therefore already calls non-empty (FR-24). One
+    ///   comparison, and it is the answer every keystroke of an ordinary word gets.
+    /// * **⚠ There is no cache.** Strokes made before FR-20 has swept the layouts. The
+    ///   criterion is not computable — there is no layout to ask — and "I do not know" is not
+    ///   "nothing". The rule stands aside and the stroke is recorded exactly as this module
+    ///   recorded it before this task. A boundary invented out of an unbuilt cache would empty
+    ///   the buffer of every key typed in the first moments of a session.
+    /// * **The other layouts are asked.** [`crate::layouts::LayoutCache::produces_in_any_map`],
+    ///   one array read per layout, stopping at the first that answers yes. A key blank in the
+    ///   layout the user is typing in and significant in another one **is text**: that is
+    ///   precisely the stroke FR-22 and FR-23 exist to carry over, and flushing it would
+    ///   contradict FR-23 from the other side.
+    ///
+    /// ⚠ **The active layout being absent from the cache is not the same as there being no
+    /// cache.** `lookup` answers empty for every key then, letters included — and the scan of
+    /// the cache is exactly what saves them: the letter writes in some layout the cache holds,
+    /// so it is recorded, while `F5` writes in none and ends the word. The row behaves
+    /// correctly in a state [`Recorder::restamp`] deliberately leaves alone.
+    ///
+    /// NFR-01 to NFR-05: see the comment at the call site in [`Recorder::record`].
+    fn stroke_writes_nowhere(&self, produced: KeyMapping, scan: u16, mods: StrokeMods) -> bool {
+        if !produced.is_empty() {
+            return false;
+        }
+
+        let Some(cache) = self.cache.as_ref() else {
+            return false;
+        };
+
+        !cache.produces_in_any_map(scan, mods.extended(), mods.to_layout_mods())
     }
 
     /// Reads the layout the user is really typing in and adopts it — **the repair of defect E**,

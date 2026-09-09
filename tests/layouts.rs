@@ -1378,3 +1378,93 @@ fn building_the_cache_leaves_the_system_layout_list_untouched() {
     let after = enumerate_all().expect("the system layout list must be readable");
     assert_eq!(before, after, "the layout list must survive the sweep");
 }
+
+// ---------------------------------------------------------------------------------------
+// Task T-52-1 — the second half of the emptiness test of FR-10
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn the_cache_answers_whether_any_layout_at_all_writes_with_a_key() {
+    // The question [`crate::buffer::Recorder::record`] asks once a stroke came back empty from
+    // the layout the user is typing in: does *any* installed layout put a character on this
+    // physical key? "Yes" means the stroke is text after all — FR-22 converts by the scan code
+    // and FR-23 carries it over. "No" is what makes it a boundary of FR-10.
+    let cache = cache();
+    let scan_a = scan_of_a(&cache);
+
+    // A key every layout writes with. Asked of the cache rather than of one map: the answer
+    // has to be true at the *first* map that answers, whichever that is.
+    assert!(
+        cache.produces_in_any_map(scan_a, MAIN_BLOCK, Mods::NONE),
+        "клавиша A: ни одна раскладка кэша не призналась, что пишет ею"
+    );
+    assert!(
+        cache.produces_in_any_map(scan_a, MAIN_BLOCK, Mods::SHIFT),
+        "клавиша A под Shift: тот же ответ должен быть да"
+    );
+
+    // `F5`. No layout of any language writes with it, which is the whole reason FR-10 can end
+    // a word on it without a list of key codes.
+    const SCAN_F5: u16 = 0x3F;
+    assert!(
+        !cache.produces_in_any_map(SCAN_F5, MAIN_BLOCK, Mods::NONE),
+        "F5: какая-то раскладка кэша заявила, что пишет им"
+    );
+
+    // And a scan code no keyboard has at all, as the negative control that the function can
+    // say "no" for a reason other than the key being unusual.
+    assert!(
+        !cache.produces_in_any_map(0x00, MAIN_BLOCK, Mods::NONE),
+        "нулевой скан-код: прибор не умеет отвечать «нет»"
+    );
+}
+
+#[test]
+fn every_map_of_the_cache_is_asked_and_the_first_yes_is_enough() {
+    // The property the product path rests on, on a stand rather than on the machine's own
+    // layouts: a key blank in the first map and carried by the second must still answer "yes".
+    // That is the case of a user typing in the wrong layout, which is the case the whole
+    // program exists for.
+    const FIRST: LayoutId = LayoutId::from_raw(0xF052_0409);
+    const SECOND: LayoutId = LayoutId::from_raw(0xF052_0419);
+    const SCAN_BLANK_IN_FIRST: u16 = 0x1A;
+
+    let mut first = LayoutMapBuilder::new(FIRST);
+    first.set(SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
+
+    let mut second = LayoutMapBuilder::new(SECOND);
+    second.set(SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('ф'));
+    second.set(
+        SCAN_BLANK_IN_FIRST,
+        MAIN_BLOCK,
+        Mods::NONE,
+        KeyMapping::from_char('х'),
+    );
+
+    let stand = LayoutCache::from_maps(vec![first.finish(), second.finish()])
+        .expect("two non-empty maps");
+
+    assert!(
+        stand.produces_in_any_map(SCAN_BLANK_IN_FIRST, MAIN_BLOCK, Mods::NONE),
+        "клавиша, пустая в первой карте и значащая во второй, признана непишущей — \
+         спрошена не каждая карта"
+    );
+    assert!(
+        !stand.produces_in_any_map(0x3F, MAIN_BLOCK, Mods::NONE),
+        "и клавиша, пустая в обеих, обязана остаться непишущей"
+    );
+
+    // A dead key of FR-24 writes: it carries the dead character itself, and a key that is dead
+    // somewhere is a key that is text somewhere.
+    const SCAN_DEAD: u16 = 0x1B;
+    let mut only = LayoutMapBuilder::new(FIRST);
+    only.set(SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
+    only.set(SCAN_DEAD, MAIN_BLOCK, Mods::NONE, KeyMapping::dead('^'));
+
+    let with_dead = LayoutCache::from_maps(vec![only.finish()]).expect("one non-empty map");
+
+    assert!(
+        with_dead.produces_in_any_map(SCAN_DEAD, MAIN_BLOCK, Mods::NONE),
+        "мёртвая клавиша FR-24 прочитана как непишущая"
+    );
+}
