@@ -1182,6 +1182,13 @@ fn the_liveness_timer_is_the_thirty_seconds_of_fr80_and_comes_off() {
 /// `app`'s wake-up (`WM_APP + 1`) and configuration nudge (`WM_APP + 5`), and the tray callback
 /// (`WM_APP + 2`). They are named in the doc comment of every constant here, which is the only
 /// place the whole map is written down.
+///
+/// ⚠ **Task Т-49-2 lengthened it again, and found four numbers that were never in it at all.**
+/// The list stopped at `WM_APP + 16` while the program had gone on to `+ 19`: the two sound
+/// messages of `app` (`+ 17`, `+ 18`) and the feed message of `letters` (`+ 19`) had never been
+/// compared against anything. The third sound message, `WM_APP_SOUND_REFUSED` (`+ 20`), was
+/// therefore being added against a list that could not have caught a collision with any of its
+/// three nearest neighbours — which is exactly the case the test exists for.
 #[test]
 fn the_private_messages_of_this_process_are_all_distinct() {
     let messages = [
@@ -1198,6 +1205,10 @@ fn the_private_messages_of_this_process_are_all_distinct() {
         lang_switcher::settings::WM_APP_SYSTEM_THEME,
         lang_switcher::hook::WM_APP_SEED_CAPS,
         WM_APP_WIPE,
+        lang_switcher::app::WM_APP_SOUND_DONE,
+        lang_switcher::app::WM_APP_SOUND_IDLE,
+        lang_switcher::letters::WM_APP_FEED,
+        lang_switcher::app::WM_APP_SOUND_REFUSED,
     ];
 
     for (index, message) in messages.iter().enumerate() {

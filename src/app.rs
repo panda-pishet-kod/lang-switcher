@@ -382,6 +382,14 @@ pub const WM_APP_SOUND_DONE: u32 = WM_APP + 17;
 /// Posted to the UI thread when a press was **idle** — FR-100. See [`WM_APP_SOUND_DONE`].
 pub const WM_APP_SOUND_IDLE: u32 = WM_APP + 18;
 
+/// Posted to the UI thread when a press was **refused** — FR-100, task **Т-49-2**.
+///
+/// `WM_APP + 20`, the first free number: `+ 19` is `letters::WM_APP_FEED`, and the whole map is
+/// written down in the doc comment of every constant of the family. See [`WM_APP_SOUND_DONE`]
+/// for the shape and for what SEC-05 buys a forger, and [`Press::Refused`] for which situations
+/// this is and which — `Field::Pending` — it deliberately is not.
+pub const WM_APP_SOUND_REFUSED: u32 = WM_APP + 20;
+
 /// The sound of a press that replaced text — FR-100, «чк-чк».
 ///
 /// # Why the sound is the program's own and not the system's
@@ -415,6 +423,35 @@ pub const SOUND_REPLACED: &[u8] = include_bytes!("../res/sound-replaced.wav");
 /// without looking at the screen.
 pub const SOUND_IDLE: &[u8] = include_bytes!("../res/sound-idle.wav");
 
+/// The sound of a press this program **refused** — FR-100, «чк» с низким телом, task **Т-49-2**.
+///
+/// # The third thing one switch can say
+///
+/// The user, 2026-09-09: «в поле пароля когда вводишь, нет никакого звукового сигнала и том что
+/// смена не удалась, да и в принципе сознательно не сработала, хорошо бы было такой звуковой
+/// сигнал создать, чтобы он был в том же стиле, но чётко означал отказ». There was no sound at
+/// all — not the idle click, nothing: the branch that answers a press is gated on the typing
+/// buffer being on this thread, and in a password field FR-70 has **parked** it. See
+/// [`press_outcome`], which is where that hole is closed.
+///
+/// # Why it is this sound and not a new one
+///
+/// The rule [`SOUND_IDLE`] states holds for the third arm too: two different noises would be two
+/// different objects. So this is **built out of the shipped click itself** — the very bytes of
+/// [`SOUND_IDLE`], which are `clicks\idle-08.wav` of stage Э21, the click the user accepted by
+/// ear («звук отличный, приёмка пройдена», 2026-09-01) — with a low body under it that decays in
+/// 62 ms. The same switch, hitting its lock: a dull knock rather than a second event. Nothing was
+/// re-synthesised from parameters, because the generator round that produced `clicks\` did not
+/// survive and re-deriving the timbre would have been guesswork; re-arranging the bytes cannot
+/// drift.
+///
+/// Chosen by ear out of eight candidates, all built the same way — the user, 2026-09-09: «Вот
+/// этот вариант подходит: otkaz-4 «чк» с низким телом — глухой стук, а не второе событие». The
+/// eight and the generator are in `scratchpad-звук-отказа\`.
+///
+/// Its peak is the peak of [`SOUND_REPLACED`]: a refusal has to be legible, not loud.
+pub const SOUND_REFUSED: &[u8] = include_bytes!("../res/sound-refused.wav");
+
 /// Which of the two sounds a press earned — FR-100.
 ///
 /// An enum and not the raw bytes, because the decision and the playing of it are different
@@ -427,6 +464,9 @@ pub enum Tone {
     Replaced,
     /// The press was suppressed and produced nothing — «чк».
     Idle,
+    /// **The program refused to act here** — a dull knock, task Т-49-2. See [`Press::Refused`]
+    /// for which situations that is and which it deliberately is not.
+    Refused,
 }
 
 impl Tone {
@@ -435,8 +475,37 @@ impl Tone {
         match self {
             Self::Replaced => SOUND_REPLACED,
             Self::Idle => SOUND_IDLE,
+            Self::Refused => SOUND_REFUSED,
         }
     }
+}
+
+/// What one press of the hotkey **did** — the three outcomes FR-100 tells apart, task Т-49-2.
+///
+/// Separate from [`Tone`] and one-to-one with it on purpose: this is what happened, that is what
+/// the user hears, and the module already keeps the decision and the playing of it apart (see
+/// [`Beeper`]). A future tone that answered two outcomes, or an outcome that earned silence,
+/// would have nowhere to live if the two were one type.
+///
+/// **SEC-01, SEC-07.** Three named constants. Nothing here can carry a character, a scan code or
+/// the name of a window, and nothing that could may be added: what the user typed never reaches
+/// the sound path at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    /// Text on the screen changed — «чк-чк».
+    Replaced,
+    /// The press was answered and changed nothing: an empty buffer, a word with no direction,
+    /// a verdict that has not come back yet. **Not a refusal** — nothing was forbidden, there
+    /// was simply nothing to do.
+    Idle,
+    /// **This program would not act here** — FR-70 (a password field) and FR-84 (an excluded
+    /// process), and those two only.
+    ///
+    /// ⚠ [`crate::guard::Field::Pending`] is deliberately **not** one of them, and the
+    /// distinction is the whole point of the arm: «ответа ещё нет» is not knowing, not
+    /// forbidding, and a program that said «отказано» while its own probe was still running
+    /// would be saying something untrue. A press in that window is [`Press::Idle`].
+    Refused,
 }
 
 /// `[feedback] sound` as the UI thread last published it — FR-100.
@@ -506,22 +575,69 @@ impl Beeper for SystemBeeper {
     }
 }
 
-/// Which tone a press earns, or `None` when `[feedback] sound` is off — the whole of FR-100.
+/// **What a press earned, given the three things that decide it** — FR-100, task **Т-49-2**.
 ///
-/// A pure function of two booleans, so the rule can be read in one line and driven by unit tests
-/// rather than by the machine's speakers.
+/// `buffered` is whether the typing buffer is on this thread at all, `refuses` is
+/// [`crate::guard::refuses`] — FR-70 or FR-84 — and `replaced` is whether text on the screen
+/// changed. `None` means the press is not this function's to answer.
 ///
-/// ⚠ **One rule for every idle press, and the password field is not an exception** — decision of
-/// the user, question 77. A sound in a password field says the program is there; but silence
-/// where every other idle press sounds says exactly the same thing, and louder, because it is a
-/// *difference*. A branch on the password field would buy nothing and would create the one thing
-/// SEC-06 is about: behaviour that changes when a password field has the focus.
-pub const fn tone_for(replaced: bool, enabled: bool) -> Option<Tone> {
+/// # The hole this closes, and how it hid
+///
+/// The branch that answers a press used to be gated on `buffer::is_installed()` and nothing
+/// else. In a password field FR-70 **parks** the buffer — `park_buffer` calls
+/// `buffer::uninstall` — so the gate was shut and **no message was posted at all**: not the idle
+/// click, nothing. The user, 2026-09-09: «в поле пароля когда вводишь, нет никакого звукового
+/// сигнала и том что смена не удалась, да и в принципе сознательно не сработала».
+///
+/// ⚠ **And the doc comment that used to stand here argued from a premise the code did not
+/// meet.** It said a password field needed no branch of its own because «silence where every
+/// other idle press sounds says exactly the same thing, and louder» — which is true, and which
+/// is precisely what the program did: it was silent there and clicked everywhere else. The
+/// difference the note set out to avoid existed the whole time, unannounced. What is new here is
+/// not the difference; it is that the difference now **says what it means**.
+///
+/// # The three answers
+///
+/// * **the buffer is not on this thread and the program refuses** — [`Press::Refused`]. This is
+///   the arm that did not exist;
+/// * **the buffer is not on this thread and nothing is being refused** — `None`. The thread owns
+///   no buffer (the UI and watcher threads), or the input pipeline has not started yet. There is
+///   nothing to report and nobody to report it to;
+/// * **the buffer is here** — [`Press::Replaced`] or [`Press::Idle`], exactly as before.
+///
+/// A pure function of three booleans, so the rule can be read in one line and driven by unit
+/// tests rather than by the machine's speakers.
+pub const fn press_outcome(buffered: bool, refuses: bool, replaced: bool) -> Option<Press> {
+    if !buffered {
+        return if refuses { Some(Press::Refused) } else { None };
+    }
+
+    Some(if replaced {
+        Press::Replaced
+    } else {
+        Press::Idle
+    })
+}
+
+/// Which tone an outcome earns, or `None` when `[feedback] sound` is off — the whole of FR-100.
+///
+/// A pure function of an outcome and a setting, so the rule can be read in one line. The
+/// mapping is one-to-one today; it is written out rather than derived so that a tone which ever
+/// answers two outcomes has a place to be written down.
+///
+/// ⚠ **The switch of `[feedback] sound` governs all three tones together** — there is no
+/// per-tone setting and section 7 grows no key: the user asked for a third sound, not for a
+/// third preference.
+pub const fn tone_for(press: Press, enabled: bool) -> Option<Tone> {
     if !enabled {
         return None;
     }
 
-    Some(if replaced { Tone::Replaced } else { Tone::Idle })
+    Some(match press {
+        Press::Replaced => Tone::Replaced,
+        Press::Idle => Tone::Idle,
+        Press::Refused => Tone::Refused,
+    })
 }
 
 /// Answers one press with its tone — FR-100, through the seam.
@@ -531,11 +647,11 @@ pub const fn tone_for(replaced: bool, enabled: bool) -> Option<Tone> {
 /// **On the UI thread, after the outcome of the press is known, and nowhere else.** Not in the
 /// hook callback, which returns a verdict to the system and owes it microseconds; not on the
 /// input thread either, whose budget NFR-09 puts at thirty milliseconds for the whole of a
-/// replacement. The input thread learns the outcome and *posts* it — [`WM_APP_SOUND_DONE`] or
-/// [`WM_APP_SOUND_IDLE`] — and `PostMessageW` queues and returns. The selection path already
-/// runs here and calls this directly.
-pub fn answer_press<B: Beeper>(beeper: &mut B, replaced: bool, enabled: bool) {
-    if let Some(tone) = tone_for(replaced, enabled) {
+/// replacement. The input thread learns the outcome and *posts* it — [`WM_APP_SOUND_DONE`],
+/// [`WM_APP_SOUND_IDLE`] or [`WM_APP_SOUND_REFUSED`] — and `PostMessageW` queues and returns.
+/// The selection path already runs here and calls this directly.
+pub fn answer_press<B: Beeper>(beeper: &mut B, press: Press, enabled: bool) {
+    if let Some(tone) = tone_for(press, enabled) {
         beeper.beep(tone);
     }
 }
@@ -544,8 +660,32 @@ pub fn answer_press<B: Beeper>(beeper: &mut B, replaced: bool, enabled: bool) {
 ///
 /// The one line of the program that is allowed to make a sound, and the only caller of the
 /// production [`Beeper`]. Reached from the UI thread's window procedure and from nowhere else.
-fn sound_press(replaced: bool) {
-    answer_press(&mut SystemBeeper, replaced, sound_enabled());
+fn sound_press(press: Press) {
+    answer_press(&mut SystemBeeper, press, sound_enabled());
+}
+
+/// Which outcome one of the three sound messages carries, or `None` for every other message.
+///
+/// The inverse of the posts in the hotkey branch, written as a total function so that the window
+/// procedure has one arm for the family instead of three, and so that a forged message
+/// (SEC-05) buys its sender one click of a sound the machine can make for itself and nothing
+/// else — the argument [`WM_APP_SOUND_DONE`] already makes.
+const fn press_of_sound_message(message: u32) -> Option<Press> {
+    match message {
+        WM_APP_SOUND_DONE => Some(Press::Replaced),
+        WM_APP_SOUND_IDLE => Some(Press::Idle),
+        WM_APP_SOUND_REFUSED => Some(Press::Refused),
+        _ => None,
+    }
+}
+
+/// Which message carries `press` to the UI thread — the inverse of [`press_of_sound_message`].
+const fn sound_message_for(press: Press) -> u32 {
+    match press {
+        Press::Replaced => WM_APP_SOUND_DONE,
+        Press::Idle => WM_APP_SOUND_IDLE,
+        Press::Refused => WM_APP_SOUND_REFUSED,
+    }
 }
 
 /// The one and only shutdown flag of the process.
@@ -2552,10 +2692,7 @@ unsafe extern "system" fn window_proc(
             let hotkey = message == crate::hook::WM_APP_HOTKEY;
             let handed_back = message == crate::selection::WM_APP_BUFFER_PATH;
 
-            if (hotkey || handed_back)
-                && crate::buffer::is_installed()
-                && !(hotkey && crate::selection::wants_selection_path())
-            {
+            if (hotkey || handed_back) && !(hotkey && crate::selection::wants_selection_path()) {
                 // ⚠ **FR-100, task Т-21-5 — the answer is not made here.** This is the input
                 // thread, whose budget NFR-09 puts at thirty milliseconds for the whole of a
                 // replacement, and section 6.1 gives the process's slow work to the UI thread.
@@ -2564,20 +2701,30 @@ unsafe extern "system" fn window_proc(
                 // further away still — it returned to the system long before `WM_APP_HOTKEY`
                 // reached this loop.
                 //
-                // `Some(_)` is a replacement the user can see, `None` is a press that was
-                // swallowed and produced nothing — an empty buffer in a console, a password
-                // field, an excluded process, no direction. One rule for all of them, question
-                // 77; see `tone_for`.
-                let replaced = crate::inject::on_hotkey().is_some();
+                // ⭐ **Task Т-49-2 — the gate moved and this is the whole of the repair.** The
+                // condition on this `if` used to carry `crate::buffer::is_installed()`, and in a
+                // password field FR-70 has **parked** the buffer, so the branch did not run and
+                // not one message was posted: the press was answered by silence. The buffer is
+                // now asked *inside* `press_outcome`, together with `guard::refuses`, and the
+                // press that this program deliberately would not act on gets a voice of its own.
+                //
+                // `is_input_window` replaces what `is_installed` used to do for SEC-05 — a
+                // forged `WM_APP_HOTKEY` at the UI window must not reach `inject::on_hotkey`.
+                // It is the gate the FR-70 arm below already uses and it names the same thread
+                // through the register of windows.
+                //
+                // `on_hotkey` is called **only** when the buffer is here: with the buffer parked
+                // there is nothing for it to convert, and asking it would be a system call made
+                // on a press this program has already decided not to answer with a replacement.
+                if is_input_window(hwnd) {
+                    let buffered = crate::buffer::is_installed();
+                    let replaced = buffered && crate::inject::on_hotkey().is_some();
 
-                post_to(
-                    Role::Ui,
-                    if replaced {
-                        WM_APP_SOUND_DONE
-                    } else {
-                        WM_APP_SOUND_IDLE
-                    },
-                );
+                    if let Some(press) = press_outcome(buffered, crate::guard::refuses(), replaced)
+                    {
+                        post_to(Role::Ui, sound_message_for(press));
+                    }
+                }
             }
 
             // ⛔ **There was an arm for `switch::WM_APP_SWITCH` here until task Т-14-4**, and
@@ -2704,7 +2851,7 @@ unsafe extern "system" fn window_proc(
                     // what it did — which is why exactly one tone comes out of one press.
                     //
                     // Sounded straight rather than posted: this already **is** the UI thread.
-                    sound_press(true);
+                    sound_press(Press::Replaced);
                 }
             }
 
@@ -2716,8 +2863,8 @@ unsafe extern "system" fn window_proc(
             // buys the sender is one playback of a click — a sound any process may make for
             // itself — and nothing of this program is read or changed by it. The setting of
             // FR-100 still holds: with the sound off, a posted message is as silent as a press.
-            if message == WM_APP_SOUND_DONE || message == WM_APP_SOUND_IDLE {
-                sound_press(message == WM_APP_SOUND_DONE);
+            if let Some(press) = press_of_sound_message(message) {
+                sound_press(press);
             }
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
@@ -3386,7 +3533,11 @@ mod tests {
     /// this module green.
     #[test]
     fn both_sounds_are_complete_wav_images_and_differ_from_each_other() {
-        for (what, wave) in [("replaced", SOUND_REPLACED), ("idle", SOUND_IDLE)] {
+        for (what, wave) in [
+            ("replaced", SOUND_REPLACED),
+            ("idle", SOUND_IDLE),
+            ("refused", SOUND_REFUSED),
+        ] {
             assert!(
                 wave.len() > 44,
                 "{what}: a RIFF header alone is 44 bytes, this is {}",
@@ -3433,6 +3584,19 @@ mod tests {
             SOUND_REPLACED.len() > SOUND_IDLE.len(),
             "the answer that says «done» is the longer of the two: one click against two"
         );
+
+        // Task Т-49-2. The third has to differ from **both**, and pointing it at either of them
+        // would leave every other test in this module green — the same trap this test was
+        // written for when there were two.
+        assert_ne!(SOUND_REFUSED, SOUND_REPLACED);
+        assert_ne!(
+            SOUND_REFUSED, SOUND_IDLE,
+            "the refusal is the idle click with a low body under it, not the idle click"
+        );
+        assert!(
+            SOUND_REFUSED.len() > SOUND_IDLE.len(),
+            "the body decays for 62 ms after the click, so the refusal is the longer of the two"
+        );
     }
 
     /// Each tone names its own bytes and nobody else's.
@@ -3440,30 +3604,37 @@ mod tests {
     fn each_tone_carries_the_wave_that_belongs_to_it() {
         assert_eq!(Tone::Replaced.wave(), SOUND_REPLACED);
         assert_eq!(Tone::Idle.wave(), SOUND_IDLE);
+        assert_eq!(Tone::Refused.wave(), SOUND_REFUSED);
     }
 
-    /// **FR-100 — one press, one tone, and the two tones are not the same tone.**
+    /// **FR-100 — one press, one tone, and no two of the three are the same tone.**
     #[test]
     fn a_press_answers_with_the_tone_its_outcome_earned() {
         let mut bench = Bench::default();
 
-        answer_press(&mut bench, true, true);
-        answer_press(&mut bench, false, true);
+        answer_press(&mut bench, Press::Replaced, true);
+        answer_press(&mut bench, Press::Idle, true);
+        answer_press(&mut bench, Press::Refused, true);
 
         assert_eq!(
             bench.tones,
-            vec![Tone::Replaced, Tone::Idle],
-            "a replacement and an idle press are told apart by ear or not at all"
+            vec![Tone::Replaced, Tone::Idle, Tone::Refused],
+            "a replacement, an idle press and a refusal are told apart by ear or not at all"
         );
     }
 
     /// **The switch of `[feedback] sound`, and it is the whole of «off».**
+    ///
+    /// All three tones together: the user asked for a third sound, not for a third preference,
+    /// and a refusal that went on sounding with the setting off would be exactly the surprise
+    /// FR-100's switch exists to prevent.
     #[test]
-    fn the_switch_of_the_setting_silences_both_tones() {
+    fn the_switch_of_the_setting_silences_every_tone() {
         let mut bench = Bench::default();
 
-        answer_press(&mut bench, true, false);
-        answer_press(&mut bench, false, false);
+        answer_press(&mut bench, Press::Replaced, false);
+        answer_press(&mut bench, Press::Idle, false);
+        answer_press(&mut bench, Press::Refused, false);
 
         assert!(
             bench.tones.is_empty(),
@@ -3476,10 +3647,65 @@ mod tests {
     /// takes, and what lets the two above be about the wiring rather than about the arithmetic.
     #[test]
     fn the_tone_of_a_press_is_a_function_of_the_outcome_and_the_setting() {
-        assert_eq!(tone_for(true, true), Some(Tone::Replaced));
-        assert_eq!(tone_for(false, true), Some(Tone::Idle));
-        assert_eq!(tone_for(true, false), None);
-        assert_eq!(tone_for(false, false), None);
+        assert_eq!(tone_for(Press::Replaced, true), Some(Tone::Replaced));
+        assert_eq!(tone_for(Press::Idle, true), Some(Tone::Idle));
+        assert_eq!(tone_for(Press::Refused, true), Some(Tone::Refused));
+
+        for press in [Press::Replaced, Press::Idle, Press::Refused] {
+            assert_eq!(tone_for(press, false), None, "{press:?} with the sound off");
+        }
+    }
+
+    /// **The hole of task Т-49-2, as the three booleans that decide it.**
+    ///
+    /// The user, 2026-09-09: «в поле пароля когда вводишь, нет никакого звукового сигнала».
+    /// The row that was missing is the first one below — the buffer parked by FR-70 **and** a
+    /// program that is refusing rather than idling.
+    #[test]
+    fn a_press_the_program_refuses_earns_a_voice_of_its_own() {
+        // The buffer is parked (FR-70, FR-84) and the program is refusing: the arm that did not
+        // exist. `replaced` cannot be true here — with the buffer parked nothing is converted —
+        // and the rule does not consult it.
+        assert_eq!(
+            press_outcome(false, true, false),
+            Some(Press::Refused),
+            "a password field and an excluded process are refusals, not idle presses"
+        );
+
+        // The buffer is not on this thread and nothing is being refused — the UI and watcher
+        // threads, and the input thread before the pipeline starts. There is nothing to say.
+        assert_eq!(press_outcome(false, false, false), None);
+
+        // With the buffer here the rule is exactly what it was before this task.
+        assert_eq!(press_outcome(true, false, true), Some(Press::Replaced));
+        assert_eq!(press_outcome(true, false, false), Some(Press::Idle));
+
+        // ⚠ **And the refusal never outranks a replacement that really happened.** The state can
+        // move between the press and the message — the watcher thread publishes verdicts — so
+        // the rule is written to prefer the fact over the flag: text the user can see changed.
+        assert_eq!(press_outcome(true, true, true), Some(Press::Replaced));
+    }
+
+    /// Each of the three messages carries one outcome, and every other message carries none.
+    ///
+    /// SEC-05: the family is a closed set of three numbers. A message outside it must fall
+    /// through to the rest of the window procedure rather than make a sound.
+    #[test]
+    fn the_three_sound_messages_map_one_to_one_onto_the_three_outcomes() {
+        for press in [Press::Replaced, Press::Idle, Press::Refused] {
+            assert_eq!(
+                press_of_sound_message(sound_message_for(press)),
+                Some(press),
+                "{press:?} does not survive the round trip through its message"
+            );
+        }
+
+        assert_eq!(
+            press_of_sound_message(WM_APP_SOUND_REFUSED),
+            Some(Press::Refused)
+        );
+        assert_eq!(press_of_sound_message(crate::hook::WM_APP_HOTKEY), None);
+        assert_eq!(press_of_sound_message(WM_APP_SOUND_REFUSED + 1), None);
     }
 
     /// Types one ordinary key into the buffer of this thread.

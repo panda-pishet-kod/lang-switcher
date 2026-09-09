@@ -544,6 +544,37 @@ pub fn buffering_allowed() -> bool {
     buffering_allowed_in(field, excluded)
 }
 
+/// **Whether this program is refusing to act here, as opposed to merely having nothing to do** —
+/// FR-100's third tone, task **Т-49-2**.
+///
+/// `true` in exactly two situations, and they are the two in which the program **could** have
+/// acted and decided not to: a password field ([`Field::Password`], FR-70) and a process the
+/// user excluded ([`excluded`], FR-84).
+///
+/// # Why [`Field::Pending`] is not one of them
+///
+/// It answers `false` here although [`buffering_allowed`] answers `false` there too, and the two
+/// questions are genuinely different. `Pending` is «ответа ещё нет»: the focus has moved, the
+/// probe of FR-72 is on its way, and for at most [`PROBE_BUDGET_MS`] this program does not know
+/// what kind of field it is looking at. Sounding «отказано» there would tell the user something
+/// this program has not established — and would do it in the one window where the answer usually
+/// turns out to be «ordinary». A press in that window changed nothing, which is what
+/// `crate::app::Press::Idle` is for.
+///
+/// [`Field::Undetermined`] answers `false` for the stronger version of the same reason: FR-73
+/// says an undeterminable field is one this program **records** in, so nothing is being refused.
+///
+/// # Cost
+///
+/// One relaxed load and one `match` — the same word [`buffering_allowed`] reads, and read the
+/// same way, so the pair costs one load rather than two (see [`state`]). No allocation
+/// (NFR-03), no lock (NFR-04), no I/O (NFR-05).
+pub fn refuses() -> bool {
+    let (field, excluded) = state();
+
+    excluded || matches!(field, Field::Password)
+}
+
 /// The flag of SEC-04a: `1` in a password field, `0` everywhere else.
 ///
 /// ⚠ **Condition 2 of SEC-04a: a flag, never the content.** What leaves the process is one bit
