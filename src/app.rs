@@ -711,6 +711,20 @@ static WAKE_TARGETS: [AtomicUsize; THREAD_COUNT] =
 /// the documented default rather than a special case.
 static BUFFER_CAPACITY: AtomicUsize = AtomicUsize::new(0);
 
+/// `[buffer] idle_timeout_s` as the input thread sees it — **FR-15**, task T-52-4, **already
+/// clamped**.
+///
+/// [`IDLE_TIMEOUT_UNPUBLISHED`] until the UI thread has read the file. The value cannot use zero
+/// as its "nothing yet" marker the way [`BUFFER_CAPACITY`] does, because zero is a **documented
+/// value** of this field — it is how section 7 says «выключено» — so the marker is a number the
+/// publication can never produce: the ceiling of [`crate::buffer::MAX_IDLE_TIMEOUT_S`] is a day,
+/// and the clamp is applied *here*, before the store, exactly as task T-13-13 clamps the three
+/// millisecond fields where they cross to their threads.
+static BUFFER_IDLE_TIMEOUT_S: AtomicU32 = AtomicU32::new(IDLE_TIMEOUT_UNPUBLISHED);
+
+/// The "the UI thread has not read the file yet" value of [`BUFFER_IDLE_TIMEOUT_S`].
+const IDLE_TIMEOUT_UNPUBLISHED: u32 = u32::MAX;
+
 /// How many times [`LayoutCache::build`] failed and the hardwired table of FR-25 was used.
 ///
 /// FR-25 asks for the fallback, not for a diagnosis, and a program that cannot enumerate the
@@ -1431,6 +1445,9 @@ fn start_input_pipeline() {
 fn install_buffer() {
     crate::buffer::install(&settings::Buffer {
         capacity: BUFFER_CAPACITY.load(Ordering::Acquire),
+        // FR-15, task T-52-4 — see [`configured_idle_timeout_s`] for the "nothing published
+        // yet" case, which is section 7's own default and not a third state.
+        idle_timeout_s: configured_idle_timeout_s(),
     });
 
     crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
@@ -1443,6 +1460,42 @@ fn install_buffer() {
 /// which is what makes a post that arrived before the window existed harmless.
 fn apply_configured_capacity() {
     apply_capacity(BUFFER_CAPACITY.load(Ordering::Acquire));
+    apply_idle_timeout(BUFFER_IDLE_TIMEOUT_S.load(Ordering::Acquire));
+}
+
+/// `[buffer] idle_timeout_s` as it stands now — the published value, or section 7's default
+/// while the UI thread has not read the file yet. **FR-15**, task T-52-4.
+fn configured_idle_timeout_s() -> u32 {
+    match BUFFER_IDLE_TIMEOUT_S.load(Ordering::Acquire) {
+        IDLE_TIMEOUT_UNPUBLISHED => settings::Buffer::default().idle_timeout_s,
+        published => published,
+    }
+}
+
+/// Applies `[buffer] idle_timeout_s` to the buffer of this thread — **FR-15**, task T-52-4.
+///
+/// The sibling of [`apply_capacity`] and it runs beside it, on every message of the input
+/// window, for the same three reasons: the message is a wake-up rather than a command (SEC-05),
+/// a post that arrived before the window existed is harmless because the start-up pipeline
+/// reads the atomics once more at the end, and re-reading a published value costs one relaxed
+/// load and one comparison.
+///
+/// ⚠ **Unlike a capacity change, this one throws nothing away.** [`Recorder::set_capacity`]
+/// rebuilds the ring, so `apply_capacity` has to compare before it acts or it would empty the
+/// buffer on every message; the timeout is one number and setting it again is free. The
+/// comparison below is therefore for tidiness rather than for safety.
+fn apply_idle_timeout(published: u32) {
+    if published == IDLE_TIMEOUT_UNPUBLISHED {
+        // Nothing published yet. The buffer was installed on section 7's default and that is
+        // still the right answer.
+        return;
+    }
+
+    crate::buffer::with(|recorder| {
+        if recorder.idle_timeout_s() != crate::buffer::effective_idle_timeout_s(published) {
+            recorder.set_idle_timeout_s(published);
+        }
+    });
 }
 
 /// The half of [`apply_configured_capacity`] that does not read the atomic — see there.
@@ -2191,7 +2244,7 @@ pub fn publish_configuration(config: &settings::Config) {
     // section 7 are turned into numbers at publication time.
     crate::guard::publish_exclusions(&config.exclusions.processes);
 
-    publish_buffer_capacity(config.buffer.capacity);
+    publish_buffer_section(&config.buffer);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2248,17 +2301,29 @@ fn note_field_clamped() {
     );
 }
 
-/// Publishes `[buffer] capacity` to the input thread and nudges it into applying it — FR-07.
+/// Publishes the `[buffer]` section to the input thread and nudges it into applying it — FR-07
+/// and, since task T-52-4, **FR-15**.
 ///
-/// Two steps and in this order: the value goes into the atomic first, and only then is the
-/// message posted, so a thread woken by the message cannot read a stale capacity.
+/// Two steps and in this order: the values go into the atomics first, and only then is the
+/// message posted, so a thread woken by the message cannot read a stale one.
 ///
 /// The message is a wake-up and not a command — the same design as [`WM_APP_WAKE`], and for
 /// the same SEC-05 reason. If it never arrives, because the input thread had not created its
-/// window yet, the value is not lost: [`start_input_pipeline`] reads the atomic once more when
-/// its sweep is over.
-fn publish_buffer_capacity(capacity: usize) {
-    BUFFER_CAPACITY.store(capacity, Ordering::Release);
+/// window yet, the values are not lost: [`start_input_pipeline`] reads the atomics once more
+/// when its sweep is over.
+///
+/// ⚠ **The timeout is clamped here and the capacity is not**, and the asymmetry is deliberate.
+/// A capacity is clamped where it is *used*, because `apply_capacity` has to compare the raw
+/// number against the effective one to avoid rebuilding the ring on every message. The timeout
+/// has no such comparison to protect, and it does need a value the "nothing published yet"
+/// marker cannot collide with — see [`BUFFER_IDLE_TIMEOUT_S`]. Clamping at publication is also
+/// what task T-13-13 does with the three millisecond fields of section 7.
+fn publish_buffer_section(buffer: &settings::Buffer) {
+    BUFFER_CAPACITY.store(buffer.capacity, Ordering::Release);
+    BUFFER_IDLE_TIMEOUT_S.store(
+        crate::buffer::effective_idle_timeout_s(buffer.idle_timeout_s),
+        Ordering::Release,
+    );
 
     post_to(Role::Input, WM_APP_CONFIGURED);
 }

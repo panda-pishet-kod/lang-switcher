@@ -673,12 +673,16 @@ fn the_capacity_comes_from_the_configuration() {
     assert_eq!(default.capacity(), 256);
 
     // A configured value is honoured...
-    let configured = Recorder::from_config(&settings::Buffer { capacity: 12 });
+    let configured = Recorder::from_config(&settings::Buffer {
+        capacity: 12,
+        ..settings::Buffer::default()
+    });
     assert_eq!(configured.capacity(), 12);
 
     // ...and a value that cannot be meant is not allocated.
     let absurd = Recorder::from_config(&settings::Buffer {
         capacity: usize::MAX,
+        ..settings::Buffer::default()
     });
     assert_eq!(absurd.capacity(), MAX_CAPACITY);
 }
@@ -4088,4 +4092,280 @@ fn the_alt_of_a_syskeydown_is_enough_for_the_switcher_row() {
     );
     assert_eq!(recorder.len(), 6);
     assert_eq!(typed(&recorder), "ghbdtn");
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-52-4 — FR-15: a buffer nobody has touched for `idle_timeout_s` empties itself
+// -------------------------------------------------------------------------------------
+
+/// A recorder with the stand's cache, English active, and `idle_timeout_s` set — FR-15.
+fn fresh_with_idle_timeout(seconds: u32) -> Recorder {
+    let mut recorder = fresh();
+    recorder.set_idle_timeout_s(seconds);
+    recorder
+}
+
+/// Types `ghbdtn` with every stroke stamped `time`.
+fn type_ghbdtn_at(recorder: &mut Recorder, time: u32) {
+    for (vk, scan) in [
+        (VK_G, SCAN_G),
+        (VK_H, SCAN_H),
+        (VK_B, SCAN_B),
+        (VK_D, SCAN_D),
+        (VK_T, SCAN_T),
+        (VK_N, SCAN_N),
+    ] {
+        assert_eq!(
+            deliver(recorder, vk, scan, 0, time, Edge::Down),
+            Recorded::Stored
+        );
+    }
+
+    assert_eq!(recorder.len(), 6);
+}
+
+#[test]
+fn a_word_nobody_has_touched_for_the_timeout_is_forgotten() {
+    // ⭐ **FR-15, the requirement task T-52-4 added.** A typed word lives in memory until the
+    // next boundary of FR-10, and there may be no boundary for hours: the user types half a
+    // line, walks away, and the strokes sit in this process for the rest of the day. SEC-01 is
+    // the reason that matters, and the arithmetic of FR-12 is the other one — the comment at
+    // `is_newer_than` rests on «a stroke in the buffer is never minutes old», which nothing
+    // guaranteed.
+    const TYPED_AT: u32 = 1_000_000;
+
+    let mut recorder = fresh_with_idle_timeout(300);
+    type_ghbdtn_at(&mut recorder, TYPED_AT);
+
+    let flushed = recorder.flush_if_idle(TYPED_AT + 360_000);
+
+    assert!(
+        flushed,
+        "через 360 с покоя кольцо всё ещё держит {} штрихов: «{}»",
+        recorder.len(),
+        typed(&recorder)
+    );
+    assert_eq!(
+        recorder.len(),
+        0,
+        "через 360 с покоя кольцо всё ещё держит {} штрихов",
+        recorder.len()
+    );
+}
+
+#[test]
+fn the_idle_flush_is_the_full_flush_of_fr10_and_zeroes_everything() {
+    // Every flush of the FR-10 table goes through one function, and this one is no exception:
+    // the ring is emptied and its memory overwritten (SEC-02), the position counter of FR-32 is
+    // zeroed (FR-34), the conversion session is ended — after which the rollback of FR-33 is no
+    // longer possible, and that is accepted — and the moment of the last edit goes with them
+    // (FR-14), because a flush is the opposite of editing.
+    const TYPED_AT: u32 = 500_000;
+
+    let mut recorder = fresh_with_idle_timeout(30);
+    type_ghbdtn_at(&mut recorder, TYPED_AT);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    assert!(recorder.flush_if_idle(TYPED_AT + 30_000));
+
+    assert_eq!(recorder.len(), 0, "FR-10: полный сброс");
+    assert_eq!(recorder.cycle_position(), 0, "FR-34: счётчик цикла");
+    assert!(!recorder.in_conversion(), "сессия конвертации закрыта");
+    assert!(
+        !recorder.edited_within(TYPED_AT + 30_000, 60_000),
+        "FR-14: сброс — не правка"
+    );
+    assert_eq!(
+        non_zero_slots(&recorder),
+        0,
+        "SEC-02: обнуление памяти, живое окно и свободные слоты одинаково"
+    );
+}
+
+#[test]
+fn the_idle_flush_happens_no_earlier_than_the_timeout() {
+    // The precision the requirement states: not before `idle_timeout_s`, and — because the only
+    // clock that drives it is the thirty-second tick of FR-80 — not later than
+    // `idle_timeout_s + 30 s`. The first half is this test; the second is a property of the
+    // tick and is measured in `tests\watchdog.rs`.
+    const TYPED_AT: u32 = 2_000_000;
+
+    for (elapsed, expected) in [
+        (0, false),
+        (299_000, false),
+        (299_999, false),
+        (300_000, true),
+    ] {
+        let mut recorder = fresh_with_idle_timeout(300);
+        type_ghbdtn_at(&mut recorder, TYPED_AT);
+
+        assert_eq!(
+            recorder.flush_if_idle(TYPED_AT + elapsed),
+            expected,
+            "через {elapsed} мс покоя сброс должен быть {expected}"
+        );
+        assert_eq!(recorder.len(), if expected { 0 } else { 6 });
+    }
+}
+
+#[test]
+fn a_stroke_restarts_the_idle_clock() {
+    // «покой» is measured from the last *edit* of the ring — FR-14's own moment — so a user who
+    // is typing never meets the rule, however long the word has been growing.
+    const START: u32 = 3_000_000;
+
+    let mut recorder = fresh_with_idle_timeout(30);
+    type_ghbdtn_at(&mut recorder, START);
+
+    // Almost there, and then one more letter.
+    assert!(!recorder.flush_if_idle(START + 29_000));
+    assert_eq!(
+        deliver(&mut recorder, VK_A, SCAN_A, 0, START + 29_000, Edge::Down),
+        Recorded::Stored
+    );
+
+    // The clock now runs from the new stroke, not from the old ones.
+    assert!(!recorder.flush_if_idle(START + 58_000));
+    assert!(recorder.flush_if_idle(START + 59_000));
+
+    // A `Backspace` is an edit too — FR-14 counts both halves — so erasing keeps the rest of
+    // the word alive just as typing does.
+    let mut recorder = fresh_with_idle_timeout(30);
+    type_ghbdtn_at(&mut recorder, START);
+
+    assert_eq!(
+        deliver(&mut recorder, VK_BACK, 0x0E, 0, START + 29_000, Edge::Down),
+        Recorded::Popped
+    );
+    assert!(!recorder.flush_if_idle(START + 58_000));
+    assert!(recorder.flush_if_idle(START + 59_000));
+}
+
+#[test]
+fn a_zero_timeout_never_flushes() {
+    // `0` is the documented way to switch the rule off, and it is a request rather than a slip:
+    // section 7 says so, and `effective_idle_timeout_s` keeps it as it is instead of reading it
+    // as a mistake the way a capacity of zero is read.
+    const TYPED_AT: u32 = 7_000;
+
+    let mut recorder = fresh_with_idle_timeout(0);
+    type_ghbdtn_at(&mut recorder, TYPED_AT);
+
+    for elapsed in [30_000, 300_000, 86_400_000, u32::MAX / 2] {
+        assert!(
+            !recorder.flush_if_idle(TYPED_AT.wrapping_add(elapsed)),
+            "idle_timeout_s = 0: сброс через {elapsed} мс"
+        );
+    }
+
+    assert_eq!(recorder.len(), 6);
+    assert_eq!(recorder.idle_timeout_s(), 0);
+}
+
+#[test]
+fn an_empty_buffer_is_never_flushed_by_the_idle_rule() {
+    // There is nothing to forget, and the answer must say so: the counter this drives is a
+    // count of *flushes*, and an empty buffer reporting one every thirty seconds for the rest
+    // of the session would make that number meaningless.
+    let mut recorder = fresh_with_idle_timeout(30);
+
+    assert!(!recorder.flush_if_idle(1_000_000));
+
+    // And the same after a flush of its own: the first tick empties the ring, the next finds
+    // nothing.
+    type_ghbdtn_at(&mut recorder, 1_000_000);
+    assert!(recorder.flush_if_idle(1_030_000));
+    assert!(!recorder.flush_if_idle(1_060_000));
+}
+
+#[test]
+fn the_idle_rule_uses_the_wrapping_arithmetic_of_fr12() {
+    // FR-12. The clock is `GetTickCount`: milliseconds in 32 bits, wrapping to zero every 49
+    // days and 17 hours. A word typed just before the wrap and left alone must be forgotten on
+    // the far side of it, and a plain `>=` on the raw numbers would answer the opposite — the
+    // buffer would then hold that word until something else emptied it.
+    const BEFORE_WRAP: u32 = u32::MAX - 10_000;
+
+    let mut recorder = fresh_with_idle_timeout(30);
+    type_ghbdtn_at(&mut recorder, BEFORE_WRAP);
+
+    // 20 000 ms later, which is 9 999 on the far side of zero: not yet.
+    assert!(
+        !recorder.flush_if_idle(BEFORE_WRAP.wrapping_add(20_000)),
+        "через 20 с после переполнения счётчика сброс слишком ранний"
+    );
+
+    // 30 000 ms later: exactly the timeout, across the wrap.
+    assert!(
+        recorder.flush_if_idle(BEFORE_WRAP.wrapping_add(30_000)),
+        "слово, набранное перед переполнением счётчика, не забыто"
+    );
+    assert_eq!(recorder.len(), 0);
+}
+
+#[test]
+fn the_idle_timeout_comes_from_the_configuration_and_is_clamped() {
+    // Section 7's default, and the two ceilings. The floor is the thirty-second tick of FR-80 —
+    // the rule is checked there and nowhere else, so a shorter timeout could not be honoured —
+    // and the ceiling is a day.
+    assert_eq!(settings::Buffer::default().idle_timeout_s, 300);
+    assert_eq!(
+        Recorder::from_config(&settings::Buffer::default()).idle_timeout_s(),
+        300
+    );
+
+    for (asked, published) in [
+        (0, 0),
+        (1, 30),
+        (29, 30),
+        (30, 30),
+        (300, 300),
+        (86_400, 86_400),
+        (86_401, 86_400),
+        (u32::MAX, 86_400),
+    ] {
+        assert_eq!(
+            buffer::effective_idle_timeout_s(asked),
+            published,
+            "idle_timeout_s = {asked} должен публиковаться как {published}"
+        );
+
+        let configured = Recorder::from_config(&settings::Buffer {
+            idle_timeout_s: asked,
+            ..settings::Buffer::default()
+        });
+
+        assert_eq!(configured.idle_timeout_s(), published);
+    }
+}
+
+#[test]
+fn the_idle_rule_is_reachable_from_the_thread_local_layer() {
+    // The one caller in the product is the liveness tick of FR-80, and it reaches the buffer
+    // through the thread-local layer like every other flush source of the FR-10 table. A thread
+    // with no buffer answers `false` rather than panicking, which is what every function of that
+    // layer does.
+    assert!(!buffer::is_installed());
+    assert!(!buffer::flush_if_idle(1_000_000));
+
+    buffer::install_recorder(fresh_with_idle_timeout(30));
+
+    for time in [10_000, 10_001, 10_002] {
+        buffer::record(KeyEvent {
+            vk: VK_A,
+            edge: Edge::Down,
+            extra_info: FOREIGN_SIGNATURE,
+            scan: SCAN_A,
+            flags: 0,
+            time,
+        });
+    }
+
+    assert_eq!(buffer::len(), 3);
+    assert!(!buffer::flush_if_idle(10_002 + 29_000));
+    assert!(buffer::flush_if_idle(10_002 + 30_000));
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
 }

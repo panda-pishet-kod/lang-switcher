@@ -186,6 +186,51 @@ pub const fn effective_capacity(requested: usize) -> usize {
 }
 
 // ---------------------------------------------------------------------------------------
+// FR-15 — the idle timeout, task T-52-4
+// ---------------------------------------------------------------------------------------
+
+/// Shortest `[buffer] idle_timeout_s` this module will act on — **FR-15**, task T-52-4.
+///
+/// The rule is checked on the thirty-second liveness tick of FR-80 and on nothing else (no new
+/// timer is created, and none may be: `SetTimer` in the callback is forbidden). A timeout
+/// shorter than the tick could therefore not be honoured anyway — it would round up to the
+/// tick — and a user who wrote `5` would get thirty seconds while believing they had five. The
+/// floor says out loud what the mechanism can do.
+pub const MIN_IDLE_TIMEOUT_S: u32 = 30;
+
+/// Milliseconds in a second — the one conversion FR-15 needs, named rather than written as a
+/// literal in three places.
+const MS_PER_SECOND: u32 = 1_000;
+
+/// Longest `[buffer] idle_timeout_s` this module will act on — one day.
+///
+/// Above a day the rule stops being «набранное слово не живёт вечно» and becomes a promise the
+/// program cannot keep across a logon anyway: FR-90's suspension, a session lock (row 8 of the
+/// FR-10 table) and a reboot all empty the ring long before. A hand-edited file may hold any
+/// number; this is what the program will do with it.
+pub const MAX_IDLE_TIMEOUT_S: u32 = 86_400;
+
+/// The idle timeout as it is **published** — FR-15, task T-52-4.
+///
+/// [`effective_capacity`] for the timeout, and public for the same reason: `app` clamps the
+/// configured value where it crosses to the input thread, exactly as task T-13-13 clamps the
+/// three millisecond fields of section 7 there.
+///
+/// ⚠ **Zero is kept as zero, and that is the difference from [`effective_capacity`].** A
+/// capacity of zero is a mistake — a buffer of no strokes is a program that quietly stopped
+/// working — whereas `idle_timeout_s = 0` is the documented way to switch the rule off, which is
+/// a request and not a slip. It is the same reading task T-13-13 gives the millisecond fields,
+/// where zero means «не ждать».
+pub const fn effective_idle_timeout_s(requested: u32) -> u32 {
+    match requested {
+        0 => 0,
+        requested if requested < MIN_IDLE_TIMEOUT_S => MIN_IDLE_TIMEOUT_S,
+        requested if requested > MAX_IDLE_TIMEOUT_S => MAX_IDLE_TIMEOUT_S,
+        requested => requested,
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The modifier mask of FR-04
 // ---------------------------------------------------------------------------------------
 
@@ -1428,6 +1473,14 @@ pub struct Recorder {
     /// change the text, and read on the input thread's message loop. No allocation, no lock, no
     /// I/O, and nothing that can panic.
     last_edit: Option<u32>,
+    /// **How long the ring may stand untouched before it is emptied, milliseconds — FR-15**,
+    /// task T-52-4. Zero switches the rule off.
+    ///
+    /// Held in milliseconds because that is the unit of [`Stroke::time`] and of
+    /// [`Recorder::last_edit`]: the configuration is in seconds, and converting once when the
+    /// value is set is one multiplication instead of one on every check. The conversion cannot
+    /// overflow — [`MAX_IDLE_TIMEOUT_S`] is a day, which is 86 400 000 milliseconds.
+    idle_timeout_ms: u32,
 }
 
 impl Recorder {
@@ -1452,6 +1505,9 @@ impl Recorder {
             verify: None,
             stamp: None,
             last_edit: None,
+            // FR-15, task T-52-4. A recorder built without a configuration behaves as section 7
+            // describes the program, which is what every other default in this constructor does.
+            idle_timeout_ms: settings::Buffer::default().idle_timeout_s * MS_PER_SECOND,
         }
     }
 
@@ -1478,7 +1534,29 @@ impl Recorder {
     /// The capacity is *read*, not hard-wired: the constant of FR-07 lives in section 7 as a
     /// default, and this is the path the product takes.
     pub fn from_config(config: &settings::Buffer) -> Self {
-        Self::with_capacity(config.capacity)
+        let mut recorder = Self::with_capacity(config.capacity);
+
+        // FR-15, task T-52-4.
+        recorder.set_idle_timeout_s(config.idle_timeout_s);
+
+        recorder
+    }
+
+    /// Sets `[buffer] idle_timeout_s` — **FR-15**, task T-52-4.
+    ///
+    /// The value is put through [`effective_idle_timeout_s`], so a caller comparing "the
+    /// timeout I have" against "the timeout the configuration asks for" reads the same number
+    /// this stores — the rule [`effective_capacity`] already establishes for the capacity.
+    ///
+    /// Cheap enough to call on every message of the input thread, which is what
+    /// `app::apply_configured_buffer` does: one comparison and, at most, one store.
+    pub fn set_idle_timeout_s(&mut self, seconds: u32) {
+        self.idle_timeout_ms = effective_idle_timeout_s(seconds) * MS_PER_SECOND;
+    }
+
+    /// The idle timeout in force, seconds — FR-15.
+    pub fn idle_timeout_s(&self) -> u32 {
+        self.idle_timeout_ms / MS_PER_SECOND
     }
 
     /// How many strokes fit.
@@ -2198,6 +2276,81 @@ impl Recorder {
         self.converted = false;
     }
 
+    /// Empties the buffer if nothing has happened to it for `idle_timeout_s` — **FR-15**, task
+    /// T-52-4. Answers whether it did.
+    ///
+    /// # What the requirement is for
+    ///
+    /// A typed word lives in this process until the next boundary of the FR-10 table, and there
+    /// may be no boundary for hours: a user types half a line, is called away, and the strokes
+    /// stand in memory for the rest of the day. **SEC-01** is the first reason that is wrong.
+    /// The second is arithmetical: the comment at [`is_newer_than`] rests on «a stroke in the
+    /// buffer is never minutes old», and until this rule existed nothing made that true.
+    ///
+    /// # The clock, and why it is the one of FR-12
+    ///
+    /// `now_ms` and [`Recorder::last_edit`] are both `GetTickCount` — milliseconds since the
+    /// machine started, in 32 bits, wrapping to zero every 49 days and 17 hours. A plain
+    /// `now >= last_edit + timeout` would answer backwards across that wrap and would keep a
+    /// word typed just before it until something else emptied the ring. [`is_newer_than`] is
+    /// the comparison FR-12 already wrote for exactly this, and it is asked the question in the
+    /// form it answers: **the deadline is not newer than now.**
+    ///
+    /// # The three ways this does nothing
+    ///
+    /// * **The rule is off** — `idle_timeout_s = 0`, which section 7 documents as a request and
+    ///   not a mistake;
+    /// * **the ring is empty** — there is nothing to forget, and answering `true` there would
+    ///   make the counter this drives report a flush every thirty seconds for the rest of the
+    ///   session;
+    /// * **the deadline has not come.** Not before `idle_timeout_s`; and because the only clock
+    ///   that calls this is the thirty-second liveness tick of FR-80, not later than
+    ///   `idle_timeout_s + 30 s`. A machine that slept through the deadline flushes on the
+    ///   first tick after it wakes, which is the wanted behaviour and not an oversight.
+    ///
+    /// # What the flush is
+    ///
+    /// [`Recorder::reset`] — the same «полный сброс» every asynchronous row of the FR-10 table
+    /// performs, and therefore the same guarantees: the ring's memory is overwritten (SEC-02),
+    /// the position counter of FR-32 goes to zero (FR-34), the moment of the last edit is
+    /// forgotten (FR-14) and the conversion session is closed. ⚠ **After this the rollback of
+    /// FR-33 is no longer possible**, which is accepted: five minutes after a conversion nobody
+    /// is still deciding whether to undo it.
+    ///
+    /// **Silent.** No sound of FR-100: the user is not at the keyboard, and a program that made
+    /// a noise at somebody's empty chair would be reporting its own housekeeping.
+    ///
+    /// # Where it is called from
+    ///
+    /// The `WM_TIMER` of `watchdog::LIVENESS_TIMER_ID`, on the **input** thread's message loop
+    /// — the thread that owns the buffer. Not from the hook callback, and no timer of its own:
+    /// `SetTimer` on the callback path is forbidden outright, and a second timer for a rule
+    /// that already has a thirty-second heartbeat to ride on would be a second thing to keep
+    /// alive.
+    pub fn flush_if_idle(&mut self, now_ms: u32) -> bool {
+        if self.idle_timeout_ms == 0 || self.ring.len() == 0 {
+            return false;
+        }
+
+        // A non-empty ring always has an edit behind it — every push and every pop writes the
+        // moment, and `clear_ring` empties the two together — so this is a state that cannot
+        // arise rather than a case with a meaning. Answering "not idle" is the conservative
+        // reading of it: a buffer whose age is unknown is not thrown away on a guess.
+        let Some(last_edit) = self.last_edit else {
+            return false;
+        };
+
+        let deadline = last_edit.wrapping_add(self.idle_timeout_ms);
+
+        if is_newer_than(deadline, now_ms) {
+            return false;
+        }
+
+        self.reset();
+
+        true
+    }
+
     /// Empties the ring and zeroes the position counter — **FR-10, FR-34, SEC-02.**
     ///
     /// The one place the ring is emptied, and therefore the one place FR-34 has to be obeyed.
@@ -2718,6 +2871,17 @@ pub fn set_caps_lock(probe: CapsProbe) -> bool {
 /// The public flush the other sources of the FR-10 table attach to; see [`Recorder::reset`].
 pub fn reset() -> bool {
     with(Recorder::reset).is_some()
+}
+
+/// Empties the buffer of the calling thread if it has stood untouched for `idle_timeout_s` —
+/// **FR-15**, SEC-01, SEC-02, task T-52-4.
+///
+/// [`Recorder::flush_if_idle`] as the rest of the program reaches it. The one caller is the
+/// thirty-second liveness tick of FR-80 on the input thread (`watchdog::flush_buffer_if_idle`),
+/// which is the thread that owns the buffer — a thread with no buffer answers `false`, which is
+/// the honest answer for a thread that has recorded nothing.
+pub fn flush_if_idle(now_ms: u32) -> bool {
+    with(|recorder| recorder.flush_if_idle(now_ms)).unwrap_or(false)
 }
 
 /// Flushes the buffer of the calling thread of everything typed at or before `event_time`, and

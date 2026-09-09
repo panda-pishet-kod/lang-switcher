@@ -952,6 +952,14 @@ static RECOVERY_PROBES: AtomicU32 = AtomicU32::new(0);
 /// **SEC-01, SEC-07.** A count of events and nothing else.
 static FOCUS_AFTER_TYPING: AtomicU32 = AtomicU32::new(0);
 
+/// Buffers emptied because nobody had touched them for `[buffer] idle_timeout_s` — **FR-15**,
+/// task T-52-4. See [`flush_buffer_if_idle`].
+///
+/// Beside the other flush counts of [`Counters`] rather than in [`Health`], because that is what
+/// it is: one more row of the FR-10 table reporting how often it fired. A count of flushes and
+/// never of what was in them (SEC-07).
+static IDLE_FLUSHES: AtomicU32 = AtomicU32::new(0);
+
 /// Counts of what the subscriptions of this module have done — SEC-07 allows counts and nothing
 /// else, and these are counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1005,6 +1013,47 @@ pub struct Counters {
     /// task Т-48-2. See [`FOCUS_AFTER_TYPING`] for why it is beside `window_flushes` rather than
     /// subtracted from it.
     pub focus_after_typing: u32,
+    /// Buffers emptied by the idle timeout of **FR-15** — task T-52-4. See [`IDLE_FLUSHES`].
+    pub idle_flushes: u32,
+}
+
+/// Empties the typing buffer of this thread if `[buffer] idle_timeout_s` has passed with
+/// nothing happening to it — **FR-15**, task T-52-4. Answers whether it did.
+///
+/// The whole of the mechanism is [`crate::buffer::flush_if_idle`]; this is the call site, the
+/// counter and nothing else. Public so that a test can drive it with a chosen moment: the
+/// `WM_TIMER` arm it is called from cannot be driven from a test at all, because the
+/// reinstallation beside it would put a `WH_KEYBOARD_LL` hook into a process that pumps no
+/// messages — the reason section 4.11 and `tests\hook.rs` both give.
+///
+/// ⚠ **`now_ms` is a parameter and not a reading**, and that is what makes the rule measurable.
+/// The product's one caller passes [`message_tick`].
+pub fn flush_buffer_if_idle(now_ms: u32) -> bool {
+    if !crate::buffer::flush_if_idle(now_ms) {
+        return false;
+    }
+
+    IDLE_FLUSHES.fetch_add(1, Ordering::Relaxed);
+
+    true
+}
+
+/// The tick of the message this thread is handling right now — the clock of FR-12, without the
+/// `Win32_System_SystemInformation` feature.
+///
+/// `GetTickCount` is the direct source and it lives in a feature this program does not carry;
+/// the list of section 3.2 is closed. `GetMessageTime` is in `Win32_UI_WindowsAndMessaging`,
+/// which this program has carried since its first window, and it answers with the tick of the
+/// message currently being handled — **the same clock, to the millisecond**, when the handler is
+/// the timer that has just fired. Module `letters` makes exactly this substitution for exactly
+/// this reason (`moment_is_quiet`), and the constraint it names — «call this from a message
+/// handler, and only from one» — is met here by construction: the one caller is the `WM_TIMER`
+/// arm of [`handle_watchdog_message`].
+fn message_tick() -> u32 {
+    // SAFETY: takes no arguments, writes no memory of ours and cannot fail; it reads a value the
+    // system keeps for the message this thread is dispatching. The cast is of a value the
+    // documentation defines as a tick count, which is what `GetTickCount` returns as `u32`.
+    (unsafe { windows::Win32::UI::WindowsAndMessaging::GetMessageTime() }) as u32
 }
 
 /// What the subscriptions of this module have done so far.
@@ -1026,6 +1075,7 @@ pub fn counters() -> Counters {
         recovery_probes: RECOVERY_PROBES.load(Ordering::Relaxed),
         wipe_requests: WIPE_REQUESTS.load(Ordering::Relaxed),
         focus_after_typing: FOCUS_AFTER_TYPING.load(Ordering::Relaxed),
+        idle_flushes: IDLE_FLUSHES.load(Ordering::Relaxed),
     }
 }
 
@@ -2579,6 +2629,18 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
         // nothing whatsoever.
         WM_TIMER if wparam.0 == LIVENESS_TIMER_ID && is_input_window(window) => {
             LIVENESS_TICKS.fetch_add(1, Ordering::Relaxed);
+
+            // ⭐ **FR-15 rides on this tick and creates no timer of its own — task T-52-4.**
+            // The rule needs a heartbeat and this thread already has one; a second `SetTimer`
+            // would be a second thing to keep alive, and on the callback path a `SetTimer` is
+            // forbidden outright. Thirty seconds is also what fixes the precision the
+            // requirement states: not before `idle_timeout_s`, and not later than
+            // `idle_timeout_s + 30 s`.
+            //
+            // Before [`reinstall_hook`] and not after, so that the buffer is emptied even if
+            // the reinstallation below has something to say about itself.
+            flush_buffer_if_idle(message_tick());
+
             reinstall_hook(window, Reason::Timer);
             Some(LRESULT(0))
         }

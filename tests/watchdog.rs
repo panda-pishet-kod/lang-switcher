@@ -593,6 +593,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         recovery_probes: after.recovery_probes - before.recovery_probes,
         wipe_requests: after.wipe_requests - before.wipe_requests,
         focus_after_typing: after.focus_after_typing - before.focus_after_typing,
+        idle_flushes: after.idle_flushes - before.idle_flushes,
     }
 }
 
@@ -3608,4 +3609,115 @@ fn the_same_hwnd_churn_with_moving_children_is_a_transfer_and_still_flushes() {
 
     buffer::uninstall();
     drop(watching);
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-52-4 — FR-15: the idle timeout rides on the liveness tick of FR-80
+// ---------------------------------------------------------------------------------------
+
+/// **FR-15 through the module that owns the heartbeat** — task T-52-4.
+///
+/// The rule itself lives in `buffer` and is measured there, one stroke and one moment at a time.
+/// What belongs here is the wiring: the thirty-second tick of FR-80 asks the question, the
+/// answer is counted beside the other flush counts of the FR-10 table, and no timer of its own
+/// was created for it.
+///
+/// ⚠ **The `WM_TIMER` arm cannot be driven from a test** — the reinstallation beside this call
+/// would put a `WH_KEYBOARD_LL` hook into a process that pumps no messages, which section 4.11
+/// forbids and which would freeze the keyboard of whoever is running `cargo test`. So the call
+/// is made directly, with a moment of this test's own choosing, and that the arm makes it is
+/// pinned by reading the source below.
+#[test]
+fn the_idle_timeout_of_fr15_is_asked_and_counted_by_the_watchdog() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    // An empty buffer is not a flush, however long ago the moment is.
+    let before = watchdog::counters();
+    assert!(!watchdog::flush_buffer_if_idle(9_000_000));
+    assert_eq!(
+        delta(before, watchdog::counters()).idle_flushes,
+        0,
+        "пустой буфер не сброс"
+    );
+
+    // A word, and a tick that is not late enough.
+    for time in [1_000_000, 1_000_001, 1_000_002] {
+        press_at(time);
+    }
+
+    assert_eq!(buffer::len(), 3, "a half-typed word is in the ring");
+
+    let before = watchdog::counters();
+    assert!(!watchdog::flush_buffer_if_idle(1_000_002 + 299_000));
+    assert_eq!(buffer::len(), 3, "не раньше срока");
+    assert_eq!(delta(before, watchdog::counters()).idle_flushes, 0);
+
+    // And a tick that is.
+    let before = watchdog::counters();
+    assert!(watchdog::flush_buffer_if_idle(1_000_002 + 300_000));
+
+    assert_eq!(buffer::len(), 0, "FR-15: полный сброс");
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "SEC-02: обнуление памяти, как у всякого сброса FR-10"
+    );
+    assert_eq!(
+        delta(before, watchdog::counters()).idle_flushes,
+        1,
+        "сброс по покою не посчитан"
+    );
+
+    buffer::uninstall();
+}
+
+/// **The tick is the only clock FR-15 has, and no second timer was created for it** — task
+/// T-52-4.
+///
+/// Two claims about the source, and both of them are what the requirement's precision rests on:
+/// the arm of the thirty-second timer asks the question, so a buffer is emptied no later than
+/// `idle_timeout_s + 30 s`; and this module creates exactly the timers it created before, so
+/// there is no second heartbeat to keep alive and nothing new on the callback path.
+#[test]
+fn fr15_rides_on_the_liveness_tick_and_adds_no_timer() {
+    let source = source_of("watchdog.rs");
+
+    let arm = source
+        .split("WM_TIMER if wparam.0 == LIVENESS_TIMER_ID")
+        .nth(1)
+        .expect("the liveness arm is still where FR-80 put it");
+    let arm = arm
+        .split("WM_APP_REHOOK")
+        .next()
+        .expect("the arm ends before the next one");
+
+    assert!(
+        arm.contains("flush_buffer_if_idle("),
+        "FR-15: такт живости не спрашивает про покой буфера"
+    );
+
+    // `SetTimer` is called for the liveness timer of FR-80 and for the one-shot of the probe,
+    // and for nothing else. A third would be a new heartbeat, which this task was not to build.
+    let timers: Vec<&str> = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//"))
+        .filter(|line| line.contains("SetTimer("))
+        .collect();
+
+    assert_eq!(
+        timers.len(),
+        2,
+        "FR-15 не должен был заводить своего таймера, а SetTimer теперь зовётся так: {timers:?}"
+    );
+
+    // And the callback path is untouched: the flush is asked for on the message loop.
+    let hook = source_of("hook.rs");
+
+    assert!(
+        !hook.contains("flush_if_idle"),
+        "FR-15 не должен появляться на пути callback"
+    );
 }

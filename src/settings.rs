@@ -801,12 +801,30 @@ pub struct Buffer {
     /// Capacity of the typing buffer in characters. Default `256`.
     #[serde(default = "default_buffer_capacity")]
     pub capacity: usize,
+    /// **How long a word may sit in the buffer with nothing happening to it, seconds — FR-15**,
+    /// task T-52-4. Default `300`; `0` switches the rule off.
+    ///
+    /// Published clamped to [`crate::buffer::MIN_IDLE_TIMEOUT_S`] …
+    /// [`crate::buffer::MAX_IDLE_TIMEOUT_S`], with `0` kept as `0`. The file may hold anything —
+    /// it is edited by hand — and the ceilings are applied where the value crosses to the input
+    /// thread, exactly as the three millisecond fields of task T-13-13 are.
+    ///
+    /// ⚠ **`schema_version` did not move for this key, and 6 is deliberate.** There is no
+    /// `deny_unknown_fields` in this module, so a file written by this build is read by the
+    /// previous one without complaint — the key is simply ignored there. Raising the schema to
+    /// 7 would do the opposite: a user who installed this build and then went back to `e51`
+    /// would find their configuration quarantined as «из будущего»
+    /// ([`ReadOutcome::FromNewerSchema`]), which is a real cost paid for a key whose absence
+    /// already has a defined meaning.
+    #[serde(default = "default_buffer_idle_timeout_s")]
+    pub idle_timeout_s: u32,
 }
 
 impl Default for Buffer {
     fn default() -> Self {
         Self {
             capacity: default_buffer_capacity(),
+            idle_timeout_s: default_buffer_idle_timeout_s(),
         }
     }
 }
@@ -1188,6 +1206,15 @@ fn default_clipboard_restore_delay_ms() -> u32 {
 /// Serde default for `buffer.capacity`.
 fn default_buffer_capacity() -> usize {
     256
+}
+
+/// Serde default for `buffer.idle_timeout_s` — **FR-15**, task T-52-4.
+///
+/// Five minutes. Long enough that a user who stopped to read something and came back finds the
+/// word they were typing still there, short enough that a machine left alone is not keeping a
+/// half-typed line in memory for the rest of the day (SEC-01).
+fn default_buffer_idle_timeout_s() -> u32 {
+    300
 }
 
 /// Serde default for `general.theme` — the default FR-92а names.

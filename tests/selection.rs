@@ -563,7 +563,10 @@ fn nothing_that_can_block_runs_on_the_thread_that_owns_the_hook() {
 
     // Section 6.3 gives the typing buffer to the input thread and to no other, which is the test
     // `app::window_proc` uses to mean "this is the input thread".
-    lang_switcher::buffer::install(&settings::Buffer { capacity: 8 });
+    lang_switcher::buffer::install(&settings::Buffer {
+        capacity: 8,
+        ..settings::Buffer::default()
+    });
 
     let before = selection::counters();
 

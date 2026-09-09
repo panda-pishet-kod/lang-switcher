@@ -15614,3 +15614,147 @@ fn the_machine_answers_a_real_list_of_tags_and_one_of_the_locales() {
         "the answer is always one of the twelve"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// FR-15 — the idle timeout of `[buffer]`, and the schema it deliberately did not cost.
+// Task T-52-4
+// ---------------------------------------------------------------------------------------
+
+/// **Section 7's default and its ceilings** — FR-15, task T-52-4.
+///
+/// Five minutes: long enough that a user who stopped to read something and came back finds the
+/// word they were typing still there, short enough that a machine left alone is not keeping a
+/// half-typed line in memory for the rest of the day (SEC-01).
+#[test]
+fn the_idle_timeout_of_fr15_defaults_to_five_minutes_and_survives_the_round_trip() {
+    assert_eq!(
+        Config::default().buffer.idle_timeout_s,
+        300,
+        "FR-15: раздел 7 обещает 300 секунд"
+    );
+
+    let dir = TestDir::new("idle_timeout_round_trip");
+
+    for wanted in [0, 30, 300, 86_400] {
+        let mut config = Config::default();
+        config.buffer.idle_timeout_s = wanted;
+
+        let text = config.to_toml_string().expect("serialises");
+
+        assert!(
+            text.contains(&format!("idle_timeout_s = {wanted}")),
+            "the file has to carry the field: {text}"
+        );
+
+        let path = write_file(&dir, &text);
+        let (back, outcome) = settings::read_from(&path).expect("a current file must be read");
+
+        assert_eq!(outcome, ReadOutcome::Current);
+        assert_eq!(back.buffer.idle_timeout_s, wanted);
+    }
+}
+
+/// **The ceilings are applied where the value is published, and the file may hold anything.**
+///
+/// The same rule task T-13-13 gives the three millisecond fields of section 7: a hand-edited
+/// file is not validated and not rewritten, and what the program *does* with an impossible
+/// number is clamp it. The floor is the thirty-second liveness tick of FR-80 — the rule is
+/// checked there and nowhere else, so a shorter timeout could not be honoured and a user who
+/// wrote `5` would get thirty seconds while believing they had five.
+///
+/// ⚠ **Zero is not clamped**, and that is the difference from `capacity`: `0` is how section 7
+/// says «выключено», which is a request rather than a slip.
+#[test]
+fn an_impossible_idle_timeout_is_clamped_at_publication_and_left_in_the_file() {
+    let dir = TestDir::new("idle_timeout_clamped");
+
+    for (in_file, published) in [
+        (0u32, 0u32),
+        (1, 30),
+        (29, 30),
+        (30, 30),
+        (300, 300),
+        (86_400, 86_400),
+        (86_401, 86_400),
+        (u32::MAX, 86_400),
+    ] {
+        let path = write_file(
+            &dir,
+            &format!(
+                "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+                 \n\
+                 [buffer]\n\
+                 idle_timeout_s = {in_file}\n"
+            ),
+        );
+
+        let (config, outcome) = settings::read_from(&path).expect("the file must be read");
+
+        assert_eq!(outcome, ReadOutcome::Current);
+        assert_eq!(
+            config.buffer.idle_timeout_s, in_file,
+            "the file is not rewritten and not validated"
+        );
+        assert_eq!(
+            lang_switcher::buffer::effective_idle_timeout_s(config.buffer.idle_timeout_s),
+            published,
+            "idle_timeout_s = {in_file} публикуется как {published}"
+        );
+    }
+
+    assert_eq!(lang_switcher::buffer::MIN_IDLE_TIMEOUT_S, 30);
+    assert_eq!(lang_switcher::buffer::MAX_IDLE_TIMEOUT_S, 86_400);
+}
+
+/// **⭐ The schema did not move for FR-15, and this is the reasoning as a measurement.**
+///
+/// A file this build has never seen the key in — a configuration written by `e51`, stamped
+/// schema 6 — is read as **current**, with the section 7 default filled in by serde. It is not
+/// migrated, because there is nothing to migrate: an absent key already has a defined meaning.
+///
+/// Raising the schema to 7 would have bought nothing and cost something real. There is no
+/// `deny_unknown_fields` in this module, so a file written by *this* build is read by the
+/// previous one without complaint — the key is simply ignored there. A schema of 7, by
+/// contrast, would send that same file into quarantine as «из будущего»
+/// (`ReadOutcome::FromNewerSchema`) the moment a user went back to `e51`, which is the one
+/// outcome the version field exists to cause and the one nobody wanted here.
+#[test]
+fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
+    let dir = TestDir::new("idle_timeout_absent");
+
+    let path = write_file(
+        &dir,
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [buffer]\n\
+             capacity = 256\n"
+        ),
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("an e51 file must still be read");
+
+    assert_eq!(
+        outcome,
+        ReadOutcome::Current,
+        "FR-15: файл схемы 6 без ключа — текущий, а не мигрированный"
+    );
+    assert_eq!(
+        config.buffer.idle_timeout_s, 300,
+        "отсутствующий ключ читается умолчанием раздела 7"
+    );
+    assert_eq!(config.buffer.capacity, 256, "и остальное на месте");
+
+    // The schema itself did not move — the whole point of the paragraph above.
+    assert_eq!(
+        CURRENT_SCHEMA_VERSION, 6,
+        "FR-15 не поднимает схему: цена подъёма — карантин конфигурации при откате на e51"
+    );
+
+    // And the far side of that promise: a file stamped 7 *would* be quarantined, which is what
+    // makes the choice above a choice and not a coincidence.
+    let newer = write_file(&dir, "schema_version = 7\n");
+    let (_, outcome) = settings::read_from(&newer).expect("a newer file is read, not refused");
+
+    assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: 7 });
+}
