@@ -6268,6 +6268,107 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
     );
 }
 
+/// **Закрытая часть комбобокса одинакова во ВСЕХ окнах программы** — решение 110.3,
+/// задача Т-47-1.
+///
+/// # Находка, ради которой этот тест заведён
+///
+/// Слова пользователя 2026-09-09 со снимком шага 3 мастера: «высота поля выбора раскладки
+/// отличается от типового принятого в общем окне». Замер до правки
+/// (`scratchpad-Э47\красное-высота-комбо-e46.log`):
+///
+/// ```text
+/// мастер, шаг 3: окно контрола 22 px, CB_GETITEMHEIGHT(-1) 16 px
+/// настройки:     окно контрола 24 px, CB_GETITEMHEIGHT(-1) 18 px
+/// ```
+///
+/// Прежняя мерка — «высота шрифта диалога + `CLOSED_ITEM_EXTRA`» — **зависела от шрифта окна**:
+/// 9 pt мастера дают высоту 15 px, 10 pt окна настроек — 17 px, отсюда 16 и 18. Формула была
+/// одна, а результат разный.
+///
+/// # Что проверяется, и почему этого нельзя проверить прежним тестом
+///
+/// [`the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator`] выводит
+/// `CLOSED_ITEM_EXTRA` из макета и проверяет **арифметику константы**. Он остался зелёным и
+/// при дефекте, и после ремонта: он ничего не знает о том, что окон в программе два и шрифты у
+/// них разные. Здесь проверяется само правило — **число, которое ставится контролу, одно на
+/// все окна**, — на двух модельных высотах шрифта, измеренных на этой машине.
+///
+/// ⚠ Оконного дескриптора у теста нет, поэтому тело `widgets::combo::closed_height` повторено
+/// здесь **арифметикой**, а то, что окно в самом деле ходит этой дорогой, проверяется чтением
+/// исходника ниже — тем же приёмом, каким проверены другие правила этого файла.
+#[test]
+fn the_closed_part_of_a_combo_box_is_the_same_height_in_every_window() {
+    // Высоты шрифта диалога, измеренные стендом на этой машине: мастер несёт 9 pt, окно
+    // настроек — 10 pt, и одна кегельная строка выходит 15 и 17 пикселей соответственно
+    // (прибор печатает их как «окно контрола» однострочного поля).
+    const WIZARD_FONT: i32 = 15;
+    const SETTINGS_FONT: i32 = 17;
+
+    // Тело `widgets::combo::closed_height`, повторённое арифметикой.
+    let closed = |font: i32| {
+        let by_font = font + theme::scaled(lang_switcher::widgets::combo::CLOSED_ITEM_EXTRA, 96);
+        let by_mockup = theme::scaled(lang_switcher::widgets::combo::CLOSED_BOX, 96);
+        by_font.max(by_mockup)
+    };
+
+    let wizard = closed(WIZARD_FONT);
+    let settings = closed(SETTINGS_FONT);
+
+    println!("закрытая часть при 96 DPI: мастер {wizard} px, окно настроек {settings} px");
+
+    assert_eq!(
+        wizard, settings,
+        "закрытая часть комбобокса обязана быть одной и той же во всех окнах программы, а \
+         вышло {wizard} против {settings} — мерка снова зависит от шрифта окна (решение 110.3)"
+    );
+
+    // ⭐ И это ровно то число, которое окно настроек имело всегда: эталон механики (решение
+    // 109.1) не двигается, мастер встаёт на него.
+    assert_eq!(
+        settings,
+        SETTINGS_FONT + theme::scaled(lang_switcher::widgets::combo::CLOSED_ITEM_EXTRA, 96),
+        "окно настроек обязано остаться при своей прежней закрытой части — это эталон, а не \
+         предмет правки"
+    );
+    assert_eq!(settings, 18, "и она равна 18 px при 96 DPI — замер стенда");
+
+    // Пол по шрифту не декорация: он держит слово внутри закрытой части, какой бы крупный
+    // шрифт окно ни несло. Макетная мерка одна такой гарантии не даёт.
+    let huge = closed(40);
+    assert!(
+        huge > theme::scaled(lang_switcher::widgets::combo::CLOSED_BOX, 96),
+        "при крупном шрифте закрытая часть обязана подниматься выше макетной мерки, иначе \
+         слово в неё не влезет — вышло {huge}"
+    );
+    assert_eq!(
+        huge,
+        40 + theme::scaled(lang_switcher::widgets::combo::CLOSED_ITEM_EXTRA, 96)
+    );
+
+    // ---- и что окно в самом деле ходит этой дорогой --------------------------------------
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("widgets.rs"),
+    )
+    .expect("src/widgets.rs must be readable")
+    .replace("\r\n", "\n");
+
+    for part in [
+        "pub const CLOSED_BOX: i32 = 25;",
+        "let Some(height) = closed_height(hwnd) else {",
+        "let by_font = row_height(hwnd, CLOSED_ITEM_EXTRA)?;",
+        "let by_mockup = scaled(CLOSED_BOX, dc_dpi(dc));",
+        "Some(by_font.max(by_mockup))",
+    ] {
+        assert!(
+            source.contains(part),
+            "слой обязан нести `{part}` — иначе правило 110.3 держится только этим тестом"
+        );
+    }
+}
+
 // -----------------------------------------------------------------------------------------
 // The about dialog — FR-92а, task T-11-11, read out of the built binary like everything else
 // -----------------------------------------------------------------------------------------
