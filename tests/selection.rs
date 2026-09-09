@@ -352,13 +352,43 @@ fn a_snapshot_accounts_for_every_format_the_clipboard_lists() {
         Err(other) => panic!("the snapshot refused: {other}"),
     };
 
-    assert_eq!(
-        snapshot.captured_formats() + snapshot.handle_formats() + snapshot.refused_formats(),
-        snapshot.listed_formats(),
-        "every listed format is either captured or explained"
-    );
+    let accounted =
+        snapshot.captured_formats() + snapshot.handle_formats() + snapshot.refused_formats();
 
-    // Nothing captured is a handle format, and every captured one is memory-backed.
+    // ⚠ **The identity holds below the ceiling of FR-64 and not above it — task Т-48-6.**
+    //
+    // Above it the requirement itself says what happens: «при превышении лимита сохраняется
+    // только `CF_UNICODETEXT`». Every other memory format is then deliberately skipped, and a
+    // skipped format is not captured, is not a handle format and was not refused — it is the
+    // fourth thing FR-64 asks for, and the sum is short by exactly the number of them.
+    //
+    // This assertion used to be written without the truncated case and had simply never met a
+    // clipboard over four megabytes. On 2026-09-09 it met one — on a **pristine** tree, before
+    // any change of stage Э48 — and read `1` against `8`, which looked like a defect of the
+    // product and was a defect of the premise. The user's word: «Починить сейчас, до закрытия
+    // Э48». What the truncated case can still say is the inequality, and it is the sharp half:
+    // nothing may be *invented*, and `CF_UNICODETEXT` is what has to survive.
+    if snapshot.is_truncated() {
+        assert!(
+            accounted <= snapshot.listed_formats(),
+            "a truncated snapshot accounts for no more than the clipboard listed: \
+             {accounted} of {}",
+            snapshot.listed_formats()
+        );
+        assert!(
+            snapshot.formats().all(|format| format == CF_UNICODETEXT),
+            "FR-64: above the ceiling only CF_UNICODETEXT is kept"
+        );
+    } else {
+        assert_eq!(
+            accounted,
+            snapshot.listed_formats(),
+            "every listed format is either captured or explained"
+        );
+    }
+
+    // Nothing captured is a handle format, and every captured one is memory-backed. True in
+    // both cases: truncation drops formats, it never adds one.
     for format in snapshot.formats() {
         assert!(
             selection::is_memory_format(format),
@@ -381,7 +411,32 @@ fn the_budget_of_fr64_is_four_megabytes_for_everything_together() {
     let window = TestWindow::create();
 
     if let Ok(snapshot) = selection::snapshot(window.0) {
-        assert!(!snapshot.is_truncated() || snapshot.total_bytes() > SNAPSHOT_BUDGET_BYTES);
+        if snapshot.is_truncated() {
+            // ⚠ **What the second arm of this assertion used to say could never be true** —
+            // task Т-48-6. It read `total_bytes() > SNAPSHOT_BUDGET_BYTES`, and `total_bytes`
+            // counts the bytes that were **captured**: above the ceiling that is the one text
+            // block FR-64 keeps, which is small by construction. So the arm was unreachable and
+            // the whole line was «a truncated snapshot fails», which is what a clipboard over
+            // four megabytes on this machine made it do on 2026-09-09.
+            //
+            // The quantity the old wording wanted — the sum *before* the decision — is not
+            // published by `Snapshot` at all, so a test cannot read it; that half of FR-64 rests
+            // on `snapshot`'s own arithmetic. What is observable is that the truncation did its
+            // work, and that is asserted here.
+            assert!(
+                snapshot.total_bytes() <= SNAPSHOT_BUDGET_BYTES,
+                "a truncation exists to bring the snapshot under the ceiling, and this one \
+                 kept {} bytes",
+                snapshot.total_bytes()
+            );
+            assert!(
+                snapshot.captured_formats() <= 1,
+                "FR-64: above the ceiling at most CF_UNICODETEXT is kept, and {} formats were",
+                snapshot.captured_formats()
+            );
+        } else {
+            assert!(snapshot.total_bytes() <= SNAPSHOT_BUDGET_BYTES);
+        }
     }
 }
 
