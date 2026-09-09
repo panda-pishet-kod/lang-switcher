@@ -468,8 +468,8 @@ IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
 
 // Values fixed by decision 8 of DECISIONS.md.
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,50,0,0
-  PRODUCTVERSION  0,50,0,0
+  FILEVERSION     0,51,0,0
+  PRODUCTVERSION  0,51,0,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L
@@ -482,12 +482,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Panda_Pishet_Kod"
             VALUE "FileDescription",  "Lang Switcher"
-            VALUE "FileVersion",      "0.50.0.0"
+            VALUE "FileVersion",      "0.51.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
             VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
-            VALUE "ProductVersion",   "0.50.0.0"
+            VALUE "ProductVersion",   "0.51.0.0"
         END
     END
     BLOCK "VarFileInfo"
@@ -857,7 +857,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 // from the task bar. Both windows of FR-92 are fixed, because the user named both.
 EXSTYLE 0x00040000
 CAPTION "О программе"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     ICON            IDI_APP_ACTIVE, IDC_ABOUT_ICON, 12, 13, 23, 22
     LTEXT           "Lang Switcher", IDC_ABOUT_NAME, 42, 12, 141, 11, SS_OWNERDRAW
@@ -948,7 +948,7 @@ END
 // 555 × 8 / 15 is 296. Решение 101 п. 7 fixes it there for every letter, so that a person does
 // not meet a window that changes size depending on what the author had to say.
 
-IDD_LETTER DIALOGEX 0, 0, 191, 296
+IDD_LETTER DIALOGEX 0, 0, 191, 308
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, for the reason the two windows above carry it: the owner is
 // this program's hidden WS_EX_TOOLWINDOW window, and an owned window inherits its owner's
@@ -956,7 +956,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 // cannot be found at all — and unlike those two, this one is **modeless** and may sit open.
 EXSTYLE 0x00040000
 CAPTION "Письмо от автора"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     ICON            IDI_APP_ACTIVE, IDC_LETTER_ICON, 12, 13, 23, 22
     LTEXT           "", IDC_LETTER_TITLE, 42, 12, 141, 22, SS_OWNERDRAW
@@ -992,7 +992,7 @@ IDD_LETTERS_LIST DIALOGEX 0, 0, 191, 296
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "Последние письма"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     CONTROL         "", IDC_LETTERS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 12, 167, 240
     LTEXT           "", IDC_LETTERS_T1, 19, 20, 153, 11, SS_OWNERDRAW
@@ -1028,7 +1028,7 @@ IDD_AUTHOR DIALOGEX 0, 0, 246, 300
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "От автора"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     ICON            IDI_APP_ACTIVE, IDC_AUTHOR_ICON, 12, 13, 23, 22
     LTEXT           "Lang Switcher", IDC_AUTHOR_NAME, 42, 12, 192, 12, SS_OWNERDRAW
@@ -1070,7 +1070,7 @@ IDD_WIZARD DIALOGEX 0, 0, 256, 268
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 EXSTYLE 0x00040000
 CAPTION "Написать автору"
-FONT 9, "Segoe UI", 400, 0, 0x1
+FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
     LTEXT           "", IDC_WZ_STEP, 16, 12, 224, 9, SS_OWNERDRAW
     LTEXT           "", IDC_WZ_PROGRESS, 16, 23, 224, 3, SS_OWNERDRAW
@@ -1592,9 +1592,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "было {0} · обновлено сегодня"
     IDS_WHATSNEW_TODAY      "обновлено сегодня"
     IDS_WHATSNEW_PANEL      "Три изменения"
-    IDS_WHATSNEW_1          "Строка выпадающего списка раскладок стала одной высоты во всех окнах программы."
-    IDS_WHATSNEW_2          "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно."
-    IDS_WHATSNEW_3          "Звук отказа выключается тем же переключателем «Звуковой отклик», что и два прежних."
+    IDS_WHATSNEW_1          "Все окна программы теперь одного кегля — как в окне настроек."
+    IDS_WHATSNEW_2          "Строка выпадающего списка раскладок стала одной высоты во всех окнах программы."
+    IDS_WHATSNEW_3          "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно."
     IDS_WHATSNEW_FULL       "Полный список изменений опубликован в канале."
     IDS_AUTHOR_CAPTION      "От автора"
     IDS_AUTHOR_VERSION      "версия {0} · Панда, он же Panda_Pishet_Kod"
@@ -1806,9 +1806,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "you had {0} · updated today"
     IDS_WHATSNEW_TODAY      "updated today"
     IDS_WHATSNEW_PANEL      "Three changes"
-    IDS_WHATSNEW_1          "A row of the drop-down layout list is now the same height in every window of the program."
-    IDS_WHATSNEW_2          "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose."
-    IDS_WHATSNEW_3          "The refusal sound is switched off by the same «Sound feedback» box as the other two."
+    IDS_WHATSNEW_1          "Every window of the program now uses one type size — the one the settings window has."
+    IDS_WHATSNEW_2          "A row of the drop-down layout list is now the same height in every window of the program."
+    IDS_WHATSNEW_3          "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose."
     IDS_WHATSNEW_FULL       "The full list of changes is published in the channel."
     IDS_AUTHOR_CAPTION      "From the author"
     IDS_AUTHOR_VERSION      "version {0} · Panda, also known as Panda_Pishet_Kod"
@@ -2033,9 +2033,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "було {0} · оновлено сьогодні"
     IDS_WHATSNEW_TODAY      "оновлено сьогодні"
     IDS_WHATSNEW_PANEL      "Три зміни"
-    IDS_WHATSNEW_1          "Рядок випадного списку розкладок став однієї висоти в усіх вікнах програми."
-    IDS_WHATSNEW_2          "У полі пароля натискання більше не мовчить: програма відповідає глухим стуком — перемикання тут заборонене навмисно."
-    IDS_WHATSNEW_3          "Звук відмови вимикається тим самим перемикачем «Звуковий відгук», що й два попередні."
+    IDS_WHATSNEW_1          "Усі вікна програми тепер одного кегля — як у вікні налаштувань."
+    IDS_WHATSNEW_2          "Рядок випадного списку розкладок став однієї висоти в усіх вікнах програми."
+    IDS_WHATSNEW_3          "У полі пароля натискання більше не мовчить: програма відповідає глухим стуком — перемикання тут заборонене навмисно."
     IDS_WHATSNEW_FULL       "Повний список змін опубліковано в каналі."
     IDS_AUTHOR_CAPTION      "Від автора"
     IDS_AUTHOR_VERSION      "версія {0} · Панда, він же Panda_Pishet_Kod"
@@ -2243,9 +2243,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vorher {0} · heute aktualisiert"
     IDS_WHATSNEW_TODAY      "heute aktualisiert"
     IDS_WHATSNEW_PANEL      "Drei Änderungen"
-    IDS_WHATSNEW_1          "Eine Zeile der Belegungs-Ausklappliste ist jetzt in jedem Fenster des Programms gleich hoch."
-    IDS_WHATSNEW_2          "Ein Druck in einem Kennwortfeld wird nicht mehr mit Stille beantwortet: das Programm klopft dumpf — das Umschalten ist dort absichtlich untersagt."
-    IDS_WHATSNEW_3          "Der Ablehnungston wird mit demselben Kästchen «Tonrückmeldung» abgeschaltet wie die beiden anderen."
+    IDS_WHATSNEW_1          "Alle Fenster des Programms haben jetzt denselben Schriftgrad — den des Einstellungsfensters."
+    IDS_WHATSNEW_2          "Eine Zeile der Belegungs-Ausklappliste ist jetzt in jedem Fenster des Programms gleich hoch."
+    IDS_WHATSNEW_3          "Ein Druck in einem Kennwortfeld wird nicht mehr mit Stille beantwortet: das Programm klopft dumpf — das Umschalten ist dort absichtlich untersagt."
     IDS_WHATSNEW_FULL       "Die vollständige Liste der Änderungen ist im Kanal veröffentlicht."
     IDS_AUTHOR_CAPTION      "Vom Autor"
     IDS_AUTHOR_VERSION      "Version {0} · Panda, auch bekannt als Panda_Pishet_Kod"
@@ -2455,9 +2455,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "vous aviez {0} · mis à jour aujourd'hui"
     IDS_WHATSNEW_TODAY      "mis à jour aujourd'hui"
     IDS_WHATSNEW_PANEL      "Trois changements"
-    IDS_WHATSNEW_1          "Une ligne de la liste déroulante des dispositions a désormais la même hauteur dans toutes les fenêtres du programme."
-    IDS_WHATSNEW_2          "Une frappe dans un champ de mot de passe n'est plus accueillie par le silence : le programme frappe sourdement — la conversion y est interdite à dessein."
-    IDS_WHATSNEW_3          "Le son de refus se coupe avec la même case « Retour sonore » que les deux autres."
+    IDS_WHATSNEW_1          "Toutes les fenêtres du programme utilisent désormais un seul corps de texte — celui des réglages."
+    IDS_WHATSNEW_2          "Une ligne de la liste déroulante des dispositions a désormais la même hauteur dans toutes les fenêtres du programme."
+    IDS_WHATSNEW_3          "Une frappe dans un champ de mot de passe n'est plus accueillie par le silence : le programme frappe sourdement — la conversion y est interdite à dessein."
     IDS_WHATSNEW_FULL       "La liste complète des changements est publiée dans la chaîne."
     IDS_AUTHOR_CAPTION      "De l'auteur"
     IDS_AUTHOR_VERSION      "version {0} · Panda, alias Panda_Pishet_Kod"
@@ -2664,9 +2664,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "tenía {0} · actualizado hoy"
     IDS_WHATSNEW_TODAY      "actualizado hoy"
     IDS_WHATSNEW_PANEL      "Tres cambios"
-    IDS_WHATSNEW_1          "Una fila de la lista desplegable de distribuciones tiene ahora la misma altura en todas las ventanas del programa."
-    IDS_WHATSNEW_2          "Una pulsación en un campo de contraseña ya no se responde con silencio: el programa da un golpe sordo — ahí el cambio está prohibido a propósito."
-    IDS_WHATSNEW_3          "El sonido de rechazo se apaga con la misma casilla «Respuesta sonora» que los otros dos."
+    IDS_WHATSNEW_1          "Todas las ventanas del programa usan ahora un solo tamaño de letra — el de los ajustes."
+    IDS_WHATSNEW_2          "Una fila de la lista desplegable de distribuciones tiene ahora la misma altura en todas las ventanas del programa."
+    IDS_WHATSNEW_3          "Una pulsación en un campo de contraseña ya no se responde con silencio: el programa da un golpe sordo — ahí el cambio está prohibido a propósito."
     IDS_WHATSNEW_FULL       "La lista completa de cambios está publicada en el canal."
     IDS_AUTHOR_CAPTION      "Del autor"
     IDS_AUTHOR_VERSION      "versión {0} · Panda, alias Panda_Pishet_Kod"
@@ -2871,9 +2871,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "você tinha {0} · atualizado hoje"
     IDS_WHATSNEW_TODAY      "atualizado hoje"
     IDS_WHATSNEW_PANEL      "Três mudanças"
-    IDS_WHATSNEW_1          "Uma linha da lista pendente de disposições tem agora a mesma altura em todas as janelas do programa."
-    IDS_WHATSNEW_2          "Uma tecla premida num campo de palavra-passe já não é respondida com silêncio: o programa dá uma pancada surda — aí a conversão é proibida de propósito."
-    IDS_WHATSNEW_3          "O som de recusa desliga-se com a mesma caixa «Resposta sonora» que os outros dois."
+    IDS_WHATSNEW_1          "Todas as janelas do programa usam agora um só tamanho de letra — o das definições."
+    IDS_WHATSNEW_2          "Uma linha da lista pendente de disposições tem agora a mesma altura em todas as janelas do programa."
+    IDS_WHATSNEW_3          "Uma tecla premida num campo de palavra-passe já não é respondida com silêncio: o programa dá uma pancada surda — aí a conversão é proibida de propósito."
     IDS_WHATSNEW_FULL       "A lista completa de mudanças está publicada no canal."
     IDS_AUTHOR_CAPTION      "Do autor"
     IDS_AUTHOR_VERSION      "versão {0} · Panda, também conhecido como Panda_Pishet_Kod"
@@ -3083,9 +3083,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "avevi la {0} · aggiornato oggi"
     IDS_WHATSNEW_TODAY      "aggiornato oggi"
     IDS_WHATSNEW_PANEL      "Tre cambiamenti"
-    IDS_WHATSNEW_1          "Una riga dell'elenco a discesa dei layout ha ora la stessa altezza in tutte le finestre del programma."
-    IDS_WHATSNEW_2          "Una pressione in un campo password non riceve più il silenzio: il programma bussa sordo — lì il cambio è vietato di proposito."
-    IDS_WHATSNEW_3          "Il suono di rifiuto si spegne con la stessa casella «Risposta sonora» degli altri due."
+    IDS_WHATSNEW_1          "Tutte le finestre del programma usano ora un solo corpo di testo — quello delle impostazioni."
+    IDS_WHATSNEW_2          "Una riga dell'elenco a discesa dei layout ha ora la stessa altezza in tutte le finestre del programma."
+    IDS_WHATSNEW_3          "Una pressione in un campo password non riceve più il silenzio: il programma bussa sordo — lì il cambio è vietato di proposito."
     IDS_WHATSNEW_FULL       "L'elenco completo dei cambiamenti è pubblicato nel canale."
     IDS_AUTHOR_CAPTION      "Dall'autore"
     IDS_AUTHOR_VERSION      "versione {0} · Panda, alias Panda_Pishet_Kod"
@@ -3295,9 +3295,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "było {0} · zaktualizowano dzisiaj"
     IDS_WHATSNEW_TODAY      "zaktualizowano dzisiaj"
     IDS_WHATSNEW_PANEL      "Trzy zmiany"
-    IDS_WHATSNEW_1          "Wiersz rozwijanej listy układów ma teraz taką samą wysokość we wszystkich oknach programu."
-    IDS_WHATSNEW_2          "Naciśnięcie w polu hasła nie jest już zbywane ciszą: program puka głucho — zamiana jest tam zabroniona celowo."
-    IDS_WHATSNEW_3          "Dźwięk odmowy wyłącza to samo pole «Sygnał dźwiękowy» co dwa poprzednie."
+    IDS_WHATSNEW_1          "Wszystkie okna programu mają teraz jeden stopień pisma — taki jak w ustawieniach."
+    IDS_WHATSNEW_2          "Wiersz rozwijanej listy układów ma teraz taką samą wysokość we wszystkich oknach programu."
+    IDS_WHATSNEW_3          "Naciśnięcie w polu hasła nie jest już zbywane ciszą: program puka głucho — zamiana jest tam zabroniona celowo."
     IDS_WHATSNEW_FULL       "Pełna lista zmian jest opublikowana na kanale."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "wersja {0} · Panda, znany też jako Panda_Pishet_Kod"
@@ -3503,9 +3503,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "měli jste {0} · aktualizováno dnes"
     IDS_WHATSNEW_TODAY      "aktualizováno dnes"
     IDS_WHATSNEW_PANEL      "Tři změny"
-    IDS_WHATSNEW_1          "Řádek rozbalovacího seznamu rozložení má nyní stejnou výšku ve všech oknech programu."
-    IDS_WHATSNEW_2          "Stisk v poli pro heslo už neodpovídá tichem: program tupě klepne — převod je tam zakázán záměrně."
-    IDS_WHATSNEW_3          "Zvuk odmítnutí vypíná stejné políčko «Zvuková odezva» jako oba předchozí."
+    IDS_WHATSNEW_1          "Všechna okna programu mají nyní jeden stupeň písma — stejný jako okno nastavení."
+    IDS_WHATSNEW_2          "Řádek rozbalovacího seznamu rozložení má nyní stejnou výšku ve všech oknech programu."
+    IDS_WHATSNEW_3          "Stisk v poli pro heslo už neodpovídá tichem: program tupě klepne — převod je tam zakázán záměrně."
     IDS_WHATSNEW_FULL       "Úplný seznam změn je zveřejněn na kanálu."
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_VERSION      "verze {0} · Panda, známý též jako Panda_Pishet_Kod"
@@ -3714,9 +3714,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "önceki {0} · bugün güncellendi"
     IDS_WHATSNEW_TODAY      "bugün güncellendi"
     IDS_WHATSNEW_PANEL      "Üç değişiklik"
-    IDS_WHATSNEW_1          "Düzen açılır listesindeki satır artık programın tüm pencerelerinde aynı yükseklikte."
-    IDS_WHATSNEW_2          "Parola alanındaki tuş basışı artık sessizlikle karşılanmıyor: program boğuk bir tık veriyor — dönüştürme orada bilerek yasak."
-    IDS_WHATSNEW_3          "Ret sesi, diğer ikisiyle aynı «Sesli geri bildirim» kutusundan kapatılıyor."
+    IDS_WHATSNEW_1          "Programın tüm pencereleri artık tek punto kullanıyor — ayarlar penceresindeki punto."
+    IDS_WHATSNEW_2          "Düzen açılır listesindeki satır artık programın tüm pencerelerinde aynı yükseklikte."
+    IDS_WHATSNEW_3          "Parola alanındaki tuş basışı artık sessizlikle karşılanmıyor: program boğuk bir tık veriyor — dönüştürme orada bilerek yasak."
     IDS_WHATSNEW_FULL       "Değişikliklerin tam listesi kanalda yayımlandı."
     IDS_AUTHOR_CAPTION      "Yazardan"
     IDS_AUTHOR_VERSION      "sürüm {0} · Panda, namıdiğer Panda_Pishet_Kod"
@@ -3929,9 +3929,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "είχατε {0} · ενημερώθηκε σήμερα"
     IDS_WHATSNEW_TODAY      "ενημερώθηκε σήμερα"
     IDS_WHATSNEW_PANEL      "Τρεις αλλαγές"
-    IDS_WHATSNEW_1          "Μια γραμμή της αναπτυσσόμενης λίστας διατάξεων έχει τώρα το ίδιο ύψος σε όλα τα παράθυρα του προγράμματος."
-    IDS_WHATSNEW_2          "Το πάτημα σε πεδίο κωδικού δεν απαντάται πια με σιωπή: το πρόγραμμα χτυπά υπόκωφα — η μετατροπή εκεί απαγορεύεται σκόπιμα."
-    IDS_WHATSNEW_3          "Ο ήχος άρνησης κλείνει από το ίδιο πλαίσιο «Ηχητική απόκριση» με τους άλλους δύο."
+    IDS_WHATSNEW_1          "Όλα τα παράθυρα του προγράμματος έχουν τώρα ένα μέγεθος γραμματοσειράς — αυτό των ρυθμίσεων."
+    IDS_WHATSNEW_2          "Μια γραμμή της αναπτυσσόμενης λίστας διατάξεων έχει τώρα το ίδιο ύψος σε όλα τα παράθυρα του προγράμματος."
+    IDS_WHATSNEW_3          "Το πάτημα σε πεδίο κωδικού δεν απαντάται πια με σιωπή: το πρόγραμμα χτυπά υπόκωφα — η μετατροπή εκεί απαγορεύεται σκόπιμα."
     IDS_WHATSNEW_FULL       "Ο πλήρης κατάλογος αλλαγών δημοσιεύεται στο κανάλι."
     IDS_AUTHOR_CAPTION      "Από τον δημιουργό"
     IDS_AUTHOR_VERSION      "έκδοση {0} · Πάντα, γνωστός και ως Panda_Pishet_Kod"
@@ -4150,9 +4150,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "הייתה {0} · עודכן היום"
     IDS_WHATSNEW_TODAY      "עודכן היום"
     IDS_WHATSNEW_PANEL      "שלושה שינויים"
-    IDS_WHATSNEW_1          "שורה ברשימה הנפתחת של הפריסות היא עכשיו באותו גובה בכל חלונות התוכנית."
-    IDS_WHATSNEW_2          "לחיצה בשדה סיסמה כבר לא נענית בשקט: התוכנית מקישה קישה עמומה — ההמרה שם אסורה בכוונה."
-    IDS_WHATSNEW_3          "צליל הסירוב מכובה באותה תיבת «משוב קולי» כמו שני האחרים."
+    IDS_WHATSNEW_1          "לכל חלונות התוכנית יש עכשיו גודל גופן אחד — זה של חלון ההגדרות."
+    IDS_WHATSNEW_2          "שורה ברשימה הנפתחת של הפריסות היא עכשיו באותו גובה בכל חלונות התוכנית."
+    IDS_WHATSNEW_3          "לחיצה בשדה סיסמה כבר לא נענית בשקט: התוכנית מקישה קישה עמומה — ההמרה שם אסורה בכוונה."
     IDS_WHATSNEW_FULL       "הרשימה המלאה של השינויים מתפרסמת בערוץ."
     IDS_AUTHOR_CAPTION      "מהמפתח"
     IDS_AUTHOR_VERSION      "גרסה {0} · פנדה, הידוע גם כ־Panda_Pishet_Kod"
@@ -4357,9 +4357,9 @@ BEGIN
     IDS_WHATSNEW_FROM       "كانت {0} · حُدّث اليوم"
     IDS_WHATSNEW_TODAY      "حُدّث اليوم"
     IDS_WHATSNEW_PANEL      "ثلاثة تغييرات"
-    IDS_WHATSNEW_1          "أصبح صف القائمة المنسدلة للتخطيطات بالارتفاع نفسه في جميع نوافذ البرنامج."
-    IDS_WHATSNEW_2          "لم تعد الضغطة في حقل كلمة المرور تُقابَل بالصمت: يصدر البرنامج طرقة مكتومة — التحويل هناك ممنوع عن قصد."
-    IDS_WHATSNEW_3          "يُطفأ صوت الرفض بمربع «استجابة صوتية» نفسه الذي يطفئ الصوتين الآخرين."
+    IDS_WHATSNEW_1          "أصبحت جميع نوافذ البرنامج تستخدم حجم خط واحدًا — حجم نافذة الإعدادات."
+    IDS_WHATSNEW_2          "أصبح صف القائمة المنسدلة للتخطيطات بالارتفاع نفسه في جميع نوافذ البرنامج."
+    IDS_WHATSNEW_3          "لم تعد الضغطة في حقل كلمة المرور تُقابَل بالصمت: يصدر البرنامج طرقة مكتومة — التحويل هناك ممنوع عن قصد."
     IDS_WHATSNEW_FULL       "قائمة التغييرات الكاملة منشورة في القناة."
     IDS_AUTHOR_CAPTION      "من المؤلف"
     IDS_AUTHOR_VERSION      "الإصدار {0} · باندا، المعروف أيضًا بـ Panda_Pishet_Kod"
