@@ -8596,8 +8596,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
     // полей и каретку.
     (
         settings::IDS_WHATSNEW_1,
-        "Галочки в мастере «Написать автору» ставятся и снимаются с первого щелчка.",
-        "The boxes of the «Write to the author» wizard tick and untick on the first click.",
+        "Поле выбора раскладки в мастере «Написать автору» стало той же высоты, что и в настройках.",
+        "The layout chooser in the «Write to the author» wizard is now the height it has in the settings window.",
     ),
     (
         settings::IDS_WHATSNEW_2,
