@@ -52,7 +52,7 @@ use std::{fs, path::Path};
 use lang_switcher::convert;
 use lang_switcher::diag::{Kind, Operation};
 use lang_switcher::inject::{self, Dispatched, Modifiers};
-use lang_switcher::layouts::{Cycle, LayoutId, LayoutMap};
+use lang_switcher::layouts::{Cycle, KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, Mods};
 use lang_switcher::selection::{
     self, CF_UNICODETEXT, CHORD_EVENTS, ClipboardError, OPEN_ATTEMPTS, OPEN_RETRY_INTERVAL, Origin,
     Outcome, Path as SelectionPath, Plan, Refusal, SNAPSHOT_BUDGET_BYTES, Snapshot, Update,
@@ -2568,17 +2568,20 @@ fn the_script_of_the_selection_decides_the_direction() {
     assert_eq!(step_five("ghbdtn 123", convert::FALLBACK_US), "привет 123");
     assert_eq!(step_five("привет 123", convert::FALLBACK_US), "ghbdtn 123");
 
-    // ⚠ **Mixed text.** Six characters distinguish English and six distinguish Russian, so
-    // nothing decides and the foreground layout breaks the tie. The whole selection is then
-    // converted in that one direction: the half that belongs to it is recoded, the other half
-    // has no reverse mapping there and is carried over unchanged (FR-23 read backwards).
+    // ⚠ **Mixed text — the canon this line used to hold was rewritten by the user's word**,
+    // question **111.4**, task Т-48-3. It read «`ghbdtn привет 123` → `привет привет 123`»:
+    // the whole selection went one way, so the Cyrillic word had no reverse mapping in the
+    // source and came out exactly as it went in. Step 5 now decides the script **per word**
+    // (FR-61 step 5), so each word goes to the next layout after **its own** source and the
+    // foreground layout no longer changes the answer — it only breaks the tie for the text as a
+    // whole, which is what step 7 switches to.
     assert_eq!(
         step_five("ghbdtn привет 123", convert::FALLBACK_US),
-        "привет привет 123"
+        "привет ghbdtn 123"
     );
     assert_eq!(
         step_five("ghbdtn привет 123", convert::FALLBACK_RUSSIAN),
-        "ghbdtn ghbdtn 123"
+        "привет ghbdtn 123"
     );
 
     // A selection with nothing to decide by and a foreground layout outside the pair is refused
@@ -2596,6 +2599,197 @@ fn the_script_of_the_selection_decides_the_direction() {
         selection::detect_source("123", &maps, convert::FALLBACK_US),
         Some(0)
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-61 step 5 by words — the user's third finding, question 111.3, task Т-48-3
+// ---------------------------------------------------------------------------------------
+
+/// Runs step 5 and answers **both** halves: what step 6 was given, and what step 7 switched to.
+///
+/// [`step_five`] answers the first alone, and the whole point of question 111.3 is that the two
+/// no longer move together: each word is recoded by **its own** source layout, while step 7
+/// switches to the target of the decision made over the **whole** text.
+fn step_five_switching(text: &str, foreground: LayoutId) -> (String, Option<LayoutId>) {
+    let plan = pair_plan(foreground);
+    let mut bench = Bench::with_selection(text);
+    let _ = selection::run(&mut bench, &plan);
+
+    (bench.written.clone().unwrap_or_default(), bench.switched)
+}
+
+/// **The user's third finding, word for word** — 2026-09-09, question **111**:
+///
+/// > если набрать текст: `z [jntk yfgbcfnm ckjdj нфтвуч yj pf,sk cvtybnm` затем выделить
+/// > набранный текст и нажать pause, то получится: `я хотел написать слово нфтвуч но забыл
+/// > сменить`
+///
+/// The sentence is seven words typed on an English keyboard and one — `нфтвуч` — typed on a
+/// Russian one. Before task Т-48-3 the script was decided **once for the whole selection**
+/// (29 distinguishing Latin characters against 6 Cyrillic ones, so the source was English), and
+/// the Russian word had no reverse mapping in the English map: FR-23 read backwards carried it
+/// over untouched, which is exactly what the user saw.
+///
+/// It is `yandex` that the Russian word is owed: `нфтвуч` is what those six keys give in the
+/// Russian layout, and the next layout in the cycle after Russian is English.
+#[test]
+fn the_sentence_of_the_users_third_finding_converts_word_by_word() {
+    let typed = "z [jntk yfgbcfnm ckjdj нфтвуч yj pf,sk cvtybnm";
+    let owed = "я хотел написать слово yandex но забыл сменить";
+
+    // The foreground layout does not enter into it: every word of this sentence distinguishes a
+    // layout on its own, so the tie-break has nothing to break.
+    let (written, switched) = step_five_switching(typed, convert::FALLBACK_US);
+    assert_eq!(written, owed, "each word follows its own layout");
+
+    // Step 7 follows the decision over the **whole** text — English by a strict majority — so
+    // the layout the user is left typing in is Russian, the next one after it.
+    assert_eq!(switched, Some(convert::FALLBACK_RUSSIAN));
+
+    let (written, switched) = step_five_switching(typed, convert::FALLBACK_RUSSIAN);
+    assert_eq!(
+        written, owed,
+        "and the foreground layout does not change it"
+    );
+    assert_eq!(switched, Some(convert::FALLBACK_RUSSIAN));
+}
+
+/// **The table of small cases of FR-61 step 5 by words** — acceptance point 2 of the stage.
+///
+/// Each row is one property of the rule, and the rows that were true before task Т-48-3 are
+/// here to say that they still are: the whole-word paths of the feature did not move.
+#[test]
+fn each_word_of_the_selection_is_recoded_by_its_own_layout() {
+    // One word, one layout — unchanged in both directions and under both tie-breaks.
+    assert_eq!(step_five("ghbdtn", convert::FALLBACK_US), "привет");
+    assert_eq!(step_five("ghbdtn", convert::FALLBACK_RUSSIAN), "привет");
+    assert_eq!(step_five("привет", convert::FALLBACK_US), "ghbdtn");
+    assert_eq!(step_five("привет", convert::FALLBACK_RUSSIAN), "ghbdtn");
+
+    // Two words of two layouts, in either order: each goes to the next after its own source.
+    assert_eq!(
+        step_five("ghbdtn привет", convert::FALLBACK_US),
+        "привет ghbdtn"
+    );
+    assert_eq!(
+        step_five("привет ghbdtn", convert::FALLBACK_RUSSIAN),
+        "ghbdtn привет"
+    );
+
+    // `pf,sk` and `z` out of the user's sentence, each on its own: the comma of the English
+    // layout is a distinguishing character, because the same key gives `б` in the Russian one.
+    assert_eq!(step_five("pf,sk", convert::FALLBACK_US), "забыл");
+    assert_eq!(step_five("z", convert::FALLBACK_US), "я");
+    assert_eq!(step_five("нфтвуч", convert::FALLBACK_US), "yandex");
+
+    // ⚠ **A word with nothing to decide by follows the decision over the whole text** — and
+    // that decision is the tie-break of the foreground layout when the text has nothing to
+    // decide by either. Both are what they were before Т-48-3.
+    assert_eq!(step_five("123", convert::FALLBACK_US), "123");
+    assert_eq!(step_five("!!!", convert::FALLBACK_US), "!!!");
+    assert_eq!(step_five("!!!", convert::FALLBACK_RUSSIAN), "!!!");
+
+    // …and beside a word that **does** decide, the digits follow that word's decision over the
+    // text rather than the foreground layout.
+    assert_eq!(step_five("ghbdtn 123", convert::FALLBACK_US), "привет 123");
+    assert_eq!(step_five("привет 123", convert::FALLBACK_US), "ghbdtn 123");
+
+    // Case is carried, per word, exactly as it was per text.
+    assert_eq!(
+        step_five("Ghbdtn Привет", convert::FALLBACK_US),
+        "Привет Ghbdtn"
+    );
+    assert_eq!(
+        step_five("ПРИВЕТ GHBDTN", convert::FALLBACK_US),
+        "GHBDTN ПРИВЕТ"
+    );
+
+    // ⚠ **Separators are carried through untouched, whatever they are and however many.** The
+    // words are the maximal runs of characters that are neither whitespace nor control, so two
+    // spaces stay two spaces and a line break stays a line break.
+    assert_eq!(
+        step_five("ghbdtn  привет", convert::FALLBACK_US),
+        "привет  ghbdtn"
+    );
+    assert_eq!(
+        step_five("ghbdtn\nпривет\tghbdtn", convert::FALLBACK_US),
+        "привет\nghbdtn\tпривет"
+    );
+
+    // A selection that decides nothing and whose foreground layout is outside the pair is still
+    // refused rather than converted in a direction nobody chose — FR-30, and step 5 has no word
+    // to fall back on when the text itself has no answer.
+    let (written, switched) = step_five_switching("123", LayoutId::default());
+    assert_eq!(written, "", "nothing was written");
+    assert_eq!(switched, None, "and nothing was switched");
+}
+
+/// Builds a synthetic layout over three keys, so that a cycle of **three** layouts can be
+/// driven without asking the machine what it has installed.
+///
+/// The space bar is in every one of them with the same character, for the reason
+/// `tests\cycle.rs` gives: the space is a physical key like any other, and a synthetic layout
+/// that left it blank would make the separator rule vacuous.
+fn synthetic_map(layout: LayoutId, characters: [char; 3]) -> LayoutMap {
+    /// `A`, `S` and `D` of the middle row — three keys and nothing else is needed.
+    const SCANS: [u16; 3] = [0x1E, 0x1F, 0x20];
+    const SPACE: u16 = 0x39;
+    const MAIN_BLOCK: bool = false;
+
+    let mut builder = LayoutMapBuilder::new(layout);
+
+    for (&scan, &character) in SCANS.iter().zip(characters.iter()) {
+        builder.set(
+            scan,
+            MAIN_BLOCK,
+            Mods::NONE,
+            KeyMapping::from_char(character),
+        );
+    }
+
+    builder.set(SPACE, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char(' '));
+
+    builder.finish()
+}
+
+/// **A cycle of three layouts sends every word to the next one after its own source** — FR-30,
+/// FR-31 and step 5 of FR-61 together.
+///
+/// The pair is the easy case, because "the other one" is the same answer whichever way you read
+/// it. With three layouts the two readings part company, and this is the one that FR-61 asks
+/// for: the step is taken from the **word's** source, not from the text's.
+#[test]
+fn a_cycle_of_three_layouts_sends_each_word_to_the_next_after_its_own_source() {
+    let first = LayoutId::from_raw(0x0A0A_0A0A);
+    let second = LayoutId::from_raw(0x0B0B_0B0B);
+    let third = LayoutId::from_raw(0x0C0C_0C0C);
+
+    let maps = vec![
+        synthetic_map(first, ['a', 'b', 'c']),
+        synthetic_map(second, ['d', 'e', 'f']),
+        synthetic_map(third, ['g', 'h', 'i']),
+    ];
+
+    let cycle = Cycle::from_layouts(&[first, second, third]).expect("a cycle of three");
+    let plan = Plan::new(
+        maps,
+        cycle,
+        first,
+        Duration::from_millis(300),
+        Duration::from_millis(200),
+        0,
+    );
+
+    let mut bench = Bench::with_selection("abc def ghi");
+    let _ = selection::run(&mut bench, &plan);
+
+    // `abc` was typed in the first layout and goes to the second; `def` in the second and goes
+    // to the third; `ghi` in the third and comes round to the first.
+    assert_eq!(bench.written.as_deref(), Some("def ghi abc"));
+
+    // Three distinguishing characters each: the text as a whole decides nothing, the foreground
+    // layout breaks the tie, and step 7 switches to the next one after **that**.
+    assert_eq!(bench.switched, Some(second));
 }
 
 /// **Acceptance point 15.** A character with no reverse mapping in the source layout is carried
@@ -2655,20 +2849,27 @@ fn a_double_press_comes_back_where_the_mapping_allows_it_and_not_where_it_does_n
         assert_eq!(back, original, "second press must give {original:?} back");
     }
 
-    // ---- where it does not, and why ----------------------------------------------------
+    // ⭐ **Mixed scripts came back into this list with task Т-48-3** — question **111.3**, and
+    // it is worth its own paragraph because this test used to say the opposite.
     //
-    // 1. **Mixed scripts.** Each press converts the *whole* selection in one direction, so the
-    //    half that was already in the target script is dragged across with it. The second press
-    //    drags both halves back the other way, and the text that comes out is not the text that
-    //    went in.
+    // While each press converted the *whole* selection in one direction, the half already in
+    // the target script was dragged across with it and the second press dragged both halves the
+    // other way: `ghbdtn привет` → `привет привет` → `ghbdtn ghbdtn`, and the text that came
+    // out was not the text that went in. Step 5 now decides the script **per word**, so every
+    // word keeps a direction of its own and the second press simply walks each of them one more
+    // step round the cycle. With two layouts, one more step is the way back.
     let mixed = "ghbdtn привет";
     let once = step_five(mixed, convert::FALLBACK_US);
-    assert_eq!(once, "привет привет");
+    assert_eq!(once, "привет ghbdtn");
     let twice = step_five(&once, convert::FALLBACK_US);
-    assert_eq!(twice, "ghbdtn ghbdtn");
-    assert_ne!(twice, mixed, "a mixed selection does not come back");
+    assert_eq!(
+        twice, mixed,
+        "a mixed selection now comes back, and it did not before Т-48-3"
+    );
 
-    // 2. **A character only one of the two layouts can produce, standing next to the image of
+    // ---- where it does not, and why ----------------------------------------------------
+    //
+    // **A character only one of the two layouts can produce, standing next to the image of
     //    another.** `.` is on a key of both layouts, `ю` is on none of the English ones — so in
     //    the English direction `.` becomes `ю` and a `ю` that was already there stays `ю`. Two
     //    different characters have become one, and no second press can tell them apart.
@@ -3360,14 +3561,17 @@ fn every_working_copy_of_the_text_is_released_through_the_volatile_zeroing() {
         fills[0]
     );
 
-    // Six buffers, six calls: the three the finding named and the three that were not zeroed at
-    // all. The count is asserted so that a seventh copy of the user's text added later cannot
-    // quietly arrive without one.
+    // Seven buffers, seven calls: the three the finding named, the three that were not zeroed
+    // at all, and the working buffer of `recode_words` — the second recoder, added by task
+    // Т-48-3 when step 5 began deciding the script per word. The count is asserted so that an
+    // eighth copy of the user's text added later cannot quietly arrive without one; it went
+    // from six to seven the moment a seventh copy existed, which is the whole point of it being
+    // a number.
     let zeroed = code_lines_with(&source, "buffer::zero_slice(");
 
     assert_eq!(
         zeroed.len(),
-        6,
+        7,
         "every working copy is zeroed through the helper: {zeroed:?}"
     );
 }

@@ -2398,6 +2398,34 @@ pub fn detect_source(text: &str, maps: &[LayoutMap], fallback: LayoutId) -> Opti
 /// Allocates one string of the result's size and nothing per character.
 pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
     let mut units: Vec<u16> = Vec::with_capacity(text.len() + 1);
+
+    let (mapped, carried) = recode_into(text, source, target, &mut units);
+
+    let recoded = String::from_utf16_lossy(&units);
+
+    // The working buffer held the user's text — SEC-01, SEC-02. Volatile since task T-13-15:
+    // `units` is dropped two lines below, and a plain `fill` in front of that is a dead store.
+    crate::buffer::zero_slice(&mut units);
+
+    Recoded {
+        text: recoded,
+        target: target.layout(),
+        mapped,
+        carried,
+    }
+}
+
+/// Appends `text` recoded from `source` into `target` onto `units`, and answers the two counts.
+///
+/// The two lookups of [`recode`] and nothing else, in a shape both [`recode`] and
+/// [`recode_words`] can call: the first converts a whole selection in one direction, the second
+/// calls this once per word with a direction of that word's own. Task **Т-48-3**.
+fn recode_into(
+    text: &str,
+    source: &LayoutMap,
+    target: &LayoutMap,
+    units: &mut Vec<u16>,
+) -> (usize, usize) {
     let mut mapped = 0usize;
     let mut carried = 0usize;
 
@@ -2416,10 +2444,115 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
         }
     }
 
+    (mapped, carried)
+}
+
+/// Appends `text` onto `units` exactly as it stands, and answers how many characters that was.
+///
+/// The separators of step 5 — task **Т-48-3**. They belong to no layout: every layout has a
+/// space bar and a line break is not a key at all, so putting them through the two lookups
+/// would be asking a question with no answer and counting the reply as a conversion.
+fn carry_into(text: &str, units: &mut Vec<u16>) -> usize {
+    let mut carried = 0usize;
+
+    for ch in text.chars() {
+        let mut buffer = [0u16; 2];
+        units.extend_from_slice(ch.encode_utf16(&mut buffer));
+        carried += 1;
+    }
+
+    carried
+}
+
+/// Whether `ch` separates two words — step 5 of FR-61 since task **Т-48-3**.
+///
+/// The same test [`decides_script`] applies to a character before counting it, and deliberately
+/// the same one: a character that says nothing about which layout the text was typed under is a
+/// character that cannot belong to a word for the purpose of deciding that word's layout.
+fn separates_words(ch: char) -> bool {
+    !decides_script(ch)
+}
+
+/// **Recodes `text` word by word, each word out of its own layout** — step 5 of FR-61 since
+/// task **Т-48-3**, question **111.3**.
+///
+/// `fallback` is the source layout decided over the **whole** text, and it does two jobs: it is
+/// what a word with nothing to decide by follows, and it is what step 7 switches by — see
+/// [`recode_with`], which owns that half.
+///
+/// # Why the script is decided per word and not once
+///
+/// The user's third finding, word for word — 2026-09-09:
+///
+/// > если набрать текст: `z [jntk yfgbcfnm ckjdj нфтвуч yj pf,sk cvtybnm` затем выделить
+/// > набранный текст и нажать pause, то получится: `я хотел написать слово нфтвуч но забыл
+/// > сменить`
+///
+/// Twenty-nine Latin characters against six Cyrillic ones: the strict maximum of
+/// [`detect_source`] named English, the whole selection was recoded English → Russian, and the
+/// one Russian word had no reverse mapping in the English map. FR-23 read backwards then carried
+/// it over untouched — correctly, by the rule as it stood, and uselessly, by what the user
+/// meant. A sentence typed in two layouts is two sentences as far as the reverse lookup is
+/// concerned, and the unit that has one layout is the **word**.
+///
+/// # The four answers, in order
+///
+/// 1. **a word that distinguishes a layout** goes to the next layout after **that** one — FR-30,
+///    FR-31, the cycle of §4.4 asked from the word's own source and not from the text's;
+/// 2. **a word that distinguishes nothing** — digits, punctuation — follows `fallback`, which is
+///    the decision over the whole text. `123` beside `ghbdtn` goes where `ghbdtn` goes;
+/// 3. **a word whose source has no target in the cycle** is carried over unchanged, which is the
+///    refusal of FR-30 applied to one word instead of to the selection;
+/// 4. **separators** — whitespace and control characters — are carried over exactly as they
+///    stand, two spaces as two spaces and a line break as a line break.
+///
+/// Allocates the one string of the result, as [`recode`] does, and one small score vector per
+/// word inside [`detect_source`]. This runs on the UI thread in answer to a hotkey, never in
+/// the hook callback: NFR-01 to NFR-05 are about that callback and are untouched here.
+fn recode_words(text: &str, plan: &Plan, fallback: &LayoutMap, target: &LayoutMap) -> Recoded {
+    let mut units: Vec<u16> = Vec::with_capacity(text.len() + 1);
+    let mut mapped = 0usize;
+    let mut carried = 0usize;
+
+    // One pass, splitting on the fly: `split_word_bounds`-style crates are not in this program
+    // and are not needed — the boundary of step 5 is "whitespace or control", which
+    // `char::is_whitespace` and `char::is_control` answer between them.
+    for piece in text.split_inclusive(separates_words) {
+        // `split_inclusive` hands back the separator attached to the end of the piece before it,
+        // so each piece is a word followed by at most one separator. Splitting it here keeps the
+        // two rules apart without a second pass over the text.
+        let end = piece
+            .char_indices()
+            .rev()
+            .find(|&(_, ch)| !separates_words(ch))
+            .map_or(0, |(index, ch)| index + ch.len_utf8());
+
+        let (word, separator) = piece.split_at(end);
+
+        if !word.is_empty() {
+            let source = detect_source(word, &plan.maps, fallback.layout())
+                .and_then(|index| plan.maps.get(index));
+
+            match source.and_then(|source| target_for(source, plan)) {
+                Some((source, word_target)) => {
+                    let (word_mapped, word_carried) =
+                        recode_into(word, source, word_target, &mut units);
+
+                    mapped += word_mapped;
+                    carried += word_carried;
+                }
+                // Answer 3: no source, or a source the cycle has no target for. The word is the
+                // user's text and is handed back as it stands rather than dropped.
+                None => carried += carry_into(word, &mut units),
+            }
+        }
+
+        carried += carry_into(separator, &mut units);
+    }
+
     let recoded = String::from_utf16_lossy(&units);
 
-    // The working buffer held the user's text — SEC-01, SEC-02. Volatile since task T-13-15:
-    // `units` is dropped two lines below, and a plain `fill` in front of that is a dead store.
+    // SEC-01, SEC-02 — the same wipe [`recode`] does, and for the same reason.
     crate::buffer::zero_slice(&mut units);
 
     Recoded {
@@ -2428,6 +2561,21 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
         mapped,
         carried,
     }
+}
+
+/// The map one step along the cycle from `source` — FR-30, FR-31 — paired with `source` itself.
+///
+/// `None` is the refusal of FR-30 («остальные раскладки игнорируются») and of FR-35, both
+/// counted inside module `layouts`. Split out so that [`recode_words`] and [`recode_with`] ask
+/// the question in exactly one way.
+fn target_for<'plan>(
+    source: &'plan LayoutMap,
+    plan: &'plan Plan,
+) -> Option<(&'plan LayoutMap, &'plan LayoutMap)> {
+    let target = plan.cycle.target(source.layout(), 1).ok()?;
+    let target = plan.maps.iter().find(|map| map.layout() == target)?;
+
+    Some((source, target))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2903,10 +3051,19 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     // ---- FR-40 step 6 and step 8 happen here, in `Session::drop` ------------------------
 }
 
-/// The second half of step 5 for the source layout `index` of `plan`.
+/// The second half of step 5 for the source layout `index` of `plan` — **the decision over the
+/// whole text**, which is now one of two decisions and no longer the one that recodes.
 ///
 /// `None` when the cycle has no target for that source — the refusals of FR-30 and FR-35, all of
 /// them counted inside module `layouts`.
+///
+/// # What `index` still decides after task Т-48-3
+///
+/// Two things, and the recoding is not one of them. It is the **tie-break** a word with no
+/// distinguishing characters follows — `123` beside `ghbdtn` goes where `ghbdtn` goes — and it
+/// is the layout **step 7** switches the foreground window to, which is what the user goes on
+/// typing in. Both were true before; what changed is that the words in between now each answer
+/// for themselves. See [`recode_words`].
 fn recode_with(text: &str, index: usize, plan: &Plan) -> Option<Recoded> {
     let source = plan.maps.get(index)?;
 
@@ -2914,10 +3071,9 @@ fn recode_with(text: &str, index: usize, plan: &Plan) -> Option<Recoded> {
     // one — the text it converts is in the user's document, not in a buffer of ours, so the
     // second press reads back what the first press produced and step 5 detects *that* as the
     // source. See the report on where this is reversible and where it is not.
-    let target = plan.cycle.target(source.layout(), 1).ok()?;
-    let target = plan.maps.iter().find(|map| map.layout() == target)?;
+    let (source, target) = target_for(source, plan)?;
 
-    Some(recode(text, source, target))
+    Some(recode_words(text, plan, source, target))
 }
 
 // ---------------------------------------------------------------------------------------
