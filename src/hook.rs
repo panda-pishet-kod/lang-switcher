@@ -282,6 +282,19 @@ pub struct Mode {
     pub fail_safe: bool,
     /// Virtual-key code of the hotkey of FR-02.
     pub hotkey_vk: u16,
+    /// **The foreground process is one the user excluded — FR-84**, task T-52-3.
+    ///
+    /// `true` means the hotkey is not ours here: it is passed to the application untouched and
+    /// no conversion is started. FR-95 says the hotkey disappears while the program is active,
+    /// and FR-84 is the exception FR-95 itself points at — «предусмотрен список исключений».
+    ///
+    /// ⚠ **A published value, not a question asked here.** The verdict is computed by the
+    /// watcher thread and published as one word; the **input thread's message loop** copies it
+    /// into this module through [`set_hotkey_yields`], and [`current_mode`] reads it in the row
+    /// of the three loads beside it. The callback therefore reaches into module `guard` for
+    /// nothing at all, which is the contract section 6.3 gives that module and which
+    /// `tests\guard.rs` pins by reading this file.
+    pub hotkey_yields: bool,
 }
 
 /// The down/up state of the hotkey — FR-08, and nothing else.
@@ -293,6 +306,17 @@ pub struct Mode {
 pub struct HotkeyState {
     /// Whether the hotkey is held down right now, as far as this program has seen.
     pub hotkey_down: bool,
+    /// **Whether the press this hold began with was given to the application** — FR-84, task
+    /// T-52-3.
+    ///
+    /// Decided once, on the first press, and read by every event of the same hold: the
+    /// auto-repeats and the release. It exists because [`Mode::hotkey_yields`] can *change*
+    /// between the press and the release — the user alt-tabs, or the watcher's answer for the
+    /// new foreground window arrives in the middle of the keystroke — and an application must
+    /// see a whole keystroke or none of it. A suppressed press whose release was let through
+    /// leaves it holding a key it never saw go down; a passed press whose release was swallowed
+    /// leaves it holding one for ever.
+    pub hotkey_passed: bool,
 }
 
 /// The result of [`classify`]: what to do with the stroke, and whether a hotkey press has
@@ -439,9 +463,12 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
     // FR-99. Buffering is disarmed and "весь ввод пропускается без обработки"; the hotkey is
     // not suppressed either, because a fail-safe program is not an active one and FR-95 only
     // speaks of the active case. The remembered down state is dropped so that a hotkey held
-    // across the transition cannot come back as a stale "still down".
+    // across the transition cannot come back as a stale "still down". Task T-52-3 drops the
+    // remembered fate of the press with it, and for the same reason: both halves of the hold
+    // describe a keystroke this program is no longer part of.
     if mode.fail_safe {
         state.hotkey_down = false;
+        state.hotkey_passed = false;
         return Outcome::PASS;
     }
 
@@ -460,6 +487,7 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
     // wants it.
     if !mode.active {
         state.hotkey_down = false;
+        state.hotkey_passed = false;
         return Outcome::PASS;
     }
 
@@ -499,6 +527,33 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
             let first_press = !state.hotkey_down;
             state.hotkey_down = true;
 
+            // ---------------------------------------------------------------------------
+            // ⭐ **FR-84, and it is the remedy FR-95 already promised — task T-52-3.**
+            //
+            // FR-95 says the hotkey disappears whenever the program is active, and then points
+            // at the way out for an application that needs the key for itself: «предусмотрен
+            // список исключений (FR-84)». It was not true of the code. This branch stands above
+            // every use of the typing buffer, and the exclusion gate lived *below* it — in the
+            // buffer — so an excluded game had `Pause` swallowed exactly as any other window
+            // did, and got a refusal and the dull thud of FR-100 in place of the key.
+            //
+            // In an excluded process the key is not ours: it is passed on untouched and no
+            // conversion is started, so nothing sounds and nothing is converted.
+            //
+            // ⚠ **Decided on the first press and remembered** — see [`HotkeyState::hotkey_passed`].
+            // The verdict can move between the press and the release, and an application must
+            // see a whole keystroke or none of it. The auto-repeats of FR-08 follow the same
+            // remembered answer, which is what lets a held `Pause` go on pausing an excluded
+            // console's output.
+            // ---------------------------------------------------------------------------
+            if first_press {
+                state.hotkey_passed = mode.hotkey_yields;
+            }
+
+            if state.hotkey_passed {
+                return Outcome::PASS;
+            }
+
             Outcome {
                 // FR-95: suppressed always, repeats included. The decision to suppress is
                 // taken here, synchronously, and whether there is anything to convert is not
@@ -511,7 +566,18 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
         }
 
         Edge::Up => {
+            // The fate of the press this release ends — FR-84, task T-52-3. A release that
+            // arrives with no press behind it (the key went down before the program was
+            // running, or while it was suspended) finds the flag false and is suppressed, which
+            // is what this branch has always done.
+            let passed = state.hotkey_passed;
+
             state.hotkey_down = false;
+            state.hotkey_passed = false;
+
+            if passed {
+                return Outcome::PASS;
+            }
 
             Outcome {
                 // FR-95 again, and not a detail: a suppressed press whose release was let
@@ -656,6 +722,15 @@ static ACTIVE: AtomicBool = AtomicBool::new(true);
 /// FR-99 has disarmed buffering.
 static FAIL_SAFE: AtomicBool = AtomicBool::new(false);
 
+/// **The foreground process is excluded — FR-84**, task T-52-3. Published by the **input**
+/// thread's message loop, which is the thread that reads the verdict the watcher computed.
+///
+/// A static of this module rather than a question asked of the module that owns the verdict:
+/// section 6.3 gives that module a contract that nothing of it is named on the callback path,
+/// and one relaxed store per message of the input thread is the whole price of keeping it. See
+/// [`Mode::hotkey_yields`].
+static HOTKEY_YIELDS: AtomicBool = AtomicBool::new(false);
+
 /// Panics inside the callback since the last one that returned normally — FR-99.
 static CONSECUTIVE_PANICS: AtomicU32 = AtomicU32::new(0);
 
@@ -693,7 +768,12 @@ thread_local! {
     /// `const`-initialised so that reading it compiles to a plain thread-local access with no
     /// lazy-initialisation check, no allocation and no branch worth measuring — which is what
     /// NFR-01 and NFR-03 need of the hot path.
-    static HOTKEY_STATE: Cell<HotkeyState> = const { Cell::new(HotkeyState { hotkey_down: false }) };
+    static HOTKEY_STATE: Cell<HotkeyState> = const {
+        Cell::new(HotkeyState {
+            hotkey_down: false,
+            hotkey_passed: false,
+        })
+    };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -880,6 +960,25 @@ pub fn hotkey_vk() -> u16 {
     HOTKEY_VK.load(Ordering::Relaxed) as u16
 }
 
+/// Publishes whether the foreground process is excluded — **FR-84**, task T-52-3.
+///
+/// Called by the **input** thread from the gate that already re-reads the published verdict
+/// after every message it receives (`app::apply_buffering_gate`). The gate is the right caller
+/// for the same three reasons it is the right caller for the typing buffer: it runs on the
+/// thread the callback belongs to, it cannot miss a change however the change was made, and it
+/// costs one relaxed load and one relaxed store per message rather than a channel.
+///
+/// ⚠ **Not called from the callback, and that is the point.** The verdict lives in another
+/// module, whose contract is that nothing of it is named on the hook path at all.
+pub fn set_hotkey_yields(yields: bool) {
+    HOTKEY_YIELDS.store(yields, Ordering::Relaxed);
+}
+
+/// Whether the hotkey is currently being left to the application — FR-84, task T-52-3.
+pub fn hotkey_yields() -> bool {
+    HOTKEY_YIELDS.load(Ordering::Relaxed)
+}
+
 /// Publishes `general.enabled` — FR-90, FR-95. Called by the UI thread.
 ///
 /// # Point 3 of task T-13-4 — the resumption asks for a fresh `CapsLock`
@@ -954,6 +1053,15 @@ pub fn current_mode() -> Mode {
         active: is_active(),
         fail_safe: fail_safe(),
         hotkey_vk: hotkey_vk(),
+        // ⚠ **A fourth relaxed load on the path of every keystroke — task T-52-3, and it is
+        // paid here on purpose.** It could be read inside the hotkey branch alone, which would
+        // cost an ordinary letter nothing at all; what that would cost instead is the property
+        // this whole type exists for — that [`classify`] is a function of its arguments and
+        // every combination of its flags is reachable from a test. A relaxed load of a static
+        // `bool` is one instruction with no fence and no contention (the writer is the same
+        // thread), which does not show at the percentiles NFR-01 is written in; the
+        // testability does show, in every row of `tests\hook.rs`.
+        hotkey_yields: hotkey_yields(),
     }
 }
 

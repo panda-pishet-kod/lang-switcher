@@ -1308,3 +1308,106 @@ fn the_channel_publishes_the_flag_and_not_the_field() {
         "no decoded character can be riding in the payload"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Task T-52-3 — FR-84 reaches the hotkey, and it reaches it through the gate
+// ---------------------------------------------------------------------------------------
+
+/// **The publication path of FR-84 for the hotkey, and it is the same path the buffer takes.**
+///
+/// FR-95 names «список исключений (FR-84)» as the remedy for an application that needs the
+/// hotkey for itself, and task T-52-3 made the remedy real. What this pins is *where* the
+/// verdict is read: the input thread's gate — the one function that already re-reads the
+/// published state after every message — copies it into module `hook`'s own static, and the
+/// callback goes on naming nothing of this module at all.
+///
+/// A source check rather than a behavioural one because the gate is private to `app` and runs
+/// on a thread with a window, a hook and a typing buffer; the behaviour on the far side of the
+/// hand-off is measured in `tests\hook.rs`, which drives `classify` directly.
+#[test]
+fn the_exclusion_verdict_reaches_the_hotkey_through_the_gate_on_the_input_thread() {
+    let app = source_of("app.rs");
+
+    let publications = code_lines_with(&app, "hook::set_hotkey_yields(");
+
+    assert!(
+        !publications.is_empty(),
+        "FR-84: nothing publishes the exclusion verdict to the hotkey path"
+    );
+
+    assert!(
+        publications
+            .iter()
+            .all(|(_, line)| line.contains("guard::excluded()")),
+        "FR-84: the hotkey must yield on the exclusion and on nothing else, at {publications:?}"
+    );
+
+    // And it is published from the gate, which is the function section 6.3 puts on the input
+    // thread's message loop beside the reader of the buffering flag.
+    let gate = app
+        .split("fn apply_buffering_gate()")
+        .nth(1)
+        .expect("the gate is still where the buffer is decided");
+    let gate = gate
+        .split("\n}")
+        .next()
+        .expect("the body of the gate is bounded");
+
+    assert!(
+        gate.contains("hook::set_hotkey_yields("),
+        "FR-84: the verdict is published somewhere other than the gate"
+    );
+
+    // The contract of this module is unchanged by the addition: the callback still reaches into
+    // it for nothing. `the_hook_callback_names_nothing_of_module_guard` above says so from the
+    // other side; this says the new line did not become the exception.
+    let hook = source_of("hook.rs");
+
+    assert!(
+        code_lines_with(&hook, "guard::").is_empty(),
+        "§6.3: the hotkey's exclusion is a published flag, not a question asked in the callback"
+    );
+}
+
+/// **A password field still suppresses the hotkey and still refuses** — FR-70, the pin task
+/// T-52-3 needs most.
+///
+/// The two exemptions of FR-100's third tone are a password field and an excluded process, and
+/// task T-52-3 changed what happens in **one** of them. In a password field the hotkey stays
+/// ours: it is suppressed, the conversion is attempted, there is nothing to convert because the
+/// buffer was never kept, and the user hears the dull thud that tells them the program decided
+/// not to act. Giving the key to the application there would hand `Pause` to a login form for
+/// no reason at all.
+#[test]
+fn a_password_field_does_not_give_the_hotkey_away() {
+    // The premise: both states switch buffering off and both are refusals…
+    assert!(!guard::buffering_allowed_for(Field::Password));
+    assert!(guard::refuses_in(Field::Password, false));
+    assert!(guard::refuses_in(Field::Ordinary, true));
+
+    // …and only one of them is an exclusion. `excluded` is the second half of the published
+    // word and is independent of the field: a password field in an ordinary process answers
+    // `false`, which is what keeps the hotkey ours there.
+    for field in [
+        Field::Password,
+        Field::Pending,
+        Field::Ordinary,
+        Field::Undetermined,
+    ] {
+        assert!(
+            !guard::refuses_in(field, false) || field == Field::Password,
+            "only a password field refuses without an exclusion"
+        );
+    }
+
+    // The publication above binds the hotkey to `excluded()`, and nothing else in the word can
+    // raise it — which is the whole of «в поле пароля глухой стук остаётся».
+    let app = source_of("app.rs");
+
+    assert!(
+        code_lines_with(&app, "hook::set_hotkey_yields(")
+            .iter()
+            .all(|(_, line)| !line.contains("buffering_allowed") && !line.contains("field()")),
+        "FR-70: the hotkey must not be given away on a password field"
+    );
+}

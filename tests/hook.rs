@@ -47,6 +47,7 @@ fn armed() -> Mode {
         active: true,
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
+        hotkey_yields: false,
     }
 }
 
@@ -1412,4 +1413,198 @@ fn the_capslock_seed_is_outside_the_callback() {
             "the function {signature:?} must be in this file"
         );
     }
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-52-3 — FR-84 and FR-95: in an excluded process the hotkey is the application's
+// -------------------------------------------------------------------------------------
+
+/// The ordinary running state, with the foreground process excluded — FR-84.
+fn armed_in_an_excluded_process() -> Mode {
+    Mode {
+        hotkey_yields: true,
+        ..armed()
+    }
+}
+
+#[test]
+fn in_an_excluded_process_the_hotkey_reaches_the_application() {
+    // ⭐ **The finding of task T-52-3.** FR-95 names the remedy for an application that needs
+    // the hotkey for itself — «предусмотрен список исключений (FR-84)» — and the remedy was not
+    // in the code. `Mode` knew three things and none of them was the exclusion; the hotkey
+    // branch stands *above* every use of the buffer, and the exclusion gate lived below it, in
+    // `buffer::record`. So in an excluded game `Pause` was swallowed, the conversion refused
+    // and the dull thud of FR-100 played — the requirement's own remedy did nothing.
+    let mut state = HotkeyState::default();
+
+    let outcome = hook::classify(
+        armed_in_an_excluded_process(),
+        &mut state,
+        user_key(VK_PAUSE, Edge::Down),
+    );
+
+    assert_eq!(
+        outcome.decision,
+        Decision::Pass,
+        "в исключённом процессе Pause подавлена — приложение её не получило"
+    );
+    assert!(
+        !outcome.fire_hotkey,
+        "в исключённом процессе Pause запустила конвертацию"
+    );
+
+    // And the release goes the same way, so the application sees a whole keystroke.
+    let up = hook::classify(
+        armed_in_an_excluded_process(),
+        &mut state,
+        user_key(VK_PAUSE, Edge::Up),
+    );
+
+    assert_eq!(up.decision, Decision::Pass);
+    assert!(!up.fire_hotkey);
+}
+
+#[test]
+fn the_release_of_the_hotkey_repeats_the_fate_of_its_press() {
+    // ⚠ **The verdict can change between the press and the release** — the user alt-tabs, or
+    // the watcher's answer for the new foreground window arrives in the middle of the
+    // keystroke. Whichever way it moves, the application must see a whole key or none of it: a
+    // suppressed press whose release was let through leaves it holding a key it never saw go
+    // down, and a passed press whose release was swallowed leaves it holding one for ever.
+    //
+    // So the fate is decided once, on the press, and remembered.
+
+    // Pressed in an excluded process, released after the exclusion has gone.
+    let mut state = HotkeyState::default();
+
+    assert_eq!(
+        hook::classify(
+            armed_in_an_excluded_process(),
+            &mut state,
+            user_key(VK_PAUSE, Edge::Down)
+        )
+        .decision,
+        Decision::Pass
+    );
+    assert_eq!(
+        hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up)).decision,
+        Decision::Pass,
+        "нажатие пропущено, а отпускание подавлено — приложение держит клавишу вечно"
+    );
+
+    // Pressed in an ordinary process, released after the process became excluded.
+    let mut state = HotkeyState::default();
+
+    let down = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    assert_eq!(down.decision, Decision::Suppress);
+    assert!(down.fire_hotkey);
+
+    assert_eq!(
+        hook::classify(
+            armed_in_an_excluded_process(),
+            &mut state,
+            user_key(VK_PAUSE, Edge::Up)
+        )
+        .decision,
+        Decision::Suppress,
+        "нажатие подавлено, а отпускание пропущено — приложение получило клавишу, \
+         которую не видело нажатой"
+    );
+}
+
+#[test]
+fn the_auto_repeat_of_a_yielded_hotkey_reaches_the_application_as_it_is() {
+    // FR-08 suppresses *conversions*, not keystrokes. A key the program has decided not to take
+    // is not its business at all, so the repeats the system sends go through exactly as the
+    // first press did — which is what makes `Pause` pause the output of an excluded console.
+    let mut state = HotkeyState::default();
+
+    for _ in 0..5 {
+        let outcome = hook::classify(
+            armed_in_an_excluded_process(),
+            &mut state,
+            user_key(VK_PAUSE, Edge::Down),
+        );
+
+        assert_eq!(outcome.decision, Decision::Pass);
+        assert!(!outcome.fire_hotkey, "FR-84: конвертации нет ни на одном повторе");
+    }
+
+    assert_eq!(
+        hook::classify(
+            armed_in_an_excluded_process(),
+            &mut state,
+            user_key(VK_PAUSE, Edge::Up)
+        )
+        .decision,
+        Decision::Pass
+    );
+
+    // And the very next press outside the exclusion is an ordinary hotkey press again.
+    let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+
+    assert_eq!(outcome.decision, Decision::Suppress);
+    assert!(outcome.fire_hotkey, "вне исключения горячая клавиша наша");
+}
+
+#[test]
+fn the_exclusion_changes_nothing_for_an_ordinary_stroke() {
+    // FR-84 takes the *buffer* away through the gate on the input thread, and this file's
+    // concern is only the hotkey. An ordinary key is passed on either way, and the flag must
+    // not turn into a second, contradictory gate on the callback path.
+    let mut state = HotkeyState::default();
+
+    for edge in [Edge::Down, Edge::Up] {
+        assert_eq!(
+            hook::classify(armed_in_an_excluded_process(), &mut state, user_key(VK_A, edge)),
+            passed_on(),
+            "an ordinary stroke in an excluded process, {edge:?}"
+        );
+    }
+}
+
+#[test]
+fn the_states_above_the_exclusion_still_answer_first() {
+    // The order of the rows of `classify` is the requirement, and the exclusion joins the
+    // bottom of it. FR-99 and FR-90 already pass the hotkey on; the exclusion must not make
+    // either of them fire a conversion, and their remembered state must stay as it was.
+    for mode in [
+        Mode {
+            fail_safe: true,
+            ..armed_in_an_excluded_process()
+        },
+        Mode {
+            active: false,
+            ..armed_in_an_excluded_process()
+        },
+    ] {
+        let mut state = HotkeyState::default();
+
+        let outcome = hook::classify(mode, &mut state, user_key(VK_PAUSE, Edge::Down));
+
+        assert_eq!(outcome.decision, Decision::Pass);
+        assert!(!outcome.fire_hotkey);
+        assert!(!state.hotkey_down, "the remembered state must not go stale");
+    }
+}
+
+#[test]
+fn the_exclusion_verdict_reaches_the_callback_through_this_modules_own_static() {
+    // The publication path, from the outside: the input thread's gate stores the verdict here,
+    // and `current_mode` — what the callback actually uses — reads it back. Section 6.3 puts
+    // the reader of the published verdict on the input thread's message loop, and this is the
+    // seam where it hands the answer over to the callback.
+    let restore = hook::hotkey_yields();
+
+    hook::set_hotkey_yields(true);
+    assert!(hook::hotkey_yields());
+    assert!(
+        hook::current_mode().hotkey_yields,
+        "current_mode не читает опубликованный вердикт FR-84"
+    );
+
+    hook::set_hotkey_yields(false);
+    assert!(!hook::current_mode().hotkey_yields);
+
+    hook::set_hotkey_yields(restore);
 }

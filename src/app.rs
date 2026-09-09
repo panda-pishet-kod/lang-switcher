@@ -1904,6 +1904,15 @@ thread_local! {
 /// The state is read with one operation, which is what FR-71 asks of the reader of the flag, and
 /// it is read here rather than in the callback because here is where the buffer lives.
 fn apply_buffering_gate() {
+    // ⭐ **FR-84 for the hotkey as well as for the buffer — task T-52-3.** FR-95 says the
+    // hotkey disappears while the program is active and points at «список исключений (FR-84)»
+    // as the remedy for an application that needs the key for itself; until this task the
+    // remedy did not exist in the code. The gate is where it belongs: the same message, the
+    // same thread, the same published verdict the line below already reads, and one relaxed
+    // store — the callback goes on naming nothing of module `guard`, which is that module's
+    // contract in section 6.3.
+    crate::hook::set_hotkey_yields(crate::guard::excluded());
+
     if crate::guard::buffering_allowed() {
         restore_buffer();
     } else {

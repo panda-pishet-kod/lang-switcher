@@ -2010,6 +2010,7 @@ fn armed() -> Mode {
         active: true,
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
+        hotkey_yields: false,
     }
 }
 
