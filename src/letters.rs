@@ -7519,7 +7519,12 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // ⚠ Закрытую часть это сообщение не задаёт и задавать не должно: одно `WM_MEASUREITEM`
     // красит обе высоты сразу, поэтому закрытую двигает `CB_SETITEMHEIGHT(−1)` из
     // `widgets::combo::attach`.
-    let height = widgets::combo::row_height(hwnd, widgets::combo::LIST_ITEM_EXTRA);
+    //
+    // ⭐ **Задача T-50-2, решение 115.2.** «Формула одна на все окна» было правдой, а результат
+    // всё равно расходился: формула несла высоту шрифта ОКНА, а мастер несёт 9 pt против 10 pt
+    // окна настроек — 24 px против 26. Теперь спрашивается бо́льшая из макетной мерки и прежней
+    // шрифтовой, и это окно поднимается до 26; окно настроек — эталон и не двигается.
+    let height = widgets::combo::list_row_height(hwnd);
 
     let Some(height) = height else {
         return 0;

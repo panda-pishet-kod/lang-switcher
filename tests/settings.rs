@@ -6188,11 +6188,18 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
     }
 
     // `WM_MEASUREITEM` measures the list, and only the list.
+    //
+    // ⚠ **Task T-50-2 moved the answer into the common layer** — it used to be
+    // `combo_row_height(hwnd, COMBO_LIST_ITEM_EXTRA)`, computed here, and that was the defect:
+    // the measure carried the *window's* font, so a wizard at 9 pt got 24 px where this window
+    // at 10 pt got 26. What the assertion is about is unchanged — this message answers for a
+    // **list item** — and it is now answered by the one body both windows share.
     let measured = function_body(&source, "unsafe fn on_measure_item(");
 
     assert!(
-        measured.contains("combo_row_height(hwnd, COMBO_LIST_ITEM_EXTRA)"),
-        "`on_measure_item` must answer the height of a *list item*"
+        measured.contains("crate::widgets::combo::list_row_height(hwnd)"),
+        "`on_measure_item` must answer the height of a *list item*, and ask the common layer \
+         for it"
     );
     assert!(
         !measured.contains("COMBO_CLOSED_ITEM_EXTRA"),
@@ -6205,7 +6212,7 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
         .find("if !owner_drawn_item(")
         .expect("`on_measure_item` must still gate on type and identifier — SEC-05");
     let work = measured
-        .find("combo_row_height(")
+        .find("list_row_height(")
         .expect("`on_measure_item` must still measure something");
 
     assert!(
@@ -6297,6 +6304,111 @@ fn the_closed_part_of_a_combo_box_is_the_twelve_dialog_units_of_the_generator() 
 /// ⚠ Оконного дескриптора у теста нет, поэтому тело `widgets::combo::closed_height` повторено
 /// здесь **арифметикой**, а то, что окно в самом деле ходит этой дорогой, проверяется чтением
 /// исходника ниже — тем же приёмом, каким проверены другие правила этого файла.
+/// **Строка РАСКРЫТОГО списка — одна высота на все окна программы**, решение **115.2**, задача
+/// **T-50-1**.
+///
+/// Родной брат теста ниже и написан по его образцу. Замер Э46 (`109а.6`, потом подтверждён
+/// решением 110.4):
+///
+/// ```text
+/// мастер, шаг 3: строка раскрытого списка 24 px
+/// настройки:     строка раскрытого списка 26 px
+/// ```
+///
+/// Прежняя мерка — «высота шрифта диалога + `LIST_ITEM_EXTRA`» — **зависела от шрифта окна**
+/// ровно так же, как зависела мерка закрытой части до Э47: 9 pt мастера дают 15 px, 10 pt окна
+/// настроек — 17, воздух `scaled(12, 96) = 9` одинаков, отсюда 24 и 26. Э46 привёл к общему виду
+/// **тело** строки и положение слова в ней, Э47 — закрытую часть; сама высота строки не
+/// трогалась ни разу.
+///
+/// ⚠ Оконного дескриптора у теста нет, поэтому тело `widgets::combo::list_row_height` повторено
+/// здесь **арифметикой**, а то, что окна в самом деле ходят этой дорогой, проверяется чтением
+/// исходников ниже — обоих, потому что `WM_MEASUREITEM` у мастера свой.
+#[test]
+fn a_row_of_the_dropped_down_list_is_the_same_height_in_every_window() {
+    // Те же две модельные высоты, что и в тесте закрытой части: они измерены стендом на этой
+    // машине и обе поставлены там же.
+    const WIZARD_FONT: i32 = 15;
+    const SETTINGS_FONT: i32 = 17;
+
+    let air = theme::scaled(lang_switcher::widgets::combo::LIST_ITEM_EXTRA, 96);
+    assert_eq!(air, 9, "воздух строки при 96 DPI — замер Э46");
+
+    // ⭐ **Дефект, числами, прямо здесь.** Прежняя мерка — «шрифт окна + воздух» — и есть эти
+    // две строчки: она даёт 24 и 26, что и намерил Э46. Оставлено в теле теста, чтобы «до» и
+    // «после» читались рядом, а не в отчёте.
+    assert_eq!(
+        WIZARD_FONT + air,
+        24,
+        "мерка до T-50-2 давала мастеру 24 px"
+    );
+    assert_eq!(SETTINGS_FONT + air, 26, "…и окну настроек 26 px");
+
+    // Тело `widgets::combo::list_row_height`, повторённое арифметикой.
+    let row = |font: i32| {
+        let by_font = font + air;
+        let by_mockup = theme::scaled(lang_switcher::widgets::combo::LIST_BOX, 96);
+        by_font.max(by_mockup)
+    };
+
+    let wizard = row(WIZARD_FONT);
+    let settings = row(SETTINGS_FONT);
+
+    println!("строка списка при 96 DPI: мастер {wizard} px, окно настроек {settings} px");
+
+    assert_eq!(
+        wizard, settings,
+        "строка раскрытого списка обязана быть одной и той же во всех окнах программы, а вышло \
+         {wizard} против {settings} — мерка снова зависит от шрифта окна (решение 115.2)"
+    );
+
+    // ⭐ И это ровно то число, которое окно настроек имело всегда: эталон не двигается, мастер
+    // встаёт на него. Тот же принцип, что решение 110.3 применило к закрытой части.
+    assert_eq!(
+        settings,
+        SETTINGS_FONT + air,
+        "окно настроек обязано остаться при своей прежней строке — это эталон, а не предмет \
+         правки"
+    );
+    assert_eq!(settings, 26, "и она равна 26 px при 96 DPI — замер Э46");
+
+    // Пол по шрифту держит слово внутри строки, какой бы крупный шрифт окно ни несло.
+    let huge = row(40);
+    assert!(
+        huge > theme::scaled(lang_switcher::widgets::combo::LIST_BOX, 96),
+        "при крупном шрифте строка обязана подниматься выше макетной мерки — вышло {huge}"
+    );
+    assert_eq!(huge, 40 + air);
+
+    // ⚠ **И строка списка обязана остаться ВЫШЕ закрытой части.** Одно `WM_MEASUREITEM` красит
+    // обе высоты, закрытую двигает `CB_SETITEMHEIGHT(−1)`; макетное число, взятое меньше
+    // закрытого, дало бы список с рядами ниже собственного поля.
+    assert!(
+        theme::scaled(lang_switcher::widgets::combo::LIST_BOX, 96)
+            > theme::scaled(lang_switcher::widgets::combo::CLOSED_BOX, 96),
+        "макетная строка списка обязана быть выше макетной закрытой части"
+    );
+
+    // ---- и что окна в самом деле ходят этой дорогой --------------------------------------
+    for (module, what) in [
+        ("settings.rs", "окно настроек"),
+        ("letters.rs", "мастер и письма"),
+    ] {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join(module),
+        )
+        .unwrap_or_else(|error| panic!("src\\{module} must be readable: {error}"));
+
+        assert!(
+            source.contains("list_row_height(hwnd)"),
+            "{what}: `WM_MEASUREITEM` обязан спрашивать высоту у общего слоя, иначе правило \
+             живёт в одном окне из двух"
+        );
+    }
+}
+
 #[test]
 fn the_closed_part_of_a_combo_box_is_the_same_height_in_every_window() {
     // Высоты шрифта диалога, измеренные стендом на этой машине: мастер несёт 9 pt, окно
@@ -6355,12 +6467,15 @@ fn the_closed_part_of_a_combo_box_is_the_same_height_in_every_window() {
     .expect("src/widgets.rs must be readable")
     .replace("\r\n", "\n");
 
+    // ⚠ **Задача T-50-2 вынесла общий хвост в `mockup_pixels`** — до неё блок `GetDC`/`ReleaseDC`
+    // стоял тут же двумя строками, и когда строке списка понадобилась та же макетная мерка, он
+    // стал бы вторым таким же блоком с собственным `SAFETY`. Правило, о котором этот сторож,
+    // не изменилось: бо́льшая из шрифтовой мерки и макетной.
     for part in [
         "pub const CLOSED_BOX: i32 = 25;",
         "let Some(height) = closed_height(hwnd) else {",
         "let by_font = row_height(hwnd, CLOSED_ITEM_EXTRA)?;",
-        "let by_mockup = scaled(CLOSED_BOX, dc_dpi(dc));",
-        "Some(by_font.max(by_mockup))",
+        "Some(by_font.max(mockup_pixels(hwnd, CLOSED_BOX)))",
     ] {
         assert!(
             source.contains(part),

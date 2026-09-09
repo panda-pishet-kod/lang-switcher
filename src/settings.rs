@@ -6199,7 +6199,12 @@ unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
     } else {
         // The rows of the dropped-down list, and only they, since task T-12-2 — see the ⚠ of
         // the doc comment above.
-        combo_row_height(hwnd, COMBO_LIST_ITEM_EXTRA)
+        //
+        // ⭐ **Task T-50-2, decision 115.2.** Asked of the common layer, which takes the larger
+        // of the mock-up height and the old font-derived one: the measure used to depend on the
+        // window's font, and a wizard carrying 9 pt got 24 px where this window's 10 pt got 26.
+        // This window is the reference and does not move — it had 26 and keeps 26.
+        crate::widgets::combo::list_row_height(hwnd)
     };
 
     let Some(measured) = measured else {
