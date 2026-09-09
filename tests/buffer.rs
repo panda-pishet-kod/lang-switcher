@@ -170,6 +170,12 @@ const SCAN_BRACKET: u16 = 0x1A;
 const SCAN_CIRCUMFLEX: u16 = 0x1B;
 /// Scan code of the grave key — the `Ctrl+Shift+гравис` of FR-11, task T-52-2.
 const SCAN_GRAVE: u16 = 0x29;
+/// Scan codes of the top-row digits `1`, `0` and `9` — the same task.
+const SCAN_1: u16 = 0x02;
+const SCAN_0: u16 = 0x0B;
+const SCAN_9: u16 = 0x0A;
+/// Scan code of the keypad `1`, which is a different physical key from [`SCAN_1`].
+const SCAN_NUMPAD1: u16 = 0x4F;
 
 /// Scan code of `F5` — the key of the live acceptance list, task T-52-1.
 const SCAN_F5: u16 = 0x3F;
@@ -249,6 +255,19 @@ fn english() -> LayoutMap {
                 KeyMapping::from_char(' '),
             ),
             // The six keys of `ghbdtn` — task T-52-1.
+            // The top-row digits of the `Ctrl+Shift+<цифра>` combinations — task T-52-2. Every
+            // real layout carries them, and the stand has to as well: without them the bare
+            // digit would be an empty stroke of task T-52-1 and the pins below would be
+            // measuring the wrong rule.
+            (SCAN_1, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('1')),
+            (SCAN_0, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('0')),
+            (SCAN_9, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('9')),
+            (
+                SCAN_NUMPAD1,
+                KEYPAD,
+                Mods::NONE,
+                KeyMapping::from_char('1'),
+            ),
             (SCAN_G, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('g')),
             (SCAN_H, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('h')),
             (SCAN_B, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('b')),
@@ -397,6 +416,16 @@ const VK_BROWSER_HOME: u16 = 0xAC;
 const VK_CLEAR: u16 = 0x0C;
 /// `VK_PACKET` — the foreign Unicode injection of task T-52-1.
 const VK_PACKET: u16 = 0xE7;
+
+// The keys of the "switch to this language" combinations of FR-11 — task T-52-2.
+/// The top-row digits, both ends of the range and the one the tests use.
+const VK_0: u16 = 0x30;
+const VK_1: u16 = 0x31;
+const VK_9: u16 = 0x39;
+/// The grave key.
+const VK_OEM_3: u16 = 0xC0;
+/// The keypad `1`, which the system dialog does **not** bind.
+const VK_NUMPAD1: u16 = 0x61;
 /// The seven volume and media keys of task T-52-1, in the order of section 4.10.
 const MEDIA_KEYS: [u16; 7] = [0xAD, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3];
 
@@ -3865,4 +3894,197 @@ fn our_own_unicode_injection_never_reaches_the_recorder() {
 
     buffer::uninstall();
     assert!(!buffer::is_installed());
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-52-2 — FR-11: every language switcher of the system dialog keeps the buffer
+// -------------------------------------------------------------------------------------
+
+/// Drives one combination of the system dialog: modifiers down, key, modifiers up.
+///
+/// Returns what the key itself answered. The releases are delivered too, because a switcher
+/// that left `held` raised would poison every stroke after it — and because that is the shape
+/// the probe of T-03-3c reads, which `tests\hook.rs` pins from its own side.
+fn switch_with(recorder: &mut Recorder, modifiers: &[u16], vk: u16, scan: u16) -> Recorded {
+    for &modifier in modifiers {
+        assert_eq!(hold(recorder, modifier), Recorded::Modifier);
+    }
+
+    let outcome = press(recorder, vk, scan);
+
+    for &modifier in modifiers.iter().rev() {
+        assert_eq!(release(recorder, modifier), Recorded::Modifier);
+    }
+
+    outcome
+}
+
+#[test]
+fn every_switcher_of_the_system_dialog_keeps_the_buffer() {
+    // ⭐ **The finding of task T-52-2.** FR-11 promises that a layout switch the user makes
+    // themselves does not destroy the word they are in the middle of typing, and the code kept
+    // that promise for three combinations: `Alt+Shift` and `Ctrl+Shift` are modifiers alone and
+    // never reach `record` at all, and `Win+Space` has a row of its own above.
+    //
+    // The Windows language dialog offers more than those. Beside "switch to the next layout" it
+    // binds **"switch to a particular language"** to `(Ctrl | Alt) + Shift + <digit>`, and the
+    // same page binds the grave key. Every one of those arrived here as `Ctrl`-or-`Alt` plus a
+    // key — the exact shape of the command row of FR-10 — and threw the word away.
+    for (name, modifiers, vk, scan) in [
+        ("Ctrl+Shift+1", [VK_LCONTROL, VK_LSHIFT].as_slice(), VK_1, SCAN_1),
+        ("Alt+Shift+1", [VK_LMENU, VK_LSHIFT].as_slice(), VK_1, SCAN_1),
+        (
+            "Ctrl+Shift+гравис",
+            [VK_LCONTROL, VK_LSHIFT].as_slice(),
+            VK_OEM_3,
+            SCAN_GRAVE,
+        ),
+        // Both sides of every modifier, and the top-row digits at both ends of the range.
+        ("правый Ctrl+правый Shift+0", [VK_RCONTROL, VK_RSHIFT].as_slice(), VK_0, SCAN_0),
+        ("Ctrl+Shift+9", [VK_LCONTROL, VK_LSHIFT].as_slice(), VK_9, SCAN_9),
+    ] {
+        let mut recorder = fresh();
+        type_ghbdtn(&mut recorder);
+
+        let outcome = switch_with(&mut recorder, modifiers, vk, scan);
+
+        assert_eq!(
+            outcome,
+            Recorded::Ignored,
+            "{name} после ghbdtn: буфер сброшен как команда, len = {}",
+            recorder.len()
+        );
+        assert_eq!(
+            recorder.len(),
+            6,
+            "{name}: слово потеряно, в кольце «{}»",
+            typed(&recorder)
+        );
+        assert_eq!(typed(&recorder), "ghbdtn", "{name}: слово должно уцелеть");
+    }
+}
+
+#[test]
+fn a_switcher_of_the_system_dialog_right_after_a_conversion_keeps_the_rollback() {
+    // Р-44, and the whole reason the row stands *above* the last row of the FR-10 table. The
+    // user converts a word, sees the layout is still not the one they meant, switches to it by
+    // its number and reaches for the hotkey again — and the rollback of FR-33 has to still be
+    // there. `Win+Space` has answered this since task T-10-12; the numbered switchers answer it
+    // now for the same reason and by the same construction.
+    let mut recorder = fresh();
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    assert_eq!(
+        switch_with(&mut recorder, &[VK_LCONTROL, VK_LSHIFT], VK_1, SCAN_1),
+        Recorded::Ignored,
+        "Р-44: FR-11 накрывает и последнюю строку таблицы FR-10"
+    );
+
+    assert_eq!(recorder.len(), 3, "штрихи переживают переключение — FR-11");
+    assert_eq!(recorder.cycle_position(), 3, "и счётчик цикла тоже");
+    assert!(
+        recorder.in_conversion(),
+        "сессия та же, что открыл Pause, — откат FR-33 ещё возможен"
+    );
+    assert_eq!(typed(&recorder), "aaa", "и ничего не записалось");
+
+    // What still ends the session is an ordinary key, exactly as the last row says.
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert!(!recorder.in_conversion());
+    assert_eq!(recorder.cycle_position(), 0);
+}
+
+#[test]
+fn the_neighbours_of_the_switcher_row_are_still_commands() {
+    // The row is as narrow as the requirement is, and every neighbour below is a combination the
+    // system dialog does **not** offer. Each of them flushes, as it did before this task.
+    let cases: [(&str, &[u16], u16, u16); 6] = [
+        // `Win` in the combination: not a switcher of the dialog, and `Win+Ctrl+Shift+1` is a
+        // command like any other.
+        (
+            "Win+Ctrl+Shift+1",
+            &[VK_LWIN, VK_LCONTROL, VK_LSHIFT],
+            VK_1,
+            SCAN_1,
+        ),
+        // ⚠ `Ctrl` **and** `Alt` together is `AltGr` — a symbol modifier of FR-20, not a
+        // switcher. The dialog binds one modifier or the other, never both.
+        (
+            "Ctrl+Alt+Shift+1",
+            &[VK_LCONTROL, VK_LMENU, VK_LSHIFT],
+            VK_1,
+            SCAN_1,
+        ),
+        // The keypad digit is a different physical key and the dialog does not bind it.
+        (
+            "Ctrl+Shift+цифра дополнительной клавиатуры",
+            &[VK_LCONTROL, VK_LSHIFT],
+            VK_NUMPAD1,
+            SCAN_NUMPAD1,
+        ),
+        // No `Shift`: `Ctrl+1` and `Alt+1` are ordinary application commands.
+        ("Ctrl+1", &[VK_LCONTROL], VK_1, SCAN_1),
+        ("Alt+1", &[VK_LMENU], VK_1, SCAN_1),
+        // A letter under the switcher's own modifiers is still `Ctrl+Shift+A`.
+        ("Ctrl+Shift+A", &[VK_LCONTROL, VK_LSHIFT], VK_A, SCAN_A),
+    ];
+
+    for (name, modifiers, vk, scan) in cases {
+        let mut recorder = fresh();
+        type_ghbdtn(&mut recorder);
+
+        assert_eq!(
+            switch_with(&mut recorder, modifiers, vk, scan),
+            Recorded::Flushed,
+            "{name} перестала быть командой, len = {}",
+            recorder.len()
+        );
+        assert_eq!(recorder.len(), 0, "{name}: кольцо не пусто");
+    }
+}
+
+#[test]
+fn the_grave_key_without_modifiers_is_a_character_and_not_a_switcher() {
+    // Section 10, and it is a limitation rather than a rule: the *user* can bind the bare grave
+    // key as a switcher in the system dialog, and from the hook it is then indistinguishable
+    // from typing the character. We read it as the character it is, because that is what it is
+    // for everybody who has not bound it — and reading the registry to find out is refused.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        press(&mut recorder, VK_OEM_3, SCAN_GRAVE),
+        Recorded::Stored,
+        "гравис без модификаторов — символ, а не переключатель"
+    );
+    assert_eq!(typed(&recorder), "ghbdtn`");
+}
+
+#[test]
+fn the_alt_of_a_syskeydown_is_enough_for_the_switcher_row() {
+    // ⚠ `Alt+Shift+<digit>` arrives as `WM_SYSKEYDOWN`, and an `Alt` that went down before the
+    // hook was installed is invisible to the tracker of `held`. The system's own answer for
+    // this very event — `LLKHF_ALTDOWN` — is believed alongside the tracker by `mods_now`, and
+    // the row above reads the mask rather than the tracker, so the switcher is recognised even
+    // when the tracker never saw the `Alt` go down.
+    let mut recorder = fresh();
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(
+        deliver(
+            &mut recorder,
+            VK_1,
+            SCAN_1,
+            LLKHF_ALTDOWN.0,
+            SOME_TIME,
+            Edge::Down
+        ),
+        Recorded::Ignored,
+        "Alt из флага системы не признан переключателем"
+    );
+    assert_eq!(recorder.len(), 6);
+    assert_eq!(typed(&recorder), "ghbdtn");
 }

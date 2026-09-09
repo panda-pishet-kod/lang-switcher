@@ -136,8 +136,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT,
     VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MEDIA_NEXT_TRACK,
     VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU, VK_NEXT, VK_PACKET,
-    VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_SPACE,
-    VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    VK_OEM_3, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+    VK_SPACE, VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{LLKHF_ALTDOWN, LLKHF_EXTENDED};
 
@@ -879,6 +879,25 @@ const MEDIA_KEYS: [u16; 7] = [
     VK_MEDIA_STOP.0,
     VK_MEDIA_PLAY_PAUSE.0,
 ];
+
+/// Whether `vk` is the key half of a "switch to this language" combination — task **T-52-2**.
+///
+/// The **top-row** digits `0`…`9` and the grave key: what the Windows language dialog offers
+/// beside `Alt+Shift` and `Ctrl+Shift`, and the whole list it offers. `VK_NUMPAD0`…`VK_NUMPAD9`
+/// are deliberately absent — they are different physical keys and the dialog does not bind
+/// them. The modifier half of the combination is at the call site in [`Recorder::record`], with
+/// the reasoning for every one of its four conditions.
+///
+/// A range test and one comparison; `const` for the same reason [`modifier_role`] is.
+const fn is_layout_switch_key(vk: u16) -> bool {
+    matches!(vk, VK_TOP_ROW_0..=VK_TOP_ROW_9) || vk == VK_OEM_3.0
+}
+
+/// `VK_0` — the first of the ten top-row digit codes, which Windows defines by their ASCII
+/// values and the `windows` crate does not name.
+const VK_TOP_ROW_0: u16 = 0x30;
+/// `VK_9`, the last of them.
+const VK_TOP_ROW_9: u16 = 0x39;
 
 /// Whether `vk` is one of the seven keys of [`MEDIA_KEYS`].
 ///
@@ -1789,6 +1808,65 @@ impl Recorder {
         // FR-32 stays where it was for the same reason the strokes do — a layout change is not a
         // flush, so FR-34 has nothing to say about it.
         if key.vk == VK_SPACE.0 && self.held.win() && !mods.ctrl() && !mods.alt() {
+            return Recorded::Ignored;
+        }
+
+        // ---------------------------------------------------------------------------------
+        // ⭐ **The rest of FR-11 — task T-52-2**, and it stands beside the row above because it
+        // is the same requirement answered for the combinations the code had missed.
+        //
+        // FR-11 is about **the user switching the layout themselves**, and the Windows language
+        // dialog offers more ways to do that than the two the code knew. Beside "switch to the
+        // next layout" — `Alt+Shift` and `Ctrl+Shift`, which are modifiers alone and never
+        // reach this function — the same dialog binds **"switch to a particular language"** to
+        // `(Ctrl | Alt) + Shift + <top-row digit>`, and to the grave key in the same list. Every
+        // one of those arrived here as `Ctrl`-or-`Alt` plus a key, which is exactly the shape of
+        // the command row below, and threw the word away. FR-11 says a switch does not flush,
+        // and it says it without exceptions.
+        //
+        // **The shape of the combination, and every half of it is deliberate:**
+        //
+        // * **`Ctrl` or `Alt`, but never both.** `Ctrl` together with `Alt` is `AltGr` — a
+        //   *symbol* modifier of FR-20, the one combination that produces characters — and the
+        //   dialog binds one modifier or the other, never the pair. `!=` on the two booleans is
+        //   the whole of it;
+        // * **`Shift`, either side.** Without it `Ctrl+1` and `Alt+1` are ordinary application
+        //   commands and stay commands;
+        // * **no `Win`.** `Win+Ctrl+Shift+1` switches no layout and is a command like any other;
+        // * **the top row only.** `VK_NUMPAD0`…`VK_NUMPAD9` are different physical keys and the
+        //   dialog does not bind them, so [`is_layout_switch_key`] takes the top row and the
+        //   grave key and nothing else.
+        //
+        // ⚠ **`Alt+Shift+<цифра>` arrives as `WM_SYSKEYDOWN`, and that is why the mask is read
+        // rather than the tracker.** [`Recorder::mods_now`] believes `LLKHF_ALTDOWN` — the
+        // system's own answer for this very event — alongside `held`, so an `Alt` that went
+        // down before the hook was installed is still seen here.
+        //
+        // **What it does is what `Win+Space` does, and for the same reasons.** Nothing is
+        // recorded — the stroke puts no character on the screen, and a stroke in the ring would
+        // make FR-22 produce a character the user never typed. The position counter of FR-32 is
+        // not touched: a layout change is not a flush, so FR-34 has nothing to say about it. And
+        // the conversion session is left **open**, which is the whole point of standing above
+        // the last row of the table (Р-44): the user who converted a word, saw the layout was
+        // still not the one they meant, switched to it by its number and reached for the hotkey
+        // again must still have the rollback of FR-33.
+        //
+        // ⚠ **The bare grave key is not here and cannot be** — section 10. The dialog lets the
+        // user bind it with no modifiers at all, and from inside the hook that stroke is
+        // indistinguishable from typing the character. We read it as the character, because
+        // that is what it is for everybody who has not bound it; asking the registry which it
+        // is was refused with the rest of the registry reading.
+        //
+        // **NFR-01 and NFR-02.** For an ordinary letter the first test — `Shift` in the mask —
+        // is usually false and the row ends there; a capital letter pays the second, which is
+        // two boolean reads. No allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05), no
+        // Win32 call (NFR-02).
+        // ---------------------------------------------------------------------------------
+        if mods.shift()
+            && (mods.ctrl() != mods.alt())
+            && !self.held.win()
+            && is_layout_switch_key(key.vk)
+        {
             return Recorded::Ignored;
         }
 
