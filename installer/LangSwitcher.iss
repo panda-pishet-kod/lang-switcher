@@ -45,7 +45,7 @@
 #endif
 
 #define AppName        "Lang Switcher"
-#define AppVersion     "0.50.0"
+#define AppVersion     "0.51.0"
 #define AppPublisher   "Panda_Pishet_Kod"
 #define AppExeName     "LangSwitcher.exe"
 #define AppCopyright   "Copyright (C) 2026 Panda_Pishet_Kod"
@@ -80,10 +80,10 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
-VersionInfoVersion=0.50.0.0
+VersionInfoVersion=0.51.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=0.50.0.0
+VersionInfoProductVersion=0.51.0.0
 VersionInfoDescription={#AppName} Setup
 VersionInfoCopyright={#AppCopyright}
 
