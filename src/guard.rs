@@ -572,6 +572,17 @@ pub fn buffering_allowed() -> bool {
 pub fn refuses() -> bool {
     let (field, excluded) = state();
 
+    refuses_in(field, excluded)
+}
+
+/// The rule of [`refuses`] apart from the reading of it — the shape [`buffering_allowed_in`]
+/// already has, and for the same reason.
+///
+/// `Field::Password` cannot be staged in a test process (it is published by a probe against the
+/// real foreground window, see `tests\guard.rs`), so a rule that lived only inside the reader
+/// could be checked for one of its four states and no more. Here all eight combinations are
+/// checkable without a window, a focus or a process.
+pub const fn refuses_in(field: Field, excluded: bool) -> bool {
     excluded || matches!(field, Field::Password)
 }
 

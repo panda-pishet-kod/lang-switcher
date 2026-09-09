@@ -8592,22 +8592,23 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
         "Three changes",
     ),
     // ⚠ Три строки «Что нового» меняются КАЖДОЙ поставкой — это их назначение. Здесь стоят
-    // слова 0.48.0 (задача Т-48-5); прежние, слова 0.46.0/0.47.0, были про высоту поля выбора
-    // раскладки, текст в полях мастера и слово в строке списка.
+    // слова 0.49.0 (задача Т-49-4); прежние, слова 0.48.0, были про список подсказок в адресной
+    // строке, выделение по словам и стирание Backspace — письмо о них пользователю показано
+    // (`last_seen_version = "0.48.0"`).
     (
         settings::IDS_WHATSNEW_1,
-        "Список подсказок в адресной строке больше не съедает первые буквы слова перед конвертацией.",
-        "The suggestion list of an address bar no longer eats the first letters of a word before conversion.",
+        "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно.",
+        "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Выделенный текст: каждое слово переводится по своей раскладке, включая слово другой раскладки в середине фразы.",
-        "Selected text: every word is converted by its own layout, including a word of another layout in the middle of a phrase.",
+        "Тот же глухой стук звучит и в программе из списка исключений.",
+        "The same dull knock sounds in a program from the exclusion list.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Слово, набранное после стирания клавишей Backspace, конвертируется целиком.",
-        "A word typed after erasing with Backspace is converted whole.",
+        "Звук отказа выключается тем же переключателем «Звуковой отклик», что и два прежних.",
+        "The refusal sound is switched off by the same «Sound feedback» box as the other two.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,

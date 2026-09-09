@@ -422,6 +422,52 @@ fn a_focus_change_caused_by_typing_asks_for_the_probe_and_keeps_the_buffer() {
     }
 }
 
+/// **«Отказано» и «нечего делать» — разные вещи, и FR-100 их различает** — task Т-49-2.
+///
+/// The third tone of FR-100 sounds where this program **would not act**, and nowhere else. All
+/// eight combinations, because the distinction that matters is not the obvious one: three of the
+/// four states switch buffering **off**, and only one of those three is a refusal.
+#[test]
+fn a_refusal_is_a_password_field_or_an_exclusion_and_nothing_else() {
+    // FR-70 and FR-84 — the two the user named: «такие случаи как ввод пароля».
+    assert!(guard::refuses_in(Field::Password, false));
+    assert!(
+        guard::refuses_in(Field::Ordinary, true),
+        "FR-84: an excluded process"
+    );
+    assert!(guard::refuses_in(Field::Password, true));
+
+    // ⚠ **`Pending` is the one that catches people out.** Buffering is off there, exactly as it
+    // is in a password field — and it is not a refusal: «ответа ещё нет» is not knowing, and a
+    // program that sounded «отказано» while its own probe was still running would be saying
+    // something it has not established. The press changed nothing, which is `Press::Idle`.
+    assert!(
+        !guard::buffering_allowed_for(Field::Pending),
+        "the premise: buffering really is off in Pending too"
+    );
+    assert!(
+        !guard::refuses_in(Field::Pending, false),
+        "…and it is still not a refusal"
+    );
+
+    // FR-73 says an undeterminable field is one this program records in, so nothing is refused.
+    assert!(!guard::refuses_in(Field::Undetermined, false));
+    assert!(!guard::refuses_in(Field::Ordinary, false));
+
+    // The exclusion overrides every field state, which is what makes it the first term.
+    for field in [
+        Field::Pending,
+        Field::Ordinary,
+        Field::Password,
+        Field::Undetermined,
+    ] {
+        assert!(
+            guard::refuses_in(field, true),
+            "{field:?}: FR-84 refuses whatever the field turns out to be"
+        );
+    }
+}
+
 /// The four states and the two answers, as the rest of the program sees them.
 #[test]
 fn the_flag_of_sec04a_is_one_bit_and_follows_the_state() {
