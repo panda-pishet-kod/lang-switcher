@@ -346,6 +346,82 @@ fn a_refused_probe_request_does_not_cancel_one_that_was_accepted() {
     stage::clear_probe_requests();
 }
 
+/// **FR-14 — the probe is asked for and the state is left where it is**, task Т-48-2,
+/// question **111.1**.
+///
+/// `note_focus_moved_keeping_buffer` is what `app::window_proc` answers a focus event the user's
+/// own typing provoked with. Everything about the probe is the road
+/// [`guard::note_focus_moved`] takes — a new generation, a request to the watcher thread, and
+/// FR-73's default when there is nobody to ask — and the one difference is the difference the
+/// user sees: [`Field::Pending`] is not published, so `buffering_allowed` goes on answering
+/// `true` and the word in the buffer is still there when the hotkey arrives.
+///
+/// ⚠ **What this cannot stage, and where the other half is checked.** In a test process there is
+/// no watcher window, so the request is refused and FR-73 answers `Undetermined` before the call
+/// returns — the same wall `a_focus_change_with_no_watcher_thread_ends_in_the_fr73_default` runs
+/// into, and the reason `Field::Pending` cannot be observed here in either function. So what is
+/// asserted is what is observable: the counter moved, the request was made and taken back, and
+/// the published state is one that records. That the exemption is refused outright in `Pending`
+/// and `Password` is `tests\watchdog.rs`, where the gate itself lives
+/// (`the_typing_rule_acts_only_while_recording_is_allowed`, decision П-4).
+///
+/// ⚠ This test writes process-global state, like the FR-73 test above, and asserts only about
+/// values it set itself in the same body.
+#[test]
+fn a_focus_change_caused_by_typing_asks_for_the_probe_and_keeps_the_buffer() {
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let before = guard::counters();
+
+    guard::note_focus_moved_keeping_buffer();
+
+    assert!(
+        guard::buffering_allowed(),
+        "FR-14: the buffer is kept, which is the whole of what the rule buys the user"
+    );
+    assert_ne!(
+        guard::field(),
+        Field::Pending,
+        "FR-14: the state is not moved to «ответа ещё нет»"
+    );
+    assert!(
+        !guard::password_field(),
+        "SEC-04a: the flag is 0 when this is not a password field"
+    );
+
+    // ⭐ **The probe *was* asked for, and this is how that is observable here.** `Undetermined`
+    // is published by exactly one path — the `!request_probe()` arm — so reading it back is
+    // reading that the request was made and refused for want of a watcher window. It is the
+    // half of FR-71 that FR-14 keeps whole, and SEC-06 rests on it: the verdict comes back by
+    // the ordinary road and a `Password` still empties the buffer in
+    // `app::apply_buffering_gate`.
+    assert_eq!(
+        guard::field(),
+        Field::Undetermined,
+        "the probe was requested; with nobody to answer, FR-73 decides"
+    );
+
+    let after = guard::counters();
+    assert_eq!(
+        after.focus_changes,
+        before.focus_changes + 1,
+        "the focus change is counted, exempt or not"
+    );
+
+    #[cfg(feature = "testing")]
+    {
+        use lang_switcher::guard::stage;
+
+        assert_eq!(
+            stage::probe_requests(),
+            0,
+            "SEC-05: a refused request with nobody underneath it takes itself back"
+        );
+
+        stage::clear_probe_requests();
+    }
+}
+
 /// The four states and the two answers, as the rest of the program sees them.
 #[test]
 fn the_flag_of_sec04a_is_one_bit_and_follows_the_state() {

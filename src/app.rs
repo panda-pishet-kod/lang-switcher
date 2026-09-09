@@ -2427,7 +2427,23 @@ unsafe extern "system" fn window_proc(
             // The result is deliberately dropped: FR-12 decides how much of the buffer goes,
             // module `watchdog` counts what happened, and there is nothing for the window
             // procedure to do with the answer. SEC-07 — it is a count, never a stroke.
-            crate::watchdog::apply_flush(message, lparam);
+            //
+            // ⭐ **FR-14 — task Т-48-2, question 111.1.** The line above it is the whole of the
+            // new rule as this function sees it: `take_typing_induced_flush` decides, once, and
+            // the answer is carried down to the park below. Deciding twice would be deciding
+            // differently — the watcher thread publishes verdicts between these two points —
+            // and deciding *there* would be too late, because the flush would already have run.
+            //
+            // `true` means the focus event was the application's own answer to the user's
+            // typing: the address bar of Edge announcing the suggestion row it has just opened,
+            // an autocompletion, an Electron echo. The request is already taken by then, so
+            // there is nothing left for `apply_flush` to apply; the call is skipped rather than
+            // relying on that, so that the intent is on the page and not in the arithmetic.
+            let caused_by_typing = crate::watchdog::take_typing_induced_flush(message);
+
+            if !caused_by_typing {
+                crate::watchdog::apply_flush(message, lparam);
+            }
 
             // **FR-21, the delivery** — task T-03-3, and the point of that half of the task.
             // `WM_INPUTLANGCHANGE` cannot reach this program: it goes to the window with the
@@ -2750,7 +2766,15 @@ unsafe extern "system" fn window_proc(
             // `apply_configured_capacity` below is: a published value re-read after every message
             // cannot be missed, whichever way it changed.
             if is_input_window(hwnd) {
-                if message == crate::watchdog::WM_APP_FLUSH {
+                if message == crate::watchdog::WM_APP_FLUSH && caused_by_typing {
+                    // ⭐ **FR-14 — the exempt half**, task Т-48-2. The probe of FR-72 is asked
+                    // for exactly as it is below; what is not done is the two things that would
+                    // take the user's word away — `Field::Pending` and the park. The verdict
+                    // comes back by the same road, `guard::WM_APP_FIELD` → the gate below, and
+                    // a `Password` still empties and overwrites the buffer there (SEC-06,
+                    // decision П-4).
+                    crate::guard::note_focus_moved_keeping_buffer();
+                } else if message == crate::watchdog::WM_APP_FLUSH {
                     crate::guard::note_focus_moved();
 
                     // ⚠ **The wipe is unconditional and is here rather than in the gate below.**

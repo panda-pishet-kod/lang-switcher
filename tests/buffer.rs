@@ -846,6 +846,107 @@ fn backspace_takes_one_stroke_out_instead_of_flushing() {
 }
 
 // -------------------------------------------------------------------------------------
+// FR-14 — the recorder remembers *when* the user last edited; question 111, task Т-48-2
+// -------------------------------------------------------------------------------------
+
+/// **`Backspace` is remembered as an edit, and that is the whole reason the field exists.**
+///
+/// The user's second finding, word for word: «стираем набранный текст, набираем yandex.ru и
+/// нажимаем pause получаем `yaтвучюкг`». Erasing the address closes the suggestion list of
+/// Edge, and the first stroke of the new word opens it again — a focus event with a fresh
+/// `idChild` in the middle of the word. FR-14 needs to know that the user has been editing, and
+/// a `Backspace` leaves **nothing in the ring** to say so: it takes a stroke out. So the moment
+/// of the last edit is remembered beside the ring, and a pop refreshes it exactly as a press
+/// does.
+#[test]
+fn the_recorder_remembers_the_moment_of_the_last_edit() {
+    let mut recorder = fresh();
+
+    // Nothing typed yet: there is no edit to be inside any window.
+    assert!(!recorder.edited_within(1_000, 1_500));
+
+    deliver(&mut recorder, VK_A, SCAN_A, 0, 1_000, Edge::Down);
+
+    // The half-open window of FR-14 is `(T − Δ, T]`: the stroke's own moment is inside it, one
+    // millisecond earlier is not the boundary, and Δ milliseconds later is the last moment that
+    // still counts.
+    assert!(recorder.edited_within(1_000, 1_500), "`t == T` is inside");
+    assert!(
+        recorder.edited_within(2_499, 1_500),
+        "the last moment at which `T − Δ < t` still holds"
+    );
+    assert!(
+        !recorder.edited_within(2_500, 1_500),
+        "`T − Δ == t` is the open end of the window and is outside it"
+    );
+    assert!(
+        !recorder.edited_within(999, 1_500),
+        "an event older than the stroke is not an event the stroke caused"
+    );
+
+    // ⭐ **The pop of `Backspace` is an edit.** The ring is empty afterwards, so without the
+    // memory beside it FR-14 would see a user who has typed nothing.
+    assert_eq!(
+        deliver(&mut recorder, VK_BACK, 0x0E, 0, 4_000, Edge::Down),
+        Recorded::Popped
+    );
+    assert_eq!(recorder.len(), 0, "the ring is empty");
+    assert!(
+        recorder.edited_within(4_000, 1_500),
+        "…and the erasure is still an edit FR-14 can see"
+    );
+
+    // A `Backspace` on an empty ring pops nothing and is not an edit either.
+    assert_eq!(
+        deliver(&mut recorder, VK_BACK, 0x0E, 0, 9_000, Edge::Down),
+        Recorded::Ignored
+    );
+    assert!(!recorder.edited_within(9_000, 1_500));
+}
+
+/// **The memory of the last edit obeys FR-12 and FR-10 exactly as the strokes do.**
+///
+/// It is not a second, longer-lived copy of the buffer: every rule that empties the ring empties
+/// this too, and the timestamp arithmetic is the wrapping one of `is_newer_than` rather than a
+/// plain comparison — the tick counter wraps every 49 days and FR-14 must not read the wrap as
+/// «the user has not typed for a month».
+#[test]
+fn the_moment_of_the_last_edit_is_cleared_with_the_buffer() {
+    let mut recorder = fresh();
+
+    deliver(&mut recorder, VK_A, SCAN_A, 0, 1_000, Edge::Down);
+    recorder.reset();
+    assert!(
+        !recorder.edited_within(1_000, 1_500),
+        "FR-10: a full flush takes the memory of the edit with it"
+    );
+
+    // FR-12: a flush stamped at or after the edit takes it; one stamped before it leaves it,
+    // exactly as it leaves the strokes that are newer than the event.
+    deliver(&mut recorder, VK_A, SCAN_A, 0, 2_000, Edge::Down);
+    recorder.reset_up_to(1_999);
+    assert!(
+        recorder.edited_within(2_000, 1_500),
+        "the edit is newer than the event and survives it"
+    );
+
+    recorder.reset_up_to(2_000);
+    assert!(
+        !recorder.edited_within(2_000, 1_500),
+        "an event at the edit's own moment covers it"
+    );
+
+    // ⭐ **The wrap of the 32-bit tick counter.** A stroke made just before it and an event just
+    // after it are milliseconds apart, and FR-14 has to read them that way.
+    let before_wrap = u32::MAX - 50;
+    deliver(&mut recorder, VK_A, SCAN_A, 0, before_wrap, Edge::Down);
+    assert!(
+        recorder.edited_within(100, 1_500),
+        "151 ms across the wrap is inside a window of 1500"
+    );
+}
+
+// -------------------------------------------------------------------------------------
 // Point 15 — FR-10: editing and navigation keys flush the whole buffer
 // -------------------------------------------------------------------------------------
 

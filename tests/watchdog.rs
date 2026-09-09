@@ -34,7 +34,9 @@
 //! a test stage a **silent** removal — the system does that, on its own schedule, and the report
 //! of task T-06-2 says exactly which part of FR-80 is therefore argued rather than measured.
 
+use std::fs;
 use std::os::windows::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -44,8 +46,8 @@ use lang_switcher::guard::{self, Field};
 use lang_switcher::hook::{Edge, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{
-    self, Counters, FLUSH_EVENTS, Rebuild, WIPING_SESSION_EVENTS, WM_APP_FLUSH, WM_APP_LAYOUT,
-    WM_APP_WIPE,
+    self, Cause, Counters, FLUSH_EVENTS, Rebuild, WIPING_SESSION_EVENTS, WM_APP_FLUSH,
+    WM_APP_LAYOUT, WM_APP_WIPE,
 };
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -480,29 +482,80 @@ fn coalescing_keeps_the_newer_of_two_pending_flushes() {
     // included, which is why the cell is 64 bits wide and not 32.
     assert_eq!(watchdog::pending_time(0), None);
     assert_eq!(
-        watchdog::coalesced(0, 0).and_then(watchdog::pending_time),
+        watchdog::coalesced(0, 0, Cause::WindowChange).and_then(watchdog::pending_time),
         Some(0)
     );
 
-    let filled = watchdog::coalesced(0, 500).expect("an empty cell takes any request");
+    let filled =
+        watchdog::coalesced(0, 500, Cause::WindowChange).expect("an empty cell takes any request");
     assert_eq!(watchdog::pending_time(filled), Some(500));
 
     // A newer request replaces it: a flush stamped `T` removes everything at or before `T`, so
     // the newer of two pending flushes does everything the older one would have and more.
-    let newer = watchdog::coalesced(filled, 900).expect("900 is newer than 500");
+    let newer =
+        watchdog::coalesced(filled, 900, Cause::WindowChange).expect("900 is newer than 500");
     assert_eq!(watchdog::pending_time(newer), Some(900));
 
     // An older one, and the same one, add nothing and are dropped.
-    assert_eq!(watchdog::coalesced(newer, 500), None);
-    assert_eq!(watchdog::coalesced(newer, 900), None);
+    assert_eq!(watchdog::coalesced(newer, 500, Cause::WindowChange), None);
+    assert_eq!(watchdog::coalesced(newer, 900, Cause::WindowChange), None);
 
     // Across the wrap of the counter. `u32::max` on the raw values would keep the *older* of
     // these two and lose the flush; the comparison of FR-12 keeps the right one.
-    let before_wrap = watchdog::coalesced(0, u32::MAX - 10).expect("an empty cell");
-    let after_wrap = watchdog::coalesced(before_wrap, 10).expect("21 ms later, past the turn");
+    let before_wrap =
+        watchdog::coalesced(0, u32::MAX - 10, Cause::WindowChange).expect("an empty cell");
+    let after_wrap = watchdog::coalesced(before_wrap, 10, Cause::WindowChange)
+        .expect("21 ms later, past the turn");
 
     assert_eq!(watchdog::pending_time(after_wrap), Some(10));
-    assert_eq!(watchdog::coalesced(after_wrap, u32::MAX - 10), None);
+    assert_eq!(
+        watchdog::coalesced(after_wrap, u32::MAX - 10, Cause::WindowChange),
+        None
+    );
+}
+
+/// **The kind of the collapsed request is the stricter of the two** — FR-14, task Т-48-2.
+///
+/// Two events between two turns of the input thread's message loop become one request, and the
+/// one they become may only be exempt from FR-10 if **both** of them could have been. A window
+/// change anywhere in the mix means the user moved, and no amount of recent typing makes that
+/// the application's answer to a keystroke.
+#[test]
+fn coalescing_keeps_the_stricter_of_two_causes() {
+    // A focus event into an empty cell is a focus request.
+    let focus = watchdog::coalesced(0, 500, Cause::FocusChange).expect("an empty cell");
+    assert_eq!(watchdog::pending_time(focus), Some(500));
+    assert!(watchdog::focus_pending(focus));
+
+    // A second focus event, newer, keeps the kind and moves the stamp.
+    let later = watchdog::coalesced(focus, 900, Cause::FocusChange).expect("900 is newer");
+    assert_eq!(watchdog::pending_time(later), Some(900));
+    assert!(watchdog::focus_pending(later));
+
+    // ⚠ A window change joining them takes the kind away — and it does so **even when it adds
+    // nothing to the timestamp**, which is the case a rule written as «the newer wins» would
+    // have dropped on the floor.
+    let mixed = watchdog::coalesced(later, 900, Cause::WindowChange)
+        .expect("the kind still has to be written, though the stamp does not");
+    assert_eq!(watchdog::pending_time(mixed), Some(900));
+    assert!(
+        !watchdog::focus_pending(mixed),
+        "a window change is never exempt"
+    );
+
+    // …and it does not come back when another focus event arrives behind it.
+    let after = watchdog::coalesced(mixed, 1_500, Cause::FocusChange).expect("1500 is newer");
+    assert!(!watchdog::focus_pending(after));
+
+    // An empty cell is not a pending focus change; neither is a window request.
+    assert!(!watchdog::focus_pending(0));
+    let window = watchdog::coalesced(0, 500, Cause::WindowChange).expect("an empty cell");
+    assert!(!watchdog::focus_pending(window));
+
+    // The two kinds of an otherwise identical request are different cells, which is what makes
+    // the bit readable at all.
+    assert_ne!(focus, window);
+    assert_eq!(watchdog::pending_time(window), Some(500));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -539,6 +592,7 @@ fn delta(before: Counters, after: Counters) -> Counters {
         focus_repeats: after.focus_repeats - before.focus_repeats,
         recovery_probes: after.recovery_probes - before.recovery_probes,
         wipe_requests: after.wipe_requests - before.wipe_requests,
+        focus_after_typing: after.focus_after_typing - before.focus_after_typing,
     }
 }
 
@@ -566,7 +620,7 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
 
     // No buffer on this thread yet — every thread but the input one is in that position, and
     // the window procedure runs on all three of them (section 6.3).
-    watchdog::request_flush(1_000);
+    watchdog::request_flush(1_000, Cause::WindowChange);
     assert_eq!(watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)), None);
 
     buffer::install_recorder(Recorder::with_capacity(16));
@@ -595,8 +649,8 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
 
     // Two requests between two turns of the message loop collapse into the newer one, and the
     // newer one does everything the older would have done.
-    watchdog::request_flush(1_001);
-    watchdog::request_flush(1_003);
+    watchdog::request_flush(1_001, Cause::WindowChange);
+    watchdog::request_flush(1_003, Cause::WindowChange);
     assert_eq!(
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Cleared { removed: 3 })
@@ -623,7 +677,7 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
     press_at(2_002);
     assert_eq!(buffer::len(), 3);
 
-    watchdog::request_flush(1_999);
+    watchdog::request_flush(1_999, Cause::WindowChange);
     assert_eq!(
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Kept { kept: 3 }),
@@ -654,7 +708,7 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
         press_at(time);
     }
 
-    watchdog::request_flush(3_001);
+    watchdog::request_flush(3_001, Cause::WindowChange);
     assert_eq!(
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Partial {
@@ -725,6 +779,201 @@ fn a_flush_request_travels_from_the_watcher_thread_to_a_zeroed_slot() {
         "the forged WM_INPUT was not a packet"
     );
     assert_eq!(counted.mouse_flushes, 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-14 — a focus event the typing itself caused is not a boundary; question 111, task Т-48-2
+// ---------------------------------------------------------------------------------------
+
+/// **The user's first and second findings, in the arithmetic that produced them** — 2026-09-09,
+/// question **111**:
+///
+/// > открываем браузер EDGE набираем нфтвучюкг нажимаем pause получаем нфndex.ru
+///
+/// The address bar of Edge announces the selected row of its suggestion list as the **active
+/// child** of the field, and MSAA delivers that as `EVENT_OBJECT_FOCUS` on the same top-level
+/// window with a different `idChild`. The triple differs, so `focus_repeated` does not absorb
+/// it, and before task Т-48-2 the input thread answered it with `apply_flush` — the strokes
+/// typed before the message was dispatched were cut away, and `Shift+Left` then covered only
+/// what was left. Two letters out of nine: `нфтвуч.ru` → `нфndex.ru`.
+///
+/// FR-14 is the rule that answers it: an `EVENT_OBJECT_FOCUS` of the foreground window with a
+/// stroke of the user's own in `(T − Δ, T]` is the application's answer to the typing, not the
+/// user leaving the field. The buffer stands.
+#[test]
+fn a_focus_event_the_typing_itself_caused_keeps_the_buffer() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    // Nine strokes, «нфтвучюкг», in the tick domain the event timestamps live in, and the
+    // event stamped a few milliseconds after the last of them — which is what an event the
+    // typing *caused* looks like.
+    let typed_at = 500_000_u32;
+    for offset in 0..9 {
+        press_at(typed_at + offset);
+    }
+    assert_eq!(buffer::len(), 9);
+
+    watchdog::request_flush(typed_at + 12, Cause::FocusChange);
+
+    let before = watchdog::counters();
+
+    // The pair the input thread runs, in its order: the rule first, the arithmetic of FR-12
+    // only if the rule did not answer.
+    assert!(
+        watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "FR-14: a focus event within Δ of the user's own typing is not a boundary"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        None,
+        "the request was taken by the rule, so nothing is left to apply"
+    );
+    assert_eq!(
+        buffer::len(),
+        9,
+        "FR-14: every stroke of the word survives the suggestion list opening"
+    );
+
+    let counted = delta(before, watchdog::counters());
+
+    assert_eq!(
+        counted.focus_after_typing, 1,
+        "and the exemption is counted"
+    );
+    assert_eq!(
+        counted.window_flushes_taken, 1,
+        "the request really was taken out of the cell"
+    );
+    assert_eq!(
+        (counted.full_clears, counted.strokes_removed),
+        (0, 0),
+        "no flush happened, so no flush is reported (SEC-04a)"
+    );
+
+    buffer::reset();
+    buffer::uninstall();
+}
+
+/// **The canon of FR-10 where FR-14 does not reach: strokes older than Δ are still cut away.**
+///
+/// The exemption is bounded in time on purpose — a focus change that arrives with no recent
+/// typing behind it is the user moving to another field, which is the row of the FR-10 table
+/// FR-14 explicitly does not touch. Five seconds is more than three times Δ.
+#[test]
+fn a_focus_event_older_than_the_typing_window_still_flushes() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let typed_at = 600_000_u32;
+    for offset in 0..6 {
+        press_at(typed_at + offset);
+    }
+    assert_eq!(buffer::len(), 6);
+
+    // Δ is 1500 ms; the event is five seconds after the last stroke.
+    assert_eq!(watchdog::TYPING_WINDOW_MS, 1_500);
+    watchdog::request_flush(typed_at + 5_000, Cause::FocusChange);
+
+    assert!(
+        !watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "the typing window has closed, so the rule does not answer"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Cleared { removed: 6 }),
+        "FR-10 is untouched where the typing window has closed"
+    );
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
+}
+
+/// **`EVENT_SYSTEM_FOREGROUND` never answers to FR-14** — the user changing windows is a change
+/// of the input context whatever they were typing a moment earlier.
+#[test]
+fn a_foreground_change_is_never_caused_by_typing() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let typed_at = 700_000_u32;
+    for offset in 0..6 {
+        press_at(typed_at + offset);
+    }
+
+    // The same shape as the exempt case above — a stroke well inside `(T − Δ, T]` — and the
+    // only difference is the kind of event that raised the request.
+    watchdog::request_flush(typed_at + 12, Cause::WindowChange);
+
+    assert!(
+        !watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "FR-14: «Смена активного окна правилу не подчиняется никогда»"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Cleared { removed: 6 }),
+        "a window change flushes however recently the user typed"
+    );
+    assert_eq!(buffer::len(), 0);
+
+    buffer::uninstall();
+}
+
+/// **SEC-06 is not weakened: `Pending` and `Password` take the old road** — decision П-4, task
+/// Т-48-2.
+///
+/// FR-14 acts only while recording is allowed. The two states that answer `false` are the two
+/// the requirement is protecting — `Pending` is «the user has just moved into a field and the
+/// probe has not answered yet», `Password` is FR-70 itself — and in neither is a focus event
+/// exempt, however recently the user typed.
+///
+/// ⚠ **Why the gate is read rather than staged.** `Field::Password` is published by
+/// `guard::run_pending_probe` off the real foreground window, and `Field::Pending` cannot be
+/// held in a test process at all: with no watcher window to answer, `note_focus_moved` resolves
+/// it to `Undetermined` before it returns (FR-73). The same wall
+/// `a_move_out_of_a_password_element_in_one_window_returns_buffering` runs into. So the two
+/// halves are checked where each of them lives: the rule, through `buffering_allowed_for`, and
+/// the wire, in the one line of `take_typing_induced_flush` that consults it.
+#[test]
+fn the_typing_rule_acts_only_while_recording_is_allowed() {
+    assert!(
+        !guard::buffering_allowed_for(Field::Password),
+        "FR-70: nothing is recorded in a password field"
+    );
+    assert!(
+        !guard::buffering_allowed_for(Field::Pending),
+        "FR-71: nothing is recorded while the verdict is owed"
+    );
+    assert!(guard::buffering_allowed_for(Field::Ordinary));
+    assert!(
+        guard::buffering_allowed_for(Field::Undetermined),
+        "FR-73: an undeterminable field records"
+    );
+
+    // The wire. `take_typing_induced_flush` is the one place FR-14 is decided, and one of its
+    // five conditions is this gate; a rule that forgot it would exempt a focus event **inside**
+    // a password field, which is the SEC-06 hole П-4 forbids.
+    let source = source_of("watchdog.rs");
+    let rule = body_of(&source, "pub fn take_typing_induced_flush");
+
+    assert_eq!(
+        code_lines_with(rule, "crate::guard::buffering_allowed()").len(),
+        1,
+        "FR-14 asks the gate of FR-70/FR-71 exactly once, and it does ask it"
+    );
+    assert_eq!(
+        code_lines_with(rule, "crate::buffer::edited_within(").len(),
+        1,
+        "…and the measurement of FR-14 itself"
+    );
+    assert_eq!(
+        code_lines_with(rule, "focus_pending(cell)").len(),
+        1,
+        "…and the kind of the event, so that a window change is never exempt"
+    );
 }
 
 /// How many slots of the backing array of this thread's buffer are not zero, or `None` on a
@@ -2446,6 +2695,61 @@ fn a_move_out_of_a_password_element_in_one_window_returns_buffering() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// Reading `src\` as text — the shape `tests\guard.rs` and `tests\selection.rs` settled on
+// ---------------------------------------------------------------------------------------
+
+/// One named module of `src\`, read as text with line endings normalised.
+fn source_of(module: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join(module);
+
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+
+    text.replace("\r\n", "\n")
+}
+
+/// The body of the item whose signature line starts with `signature` — from that line to the
+/// first `}` in column 0 after it.
+///
+/// A region and not the whole module, for the reason `tests\selection.rs` gives its own cut: a
+/// sweep over everything would count the prose of the module header and would be a sweep nobody
+/// could keep green.
+fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source.find(signature).unwrap_or_else(|| {
+        panic!("src\\watchdog.rs must contain \"{signature}\" — the sweep below is about it")
+    });
+
+    let rest = &source[start..];
+    let end = rest
+        .find("\n}")
+        .expect("the item must end at a closing brace in column 0");
+
+    let region = &rest[..end];
+
+    assert!(
+        !region.is_empty() && region.len() < rest.len(),
+        "\"{signature}\" was bounded rather than taken as the rest of the module"
+    );
+
+    region
+}
+
+/// Lines of `text` that contain `needle` and are not comment lines.
+///
+/// The point of these sweeps is to separate a **call** from a sentence about a call: this module
+/// documents its rules at length, and a sweep that counted prose would assert nothing.
+fn code_lines_with<'a>(text: &'a str, needle: &str) -> Vec<(usize, &'a str)> {
+    text.lines()
+        .enumerate()
+        .map(|(index, line)| (index + 1, line.trim()))
+        .filter(|(_, line)| !line.starts_with("//"))
+        .filter(|(_, line)| line.contains(needle))
+        .collect()
+}
+
 /// A helper process the test spawned, killed by the identifier the spawn returned — Р-42.
 ///
 /// The scripts live in the test process's temporary directory, not in the project tree; the
@@ -3171,8 +3475,14 @@ fn a_focus_transfer_to_a_different_hwnd_by_a_foreign_process_still_flushes() {
     // `as u32` is the documented reinterpretation of a tick the system hands back signed.
     let typed_at = unsafe { GetMessageTime() } as u32;
 
+    // ⚠ **Five seconds back, and that is the canon of question 111.4.** Until task Т-48-2 these
+    // strokes were stamped «now», and the assertion below then read "a focus transfer flushes
+    // what the user typed a moment ago" — which is precisely what FR-14 now denies, because an
+    // application raising a focus event milliseconds after a keystroke is answering the
+    // keystroke. What FR-10 still says, and what this test is now the statement of, is that a
+    // focus transfer flushes typing the window of FR-14 no longer covers.
     for _ in 0..6 {
-        press_at(typed_at);
+        press_at(typed_at.wrapping_sub(5_000));
     }
     assert_eq!(buffer::len(), 6);
 
@@ -3186,6 +3496,10 @@ fn a_focus_transfer_to_a_different_hwnd_by_a_foreign_process_still_flushes() {
         "the alternating churn stopped arriving"
     );
 
+    assert!(
+        !watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "FR-14 does not reach typing that is older than Δ"
+    );
     assert_eq!(
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
         Some(ResetOutcome::Cleared { removed: 6 }),
@@ -3244,8 +3558,13 @@ fn the_same_hwnd_churn_with_moving_children_is_a_transfer_and_still_flushes() {
     // the documented reinterpretation of a tick the system hands back signed.
     let typed_at = unsafe { GetMessageTime() } as u32;
 
+    // ⚠ **Five seconds back — the canon of question 111.4**, the same rewrite as in
+    // `a_focus_transfer_to_a_different_hwnd_by_a_foreign_process_still_flushes` and for the same
+    // reason. This is the very shape of the user's finding: the same window, the child moving,
+    // milliseconds after a keystroke. FR-14 now exempts that shape, and what stays canon is the
+    // shape without the typing behind it.
     for _ in 0..6 {
-        press_at(typed_at);
+        press_at(typed_at.wrapping_sub(5_000));
     }
     assert_eq!(buffer::len(), 6);
 
@@ -3264,6 +3583,10 @@ fn the_same_hwnd_churn_with_moving_children_is_a_transfer_and_still_flushes() {
     assert_eq!(
         counted.focus_repeats, 0,
         "not one of these events repeats the triple before it, so not one is churn"
+    );
+    assert!(
+        !watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "FR-14 does not reach typing that is older than Δ"
     );
     assert_eq!(
         watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),

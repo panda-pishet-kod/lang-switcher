@@ -1690,6 +1690,21 @@ pub struct Snapshot {
     /// SEC-01, SEC-07: a count of strokes removed, never a stroke. No scan code, no character
     /// and no layout of any of them enters this number.
     pub strokes_removed: u32,
+    /// Focus events **FR-14** exempted — the application's own answer to the user's typing, task
+    /// **Т-48-2**.
+    ///
+    /// [`crate::watchdog::Counters::focus_after_typing`], on the channel for the reason
+    /// `focus_repeats` is: **it is the number the hypothesis is decided by, and the file sink
+    /// cannot answer it in time.** The scenario is «type in the address bar of Edge and go on
+    /// working», which requires the process to survive the step under investigation.
+    ///
+    /// Read beside `window_flushes` and `strokes_removed`, it separates the two ways the rule
+    /// can be wrong: this standing still while the other two rise is FR-14 not firing where it
+    /// should, and this rising while a genuine field change goes unflushed is FR-14 firing where
+    /// it should not.
+    ///
+    /// SEC-01, SEC-07: a count of events. Not a window, not an element, not a stroke.
+    pub focus_after_typing: u32,
     /// Which of the four states of [`crate::guard::Field`] the gate is in — task **T-10-10**.
     ///
     /// [`crate::guard::field`], printed through [`crate::guard::Field::name`] — one of
@@ -1852,6 +1867,7 @@ pub fn snapshot() -> Snapshot {
         window_flushes: subscriptions.window_flushes,
         full_clears: subscriptions.full_clears,
         strokes_removed: subscriptions.strokes_removed,
+        focus_after_typing: subscriptions.focus_after_typing,
         field_state: crate::guard::field(),
         clipboard_refusals: clipboard.open_refusals,
         clipboard_close_failures: clipboard.close_failures,
@@ -1992,6 +2008,11 @@ pub fn snapshot() -> Snapshot {
 /// press applied, so that a `X→X` press — the rollback `Cycle::target` produces whenever
 /// `step % len == 0`, a **legitimate** identity — can be told apart from an identity nobody asked
 /// for. See [`LAST_REPLACEMENT_CHANGED`] and [`LAST_REPLACEMENT_DIRECTION`].
+///
+/// ⭐ `focus_after_typing` of task **Т-48-2** is appended last, by the same rule: it is the
+/// observable of **FR-14**, the rule that stopped the suggestion list of an address bar from
+/// cutting the user's word in half, and it is the number that separates the rule not firing from
+/// the rule firing where it should not. See [`Snapshot::focus_after_typing`].
 pub fn render(state: &Snapshot) -> String {
     format!(
         "buffer_len={}\n\
@@ -2038,7 +2059,8 @@ pub fn render(state: &Snapshot) -> String {
          restamp_uncached={}\n\
          restamp_accepted={}\n\
          last_replacement_changed={}\n\
-         last_replacement_direction={:#010x}/{:#010x}\n",
+         last_replacement_direction={:#010x}/{:#010x}\n\
+         focus_after_typing={}\n",
         state.buffer_len,
         u8::from(state.hook_installed),
         state.hook_ready_us,
@@ -2087,6 +2109,7 @@ pub fn render(state: &Snapshot) -> String {
         u8::from(state.last_replacement_changed),
         state.last_replacement_from,
         state.last_replacement_to,
+        state.focus_after_typing,
     )
 }
 
@@ -2107,7 +2130,7 @@ pub const fn method_name(method: ReplacementMethod) -> &'static str {
 /// Exported so that a check of condition 2 of SEC-04a can assert the set exactly rather than
 /// merely look for what it expects: a key that appeared here without being listed would be a
 /// key nobody reviewed.
-pub const KEYS: [&str; 45] = [
+pub const KEYS: [&str; 46] = [
     "buffer_len",
     "hook_installed",
     "hook_ready_us",
@@ -2153,6 +2176,7 @@ pub const KEYS: [&str; 45] = [
     "restamp_accepted",
     "last_replacement_changed",
     "last_replacement_direction",
+    "focus_after_typing",
 ];
 
 /// Keys SEC-04a reserves and this build does not answer — see [`KEYS`] and the module

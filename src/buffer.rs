@@ -681,6 +681,24 @@ impl Ring {
             .count()
     }
 
+    /// Whether any live stroke was made inside the half-open window `(event_time − delta,
+    /// event_time]` — **FR-14**, task Т-48-2.
+    ///
+    /// The mirror of [`Ring::newer_than`], and it borrows the whole of its arithmetic: both ends
+    /// are [`is_newer_than`], so the wrap of the 32-bit tick counter is not a special case here
+    /// either. Every live stroke is examined for the reason given there — the newest stroke is
+    /// the last one only while the clock runs forward.
+    fn any_within(&self, event_time: u32, delta: u32) -> bool {
+        let capacity = self.capacity();
+        let opened = event_time.wrapping_sub(delta);
+
+        (0..self.len).any(|offset| {
+            let time = self.slots[(self.head + offset) % capacity].time;
+
+            !is_newer_than(time, event_time) && is_newer_than(time, opened)
+        })
+    }
+
     /// Writes zeroes over one slot so that no optimiser may remove the write — SEC-02.
     fn zero_slot(&mut self, index: usize) {
         // Bounds-checked here, in safe code, so that the raw write below cannot be the place
@@ -1336,6 +1354,26 @@ pub struct Recorder {
     /// probe travels with the recorder across the FR-70 gate — the same arrangement `verify`
     /// already relies on.
     stamp: Option<LayoutProbe>,
+    /// **When the user last edited what they are typing — FR-14**, task Т-48-2. `None` while
+    /// nothing has been typed since the last flush.
+    ///
+    /// "Edited" is a press that was recorded **or** a `Backspace` that took one out, and the
+    /// two have to be one field rather than a reading of the ring, for the reason the user's
+    /// second finding gives: «стираем набранный текст, набираем yandex.ru и нажимаем pause
+    /// получаем `yaтвучюкг`». Erasing empties the ring; the suggestion list of the address bar
+    /// closes with it and re-opens on the first stroke of the new word, raising the focus event
+    /// FR-14 is about. A rule that read «the newest stroke in the ring» would see a user who had
+    /// typed nothing and would let that event cut the word in half — which is exactly the
+    /// measurement of 2026-09-09.
+    ///
+    /// It is **not** a second copy of the buffer and does not outlive it: [`Recorder::clear_ring`]
+    /// clears it with the strokes, and [`Recorder::reset_up_to`] applies FR-12 to it on the same
+    /// terms as to a stroke — an event at or after the edit covers it.
+    ///
+    /// NFR-01 to NFR-05: one `Option<u32>` written in the hook callback on the two paths that
+    /// change the text, and read on the input thread's message loop. No allocation, no lock, no
+    /// I/O, and nothing that can panic.
+    last_edit: Option<u32>,
 }
 
 impl Recorder {
@@ -1359,6 +1397,7 @@ impl Recorder {
             cycle: 0,
             verify: None,
             stamp: None,
+            last_edit: None,
         }
     }
 
@@ -1733,6 +1772,12 @@ impl Recorder {
         // stroke is a letter again, and the state below is closed without anybody closing it.
         if key.vk == VK_BACK.0 {
             return if self.ring.pop() {
+                // **FR-14** — task Т-48-2, and the reason the memory is not simply "the newest
+                // stroke in the ring". Erasing takes strokes *out*: «стираем набранный текст,
+                // набираем yandex.ru» leaves an empty ring behind, and the focus event the next
+                // keystroke provokes would find no evidence that the user had been editing at
+                // all. A pop is an edit and is remembered as one.
+                self.last_edit = Some(key.time);
                 Recorded::Popped
             } else {
                 Recorded::Ignored
@@ -1856,11 +1901,53 @@ impl Recorder {
 
         let stroke = Stroke::new(key.vk, key.scan, mods, self.active, key.time, produced);
 
+        // **FR-14** — task Т-48-2. The moment of the edit, beside the ring. One store of an
+        // `Option<u32>` on the path of a key that writes, no allocation (NFR-03), no lock
+        // (NFR-04), no I/O (NFR-05); see [`Recorder::last_edit`] for why the ring alone could
+        // not answer the question.
+        self.last_edit = Some(key.time);
+
         if self.ring.push(stroke) {
             Recorded::Evicted
         } else {
             Recorded::Stored
         }
+    }
+
+    /// **Whether the user was editing in the window `(event_time − delta, event_time]`** — the
+    /// whole test of **FR-14**, task Т-48-2.
+    ///
+    /// `true` means: a stroke of theirs was recorded, or a `Backspace` of theirs took one out,
+    /// at a moment no later than the event and no earlier than `delta` before it. That is what
+    /// makes an `EVENT_OBJECT_FOCUS` of the foreground window the application's answer to the
+    /// typing rather than the user moving to another field — see `watchdog::take_typing_induced_flush`,
+    /// which is the one caller and which owns the rest of the rule.
+    ///
+    /// # Why both halves are asked
+    ///
+    /// [`Recorder::last_edit`] holds the **newest** edit, which is the ordinary answer and the
+    /// cheap one. It is not the whole answer: an event can arrive stamped between two strokes —
+    /// the user goes on typing while the message crosses to the input thread — and then the
+    /// newest edit is *after* the event while an older stroke sits squarely inside the window.
+    /// The ring is asked in that case, and [`Ring::any_within`] answers it.
+    ///
+    /// # Cost
+    ///
+    /// One comparison in the ordinary case. The ring is walked only when the newest edit is
+    /// outside the window, which is once per focus event at most — this runs on the input
+    /// thread's message loop and never in the hook callback (NFR-01 to NFR-05); nothing here
+    /// allocates, locks or does I/O.
+    pub fn edited_within(&self, event_time: u32, delta: u32) -> bool {
+        let opened = event_time.wrapping_sub(delta);
+
+        if self
+            .last_edit
+            .is_some_and(|edit| !is_newer_than(edit, event_time) && is_newer_than(edit, opened))
+        {
+            return true;
+        }
+
+        self.ring.any_within(event_time, delta)
     }
 
     /// Whether the buffer stands in «слово + хвост» — the soft boundary of FR-10, task Т-24-2.
@@ -1966,6 +2053,13 @@ impl Recorder {
         self.ring.clear();
         self.cycle = 0;
 
+        // **FR-14** — task Т-48-2, and it is here for the reason the counter of FR-34 is: every
+        // rule of the FR-10 table that empties the ring arrives at this one function, so there
+        // is no call site that can forget. A buffer with nothing in it has no edit behind it,
+        // and an exemption resting on a memory the flush left standing would be an exemption
+        // for typing the user has already had thrown away.
+        self.last_edit = None;
+
         #[cfg(feature = "testing")]
         crate::control::note_cycle_position(0);
     }
@@ -2002,6 +2096,18 @@ impl Recorder {
     pub fn reset_up_to(&mut self, event_time: u32) -> ResetOutcome {
         let live = self.ring.len();
         let newer = self.ring.newer_than(event_time);
+
+        // **FR-14 under FR-12** — task Т-48-2. The memory of the edit is treated exactly as a
+        // stroke of the same age would be: an event at or after it removes it, an event older
+        // than it leaves it. Written before the branches below so that the full-clearance arm,
+        // which reaches [`Recorder::clear_ring`] and would clear the field anyway, and the two
+        // arms that do not, all end with the same rule applied.
+        if self
+            .last_edit
+            .is_some_and(|edit| !is_newer_than(edit, event_time))
+        {
+            self.last_edit = None;
+        }
 
         if newer == 0 {
             // The event is newer than every stroke — including the case of no strokes at all.
@@ -2386,6 +2492,17 @@ pub fn reset() -> bool {
 /// subscriptions, all three of which module `watchdog` owns. See [`Recorder::reset_up_to`].
 pub fn reset_up_to(event_time: u32) -> Option<ResetOutcome> {
     with(|recorder| recorder.reset_up_to(event_time))
+}
+
+/// **FR-14** — whether the buffer of the calling thread was edited inside `(event_time − delta,
+/// event_time]`, task Т-48-2.
+///
+/// [`Recorder::edited_within`] as the rest of the program reaches it, named after the method it
+/// drives exactly as [`record`] and [`reset_up_to`] are. A thread with no buffer — every thread
+/// but the input one — answers `false`, which is the honest answer: a thread that records
+/// nothing has seen nobody type.
+pub fn edited_within(event_time: u32, delta: u32) -> bool {
+    with(|recorder| recorder.edited_within(event_time, delta)).unwrap_or(false)
 }
 
 /// Records that a conversion has run — the last row of FR-10.

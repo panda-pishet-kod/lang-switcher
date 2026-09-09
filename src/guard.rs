@@ -841,6 +841,67 @@ pub fn note_focus_moved() {
     }
 }
 
+/// The focus moved **and the buffer stays** — **FR-14**, task Т-48-2, question **111.1**.
+///
+/// Called by `app::window_proc` in place of [`note_focus_moved`] for a focus event
+/// `watchdog::take_typing_induced_flush` has recognised as the application's own answer to the
+/// user's typing: the suggestion list of an address bar opening, an autocompletion, an Electron
+/// echo. Everything about the **probe** is the same — a new generation is opened, the watcher
+/// thread is asked for a verdict, and a request that reaches no window resolves to
+/// [`Field::Undetermined`] exactly as it does above. The one difference is the state:
+/// [`Field::Pending`] is **not** published, so [`buffering_allowed`] goes on answering `true`
+/// and `app::apply_buffering_gate` leaves the buffer where it is.
+///
+/// # SEC-06 is bounded, not abandoned — decision П-4
+///
+/// The verdict arrives by the ordinary road, `WM_APP_FIELD` → `app::apply_buffering_gate`, and a
+/// [`Field::Password`] parks and wipes the buffer there as it always has. What the user gains is
+/// the word they were typing; what it costs is that a password typed in the window between a
+/// *programmatic* field change and the verdict lives in this process's memory for at most
+/// [`PROBE_BUDGET_MS`] instead of being thrown away at once. The user's word on that trade,
+/// 2026-09-09: «согласен». SPEC §10 record 18 carries it.
+///
+/// ⚠ **The caller owns the other half of the guard**: this function is only ever reached when
+/// [`buffering_allowed`] already answered `true`, so `Pending` and `Password` never take this
+/// road at all. See `watchdog::take_typing_induced_flush`, where all five conditions of FR-14
+/// stand together.
+pub fn note_focus_moved_keeping_buffer() {
+    FOCUS_CHANGES.fetch_add(1, Ordering::Relaxed);
+
+    let generation = enter_probe_keeping_field();
+
+    if !request_probe() {
+        // The same answer [`note_focus_moved`] gives, for the same reason: with no watcher
+        // window there is nobody to answer, and FR-73 puts an undeterminable field on the side
+        // that records.
+        publish(
+            Probe {
+                field: Field::Undetermined,
+                excluded: false,
+            },
+            generation,
+        );
+    }
+}
+
+/// Opens a new focus generation and leaves the published state alone — the probe half of
+/// [`note_focus_moved_keeping_buffer`], task **Т-48-2**. Answers the generation it opened.
+///
+/// # Why one `fetch_add` here where [`enter_pending`] needs a compare-and-swap loop
+///
+/// The loop next door exists because no fetch primitive both raises the generation **and**
+/// clears [`FIELD_MASK`], and the two may not be seen apart. Here there is nothing to clear:
+/// the field code and [`EXCLUDED_BIT`] are carried over untouched, which is the whole point of
+/// the rule, so raising the generation is a single addition and has no "between" to protect.
+///
+/// The step is one whole byte above the state (`GENERATION_STEP`), so the addition cannot carry
+/// into the field code; the wrap at the top is the case [`GENERATION_MASK`] argues about.
+fn enter_probe_keeping_field() -> u32 {
+    let previous = FIELD.fetch_add(GENERATION_STEP, Ordering::Relaxed);
+
+    generation_of(previous.wrapping_add(GENERATION_STEP))
+}
+
 /// Opens a new focus generation and publishes [`Field::Pending`] into it — **the whole of what
 /// the input thread does to [`FIELD`]**, task **T-13-12**. Answers the generation it opened.
 ///

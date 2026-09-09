@@ -1833,6 +1833,65 @@ fn the_three_flush_keys_of_t_10_9_are_published_as_decimal_counts_at_the_tail() 
     );
 }
 
+/// **`focus_after_typing` of task Т-48-2 — the observable of FR-14**, published as a decimal
+/// count at the tail of `KEYS` and mirroring `watchdog::counters()`.
+///
+/// # Why it exists at all
+///
+/// FR-14 stopped an `EVENT_OBJECT_FOCUS` that the user's own typing provoked from cutting the
+/// buffer in half — the suggestion list of the address bar of Edge, question **111**. The rule
+/// can be wrong in two directions and `window_flushes` alone cannot tell them apart: standing
+/// still while `strokes_removed` rises is the rule not firing where it should, and rising while
+/// a genuine field change goes unflushed is the rule firing where it should not. This is the
+/// number that separates them, and it has to be on the channel rather than in the file report
+/// because the scenario — «набрать в адресной строке и продолжить работать» — requires the
+/// process to survive the step under investigation.
+///
+/// # SEC-01, SEC-07, condition 2 of SEC-04a
+///
+/// A count of events. Not a window, not an element, not a stroke — asserted below by refusing
+/// every value that is not a bare decimal.
+#[test]
+fn the_focus_after_typing_key_of_t_48_2_is_published_as_a_decimal_count_at_the_tail() {
+    let text = control::render(&control::snapshot());
+
+    let published = text
+        .lines()
+        .find_map(|line| line.strip_prefix("focus_after_typing="))
+        .expect("the channel does not publish focus_after_typing");
+
+    println!("focus_after_typing={published}");
+
+    assert!(
+        !published.is_empty() && published.bytes().all(|byte| byte.is_ascii_digit()),
+        "focus_after_typing must be a decimal count, not {published:?}"
+    );
+
+    assert!(control::KEYS.contains(&"focus_after_typing"));
+    assert!(!control::RESERVED_KEYS.contains(&"focus_after_typing"));
+
+    // Appended last, the rule every key since task T-05-2a has followed. The length assertion
+    // travels with the last-appended key — it came from
+    // `the_two_replacement_outcome_keys_of_t_10_17_close_the_channel` — so a task that adds a
+    // key is the task that edits it.
+    assert_eq!(control::KEYS[45], "focus_after_typing");
+    assert_eq!(control::KEYS.len(), 46);
+
+    // And it is the number `watchdog` holds, not one invented here — decision Р-28, one source
+    // and two sinks. Read twice around the snapshot, because the program keeps running.
+    let before = watchdog::counters();
+    let state = control::snapshot();
+    let after = watchdog::counters();
+
+    assert!(
+        (before.focus_after_typing..=after.focus_after_typing).contains(&state.focus_after_typing),
+        "the channel publishes what watchdog holds: {} is outside {}..={}",
+        state.focus_after_typing,
+        before.focus_after_typing,
+        after.focus_after_typing
+    );
+}
+
 /// The three keys mirror `watchdog::counters()` and are not invented here.
 ///
 /// The channel is a mirror of the module that owns the numbers (decision Р-28: one source,
@@ -2647,11 +2706,12 @@ fn the_two_replacement_outcome_keys_of_t_10_17_close_the_channel() {
     // against fixed indices for the reason given at
     // `the_active_layout_key_of_t_10_5_is_published_as_a_hex_layout_handle`. The length
     // assertion travels with the last-appended key, so a task that adds one is the task that
-    // edits it; it moved here from
-    // `the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot`.
+    // edits it: it came here from
+    // `the_five_restamp_keys_of_t_10_15_separate_every_outcome_in_one_snapshot` and went on to
+    // `the_focus_after_typing_key_of_t_48_2_is_published_as_a_decimal_count_at_the_tail`, which
+    // is where the tail of the channel now is (task Т-48-2).
     assert_eq!(
         &control::KEYS[43..45],
         &["last_replacement_changed", "last_replacement_direction"]
     );
-    assert_eq!(control::KEYS.len(), 45);
 }

@@ -642,6 +642,43 @@ pub fn rebuild_for(message: u32) -> Option<Rebuild> {
 /// timestamp.
 const PENDING_MARK: u64 = 1 << 32;
 
+/// Bit that says the pending request was raised by `EVENT_OBJECT_FOCUS` **and by nothing else** —
+/// the kind of event **FR-14** may exempt, task Т-48-2.
+///
+/// The kind travels in the cell beside the timestamp rather than being worked out again on the
+/// input thread, because by the time the message is dispatched the event that raised it is gone:
+/// `GetForegroundWindow` may already answer with another window, and the `WinEvent` arguments
+/// are not kept anywhere. One bit above [`PENDING_MARK`], written by the same store the
+/// timestamp travels in, so a reader that sees the mark sees the kind with it.
+///
+/// ⚠ **Coalescing clears it and never sets it.** Two events between two turns of the message
+/// loop collapse into one request (see [`coalesced`]), and the collapsed request has to be the
+/// **stricter** of the two: a foreground change joining a focus event means the user changed
+/// windows, and FR-14 says a window change is never caused by typing. So the bit survives only
+/// while every event that went into the cell was a focus event.
+const PENDING_FOCUS: u64 = 1 << 33;
+
+/// **Δ of FR-14** — how long after an edit a focus event of the foreground window is still taken
+/// for the application's answer to that edit rather than for the user leaving the field.
+///
+/// 1500 ms, the figure of decision **111.1**. It is a constant and not a setting: the user has
+/// no way to know what to put in it, and a wrong value is a defect rather than a preference
+/// (`[general]` carries nothing of the kind and the configuration schema stays at 6).
+///
+/// # Why this order of magnitude
+///
+/// It has to cover the whole distance from the keystroke to the message being dispatched: the
+/// application's own handling of the key, the accessibility provider raising the event, the
+/// `WinEvent` callback, the queue hop to the input thread, and whatever the input thread was
+/// doing meanwhile. The last of these is bounded by `guard::PROBE_BUDGET_MS` — **1550 ms**
+/// against a silent provider — so a value below that could be outrun by a probe of the previous
+/// event alone.
+///
+/// It also has to stay short enough that a *genuine* move to another field, made after a pause,
+/// is still a boundary. A second and a half is far longer than any of the measured delays and
+/// far shorter than the pause a user makes before clicking somewhere else.
+pub const TYPING_WINDOW_MS: u32 = 1_500;
+
 /// The value the pending-flush cell should take to also cover an event stamped `time`, or `None`
 /// when the cell already covers it.
 ///
@@ -652,13 +689,29 @@ const PENDING_MARK: u64 = 1 << 32;
 ///
 /// "Newer" is [`is_newer_than`] and not `>`, for the reason given there: `u64::max` on the raw
 /// cell would pick the wrong one of two timestamps that straddle the wrap of the 32-bit counter.
-pub const fn coalesced(cell: u64, time: u32) -> Option<u64> {
-    let wanted = PENDING_MARK | time as u64;
+pub const fn coalesced(cell: u64, time: u32, cause: Cause) -> Option<u64> {
+    // ⚠ **The kind of the collapsed request is the stricter of the two** — [`PENDING_FOCUS`].
+    // A focus event joining a focus event is still only focus; anything else in the mix makes
+    // the whole request one FR-14 may not exempt, and there is no order of arrival in which
+    // that is wrong.
+    let focus = match pending_time(cell) {
+        Some(_) => cause.is_focus() && focus_pending(cell),
+        None => cause.is_focus(),
+    };
 
-    match pending_time(cell) {
-        Some(pending) if !is_newer_than(time, pending) => None,
-        _ => Some(wanted),
-    }
+    let stamp = match pending_time(cell) {
+        // The cell already covers the event; only the kind can still need writing.
+        Some(pending) if !is_newer_than(time, pending) => pending,
+        _ => time,
+    };
+
+    let wanted = if focus {
+        PENDING_MARK | PENDING_FOCUS | stamp as u64
+    } else {
+        PENDING_MARK | stamp as u64
+    };
+
+    if wanted == cell { None } else { Some(wanted) }
 }
 
 /// The timestamp a pending-flush cell carries, or `None` when it is empty.
@@ -668,6 +721,45 @@ pub const fn pending_time(cell: u64) -> Option<u32> {
     }
 
     Some(cell as u32)
+}
+
+/// Whether a pending-flush cell was raised by focus events alone — the kind **FR-14** may
+/// exempt, task Т-48-2. See [`PENDING_FOCUS`].
+///
+/// Answers `false` for an empty cell, which is the honest reading: nothing is pending, so
+/// nothing pending is a focus change.
+pub const fn focus_pending(cell: u64) -> bool {
+    cell & PENDING_MARK != 0 && cell & PENDING_FOCUS != 0
+}
+
+/// Which row of the FR-10 table raised a flush request — task **Т-48-2**.
+///
+/// Two arms, and they are the two `WinEvent` rows: [`FLUSH_EVENTS`] has exactly two members and
+/// [`win_event_proc`] is the only caller that classifies real events. The distinction exists for
+/// **FR-14** and for nothing else — a focus event may be the application's answer to the user's
+/// own typing, and a window change never is.
+///
+/// **SEC-01, SEC-07.** Two named constants. There is nothing here that could carry a character,
+/// a scan code or a window title, and nothing may be added that could.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Cause {
+    /// `EVENT_SYSTEM_FOREGROUND` — the user changed windows. **Never** exempt by FR-14, however
+    /// recently they typed: leaving a window is a change of the input context in its own right.
+    ///
+    /// The default, because it is the answer that flushes: a request whose origin was somehow
+    /// lost must fall on the side that protects the next field, not on the side that keeps a
+    /// buffer.
+    #[default]
+    WindowChange,
+    /// `EVENT_OBJECT_FOCUS` — the focus moved inside a window. Subject to FR-14.
+    FocusChange,
+}
+
+impl Cause {
+    /// Whether this is the kind FR-14 may exempt.
+    pub const fn is_focus(self) -> bool {
+        matches!(self, Self::FocusChange)
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -844,6 +936,22 @@ static DEVICE_NOTICE_FAILURES: AtomicU32 = AtomicU32::new(0);
 /// nothing else it could ever hold.
 static RECOVERY_PROBES: AtomicU32 = AtomicU32::new(0);
 
+/// Focus events **FR-14** exempted — the application answering the user's own typing, task
+/// Т-48-2.
+///
+/// The observable half of the rule, and the number a live run is read by: on the address bar of
+/// Edge it rises once per opening of the suggestion list, and on a user who is genuinely moving
+/// between fields it does not rise at all.
+///
+/// It is **not** subtracted from [`WINDOW_FLUSHES`]: that counter says how many requests the
+/// `WinEvent` callback raised, which is a fact about the watcher thread and is still true. What
+/// FR-14 changes is what the input thread then did with them, and this is the count of that.
+/// None of the four outcome counters of [`note_flush_outcome`] moves for an exempt event, because
+/// no flush was applied.
+///
+/// **SEC-01, SEC-07.** A count of events and nothing else.
+static FOCUS_AFTER_TYPING: AtomicU32 = AtomicU32::new(0);
+
 /// Counts of what the subscriptions of this module have done — SEC-07 allows counts and nothing
 /// else, and these are counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -893,6 +1001,10 @@ pub struct Counters {
     /// Wipes of rows 8 and 9 of the FR-10 table asked of the input thread — task Т-13-7. See
     /// [`WIPE_REQUESTS`]: this is the send side, and it is the side a test can read.
     pub wipe_requests: u32,
+    /// Focus events exempted by **FR-14** — the application's own answer to the user's typing,
+    /// task Т-48-2. See [`FOCUS_AFTER_TYPING`] for why it is beside `window_flushes` rather than
+    /// subtracted from it.
+    pub focus_after_typing: u32,
 }
 
 /// What the subscriptions of this module have done so far.
@@ -913,6 +1025,7 @@ pub fn counters() -> Counters {
         focus_repeats: FOCUS_REPEATS.load(Ordering::Relaxed),
         recovery_probes: RECOVERY_PROBES.load(Ordering::Relaxed),
         wipe_requests: WIPE_REQUESTS.load(Ordering::Relaxed),
+        focus_after_typing: FOCUS_AFTER_TYPING.load(Ordering::Relaxed),
     }
 }
 
@@ -1201,6 +1314,13 @@ pub fn apply_flush(message: u32, lparam: LPARAM) -> Option<ResetOutcome> {
 /// just decided about it. A `Partial` or a `Kept` computed for such an event therefore does not
 /// outlive the message it was computed in.
 ///
+/// ⚠ **Since task Т-48-2 the sentence above has one exception, and it is decided before this
+/// function is reached.** [`take_typing_induced_flush`] answers `true` for a focus event the
+/// user's own typing provoked — **FR-14** — and `app::window_proc` then calls neither
+/// [`apply_flush`] nor `park_buffer` for it. This classification is unchanged and still says what
+/// a [`WM_APP_FLUSH`] that *is* applied costs; what changed is that not every `WM_APP_FLUSH` is
+/// applied any more.
+///
 /// That is not a defect and it is not this module's to repair. The user settled it as decision
 /// **П-2**, «утвердить», and SPEC §10 record 10 now says so in as many words:
 ///
@@ -1401,10 +1521,10 @@ fn mouse_button_time(lparam: LPARAM) -> Option<u32> {
 /// Public because it is the funnel the remaining asynchronous rows of the FR-10 table will use —
 /// `EVENT_SYSTEM_DESKTOPSWITCH` and `WM_WTSSESSION_CHANGE`, task T-06-2 — and because it is the
 /// half of the path that can be driven from a test without a mouse and without a window.
-pub fn request_flush(time: u32) {
+pub fn request_flush(time: u32, cause: Cause) {
     let mut cell = PENDING_FLUSH.load(Ordering::Acquire);
 
-    while let Some(wanted) = coalesced(cell, time) {
+    while let Some(wanted) = coalesced(cell, time, cause) {
         match PENDING_FLUSH.compare_exchange_weak(cell, wanted, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => break,
@@ -1413,6 +1533,78 @@ pub fn request_flush(time: u32) {
     }
 
     WINDOW_FLUSHES.fetch_add(1, Ordering::Relaxed);
+}
+
+/// **FR-14 — takes the pending flush when it is the application's own answer to the user's
+/// typing, and answers whether it did.** Task **Т-48-2**, question **111.1**.
+///
+/// This is the *whole* of the rule and the one place it is decided. `app::window_proc` calls it
+/// once per message, before anything else touches the buffer, and carries the answer to the two
+/// places that need it:
+///
+/// * `true` — [`apply_flush`] is **not** called (the request is already taken, so it could find
+///   nothing anyway), `app::park_buffer` is **not** called, and the probe of FR-72 is asked for
+///   through `guard::note_focus_moved_keeping_buffer`, which leaves the field state alone;
+/// * `false` — the previous order, unchanged in every particular.
+///
+/// # The five conditions, and why each is there
+///
+/// 1. **the message is [`WM_APP_FLUSH`]** — the mouse row of FR-10 is not a focus event and is
+///    not exempt from anything;
+/// 2. **this thread owns the typing buffer** — section 6.3, and the same gate [`apply_flush`]
+///    opens with. A forged `WM_APP_FLUSH` posted at the UI window by another process (SEC-05)
+///    must not consume a request the input thread has not seen;
+/// 3. **the request is pending and was raised by focus events alone** — [`PENDING_FOCUS`]. An
+///    `EVENT_SYSTEM_FOREGROUND` anywhere in the coalesced request disqualifies it, which is
+///    FR-14's «Смена активного окна правилу не подчиняется никогда»;
+/// 4. **recording is allowed** — `guard::buffering_allowed`, that is [`crate::guard::Field`] is
+///    `Ordinary` or `Undetermined` and the process is not excluded. In `Pending` the program is
+///    already waiting on a verdict about a field the user moved into, and in `Password` FR-70
+///    holds; **SEC-06 is not weakened in either** (decision П-4);
+/// 5. **the user was editing inside the window** — `buffer::edited_within` with
+///    [`TYPING_WINDOW_MS`], which is the measurement FR-14 rests on.
+///
+/// # What it costs SEC-06, in one sentence, and why the user accepted it
+///
+/// A password typed **immediately after a field the page changed under the user** now lives in
+/// memory until the probe answers, instead of being thrown away at once — at most
+/// `guard::PROBE_BUDGET_MS`, only in this process's memory, and wiped by the verdict through
+/// `app::apply_buffering_gate`. The user's word on it, 2026-09-09: «согласен». SPEC §10 record
+/// 18 carries the whole of the cost.
+///
+/// # NFR-01 to NFR-05
+///
+/// Three atomic loads, one comparison, one swap on the exempt path, and at most one walk of the
+/// ring. **This is the input thread's message loop and never the hook or the `WinEvent`
+/// callback** — the callback's whole job stays what it was: one compare-and-swap and two
+/// `PostMessageW`. Nothing here allocates, locks or does I/O.
+pub fn take_typing_induced_flush(message: u32) -> bool {
+    if message != WM_APP_FLUSH || !crate::buffer::is_installed() {
+        return false;
+    }
+
+    let cell = PENDING_FLUSH.load(Ordering::Acquire);
+
+    let Some(time) = pending_time(cell) else {
+        return false;
+    };
+
+    if !focus_pending(cell) || !crate::guard::buffering_allowed() {
+        return false;
+    }
+
+    if !crate::buffer::edited_within(time, TYPING_WINDOW_MS) {
+        return false;
+    }
+
+    // The request is taken and not left standing: nothing downstream may apply a timestamp this
+    // rule has just decided against. `take_pending_flush` is the one door out of the cell, so
+    // the arithmetic of `window_flushes_taken` stays true — the request *was* taken.
+    let _ = take_pending_flush();
+
+    FOCUS_AFTER_TYPING.fetch_add(1, Ordering::Relaxed);
+
+    true
 }
 
 /// Takes the pending flush request, leaving the cell empty.
@@ -1880,8 +2072,18 @@ unsafe extern "system" fn win_event_proc(
     }
 
     // FR-10, rows "смена активного окна" and "смена фокуса внутри окна". FR-12 is why the
-    // timestamp travels with the request instead of being taken when it is applied.
-    request_flush(event_time);
+    // timestamp travels with the request instead of being taken when it is applied, and
+    // **FR-14** is why the kind of the event travels with it too: by the time the input thread
+    // dispatches the message, the event that raised it is gone — the foreground window may
+    // already be another one and these arguments are kept nowhere — so the one place that knows
+    // which row of the table this is, is here. Task Т-48-2.
+    let cause = if event == EVENT_OBJECT_FOCUS {
+        Cause::FocusChange
+    } else {
+        Cause::WindowChange
+    };
+
+    request_flush(event_time, cause);
     crate::app::post_to_input_thread(WM_APP_FLUSH);
 
     // FR-21 delivery. The layout is a property of the thread that owns the window the user is
