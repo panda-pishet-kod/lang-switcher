@@ -8592,22 +8592,22 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
         "Three changes",
     ),
     // ⚠ Три строки «Что нового» меняются КАЖДОЙ поставкой — это их назначение. Здесь стоят
-    // слова 0.45.0 (задача Т-45-5); прежние, слова 0.44.0, были про значок уведомления, высоту
-    // полей и каретку.
+    // слова 0.48.0 (задача Т-48-5); прежние, слова 0.46.0/0.47.0, были про высоту поля выбора
+    // раскладки, текст в полях мастера и слово в строке списка.
     (
         settings::IDS_WHATSNEW_1,
-        "Поле выбора раскладки в мастере «Написать автору» стало той же высоты, что и в настройках.",
-        "The layout chooser in the «Write to the author» wizard is now the height it has in the settings window.",
+        "Список подсказок в адресной строке больше не съедает первые буквы слова перед конвертацией.",
+        "The suggestion list of an address bar no longer eats the first letters of a word before conversion.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Текст в полях мастера больше не пропадает при выборе переключателей.",
-        "The text in the wizard's fields no longer disappears when a radio is picked.",
+        "Выделенный текст: каждое слово переводится по своей раскладке, включая слово другой раскладки в середине фразы.",
+        "Selected text: every word is converted by its own layout, including a word of another layout in the middle of a phrase.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Слово в строке списка раскладок встало по центру строки, как в настройках.",
-        "The word in a row of the layout list is centred in its row now, as in the settings window.",
+        "Слово, набранное после стирания клавишей Backspace, конвертируется целиком.",
+        "A word typed after erasing with Backspace is converted whole.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
