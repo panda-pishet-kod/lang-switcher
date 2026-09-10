@@ -269,6 +269,16 @@ fn english() -> LayoutMap {
             (SCAN_D, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('d')),
             (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('t')),
             (SCAN_N, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('n')),
+            // ⭐ **The same six keys with `Shift` — task T-39-3 (finding С8).** A lost release of
+            // `Shift` shows only as a *capital*, and without these rows a shifted `g` wrote nothing
+            // anywhere and took the flush of task T-52-1 instead of being recorded: the test of
+            // the lost release would have measured the wrong rule. Every real layout has them.
+            (SCAN_G, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('G')),
+            (SCAN_H, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('H')),
+            (SCAN_B, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('B')),
+            (SCAN_D, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('D')),
+            (SCAN_T, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('T')),
+            (SCAN_N, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('N')),
             // ⭐ **A dead key of FR-24 — task T-52-1.** It is what makes "produced nothing" and
             // "is not text" two different questions: `ToUnicodeEx` returns a negative number
             // here, the stroke carries a character and a mark, and the new flush rule must let
@@ -324,6 +334,13 @@ fn russian() -> LayoutMap {
             (SCAN_D, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('в')),
             (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('е')),
             (SCAN_N, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('т')),
+            // And shifted — task T-39-3: `GHBDTN` is `ПРИВЕТ` on the same six keys.
+            (SCAN_G, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('П')),
+            (SCAN_H, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('Р')),
+            (SCAN_B, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('И')),
+            (SCAN_D, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('В')),
+            (SCAN_T, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('Е')),
+            (SCAN_N, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('Т')),
             // ⭐ **The key that is blank in English and writes here** — task T-52-1. It is the
             // whole of the second half of the emptiness test: a stroke is "empty" only when
             // *no* layout of the cache puts a character on the key, because FR-22 converts by
@@ -1485,6 +1502,8 @@ fn nothing_is_physically_held() -> Physical {
         alt_left: false,
         alt_right: false,
         win: false,
+        shift_left: false,
+        shift_right: false,
     }
 }
 
@@ -1503,6 +1522,8 @@ fn everything_is_physically_held() -> Physical {
         alt_left: true,
         alt_right: true,
         win: true,
+        shift_left: true,
+        shift_right: true,
     }
 }
 
@@ -1670,6 +1691,171 @@ fn the_physical_check_leaves_fr10_and_fr11_alone_when_the_key_really_is_held() {
         "AltGr must still produce text"
     );
     assert!(recorder.stroke(0).expect("stored").mods().altgr());
+}
+
+/// **Finding С8 of the audit of 2026-09-04 — task T-39-3, decision 122.1: a `Shift` release that
+/// never arrived does not capitalise the next word.**
+///
+/// The repair of defect D asks the system about `Ctrl`, `Alt` and `Win` on the row of FR-10 that is
+/// about to throw a stroke away, and `CapsLock` is re-seeded in five places — but until this task
+/// nothing ever put a raised `Shift` right. Lose its release anywhere the buffer is not looking —
+/// released over another window, over a suspended program — and every stroke afterwards is
+/// recorded «with Shift» for the rest of the session: `ghbdtn` converts into «ПРИВЕТ», the rollback
+/// of FR-32 restores «GHBDTN», and no counter moves. It is the version of the unexplained red of
+/// question 72 that decision 84.3 put on the shelf and decision 122.1 took back down.
+///
+/// **The stroke that matters is the first one.** The mask of a stroke is computed before the check
+/// that runs once per word, so a check that merely lowered the belief would still leave the first
+/// letter a capital; the invariant is that the first stroke of the word is recorded without the
+/// stuck `Shift` already.
+#[test]
+fn a_shift_release_that_never_arrived_does_not_capitalise_the_next_word() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(nothing_is_physically_held);
+
+    // `Shift` goes down and the hook sees it — and the release never arrives.
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+
+    // `ghbdtn`, from the start of a word.
+    for (vk, scan) in [
+        (VK_G, SCAN_G),
+        (VK_H, SCAN_H),
+        (VK_B, SCAN_B),
+        (VK_D, SCAN_D),
+        (VK_T, SCAN_T),
+        (VK_N, SCAN_N),
+    ] {
+        assert_eq!(press(&mut recorder, vk, scan), Recorded::Stored);
+    }
+
+    let first_is_shifted = recorder.stroke(0).expect("the first stroke").mods().shift();
+    let in_the_buffer = typed(&recorder);
+
+    let mut units = Vec::new();
+
+    for index in 0..recorder.len() {
+        let stroke = recorder.stroke(index).expect("index below the length");
+        units.extend_from_slice(convert_stroke(stroke.keystroke(), &russian()).units());
+    }
+
+    let converted = String::from_utf16(&units).expect("the synthetic layouts carry valid text");
+
+    // The three halves of the finding in one message, so that the red run names each of them.
+    assert!(
+        !first_is_shifted && in_the_buffer == "ghbdtn" && converted == "привет",
+        "С8: a lost Shift release — the first stroke carries Shift: {first_is_shifted}; the buffer \
+         holds «{in_the_buffer}»; the hotkey would write «{converted}»"
+    );
+}
+
+/// The system answering "`Ctrl` and the left `Shift` really are down" — `Ctrl+Shift+<цифра>`.
+fn ctrl_and_shift_are_physically_held() -> Physical {
+    Physical {
+        ctrl: true,
+        shift_left: true,
+        ..nothing_is_physically_held()
+    }
+}
+
+/// The system answering "`Ctrl` is down and no `Shift` is".
+fn only_ctrl_is_physically_held() -> Physical {
+    Physical {
+        ctrl: true,
+        ..nothing_is_physically_held()
+    }
+}
+
+/// The system answering "the left `Shift` really is down" — a capital at the start of a word.
+fn shift_is_physically_held() -> Physical {
+    Physical {
+        shift_left: true,
+        ..nothing_is_physically_held()
+    }
+}
+
+/// A probe that must never be asked — task T-39-3, NFR-01 and NFR-02.
+fn a_probe_ordinary_typing_must_not_ask() -> Physical {
+    panic!("NFR-01: ordinary typing asked the system about the modifiers")
+}
+
+/// **Task T-39-3: masking only lowers.** A `Shift` the user really holds at the start of a word
+/// still makes a capital — the check asks, the system says "held", and nothing comes down.
+#[test]
+fn a_shift_really_held_at_the_start_of_a_word_still_makes_a_capital() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(shift_is_physically_held);
+
+    assert_eq!(hold(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+    assert_eq!(press(&mut recorder, VK_G, SCAN_G), Recorded::Stored);
+    assert_eq!(release(&mut recorder, VK_LSHIFT), Recorded::Modifier);
+
+    for (vk, scan) in [
+        (VK_H, SCAN_H),
+        (VK_B, SCAN_B),
+        (VK_D, SCAN_D),
+        (VK_T, SCAN_T),
+        (VK_N, SCAN_N),
+    ] {
+        assert_eq!(press(&mut recorder, vk, scan), Recorded::Stored);
+    }
+
+    assert_eq!(
+        typed(&recorder),
+        "Ghbdtn",
+        "a real Shift makes the capital and stays out of the rest"
+    );
+}
+
+/// **FR-11 when the keys really are held — the first side task T-39-3 has to pin** (decision
+/// Р-44): `Ctrl+Shift+<цифра>` with both keys really down is still the switch to a particular
+/// language, and the word survives it.
+#[test]
+fn a_real_ctrl_and_shift_with_a_digit_still_switch_the_language_and_keep_the_word() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(ctrl_and_shift_are_physically_held);
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        switch_with(&mut recorder, &[VK_LCONTROL, VK_LSHIFT], VK_1, SCAN_1),
+        Recorded::Ignored,
+        "FR-11: Ctrl+Shift+1 really held is still a layout switch"
+    );
+    assert_eq!(recorder.len(), 6);
+    assert_eq!(typed(&recorder), "ghbdtn");
+}
+
+/// **What step (2) of the repair does to the corner FR-11 shares with a stuck `Shift`.** The task
+/// expected that corner to stay out of reach, because the once-per-word check stands below the row
+/// of FR-11 — and from there it is. But [`Held::reconcile`] covers `Shift` now, and the command row
+/// runs it before the row of FR-11 reads the mask: with a real `Ctrl` and a stuck `Shift` the user
+/// is pressing `Ctrl+1`, an application's command, and the buffer takes the command row of FR-10
+/// instead of being kept as if a language had been chosen.
+#[test]
+fn a_stuck_shift_does_not_turn_ctrl_and_a_digit_into_a_layout_switch() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(only_ctrl_is_physically_held);
+    type_ghbdtn(&mut recorder);
+
+    assert_eq!(
+        switch_with(&mut recorder, &[VK_LCONTROL, VK_LSHIFT], VK_1, SCAN_1),
+        Recorded::Flushed,
+        "Ctrl+1 with a stuck Shift is a command of FR-10, not the switch of FR-11"
+    );
+    assert_eq!(recorder.len(), 0);
+}
+
+/// **NFR-01 and NFR-02: ordinary typing does not ask.** The check of task T-39-3 is gated on the
+/// belief — no `Shift` believed held, no system call — so words typed without modifiers never reach
+/// the probe. This probe panics if it is asked.
+#[test]
+fn ordinary_typing_does_not_ask_the_system_about_shift() {
+    let mut recorder = fresh();
+    recorder.verify_held_with(a_probe_ordinary_typing_must_not_ask);
+
+    type_ghbdtn(&mut recorder);
+    assert_eq!(press(&mut recorder, VK_TAB, SCAN_A), Recorded::Flushed);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(typed(&recorder), "a");
 }
 
 /// A bare `Space` after a latched `Win` takes the boundary row of FR-10 it belongs to.

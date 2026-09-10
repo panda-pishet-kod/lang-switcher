@@ -974,6 +974,8 @@ fn is_media_key(vk: u16) -> bool {
 /// ⚠ **Task T-10-12 corrected the sentence above: "its release is seen" was an assumption, and
 /// it is false.** A release that never arrives leaves the belief raised for ever, and defect D
 /// is what that costs — see [`Held::reconcile`] and the comment inside [`Recorder::record`].
+/// Until task **T-39-3** that repair covered `Ctrl`, `Alt` and `Win` and not `Shift`, which had no
+/// way back at all (finding С8); it now comes down once per word — see [`Held::reconcile_shift`].
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Held {
     shift_left: bool,
@@ -1125,6 +1127,10 @@ impl Held {
     /// [`Held::win`] answer after reconciliation precisely as they did before, and no side is
     /// ever lowered while the system says the key is held. The two `Alt` bits keep the sided
     /// probe they already had.
+    ///
+    /// ⭐ **Task T-39-3 (finding С8, decision 122.1) adds the two `Shift` bits**, sided like `Alt`.
+    /// The argument of task T-19-2 is what makes it safe: masking can only *lower* a belief, so a
+    /// `Shift` the user really holds stays up and only one whose release was lost comes down.
     fn reconcile(&mut self, physical: Physical) -> bool {
         let before = *self;
 
@@ -1134,12 +1140,28 @@ impl Held {
         self.alt_right &= physical.alt_right;
         self.win_left &= physical.win;
         self.win_right &= physical.win;
+        self.reconcile_shift(physical);
 
         *self != before
     }
+
+    /// The `Shift` half of [`Held::reconcile`] alone — **task T-39-3**, for the check
+    /// [`Recorder::record`] makes once per word. Answers whether the belief changed.
+    ///
+    /// ⛔ **`Shift` and nothing else**, on purpose: lowering a stuck `Ctrl` or `Alt` here would
+    /// change `mods.altgr()`, which chooses the character `lookup` returns — that belongs to the
+    /// command row of FR-10, which has its own check.
+    fn reconcile_shift(&mut self, physical: Physical) -> bool {
+        let before = (self.shift_left, self.shift_right);
+
+        self.shift_left &= physical.shift_left;
+        self.shift_right &= physical.shift_right;
+
+        (self.shift_left, self.shift_right) != before
+    }
 }
 
-/// The command modifiers as the **system** reports them, against the belief of [`Held`].
+/// The modifiers as the **system** reports them, against the belief of [`Held`].
 ///
 /// Produced by [`crate::hook::physical_modifiers`], which is where the Win32 call belongs: the
 /// argument for `GetAsyncKeyState` over `GetKeyState` is already written out there for FR-96,
@@ -1160,12 +1182,19 @@ pub struct Physical {
     pub alt_right: bool,
     /// Either `Win`.
     pub win: bool,
+    /// The left `Shift` — **finding С8, task T-39-3**. Sided like the two `Alt` bits, because
+    /// [`Held`] tracks the two keys separately (task T-19-2) and a real left `Shift` must not keep
+    /// up a right one whose release was lost.
+    pub shift_left: bool,
+    /// The right `Shift`.
+    pub shift_right: bool,
 }
 
 /// How [`Recorder`] asks the system what is really held.
 ///
 /// A bare function pointer and not a closure or a trait object: it is read on the command row
-/// of FR-10 and nowhere else, it allocates nothing, and it leaves [`Recorder`] `Send`-neutral
+/// of FR-10 and — since task T-39-3 — on the first stroke of a word while a `Shift` is believed
+/// held, and nowhere else; it allocates nothing, and it leaves [`Recorder`] `Send`-neutral
 /// and free of any interior mutability the callback would have to synchronise on.
 pub type PhysicalProbe = fn() -> Physical;
 
@@ -2131,6 +2160,39 @@ impl Recorder {
         // been called under from this file since task T-03-4.
         if self.ring.len() == 0 {
             self.restamp();
+
+            // ---------------------------------------------------------------------------------
+            // ⭐ **Finding С8 — task T-39-3, decision 122.1: a lost `Shift` release comes
+            // down once per word.**
+            //
+            // The check of defect D above asks the system only on the command row, and a
+            // `Shift` alone never reaches that row: a release lost over another window left
+            // every stroke afterwards recorded «with Shift» — `ghbdtn` converting into
+            // «ПРИВЕТ» — for the rest of the session. The first stroke of a word is where
+            // this function already pays a Win32 read (the restamp above), so the `Shift`
+            // half of the belief is checked here too.
+            //
+            // ⛔⛔ **The order decides the outcome.** `mods` was computed at the top of this
+            // function; lowering the belief without recomputing it would record the first
+            // letter of the word as a capital all the same. So `mods` is recomputed here,
+            // before `lookup` below, as the command row recomputes it after its own check.
+            //
+            // **NFR-01, NFR-02: the cheap test first.** A stroke with no `Shift` believed held
+            // costs one boolean; the system is asked only when the belief says a `Shift` is
+            // down — a capital first letter, or a stuck one. And only `Shift`: see
+            // [`Held::reconcile_shift`] for why `Ctrl` and `Alt` are the command row's.
+            //
+            // ⚠ **FR-11 stands above this point and is not reached from here.** A `Shift`
+            // really held for `Ctrl+Shift+<цифра>` reads as held and nothing is lowered; a
+            // stuck one meets the command row's check first, since [`Held::reconcile`]
+            // covers `Shift` as well.
+            // ---------------------------------------------------------------------------------
+            if self.held.shift()
+                && let Some(probe) = self.verify
+                && self.held.reconcile_shift(probe())
+            {
+                mods = self.mods_now(key.flags);
+            }
         } else {
             #[cfg(feature = "testing")]
             crate::control::note_restamp(crate::control::Restamp::Skipped);
@@ -2946,6 +3008,84 @@ pub fn is_empty() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The system answering "nothing is held" — the premise of the unit tests of finding С8.
+    fn nothing_physically_held() -> Physical {
+        Physical {
+            ctrl: false,
+            alt_left: false,
+            alt_right: false,
+            win: false,
+            shift_left: false,
+            shift_right: false,
+        }
+    }
+
+    /// **Finding С8 — task T-39-3.** A `Shift` the stream raised and the system says is not held
+    /// comes down on reconciliation, as every other modifier the check covers does. Until this task
+    /// reconciliation masked six bits and `Shift` was not among them, so a lost release of it had
+    /// no way back at all.
+    #[test]
+    fn reconciliation_lowers_a_shift_the_system_says_is_not_held() {
+        let mut held = Held::default();
+        held.apply(Role::ShiftLeft, Edge::Down);
+        held.apply(Role::ShiftRight, Edge::Down);
+        assert!(
+            held.shift(),
+            "the premise: the stream raised both Shift keys"
+        );
+
+        let changed = held.reconcile(nothing_physically_held());
+        let still_held = held.shift();
+
+        assert!(
+            changed && !still_held,
+            "С8: reconciliation with nothing held — the belief changed: {changed}; Shift is still \
+             believed held: {still_held}"
+        );
+    }
+
+    /// **Task T-39-3: masking only lowers.** A `Shift` the system says is held stays up — the left
+    /// one here — while the right one, whose release was lost, comes down.
+    #[test]
+    fn reconciliation_keeps_a_shift_the_system_says_is_held() {
+        let mut held = Held::default();
+        held.apply(Role::ShiftLeft, Edge::Down);
+        held.apply(Role::ShiftRight, Edge::Down);
+
+        let physical = Physical {
+            shift_left: true,
+            ..nothing_physically_held()
+        };
+
+        assert!(held.reconcile_shift(physical), "the right Shift came down");
+        assert!(
+            held.shift_left,
+            "the left Shift is really held and stays up"
+        );
+        assert!(
+            !held.shift_right,
+            "the right Shift's release was lost and it comes down"
+        );
+    }
+
+    /// **Task T-39-3: the once-per-word check is `Shift` and nothing else.** A stuck `Ctrl` and a
+    /// stuck right `Alt` stay up for the command row to put right, because lowering them here would
+    /// change the `AltGr` of the mask and with it the character `lookup` returns.
+    #[test]
+    fn the_shift_check_leaves_every_other_modifier_alone() {
+        let mut held = Held::default();
+        held.apply(Role::ShiftLeft, Edge::Down);
+        held.apply(Role::CtrlLeft, Edge::Down);
+        held.apply(Role::AltRight, Edge::Down);
+
+        assert!(held.reconcile_shift(nothing_physically_held()));
+        assert!(!held.shift());
+        assert!(
+            held.ctrl() && held.alt(),
+            "Ctrl and Alt are the command row's to lower"
+        );
+    }
 
     /// FR-07 and section 7 agree on the default, and the two are wired to each other rather
     /// than written down twice.
