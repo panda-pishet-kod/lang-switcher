@@ -3610,6 +3610,127 @@ fn the_console_reason_is_asked_after_the_cheap_ones_and_before_the_handover() {
     );
 }
 
+/// **Finding С9 of the audit of 2026-09-04, task T-38-3 — the seventh reason, and its own count.**
+///
+/// The eight steps run on the thread `selection::listen` claimed — the UI thread — and a window of
+/// that thread in front is a window whose queue it will not pump while step 3 sleeps: the settings
+/// dialog, the About box, the tray menu. The `Ctrl+C` of step 2 would wait there past the timeout,
+/// the snapshot would go as «no selection», and the queued chord would reach the dialog later and
+/// replace the user's clipboard with nothing to put back. So that press does not take the path.
+#[test]
+fn a_window_of_the_thread_that_runs_the_path_is_the_seventh_reason() {
+    let _serialised = serialised();
+
+    for thread in [1_u32, 4242, u32::MAX] {
+        let before = selection::path_counters();
+
+        assert!(
+            selection::own_window_refuses_selection(Some(thread), thread),
+            "thread {thread} owns the window in front and is the thread that would run the path"
+        );
+
+        let after = selection::path_counters();
+
+        assert_eq!(
+            after.own_window_refusals,
+            before.own_window_refusals + 1,
+            "the seventh reason is counted once for thread {thread}"
+        );
+        assert_eq!(
+            after.console_refusals, before.console_refusals,
+            "and not as the sixth"
+        );
+        assert_eq!(after.refusals, before.refusals, "and not as a failure");
+    }
+}
+
+/// **С9, the separating control — every other window is left exactly as it was.**
+///
+/// A window of another thread, no window in front at all (`None` — NFR-13, the direction the sixth
+/// reason takes for an unreadable class), and no listener registered (a worker of zero) all answer
+/// «not ours», and the counter of the seventh reason does not move.
+#[test]
+fn any_other_window_leaves_the_seventh_reason_alone() {
+    let _serialised = serialised();
+
+    let before = selection::path_counters();
+
+    for (foreground, worker, what) in [
+        (Some(4242_u32), 4243_u32, "a window of another thread"),
+        (Some(4243), 4242, "the other way round"),
+        (
+            None,
+            4242,
+            "no window in front, or its thread could not be read",
+        ),
+        (
+            Some(4242),
+            0,
+            "no listener registered: no UI thread to be stuck on",
+        ),
+        (Some(0), 0, "zero compared with zero is not a thread"),
+    ] {
+        assert!(
+            !selection::own_window_refuses_selection(foreground, worker),
+            "{what}: the path runs as it always did"
+        );
+    }
+
+    let after = selection::path_counters();
+
+    assert_eq!(
+        after.own_window_refusals, before.own_window_refusals,
+        "the counter of the seventh reason does not move for any of them"
+    );
+}
+
+/// **С9, the structural half — where the seventh reason stands in the branch.**
+///
+/// After the plan, for the reason the sixth is: its count means presses taken away from a path
+/// that would otherwise have run. Before the plan is published and before the hand-over: a press
+/// over our own window must not leave a plan behind or reach the probe of FR-61. And its answer is
+/// `false` — the path does not run. The body is cut at the end of the function, so the definition
+/// of the predicate further down the file cannot stand in for a call that is not there.
+#[test]
+fn the_own_window_reason_is_asked_after_the_plan_and_before_the_handover() {
+    let source = source_of("selection.rs");
+    let body = body_after(&source, "pub fn wants_selection_path()");
+
+    let own = body
+        .find("own_window_refuses_selection(")
+        .expect("the seventh reason is asked");
+    let plan = body.find("plan_for_press()").expect("the plan is built");
+
+    assert!(
+        plan < own,
+        "the seventh count means presses taken away from a path that would otherwise have run"
+    );
+
+    for later in ["publish_pending(", "post_to_ui_thread("] {
+        let position = body
+            .find(later)
+            .unwrap_or_else(|| panic!("{later} is reached"));
+
+        assert!(
+            own < position,
+            "our own window must be answered before {later}: no plan left behind, no probe sent"
+        );
+    }
+
+    let from_the_question = &body[own..];
+    let refusal = from_the_question
+        .find("return false")
+        .expect("the answer to our own window is a refusal");
+    let publish = from_the_question
+        .find("publish_pending(")
+        .expect("the hand-over follows");
+
+    assert!(
+        refusal < publish,
+        "the seventh reason answers `false` before anything is published"
+    );
+}
+
 /// **Criterion 7 of the task, as a test rather than as a `grep` run once.**
 ///
 /// The console classes of FR-42а are declared in `src\` exactly once, and the selection path

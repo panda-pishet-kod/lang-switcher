@@ -154,7 +154,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
     VK_C, VK_CONTROL, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, WM_APP, WM_CLIPBOARDUPDATE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowThreadProcessId, WM_APP, WM_CLIPBOARDUPDATE,
+};
 use windows::core::{Error as WinError, Free, Result as WinResult};
 
 use crate::convert::Keystroke;
@@ -3316,6 +3318,14 @@ static REFUSALS: AtomicU32 = AtomicU32::new(0);
 /// could not tell П-3 from a regression.
 static CONSOLE_REFUSALS: AtomicU32 = AtomicU32::new(0);
 
+/// Presses the selection path did not take because the window in front belongs to the thread
+/// that would run it — **finding С9 of the audit of 2026-09-04, task T-38-3**.
+///
+/// Kept apart from [`REFUSALS`] and from [`CONSOLE_REFUSALS`] for the reason the second is kept
+/// apart from the first: this is the path declining by rule, not failing, and an acceptance that
+/// could not tell the seventh reason from the sixth, or from a regression, could not tell anything.
+static OWN_WINDOW_REFUSALS: AtomicU32 = AtomicU32::new(0);
+
 /// Presses where the clipboard moved **after** step 3 had given up — task T-13-11.
 ///
 /// The late `Ctrl+C` of the audit of 2026-08-24: the probe of step 2 was answered past the
@@ -3325,7 +3335,7 @@ static CONSOLE_REFUSALS: AtomicU32 = AtomicU32::new(0);
 /// facts are independent and must be readable apart.
 static LATE_COPIES: AtomicU32 = AtomicU32::new(0);
 
-/// The counters of the selection path — SEC-01, SEC-07: six counts of program events.
+/// The counters of the selection path — SEC-01, SEC-07: seven counts of program events.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PathCounters {
     /// Presses handed to the UI thread.
@@ -3338,6 +3348,9 @@ pub struct PathCounters {
     pub refusals: u32,
     /// Presses the path did not take because a console was in front — the note to §4.7, П-3.
     pub console_refusals: u32,
+    /// Presses the path did not take because a window of the thread that would run it was in
+    /// front — finding С9, task T-38-3.
+    pub own_window_refusals: u32,
     /// Presses whose clipboard moved after step 3 gave up, and whose snapshot therefore went
     /// back at once — the late `Ctrl+C` of task T-13-11.
     pub late_copies: u32,
@@ -3351,6 +3364,7 @@ pub fn path_counters() -> PathCounters {
         no_selection: NO_SELECTION.load(Ordering::Relaxed),
         refusals: REFUSALS.load(Ordering::Relaxed),
         console_refusals: CONSOLE_REFUSALS.load(Ordering::Relaxed),
+        own_window_refusals: OWN_WINDOW_REFUSALS.load(Ordering::Relaxed),
         late_copies: LATE_COPIES.load(Ordering::Relaxed),
     }
 }
@@ -3361,7 +3375,7 @@ pub fn path_counters() -> PathCounters {
 /// with it; `false` when the typing-buffer path is to run **right here, right now**, exactly as
 /// it did before this task existed.
 ///
-/// Six reasons to answer `false`, and not one of them sends a `Ctrl+C`, opens the clipboard or
+/// Seven reasons to answer `false`, and not one of them sends a `Ctrl+C`, opens the clipboard or
 /// changes anything the user can observe:
 ///
 /// | Reason | Requirement | What was touched |
@@ -3371,6 +3385,7 @@ pub fn path_counters() -> PathCounters {
 /// | the focus is in a password field | **SEC-06, FR-70** | nothing |
 /// | no cache, or no target layout | FR-30, FR-35 | nothing |
 /// | a console is in front | **note to §4.7 (П-3), FR-42а** | two read-only `user32` queries |
+/// | a window of the UI thread is in front | **finding С9, task T-38-3** | two read-only `user32` queries |
 /// | the UI thread has no window | — | nothing |
 ///
 /// ⚠ **The first row is the whole of acceptance point 17.** With the path switched off this
@@ -3416,9 +3431,25 @@ pub fn path_counters() -> PathCounters {
 /// reconsider it: what changes is what the press *does*, not whether the system sees it.
 ///
 /// The rule and the Win32 call are split the way FR-42а is split —
-/// [`console_refuses_selection`] is the rule and [`foreground_window_class`] is the only line
-/// that asks a window — and the class names come from `inject`, so the consoles of this program
-/// are named once ([`crate::inject::CONSOLE_WINDOW_CLASSES`]).
+/// [`console_refuses_selection`] is the rule and [`foreground_window_class`] is the line that asks
+/// a window for its class — and the class names come from `inject`, so the consoles of this
+/// program are named once ([`crate::inject::CONSOLE_WINDOW_CLASSES`]).
+///
+/// # The sixth row — the seventh reason, finding С9 of the audit of 2026-09-04 (task T-38-3)
+///
+/// The eight steps run on the UI thread — the thread [`listen`] claimed — and that thread owns
+/// windows of its own: the settings dialog, the About box, the tray menu. With one of them in
+/// front, the `Ctrl+C` of step 2 goes into the queue of the very thread that is then asleep inside
+/// step 3, and nothing pumps it. The wait runs out, the snapshot is thrown away as «no selection»,
+/// and when the dialog's modal loop picks the chord up afterwards it copies out of our own edit
+/// control over the user's clipboard — no snapshot left, not one line of the journal. So with a
+/// window of that thread in front the selection path does not run, and the press on an empty
+/// typing buffer does nothing, exactly as in a console.
+///
+/// Decided by thread and not by a list of this program's window classes: a list would have to be
+/// remembered with every new window, and the thread is what the harm is made of.
+/// [`own_window_refuses_selection`] is the rule, [`foreground_window_thread`] the Win32 half, and
+/// the count is [`PathCounters::own_window_refusals`].
 pub fn wants_selection_path() -> bool {
     // FR-65, first, and before anything else can have an opinion.
     if !path_enabled() {
@@ -3459,15 +3490,30 @@ pub fn wants_selection_path() -> bool {
     // always. The press becomes a no-op here, which is what the note prescribes; FR-95 is not
     // affected, the suppression having been decided in the hook (§10, record 8).
     //
-    // ⚠ **Asked here and not earlier, and both halves of that are deliberate.** It is the only
-    // reason that costs a system call, so every cheaper reason is asked first — the ordinary
-    // press, the one with a non-empty buffer, still leaves this function without a single system
-    // call, which is what the comment on the Р-62 read above promises. And it is asked *after*
-    // the plan, so the count below means «presses this decision took away from a path that would
-    // otherwise have run»: a press with no cache is refused for a reason that holds in every
-    // window, and attributing it to the console would overstate what П-3 does. Before
-    // `publish_pending`, so that a refusal never leaves a plan behind for a later message.
+    // ⚠ **Asked here and not earlier, and both halves of that are deliberate.** It and the seventh
+    // reason below are the only reasons that cost a system call, so every cheaper reason is asked
+    // first — the ordinary press, the one with a non-empty buffer, still leaves this function
+    // without a single system call, which is what the comment on the Р-62 read above promises.
+    // And it is asked *after* the plan, so the count below means «presses this decision took away
+    // from a path that would otherwise have run»: a press with no cache is refused for a reason
+    // that holds in every window, and attributing it to the console would overstate what П-3
+    // does. Before `publish_pending`, so that a refusal never leaves a plan behind for a later
+    // message.
     if console_refuses_selection(foreground_window_class().as_deref()) {
+        return false;
+    }
+
+    // ⚠ **Finding С9 of the audit of 2026-09-04, task T-38-3 — the seventh reason.** The eight
+    // steps run on the UI thread, and a window of that thread in front — the settings dialog, the
+    // About box, the tray menu — is a window whose queue that very thread will not pump while
+    // step 3 sleeps: the `Ctrl+C` of step 2 would wait there past the timeout, the snapshot would
+    // go as «no selection», and the queued chord would later copy out of our own dialog over the
+    // user's clipboard. Asked where the sixth reason is asked and for its reasons: after the
+    // plan, before anything is published.
+    if own_window_refuses_selection(
+        foreground_window_thread(),
+        WORKER_THREAD.load(Ordering::Acquire),
+    ) {
         return false;
     }
 
@@ -3544,10 +3590,55 @@ pub fn console_refuses_selection(class: Option<&str>) -> bool {
     console
 }
 
+/// **The seventh reason of FR-60, decided from two thread ids — finding С9 of the audit of
+/// 2026-09-04, task T-38-3.**
+///
+/// `true` when the window in front belongs to `worker` — the thread [`listen`] claimed, which is
+/// the thread [`handle_selection_message`] runs the eight steps on. That is the state in which the
+/// path stands in its own way: the `Ctrl+C` of step 2 goes into the queue of the one thread that
+/// is at that moment asleep inside step 3 and will not pump it. The wait runs out, the snapshot is
+/// thrown away as «no selection», and when the modal loop of the settings dialog, the About box or
+/// the tray menu picks the queued chord up afterwards, it copies out of an edit control of ours
+/// over the user's clipboard — with no snapshot left and not one line of the journal.
+///
+/// # Why it is a function of two numbers
+///
+/// Split from the Win32 calls for the reason [`console_refuses_selection`] is split from
+/// [`foreground_window_class`]: acceptance drives the rule with any pair it likes and no live
+/// window at all. The Win32 half is [`foreground_window_thread`].
+///
+/// # `None`, and a worker of zero — NFR-13
+///
+/// `None` means there is no foreground window, or its thread could not be read. It answers
+/// **`false`** — the path runs — the direction the sixth reason takes for an unreadable class: a
+/// window that cannot be asked is going away, and it is no window of ours to be stuck behind. A
+/// `worker` of zero is [`NO_THREAD`] — no listener is registered, so there is no UI thread to be
+/// stuck on — and it answers `false` as well.
+///
+/// # Why the count is taken here
+///
+/// «Counted where it is decided», as the sixth reason counts, and into [`OWN_WINDOW_REFUSALS`]
+/// rather than [`REFUSALS`] or [`CONSOLE_REFUSALS`] for the reason given there.
+pub fn own_window_refuses_selection(foreground: Option<u32>, worker: u32) -> bool {
+    let own = match foreground {
+        Some(thread) => worker != NO_THREAD && thread == worker,
+        // No window in front, or its thread could not be read. NFR-13: examined, and answered as
+        // "not ours" for the reason the section above gives.
+        None => false,
+    };
+
+    if own {
+        OWN_WINDOW_REFUSALS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    own
+}
+
 /// The class of the window in front, or `None` when there is none or it cannot be read.
 ///
 /// **The Win32 half of the sixth reason** — the shape of [`crate::inject::window_class`], and
-/// the one call site of this path that asks the system anything.
+/// one of the two call sites of this path that ask the system anything; the other is
+/// [`foreground_window_thread`], the Win32 half of the seventh.
 ///
 /// # Which thread this runs on, and why it is not the hook callback — NFR-01…NFR-05
 ///
@@ -3577,6 +3668,34 @@ fn foreground_window_class() -> Option<String> {
     }
 
     crate::inject::window_class(foreground)
+}
+
+/// The thread that owns the window in front, or `None` when there is no such window or its thread
+/// cannot be read — **the Win32 half of the seventh reason**, finding С9, task T-38-3.
+///
+/// Runs where [`foreground_window_class`] runs and costs what it costs: two read-only `user32`
+/// queries on the input thread, after the hook callback's hand-off — no allocation, no blocking
+/// primitive, no I/O. The window in front is asked for again rather than shared with the class
+/// query: each of the two reasons is safe on its own answer, and a foreground window that changes
+/// between the two calls changes nothing either of them decides.
+fn foreground_window_thread() -> Option<u32> {
+    // SAFETY: as in `foreground_window_class` — no arguments, a handle by value, callable from any
+    // thread; the documented NULL return is checked immediately below.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.is_invalid() {
+        // NFR-13: examined. No window in front, and `own_window_refuses_selection` documents why
+        // that answers "not ours".
+        return None;
+    }
+
+    // SAFETY: `foreground` is a handle value the system has just returned, passed by value. No
+    // process-id pointer is passed, so nothing of ours is written; a window that went away in
+    // between answers zero, which is examined below.
+    let thread = unsafe { GetWindowThreadProcessId(foreground, None) };
+
+    // NFR-13: zero is the documented failure — the handle no longer names a window.
+    (thread != 0).then_some(thread)
 }
 
 /// **Runs the selection path — the UI thread's half of the hand-over.**
