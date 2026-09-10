@@ -2306,6 +2306,18 @@ pub fn paste_chord() -> [INPUT; CHORD_EVENTS] {
     events
 }
 
+/// Whether the system took every event of a chord — **finding Н17 of the audit of 2026-09-04,
+/// task T-38-5**.
+///
+/// `dispatched` is what [`crate::inject::dispatch`] answered for [`copy_chord`] or [`paste_chord`].
+/// «Taken whole» is more than [`Dispatched::is_complete`]: a chord is never empty, and an answer
+/// that requested nothing — zero taken of zero — sent nothing, which is the trap finding Н18 names
+/// in module `inject`. The sum over portions is what counts, so the opt-in pause of FR-44 changes
+/// nothing here.
+pub const fn chord_delivered(dispatched: Dispatched) -> bool {
+    dispatched.requested > 0 && dispatched.accepted == dispatched.requested
+}
+
 // ---------------------------------------------------------------------------------------
 // Step 5 of FR-61 — the only place in the program where content is looked at
 // ---------------------------------------------------------------------------------------
@@ -2803,6 +2815,9 @@ pub trait Path {
     fn release_modifiers(&mut self) -> Modifiers;
 
     /// **Step 2** — `Ctrl+C`, through `inject`, with the signature of FR-03.
+    ///
+    /// Answers what the system took, and [`run`] reads the answer: a chord not taken whole is a
+    /// refusal before step 3 — see [`chord_delivered`], task T-38-5.
     fn copy(&mut self) -> Dispatched;
 
     /// **Step 3** — wait for the clipboard sequence number to leave `baseline`.
@@ -2810,11 +2825,12 @@ pub trait Path {
 
     /// **Not a numbered step** — the clipboard sequence number as it stands *now*.
     ///
-    /// Step 3 asks whether the number left the baseline **within** the timeout; this asks whether
-    /// it left it **after** the timeout gave up, which is the late `Ctrl+C` of the audit of
-    /// 2026-08-24 (task T-13-11). It is behind the trait for the reason every other member is: a
-    /// test that had to move the machine's real clipboard to reach that branch would be a test of
-    /// the machine.
+    /// Step 3 asks whether the number left the baseline **within** the timeout; this asks for the
+    /// number outside that wait — after the timeout gave up, or after step 3 or step 2 was
+    /// refused, which is the late `Ctrl+C` of the audit of 2026-08-24 (tasks T-13-11, T-38-4 and
+    /// T-38-5), and after step 4 read the clipboard, where the answer to the probe ends (task
+    /// T-38-2). It is behind the trait for the reason every other member is: a test that had to
+    /// move the machine's real clipboard to reach those branches would be a test of the machine.
     fn sequence(&mut self) -> u32;
 
     /// **Step 4** — read `CF_UNICODETEXT`.
@@ -2824,6 +2840,10 @@ pub trait Path {
     fn write(&mut self, text: &str) -> Result<(), ClipboardError>;
 
     /// **Step 6, second half** — `Ctrl+V`.
+    ///
+    /// Answers what the system took, and [`run`] reads the answer: a paste not taken whole is a
+    /// refusal, and step 8 is owed as on every refusal after step 3 — see [`chord_delivered`],
+    /// task T-38-5.
     fn paste(&mut self) -> Dispatched;
 
     /// **Step 7** — switch the layout of the foreground window, §4.6.
@@ -2872,7 +2892,8 @@ pub enum Refusal {
     /// posted by somebody else (SEC-05).
     NoPlan,
     /// A clipboard call refused — a thread that may not block, or another process holding it
-    /// through all ten attempts of FR-62.
+    /// through all ten attempts of FR-62 — or a chord of step 2 or step 6 the system did not take
+    /// whole (task T-38-5).
     Clipboard,
     /// Step 4 found no `CF_UNICODETEXT`, or found it empty. The application answered `Ctrl+C`
     /// with something that is not text — a picture, a file list, a spreadsheet range.
@@ -2912,10 +2933,11 @@ impl Outcome {
 /// # What this type is for, and why it is a type
 ///
 /// FR-61 step 8 says the clipboard is restored, and the task specification adds that it is
-/// restored **even when something between steps 4 and 7 failed**. There are seven places in
-/// [`run`] where the work can stop early, plus the `?`-shaped ones inside them, plus a panic in
-/// a Debug build. A restore written at each of them would be a convention: correct today, and
-/// one early `return` away from being wrong.
+/// restored **even when something between steps 4 and 7 failed**. There are nine places in
+/// [`run`] where the work can stop early — seven until task T-38-5 read the answers of steps 2
+/// and 6 — plus the `?`-shaped ones inside them, plus a panic in a Debug build. A restore written
+/// at each of them would be a convention: correct today, and one early `return` away from being
+/// wrong.
 ///
 /// So it is not written at any of them. The whole of the body below runs **through** this value,
 /// the borrow of the [`Path`] lives in it, and the two put-backs are in `Drop`:
@@ -2926,6 +2948,8 @@ impl Outcome {
 /// | step 4 found no text | `Drop` | early `return`, scope ends |
 /// | step 5 could not decide | `Drop` | early `return`, scope ends |
 /// | step 6 could not write | `Drop` | early `return`, scope ends |
+/// | step 6's `Ctrl+V` was not taken whole | `Drop` | early `return`, scope ends — task T-38-5 |
+/// | step 2's `Ctrl+C` was not taken whole | `Drop`: nothing when the clipboard did not move, the other door when it did — task T-38-5 |
 /// | step 3 said there is no selection | `Drop`, and there is usually nothing to put back — see [`Owed`] |
 /// | step 3 gave up and the clipboard moved anyway | `Drop`, by the other door — [`Path::reclaim_clipboard`], task T-13-11 |
 /// | step 3 was refused — the thread may not block | `Drop`: nothing when the clipboard did not move, the same other door when it did — task T-38-4 |
@@ -3057,7 +3081,18 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     session.hygiene = true;
 
     // ---- step 2 — Ctrl+C ----------------------------------------------------------------
-    session.path.copy();
+    //
+    // ⭐ **Finding Н17, its second variant — task T-38-5.** The answer of `SendInput` is looked
+    // at. A probe the system did not take whole may never have reached the application, and
+    // waiting for it would let step 3 read a stranger's copy as its answer — so the press is
+    // refused here, before the wait. A chord taken in part may still have reached it, though, and
+    // then `Ctrl+C` has gone out: the clipboard is asked once more through the door of T-38-4, and
+    // one that moved gets the user's snapshot back at once.
+    if !chord_delivered(session.path.copy()) {
+        session.owe_the_snapshot_if_the_clipboard_moved(baseline);
+
+        return Outcome::Refused(Refusal::Clipboard);
+    }
 
     // ---- step 3 — did the clipboard move? -----------------------------------------------
     //
@@ -3161,7 +3196,13 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
         return Outcome::Refused(Refusal::Clipboard);
     }
 
-    session.path.paste();
+    // ⭐ **Finding Н17 — task T-38-5.** A `Ctrl+V` the system did not take whole pasted nothing, or
+    // not all of it: the press is a refusal and not a conversion — no tone of success, no layout
+    // switch at step 7, and the typing-buffer path gets the press as after every refusal. Step 8
+    // is owed as on every refusal after step 3, and it is our own write that it finds.
+    if !chord_delivered(session.path.paste()) {
+        return Outcome::Refused(Refusal::Clipboard);
+    }
 
     // ---- step 7 — switch the layout, §4.6 -----------------------------------------------
     //

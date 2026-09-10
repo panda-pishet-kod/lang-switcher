@@ -1995,12 +1995,15 @@ impl SelectionPath for Bench {
     }
 
     fn copy(&mut self) -> Dispatched {
-        self.note(Step::Copy);
+        // Told to fail, the chord is not taken at all — the refusal `SendInput` can answer with.
+        // Until task T-38-5 the bench answered «taken whole» whatever it was told, which is why
+        // finding Н17 could not be seen from here.
+        let refused = self.note(Step::Copy);
 
         Dispatched {
             calls: 1,
             requested: CHORD_EVENTS,
-            accepted: CHORD_EVENTS,
+            accepted: if refused { 0 } else { CHORD_EVENTS },
         }
     }
 
@@ -2035,12 +2038,13 @@ impl SelectionPath for Bench {
     }
 
     fn paste(&mut self) -> Dispatched {
-        self.note(Step::Paste);
+        // As for `copy`: told to fail, the chord is not taken at all — task T-38-5.
+        let refused = self.note(Step::Paste);
 
         Dispatched {
             calls: 1,
             requested: CHORD_EVENTS,
-            accepted: CHORD_EVENTS,
+            accepted: if refused { 0 } else { CHORD_EVENTS },
         }
     }
 
@@ -2333,6 +2337,151 @@ fn step_eight_is_handed_the_answer_up_to_the_number_after_the_read_of_step_four(
             "{what}: step 8 was handed the answer up to the number after step 4"
         );
     }
+}
+
+/// **Finding Н17 of the audit of 2026-09-04, task T-38-5 — a `Ctrl+V` the system did not take is a
+/// refusal, not a conversion.**
+///
+/// Step 6 put the recoded text on the clipboard and sent `Ctrl+V`; `SendInput` answers how many
+/// events it inserted, and until this task the answer was dropped and the press declared
+/// `Converted` — the tone of success, the layout switched, and the typing-buffer path never ran. A
+/// paste not taken whole is `Refused(Clipboard)` now: step 7 does not switch the layout, the press
+/// falls back as every refusal does, and step 8 still puts the user's clipboard back, exactly as
+/// on the other refusal paths of Э18.
+#[test]
+fn a_paste_the_system_did_not_take_is_a_refusal_and_the_clipboard_still_comes_back() {
+    let mut bench = Bench::with_selection("ghbdtn").failing_at(Step::Paste);
+    let outcome = selection::run(&mut bench, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(
+        outcome,
+        Outcome::Refused(Refusal::Clipboard),
+        "a paste not taken whole converts nothing"
+    );
+    assert!(
+        outcome.falls_back(),
+        "and the press goes down the typing-buffer path, as after every refusal"
+    );
+    assert!(
+        !bench.ran(Step::Switch),
+        "step 7 does not switch the layout for a paste that did not happen: {:?}",
+        bench.steps
+    );
+    assert!(
+        bench.ran(Step::RestoreClipboard),
+        "step 8 still puts the user's clipboard back: {:?}",
+        bench.steps
+    );
+    assert_eq!(
+        bench.restore_answer,
+        Some(ProbeAnswer::at(PROBE_ANSWER)),
+        "with the answer step 3 saw"
+    );
+}
+
+/// **Н17, its second variant, task T-38-5 — a `Ctrl+C` the system did not take is refused before
+/// step 3.**
+///
+/// A probe that never reached the application moves no clipboard, so waiting for it would only let
+/// step 3 read somebody else's copy as its answer. Refused at once: no wait, no read, and nothing
+/// owed — the clipboard is still exactly what the user left. But a chord taken in part may still
+/// have reached the application, so the clipboard is asked once more through the door of T-38-4:
+/// had it moved, the snapshot goes back at once.
+///
+/// Holds the lock of the file: the second half moves `late_copies`, which the tests of T-13-11 and
+/// T-38-4 assert by the exact one.
+#[test]
+fn a_copy_the_system_did_not_take_is_refused_before_the_wait_and_owes_nothing_unless_it_moved() {
+    let _serialised = serialised();
+
+    // ---- the probe was not taken, and nothing moved --------------------------------------------
+    let mut quiet = Bench::with_selection("ghbdtn").failing_at(Step::Copy);
+    let outcome = selection::run(&mut quiet, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
+    assert_eq!(
+        quiet.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::RestoreModifiers,
+        ],
+        "no wait, no read, and no restore of a clipboard nobody touched"
+    );
+
+    // ---- the probe was taken in part, and the clipboard moved anyway ---------------------------
+    let before = selection::path_counters();
+    let moved = Snapshot::empty().sequence().wrapping_add(4242);
+    let mut late = Bench::with_selection("ghbdtn")
+        .failing_at(Step::Copy)
+        .with_clipboard_at(moved);
+    let outcome = selection::run(&mut late, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
+    assert_eq!(
+        late.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::RestoreModifiers,
+            Step::Reclaim,
+        ],
+        "a clipboard that moved gets the user's snapshot back through the late door"
+    );
+    assert_eq!(
+        selection::path_counters().late_copies,
+        before.late_copies + 1,
+        "counted where the late copies are counted"
+    );
+}
+
+/// **Task T-38-5 — what «taken whole» means, and the trap of the empty packet.**
+///
+/// `inject::Dispatched::is_complete` answers `accepted == requested`, and for a packet of nothing
+/// that is «zero taken of zero» — complete. A chord is never empty, so an answer that requested
+/// nothing is an answer that sent nothing — the trap finding Н18 names in `src\inject.rs` — and it
+/// is not a chord delivered. The pause of FR-44 sends a chord in portions; the sums are what count.
+#[test]
+fn a_chord_is_delivered_only_when_every_event_of_it_was_taken() {
+    let whole = Dispatched {
+        calls: 1,
+        requested: CHORD_EVENTS,
+        accepted: CHORD_EVENTS,
+    };
+    let in_portions = Dispatched {
+        calls: CHORD_EVENTS,
+        requested: CHORD_EVENTS,
+        accepted: CHORD_EVENTS,
+    };
+    let none = Dispatched {
+        calls: 1,
+        requested: CHORD_EVENTS,
+        accepted: 0,
+    };
+    let in_part = Dispatched {
+        calls: 1,
+        requested: CHORD_EVENTS,
+        accepted: CHORD_EVENTS - 1,
+    };
+    let empty = Dispatched {
+        calls: 0,
+        requested: 0,
+        accepted: 0,
+    };
+
+    assert!(selection::chord_delivered(whole), "every event taken");
+    assert!(
+        selection::chord_delivered(in_portions),
+        "every event taken, in the portions of FR-44"
+    );
+    assert!(!selection::chord_delivered(none), "nothing taken");
+    assert!(!selection::chord_delivered(in_part), "taken in part");
+    assert!(
+        !selection::chord_delivered(empty),
+        "zero taken of zero requested is no chord at all"
+    );
 }
 
 /// **Acceptance point 10, the hardest path.** A panic between steps 4 and 7 still restores.
