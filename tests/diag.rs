@@ -33,6 +33,7 @@ use std::thread;
 
 use lang_switcher::diag::{self, CAPACITY, Kind, LOG_FILE_NAME, Operation, OsCode};
 use lang_switcher::settings;
+use lang_switcher::switch::{self, Scope};
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::core::Error as WinError;
 
@@ -500,6 +501,34 @@ fn the_folder_the_settings_dialog_will_open_is_the_folder_the_file_goes_to() {
     assert_eq!(file.parent(), Some(folder.as_path()));
     assert_eq!(file.file_name(), Some(LOG_FILE_NAME.as_ref()));
     assert!(folder.ends_with("Lang_Switcher"));
+}
+
+/// **Finding Н118 — task T-39-8, decision 122.2: the scope of FR-51 comes alive in the dump.**
+///
+/// The reading of the setting of FR-51 — how far a layout switch reaches — was written and called
+/// by nobody, so its counter of failed reads could never move and the dump never said which scope
+/// the switches were made under. It is read now where the dump is rendered, on the thread of the
+/// UI, and printed as a row of its own beside that counter: `per_window` — the Windows default, a
+/// switch reaches its own window — or `session`.
+#[test]
+fn the_dump_says_which_scope_of_fr51_was_in_force() {
+    let expected = match switch::scope() {
+        Scope::PerWindow => "per_window",
+        Scope::Session => "session",
+    };
+
+    let text = diag::render();
+    let row = text
+        .lines()
+        .find(|line| line.split_whitespace().next() == Some("switch.scope"))
+        .map(str::to_owned);
+
+    assert!(
+        row.as_deref()
+            .is_some_and(|row| row.split_whitespace().nth(1) == Some(expected)),
+        "Н118: the dump has no row naming the scope of FR-51 in force, expected «{expected}»: \
+         {row:?}"
+    );
 }
 
 /// **Points 10 and 24 at the level of a test.** Everything a keystroke could look like is fed

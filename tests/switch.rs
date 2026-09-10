@@ -307,6 +307,38 @@ fn a_clock_that_answers_zero_cannot_make_the_wait_endless() {
     );
 }
 
+/// **Finding Н118 — task T-39-8: a reading of FR-51 that fails is counted and reads as the
+/// default.**
+///
+/// The counter `scope_unreadable` could never move while nothing called [`switch::scope`]; the dump
+/// calls it now. The OS does not fail the query on request, so the failure is driven through the
+/// seam [`switch::scope_from`] — the very code `scope` runs on the answer it gets.
+#[test]
+fn a_reading_of_fr51_that_fails_is_counted_and_reads_as_the_default() {
+    let _counters = counters();
+
+    assert_eq!(switch::scope_from(Ok(true)), Scope::PerWindow);
+    assert_eq!(switch::scope_from(Ok(false)), Scope::Session);
+    assert_eq!(
+        switch::failures().scope_unreadable,
+        0,
+        "an answer is not a failure"
+    );
+
+    let failed = windows::core::Error::from(windows::Win32::Foundation::E_FAIL);
+
+    assert_eq!(
+        switch::scope_from(Err(failed)),
+        Scope::PerWindow,
+        "NFR-13: the default, not `FALSE`"
+    );
+    assert_eq!(
+        switch::failures().scope_unreadable,
+        1,
+        "and the failure is counted"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Point 10 — the trap of the task
 // ---------------------------------------------------------------------------------------

@@ -235,6 +235,19 @@ pub enum Scope {
     Session,
 }
 
+impl Scope {
+    /// The word the dump of module `diag` prints for this scope — **task T-39-8, finding Н118**.
+    ///
+    /// A `const fn` over a closed list, which is what `diag::row_word` asks of every word it
+    /// prints: never anything this program read from the outside.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::PerWindow => "per_window",
+            Self::Session => "session",
+        }
+    }
+}
+
 /// Reads the setting of FR-51 — `SPI_GETTHREADLOCALINPUTSETTINGS`.
 ///
 /// `TRUE` means input settings are **thread-local**, which is the same statement as "each app
@@ -253,6 +266,11 @@ pub enum Scope {
 /// so that the diagnostics of SEC-04a say which reach was in force when a switch was made. It is
 /// deliberately **not** read on the switching path, where it would be a Win32 call made for
 /// nothing.
+///
+/// ⭐ **Until task T-39-8 nothing read it at all (finding Н118)** — the paragraph above described a
+/// report nobody made, and its counter could never move. The dump of module `diag` reads it now,
+/// on the thread that renders the dump — the UI thread — and prints it as the row `switch.scope`
+/// beside `switch.scope_unreadable`.
 ///
 /// NFR-13: a failed call is not read as `FALSE`. The setting is on by default, the default is
 /// what the overwhelming majority of installations run, and answering [`Scope::PerWindow`] is
@@ -276,9 +294,20 @@ pub fn scope() -> Scope {
         )
     };
 
+    scope_from(read.map(|()| thread_local.as_bool()))
+}
+
+/// What the reading of [`scope`] means — **the seam of task T-39-8 (finding Н118)**, so that the
+/// failure can be driven from a test: the OS does not fail `SPI_GETTHREADLOCALINPUTSETTINGS` on
+/// request.
+///
+/// `Ok(true)` — input settings are thread-local — is [`Scope::PerWindow`]; `Ok(false)` is
+/// [`Scope::Session`]; a failure is counted in [`Failures::scope_unreadable`], reported, and read
+/// as the default rather than as `FALSE` (NFR-13).
+pub fn scope_from(read: windows::core::Result<bool>) -> Scope {
     match read {
-        Ok(()) if thread_local.as_bool() => Scope::PerWindow,
-        Ok(()) => Scope::Session,
+        Ok(true) => Scope::PerWindow,
+        Ok(false) => Scope::Session,
         Err(error) => {
             // NFR-13: examined, counted and reported, never silently turned into `FALSE`.
             SCOPE_UNREADABLE.fetch_add(1, Ordering::Relaxed);

@@ -1439,6 +1439,10 @@ fn render_counters(out: &mut String) {
     row_u32(out, "inject.send_mismatches", send_mismatches);
     row_u32(out, "inject.events_lost", events_lost);
 
+    // Task T-39-8, finding Н118: the scope of FR-51, read here — on the thread that renders the
+    // dump, the UI thread — and before the counters are taken, so that a read that fails is
+    // already in `switch.scope_unreadable` below. Never on the switching path.
+    let scope = crate::switch::scope();
     let failures = crate::switch::failures();
 
     // ⚠ Six rows left this section in task Т-14-4 — `attach_activate`, `text_services`,
@@ -1454,6 +1458,7 @@ fn render_counters(out: &mut String) {
     row_u32(out, "switch.no_target", failures.no_target);
     row_u32(out, "switch.no_foreground", failures.no_foreground);
     row_u32(out, "switch.scope_unreadable", failures.scope_unreadable);
+    row_word(out, "switch.scope", scope.name());
 
     // Task T-34-4, finding Н95: the fourteen counters of the password-field guard of FR-70…FR-73
     // and the fifteen of the clipboard path of FR-60…FR-65, through the public readers both
