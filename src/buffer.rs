@@ -1412,9 +1412,10 @@ pub struct Recorder {
     /// no file (NFR-05).
     ///
     /// **FR-34.** It is zeroed by [`Recorder::clear_ring`], which every rule of FR-10 that empties
-    /// the ring goes through, so it cannot be left behind by a flush; by the partial arm of
+    /// the ring goes through — and, since task T-39-2, the resize of [`Recorder::set_capacity`]
+    /// as well — so it cannot be left behind by a flush; and by the partial arm of
     /// [`Recorder::reset_up_to`], which takes strokes out without emptying the ring (finding Н6,
-    /// task T-39-1); and by [`Recorder::set_capacity`], which replaces the ring.
+    /// task T-39-1).
     cycle: usize,
     /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
     /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
@@ -1565,7 +1566,8 @@ impl Recorder {
         self.ring.capacity()
     }
 
-    /// Resizes the ring, keeping everything else this recorder knows — FR-07.
+    /// Resizes the ring through the general flush, keeping the cache, the layout and the settings
+    /// this recorder knows — FR-07.
     ///
     /// # Why a resize exists at all
     ///
@@ -1581,33 +1583,35 @@ impl Recorder {
     ///
     /// The old ring is dropped, which overwrites it with zeroes (SEC-02, [`Ring::drop`]), so
     /// whatever was in the buffer is gone. That is a property of resizing an array and not a
-    /// flush of FR-10, it happens once and at start-up, and it is **not** the case FR-11 speaks
-    /// about: a layout change flushes nothing and goes through
+    /// row of the FR-10 table, it happens once and at start-up, and it is **not** the case FR-11
+    /// speaks about: a layout change flushes nothing and goes through
     /// [`Recorder::set_active_layout`], which touches no slot at all.
+    ///
+    /// ⭐ **Since task T-39-2 (finding Т3) the strokes go the way every flush sends them** —
+    /// through [`Recorder::reset`], before the ring is replaced — so that what a flush clears is
+    /// one rule rather than two copies of it: the position counter of FR-32, the conversion
+    /// session of the last row of FR-10 and the memory of the last edit (FR-14, FR-15) go with
+    /// the strokes. What the resize keeps is what it was written to keep: the cache of FR-20, the
+    /// layout of FR-04, both probes and the idle timeout.
     ///
     /// Allocates, exactly once, like [`Recorder::with_capacity`] — so it is called from the
     /// input thread's message loop and never from the callback (NFR-03).
     pub fn set_capacity(&mut self, capacity: usize) {
-        self.ring = Ring::with_capacity(effective_capacity(capacity));
-
-        // The strokes went with the old ring, so the position counter of FR-32 has nothing left
-        // to be a position in and goes too. This is not one of the flushes of FR-10 — see above
-        // — but a counter left standing over an empty buffer would make the *next* buffer start
-        // its cycle in the middle, which is the one way FR-32 could be broken without anybody
-        // writing back into the buffer at all.
-        self.cycle = 0;
-
-        // ⚠ **The third place the counter is written, and the mirror of SEC-04a has to see it.**
-        // `Ring::with_capacity` builds its length through `set_len`, so the length mirror is
-        // published as zero a line above; without this line the position mirror would keep
-        // whatever it said before, and a snapshot could show `buffer_len=0` beside a non-zero
-        // `cycle_position` — a pair that cannot happen in the program and would be read as truth
-        // by the bench of §11.5, which needs both numbers for positions 16 and 17.
+        // ⭐ **Finding Т3 — task T-39-2: the general flush first, so that what a flush clears is
+        // written once for everyone.** Until this task the resize zeroed the position counter by
+        // its own hand and left the rest standing: the conversion session of the last row of
+        // FR-10 and the memory of the last edit — FR-14, and the idle clock of FR-15 that reads
+        // it — outlived the strokes they were about. `reset` reaches `clear_ring`, which zeroes
+        // the old ring (SEC-02), zeroes the counter of FR-34 and publishes that zero to the mirror
+        // of SEC-04a, forgets the edit, and then ends the session.
         //
-        // Task T-05-2a found the gap and was not permitted to close it; the counter's own logic
-        // is untouched here — this adds the publication and nothing else.
-        #[cfg(feature = "testing")]
-        crate::control::note_cycle_position(self.cycle);
+        // The mirrors still agree afterwards, which is what task T-04-3-3 closed: `clear_ring`
+        // publishes the counter's zero, and the new ring below publishes its length's zero
+        // through `set_len`, so no snapshot can show `buffer_len=0` beside a stale
+        // `cycle_position`.
+        self.reset();
+
+        self.ring = Ring::with_capacity(effective_capacity(capacity));
     }
 
     /// How many strokes are live. The one number SEC-04a allows the debug channel to publish.
@@ -2392,8 +2396,10 @@ impl Recorder {
     /// the controller as a choice. Task T-04-3-3 was given the one line and took the narrower
     /// half of it: **all three places now publish**, and how the counter is written is still
     /// untouched. Making it single-writer like `len` remains open and belongs to whoever is
-    /// allowed to change the shape of this type. Task T-39-1 (finding Н6) added a fourth write,
-    /// the partial arm of [`Recorder::reset_up_to`], and it publishes like the other three.
+    /// allowed to change the shape of this type. Task T-39-1 (finding Н6) added the partial arm of
+    /// [`Recorder::reset_up_to`] as a write that publishes, and task T-39-2 (finding Т3) took the
+    /// one in `set_capacity` out again — a resize now flushes through [`Recorder::reset`] — so
+    /// the counter is written in three places, and all three publish.
     ///
     /// NFR-01 to NFR-05: this function is reached from inside the hook callback, and what the
     /// feature adds to that path is one relaxed atomic store. In a build without it — every

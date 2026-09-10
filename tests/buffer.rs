@@ -2280,11 +2280,53 @@ fn a_resize_keeps_the_cache_and_the_layout_and_leaves_no_strokes_behind() {
     assert_eq!(recorder.capacity(), MAX_CAPACITY);
 }
 
+/// **Finding Т3 of the audit of 2026-09-04 — task T-39-2: a resize goes through the one flush every
+/// other rule goes through.**
+///
+/// `set_capacity` replaced the ring and zeroed the position counter by its own hand, and left the
+/// rest of what a flush clears standing: the conversion session of the last row of FR-10 stayed
+/// open over a buffer that no longer held a converted stroke, and the memory of the last edit —
+/// the moment FR-14 and the idle clock of FR-15 count from — went on describing typing that had
+/// been thrown away with the old ring. A rule of flushing written out a second time is a rule that
+/// drifts, and this copy had drifted by two fields.
+///
+/// What a resize keeps is pinned by the test above and does not move: the cache, the layout and a
+/// buffer that works afterwards.
+#[test]
+fn a_resize_clears_everything_a_flush_clears() {
+    let mut recorder = fresh_of(8);
+    fill(&mut recorder, 3);
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+    assert!(
+        recorder.edited_within(SOME_TIME, 1_500),
+        "the premise: the strokes just typed are an edit inside the window"
+    );
+
+    recorder.set_capacity(64);
+
+    assert_eq!(recorder.len(), 0, "the strokes went with the old ring");
+    assert_eq!(
+        recorder.cycle_position(),
+        0,
+        "FR-34: and the position with them"
+    );
+
+    // Both halves of the finding in one message, so that the red run names each of them.
+    let session_open = recorder.in_conversion();
+    let edit_remembered = recorder.edited_within(SOME_TIME, 1_500);
+    assert!(
+        !session_open && !edit_remembered,
+        "Т3: after a resize the conversion session is still open: {session_open}; the last edit \
+         (FR-14, the clock of FR-15) is still remembered: {edit_remembered}"
+    );
+}
+
 /// **SEC-04a: a resize publishes the position counter, and the pair of mirrors stays possible.**
 ///
-/// The third of the three places `Recorder::cycle` is written — task T-04-3-3. `set_capacity`
-/// zeroes the counter and builds a new ring whose length goes out through `Ring::set_len`, so
-/// the length mirror reads zero the moment the resize is done. Before this task the position
+/// Task T-04-3-3 made the resize publish the zero it stored. Since task T-39-2 that zero comes from
+/// the general flush the resize goes through (`Recorder::reset` → `clear_ring`), and the new ring's
+/// length goes out through `Ring::set_len`, so both mirrors read zero the moment the resize is done. Before this task the position
 /// mirror was left alone, and a snapshot of SEC-04a could therefore carry `buffer_len = 0`
 /// beside a non-zero `cycle_position` — a pair the program itself can never be in, and the pair
 /// the bench of §11.5 reads for positions 16 and 17.
