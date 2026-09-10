@@ -831,6 +831,38 @@ fn the_start_up_reconciliation_of_autostart_has_names_of_its_own() {
     }
 }
 
+/// **Task T-55-2, решение 120.4 (ж) — a change of autostart the program withheld has a name of its
+/// own.** A session on a configuration from a newer schema asks the `Run` key nothing, and the
+/// check mark of FR-91 and «Применить» say so in the journal instead of in silence. The shape of
+/// «configuration save suppressed», whose neighbour it is, and `Kind::Process` like it.
+#[test]
+fn a_suppressed_change_of_autostart_has_a_name_of_its_own() {
+    let name = "autostart change suppressed";
+
+    let _gate = ring();
+
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» still reaches the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "{name} landed in the wrong group"
+    );
+
+    diag::record(operation, OsCode::NONE);
+
+    assert!(
+        diag::render().contains(name),
+        "the dump does not print {name}"
+    );
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the

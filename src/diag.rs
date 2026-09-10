@@ -645,6 +645,15 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // kind every configuration row takes — and **no new `Kind`**, the rule every note above follows.
     ("autostart registered at start", Kind::Process),
     ("autostart removed at start", Kind::Process),
+    // ⭐ **Task T-55-2, решение 120.4 (ж)** — a change of autostart the person asked for and the
+    // program withheld, because the session lives on a file from a newer schema: «Применить» and
+    // the check mark of FR-91 do not ask the `Run` key then, and this row is how the withholding
+    // reaches a dump instead of silence. The neighbour of «configuration save suppressed», and of
+    // its shape. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the state asked for, not the state kept.
+    // `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("autostart change suppressed", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

@@ -3397,13 +3397,42 @@ fn the_step_back_and_the_save_policy_of_t_13_6_answer_different_questions() {
 
     let asked = dialog_produced(&live(|tray| tray.config().clone()), !in_force);
 
-    tray::apply_settings_via(&asked, |_| Err(WinError::from(ERROR_ACCESS_DENIED)));
+    // Task T-55-2, решение 120.4 (ж): under `Forbidden` the registry is not asked at all. The
+    // closure still answers `Err`, as it did when this test was written for task T-13-24, and now
+    // it also counts — so that "not asked" is a number rather than an absence of evidence.
+    let registry_asked = Cell::new(0u32);
+    // Counted rather than looked for: the ring is the process's, and a neighbour may have left the
+    // same name in it already.
+    let notes_before = diag::render()
+        .matches("autostart change suppressed")
+        .count();
+
+    tray::apply_settings_via(&asked, |_| {
+        registry_asked.set(registry_asked.get() + 1);
+        Err(WinError::from(ERROR_ACCESS_DENIED))
+    });
 
     println!(
-        "under SavePolicy::Forbidden: entries={:?} autostart={} hotkey={}",
+        "under SavePolicy::Forbidden: registry asked {} times, entries={:?} autostart={} hotkey={}",
+        registry_asked.get(),
         home.entries(),
         live(Tray::autostart),
         live(|tray| tray.config().hotkey.key.clone())
+    );
+
+    assert_eq!(
+        registry_asked.get(),
+        0,
+        "решение 120.4 (ж), task T-55-2: a session on a file from a newer schema asks the `Run` key \
+         nothing, so the autostart below stays where it was without a refusal to step back from"
+    );
+    assert_eq!(
+        diag::render()
+            .matches("autostart change suppressed")
+            .count(),
+        notes_before + 1,
+        "and «Применить» says so in the journal: the dialog asked for a change of autostart that \
+         the program withheld"
     );
 
     // T-13-6's answer, unchanged.
@@ -3516,10 +3545,12 @@ fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
     );
 
     // The twin does return, and that is not a contradiction: its whole operation is the one
-    // field, so skipping the field and giving up the operation are the same act.
+    // field, so skipping the field and giving up the operation are the same act. Since task
+    // T-55-2 the twin's body is the seam `toggle_autostart_via`, and the menu entry hands it the
+    // real registry write — both halves are read here.
     let at = source
-        .find("fn toggle_autostart() {")
-        .expect("toggle_autostart must be in this file");
+        .find("pub fn toggle_autostart_via(")
+        .expect("toggle_autostart_via must be in this file");
     let twin = &source[at..];
     let end = twin.find("\n}").expect("a function closes with its brace");
     let twin = &twin[..end];
@@ -3528,6 +3559,18 @@ fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
         twin.contains("app::report_non_critical(\"RegSetValueExW\", &error);")
             && twin.contains("return;"),
         "the twin of FR-93 keeps the rule the way it always has"
+    );
+
+    let at = source
+        .find("fn toggle_autostart() {")
+        .expect("toggle_autostart must be in this file");
+    let door = &source[at..];
+    let end = door.find("\n}").expect("a function closes with its brace");
+
+    assert!(
+        door[..end].contains("toggle_autostart_via(settings::set_autostart)"),
+        "the check mark of FR-91 must hand in `settings::set_autostart`, the one function that \
+         writes the `Run` key of FR-93"
     );
 
     // And the product itself goes through the seam with the real registry write in its hand —
@@ -3728,33 +3771,34 @@ fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
     );
     let newer = "schema_version = 99\r\n\r\n[general]\r\nautostart = true\r\n".to_owned();
 
-    // (name, file text, whether there is a path at all, (reads, writes) expected)
+    // (name, file text, whether there is a path at all, expected: (reads at the start, writes at
+    // the start, registry calls of «Применить», registry calls of the check mark of FR-91))
     let cases = [
         (
             "a file read whole — Allowed",
             Some(&current),
             true,
-            (1, vec![true]),
+            (1, vec![true], 1, 1),
         ),
         (
             "no file, a first run — Allowed",
             None,
             true,
-            (1, vec![true]),
+            (1, vec![true], 1, 1),
         ),
         (
             "a file this build could not read — QuarantineFirst",
             Some(&unreadable),
             true,
-            (0, vec![]),
+            (0, vec![], 1, 1),
         ),
         (
             "a file from a newer schema — Forbidden",
             Some(&newer),
             true,
-            (0, vec![]),
+            (0, vec![], 0, 0),
         ),
-        ("no %APPDATA% at all", None, false, (0, vec![])),
+        ("no %APPDATA% at all", None, false, (0, vec![], 1, 1)),
     ];
 
     let mut wrong = Vec::new();
@@ -3769,13 +3813,41 @@ fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
         let asked = RunKeyAsked::default();
         let path = has_path.then(|| home.config());
 
-        drop(attach_with_run_key(
-            &window, path, true, None, false, &asked,
-        ));
+        // The start.
+        let attached = attach_with_run_key(&window, path, true, None, false, &asked);
 
-        let answered = (asked.reads.get(), asked.writes.borrow().clone());
+        // On request, through both doors, each asking for a change so that a write is always
+        // what the person wants and its absence can only be the rule. `general.enabled` is left
+        // alone — see the note at the head of the T-13-24 block.
+        let applied = Cell::new(0u32);
+        let mut dialog = live(|tray| tray.config().clone());
+        dialog.general.autostart = !dialog.general.autostart;
 
-        println!("{name}: reads={} writes={:?}", answered.0, answered.1);
+        tray::apply_settings_via(&dialog, |_| {
+            applied.set(applied.get() + 1);
+            Ok(())
+        });
+
+        let toggled = Cell::new(0u32);
+
+        tray::toggle_autostart_via(|_| {
+            toggled.set(toggled.get() + 1);
+            Ok(())
+        });
+
+        drop(attached);
+
+        let answered = (
+            asked.reads.get(),
+            asked.writes.borrow().clone(),
+            applied.get(),
+            toggled.get(),
+        );
+
+        println!(
+            "{name}: start reads={} writes={:?}; «Применить» asked {}; the check mark asked {}",
+            answered.0, answered.1, answered.2, answered.3
+        );
 
         if answered != expected {
             wrong.push(format!(
@@ -3785,6 +3857,103 @@ fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
     }
 
     assert!(wrong.is_empty(), "решение 120.4 (ж): {wrong:?}");
+}
+
+/// **Task T-55-2 — the second door.** The check mark of FR-91 on a session that lives on a file
+/// from a newer schema asks the `Run` key nothing: the check mark stays where it was, the file is
+/// not touched, and the refusal is a line of the journal rather than silence. The control is the
+/// same click on a file read whole — exactly one call, and the check mark follows it.
+///
+/// The journal is read as a count of the one name before and after the click, not as «the dump
+/// contains it»: the ring is the process's, and a neighbour of this binary could have left the
+/// name there already.
+#[test]
+fn the_check_mark_of_fr_91_on_a_newer_file_asks_the_registry_nothing_and_says_so() {
+    const SUPPRESSED: &str = "autostart change suppressed";
+
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+
+    // A file from a newer schema — `SavePolicy::Forbidden`.
+    let newer = TestDir::new("e55-toggle-forbidden");
+    fs::write(
+        newer.config(),
+        "schema_version = 99\r\n\r\n[general]\r\nautostart = true\r\n",
+    )
+    .expect("the newer file must be writable");
+    let before = fs::read(newer.config()).expect("the newer file must be readable");
+
+    let attached = attach_ui(&window, &newer);
+
+    assert_eq!(
+        live(Tray::save_policy),
+        settings::SavePolicy::Forbidden,
+        "the precondition: a file from a newer schema"
+    );
+
+    let notes_before = diag::render().matches(SUPPRESSED).count();
+    let asked = Cell::new(0u32);
+
+    tray::toggle_autostart_via(|_| {
+        asked.set(asked.get() + 1);
+        Ok(())
+    });
+
+    let notes_after = diag::render().matches(SUPPRESSED).count();
+
+    println!(
+        "under Forbidden: registry asked {} times, check mark {}, journal lines {notes_before} -> \
+         {notes_after}",
+        asked.get(),
+        live(Tray::autostart)
+    );
+
+    assert_eq!(
+        asked.get(),
+        0,
+        "решение 120.4 (ж): on a file from a newer schema the check mark asks the registry nothing"
+    );
+    assert!(
+        live(Tray::autostart),
+        "and the check mark stays where it was"
+    );
+    assert_eq!(
+        notes_after,
+        notes_before + 1,
+        "and the refusal is one line of the journal, not silence"
+    );
+
+    drop(attached);
+
+    assert_eq!(
+        fs::read(newer.config()).expect("the newer file must still be there"),
+        before,
+        "T-13-6: the file is not touched"
+    );
+
+    // The control: a file read whole — `SavePolicy::Allowed`.
+    let current = TestDir::new("e55-toggle-allowed");
+    current_file_saying(&current, true);
+
+    let attached = attach_ui(&window, &current);
+    let asked = Cell::new(0u32);
+    let wanted = Cell::new(None);
+
+    tray::toggle_autostart_via(|state| {
+        asked.set(asked.get() + 1);
+        wanted.set(Some(state));
+        Ok(())
+    });
+
+    assert_eq!(
+        (asked.get(), wanted.get()),
+        (1, Some(false)),
+        "the control: on a file read whole the click reaches the registry exactly once, turning \
+         autostart off"
+    );
+    assert!(!live(Tray::autostart), "and the check mark follows it");
+
+    drop(attached);
 }
 
 /// **Решение 120.4 (б), the other direction.** A configuration that says `false` meets a value of

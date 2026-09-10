@@ -694,6 +694,15 @@ impl Tray {
         self.config.general.autostart
     }
 
+    /// What the one read of the configuration said may be done to the file — the decision of task
+    /// T-13-6, read out — task T-55-2.
+    ///
+    /// «Применить» and the check mark of FR-91 ask it before they touch `HKCU\…\Run`: the one rule
+    /// of [`SavePolicy::lets_the_run_key_follow`] is a question about this value.
+    pub fn save_policy(&self) -> SavePolicy {
+        self.save_policy
+    }
+
     /// The configuration this tray holds.
     pub fn config(&self) -> &Config {
         &self.config
@@ -1437,6 +1446,11 @@ const AUTOSTART_REGISTERED_AT_START: &str = "autostart registered at start";
 
 /// The same start found `general.autostart = false` and a value under the name, and removed it.
 const AUTOSTART_REMOVED_AT_START: &str = "autostart removed at start";
+
+/// ⭐ **Решение 120.4 (ж), task T-55-2.** «Применить» or the check mark of FR-91 asked for a change
+/// of autostart on a session that lives on a file from a newer schema, and the registry was not
+/// asked — [`apply_settings_via`], [`toggle_autostart_via`].
+const AUTOSTART_CHANGE_SUPPRESSED: &str = "autostart change suppressed";
 
 /// Puts one configuration event into the ring: the fact, and nothing of the file.
 ///
@@ -3815,15 +3829,26 @@ fn apply_settings(config: &Config) {
 /// disagreement is visible rather than hidden. What changes is only that the **file** stops
 /// claiming what is not so.
 ///
-/// # And the save policy of task T-13-6
+/// # And the save policy of task T-13-6 — where the two meet since task T-55-2
 ///
-/// The two mechanisms never meet. This one decides **what** is stored; [`Tray::save_config`]
-/// decides **whether** the file may be written at all, on its own facts — the outcome of the
-/// one read this program performs — and it decides that afterwards and underneath
-/// [`Tray::replace_config`]. A session running under [`SavePolicy::Forbidden`] writes no file
-/// either way, and the corrected value is still the one the tray holds in memory and the one
-/// the check mark of FR-91 shows. Neither can shadow the other, and neither has to know the
-/// other exists.
+/// For the **file** they still decide different questions. This function decides **what** is
+/// stored; [`Tray::save_config`] decides **whether** the file may be written at all, on its own
+/// facts — the outcome of the one read this program performs — and it decides that afterwards and
+/// underneath [`Tray::replace_config`].
+///
+/// For the **registry** they meet once, in front of the write: the one rule of решение 120.4 (ж),
+/// [`SavePolicy::lets_the_run_key_follow`] at [`settings::RunKeyMoment::Request`], shared with the
+/// start of the program and with [`toggle_autostart_via`]. Before that task this door wrote the
+/// `Run` key whatever the file was, and under [`SavePolicy::Forbidden`] — a file from a newer build,
+/// not written this session — «Применить» made the registry and that file disagree for good. Now
+/// the registry is not asked at all there, and `general.autostart` steps back exactly as it does on
+/// a refusal: every other change of the dialog is still taken into memory, and a change of
+/// autostart the person asked for is withheld and says so in the journal
+/// ([`AUTOSTART_CHANGE_SUPPRESSED`]). Under [`SavePolicy::QuarantineFirst`] the registry **does**
+/// follow: the person is choosing now, and their choice is what the file will carry once the
+/// unreadable bytes are moved aside. That is the one difference from the start of the program,
+/// where the same policy leaves the registry alone — the configuration then is defaults nobody
+/// chose.
 ///
 /// # Why the registry write is an argument
 ///
@@ -3841,17 +3866,36 @@ pub fn apply_settings_via(config: &Config, write_run_key: impl FnOnce(bool) -> W
     // keep.
     let in_force = with_tray(|tray| tray.autostart());
 
+    // Решение 120.4 (ж), task T-55-2: the one rule, asked on request — see the section on the save
+    // policy above. A thread with no tray of its own follows, as this door always did.
+    let may_follow = with_tray(|tray| {
+        tray.save_policy()
+            .lets_the_run_key_follow(settings::RunKeyMoment::Request)
+    })
+    .unwrap_or(true);
+
     let mut stored = config.clone();
 
     // FR-93 first: if the registry refuses, the file is not made to claim otherwise.
-    if let Err(error) = write_run_key(config.general.autostart) {
+    let steps_back = if !may_follow {
+        // Not asked at all. A change the person did ask for is withheld, and the journal is told.
+        if in_force.is_some_and(|in_force| in_force != config.general.autostart) {
+            note_configuration(AUTOSTART_CHANGE_SUPPRESSED);
+        }
+
+        true
+    } else if let Err(error) = write_run_key(config.general.autostart) {
         // NFR-13: the refusal is used, not swallowed. It is reported, and it is the reason the
         // one field below steps back to what is true.
         app::report_non_critical("RegSetValueExW", &error);
 
-        if let Some(in_force) = in_force {
-            stored.general.autostart = in_force;
-        }
+        true
+    } else {
+        false
+    };
+
+    if steps_back && let Some(in_force) = in_force {
+        stored.general.autostart = in_force;
     }
 
     with_tray(|tray| tray.replace_config(stored.clone()));
@@ -3912,11 +3956,44 @@ pub fn adopt_ui_language() {
 /// describes what the system will do at the next logon, and a file that disagrees with the
 /// system would make the tray show a state that is not true.
 fn toggle_autostart() {
-    let Some(wanted) = with_tray(|tray| !tray.autostart()) else {
+    toggle_autostart_via(settings::set_autostart);
+}
+
+/// The same, with the registry write handed in — task T-55-2.
+///
+/// # The second door, and the same rule
+///
+/// Before that task the menu entry wrote the `Run` key whatever the session's file was, and a
+/// session on a file from a newer schema — a file not written at all this session — made the
+/// registry and that file disagree for good at one click. The entry now asks the one rule of
+/// решение 120.4 (ж), [`SavePolicy::lets_the_run_key_follow`] at
+/// [`settings::RunKeyMoment::Request`], exactly as «Применить» does in [`apply_settings_via`]: under
+/// [`SavePolicy::Forbidden`] the registry is not asked, the check mark stays where it was, and the
+/// refusal is one line of the journal ([`AUTOSTART_CHANGE_SUPPRESSED`]) — never silence.
+///
+/// # Why the registry write is an argument
+///
+/// The reason [`apply_settings_via`] gives: no test may drive this door through the real
+/// `HKCU\…\CurrentVersion\Run`. `tests\tray.rs` hands in a closure that counts; the menu hands in
+/// [`settings::set_autostart`] through [`toggle_autostart`], and nothing else does.
+pub fn toggle_autostart_via(write_run_key: impl FnOnce(bool) -> WinResult<()>) {
+    let Some((wanted, may_follow)) = with_tray(|tray| {
+        (
+            !tray.autostart(),
+            tray.save_policy()
+                .lets_the_run_key_follow(settings::RunKeyMoment::Request),
+        )
+    }) else {
         return;
     };
 
-    if let Err(error) = settings::set_autostart(wanted) {
+    if !may_follow {
+        // Решение 120.4 (ж): the file is not written this session, so neither is the registry.
+        note_configuration(AUTOSTART_CHANGE_SUPPRESSED);
+        return;
+    }
+
+    if let Err(error) = write_run_key(wanted) {
         // NFR-13. Nothing is recorded anywhere: the state the user asked for was not reached,
         // and the check mark stays where it was.
         app::report_non_critical("RegSetValueExW", &error);
