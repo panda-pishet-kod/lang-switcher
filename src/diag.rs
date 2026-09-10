@@ -698,6 +698,14 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // a byte of any of them. `Kind::Selection` and **no new `Kind`**, the rule every note above
     // follows.
     ("clipboard formats truncated", Kind::Selection),
+    // ⭐ **Task T-38-8, finding С11 of the audit of 2026-09-04, decisions 121.2 and 121.3** — the
+    // clipboard listed formats and `selection::snapshot` kept none of them: step 1 answered
+    // success, and step 8 will have nothing to put back. The behaviour is not changed; this is the
+    // trace of it. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not how many formats there were, not which, not
+    // why none was kept. `Kind::Selection` and **no new `Kind`**, the rule every note above follows.
+    ("clipboard snapshot saved nothing", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
@@ -1343,7 +1351,8 @@ fn local_time() -> Option<String> {
 /// refused `PostMessage`s. Task T-34-4 (finding Н95) added the fourteen counters of the
 /// password-field guard (`guard.*`) and the fifteen of the clipboard path (`selection.*`),
 /// through the readers those two modules publish; task T-38-7 (finding Н16) added a sixteenth,
-/// `selection.format_list_truncations`.
+/// `selection.format_list_truncations`, and task T-38-8 (finding С11) a seventeenth,
+/// `selection.snapshots_saved_nothing`.
 ///
 /// `watchdog::counters` and `hook::hotkey_handoffs` are **left out on purpose**. They are
 /// honest counts of program events and SEC-07 would permit them, but they are proportional to
@@ -1473,10 +1482,11 @@ fn render_counters(out: &mut String) {
 
     // Task T-34-4, finding Н95: the fourteen counters of the password-field guard of FR-70…FR-73
     // and the fifteen of the clipboard path of FR-60…FR-65, through the public readers both
-    // modules already publish. Counts and nothing else — SEC-07 allows a number and forbids a
-    // name of what was observed, and none of these carries one. `tests\diag.rs` builds this list
-    // a second time by taking the two structures apart field by field, so a counter added there
-    // and not here is a compile error rather than a silent hole.
+    // modules already publish; tasks T-38-7 and T-38-8 added a sixteenth and a seventeenth of the
+    // clipboard path. Counts and nothing else — SEC-07 allows a number and forbids a name of what
+    // was observed, and none of these carries one. `tests\diag.rs` builds this list a second time
+    // by taking the two structures apart field by field, so a counter added there and not here is
+    // a compile error rather than a silent hole.
     let guard = crate::guard::counters();
     row_u32(out, "guard.focus_changes", guard.focus_changes);
     row_u32(out, "guard.probes", guard.probes);
@@ -1520,6 +1530,11 @@ fn render_counters(out: &mut String) {
         out,
         "selection.format_list_truncations",
         clipboard.format_list_truncations,
+    );
+    row_u32(
+        out,
+        "selection.snapshots_saved_nothing",
+        clipboard.snapshots_saved_nothing,
     );
     row_u32(out, "selection.refused_formats", clipboard.refused_formats);
     row_u32(out, "selection.handle_formats", clipboard.handle_formats);

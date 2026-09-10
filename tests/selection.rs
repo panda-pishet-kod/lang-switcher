@@ -3075,6 +3075,129 @@ fn a_list_of_formats_cut_short_has_a_name_of_its_own_in_the_journal() {
     );
 }
 
+/// **Finding С11 of the audit of 2026-09-04, task T-38-8, decision 121.2 — «there was something to
+/// keep, and nothing was kept» is a fact of its own, counted and journalled once.**
+///
+/// A clipboard held only a metafile, or went over the budget of FR-64 with no text, or every
+/// delayed format refused: step 1 answered success, `Ctrl+C` went out, and step 8 could put back
+/// nothing. The behaviour stays as it is — the gate before step 2 is a question of its own
+/// (decision 121.2) — and what changes is that the fact leaves a trace. Decided from two numbers,
+/// so the rule is driven here without a clipboard: three formats listed, none kept.
+#[test]
+fn a_snapshot_that_kept_nothing_of_a_listed_clipboard_is_counted_and_journalled_once() {
+    let _serialised = serialised();
+
+    let named = Operation::from_name("clipboard snapshot saved nothing");
+    let before = selection::counters();
+    let journal_before = lang_switcher::diag::recorded();
+
+    assert!(
+        selection::snapshot_saved_nothing(3, 0),
+        "three formats listed and none kept"
+    );
+
+    let after = selection::counters();
+
+    assert_eq!(
+        after.snapshots_saved_nothing,
+        before.snapshots_saved_nothing + 1,
+        "counted once"
+    );
+    assert_eq!(
+        lang_switcher::diag::snapshot()
+            .iter()
+            .filter(|event| event.ordinal >= journal_before && event.operation == named)
+            .count(),
+        1,
+        "and one entry of the journal, under its own name"
+    );
+}
+
+/// **С11, the asymmetry — a snapshot that kept nothing because there was nothing is not the fact
+/// above, and neither is one that kept something.** The same asymmetry `restore_placed_nothing`
+/// keeps for the restore: an empty clipboard, snapshotted empty, is the whole of the correct
+/// behaviour, and a clipboard over the budget whose text was kept lost a part, not everything.
+#[test]
+fn a_snapshot_of_nothing_or_that_kept_something_is_not_one_that_saved_nothing() {
+    let _serialised = serialised();
+
+    let before = selection::counters();
+
+    for (listed, captured, what) in [
+        (0, 0, "an empty clipboard, and an empty snapshot of it"),
+        (3, 3, "every listed format kept"),
+        (3, 1, "only the text kept, over the budget of FR-64"),
+    ] {
+        assert!(
+            !selection::snapshot_saved_nothing(listed, captured),
+            "{what}: listed {listed}, captured {captured}"
+        );
+    }
+
+    assert_eq!(
+        selection::counters().snapshots_saved_nothing,
+        before.snapshots_saved_nothing,
+        "none of them is counted"
+    );
+}
+
+/// **С11 — SEC-07.** The snapshot that saved nothing has a name of its own in the journal's closed
+/// vocabulary (decision 121.3).
+#[test]
+fn a_snapshot_that_saved_nothing_has_a_name_of_its_own_in_the_journal() {
+    let saved_nothing = Operation::from_name("clipboard snapshot saved nothing");
+
+    assert_ne!(
+        saved_nothing,
+        Operation::UNLISTED,
+        "the row decision 121.3 allowed is in the table, so the entry is named rather than counted"
+    );
+    assert_eq!(saved_nothing.name(), "clipboard snapshot saved nothing");
+    assert_eq!(saved_nothing.kind(), Kind::Selection);
+}
+
+/// **С11, the structural half — where the question stands in `snapshot`, and what it is handed.**
+///
+/// After the markers of decision 121.7 are put in, so that the count it is handed is final: asked
+/// before the copying, it would see every snapshot empty and count every clipboard there is.
+/// Before the snapshot is returned. And handed what was kept **of the clipboard** — a marker found
+/// without data goes back in the restrictive form this program writes, it is not something kept,
+/// so a clipboard that had nothing else still saved nothing (task T-38-6 made that case possible).
+/// The body is cut at the end of the function, so the definition of the predicate further down the
+/// file cannot stand in for a call that is not there.
+#[test]
+fn a_snapshot_asks_whether_it_saved_nothing_on_the_final_count_of_what_it_kept() {
+    let source = source_of("selection.rs");
+    let body = body_after(&source, "pub fn snapshot(owner: HWND)");
+
+    assert_eq!(
+        body.matches("snapshot_saved_nothing(").count(),
+        1,
+        "asked once, in the one function that has the real numbers"
+    );
+
+    let asked = body
+        .find("snapshot_saved_nothing(")
+        .expect("the fact is asked");
+    let markers = body
+        .find("PRIVACY_MARKER_DATA.to_vec()")
+        .expect("the markers found without data are put in");
+    let returned = body
+        .find("Ok(Snapshot {")
+        .expect("the snapshot is returned");
+
+    assert!(
+        markers < asked && asked < returned,
+        "asked on the final count of what was kept, and before the snapshot leaves"
+    );
+
+    let call = cut_at(&body[asked..], ";", "the call of snapshot_saved_nothing");
+
+    for handed in ["listed.len()", "captured.len()", "markers_without_data"] {
+        assert!(call.contains(handed), "the call is handed {handed}: {call}");
+    }
+}
+
 /// **SEC-07.** The skipped restore of decision П-5 has a name in the journal's closed vocabulary.
 #[test]
 fn the_skipped_restore_has_a_name_in_the_journal() {

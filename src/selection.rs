@@ -406,6 +406,15 @@ static TRUNCATIONS: AtomicU32 = AtomicU32::new(0);
 /// listed more formats than this module walks, and whose tail the snapshot never saw.
 static FORMAT_LIST_TRUNCATIONS: AtomicU32 = AtomicU32::new(0);
 
+/// Snapshots of a clipboard that listed formats and kept none of them — **finding С11 of the audit
+/// of 2026-09-04, task T-38-8, decision 121.2**. A metafile and nothing else, a clipboard over the
+/// budget of FR-64 with no text, every delayed format refused: step 1 answered success, the
+/// `Ctrl+C` of step 2 goes out regardless, and step 8 will have nothing to put back. The behaviour
+/// is not changed; this is the trace of it, which no other count gives: [`REFUSED_FORMATS`] and
+/// [`HANDLE_FORMATS_SEEN`] add up over every snapshot, and not one of them says a snapshot came out
+/// empty.
+static SNAPSHOTS_SAVED_NOTHING: AtomicU32 = AtomicU32::new(0);
+
 /// Formats that were listed on the clipboard and could not be read out of it.
 ///
 /// Delayed rendering, mostly: see [`snapshot`]. Counted rather than escalated, because FR-64
@@ -562,6 +571,10 @@ pub struct Counters {
     /// Snapshots whose list of formats was cut short at [`MAX_FORMATS`] — finding Н16, task
     /// T-38-7. A count of the bound being reached, and nothing about what the formats held.
     pub format_list_truncations: u32,
+    /// Snapshots of a clipboard that listed formats and kept none of them — finding С11, task
+    /// T-38-8, see [`snapshot_saved_nothing`]. A count of snapshots of this program that leave
+    /// step 8 nothing to put back, and nothing about what the formats held.
+    pub snapshots_saved_nothing: u32,
     /// Listed formats that could not be read — delayed rendering, mostly.
     pub refused_formats: u32,
     /// Listed formats that are not memory blocks — see [`HANDLE_FORMATS`].
@@ -593,6 +606,7 @@ pub fn counters() -> Counters {
         foreign_updates: FOREIGN_UPDATES.load(Ordering::Relaxed),
         truncations: TRUNCATIONS.load(Ordering::Relaxed),
         format_list_truncations: FORMAT_LIST_TRUNCATIONS.load(Ordering::Relaxed),
+        snapshots_saved_nothing: SNAPSHOTS_SAVED_NOTHING.load(Ordering::Relaxed),
         refused_formats: REFUSED_FORMATS.load(Ordering::Relaxed),
         handle_formats: HANDLE_FORMATS_SEEN.load(Ordering::Relaxed),
         listener_remove_failures: LISTENER_REMOVE_FAILURES.load(Ordering::Relaxed),
@@ -1292,6 +1306,15 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
         }
     }
 
+    // ⭐ **Finding С11 of the audit of 2026-09-04, task T-38-8.** Something listed and nothing of it
+    // kept is counted and journalled once, on the final count: after the copying, and without the
+    // markers above, which go back in this program's own restrictive form and are not something
+    // kept. The answer changes nothing here — decision 121.2.
+    let _saved_nothing = snapshot_saved_nothing(
+        listed.len(),
+        captured.len().saturating_sub(markers_without_data),
+    );
+
     // Read after the copying and while the clipboard is still ours, so that the baseline step 3
     // of FR-61 compares against is the state the snapshot actually describes.
     let sequence = sequence_number();
@@ -1373,6 +1396,55 @@ fn note_truncation() {
 fn note_format_list_truncation() {
     crate::diag::record(
         crate::diag::Operation::from_name("clipboard formats truncated"),
+        crate::diag::OsCode::NONE,
+    );
+}
+
+/// ⭐ **Finding С11 of the audit of 2026-09-04, task T-38-8, decision 121.2.** Whether a snapshot of
+/// a clipboard that listed formats kept none of them — and, when it did, the count and the journal
+/// entry of that fact.
+///
+/// `listed` is how many formats the clipboard listed; `captured` is how many entries were kept
+/// **of the clipboard** — the markers of decision 121.7 found without data are left out by the
+/// caller, because the bytes they go back with are this program's own and not something kept. The
+/// asymmetry [`restore_placed_nothing`] keeps for step 8, on the side of step 1: an **empty**
+/// clipboard snapshotted empty answers `false` — there was nothing to keep, and keeping nothing is
+/// the whole of the correct behaviour — and so does a snapshot that kept a part, the text of a
+/// clipboard over the budget of FR-64. The fact is the asymmetry: something listed, nothing kept.
+///
+/// # Why the count is taken here
+///
+/// «Counted where it is decided», the rule [`console_refuses_selection`] follows: the fact is a
+/// function of two numbers, so acceptance drives it — three listed, none kept — with no clipboard
+/// at all, and sees the counter move and the journal grow by one entry. [`snapshot`] is the one
+/// caller, and the one place that has the real numbers.
+///
+/// # What does not change
+///
+/// The behaviour. Step 1 still answers success and the `Ctrl+C` of step 2 still goes out: a gate
+/// before step 2 is a question of its own (decision 121.2). This is the trace of the fact, and
+/// only that.
+pub fn snapshot_saved_nothing(listed: usize, captured: usize) -> bool {
+    let saved_nothing = listed > 0 && captured == 0;
+
+    if saved_nothing {
+        SNAPSHOTS_SAVED_NOTHING.fetch_add(1, Ordering::Relaxed);
+        note_snapshot_saved_nothing();
+    }
+
+    saved_nothing
+}
+
+/// Puts the journal entry a snapshot that saved nothing leaves behind — **finding С11 of the audit
+/// of 2026-09-04, task T-38-8, decisions 121.2 and 121.3**.
+///
+/// The shape of [`note_truncation`] and [`note_format_list_truncation`], and for their reasons: the
+/// *fact* and nothing else, under the row decision 121.3 allowed — «clipboard snapshot saved
+/// nothing» — with [`crate::diag::OsCode::NONE`] beside it, because no Win32 call failed and a
+/// number built from the snapshot would be a shape of somebody's clipboard (SEC-01, SEC-07).
+fn note_snapshot_saved_nothing() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard snapshot saved nothing"),
         crate::diag::OsCode::NONE,
     );
 }

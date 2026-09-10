@@ -1604,6 +1604,7 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         foreign_updates,
         truncations,
         format_list_truncations,
+        snapshots_saved_nothing,
         refused_formats,
         handle_formats,
         listener_remove_failures,
@@ -1623,6 +1624,7 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         ("selection.foreign_updates", foreign_updates),
         ("selection.truncations", truncations),
         ("selection.format_list_truncations", format_list_truncations),
+        ("selection.snapshots_saved_nothing", snapshots_saved_nothing),
         ("selection.refused_formats", refused_formats),
         ("selection.handle_formats", handle_formats),
         (
