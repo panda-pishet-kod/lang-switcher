@@ -17,7 +17,7 @@
 //! Nothing here writes into the real `%APPDATA%\Lang_Switcher`: every tray is installed
 //! with [`Tray::install_at`] pointing at a directory under `%TEMP%` that removes itself.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -3538,6 +3538,411 @@ fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
         entry.contains("apply_settings_via(config, settings::set_autostart)"),
         "«Применить» must hand in `settings::set_autostart`, which is the one function that \
          writes the `Run` key of FR-93"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-55-1, решение 120.4 — autostart for real: every start makes the `Run` key agree with
+// the configuration
+// ---------------------------------------------------------------------------------------
+//
+// ⚠ **The registry is a seam here too, and never the real key** — the rule of the T-13-24 block
+// above. `tray::attach_at_via` takes the guard of (е), the reading of the value and its write as
+// arguments; every test below hands in closures that count what they were asked, and the first
+// one reads `settings::autostart_value()` before and after to show the machine's own value never
+// moved. The product goes through `tray::attach_at`, which hands in the real three — the last test
+// of the block reads that out of the source.
+
+/// What the start-up reconciliation asked of a registry that was handed in — task T-55-1.
+#[derive(Default)]
+struct RunKeyAsked {
+    /// How many times the value was read.
+    reads: Cell<u32>,
+    /// Every write, in order, with the state it asked for.
+    writes: RefCell<Vec<bool>>,
+}
+
+/// Attaches a tray through the seam of решение 120.4 (б): a registry that holds `value`, answers
+/// every write with success — or with `ERROR_ACCESS_DENIED` when `refuse` — and counts.
+fn attach_with_run_key(
+    window: &TestWindow,
+    config_path: Option<PathBuf>,
+    may_register: bool,
+    value: Option<String>,
+    refuse: bool,
+    asked: &RunKeyAsked,
+) -> Attachment {
+    let product = ProductImage::open();
+
+    tray::attach_at_via(
+        window.handle,
+        product.instance(),
+        config_path,
+        may_register,
+        || {
+            asked.reads.set(asked.reads.get() + 1);
+            value
+        },
+        |wanted| {
+            asked.writes.borrow_mut().push(wanted);
+
+            if refuse {
+                Err(WinError::from(ERROR_ACCESS_DENIED))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .expect("the tray must attach: the icons are in the product binary's resources")
+}
+
+/// A current file of section 7 that says `autostart = {autostart}` and nothing else.
+fn current_file_saying(home: &TestDir, autostart: bool) {
+    fs::write(
+        home.config(),
+        format!(
+            "schema_version = {}\r\n\r\n[general]\r\nautostart = {autostart}\r\n",
+            settings::CURRENT_SCHEMA_VERSION
+        ),
+    )
+    .expect("the configuration must be writable");
+}
+
+/// **Решение 120.4 (б), the first red of task T-55-1.** A configuration that says `true` meets a
+/// `Run` key with no value of ours, and after the start the value is there — written once, with
+/// `true`, and named in the journal.
+///
+/// Before this task the start asked the registry nothing: the default of section 7 was a check mark
+/// and nothing more, and the value appeared only when somebody pressed «Применить».
+#[test]
+fn a_start_on_true_writes_the_run_key_value_that_is_missing() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-start-writes");
+    let asked = RunKeyAsked::default();
+    let registry_before = settings::autostart_value();
+
+    let attached = attach_with_run_key(&window, Some(home.config()), true, None, false, &asked);
+
+    assert!(
+        live(Tray::autostart),
+        "a first run carries the default of section 7, `general.autostart = true`"
+    );
+    assert_eq!(
+        *asked.writes.borrow(),
+        vec![true],
+        "решение 120.4 (б): the missing value is written at the start, exactly once"
+    );
+    assert!(
+        diag::render().contains("autostart registered at start"),
+        "and the action is a line of the journal"
+    );
+
+    drop(attached);
+
+    assert_eq!(
+        settings::autostart_value(),
+        registry_before,
+        "the seam is the whole of it — the real `Run` key of whoever runs this is untouched"
+    );
+}
+
+/// **Решение 120.4 (е), the second red of task T-55-1.** A build that may not register itself asks
+/// the registry nothing — not a read, not a write — even on `true` with no value there. The
+/// control is the same start with the guard open: one read and one write.
+#[test]
+fn a_build_that_may_not_register_itself_asks_the_registry_nothing() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-guard");
+    current_file_saying(&home, true);
+
+    let closed = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        false,
+        None,
+        false,
+        &closed,
+    ));
+
+    let open = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        true,
+        None,
+        false,
+        &open,
+    ));
+
+    println!(
+        "guard closed: reads={} writes={:?}; guard open: reads={} writes={:?}",
+        closed.reads.get(),
+        closed.writes.borrow(),
+        open.reads.get(),
+        open.writes.borrow()
+    );
+
+    assert_eq!(
+        (closed.reads.get(), closed.writes.borrow().len()),
+        (0, 0),
+        "решение 120.4 (е): a build that is not the installed product never reaches the registry"
+    );
+    assert_eq!(
+        (open.reads.get(), open.writes.borrow().clone()),
+        (1, vec![true]),
+        "the control: with the guard open the same start reads once and writes the missing value"
+    );
+}
+
+/// **Решение 120.4 (ж) and task T-55-2 — one rule, one test: the `Run` key follows only a
+/// configuration a person stands behind.**
+///
+/// At the start that is a file read whole, or no file at all — a first run (`SavePolicy::Allowed`).
+/// A file this build could not read (`QuarantineFirst`), a file from a newer schema (`Forbidden`)
+/// and a session with no `%APPDATA%` put the program on configurations nobody chose, and the
+/// registry is asked nothing. The controls are the file read whole and the first run: exactly one
+/// write each. Every case says `autostart = true` to a registry with no value, so a write is always
+/// what agreement would call for, and its absence can only be the rule.
+#[test]
+fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+
+    let current = format!(
+        "schema_version = {}\r\n\r\n[general]\r\nautostart = true\r\n",
+        settings::CURRENT_SCHEMA_VERSION
+    );
+    let unreadable = format!(
+        "schema_version = {}\r\n\r\n[general\r\nautostart = true\r\n",
+        settings::CURRENT_SCHEMA_VERSION
+    );
+    let newer = "schema_version = 99\r\n\r\n[general]\r\nautostart = true\r\n".to_owned();
+
+    // (name, file text, whether there is a path at all, (reads, writes) expected)
+    let cases = [
+        (
+            "a file read whole — Allowed",
+            Some(&current),
+            true,
+            (1, vec![true]),
+        ),
+        (
+            "no file, a first run — Allowed",
+            None,
+            true,
+            (1, vec![true]),
+        ),
+        (
+            "a file this build could not read — QuarantineFirst",
+            Some(&unreadable),
+            true,
+            (0, vec![]),
+        ),
+        (
+            "a file from a newer schema — Forbidden",
+            Some(&newer),
+            true,
+            (0, vec![]),
+        ),
+        ("no %APPDATA% at all", None, false, (0, vec![])),
+    ];
+
+    let mut wrong = Vec::new();
+
+    for (index, (name, text, has_path, expected)) in cases.into_iter().enumerate() {
+        let home = TestDir::new(&format!("e55-rule-{index}"));
+
+        if let Some(text) = text {
+            fs::write(home.config(), text).expect("the configuration must be writable");
+        }
+
+        let asked = RunKeyAsked::default();
+        let path = has_path.then(|| home.config());
+
+        drop(attach_with_run_key(
+            &window, path, true, None, false, &asked,
+        ));
+
+        let answered = (asked.reads.get(), asked.writes.borrow().clone());
+
+        println!("{name}: reads={} writes={:?}", answered.0, answered.1);
+
+        if answered != expected {
+            wrong.push(format!(
+                "{name}: expected {expected:?}, answered {answered:?}"
+            ));
+        }
+    }
+
+    assert!(wrong.is_empty(), "решение 120.4 (ж): {wrong:?}");
+}
+
+/// **Решение 120.4 (б), the other direction.** A configuration that says `false` meets a value of
+/// ours in the `Run` key, and the value is removed; with no value there, nothing is written at all.
+#[test]
+fn a_start_on_false_removes_the_value_and_leaves_an_absent_one_alone() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-start-removes");
+    current_file_saying(&home, false);
+
+    let present = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        true,
+        settings::autostart_command(),
+        false,
+        &present,
+    ));
+
+    let absent = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        true,
+        None,
+        false,
+        &absent,
+    ));
+
+    assert_eq!(
+        *present.writes.borrow(),
+        vec![false],
+        "решение 120.4 (б): `false` with a value there removes it, exactly once"
+    );
+    assert!(
+        diag::render().contains("autostart removed at start"),
+        "and the action is a line of the journal"
+    );
+    assert_eq!(
+        (absent.reads.get(), absent.writes.borrow().len()),
+        (1, 0),
+        "no value is already what `false` asks for: read once, nothing written"
+    );
+}
+
+/// **Agreement is left alone — and a value that points somewhere else is not agreement.** A value
+/// equal to the command this image would write is not written again; a value under our name that
+/// names another image — a build that once registered itself from `<dev>`, an older install — is
+/// replaced, because a `Run` value that starts something else is not autostart of this program.
+#[test]
+fn a_start_in_agreement_writes_nothing_and_a_value_naming_another_image_is_rewritten() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-start-agreement");
+    current_file_saying(&home, true);
+
+    let agreeing = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        true,
+        settings::autostart_command(),
+        false,
+        &agreeing,
+    ));
+
+    let foreign = RunKeyAsked::default();
+    drop(attach_with_run_key(
+        &window,
+        Some(home.config()),
+        true,
+        Some(r#""<dev>\cache\target\debug\LangSwitcher.exe""#.to_owned()),
+        false,
+        &foreign,
+    ));
+
+    assert_eq!(
+        (agreeing.reads.get(), agreeing.writes.borrow().len()),
+        (1, 0),
+        "a value that already starts this image is read and left alone"
+    );
+    assert_eq!(
+        *foreign.writes.borrow(),
+        vec![true],
+        "a value naming another image is written over with this one"
+    );
+}
+
+/// **A refusal at the start changes nothing in memory.** Nobody asked for anything at this moment:
+/// the file says what the person chose, and it stays the source of truth (решение 120.4 (а)). The
+/// write was attempted; the configuration, the check mark of FR-91 and the file keep `true`, and
+/// the next start tries again.
+#[test]
+fn a_refused_run_key_at_the_start_leaves_the_configuration_as_the_file_has_it() {
+    let _locale = locale_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-start-refused");
+    current_file_saying(&home, true);
+
+    let asked = RunKeyAsked::default();
+    let attached = attach_with_run_key(&window, Some(home.config()), true, None, true, &asked);
+
+    assert_eq!(
+        *asked.writes.borrow(),
+        vec![true],
+        "the write was attempted"
+    );
+    assert!(
+        live(Tray::autostart),
+        "and nothing stepped back — the configuration is still what the file says"
+    );
+
+    drop(attached);
+
+    let (stored, outcome) = settings::read_or_default(&home.config());
+
+    assert!(outcome.is_ok(), "the file must parse: {:?}", outcome.err());
+    assert!(
+        stored.general.autostart,
+        "the file still says what the person chose"
+    );
+}
+
+/// **The start of the product hands the guard and the real registry to the seam, and the seam
+/// reconciles** — task T-55-1. Swept over the source for the reason the sweep above gives: the
+/// behaviour is measured through the seam, and what no test can drive is that the product goes
+/// through it with the real three in its hand.
+#[test]
+fn the_start_of_the_product_hands_the_guard_and_the_real_registry_to_the_seam() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let body_of = |signature: &str| -> String {
+        let at = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} must be in src\\tray.rs"));
+        let body = &source[at..];
+        let end = body.find("\n}").expect("a function closes with its brace");
+
+        body[..end].to_owned()
+    };
+
+    let entry = body_of("pub fn attach_at(");
+
+    for needle in [
+        "settings::this_build_may_register_autostart()",
+        "settings::autostart_value",
+        "settings::set_autostart",
+    ] {
+        assert!(
+            entry.contains(needle),
+            "`attach_at` — the start of the product — must hand in {needle}"
+        );
+    }
+
+    assert!(
+        body_of("pub fn attach_at_via(").contains("reconcile_autostart("),
+        "the seam must make the `Run` key agree with the configuration at every start"
     );
 }
 

@@ -1758,6 +1758,44 @@ impl SavePolicy {
             Err(_) => Self::QuarantineFirst,
         }
     }
+
+    /// Whether `HKCU\…\Run` may be made to follow a configuration at `moment` — **the one rule of
+    /// решение 120.4 (ж) and task T-55-2**.
+    ///
+    /// **The rule in one sentence: the `Run` key follows only a configuration a person stands
+    /// behind** — at the start, the one read whole out of their file or made by a first run
+    /// ([`SavePolicy::Allowed`]); on request, the one they have just chosen, as long as their file
+    /// may be written at all (anything but [`SavePolicy::Forbidden`]).
+    ///
+    /// The two moments differ on exactly one policy, and on purpose. Under
+    /// [`SavePolicy::QuarantineFirst`] the configuration at the start is the defaults standing in
+    /// for text this build could not read: nobody chose them, and the person's own autostart is
+    /// somewhere in the bytes that were not understood, so the registry is left alone. The same
+    /// policy on request is a person choosing in the dialog, and their choice is what the file will
+    /// carry once the unreadable bytes are moved aside — so the registry follows. Under
+    /// [`SavePolicy::Forbidden`] the file is from a newer build and is not written this session: a
+    /// registry made to follow anything then would disagree with that file for good.
+    ///
+    /// ⚠ A session with no `%APPDATA%` has read nothing and is not a policy; its caller,
+    /// [`crate::tray`], answers that case where it asks.
+    pub fn lets_the_run_key_follow(self, moment: RunKeyMoment) -> bool {
+        match self {
+            Self::Allowed => true,
+            Self::QuarantineFirst => moment == RunKeyMoment::Request,
+            Self::Forbidden => false,
+        }
+    }
+}
+
+/// The two moments at which `HKCU\…\Run` could be made to follow a configuration — решение 120.4
+/// (ж), tasks T-55-1 and T-55-2. What each may do is [`SavePolicy::lets_the_run_key_follow`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunKeyMoment {
+    /// The start of the program: the configuration is whatever the one read produced.
+    Start,
+    /// A person asked — «Применить» of FR-92 or the check mark of FR-91 — and the configuration is
+    /// what they have just chosen.
+    Request,
 }
 
 /// What is appended to the name of a configuration file that is moved out of the way.
@@ -1949,6 +1987,65 @@ pub fn autostart_command() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
 
     Some(format!("\"{}\"", exe.display()))
+}
+
+/// Whether the image at `exe` may put itself into [`RUN_KEY_PATH`] — **решение 120.4 (е)**, task
+/// T-55-1.
+///
+/// ⛔⛔ **The guard against litter, and the first thing task T-55-1 put in.** From that task on the
+/// start of the program makes the registry agree with `general.autostart` (решение 120.4 (б)), and
+/// `general.autostart` defaults to `true`. Without this guard every debug build somebody runs,
+/// every test binary that attaches a tray and every bench under `<dev>` would write its own path
+/// into `HKCU\…\Run`. That is not a guess: a debug instance started with autostart on did exactly
+/// that in this project, and nothing in the session that ran it could take the value out again.
+///
+/// **Two conditions, and both are required:**
+///
+/// 1. **not a debug build** — `debug_build` is the caller's `cfg!(debug_assertions)`;
+/// 2. **the image is `%ProgramFiles%\Lang_Switcher\LangSwitcher.exe`** — the one place section 8.4
+///    installs the program. The installer fixes it (`DefaultDirName={commonpf64}\Lang_Switcher`,
+///    `DisableDirPage=yes`), and section 8.2 makes it the only place a `uiAccess` image starts at
+///    all.
+///
+/// The path alone keeps out every test binary (`<target>\debug\deps`), every bench and every
+/// release build under `<dev>`; the profile is a second and independent reason, for a debug image
+/// copied into the folder by hand. **The `testing` feature is deliberately not a condition:** the
+/// plain battery runs without it, so it would guard half the runs, and the path guards all of them.
+///
+/// Compared component by component and without regard to case — the file system does not care, and
+/// the environment is free to spell `Program Files` either way. Pure, and public so that both
+/// answers can be checked without the image having to be anywhere in particular.
+pub fn autostart_may_register(debug_build: bool, exe: &Path, program_files: &Path) -> bool {
+    if debug_build {
+        return false;
+    }
+
+    let installed = program_files.join(CONFIG_DIR_NAME).join(crate::EXE_NAME);
+
+    let folded = |path: &Path| -> Vec<String> {
+        path.components()
+            .map(|component| component.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+
+    folded(exe) == folded(&installed)
+}
+
+/// [`autostart_may_register`] asked about the running image — what the start of the program
+/// consults before it asks the registry anything at all.
+///
+/// `%ProgramFiles%` comes from the environment for the reason [`default_config_path`] gives for
+/// `%APPDATA%`: the value is already in the process. An image that cannot say where it is, or an
+/// environment without `ProgramFiles`, answers `false` — a build that cannot tell whether it is the
+/// installed one does not register itself.
+pub fn this_build_may_register_autostart() -> bool {
+    let (Ok(exe), Some(program_files)) =
+        (std::env::current_exe(), std::env::var_os("ProgramFiles"))
+    else {
+        return false;
+    };
+
+    autostart_may_register(cfg!(debug_assertions), &exe, Path::new(&program_files))
 }
 
 /// The value under [`RUN_KEY_PATH`], or `None` when this program is not registered there.

@@ -685,9 +685,11 @@ impl Tray {
     /// Whether `general.autostart` is set. The check mark of FR-91 shows this.
     ///
     /// What the *system* will actually do is [`settings::autostart_registered`], and the two are
-    /// kept equal by [`Tray::set_autostart`] — FR-93. They are read separately on purpose: the
-    /// settings dialog shows both, so that a value somebody removed from the registry by hand
-    /// is visible rather than merely wrong.
+    /// kept equal from both ends — FR-93: by [`Tray::set_autostart`] and «Применить» when a person
+    /// changes the setting, and, since task T-55-1, by every start of the program, which makes the
+    /// `Run` key agree with this value ([`attach_at_via`], решение 120.4 (б)). They are read
+    /// separately on purpose: the settings dialog shows both, so that a value somebody removed
+    /// from the registry by hand is visible rather than merely wrong.
     pub fn autostart(&self) -> bool {
         self.config.general.autostart
     }
@@ -1429,9 +1431,16 @@ const CONFIG_SAVE_SUPPRESSED: &str = "configuration save suppressed";
 /// as applied — carried the open `TODO` of task T-06-4 and a dropped error instead.
 const CONFIG_WRITE_FAILED: &str = "configuration write failed";
 
+/// ⭐ **Решение 120.4 (б), task T-55-1.** A start found `general.autostart = true` and no value of
+/// this image under `HKCU\…\Run`, and wrote one — [`reconcile_autostart`].
+const AUTOSTART_REGISTERED_AT_START: &str = "autostart registered at start";
+
+/// The same start found `general.autostart = false` and a value under the name, and removed it.
+const AUTOSTART_REMOVED_AT_START: &str = "autostart removed at start";
+
 /// Puts one configuration event into the ring: the fact, and nothing of the file.
 ///
-/// **SEC-01, SEC-07.** The argument is one of the five literals above, chosen at compile time,
+/// **SEC-01, SEC-07.** The argument is one of the literals above, chosen at compile time,
 /// and [`diag::Operation::from_name`] narrows even those onto the closed table of `src\diag.rs`
 /// — a name that is not a row of it becomes `UNLISTED` and keeps none of its text. There is no
 /// branch here through which a byte of the file, the name of a field this build does not know,
@@ -1549,12 +1558,52 @@ pub fn attach(hwnd: HWND, instance: HINSTANCE) -> WinResult<Attachment> {
 /// ⚠ `None`, or a path under `%APPDATA%`, is the product's business and not a test's: section
 /// 7 puts the real file in `%APPDATA%\Lang_Switcher\config.toml`, and that file belongs to
 /// whoever is running the tests.
+///
+/// Since task T-55-1 this is also where the product's autostart is carried out: it hands
+/// [`attach_at_via`] the guard of решение 120.4 (е) and the real `Run` key — the value as
+/// [`settings::autostart_value`] reads it and [`settings::set_autostart`] to write it — and nothing
+/// else in the program does. A test or a bench that attaches through here is kept off that key by
+/// the guard, which answers no for every image but the installed one.
 pub fn attach_at(
     hwnd: HWND,
     instance: HINSTANCE,
     config_path: Option<PathBuf>,
 ) -> WinResult<Attachment> {
+    attach_at_via(
+        hwnd,
+        instance,
+        config_path,
+        settings::this_build_may_register_autostart(),
+        settings::autostart_value,
+        settings::set_autostart,
+    )
+}
+
+/// The same, with the registry half of решение 120.4 handed in — task T-55-1.
+///
+/// Installs the tray and, before the tray is put where [`with_tray`] finds it, makes the `Run` key
+/// of FR-93 agree with the configuration the program is about to live by — [`reconcile_autostart`].
+///
+/// # Why the registry is three arguments
+///
+/// The shape and the reason of [`apply_settings_via`]: the branches are the whole point of the
+/// reconciliation, and no test may drive them through the real `HKCU\…\CurrentVersion\Run` — that
+/// key belongs to whoever runs the tests. `tests\tray.rs` hands in a guard and two closures that
+/// count what they were asked; the product, through [`attach_at`], hands in
+/// [`settings::this_build_may_register_autostart`], [`settings::autostart_value`] and
+/// [`settings::set_autostart`], and nothing else does.
+pub fn attach_at_via(
+    hwnd: HWND,
+    instance: HINSTANCE,
+    config_path: Option<PathBuf>,
+    this_build_may_register: bool,
+    run_key_value: impl FnOnce() -> Option<String>,
+    write_run_key: impl FnOnce(bool) -> WinResult<()>,
+) -> WinResult<Attachment> {
     let tray = Tray::install_at(hwnd, instance, config_path)?;
+
+    // Решение 120.4 (б): the configuration is the source of truth, and every start carries it out.
+    reconcile_autostart(&tray, this_build_may_register, run_key_value, write_run_key);
 
     UI_TRAY.with(|slot| slot.replace(Some(tray)));
 
@@ -1566,6 +1615,86 @@ pub fn attach_at(
     Ok(Attachment {
         _not_send: PhantomData,
     })
+}
+
+/// Makes the `Run` key of FR-93 agree with the configuration the program starts on — **решение
+/// 120.4 (б)**, task T-55-1.
+///
+/// # Why at every start
+///
+/// Until this task `general.autostart = true`, the default of section 7, was a check mark and
+/// nothing more: the installer left its autostart task unticked, and the program wrote the value
+/// only when somebody pressed «Применить» or chose the entry of FR-91 — after a reboot nothing
+/// started, and autostart came on by an accident of the hand rather than by a decision. The
+/// configuration is the source of truth (решение 120.4 (а)), and every start carries it out: `true`
+/// meets no value of this image — the value is written; `false` meets a value — it is removed;
+/// agreement — nothing is touched, not even written again.
+///
+/// **"A value of this image" is the command [`settings::autostart_command`] builds**, not any value
+/// under the name. The name is this program's, but a value naming another image — a build that
+/// once registered itself from a working tree, an older install somewhere else — starts that other
+/// image at the next logon, which is not autostart of this program; it is written over.
+///
+/// # Three gates, in this order
+///
+/// 1. **Решение 120.4 (е) — `this_build_may_register`.** Only the installed release image says yes
+///    ([`settings::autostart_may_register`]); a test binary or a debug build returns here, before
+///    the registry is so much as read.
+/// 2. **Решение 120.4 (ж) — a configuration a person stands behind.** A path to a file at all — a
+///    session with no `%APPDATA%` read nothing, and its configuration is the defaults and nobody's
+///    — and [`SavePolicy::lets_the_run_key_follow`] at [`settings::RunKeyMoment::Start`], the one
+///    rule this shares with «Применить» and the check mark of FR-91.
+/// 3. **Agreement** — the value is read, and written only when it disagrees.
+///
+/// # A refusal changes nothing in memory
+///
+/// Unlike [`apply_settings_via`], nothing steps back. There a person asked for a change the system
+/// refused, and the file must not claim it; here nobody asked for anything — the file says what the
+/// person chose and stays the source of truth. The refusal is reported under `RegSetValueExW`, the
+/// name the other two writers of the value report under; the state line of the dialog goes on
+/// showing the registry's own answer beside the check box; and the next start tries again.
+///
+/// Each action is one entry of the journal, and agreement is none: an event per healthy start is
+/// noise — the reasoning [`Tray::install_at`] gives for the read of the configuration.
+fn reconcile_autostart(
+    tray: &Tray,
+    this_build_may_register: bool,
+    run_key_value: impl FnOnce() -> Option<String>,
+    write_run_key: impl FnOnce(bool) -> WinResult<()>,
+) {
+    if !this_build_may_register {
+        return;
+    }
+
+    if tray.config_path.is_none()
+        || !tray
+            .save_policy
+            .lets_the_run_key_follow(settings::RunKeyMoment::Start)
+    {
+        return;
+    }
+
+    let wanted = tray.config.general.autostart;
+    let value = run_key_value();
+
+    let agrees = if wanted {
+        value.is_some() && value == settings::autostart_command()
+    } else {
+        value.is_none()
+    };
+
+    if agrees {
+        return;
+    }
+
+    match write_run_key(wanted) {
+        Ok(()) => note_configuration(if wanted {
+            AUTOSTART_REGISTERED_AT_START
+        } else {
+            AUTOSTART_REMOVED_AT_START
+        }),
+        Err(error) => app::report_non_critical("RegSetValueExW", &error),
+    }
 }
 
 /// Takes the tray out of the calling thread and drops it, running the cleanup of FR-83.

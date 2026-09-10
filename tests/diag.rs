@@ -790,6 +790,47 @@ fn the_fate_of_the_configuration_file_has_names_of_its_own() {
     println!("{dump}");
 }
 
+/// **Task T-55-1, решение 120.4 (б) — the two things the start of the program may do to
+/// `HKCU\…\Run` have names of their own.**
+///
+/// Names of program events and not of Win32 calls, the shape of the five rows above. A refused
+/// write is not among them because it already has a name — `RegSetValueExW`, the one the other two
+/// writers of the value report under. `Kind::Process`, like every configuration row: the value
+/// follows the configuration, and the configuration is state of the process.
+#[test]
+fn the_start_up_reconciliation_of_autostart_has_names_of_its_own() {
+    let names = [
+        "autostart registered at start",
+        "autostart removed at start",
+    ];
+
+    let _gate = ring();
+
+    for name in names {
+        let operation = Operation::from_name(name);
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "«{name}» still reaches the journal as a code with no name"
+        );
+        assert_eq!(operation.name(), name);
+        assert_eq!(
+            operation.kind(),
+            Kind::Process,
+            "{name} landed in the wrong group"
+        );
+
+        diag::record(operation, OsCode::NONE);
+    }
+
+    let dump = diag::render();
+
+    for name in names {
+        assert!(dump.contains(name), "the dump does not print {name}");
+    }
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the

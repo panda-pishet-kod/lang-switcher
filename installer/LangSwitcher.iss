@@ -28,21 +28,21 @@
 ;    page is disabled, and the uninstaller keeps Inno's ordinary unins000.exe name.
 ; ============================================================================
 
-; --- Compile-time knob, and the only one --------------------------------------
+; --- Autostart: the product is the one writer of the Run value ----------------
 ;
-; AUTOSTART_DEFAULT_ON selects whether the optional autostart task starts out
-; ticked.  It exists for one reason: FR-93 has to be measured in BOTH states, and
-; on this machine elevation is available only through `schtasks /run`, whose
-; command line is hardwired to /VERYSILENT /NORESTART /SUPPRESSMSGBOXES and cannot
-; carry /TASKS=.  A silent install therefore always takes the compiled-in default,
-; so the only way to exercise the other branch is to compile it.
+; FR-93, decision 120.4 of DECISIONS.md (stage E55).  This script does NOT write
+; HKCU\...\Run.  The product makes that value agree with general.autostart of its
+; own configuration at every start -- default true, SPEC.md section 7 -- and the
+; settings dialog and the tray menu change it from there.  One writer, on purpose:
+; a second one here would write from an elevated Setup, whose HKCU is not
+; necessarily the hive of the person who signs in, and could only ever agree with
+; the product by accident.  The uninstaller still removes the value, and does so
+; unconditionally -- CurUninstallStepChanged below.
 ;
-; The shipping default is OFF.  A silent install must not register autostart that
-; nobody asked for -- section 8.4 says "by the user's choice", and a choice that
-; is made by default is not a choice.
-#ifndef AUTOSTART_DEFAULT_ON
-  #define AUTOSTART_DEFAULT_ON 0
-#endif
+; Until E55 an optional [Tasks] entry wrote the value, unticked by default behind
+; a compile-time knob AUTOSTART_DEFAULT_ON, and the shipping default was OFF.
+; Decision 120.4 turned autostart on by default and made the program carry it
+; out, so the task, its [Registry] entry and the knob are gone together.
 
 #define AppName        "Lang Switcher"
 #define AppVersion     "0.54.0"
@@ -63,10 +63,10 @@
 ; The name and the key FR-93 uses.  BOTH MUST MATCH src\settings.rs LITERALLY:
 ;   RUN_KEY_PATH        = r"Software\Microsoft\Windows\CurrentVersion\Run"
 ;   AUTOSTART_VALUE_NAME = "Lang Switcher"
-; If the installer wrote a different value name, the settings dialog of FR-92
-; would read one key while the installer wrote another, the tick would disagree
-; with reality, and turning autostart off in the product would leave the
-; installer's value behind forever.
+; This script no longer writes the value (see the head of the file); the
+; uninstaller deletes it by this name.  If the name drifted from the one the
+; product writes, uninstalling would leave the product's value behind, pointing
+; at a deleted file.
 #define RunKey     "Software\Microsoft\Windows\CurrentVersion\Run"
 #define RunValue   "Lang Switcher"
 
@@ -143,14 +143,6 @@ WizardStyle=modern
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
-[Tasks]
-; A separate Inno task, so that FR-93 is a tick the user can see and clear.
-#if AUTOSTART_DEFAULT_ON
-Name: "autostart"; Description: "Start {#AppName} automatically when I sign in"; GroupDescription: "Startup:"
-#else
-Name: "autostart"; Description: "Start {#AppName} automatically when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
-#endif
-
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
 ; reinstall of the identical version.  Version-number comparison would silently
@@ -160,17 +152,6 @@ Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: igno
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-
-[Registry]
-; FR-93.  The command is the quoted full path, byte for byte the shape
-; settings.rs::autostart_command builds -- format!("\"{}\"", exe.display()) -- so
-; that the value the installer writes and the value the product writes are the
-; same string and neither side sees the other's as foreign.
-; uninsdeletevalue removes it again on uninstall.  It only covers the value THIS
-; installer wrote; a value the product wrote for itself is handled unconditionally
-; in CurUninstallStepChanged below.
-Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; \
-    ValueData: """{app}\{#AppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 ; skipifsilent is the whole point of this entry being safe: a silent install --
@@ -229,12 +210,15 @@ end;
 { ---------------------------------------------------------------------------
   Uninstall: leave nothing behind EXCEPT the user's configuration.
 
-  1. The autostart value goes unconditionally.  The [Registry] entry above only
-     records an uninstall action when the autostart task was ticked at install
-     time, but the product writes the very same value itself from the settings
-     dialog (FR-92 / FR-93).  Without this, uninstalling a product whose autostart
-     was switched on from inside the program would leave a Run value pointing at a
-     deleted file.  RegDeleteValue on a missing value is not an error.
+  1. The autostart value goes unconditionally.  Its one writer is the product
+     itself (decision 120.4): every start makes HKCU\...\Run agree with the
+     configuration, and the settings dialog and the tray menu change it, so this
+     script has no [Registry] entry of its own to undo and this call is the only
+     thing that removes the value.  Without it, uninstalling would leave a Run
+     value pointing at a deleted file.  RegDeleteValue on a missing value is not
+     an error.  An uninstaller elevated as another account -- or through a
+     scheduled task -- sees another HKCU and leaves the person's value alone;
+     unticking autostart in the product before uninstalling removes it then.
 
   2. %APPDATA%\Lang_Switcher\config.toml is DELETED ONLY ON AN EXPLICIT YES, AND
      ONLY WHEN A HUMAN CAN ANSWER.  Section 8.4 says "removed on confirmation";

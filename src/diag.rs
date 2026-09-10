@@ -631,6 +631,20 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("password probe: client", Kind::Process),
     ("password probe: interface", Kind::Process),
     ("password probe: timeout", Kind::Process),
+    // ⭐ **Task T-55-1, решение 120.4 (б)** — autostart for real: every start of the program makes
+    // `HKCU\…\Run` agree with `general.autostart`, and each of the two things it may do to the
+    // value is one row. Appended at the end for the reason every row above gives: an index already
+    // written must keep its meaning.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07).** Not the command that was written, not the path
+    // of the image, not what the value said before — only that a start wrote the value or removed
+    // it. A refusal has no row of its own here: it is reported under `RegSetValueExW` above, the
+    // name the other two writers of the value already report under.
+    //
+    // `Kind::Process` — the value follows the configuration, which is state of the process, the
+    // kind every configuration row takes — and **no new `Kind`**, the rule every note above follows.
+    ("autostart registered at start", Kind::Process),
+    ("autostart removed at start", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

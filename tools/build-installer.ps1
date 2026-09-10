@@ -29,12 +29,10 @@
     report: without a countersignature the signature stops verifying the day the
     certificate expires.
 
-    -AutostartDefaultOn compiles the installer with the optional autostart task
-    pre-ticked. It exists to measure FR-93 in both states: elevation on this
-    machine is available only through `schtasks /run`, whose command line is
-    hardwired and cannot carry /TASKS=, so a silent install always takes the
-    compiled-in default. THE SHIPPING DEFAULT IS OFF; do not pass this switch for
-    a build that is meant to be kept.
+    AUTOSTART IS NOT AN INSTALLER OPTION. Since stage E55 (decision 120.4) the
+    product writes HKCU\...\Run itself at every start, following its own
+    configuration, and the installer has no autostart task to pre-tick; the
+    former -AutostartDefaultOn switch went with it.
 
     Written without a single Cyrillic character on purpose: the tooling writes
     files in UTF-8 with NO byte order mark, Windows PowerShell 5.1 reads such a
@@ -57,7 +55,6 @@
     Examples:
       .\build-installer.ps1
       .\build-installer.ps1 -SkipProductBuild
-      .\build-installer.ps1 -AutostartDefaultOn      # measurement build only
 #>
 [CmdletBinding()]
 param(
@@ -72,8 +69,6 @@ param(
     [string]$Iscc = '<dev>\tools\InnoSetup\ISCC.exe',
     # Do not rebuild and re-sign the product first. See the header.
     [switch]$SkipProductBuild,
-    # Compile with the autostart task pre-ticked. Measurement builds only.
-    [switch]$AutostartDefaultOn,
     # Compile and copy, but do not sign. For a dry run of everything before the
     # signature.
     [switch]$SkipSign
@@ -121,11 +116,6 @@ Write-Host ("Script     {0}" -f $IssFile)
 Write-Host ("Product    {0}" -f $ProductArtifact)
 Write-Host ("Installer  {0}" -f $SetupArtifact)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
-if ($AutostartDefaultOn) {
-    Write-Host 'Autostart  DEFAULT ON -- MEASUREMENT BUILD, NOT FOR KEEPING'
-} else {
-    Write-Host 'Autostart  default off (shipping default)'
-}
 if ($SkipProductBuild) { Write-Host 'Product    NOT rebuilt, -SkipProductBuild was given' }
 if ($SkipSign)         { Write-Host 'Signing    SKIPPED by -SkipSign' }
 
@@ -168,7 +158,6 @@ if (-not (Test-Path $IssFile)) {
 if (Test-Path $IssOutput) { Remove-Item -Path $IssOutput -Force }
 
 $isccArgs = @()
-if ($AutostartDefaultOn) { $isccArgs += '/DAUTOSTART_DEFAULT_ON=1' }
 $isccArgs += ('/DSourceExe=' + $ProductArtifact)
 $isccArgs += $IssFile
 

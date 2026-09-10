@@ -8174,6 +8174,119 @@ fn the_autostart_value_appears_and_disappears_under_hkcu() {
     settings::set_autostart(false).expect("removing an absent value must succeed");
 }
 
+/// **Решение 120.4 (е), task T-55-1 — the guard against litter.** Only the installed product may
+/// put itself into `HKCU\…\Run`: a release image at `%ProgramFiles%\Lang_Switcher\LangSwitcher.exe`.
+///
+/// Checked on paths written out here, so that both answers are reached whatever machine and profile
+/// run the test. Every case is collected before anything is asserted, so a red names all of them.
+#[test]
+fn only_the_installed_release_image_may_register_itself() {
+    let program_files = Path::new(r"C:\Program Files");
+    let installed = Path::new(r"C:\Program Files\Lang_Switcher\LangSwitcher.exe");
+
+    let cases: [(&str, bool, &Path, &Path, bool); 9] = [
+        (
+            "the installed release image — the control",
+            false,
+            installed,
+            program_files,
+            true,
+        ),
+        (
+            "the same path spelt in another case",
+            false,
+            Path::new(r"c:\PROGRAM FILES\lang_switcher\langswitcher.EXE"),
+            Path::new(r"C:\program files"),
+            true,
+        ),
+        (
+            "the installed path, but a debug build",
+            true,
+            installed,
+            program_files,
+            false,
+        ),
+        (
+            "a release build where cargo leaves it",
+            false,
+            Path::new(r"<dev>\cache\target\release\LangSwitcher.exe"),
+            program_files,
+            false,
+        ),
+        (
+            "a test binary",
+            false,
+            Path::new(r"<dev>\cache\target\debug\deps\tray-0123456789abcdef.exe"),
+            program_files,
+            false,
+        ),
+        (
+            "another image in the installed folder",
+            false,
+            Path::new(r"C:\Program Files\Lang_Switcher\unins000.exe"),
+            program_files,
+            false,
+        ),
+        (
+            "a folder that only begins with the name",
+            false,
+            Path::new(r"C:\Program Files\Lang_Switcher2\LangSwitcher.exe"),
+            program_files,
+            false,
+        ),
+        (
+            "one folder deeper",
+            false,
+            Path::new(r"C:\Program Files\Lang_Switcher\old\LangSwitcher.exe"),
+            program_files,
+            false,
+        ),
+        (
+            "the 32-bit Program Files",
+            false,
+            installed,
+            Path::new(r"C:\Program Files (x86)"),
+            false,
+        ),
+    ];
+
+    let mut wrong = Vec::new();
+
+    for (name, debug_build, exe, program_files, expected) in cases {
+        let answered = settings::autostart_may_register(debug_build, exe, program_files);
+
+        println!(
+            "{name}: debug={debug_build} exe={} program_files={} -> {answered}",
+            exe.display(),
+            program_files.display()
+        );
+
+        if answered != expected {
+            wrong.push(format!("{name}: expected {expected}, answered {answered}"));
+        }
+    }
+
+    assert!(wrong.is_empty(), "решение 120.4 (е): {wrong:?}");
+}
+
+/// **The same guard asked about the image running this test** — the answer that stands between a
+/// battery of `cargo test` and the `Run` key of whoever runs it. Every tray the tests attach goes
+/// through the start-up reconciliation of решение 120.4 (б), and this is what keeps it from writing.
+#[test]
+fn no_test_binary_may_register_itself() {
+    println!(
+        "current_exe = {:?}, debug_assertions = {}, ProgramFiles = {:?}",
+        std::env::current_exe(),
+        cfg!(debug_assertions),
+        std::env::var_os("ProgramFiles")
+    );
+
+    assert!(
+        !settings::this_build_may_register_autostart(),
+        "решение 120.4 (е): a test binary answered that it may put itself into HKCU\\…\\Run"
+    );
+}
+
 // -----------------------------------------------------------------------------------------
 // Harness: the product binary and its dialog template
 // -----------------------------------------------------------------------------------------
