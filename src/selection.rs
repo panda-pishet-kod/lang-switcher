@@ -2845,7 +2845,8 @@ pub trait Path {
     /// **Not step 8** — the user's clipboard back **at once**, after a late `Ctrl+C`.
     ///
     /// Reached from the `LateCopy` arm of [`Session`]'s `Drop` and from nowhere else: step 3 gave
-    /// up, the clipboard moved anyway, and what is on it is a selection this program asked for.
+    /// up or was refused (tasks T-13-11 and T-38-4), the clipboard moved anyway, and what is on it
+    /// is a selection this program asked for.
     /// Two things separate it from step 8, and both are in the name:
     ///
     /// * **no delay.** The delay of step 8 exists to let a paste land first, and on this path
@@ -2927,6 +2928,7 @@ impl Outcome {
 /// | step 6 could not write | `Drop` | early `return`, scope ends |
 /// | step 3 said there is no selection | `Drop`, and there is usually nothing to put back — see [`Owed`] |
 /// | step 3 gave up and the clipboard moved anyway | `Drop`, by the other door — [`Path::reclaim_clipboard`], task T-13-11 |
+/// | step 3 was refused — the thread may not block | `Drop`: nothing when the clipboard did not move, the same other door when it did — task T-38-4 |
 /// | a panic, Debug build | `Drop`, run by the unwind |
 /// | a panic, Release build (`panic = "abort"`) | nothing here; the system frees the clipboard with the owning thread, measured in T-07-1 |
 ///
@@ -2986,7 +2988,8 @@ enum Owed {
     /// **Т-18-1** and **T-38-2** — it is what lets the gate of П-5 tell this pass's own doing
     /// from a third writer's on the paths where the program never wrote at all.
     StepEight { answer: ProbeAnswer },
-    /// **The late `Ctrl+C`.** Step 3 gave up and the clipboard moved anyway — see [`run`].
+    /// **The late `Ctrl+C`.** Step 3 gave up, or was refused, and the clipboard moved anyway —
+    /// see [`run`] and [`Session::owe_the_snapshot_if_the_clipboard_moved`].
     LateCopy,
 }
 
@@ -3002,6 +3005,24 @@ impl<P: Path> Drop for Session<'_, P> {
             Owed::Nothing => {}
             Owed::StepEight { answer } => self.path.restore_clipboard(&self.snapshot, answer),
             Owed::LateCopy => self.path.reclaim_clipboard(&self.snapshot),
+        }
+    }
+}
+
+impl<P: Path> Session<'_, P> {
+    /// **The late `Ctrl+C`** — asks the sequence number once more against `baseline`, and when it
+    /// has moved arms [`Owed::LateCopy`] and counts it. Tasks T-13-11 and T-38-4.
+    ///
+    /// Step 2 sent a real `Ctrl+C`, and a step 3 that ends without seeing the clipboard move —
+    /// because the wait ran out, or because it was refused before it began — is not a promise that
+    /// nothing will happen: the application can still answer. One door for both ends of step 3, so
+    /// the rule «`Ctrl+C` has gone out — the snapshot is insured» is written once and cannot be
+    /// kept on one arm and forgotten on the other, which is what finding Н14 found.
+    fn owe_the_snapshot_if_the_clipboard_moved(&mut self, baseline: u32) {
+        if self.path.sequence() != baseline {
+            LATE_COPIES.fetch_add(1, Ordering::Relaxed);
+
+            self.owed = Owed::LateCopy;
         }
     }
 }
@@ -3078,15 +3099,23 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
             // that lands later still arrives after everything here has returned. What the check
             // ends is the *structural* blindness — a path that could not restore however plainly
             // the clipboard had moved.
-            if session.path.sequence() != baseline {
-                LATE_COPIES.fetch_add(1, Ordering::Relaxed);
-
-                session.owed = Owed::LateCopy;
-            }
+            session.owe_the_snapshot_if_the_clipboard_moved(baseline);
 
             return Outcome::NoSelection;
         }
-        Wait::WrongThread => return Outcome::Refused(Refusal::Clipboard),
+        Wait::WrongThread => {
+            // ⭐ **Finding Н14 of the audit of 2026-09-04, task T-38-4 — the same insurance, by
+            // the same code.** The wait refused to begin, and today it cannot: step 1 asked the
+            // same question of the same thread moments ago (`snapshot` opens the clipboard through
+            // `require_blocking_thread`) and nothing between the two changes the answer. But the
+            // `Ctrl+C` of step 2 has already gone out by the time step 3 is asked, and a refusal
+            // that walked away unarmed would lose the user's clipboard the first time this work is
+            // moved to a thread where the two answers differ. So the clipboard is asked once more,
+            // exactly as after a timeout, through the one door both arms share.
+            session.owe_the_snapshot_if_the_clipboard_moved(baseline);
+
+            return Outcome::Refused(Refusal::Clipboard);
+        }
     };
 
     // From here the clipboard holds the selection and not what the user put there. Step 8 is
@@ -3326,13 +3355,15 @@ static CONSOLE_REFUSALS: AtomicU32 = AtomicU32::new(0);
 /// could not tell the seventh reason from the sixth, or from a regression, could not tell anything.
 static OWN_WINDOW_REFUSALS: AtomicU32 = AtomicU32::new(0);
 
-/// Presses where the clipboard moved **after** step 3 had given up — task T-13-11.
+/// Presses where the clipboard moved **after** step 3 had given up, or had been refused — tasks
+/// T-13-11 and T-38-4.
 ///
 /// The late `Ctrl+C` of the audit of 2026-08-24: the probe of step 2 was answered past the
 /// timeout, and the snapshot of step 1 went back instead of being thrown away. Kept apart from
 /// every other counter because it is the one number that says how often the race is real on a
-/// given machine, and because the press itself still ends as [`Outcome::NoSelection`] — the two
-/// facts are independent and must be readable apart.
+/// given machine, and because the press itself still ends as [`Outcome::NoSelection`] — or, on a
+/// refused step 3, as [`Refusal::Clipboard`] — and the two facts are independent and must be
+/// readable apart.
 static LATE_COPIES: AtomicU32 = AtomicU32::new(0);
 
 /// The counters of the selection path — SEC-01, SEC-07: seven counts of program events.
@@ -3351,8 +3382,8 @@ pub struct PathCounters {
     /// Presses the path did not take because a window of the thread that would run it was in
     /// front — finding С9, task T-38-3.
     pub own_window_refusals: u32,
-    /// Presses whose clipboard moved after step 3 gave up, and whose snapshot therefore went
-    /// back at once — the late `Ctrl+C` of task T-13-11.
+    /// Presses whose clipboard moved after step 3 gave up or was refused, and whose snapshot
+    /// therefore went back at once — the late `Ctrl+C` of tasks T-13-11 and T-38-4.
     pub late_copies: u32,
 }
 

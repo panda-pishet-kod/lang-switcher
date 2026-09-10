@@ -1930,6 +1930,18 @@ impl Bench {
         }
     }
 
+    /// A bench where step 3 is **refused** — the calling thread may not block — task T-38-4.
+    ///
+    /// Unreachable in the product today (finding Н14, premise П4), and that is exactly why the
+    /// branch needs a bench: nothing else can walk it.
+    fn refused_by_the_wrong_thread() -> Self {
+        Self {
+            wait: Wait::WrongThread,
+            reads: None,
+            ..Self::with_selection("")
+        }
+    }
+
     fn failing_at(mut self, step: Step) -> Self {
         self.fail_at = Some(step);
         self
@@ -2703,9 +2715,12 @@ fn no_change_within_the_timeout_means_no_selection_and_falls_back() {
 ///
 /// The two halves are one test because [`selection::path_counters`] is process-wide and the
 /// assertions are about `late_copies` moving by **exactly** one and by **exactly** nothing, which
-/// two tests running beside each other could not both claim.
+/// two tests running beside each other could not both claim. Since task T-38-4 a refused step 3
+/// moves the same counter and its test runs in this binary as well, so both hold the lock of the
+/// file.
 #[test]
 fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_left_alone() {
+    let _serialised = serialised();
     let before = selection::path_counters();
 
     // ---- the clipboard did not move: everything is as it was before this task ---------------
@@ -2778,6 +2793,142 @@ fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_
     assert!(!late.ran(Step::Paste));
     assert!(!late.ran(Step::Switch));
     assert!(late.written.is_none());
+}
+
+/// **Finding Н14 of the audit of 2026-09-04, task T-38-4 — a refused step 3 insures the snapshot
+/// exactly as a timed-out one does.**
+///
+/// `Wait::WrongThread` cannot be reached in the product today: step 1 asked the same thread the
+/// same question moments earlier (premise П4, and the test below keeps it so). It is walked here
+/// through the bench because nothing else can walk it. The `Ctrl+C` of step 2 has gone out by the
+/// time step 3 refuses, so a clipboard that moved anyway owes the user's snapshot back at once,
+/// through the late door; one that did not move owes nothing — it is still what the user left.
+///
+/// Holds the lock of the file: `late_copies` is process-wide, and the test of T-13-11 above
+/// asserts it by the exact one.
+#[test]
+fn a_refused_wait_insures_the_snapshot_exactly_as_a_timed_out_one_does() {
+    let _serialised = serialised();
+    let before = selection::path_counters();
+
+    // ---- the clipboard moved although step 3 refused: the snapshot goes back ------------------
+    let moved = Snapshot::empty().sequence().wrapping_add(4242);
+    let mut refused = Bench::refused_by_the_wrong_thread().with_clipboard_at(moved);
+    let outcome = selection::run(&mut refused, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(
+        outcome,
+        Outcome::Refused(Refusal::Clipboard),
+        "a refusal is still a refusal"
+    );
+    assert_eq!(
+        refused.steps,
+        vec![
+            Step::Snapshot,
+            Step::Release,
+            Step::Copy,
+            Step::Wait,
+            Step::RestoreModifiers,
+            Step::Reclaim,
+        ],
+        "Ctrl+C went out and the clipboard moved: the snapshot goes back, after the modifiers"
+    );
+    assert!(
+        !refused.ran(Step::RestoreClipboard),
+        "the late door, and not the delayed, refusable door of step 8"
+    );
+    assert_eq!(
+        refused.sequence_probes, 1,
+        "the clipboard is asked once more, and once"
+    );
+
+    let after_moved = selection::path_counters();
+
+    assert_eq!(
+        after_moved.late_copies,
+        before.late_copies + 1,
+        "counted where the race of T-13-11 is counted"
+    );
+
+    // ---- the clipboard did not move: nothing is owed -------------------------------------------
+    let mut quiet = Bench::refused_by_the_wrong_thread();
+    let outcome = selection::run(&mut quiet, &pair_plan(convert::FALLBACK_US));
+
+    assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
+    assert!(
+        !quiet.ran(Step::Reclaim),
+        "a clipboard nobody touched is not written to"
+    );
+    assert!(!quiet.ran(Step::RestoreClipboard));
+
+    let after_quiet = selection::path_counters();
+
+    assert_eq!(
+        after_quiet.late_copies, after_moved.late_copies,
+        "nothing moved, so nothing is counted"
+    );
+}
+
+/// **Premise П4 of task T-38-4, kept true on purpose — the eight steps run on the thread that
+/// registered the listener, and on no other.**
+///
+/// `Wait::WrongThread` is unreachable today for one reason: step 1 and step 3 ask the same
+/// predicate on the same thread, a few calls apart. That holds while three facts hold, and this
+/// test is those facts: `run` is called from one place in the product, and that place is
+/// `handle_selection_message`; that function acts only on the window `listen` registered; and
+/// `listen` is called once, for the UI role of `app`. A change that runs the eight steps anywhere
+/// else — a worker thread, a second window — turns one of them red, and the refusal branch of step
+/// 3 stops being a curiosity: the insurance of T-38-4 is then what stands between the user and a
+/// lost clipboard, and the test above is what proves it still works.
+///
+/// The positive control is inside: the same sweep over the module with one more call counts two.
+#[test]
+fn the_eight_steps_run_on_the_thread_that_registered_the_listener_and_on_no_other() {
+    let source = source_of("selection.rs");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
+
+    let calls = code_lines_with(product, "run(&mut ");
+
+    assert_eq!(
+        calls.len(),
+        1,
+        "the eight steps are started from one place in the product: {calls:?}"
+    );
+
+    let handler = body_after(&source, "pub fn handle_selection_message(");
+
+    assert!(
+        handler.contains("run(&mut "),
+        "and that place is handle_selection_message"
+    );
+    assert!(
+        handler.contains("LISTENER_WINDOW.load("),
+        "which acts only on the window the listener was registered on"
+    );
+
+    let app = source_of("app.rs");
+    let registrations = code_lines_with(&app, "selection::listen(");
+
+    assert_eq!(
+        registrations.len(),
+        1,
+        "the listener is registered once: {registrations:?}"
+    );
+    assert!(
+        registrations[0].1.contains("Role::Ui"),
+        "and by the UI thread: {registrations:?}"
+    );
+
+    // The control: a sweep that could not see a second call would keep this test green however
+    // the work moved.
+    let with_a_second_call =
+        format!("{product}\nfn elsewhere() {{ let _ = run(&mut other, &plan); }}\n");
+
+    assert_eq!(
+        code_lines_with(&with_a_second_call, "run(&mut ").len(),
+        2,
+        "the sweep counts a second call when there is one"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
