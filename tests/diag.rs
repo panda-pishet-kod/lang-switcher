@@ -1159,3 +1159,77 @@ fn a_journal_the_session_has_off_creates_nothing_whatever_the_file_says() {
 
     std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-34-3 — the header says when the dump was taken and whether the session went on
+// -------------------------------------------------------------------------------------
+
+/// The line of the header that starts with `name`, if there is one.
+fn header_line<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    text.lines().find(|line| line.starts_with(name))
+}
+
+/// **Task T-34-3, finding С48.** A dump written while the program runs and the dump of the
+/// previous run used to be indistinguishable: the header carried the uptime and nothing else.
+/// Now it carries the wall clock of the moment the dump was taken — local time, the calendar
+/// the person lives in — and whether the session was still going on.
+#[test]
+fn the_header_of_a_dump_carries_the_wall_clock_and_the_state_of_the_session() {
+    let _gate = ring();
+
+    let today = lang_switcher::letters::today()
+        .expect("the clock of the machine must answer")
+        .to_string();
+
+    let text = diag::render();
+
+    let taken_at = header_line(&text, "journal.taken_at")
+        .unwrap_or_else(|| panic!("the header has no `journal.taken_at`:\n{text}"));
+    assert!(
+        taken_at.contains(&today),
+        "`journal.taken_at` does not carry today's date {today}: {taken_at}"
+    );
+
+    let session = header_line(&text, "journal.session")
+        .unwrap_or_else(|| panic!("the header has no `journal.session`:\n{text}"));
+    assert!(
+        session.ends_with("continues"),
+        "a dump rendered while the program runs must say the session continues: {session}"
+    );
+}
+
+/// **Task T-34-3, finding С48 — the other half.** The file written while the session runs and
+/// the file written at shutdown differ in the one word that matters: `continues` against
+/// `ended`. Before this task the two were the same text with a different uptime.
+#[test]
+fn a_dump_of_the_running_session_differs_from_the_dump_of_shutdown() {
+    let _gate = ring();
+
+    let (folder, _config, target) = a_session_folder("T-34-3");
+    let live = folder.join("live.log");
+
+    diag::write_to(&live).expect("the live dump could not be written");
+    with_journal(true, || {
+        assert!(
+            diag::dump_on_shutdown_to(&target),
+            "the shutdown dump could not be written"
+        );
+    });
+
+    let live_text = std::fs::read_to_string(&live).expect("the live dump could not be read");
+    let final_text = std::fs::read_to_string(&target).expect("the shutdown dump could not be read");
+
+    let live_session = header_line(&live_text, "journal.session").unwrap_or("(absent)");
+    let final_session = header_line(&final_text, "journal.session").unwrap_or("(absent)");
+
+    assert!(
+        live_session.ends_with("continues"),
+        "the dump of the running session says: {live_session}"
+    );
+    assert!(
+        final_session.ends_with("ended"),
+        "the dump of shutdown says: {final_session}"
+    );
+
+    std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+}

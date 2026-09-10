@@ -2889,7 +2889,7 @@ const FR_92_SECTIONS: [&str; 6] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 29] = [
+const TEMPLATE_TEXT: [&str; 30] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -2925,6 +2925,9 @@ const TEMPLATE_TEXT: [&str; 29] = [
     "Вести журнал",
     "Открыть папку журнала",
     "Папка журнала:",
+    // Task T-34-3: «Сохранить журнал…» stands after «Написать автору» (which carries no caption
+    // of its own in the template) and before the panel «Состояние».
+    "Сохранить журнал…",
     "Состояние",
     "ОК",
     "Отмена",
@@ -2947,7 +2950,7 @@ const TEMPLATE_TEXT: [&str; 29] = [
 ///
 /// ⚠ **Thirty-seven since task Т-31-3**: 1092, «вступит в силу после перезапуска», left with
 /// its sentence (решение 99.4). Its number is retired, not freed, exactly as the eleven above.
-const TEMPLATE_CONTROLS: [(u32, &str); 37] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1003, "Общие: оформление — FR-92а"),
@@ -2971,6 +2974,7 @@ const TEMPLATE_CONTROLS: [(u32, &str); 37] = [
     (1060, "Диагностика: вести журнал"),
     (1061, "Диагностика: открыть папку журнала"),
     (1062, "Диагностика: путь папки журнала"),
+    (1064, "Диагностика: сохранить журнал — task T-34-3"),
     // The static text. It carried -1 until FR-94, and a control identified by -1 is a control
     // whose text can never be replaced — so every one of these numbers is a precondition of the
     // interface having a second language at all.
@@ -3937,6 +3941,43 @@ const PANELS: [(u32, &str); 6] = [
     (1106, "Диагностика"),
     (1108, "Состояние"),
 ];
+
+/// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал…» (1064) stands in the slot
+/// the user chose: beside «Написать автору», on its row, inside «Диагностика», and the window
+/// has not grown for it.
+///
+/// Literal numbers on purpose, as in the tests above: the identifier is what the built template
+/// carries, and a constant borrowed from the crate would let the two drift together.
+#[test]
+fn the_save_journal_button_stands_in_the_slot_of_decision_117_5() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+    };
+
+    let save = bounds(1064).expect("the dialog must carry «Сохранить журнал…» (1064)");
+    println!("«Сохранить журнал…» (1064): {save:?}");
+    assert_eq!(save, (344, 270, 72, 14), "the slot of решение 117.5");
+
+    let (ax, ay, acx, _) = bounds(1063).expect("the dialog must carry «Написать автору» (1063)");
+    assert_eq!(ay, 270, "the two buttons share a row");
+    assert!(
+        ax + acx <= 344,
+        "«Написать автору» must end before the slot begins"
+    );
+
+    let (px, py, pcx, pcy) = bounds(1106).expect("the dialog must carry «Диагностика» (1106)");
+    assert!(
+        save.0 >= px && save.1 >= py && save.0 + save.2 <= px + pcx && save.1 + save.3 <= py + pcy,
+        "the button must lie inside «Диагностика»"
+    );
+}
 
 /// **Criterion 10 of T-11-13, and the two-sided detector of the defect** — read out of the
 /// **built** `LangSwitcher.exe`, like every other statement about the template.
@@ -8402,7 +8443,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 204] = [
+const FR_94_STRINGS: [(u16, &str, &str); 206] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8467,6 +8508,16 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
         settings::IDS_LOG_OPEN,
         "Открыть папку журнала",
         "Open the journal folder",
+    ),
+    (
+        settings::IDS_LOG_SAVE,
+        "Сохранить журнал…",
+        "Save the journal…",
+    ),
+    (
+        settings::IDS_LOG_SAVE_FAILED,
+        "Не удалось сохранить журнал.",
+        "The journal could not be saved.",
     ),
     (
         settings::IDS_LOG_DIR_LABEL,
@@ -14438,13 +14489,14 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        204,
-        "two hundred and four identifiers in use — the mandate of Э32 authorised the canon \
+        206,
+        "two hundred and six identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
-         (FR-104, Т-32-8) and the ONE the balloon of «Что нового» gained by задача Т-33а-4 — \
-         its own body, because it was knocking with the words of the update"
+         (FR-104, Т-32-8), the ONE the balloon of «Что нового» gained by задача Т-33а-4 — \
+         its own body, because it was knocking with the words of the update — and the TWO of \
+         task T-34-3: the button «Сохранить журнал…» and the sentence of its refusal"
     );
 
     let product = ProductImage::shared();

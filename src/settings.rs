@@ -120,16 +120,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
     GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
     IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
-    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, PostMessageW,
-    RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW,
-    SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY,
-    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC,
-    WS_EX_LAYOUTRTL,
+    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING,
+    MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE,
+    SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -2410,6 +2410,11 @@ pub const IDS_TOAST_UPDATE: u16 = 3138;
 /// ⭐ Заголовок остался общий с письмом — [`IDS_WHATSNEW_TITLE`]: слова там те же, они уже
 /// переведены на четырнадцать языков, и шар с письмом обязаны говорить одно и то же.
 pub const IDS_TOAST_WHATSNEW: u16 = 3212;
+/// «Сохранить журнал…» — the button of «Диагностика» that writes the dump of the running
+/// session now; task T-34-3, finding С48.
+pub const IDS_LOG_SAVE: u16 = 3213;
+/// The one sentence the person sees when that write is refused — task T-34-3.
+pub const IDS_LOG_SAVE_FAILED: u16 = 3214;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -2603,7 +2608,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 204] = [
+pub const INTERFACE_STRINGS: [u16; 206] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2628,6 +2633,8 @@ pub const INTERFACE_STRINGS: [u16; 204] = [
     IDS_GROUP_DIAGNOSTICS,
     IDS_LOG_ENABLED,
     IDS_LOG_OPEN,
+    IDS_LOG_SAVE,
+    IDS_LOG_SAVE_FAILED,
     IDS_LOG_DIR_LABEL,
     IDS_GROUP_STATE,
     IDS_OK,
@@ -3747,6 +3754,8 @@ const IDC_LOG_OPEN: i32 = 1061;
 const IDC_LOG_DIR: i32 = 1062;
 /// The way into the wizard of FR-104 from «Диагностика» — task Т-32-8.
 const IDC_WRITE_AUTHOR: i32 = 1063;
+/// «Сохранить журнал…» — task T-34-3, finding С48.
+const IDC_LOG_SAVE: i32 = 1064;
 const IDC_STATE_HOOK: i32 = 1070;
 const IDC_STATE_LAYOUTS: i32 = 1071;
 const IDC_STATE_AUTOSTART: i32 = 1072;
@@ -3921,6 +3930,7 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_GROUP_DIAGNOSTICS, IDS_GROUP_DIAGNOSTICS),
     (IDC_LOG_ENABLED, IDS_LOG_ENABLED),
     (IDC_LOG_OPEN, IDS_LOG_OPEN),
+    (IDC_LOG_SAVE, IDS_LOG_SAVE),
     (IDC_WRITE_AUTHOR, IDS_WRITE_TO_AUTHOR),
     (IDC_LOG_DIR_LABEL, IDS_LOG_DIR_LABEL),
     (IDC_GROUP_STATE, IDS_GROUP_STATE),
@@ -10358,13 +10368,14 @@ fn invalidate_hot(window: HWND) {
 /// ground — and a panel is the *background* of its block since task T-11-13 and takes no
 /// clicks at all. Subclassing either would arm a notification for a repaint that changes
 /// nothing.
-const PUSH_BUTTONS: [i32; 10] = [
+const PUSH_BUTTONS: [i32; 11] = [
     IDC_HOTKEY_CAPTURE,
     IDC_CYCLE_UP,
     IDC_CYCLE_DOWN,
     IDC_EXCLUSION_REMOVE,
     IDC_EXCLUSION_ADD,
     IDC_LOG_OPEN,
+    IDC_LOG_SAVE,
     IDC_WRITE_AUTHOR,
     OK_COMMAND,
     CANCEL_COMMAND,
@@ -11417,6 +11428,7 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
         IDC_CYCLE_DOWN => unsafe { move_cycle_row(hwnd, 1) },
 
         IDC_LOG_OPEN => open_log_folder(hwnd),
+        IDC_LOG_SAVE => save_journal(hwnd),
 
         // FR-104, task Т-32-8: the third way into the wizard, beside the tray entry and the
         // «От автора» window. It opens a **modeless** window and returns at once — the settings
@@ -11668,6 +11680,58 @@ fn open_log_folder(hwnd: HWND) {
     // module handle — the one Win32 return value that is neither a `BOOL` nor an error code.
     if result.0 as usize <= 32 {
         crate::app::report_non_critical("ShellExecuteW", &WinError::from_thread());
+    }
+}
+
+/// Writes the journal to its file **now** — the button «Сохранить журнал…» of «Диагностика»,
+/// task T-34-3, finding С48.
+///
+/// The neighbouring button opens the folder, and until this task the only file in it was the
+/// dump of the previous run, written at its shutdown and telling nothing of the session the
+/// person is looking at. This button writes the same dump while the session runs; the header
+/// says so (`journal.session  continues`) and carries the wall clock of the moment.
+///
+/// It does exactly one thing, and it is not the thing С26 found next door: nothing is
+/// launched, no shell is asked, no folder is opened. `diag::write_to` creates the folder if
+/// it is absent, writes a temporary file beside the target and renames it over — the file is
+/// whole or untouched (task T-34-1). It writes whether or not the journal is switched on: a
+/// press of the button is a request, and the setting of section 7 governs what happens at
+/// shutdown, not what happens when somebody asks.
+///
+/// A refusal is shown to the person as well as recorded (NFR-13): `write_to` has already put
+/// it into the ring with the code the system gave, and the box here says the one sentence a
+/// person can act on. `MessageBoxW` and not a window of our own: this is the error path, the
+/// box is modal to this dialog, and a second owner-drawn window for one sentence is not worth
+/// what it would cost to keep.
+fn save_journal(hwnd: HWND) {
+    let Some(target) = crate::diag::log_path() else {
+        return;
+    };
+
+    if crate::diag::write_to(&target).is_ok() {
+        return;
+    }
+
+    let sentence = wide(&text(IDS_LOG_SAVE_FAILED));
+    let caption = wide(crate::APP_NAME);
+
+    // SAFETY: both buffers are NUL-terminated UTF-16 vectors owned by this frame and neither
+    // is moved nor dropped until the call returns; `hwnd` is the live dialog, which becomes
+    // the owner of the box. The call blocks until the person closes it — on the UI thread,
+    // which is the one thread a modal box may block (section 6.1).
+    let result = unsafe {
+        MessageBoxW(
+            Some(hwnd),
+            PCWSTR(sentence.as_ptr()),
+            PCWSTR(caption.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        )
+    };
+
+    if result.0 == 0 {
+        // NFR-13: zero is the documented failure value. The refusal of the write is already
+        // in the ring; this one joins it.
+        crate::app::report_non_critical("MessageBoxW", &WinError::from_thread());
     }
 }
 

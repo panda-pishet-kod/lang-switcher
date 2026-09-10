@@ -69,7 +69,8 @@
 //!
 //! That is why the ring is a `static` array of atomics and not a `Vec` behind a `Mutex`, and
 //! why an entry is four numbers rather than a formatted line. **Nothing is formatted while
-//! recording.** Text appears only in [`render`], which runs on the UI thread at shutdown.
+//! recording.** Text appears only in [`render_as`], which runs on the UI thread — at shutdown,
+//! and when the button «Сохранить журнал…» of the settings dialog asks for a dump (task T-34-3).
 //!
 //! Publication uses a sequence stamp rather than a lock: the writer takes a ticket with one
 //! `fetch_add`, clears the stamp of the slot it landed on, stores the fields, and puts the
@@ -90,7 +91,9 @@
 //!
 //! [`dump_on_shutdown`] is not. Section 6.1 gives file input-output to the **UI thread** and
 //! forbids it to the input thread outright, so that function is called from one place, on that
-//! thread, once, as it leaves its message loop.
+//! thread, once, as it leaves its message loop. Since task T-34-3 the file has a second writer —
+//! [`write_to`], pressed as the button «Сохранить журнал…» of the settings dialog — and it lives
+//! on the same thread, because the dialog does.
 //!
 //! # The file — section 7
 //!
@@ -111,7 +114,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering, fence};
 use std::time::Instant;
 
-use windows::core::{Error as WinError, HRESULT};
+use windows::Win32::Globalization::{GetTimeFormatEx, LOCALE_NAME_INVARIANT, TIME_FORMAT_FLAGS};
+use windows::core::{Error as WinError, HRESULT, w};
 
 use crate::CONFIG_DIR_NAME;
 
@@ -610,6 +614,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("feed from a newer schema", Kind::Process),
     ("feed signature did not verify", Kind::Process),
     ("feed answer oversized", Kind::Process),
+    // Task T-34-3, finding С48: the clock of the dump header. `GetDateFormatEx` above already
+    // answers the date; this is its sibling for the time of day, and a refusal says which call
+    // refused and what the system said — never what time it was. Appended at the end for the
+    // reason every row above gives: an index already written must keep its meaning.
+    ("GetTimeFormatEx", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
@@ -1017,7 +1026,15 @@ pub fn log_path_in(app_data: &Path) -> PathBuf {
 ///
 /// **UI thread only** — section 6.1.
 pub fn write_to(path: &Path) -> io::Result<()> {
-    let outcome = write_replacing(path);
+    write_as(path, Session::Continues)
+}
+
+/// [`write_to`] with the state of the session spelled out in the header — task T-34-3.
+///
+/// [`dump_on_shutdown`] writes with [`Session::Ended`]; everything else that writes a dump does
+/// so while the program runs and says so.
+pub fn write_as(path: &Path, session: Session) -> io::Result<()> {
+    let outcome = write_replacing(path, session);
 
     if let Err(error) = &outcome {
         record(Operation::JOURNAL_WRITE_REFUSED, OsCode::of_io(error));
@@ -1026,8 +1043,8 @@ pub fn write_to(path: &Path) -> io::Result<()> {
     outcome
 }
 
-/// The three steps of [`write_to`]: the folder, the temporary file, the rename.
-fn write_replacing(path: &Path) -> io::Result<()> {
+/// The three steps of [`write_as`]: the folder, the temporary file, the rename.
+fn write_replacing(path: &Path, session: Session) -> io::Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -1040,7 +1057,7 @@ fn write_replacing(path: &Path) -> io::Result<()> {
     // result is not examined (NFR-13) for the reason `settings::write_to` gives: the error that
     // matters is the one being returned, and a `.tmp` that refused to go away is a stray file
     // beside the dump and nothing worse.
-    if let Err(error) = write_and_sync(&temporary, render().as_bytes()) {
+    if let Err(error) = write_and_sync(&temporary, render_as(session).as_bytes()) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
@@ -1140,7 +1157,7 @@ pub fn dump_on_shutdown_to(target: &Path) -> bool {
     // Recorded before the dump is rendered so that the file says it was written.
     record(Operation::JOURNAL_WRITTEN, OsCode::NONE);
 
-    if let Err(_recorded) = write_to(target) {
+    if let Err(_recorded) = write_as(target, Session::Ended) {
         // NFR-13: the outcome is examined here as well as inside `write_to`, which has already
         // put the refusal into the ring with the code the system gave (task T-34-1). Nothing
         // more can be done with it on this path: the place a report would go is the file that
@@ -1157,11 +1174,86 @@ pub fn dump_on_shutdown_to(target: &Path) -> bool {
 // Rendering — the only place in this module where text exists
 // ---------------------------------------------------------------------------------------
 
+/// Whether the session was still running when a dump was taken — task T-34-3, finding С48.
+///
+/// The one word that tells the dump the button writes from the dump the previous run left:
+/// until this task the two were the same text with a different uptime, and a person opening
+/// the journal folder could not say which run they were reading about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Session {
+    /// Written while the program runs — the button «Сохранить журнал…» of the settings dialog.
+    Continues,
+    /// Written by [`dump_on_shutdown`], the last act of the UI thread.
+    Ended,
+}
+
+impl Session {
+    /// The word the header carries.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Continues => "continues",
+            Self::Ended => "ended",
+        }
+    }
+}
+
+/// The whole dump as text, taken while the program runs — [`render_as`] with
+/// [`Session::Continues`].
+pub fn render() -> String {
+    render_as(Session::Continues)
+}
+
+/// The wall clock at the moment of the dump: `YYYY-MM-DD HH:MM:SS`, local time — task T-34-3.
+///
+/// Local time and not UTC, because the person reading the dump lives in the calendar of the
+/// machine; the invariant locale and a fixed picture, so that the digits and the calendar are
+/// this file's and not the user's. `None` when either clock refused, which NFR-13 answers by
+/// naming the refusal in the ring (`letters::today` names its own) and printing `(unknown)`.
+fn wall_clock() -> Option<String> {
+    let date = crate::letters::today()?;
+    let time = local_time()?;
+
+    Some(format!("{date} {time}"))
+}
+
+/// The time of day by the clock of this machine, `HH:MM:SS` in local time.
+fn local_time() -> Option<String> {
+    // `HH:MM:SS` and the terminator: nine units is the exact answer, and the buffer is asked
+    // for more so that a longer answer is truncated rather than refused.
+    let mut buffer = [0u16; 32];
+
+    // SAFETY: the locale name and the picture are static NUL-terminated literals of this
+    // image; the buffer is a live local of this frame and its length is what the call is told;
+    // `None` for the time is the documented «the current local time». The call writes into the
+    // buffer and reads nothing else of ours.
+    let written = unsafe {
+        GetTimeFormatEx(
+            LOCALE_NAME_INVARIANT,
+            TIME_FORMAT_FLAGS(0),
+            None,
+            w!("HH':'mm':'ss"),
+            Some(&mut buffer),
+        )
+    };
+
+    if written <= 0 {
+        crate::app::report_non_critical("GetTimeFormatEx", &WinError::from_thread());
+        return None;
+    }
+
+    // The count includes the terminator, which is not part of the text.
+    let units = usize::try_from(written).ok()?.saturating_sub(1);
+
+    String::from_utf16(buffer.get(..units)?).ok()
+}
+
 /// The whole dump as text.
 ///
 /// # What is in it, and what is deliberately not
 ///
-/// Two sections. **Events** is the ring. **Counters** is a snapshot of the counters the
+/// A header — the shape of the ring, the uptime, and since task T-34-3 the wall clock of the
+/// moment and whether the session still ran — and two sections. **Events** is the ring.
+/// **Counters** is a snapshot of the counters the
 /// earlier tasks already keep and already publish — this module reads them through their
 /// public accessors and keeps no counter of its own, because a second copy of a number is a
 /// second number to be wrong.
@@ -1177,7 +1269,7 @@ pub fn dump_on_shutdown_to(target: &Path) -> bool {
 /// a file when SEC-01 is what this module exists to honour. Leaving them out costs the
 /// diagnostic nothing: not one of them can distinguish a program that is working from one that
 /// is not.
-pub fn render() -> String {
+pub fn render_as(session: Session) -> String {
     let mut out = String::with_capacity(8192);
 
     let _ = writeln!(out, "{} diagnostic journal", crate::APP_NAME);
@@ -1186,6 +1278,12 @@ pub fn render() -> String {
     row_usize(&mut out, "journal.footprint_bytes", footprint_bytes());
     row_u64(&mut out, "journal.recorded", recorded());
     row_u32(&mut out, "journal.uptime_ms", elapsed_ms());
+    row_word(
+        &mut out,
+        "journal.taken_at",
+        wall_clock().as_deref().unwrap_or("(unknown)"),
+    );
+    row_word(&mut out, "journal.session", session.word());
 
     let _ = writeln!(out);
     let _ = writeln!(out, "--- counters ---");
