@@ -2178,6 +2178,13 @@ pub fn publish_configuration(config: &settings::Config) {
 
     crate::hook::set_active(config.general.enabled);
 
+    // **Section `[diagnostics]` of section 7 — task T-34-2, finding С47.** The journal used to
+    // read the file again at shutdown to learn whether it was on, and an unreadable file meant
+    // «off»; now it listens to this publication like every other module, so the answer at
+    // shutdown is the one the person set in this session. One store into an atomic `diag`
+    // owns, written and read on this thread.
+    crate::diag::set_log_enabled(config.diagnostics.log_enabled);
+
     // **Section `[feedback]` of section 7 — FR-100, task Т-21-5.** One store into an atomic of
     // this module, by the rule every publication above and below it follows: the configuration
     // belongs to the UI thread (section 6.1), and the sound is made on the UI thread, so this is

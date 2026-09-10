@@ -97,7 +97,9 @@
 //! Off by default: `[diagnostics] log_enabled = false`. When it is false **no file is created
 //! at all** — not an empty one, not a truncated one. The file lives next to the configuration,
 //! in `%APPDATA%\Lang_Switcher\`, because section 7 states that `%ProgramFiles%` is not
-//! writable by an ordinary user.
+//! writable by an ordinary user. Whether it is written is decided by the setting **published
+//! for this session** ([`set_log_enabled`], written by `app::publish_configuration`), not by
+//! reading the file again at shutdown — task T-34-2.
 
 use std::ffi::OsString;
 use std::fmt::Write as _;
@@ -106,13 +108,12 @@ use std::io;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering, fence};
 use std::time::Instant;
 
 use windows::core::{Error as WinError, HRESULT};
 
 use crate::CONFIG_DIR_NAME;
-use crate::settings;
 
 // ---------------------------------------------------------------------------------------
 // Size of the journal
@@ -402,7 +403,8 @@ static OPERATIONS: &[(&str, Kind)] = &[
     //
     // `Kind::Process` for all five, and **no new `Kind` is added** — the rule every note above
     // follows. The configuration is state of the process: it is read once as the process
-    // starts and written as it ends, and the second reader of it is this module itself, so a
+    // starts and written as it ends, and until task T-34-2 the second reader of it was this
+    // module itself (it now listens to the published setting instead — `set_log_enabled`), so a
     // `Kind::Tray` would be wrong for half of them and a `Kind::Settings` would be a new
     // variant, which is not a name.
     ("configuration file unreadable", Kind::Process),
@@ -1075,15 +1077,22 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
-/// Dumps the journal if the configuration asks for it. Called once, on the **UI thread**, as
-/// it leaves its message loop.
+/// Dumps the journal if the session asks for it. Called once, on the **UI thread**, as it
+/// leaves its message loop.
 ///
-/// # Why the setting is read here and not published at start-up
+/// # Why the setting is the published one and not the file — task T-34-2, finding С47
 ///
-/// Section 6.1 gives file input-output to the UI thread and this function runs on it, so the
-/// decision and the write happen in one place, on the one thread allowed to do either. Reading
-/// the setting at the moment it is acted on also means the answer is the one that is true at
-/// shutdown.
+/// Until this task the decision was taken by reading `config.toml` again, here, at shutdown,
+/// and a file that would not read meant «off». That answered the wrong question: the file is
+/// what the disk holds, and the disk can hold something other than what the person set in this
+/// session — a save that failed, a file edited by hand after start-up, a file damaged since.
+/// The journal then went silent exactly when it had been switched on, or wrote when it had
+/// been switched off. The setting every other module acts on is the one
+/// `app::publish_configuration` publishes at start-up and on every «Применить» (section 6.3),
+/// and this module now listens to the same publication: [`set_log_enabled`] is written there,
+/// [`log_enabled`] is what this function reads, and the file is not opened again. The read is
+/// on the UI thread, which is also where the write happens — section 6.1 — so nothing crosses
+/// a thread.
 ///
 /// # When it is off
 ///
@@ -1091,52 +1100,57 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// creates nothing: no folder, no file, not an empty one. That is the difference between a
 /// journal that is off and a journal that is on and had nothing to say.
 pub fn dump_on_shutdown() {
-    let Some(config_path) = settings::default_config_path() else {
-        return;
-    };
-
-    let (config, outcome) = settings::read_or_default(&config_path);
-
-    // **The second consumer of `read_or_default`, and it uses the outcome — task T-13-6.**
-    //
-    // What it decides here is narrow, and narrow is correct: **this function never writes the
-    // configuration file.** It reads one flag out of it and writes a file of its own,
-    // elsewhere. So not one of the decisions the outcome drives in `crate::tray` exists on
-    // this path — there is nothing to move aside, nothing to forbid, and no way for this code
-    // to damage a file it does not write. That is why dropping the value here was never a
-    // danger, and it is still not written.
-    //
-    // What the outcome does decide is *whose* answer `log_enabled` is. A read that failed
-    // hands back the defaults of section 7 rather than the file, so the flag is this program's
-    // own default and not a setting anybody chose — and that default is `false`, which is the
-    // direction that creates no file nobody asked for. A journal that refused to run because
-    // the configuration would not parse would be worse than no journal; a journal that started
-    // writing on a guess about an unreadable file would be worse still. The branch says so in
-    // one place instead of leaving it to be re-derived from the default table.
-    let log_enabled = match outcome {
-        Ok(_) => config.diagnostics.log_enabled,
-        Err(_) => false,
-    };
-
-    if !log_enabled {
-        return;
-    }
-
     let Some(target) = log_path() else {
         return;
     };
 
+    dump_on_shutdown_to(&target);
+}
+
+/// The published `[diagnostics] log_enabled` of this session — task T-34-2, finding С47.
+static LOG_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Publishes `[diagnostics] log_enabled` of the configuration of this session — task T-34-2.
+///
+/// Called by `app::publish_configuration` at start-up and on every «Применить», which is how
+/// every other setting reaches the module that acts on it (section 6.3). Written and read on
+/// the UI thread alone, so `Relaxed` is all the store needs; an atomic rather than a `Cell`
+/// because a `static` has to be one.
+pub fn set_log_enabled(enabled: bool) {
+    LOG_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether the journal of this session is to be written — the published setting.
+pub fn log_enabled() -> bool {
+    LOG_ENABLED.load(Ordering::Relaxed)
+}
+
+/// [`dump_on_shutdown`] with its target made explicit, for the tests. Answers whether the dump
+/// reached the file.
+///
+/// The one input besides the target is [`log_enabled`] — the published setting of the session.
+/// No path to a configuration file is taken, and none is read: that is the whole of task
+/// T-34-2, and `tests\diag.rs` plants a broken file and a file that says the opposite of the
+/// session to show that neither is consulted.
+pub fn dump_on_shutdown_to(target: &Path) -> bool {
+    if !log_enabled() {
+        return false;
+    }
+
     // Recorded before the dump is rendered so that the file says it was written.
     record(Operation::JOURNAL_WRITTEN, OsCode::NONE);
 
-    if let Err(_recorded) = write_to(&target) {
+    if let Err(_recorded) = write_to(target) {
         // NFR-13: the outcome is examined here as well as inside `write_to`, which has already
         // put the refusal into the ring with the code the system gave (task T-34-1). Nothing
         // more can be done with it on this path: the place a report would go is the file that
         // just refused, and this is the last write of the process. The `io::Error` itself goes
         // no further — its number is in the ring, and its text is text, which nothing in this
         // module keeps.
+        return false;
     }
+
+    true
 }
 
 // ---------------------------------------------------------------------------------------

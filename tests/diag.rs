@@ -1075,3 +1075,87 @@ fn an_io_error_reaches_the_journal_by_its_number_only_and_only_from_module_diag(
         "OsCode::of_io is called outside module diag: {sites:?}"
     );
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-34-2 — the journal listens to the session, not to the file on the disk
+// -------------------------------------------------------------------------------------
+
+/// A folder of its own holding a configuration file, and the path a dump would go to — one
+/// level down, so that «nothing is created» can be checked on the folder as well as the file.
+fn a_session_folder(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let folder = std::env::temp_dir().join(format!("lang_switcher-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("the temporary folder could not be created");
+
+    let config = folder.join("config.toml");
+    let target = folder.join("journal").join(LOG_FILE_NAME);
+
+    (folder, config, target)
+}
+
+/// Publishes `enabled` for the length of the closure and puts the previous value back.
+fn with_journal(enabled: bool, body: impl FnOnce()) {
+    let before = diag::log_enabled();
+    diag::set_log_enabled(enabled);
+    body();
+    diag::set_log_enabled(before);
+}
+
+/// **Task T-34-2, finding С47, first branch.** The configuration file on the disk is broken and
+/// the session has the journal on: the dump is written.
+///
+/// Before this task the decision was taken by reading the file again at shutdown, and a file
+/// that would not read meant «off» — the journal went silent precisely when a person had
+/// switched it on and the file had been damaged since. The session's own published setting
+/// is the answer; the disk is not asked.
+#[test]
+fn a_broken_file_on_the_disk_does_not_silence_a_journal_the_session_has_on() {
+    let _gate = ring();
+
+    let (folder, config, target) = a_session_folder("T-34-2a");
+    std::fs::write(&config, "[general\nthis is not a configuration file\n")
+        .expect("the broken configuration could not be planted");
+
+    let mut written = false;
+    with_journal(true, || written = diag::dump_on_shutdown_to(&target));
+
+    assert!(
+        written && target.is_file(),
+        "the session had the journal on and no dump was written (answered {written}, file: {})",
+        target.is_file()
+    );
+
+    std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+}
+
+/// **Task T-34-2, finding С47, second branch.** The file on the disk says «on» and the session
+/// says «off»: nothing is created — no folder, no file, not an empty one.
+///
+/// The disk can say «on» while the session says «off» whenever a save has failed or a file was
+/// edited by hand after the program started; and the reverse — the session on, the disk still
+/// saying the old «off» — is the same defect from the other side. Either way the file is not
+/// what the person set in this session, and section 7's «no file nobody asked for» is about the
+/// person, not the disk.
+#[test]
+fn a_journal_the_session_has_off_creates_nothing_whatever_the_file_says() {
+    let _gate = ring();
+
+    let (folder, config, target) = a_session_folder("T-34-2b");
+    let mut on_disk = settings::Config::default();
+    on_disk.diagnostics.log_enabled = true;
+    settings::write_to(&config, &on_disk).expect("the configuration could not be planted");
+
+    let mut written = true;
+    with_journal(false, || written = diag::dump_on_shutdown_to(&target));
+
+    let journal_folder = target.parent().expect("the target has a folder");
+    assert!(
+        !written && !target.exists() && !journal_folder.exists(),
+        "the session had the journal off and something was created (answered {written}, file: \
+         {}, folder: {})",
+        target.exists(),
+        journal_folder.exists()
+    );
+
+    std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+}
