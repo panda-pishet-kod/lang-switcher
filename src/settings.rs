@@ -1969,13 +1969,91 @@ fn replace_read_only_once(temporary: &Path, path: &Path) -> io::Result<WriteOutc
 /// process id keeps two instances of the program from colliding; within one process the
 /// configuration is written by the UI thread alone (section 6.3), so nothing finer is
 /// needed.
-fn temporary_path_for(path: &Path) -> PathBuf {
+///
+/// Public since task T-55-5, so that a test can take the name a write leaves from here and hand it
+/// to [`remove_abandoned_temporaries`] — the mask of the sweep is never written out a second time.
+pub fn temporary_path_for(path: &Path) -> PathBuf {
     let mut name = match path.file_name() {
         Some(name) => name.to_os_string(),
         None => OsString::from(CONFIG_FILE_NAME),
     };
-    name.push(format!(".{}.tmp", std::process::id()));
+    name.push(format!(".{}{TEMPORARY_SUFFIX}", std::process::id()));
     path.with_file_name(name)
+}
+
+/// What [`temporary_path_for`] puts after the process id, and what [`remove_abandoned_temporaries`]
+/// looks for — task T-55-5. One constant for both, so that the name a write leaves and the name a
+/// start removes cannot drift apart.
+const TEMPORARY_SUFFIX: &str = ".tmp";
+
+/// What [`remove_abandoned_temporaries`] did — task T-55-5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Swept {
+    /// Temporaries of an interrupted write that were removed.
+    pub removed: usize,
+    /// Temporaries of an interrupted write that were found and would not go.
+    pub refused: usize,
+}
+
+/// Removes the temporaries an interrupted [`write_to`] left beside `path` — task T-55-5, finding
+/// Т8.
+///
+/// A process stopped between the write of its temporary and the rename — killed, or cut off by a
+/// power failure — leaves `config.toml.<pid>.tmp` behind, and until this task nothing ever removed
+/// it: no start looked, and the uninstaller had no `[UninstallDelete]` for it. Litter like that is
+/// at odds with section 8.4, which promises an uninstall that leaves nothing of the program behind.
+///
+/// **What counts** is a file in the folder of `path` named exactly the way [`temporary_path_for`]
+/// names one: the name of `path`, a dot, decimal digits and [`TEMPORARY_SUFFIX`]. The kept copy of
+/// an unreadable file (`config.toml.bad`, [`QUARANTINE_SUFFIX`]) is not one and is precious, and no
+/// other file of the folder is looked at — the journal keeps temporaries of its own there.
+///
+/// **When:** once, at the start, where the configuration is read — before this process has written
+/// anything, so none of the temporaries can be its own. Not on a timer, and not by asking whether
+/// the process named in a file is still alive: FR-82 keeps one instance per session, and a name
+/// alone cannot prove who is still writing.
+///
+/// A refusal is not a failure of the program's work — the configuration is read all the same — and
+/// it is not silence either: it is counted in [`Swept::refused`], and the caller names it in the
+/// journal.
+pub fn remove_abandoned_temporaries(path: &Path) -> Swept {
+    let mut swept = Swept::default();
+
+    let (Some(folder), Some(name)) = (
+        path.parent(),
+        path.file_name().and_then(|name| name.to_str()),
+    ) else {
+        return swept;
+    };
+
+    // No folder yet — a first run — has nothing in it to sweep.
+    let Ok(entries) = fs::read_dir(folder) else {
+        return swept;
+    };
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+
+        let abandoned = file_name
+            .to_str()
+            .and_then(|candidate| candidate.strip_prefix(name))
+            .and_then(|rest| rest.strip_prefix('.'))
+            .and_then(|rest| rest.strip_suffix(TEMPORARY_SUFFIX))
+            .is_some_and(|digits| {
+                !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+            });
+
+        if !abandoned || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+
+        match fs::remove_file(entry.path()) {
+            Ok(()) => swept.removed += 1,
+            Err(_) => swept.refused += 1,
+        }
+    }
+
+    swept
 }
 
 /// Writes `bytes` to `path` and flushes them to the device before returning.

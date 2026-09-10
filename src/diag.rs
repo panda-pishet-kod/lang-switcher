@@ -662,6 +662,14 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the path, not the attributes, not the
     // configuration. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("configuration read-only attribute cleared", Kind::Process),
+    // ⭐ **Task T-55-5, finding Т8** — a temporary of an interrupted write of `config.toml` that the
+    // start found beside the file and could not remove. Not a failure of the program's work — the
+    // configuration is read all the same — and not silence either. Appended at the end so that no
+    // index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the name, not the process id in it, not the
+    // count. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("configuration temporary not removed", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

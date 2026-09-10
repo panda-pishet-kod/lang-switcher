@@ -91,6 +91,10 @@ VersionInfoCopyright={#AppCopyright}
 ; for it once, at the start, and nothing later needs to ask again.
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=
+; The per-user areas this script touches are the ones the uninstaller cleans up for the account
+; it runs as -- the Run value and the temporaries under {userappdata}\Lang_Switcher -- and each
+; carries that caveat where it is used.  Acknowledged here instead of repeated in every build log.
+UsedUserAreasWarning=no
 
 ; x64 only.  The shipping binary is PE machine 0x8664, and on 64-bit Windows a
 ; 32-bit install would resolve {commonpf} to "Program Files (x86)" -- the wrong
@@ -152,6 +156,17 @@ Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: igno
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+
+[UninstallDelete]
+; Task T-55-5, finding T8: a temporary of the atomic write of config.toml that an interrupted
+; write left behind -- config.toml.<pid>.tmp.  The mask the product sweeps at every start
+; (settings.rs, remove_abandoned_temporaries), with one difference: an Inno mask cannot say
+; "digits", so here the middle is any text -- nothing but this program writes names of that
+; shape into its own folder.  config.toml.bad, the kept copy of an unreadable configuration,
+; does not match and stays; config.toml itself goes only on an explicit yes (the [Code] below).
+; {userappdata} is the profile of the account the uninstaller runs as -- the same caveat as the
+; HKCU value in CurUninstallStepChanged.
+Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
 
 [Run]
 ; skipifsilent is the whole point of this entry being safe: a silent install --

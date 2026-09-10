@@ -894,6 +894,37 @@ fn clearing_the_read_only_attribute_of_the_configuration_has_a_name_of_its_own()
     );
 }
 
+/// **Task T-55-5, finding Т8 — a temporary of an interrupted write that the start could not remove
+/// has a name of its own.** Not a failure of the program's work, and still not silence; the shape
+/// of the configuration rows, and `Kind::Process` like them.
+#[test]
+fn a_temporary_the_start_could_not_remove_has_a_name_of_its_own() {
+    let name = "configuration temporary not removed";
+
+    let _gate = ring();
+
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» still reaches the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "{name} landed in the wrong group"
+    );
+
+    diag::record(operation, OsCode::NONE);
+
+    assert!(
+        diag::render().contains(name),
+        "the dump does not print {name}"
+    );
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the

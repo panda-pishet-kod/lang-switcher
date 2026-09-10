@@ -619,6 +619,12 @@ impl Tray {
 
         let (config, save_policy, on_disk) = match config_path.as_deref() {
             Some(path) => {
+                // Task T-55-5, finding Т8: the temporaries an interrupted write left beside the
+                // file go first — before this process has written anything, so none is its own.
+                if settings::remove_abandoned_temporaries(path).refused > 0 {
+                    note_configuration(CONFIG_TEMPORARY_NOT_REMOVED);
+                }
+
                 let (config, outcome) = settings::read_or_default(path);
 
                 // **This is the place `read_or_default` returns a pair for** — task T-13-6.
@@ -1493,6 +1499,10 @@ const CONFIG_WRITE_FAILED: &str = "configuration write failed";
 /// ⭐ **Task T-55-3, finding Н26.** The save landed only after the read-only attribute of
 /// `config.toml` was cleared once — [`settings::WriteOutcome::WrittenAfterClearingReadOnly`].
 const CONFIG_READ_ONLY_CLEARED: &str = "configuration read-only attribute cleared";
+
+/// ⭐ **Task T-55-5, finding Т8.** The start found a temporary of an interrupted write beside the
+/// file and could not remove it — [`settings::remove_abandoned_temporaries`].
+const CONFIG_TEMPORARY_NOT_REMOVED: &str = "configuration temporary not removed";
 
 /// ⭐ **Решение 120.4 (б), task T-55-1.** A start found `general.autostart = true` and no value of
 /// this image under `HKCU\…\Run`, and wrote one — [`reconcile_autostart`].

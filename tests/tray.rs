@@ -3187,6 +3187,37 @@ fn an_unchanged_configuration_is_left_alone_at_shutdown() {
     assert_eq!(migrated.schema_version, settings::CURRENT_SCHEMA_VERSION);
 }
 
+/// **Task T-55-5 through the tray: the sweep runs where the configuration is read.** A temporary an
+/// interrupted write left beside the file is gone once the tray is up; the kept copy of an
+/// unreadable file beside it stays.
+#[test]
+fn the_start_of_the_tray_sweeps_an_abandoned_temporary() {
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-sweep");
+    current_file_saying(&home, true);
+
+    fs::write(
+        home.config().with_file_name("config.toml.31337.tmp"),
+        "half of a write",
+    )
+    .expect("the temporary must be writable");
+    fs::write(settings::quarantine_path_for(&home.config()), "kept")
+        .expect("the kept copy must be writable");
+
+    let tray = install(&window, &home);
+    let entries = home.entries();
+
+    drop(tray);
+
+    println!("after the start: {entries:?}");
+
+    assert_eq!(
+        entries,
+        ["config.toml", "config.toml.bad"],
+        "Т8: the temporary is swept at the start, and the kept copy stays"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-24 — «Применить» does not write an autostart the registry refused
 //

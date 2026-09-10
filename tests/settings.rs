@@ -1553,6 +1553,117 @@ fn a_refusal_the_read_only_attribute_does_not_explain_is_still_a_refusal() {
     );
 }
 
+/// **Task T-55-5, finding Т8 — a start sweeps the temporaries an interrupted write left, and
+/// nothing else.** A process killed between the write of `config.toml.<pid>.tmp` and the rename
+/// left that file behind for good: nothing removed it at the next start. The folder here holds one
+/// such temporary among neighbours that only look like one — a name with no process id, a process
+/// id with a letter in it, somebody else's file, the journal's own temporary — and the kept copy of
+/// an unreadable configuration, which is precious. Exactly one file goes.
+#[test]
+fn a_start_sweeps_the_temporaries_of_an_interrupted_write_and_nothing_else() {
+    let dir = TestDir::new("sweep");
+    let path = dir.config();
+
+    fs::write(&path, "schema_version = 6\n").expect("the configuration must be writable");
+    let configuration = fs::read(&path).expect("the configuration must be readable");
+
+    for (name, text) in [
+        ("config.toml.12345.tmp", "half of a write"),
+        ("config.toml.bad", "the kept copy of an unreadable file"),
+        ("config.toml.tmp", "no process id"),
+        ("config.toml.12x45.tmp", "not a process id"),
+        ("notes.12345.tmp", "somebody else's"),
+        ("lang_switcher.log.777.tmp", "the journal's own temporary"),
+    ] {
+        fs::write(dir.path.join(name), text).expect("a file of the folder must be writable");
+    }
+
+    let swept = settings::remove_abandoned_temporaries(&path);
+
+    println!("swept: {swept:?}, left: {:?}", dir.entries());
+
+    assert_eq!(
+        swept,
+        settings::Swept {
+            removed: 1,
+            refused: 0
+        },
+        "Т8: the one temporary of an interrupted write is removed"
+    );
+    assert_eq!(
+        dir.entries(),
+        [
+            "config.toml",
+            "config.toml.12x45.tmp",
+            "config.toml.bad",
+            "config.toml.tmp",
+            "lang_switcher.log.777.tmp",
+            "notes.12345.tmp",
+        ],
+        "and nothing else: the kept copy and every neighbour stay"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the configuration must still be there"),
+        configuration,
+        "and the configuration itself is untouched"
+    );
+}
+
+/// **The name a write leaves is the name the sweep removes** — task T-55-5. The mask is not written
+/// out a second time: the test takes the name from `temporary_path_for` itself, so a change to one
+/// that the other did not follow is a red here and not a stray file on somebody's disk.
+#[test]
+fn the_sweep_recognises_exactly_the_name_a_write_leaves() {
+    let dir = TestDir::new("sweep_name");
+    let path = dir.config();
+    let temporary = settings::temporary_path_for(&path);
+
+    fs::write(&temporary, "half of a write").expect("the temporary must be writable");
+
+    let swept = settings::remove_abandoned_temporaries(&path);
+
+    assert_eq!(
+        swept.removed,
+        1,
+        "the sweep must recognise {}",
+        temporary.display()
+    );
+    assert!(!temporary.exists(), "and the temporary is gone");
+}
+
+/// **A temporary that cannot be removed is counted, not hidden** — task T-55-5. Held open with no
+/// sharing at all it survives the sweep, and the count says so; the caller names it in the journal.
+#[test]
+fn a_temporary_that_cannot_be_removed_is_counted() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = TestDir::new("sweep_refused");
+    let path = dir.config();
+    let temporary = dir.path.join("config.toml.4242.tmp");
+
+    fs::write(&temporary, "half of a write").expect("the temporary must be writable");
+
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&temporary)
+        .expect("the temporary must open");
+
+    let swept = settings::remove_abandoned_temporaries(&path);
+
+    drop(held);
+
+    assert_eq!(
+        swept,
+        settings::Swept {
+            removed: 0,
+            refused: 1
+        },
+        "a temporary that would not go is a count, not silence"
+    );
+    assert!(temporary.exists(), "and it is still there");
+}
+
 // Criterion 21. The standard path is %APPDATA%\Lang_Switcher\config.toml. Checked by
 // building the string: no file and no directory is created anywhere near the real
 // %APPDATA%, which belongs to whoever is running the tests.
