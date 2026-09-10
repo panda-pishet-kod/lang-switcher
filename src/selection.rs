@@ -400,6 +400,12 @@ static FOREIGN_UPDATES: AtomicU32 = AtomicU32::new(0);
 /// Snapshots that went over [`SNAPSHOT_BUDGET_BYTES`] and kept text only — FR-64.
 static TRUNCATIONS: AtomicU32 = AtomicU32::new(0);
 
+/// Snapshots whose list of formats was cut short at [`MAX_FORMATS`] — **finding Н16 of the audit
+/// of 2026-09-04, task T-38-7**. The neighbour of [`TRUNCATIONS`], and kept apart from it: that
+/// one is the budget of FR-64 speaking, this one the bound of the enumeration — a clipboard that
+/// listed more formats than this module walks, and whose tail the snapshot never saw.
+static FORMAT_LIST_TRUNCATIONS: AtomicU32 = AtomicU32::new(0);
+
 /// Formats that were listed on the clipboard and could not be read out of it.
 ///
 /// Delayed rendering, mostly: see [`snapshot`]. Counted rather than escalated, because FR-64
@@ -553,6 +559,9 @@ pub struct Counters {
     pub foreign_updates: u32,
     /// Snapshots cut down to text by the budget of FR-64.
     pub truncations: u32,
+    /// Snapshots whose list of formats was cut short at [`MAX_FORMATS`] — finding Н16, task
+    /// T-38-7. A count of the bound being reached, and nothing about what the formats held.
+    pub format_list_truncations: u32,
     /// Listed formats that could not be read — delayed rendering, mostly.
     pub refused_formats: u32,
     /// Listed formats that are not memory blocks — see [`HANDLE_FORMATS`].
@@ -583,6 +592,7 @@ pub fn counters() -> Counters {
         own_updates: OWN_UPDATES.load(Ordering::Relaxed),
         foreign_updates: FOREIGN_UPDATES.load(Ordering::Relaxed),
         truncations: TRUNCATIONS.load(Ordering::Relaxed),
+        format_list_truncations: FORMAT_LIST_TRUNCATIONS.load(Ordering::Relaxed),
         refused_formats: REFUSED_FORMATS.load(Ordering::Relaxed),
         handle_formats: HANDLE_FORMATS_SEEN.load(Ordering::Relaxed),
         listener_remove_failures: LISTENER_REMOVE_FAILURES.load(Ordering::Relaxed),
@@ -718,13 +728,23 @@ impl Clipboard {
         Err(ClipboardError::Busy)
     }
 
-    /// The format numbers on the clipboard right now, in the system's own order.
+    /// The format numbers on the clipboard right now, in the system's own order, and whether the
+    /// list goes on past [`MAX_FORMATS`].
     ///
     /// `EnumClipboardFormats` needs the clipboard open, which is why this is a method. It
     /// answers zero both at the end of the list and on failure, and the two are told apart the
     /// way the documentation prescribes — by the thread's last error, which the binding has
     /// already turned into an `Err` for us.
-    fn formats(&self) -> WinResult<Vec<u32>> {
+    ///
+    /// # The bound, and the one question past it — finding Н16, task T-38-7
+    ///
+    /// The walk stops at [`MAX_FORMATS`]. Until task T-38-7 it then answered the same `Ok` the end
+    /// of a list answers, so a snapshot of a clipboard that listed more was partial and could not
+    /// say so. Now the list is asked once more: zero with a clean last error is the end, and the
+    /// list was whole; anything else — another format, or a failure at that point — means the
+    /// tail was not seen, and the second value says `true`. The snapshot still answers `Ok`, as it
+    /// always did: a long list is not an error, it is a fact to be told.
+    fn formats(&self) -> WinResult<(Vec<u32>, bool)> {
         let mut formats = Vec::new();
         let mut current = 0_u32;
 
@@ -742,7 +762,7 @@ impl Clipboard {
                 let error = WinError::from_thread();
 
                 return if error.code().is_ok() {
-                    Ok(formats)
+                    Ok((formats, false))
                 } else {
                     Err(error)
                 };
@@ -752,7 +772,15 @@ impl Clipboard {
             current = next;
         }
 
-        Ok(formats)
+        // SAFETY: as in the loop — the clipboard is open and `current` is the format the last
+        // iteration returned, passed by value. The answer is examined on the next line, and
+        // nothing of ours is dereferenced.
+        let beyond = unsafe { EnumClipboardFormats(current) };
+
+        // NFR-13: the end of the list is zero with a clean last error, exactly as in the loop.
+        let ended = beyond == 0 && WinError::from_thread().code().is_ok();
+
+        Ok((formats, !ended))
     }
 
     /// The data of `format` as a movable memory block, if there is any.
@@ -971,6 +999,10 @@ pub struct Snapshot {
     bytes: usize,
     /// Whether the budget of FR-64 cut this snapshot down to [`CF_UNICODETEXT`].
     truncated: bool,
+    /// Whether the clipboard listed more formats than [`MAX_FORMATS`], so that the snapshot never
+    /// saw the tail of the list — finding Н16, task T-38-7. The neighbour of `truncated`, and a
+    /// different fact: that one is the budget, this one the bound of the enumeration.
+    formats_truncated: bool,
     /// How many privacy markers the clipboard listed **without data**, kept here in their
     /// restrictive form — finding С25, task T-38-6, decision 121.7. They are among `captured`,
     /// holding [`PRIVACY_MARKER_DATA`] rather than bytes read off the clipboard.
@@ -992,6 +1024,7 @@ impl Snapshot {
             refused: 0,
             bytes: 0,
             truncated: false,
+            formats_truncated: false,
             markers_without_data: 0,
             sequence: 0,
         }
@@ -1037,6 +1070,13 @@ impl Snapshot {
         self.truncated
     }
 
+    /// Whether the list of formats was cut short at [`MAX_FORMATS`] — the snapshot is then partial
+    /// in a way no other count shows: [`Snapshot::listed_formats`] answers the bound, not the list.
+    /// Task T-38-7, finding Н16.
+    pub fn is_format_list_truncated(&self) -> bool {
+        self.formats_truncated
+    }
+
     /// How many privacy markers were listed without data and are kept in their restrictive form
     /// — task T-38-6, decision 121.7. A count of formats, never of anything in them.
     pub fn markers_without_data(&self) -> usize {
@@ -1070,6 +1110,7 @@ impl fmt::Debug for Snapshot {
             .field("refused_formats", &self.refused)
             .field("total_bytes", &self.bytes)
             .field("truncated", &self.truncated)
+            .field("formats_truncated", &self.formats_truncated)
             .field("markers_without_data", &self.markers_without_data)
             .finish()
     }
@@ -1136,7 +1177,16 @@ impl Drop for Snapshot {
 pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
     let clipboard = Clipboard::open(owner)?;
 
-    let listed = clipboard.formats()?;
+    let (listed, formats_truncated) = clipboard.formats()?;
+
+    // ⭐ **Finding Н16 of the audit of 2026-09-04, task T-38-7.** A list cut short at the bound is
+    // counted and journalled once, the way the budget of FR-64 below is — the fact and nothing
+    // else: not how many formats there were, not which (SEC-01, SEC-07). The snapshot carries the
+    // flag and goes on with the formats it did see.
+    if formats_truncated {
+        FORMAT_LIST_TRUNCATIONS.fetch_add(1, Ordering::Relaxed);
+        note_format_list_truncation();
+    }
 
     // Pass one: what is there, how big it is, and what cannot be taken. No bytes move here.
     let mut sizes: Vec<(u32, HGLOBAL, usize)> = Vec::with_capacity(listed.len());
@@ -1255,6 +1305,7 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
         refused,
         bytes,
         truncated,
+        formats_truncated,
         markers_without_data,
         sequence,
     })
@@ -1308,6 +1359,20 @@ fn read_block(handle: HGLOBAL, size: usize) -> Option<Vec<u8>> {
 fn note_truncation() {
     crate::diag::record(
         crate::diag::Operation::from_name("clipboard snapshot truncated"),
+        crate::diag::OsCode::NONE,
+    );
+}
+
+/// Puts the journal entry a list of formats cut short at [`MAX_FORMATS`] leaves behind — **finding
+/// Н16 of the audit of 2026-09-04, task T-38-7, decision 121.3**.
+///
+/// The shape of [`note_truncation`], and for its reasons: the *fact* and nothing else, under a name
+/// of the closed vocabulary of module `diag` — «clipboard formats truncated», the row decision
+/// 121.3 allowed — with [`crate::diag::OsCode::NONE`] beside it, because no Win32 call failed and a
+/// number built from the list would be a shape of somebody's clipboard (SEC-01, SEC-07).
+fn note_format_list_truncation() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("clipboard formats truncated"),
         crate::diag::OsCode::NONE,
     );
 }
@@ -4074,6 +4139,7 @@ mod tests {
             refused: 1,
             bytes: 24,
             truncated: true,
+            formats_truncated: true,
             markers_without_data: 2,
             sequence: 77,
         };
@@ -4085,7 +4151,10 @@ mod tests {
         assert!(!printed.contains("83")); // the first byte of the payload, as a decimal
         assert!(printed.contains("captured_formats: 1"));
         assert!(printed.contains("total_bytes: 24"));
-        assert!(printed.contains("truncated: true"));
+        // The separator in front keeps this from being satisfied by `formats_truncated` below.
+        assert!(printed.contains(", truncated: true"));
+        // Task T-38-7: the list of formats cut short at the bound is a flag of its own, printed.
+        assert!(printed.contains("formats_truncated: true"));
         // Task T-38-6: the markers kept in their restrictive form are a count, and are printed.
         assert!(printed.contains("markers_without_data: 2"));
     }

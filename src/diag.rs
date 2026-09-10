@@ -688,6 +688,16 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not which field, not what stood there, not the
     // default it became. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("configuration field read as its default", Kind::Process),
+    // ⭐ **Task T-38-7, finding Н16 of the audit of 2026-09-04, decision 121.3** — the clipboard
+    // listed more formats than `selection::snapshot` walks, and the tail of the list was never
+    // seen: the snapshot is partial in a way none of its counts shows. The neighbour of «clipboard
+    // snapshot truncated» — that one is the budget of FR-64, this one the bound of the
+    // enumeration — and of its shape. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not how many formats there were, not which, not
+    // a byte of any of them. `Kind::Selection` and **no new `Kind`**, the rule every note above
+    // follows.
+    ("clipboard formats truncated", Kind::Selection),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
@@ -1332,7 +1342,8 @@ fn local_time() -> Option<String> {
 /// build, each method of the chain of FR-50, the `SendInput` return-value discrepancies, the
 /// refused `PostMessage`s. Task T-34-4 (finding Н95) added the fourteen counters of the
 /// password-field guard (`guard.*`) and the fifteen of the clipboard path (`selection.*`),
-/// through the readers those two modules publish.
+/// through the readers those two modules publish; task T-38-7 (finding Н16) added a sixteenth,
+/// `selection.format_list_truncations`.
 ///
 /// `watchdog::counters` and `hook::hotkey_handoffs` are **left out on purpose**. They are
 /// honest counts of program events and SEC-07 would permit them, but they are proportional to
@@ -1505,6 +1516,11 @@ fn render_counters(out: &mut String) {
     row_u32(out, "selection.own_updates", clipboard.own_updates);
     row_u32(out, "selection.foreign_updates", clipboard.foreign_updates);
     row_u32(out, "selection.truncations", clipboard.truncations);
+    row_u32(
+        out,
+        "selection.format_list_truncations",
+        clipboard.format_list_truncations,
+    );
     row_u32(out, "selection.refused_formats", clipboard.refused_formats);
     row_u32(out, "selection.handle_formats", clipboard.handle_formats);
     row_u32(

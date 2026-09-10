@@ -1094,6 +1094,71 @@ fn a_clipboard_over_the_budget_keeps_the_text_and_says_so() {
     );
 }
 
+/// **Finding Н16 of the audit of 2026-09-04, task T-38-7, live.** A list of formats cut short at the
+/// bound of the enumeration says so — the flag, the counter and one entry of the journal under its
+/// own name — and a list that ends exactly at the bound does not.
+///
+/// The clipboard of premise П3, one private format apart: 252 or 253 private formats of one byte,
+/// then `CF_UNICODETEXT` last, and after the close the system synthesises three more from the text.
+/// So the system lists **256** — the whole list fits the bound and the one question past it is
+/// answered «no more» — or **257**, and the snapshot walks 256 of them. The counts are checked as a
+/// precondition before the snapshot is taken: a system that synthesised differently would turn the
+/// precondition red rather than let the assertions below pass for the wrong reason. Before task
+/// T-38-7 both answered the same `Ok` and nothing else (premise П3, `premise-n16.log`).
+#[test]
+#[ignore = "writes 257 formats to the machine's clipboard; run with --ignored --test-threads=1"]
+fn a_list_of_formats_cut_short_says_so_and_a_list_that_ends_at_the_bound_does_not() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    for (private, listed, cut_short) in [(252_u32, 256_usize, false), (253, 257, true)] {
+        let mut entries: Vec<(u32, Vec<u8>)> = (0x0200..0x0200 + private)
+            .map(|format| (format, vec![0x5A]))
+            .collect();
+        entries.push((CF_UNICODETEXT, text_block("e38 Н16")));
+
+        assert!(raw_write(window.0, &entries));
+        assert_eq!(
+            raw_formats(window.0).len(),
+            listed,
+            "precondition: after the close the system lists {listed} formats"
+        );
+
+        let journal_before = lang_switcher::diag::recorded();
+        let counters_before = selection::counters();
+
+        let snapshot =
+            selection::snapshot(window.0).expect("a long list is an answer, not an error");
+
+        let counters_after = selection::counters();
+
+        assert_eq!(
+            snapshot.is_format_list_truncated(),
+            cut_short,
+            "{listed} formats listed: cut short is {cut_short}"
+        );
+        assert_eq!(
+            counters_after.format_list_truncations - counters_before.format_list_truncations,
+            u32::from(cut_short),
+            "{listed} formats listed: the counter moves only for a list cut short"
+        );
+
+        if cut_short {
+            assert!(
+                lang_switcher::diag::recorded() > journal_before,
+                "the journal took the entry"
+            );
+            assert!(
+                lang_switcher::diag::snapshot()
+                    .iter()
+                    .any(|event| event.operation.name() == "clipboard formats truncated"),
+                "and the entry is under its own name"
+            );
+        }
+    }
+}
+
 /// **Decision 121.6, task T-38-0, live.** Over a clipboard the snapshot cannot give back whole, the
 /// keeper refuses **before anything is written**.
 ///
@@ -1903,6 +1968,22 @@ fn nothing_of_the_clipboard_can_reach_the_journal() {
         "Snapshot must not derive anything; its Debug is hand-written"
     );
     assert!(product.contains("impl fmt::Debug for Snapshot"));
+
+    // Task T-38-7, finding Н16: whether the list of formats was cut short is part of what the
+    // hand-written `Debug` prints — a fact about the enumeration, never a format number or a byte.
+    let debug = cut_at(
+        product
+            .split("impl fmt::Debug for Snapshot")
+            .nth(1)
+            .expect("the hand-written Debug exists"),
+        "\n}\n",
+        "the hand-written Debug of Snapshot",
+    );
+
+    assert!(
+        debug.contains(".field(\"formats_truncated\""),
+        "the Debug of a snapshot prints whether its list of formats was cut short"
+    );
 }
 
 /// **The border of the task, as task T-07-2 leaves it.**
@@ -2970,6 +3051,27 @@ fn the_failed_restore_has_a_name_of_its_own_in_the_journal() {
         failed,
         Operation::from_name("clipboard restore skipped"),
         "a failure and a lawful skip are opposite events and may not share a row"
+    );
+}
+
+/// **Finding Н16 of the audit of 2026-09-04, task T-38-7 — SEC-07.** A list of formats cut short
+/// at the bound of the enumeration has a name of its own in the journal's closed vocabulary
+/// (decision 121.3), and it is not the name of the budget of FR-64 beside it.
+#[test]
+fn a_list_of_formats_cut_short_has_a_name_of_its_own_in_the_journal() {
+    let cut_short = Operation::from_name("clipboard formats truncated");
+
+    assert_ne!(
+        cut_short,
+        Operation::UNLISTED,
+        "the row decision 121.3 allowed is in the table, so the entry is named rather than counted"
+    );
+    assert_eq!(cut_short.name(), "clipboard formats truncated");
+    assert_eq!(cut_short.kind(), Kind::Selection);
+    assert_ne!(
+        cut_short,
+        Operation::from_name("clipboard snapshot truncated"),
+        "a list cut short at the bound is not a snapshot cut down by the budget"
     );
 }
 
