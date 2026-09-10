@@ -144,7 +144,7 @@ use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, EmptyClipboard, EnumClipboardFormats,
     GetClipboardData, GetClipboardOwner, GetClipboardSequenceNumber, OpenClipboard,
-    RemoveClipboardFormatListener, SetClipboardData,
+    RegisterClipboardFormatW, RemoveClipboardFormatListener, SetClipboardData,
 };
 use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
@@ -157,7 +157,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, WM_APP, WM_CLIPBOARDUPDATE,
 };
-use windows::core::{Error as WinError, Free, Result as WinResult};
+use windows::core::{Error as WinError, Free, PCWSTR, Result as WinResult, w};
 
 use crate::convert::Keystroke;
 use crate::hook::INJECTED_SIGNATURE;
@@ -293,6 +293,45 @@ pub const fn is_memory_format(format: u32) -> bool {
 
     !(format >= PRIVATE_FIRST && format <= PRIVATE_LAST)
         && !(format >= GDIOBJ_FIRST && format <= GDIOBJ_LAST)
+}
+
+// ---------------------------------------------------------------------------------------
+// The privacy markers — finding С25, task T-38-6, decision 121.7
+// ---------------------------------------------------------------------------------------
+
+/// The three registered formats Windows reads to keep a clipboard out of its history, out of its
+/// cloud and out of the sight of clipboard monitors — **finding С25 of the audit of 2026-09-04,
+/// task T-38-6, decision 121.7**.
+///
+/// A password manager puts them beside a secret. `CanIncludeInClipboardHistory` and
+/// `CanUploadToCloudClipboard` carry a `DWORD`, and zero is «no»; for
+/// `ExcludeClipboardContentFromMonitorProcessing` any data will do — its presence is the message.
+/// Measured 2026-09-10 (premise П2): **with** data all three already survived a snapshot and a
+/// restore; **without** data — a promise of delayed rendering that nobody kept — [`snapshot`]
+/// counted them refused, and step 8 put the secret back unmarked.
+const PRIVACY_MARKERS: [PCWSTR; 3] = [
+    w!("CanIncludeInClipboardHistory"),
+    w!("CanUploadToCloudClipboard"),
+    w!("ExcludeClipboardContentFromMonitorProcessing"),
+];
+
+/// The one form this program puts a privacy marker on the clipboard in: a `DWORD` of zero — «not
+/// into the history», «not into the cloud», and for the third marker a presence, which is all it
+/// needs. Decision 121.7: the restrictive reading of a marker that arrived without a value.
+const PRIVACY_MARKER_DATA: [u8; 4] = [0; 4];
+
+/// The format numbers of [`PRIVACY_MARKERS`] in this session — zero for a name the system would not
+/// register, which then matches no format.
+fn privacy_markers() -> [u32; 3] {
+    // SAFETY: each name is a `'static` wide literal; the call registers or looks up a format name
+    // in the window station's table and dereferences nothing of ours. Zero is the documented
+    // failure, and no clipboard format is numbered zero, so a failed name matches nothing.
+    PRIVACY_MARKERS.map(|name| unsafe { RegisterClipboardFormatW(name) })
+}
+
+/// Whether `format` is one of the three privacy markers — task T-38-6.
+pub fn is_privacy_marker(format: u32) -> bool {
+    format != 0 && privacy_markers().contains(&format)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -932,6 +971,10 @@ pub struct Snapshot {
     bytes: usize,
     /// Whether the budget of FR-64 cut this snapshot down to [`CF_UNICODETEXT`].
     truncated: bool,
+    /// How many privacy markers the clipboard listed **without data**, kept here in their
+    /// restrictive form — finding С25, task T-38-6, decision 121.7. They are among `captured`,
+    /// holding [`PRIVACY_MARKER_DATA`] rather than bytes read off the clipboard.
+    markers_without_data: usize,
     /// `GetClipboardSequenceNumber` as it stood when the snapshot was taken.
     sequence: u32,
 }
@@ -949,6 +992,7 @@ impl Snapshot {
             refused: 0,
             bytes: 0,
             truncated: false,
+            markers_without_data: 0,
             sequence: 0,
         }
     }
@@ -993,6 +1037,12 @@ impl Snapshot {
         self.truncated
     }
 
+    /// How many privacy markers were listed without data and are kept in their restrictive form
+    /// — task T-38-6, decision 121.7. A count of formats, never of anything in them.
+    pub fn markers_without_data(&self) -> usize {
+        self.markers_without_data
+    }
+
     /// Nothing was captured.
     pub fn is_empty(&self) -> bool {
         self.captured.is_empty()
@@ -1009,8 +1059,9 @@ impl Snapshot {
 
 impl fmt::Debug for Snapshot {
     /// **SEC-01, SEC-07.** Hand-written, and this is the reason: the derived implementation
-    /// would print `captured`, and `captured` is the user's clipboard. Six counts and a flag say
-    /// everything a diagnosis needs and nothing a person's data would be recognisable in.
+    /// would print `captured`, and `captured` is the user's clipboard. The counts and the flag
+    /// below say everything a diagnosis needs and nothing a person's data would be recognisable
+    /// in.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Snapshot")
             .field("captured_formats", &self.captured.len())
@@ -1019,6 +1070,7 @@ impl fmt::Debug for Snapshot {
             .field("refused_formats", &self.refused)
             .field("total_bytes", &self.bytes)
             .field("truncated", &self.truncated)
+            .field("markers_without_data", &self.markers_without_data)
             .finish()
     }
 }
@@ -1071,6 +1123,14 @@ impl Drop for Snapshot {
 /// counted and skipped, **and the walk continues** — acceptance point 12: one format's refusal
 /// may not cost the others their restore.
 ///
+/// ⭐ **Except the privacy markers — finding С25 of the audit of 2026-09-04, task T-38-6, decision
+/// 121.7.** [`PRIVACY_MARKERS`] listed with no data are neither refused nor lost: they are kept in
+/// their restrictive form, [`PRIVACY_MARKER_DATA`], so that step 8 does not put a secret back
+/// without the marks that kept it out of the history and the cloud. Only these three, and only in
+/// that form: presence without data can be restored only as a promise of delayed rendering owned
+/// by this program's window, and that would route every other program's read of the format through
+/// the UI thread and answer it with nothing. Counted in [`Snapshot::markers_without_data`].
+///
 /// **Handle formats.** See [`HANDLE_FORMATS`] for why bitmaps, palettes and metafiles are left
 /// alone and what the system's format synthesis gives back for free.
 pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
@@ -1084,6 +1144,10 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
     let mut refused = 0_usize;
     let mut total = 0_usize;
 
+    // Task T-38-6: the privacy markers of this session, and the ones found without data.
+    let markers = privacy_markers();
+    let mut markers_found_empty: Vec<u32> = Vec::new();
+
     for &format in &listed {
         if !is_memory_format(format) {
             handle_formats += 1;
@@ -1092,6 +1156,13 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
         }
 
         let Some(handle) = clipboard.block(format) else {
+            // A promise nobody kept. For a privacy marker that is the shape premise П2 measured
+            // being lost, and the marker is kept in its restrictive form instead — decision 121.7.
+            if markers.contains(&format) {
+                markers_found_empty.push(format);
+                continue;
+            }
+
             refused += 1;
             REFUSED_FORMATS.fetch_add(1, Ordering::Relaxed);
             continue;
@@ -1104,7 +1175,13 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
 
         if size == 0 {
             // Either the handle is not a global block after all — a format outside the table
-            // that behaves like one — or the block is empty. Both are nothing to restore.
+            // that behaves like one — or the block is empty. Both are nothing to restore, except
+            // that a privacy marker is kept in its restrictive form, as above.
+            if markers.contains(&format) {
+                markers_found_empty.push(format);
+                continue;
+            }
+
             refused += 1;
             REFUSED_FORMATS.fetch_add(1, Ordering::Relaxed);
             continue;
@@ -1123,7 +1200,7 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
     }
 
     // Pass two: the copying.
-    let mut captured = Vec::with_capacity(sizes.len());
+    let mut captured = Vec::with_capacity(sizes.len() + markers_found_empty.len());
     let mut bytes = 0_usize;
 
     for (format, handle, size) in sizes {
@@ -1146,6 +1223,25 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
         }
     }
 
+    // Task T-38-6, decision 121.7: the markers found without data, in their restrictive form. Not
+    // over the budget — FR-64 then keeps the text alone, and a marker is not text: the rule every
+    // marker **with** data already follows a few lines above.
+    let markers_without_data = if truncated {
+        0
+    } else {
+        markers_found_empty.len()
+    };
+
+    if !truncated {
+        for format in markers_found_empty {
+            bytes += PRIVACY_MARKER_DATA.len();
+            captured.push(Captured {
+                format,
+                bytes: PRIVACY_MARKER_DATA.to_vec(),
+            });
+        }
+    }
+
     // Read after the copying and while the clipboard is still ours, so that the baseline step 3
     // of FR-61 compares against is the state the snapshot actually describes.
     let sequence = sequence_number();
@@ -1159,6 +1255,7 @@ pub fn snapshot(owner: HWND) -> Result<Snapshot, ClipboardError> {
         refused,
         bytes,
         truncated,
+        markers_without_data,
         sequence,
     })
 }
@@ -1742,6 +1839,14 @@ fn encode_utf16(text: &str) -> Vec<u8> {
 /// `empty` itself refusing, leaves the clipboard untouched and no mark is put — and none is
 /// needed, since the number step 3 saw is then still the current one and `restore_is_due` owes
 /// the snapshot on that ground.
+///
+/// # The privacy markers — task T-38-6, finding С25, decision 121.7
+///
+/// The text goes up with the three [`PRIVACY_MARKERS`] beside it, each in its restrictive form
+/// [`PRIVACY_MARKER_DATA`]: the recoded selection is the user's text in another layout, on the
+/// clipboard for the length of a paste, and it belongs in neither the history of Win+V nor the
+/// cloud clipboard. Only beside a text that went up, and best effort — a marker the clipboard
+/// refuses costs the paste nothing.
 pub fn write_unicode_text(owner: HWND, text: &str) -> Result<(), ClipboardError> {
     let mut bytes = encode_utf16(text);
     let mut emptied = false;
@@ -1758,6 +1863,17 @@ pub fn write_unicode_text(owner: HWND, text: &str) -> Result<(), ClipboardError>
         // our own change with it, past the O(n) zeroing below. The result is carried out
         // instead, so both outcomes of `put` leave through the same close and the same read.
         let put = clipboard.put(CF_UNICODETEXT, &bytes);
+
+        // ⭐ **Task T-38-6, decision 121.7.** The privacy markers beside the text — see above.
+        // Their errors are dropped for the reason `restore` drops a refused format's: they belong
+        // to one format, the text is already up, and nothing a caller could do follows from them.
+        if put.is_ok() {
+            for marker in privacy_markers() {
+                if marker != 0 {
+                    let _ = clipboard.put(marker, &PRIVACY_MARKER_DATA);
+                }
+            }
+        }
 
         // Closed before the write is announced, as it always was: the listener of FR-63 can see
         // the change the moment the clipboard is released.
@@ -3958,6 +4074,7 @@ mod tests {
             refused: 1,
             bytes: 24,
             truncated: true,
+            markers_without_data: 2,
             sequence: 77,
         };
 
@@ -3969,6 +4086,8 @@ mod tests {
         assert!(printed.contains("captured_formats: 1"));
         assert!(printed.contains("total_bytes: 24"));
         assert!(printed.contains("truncated: true"));
+        // Task T-38-6: the markers kept in their restrictive form are a count, and are printed.
+        assert!(printed.contains("markers_without_data: 2"));
     }
 
     #[test]
@@ -3980,6 +4099,7 @@ mod tests {
         assert_eq!(snapshot.captured_formats(), 0);
         assert_eq!(snapshot.listed_formats(), 0);
         assert_eq!(snapshot.total_bytes(), 0);
+        assert_eq!(snapshot.markers_without_data(), 0);
         assert_eq!(snapshot.sequence(), 0);
         assert!(!snapshot.contains(CF_UNICODETEXT));
         assert_eq!(snapshot.formats().count(), 0);

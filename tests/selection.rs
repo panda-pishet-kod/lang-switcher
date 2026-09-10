@@ -65,8 +65,8 @@ use lang_switcher::settings;
 
 use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
-    SetClipboardData,
+    CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, OpenClipboard,
+    RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
@@ -1130,6 +1130,214 @@ fn the_keeper_refuses_a_clipboard_over_the_budget_before_writing_anything() {
     );
     assert_eq!(after, before, "the refusal wrote nothing to the clipboard");
 }
+
+/// Every format the clipboard lists, the plain way — the raw oracle for «is it there at all»,
+/// which [`raw_read`] cannot tell apart from «it is there with nothing in it». Task T-38-6.
+fn raw_formats(window: HWND) -> Vec<u32> {
+    let Some(_access) = RawAccess::open(window) else {
+        return Vec::new();
+    };
+
+    let mut formats = Vec::new();
+    let mut current = 0_u32;
+
+    loop {
+        // SAFETY: the clipboard is open; `current` is zero — the request for the first format — or
+        // the format the previous call answered. Nothing of ours is dereferenced.
+        let next = unsafe { EnumClipboardFormats(current) };
+
+        if next == 0 {
+            break;
+        }
+
+        formats.push(next);
+        current = next;
+    }
+
+    formats
+}
+
+/// Replaces the clipboard with `text` and, beside it, `promised` as a promise of delayed rendering
+/// that nobody keeps — the window of the test renders nothing. The shape premise П2 measured a
+/// privacy marker being lost in. Task T-38-6.
+///
+/// ⚠ Writes to the machine's clipboard. Only ever called from a test that holds a [`Keeper`].
+fn raw_write_text_and_a_promise(window: HWND, text: &str, promised: u32) -> bool {
+    let Some(_access) = RawAccess::open(window) else {
+        return false;
+    };
+
+    // SAFETY: the clipboard is open with a window of this thread, which `EmptyClipboard` makes the
+    // owner.
+    if unsafe { EmptyClipboard() }.is_err() {
+        return false;
+    }
+
+    let bytes = text_block(text);
+
+    // SAFETY: a plain movable allocation of `bytes.len()` bytes, which is never zero for a text
+    // block — it holds at least the terminator.
+    let Ok(block) = (unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) }) else {
+        return false;
+    };
+
+    // SAFETY: `block` was just allocated and is locked once here.
+    let pointer = unsafe { GlobalLock(block) };
+
+    if pointer.is_null() {
+        return false;
+    }
+
+    // SAFETY: `pointer` points at `bytes.len()` writable bytes — the length of the allocation —
+    // and the two regions are distinct allocations.
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), pointer.cast::<u8>(), bytes.len());
+    }
+
+    // SAFETY: the block was locked above.
+    let _ = unsafe { GlobalUnlock(block) };
+
+    // SAFETY: the clipboard is open and owned by this thread; the block passes to the system on
+    // success.
+    if unsafe { SetClipboardData(CF_UNICODETEXT, Some(HANDLE(block.0))) }.is_err() {
+        return false;
+    }
+
+    // SAFETY: open and owned; a NULL handle is the documented promise of delayed rendering. The
+    // binding turns the NULL it gets back — which for a promise *is* success — into an error, so
+    // the answer is not read here: whether the promise stands is what `raw_formats` answers.
+    let _ = unsafe { SetClipboardData(promised, None) };
+
+    true
+}
+
+/// **Finding С25 of the audit of 2026-09-04, task T-38-6 — the three privacy markers are known by
+/// name, and nothing else is one.**
+///
+/// A registered format number is the same for every process of the session, so the test asks the
+/// system for the three names itself and checks that the module recognises exactly those — not the
+/// text beside them, not a format of the system's own, not a registered format of another name.
+#[test]
+fn the_three_privacy_markers_are_recognised_and_nothing_else_is() {
+    for name in [
+        w!("CanIncludeInClipboardHistory"),
+        w!("CanUploadToCloudClipboard"),
+        w!("ExcludeClipboardContentFromMonitorProcessing"),
+    ] {
+        let format = registered(name);
+
+        assert_ne!(format, 0, "the system registers the name");
+        assert!(
+            selection::is_privacy_marker(format),
+            "format {format} is a privacy marker"
+        );
+    }
+
+    let another = registered(w!("Lang Switcher T-38-6 not a marker"));
+
+    for format in [CF_UNICODETEXT, 1, 7, 16, another] {
+        assert!(
+            !selection::is_privacy_marker(format),
+            "format {format} is not a privacy marker"
+        );
+    }
+
+    assert!(!selection::is_privacy_marker(0), "zero is no format at all");
+}
+
+/// **С25, live — a privacy marker that arrived without data goes back with its restrictive
+/// value (decision 121.7).**
+///
+/// The shape measured by premise П2: text beside `CanIncludeInClipboardHistory` placed as a promise
+/// of delayed rendering that nobody keeps, so `GetClipboardData` answers nothing for the marker. The
+/// snapshot of step 1 is taken, step 6 writes its text over the clipboard, and step 8 puts the
+/// snapshot back. Read back with the raw oracle: the marker is listed again and carries a `DWORD`
+/// of zero — «not into the history». Before task T-38-6 the snapshot counted it refused and the
+/// restore put the secret back unmarked.
+#[test]
+#[ignore = "writes to the machine's clipboard; run with --ignored --test-threads=1"]
+fn a_privacy_marker_without_data_comes_back_with_its_restrictive_value() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    let marker = registered(w!("CanIncludeInClipboardHistory"));
+
+    assert!(raw_write_text_and_a_promise(
+        window.0,
+        "a secret, marked",
+        marker
+    ));
+    assert!(
+        raw_formats(window.0).contains(&marker),
+        "the marker is listed before the snapshot"
+    );
+    assert!(
+        raw_read(window.0, marker).is_none(),
+        "and it carries no data: the promise is not kept"
+    );
+
+    let snapshot = selection::snapshot(window.0).expect("the snapshot of step 1");
+
+    assert!(
+        snapshot.contains(marker),
+        "the snapshot keeps the marker it could not read, in its restrictive form"
+    );
+
+    selection::write_unicode_text(window.0, "step six").expect("the write of step 6");
+
+    let restored = selection::restore(window.0, &snapshot).expect("the restore of step 8");
+
+    assert_eq!(restored.refused, 0, "nothing was refused on the way back");
+    assert_eq!(
+        raw_read(window.0, marker),
+        Some(PRIVACY_MARKER_BYTES.to_vec()),
+        "the marker is back, and says «not into the history»"
+    );
+}
+
+/// **С25, live — the write of step 6 carries the three privacy markers (decision 121.7).**
+///
+/// The recoded text of step 6 is the user's selection in another layout, on the clipboard for the
+/// few hundred milliseconds a paste takes. Unmarked, it went into the history of Win+V and the cloud
+/// clipboard beside the user's own copy. Read back with the raw oracle: every marker carries a
+/// `DWORD` of zero, and the text is the text.
+#[test]
+#[ignore = "writes to the machine's clipboard; run with --ignored --test-threads=1"]
+fn the_write_of_step_six_carries_the_three_privacy_markers() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    selection::write_unicode_text(window.0, "step six").expect("the write of step 6");
+
+    for name in [
+        w!("CanIncludeInClipboardHistory"),
+        w!("CanUploadToCloudClipboard"),
+        w!("ExcludeClipboardContentFromMonitorProcessing"),
+    ] {
+        let format = registered(name);
+
+        assert_eq!(
+            raw_read(window.0, format),
+            Some(PRIVACY_MARKER_BYTES.to_vec()),
+            "format {format} is on the write of step 6, with the restrictive value"
+        );
+    }
+
+    assert_eq!(
+        selection::read_unicode_text(window.0)
+            .expect("the read")
+            .as_deref(),
+        Some("step six"),
+        "and the text is the text"
+    );
+}
+
+/// The restrictive value of a privacy marker as it goes on the clipboard: a `DWORD` of zero —
+/// written here as a literal, not taken from the module, so that the live tests above cannot agree
+/// with a wrong value by construction.
+const PRIVACY_MARKER_BYTES: [u8; 4] = [0; 4];
 
 /// **Behavioural point 25.** The clipboard held by **another process**: the retries run, the
 /// refusal is an ordinary answer, and nothing is left locked afterwards.
