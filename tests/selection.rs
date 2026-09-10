@@ -17,7 +17,10 @@
 //! Even so, every test that writes takes a [`Keeper`] first. It snapshots the clipboard on the
 //! way in and restores it from `Drop` on the way out — including when the test panics, which is
 //! the same argument `selection::Clipboard` makes about `CloseClipboard` and is the reason the
-//! restore is a destructor rather than a last line.
+//! restore is a destructor rather than a last line. And it refuses to start — the test fails
+//! before a byte is written — when the snapshot could not give the clipboard back whole: over the
+//! budget of FR-64, a format that would not be read, or formats listed and none kept (decision
+//! 121.6, task T-38-0).
 //!
 //! # What is here and what is not
 //!
@@ -138,6 +141,16 @@ impl Drop for TestWindow {
 /// restore is a destructor and not a last line for the reason the module makes about
 /// `CloseClipboard`: a test that fails in the middle is exactly the case where somebody's
 /// clipboard would otherwise be left holding `ghbdtn`.
+///
+/// ⭐ **Decision 121.6, task T-38-0 — a snapshot is not a copy of everything, so the keeper asks
+/// before it lets a test write.** The snapshot keeps what FR-64 promises and no more: over four
+/// megabytes only `CF_UNICODETEXT`, never a format its owner will not render, never content that
+/// lives only as a metafile or a palette. A keeper that took such a snapshot and let the test write
+/// would put back what it holds — possibly nothing — over a clipboard already lost. On 2026-09-10
+/// an instrument built after this very type did exactly that to the owner's clipboard: eight
+/// formats over the budget, none of them text, zero captured, and the restore placed nothing
+/// (ITOG-E38, section 0). So [`Keeper::take`] refuses first and says why, **before** anything is
+/// written: the test fails, and the clipboard stays exactly as its owner left it.
 struct Keeper {
     window: HWND,
     held: Snapshot,
@@ -145,7 +158,25 @@ struct Keeper {
 
 impl Keeper {
     fn take(window: HWND) -> Self {
-        let held = selection::snapshot(window).unwrap_or_else(|_| Snapshot::empty());
+        let held = match selection::snapshot(window) {
+            Ok(held) => held,
+            Err(error) => panic!(
+                "the clipboard could not be read ({error}), so it could not be put back: this test \
+                 writes nothing — run it again when the clipboard is free"
+            ),
+        };
+
+        if let Some(reason) = keeper_refusal(
+            held.is_truncated(),
+            held.listed_formats(),
+            held.captured_formats(),
+            held.refused_formats(),
+        ) {
+            panic!(
+                "the clipboard cannot be kept whole — {reason}: this test writes nothing; put a \
+                 short text on the clipboard and run it again"
+            );
+        }
 
         Self { window, held }
     }
@@ -154,6 +185,92 @@ impl Keeper {
 impl Drop for Keeper {
     fn drop(&mut self) {
         let _restored = selection::restore(self.window, &self.held);
+    }
+}
+
+/// Why a snapshot with these counts cannot give the clipboard back whole — `None` when it can.
+///
+/// A function of four numbers, so that the rule is driven by a unit test rather than by whatever
+/// happens to be on the machine's clipboard. The loss FR-64 accepts does not count: a bitmap or a
+/// metafile listed **beside** a memory block the snapshot did keep — the system synthesises the one
+/// from the other — is neither refused nor the whole of the content.
+fn keeper_refusal(
+    truncated: bool,
+    listed: usize,
+    captured: usize,
+    refused: usize,
+) -> Option<&'static str> {
+    if truncated {
+        return Some(
+            "it is over the four megabytes of FR-64, and the snapshot kept its text alone",
+        );
+    }
+
+    if refused > 0 {
+        return Some("a listed format could not be read out of it");
+    }
+
+    if listed > 0 && captured == 0 {
+        return Some("it lists formats and the snapshot kept none of them");
+    }
+
+    None
+}
+
+/// **Decision 121.6, task T-38-0.** The keeper lets a test write only over a clipboard it can give
+/// back whole.
+///
+/// The fourth row is the clipboard of 2026-09-10: eight formats over the budget, none of them text,
+/// nothing captured — the one an instrument built after [`Keeper`] wiped. The rows that must **not**
+/// refuse matter as much: an empty clipboard has nothing to lose, and handle formats beside their
+/// memory twins are the loss FR-64 accepts; a keeper that refused those would stop the battery on
+/// every ordinary copy out of Word.
+#[test]
+fn the_keeper_refuses_a_clipboard_it_cannot_give_back_whole() {
+    // (truncated, listed, captured, refused), whether a test may write over it, and why.
+    let rows = [
+        (
+            (false, 0, 0, 0),
+            true,
+            "an empty clipboard has nothing to lose",
+        ),
+        ((false, 3, 3, 0), true, "every listed format was captured"),
+        (
+            (false, 8, 5, 0),
+            true,
+            "three handle formats beside their memory twins",
+        ),
+        (
+            (true, 8, 0, 0),
+            false,
+            "over the budget and no text: the clipboard of 2026-09-10",
+        ),
+        (
+            (true, 8, 1, 0),
+            false,
+            "over the budget with text: all but the text is gone",
+        ),
+        (
+            (false, 4, 3, 1),
+            false,
+            "a delayed format its owner did not render",
+        ),
+        (
+            (false, 2, 0, 0),
+            false,
+            "a metafile or a palette and nothing else",
+        ),
+    ];
+
+    for ((truncated, listed, captured, refused), may_write, what) in rows {
+        let refusal = keeper_refusal(truncated, listed, captured, refused);
+
+        assert_eq!(
+            refusal.is_none(),
+            may_write,
+            "{what}: truncated={truncated} listed={listed} captured={captured} refused={refused}, \
+             refusal {refusal:?}"
+        );
     }
 }
 
@@ -970,6 +1087,43 @@ fn a_clipboard_over_the_budget_keeps_the_text_and_says_so() {
         Some(small.to_owned()),
         "a block under the ceiling is read as it always was"
     );
+}
+
+/// **Decision 121.6, task T-38-0, live.** Over a clipboard the snapshot cannot give back whole, the
+/// keeper refuses **before anything is written**.
+///
+/// The row of 2026-09-10 made real: one registered format of five megabytes and no text — over the
+/// budget of FR-64, so the snapshot keeps nothing at all. An outer keeper holds the machine's own
+/// clipboard first (and refuses in its turn if that one cannot be kept, which is the whole point);
+/// the state is built; and a second [`Keeper::take`] must panic **and leave the sequence number
+/// where it stood**. A keeper that took the state and dropped would empty the clipboard on its way
+/// out — both assertions go red on that, which is what the base of the task does.
+#[test]
+#[ignore = "writes five megabytes to the machine's clipboard; run with --ignored --test-threads=1"]
+fn the_keeper_refuses_a_clipboard_over_the_budget_before_writing_anything() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    let bulk_format = registered(w!("Lang Switcher T-38-0 bulk"));
+    let bulk = vec![0x5A_u8; 5 * 1024 * 1024];
+
+    assert!(bulk.len() > SNAPSHOT_BUDGET_BYTES);
+    assert!(raw_write(window.0, &[(bulk_format, bulk)]));
+
+    let before = selection::sequence_number();
+
+    let taken = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _inner = Keeper::take(window.0);
+    }));
+
+    let after = selection::sequence_number();
+
+    assert!(
+        taken.is_err(),
+        "the keeper took a clipboard it cannot give back whole"
+    );
+    assert_eq!(after, before, "the refusal wrote nothing to the clipboard");
 }
 
 /// **Behavioural point 25.** The clipboard held by **another process**: the retries run, the
