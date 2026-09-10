@@ -1980,7 +1980,9 @@ fn is_password_element() -> Option<bool> {
                     // created is a level that cannot answer, which FR-73 has a rule for; it is
                     // not a reason to end the program, and the program without level 3 still has
                     // levels 1 and 2.
-                    crate::app::report_non_critical("CoCreateInstance(CUIAutomation8)", &error);
+                    // Named by the step and not by the call — task T-34-4, решение 117.3: a
+                    // journal row must not spell a symbol of acceptance point 9 of FR-71.
+                    crate::app::report_non_critical("password probe: client", &error);
                     return None;
                 }
             }
@@ -2043,10 +2045,11 @@ fn automation() -> WinResult<IUIAutomation> {
             };
 
             if let Err(error) = set {
-                crate::app::report_non_critical("IUIAutomation2::SetTimeout", &error);
+                // Task T-34-4, решение 117.3: the step, not the call — see the client above.
+                crate::app::report_non_critical("password probe: timeout", &error);
             }
         }
-        Err(error) => crate::app::report_non_critical("QueryInterface(IUIAutomation2)", &error),
+        Err(error) => crate::app::report_non_critical("password probe: interface", &error),
     }
 
     Ok(client)

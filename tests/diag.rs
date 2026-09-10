@@ -652,8 +652,14 @@ fn the_names_of_the_t_08_2_debt_that_could_be_added_are_in_the_vocabulary() {
 /// with `format!` (`thread::spawn: {error}`), which is *meant* to narrow to
 /// [`Operation::UNLISTED`] because it carries text not chosen at compile time — exactly what
 /// SEC-07 keeps out of the journal. This is a literal-only scan, so that name is never seen here.
+///
+/// ⭐ **Answered — решение 117.3, task T-34-4 (Э34).** The three carry neutral names now —
+/// `password probe: client / interface / timeout`, named by the step and not by the call — so
+/// nothing reaches the journal unnamed any more, and this scan asserts exactly that. The sweep of
+/// acceptance point 9 is untouched; `the_three_steps_of_the_password_probe_have_neutral_names`
+/// below checks that the new names carry none of what it looks for.
 #[test]
-fn what_still_reaches_the_journal_unnamed_is_only_what_fr_71_blocks() {
+fn nothing_reaches_the_journal_unnamed_any_more() {
     let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut checked = 0;
     let mut unnamed = Vec::new();
@@ -690,31 +696,49 @@ fn what_still_reaches_the_journal_unnamed_is_only_what_fr_71_blocks() {
 
     assert!(checked > 40, "the scan found suspiciously few call sites");
 
-    // The symbols acceptance point 9 of FR-71 keeps out of every file but `src\guard.rs`, spelled
-    // here without their leading letter so that this file does not itself become a place they
-    // occur — the sweep reads `src\` only, but a reader should not have to check that.
-    let blocked_by_fr_71 = |name: &String| {
-        ["UIAutomation", "UIAutomationCore"]
-            .iter()
-            .any(|symbol| name.contains(symbol))
-    };
-
-    let (blocked, rest): (Vec<String>, Vec<String>) =
-        unnamed.into_iter().partition(blocked_by_fr_71);
-
-    println!("of those, blocked by acceptance point 9 of FR-71: {blocked:?}");
-
     assert!(
-        rest.is_empty(),
-        "these reach the journal as a code with no name and nothing prevents naming them: {rest:?}"
+        unnamed.is_empty(),
+        "these reach the journal as a code with no name: {unnamed:?} — until task T-34-4 three \
+         names of the password-field probe stood here on purpose (acceptance point 9 of FR-71); \
+         решение 117.3 gave them neutral names, and a new one is a hole, not a policy"
     );
-    assert_eq!(
-        blocked.len(),
-        3,
-        "the three names FR-71 blocks are {blocked:?}; if this number changed, the question task \
-         T-08-3 put to the controller has been answered one way or the other and this test has to \
-         be brought into line with the answer"
-    );
+}
+
+/// **Task T-34-4, решение 117.3.** The three steps of the password-field probe are rows of the
+/// vocabulary under names that say which step refused — and carry none of the symbols the sweep
+/// of acceptance point 9 of FR-71 keeps out of every file but `src\guard.rs`. The symbols are
+/// matched by their distinctive tails, spelled without the leading letters, so that this file
+/// does not itself become a place they occur.
+#[test]
+fn the_three_steps_of_the_password_probe_have_neutral_names() {
+    let steps = [
+        "password probe: client",
+        "password probe: interface",
+        "password probe: timeout",
+    ];
+
+    for step in steps {
+        let operation = Operation::from_name(step);
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "«{step}» is not in the vocabulary"
+        );
+        assert_eq!(operation.name(), step);
+        assert_eq!(
+            operation.kind(),
+            Kind::Process,
+            "«{step}» belongs to the process"
+        );
+
+        for tail in ["IAutomation", "IsPassword", "FocusedElement"] {
+            assert!(
+                !step.contains(tail),
+                "«{step}» spells a symbol acceptance point 9 of FR-71 keeps out of the journal"
+            );
+        }
+    }
 }
 
 // -------------------------------------------------------------------------------------
@@ -1232,4 +1256,132 @@ fn a_dump_of_the_running_session_differs_from_the_dump_of_shutdown() {
     );
 
     std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-34-4 — the counters of the password-field guard and of the clipboard are in the dump
+// -------------------------------------------------------------------------------------
+
+/// The row of the dump whose name is exactly `name` — the name and then whitespace, so that
+/// `guard.exclusions` is not satisfied by `guard.exclusions_refused`.
+fn row_named<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    text.lines().find(|line| {
+        line.starts_with(name)
+            && line[name.len()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+    })
+}
+
+/// **Task T-34-4, finding Н95.** Every counter of `guard::Counters` and of
+/// `selection::Counters` is a row of the dump, under its own name — fourteen and fifteen of
+/// them on the day this was written, and the numbers are not the point.
+///
+/// The list of names is built by taking each structure apart **field by field, without `..`**:
+/// a fifteenth field of `guard::Counters`, or a sixteenth of `selection::Counters`, refuses to
+/// compile this test until it has been named here — and the assertion that runs then asks the
+/// dump for that name. The other direction is asserted too: the dump carries exactly as many
+/// `guard.` rows and `selection.` rows as the structures have fields, so a row printed under a
+/// misspelt name is caught as well as a row that is absent. The values are printed and not
+/// asserted — the structure and the dump are two snapshots, and the machine may count between
+/// them.
+#[test]
+fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
+    let lang_switcher::guard::Counters {
+        focus_changes,
+        probes,
+        stale_verdicts,
+        password_verdicts,
+        ordinary_verdicts,
+        undetermined_verdicts,
+        level1_verdicts,
+        level2_verdicts,
+        level2_timeouts,
+        level3_failures,
+        excluded_verdicts,
+        exclusions,
+        exclusions_refused,
+        exclusion_read_retries,
+    } = lang_switcher::guard::counters();
+
+    let guard_rows = [
+        ("guard.focus_changes", focus_changes),
+        ("guard.probes", probes),
+        ("guard.stale_verdicts", stale_verdicts),
+        ("guard.password_verdicts", password_verdicts),
+        ("guard.ordinary_verdicts", ordinary_verdicts),
+        ("guard.undetermined_verdicts", undetermined_verdicts),
+        ("guard.level1_verdicts", level1_verdicts),
+        ("guard.level2_verdicts", level2_verdicts),
+        ("guard.level2_timeouts", level2_timeouts),
+        ("guard.level3_failures", level3_failures),
+        ("guard.excluded_verdicts", excluded_verdicts),
+        ("guard.exclusions", exclusions),
+        ("guard.exclusions_refused", exclusions_refused),
+        ("guard.exclusion_read_retries", exclusion_read_retries),
+    ];
+
+    let lang_switcher::selection::Counters {
+        opens,
+        closes,
+        close_failures,
+        open_retries,
+        open_refusals,
+        wrong_thread_refusals,
+        updates,
+        own_updates,
+        foreign_updates,
+        truncations,
+        refused_formats,
+        handle_formats,
+        listener_remove_failures,
+        restore_skips,
+        restore_failures,
+    } = lang_switcher::selection::counters();
+
+    let selection_rows = [
+        ("selection.opens", opens),
+        ("selection.closes", closes),
+        ("selection.close_failures", close_failures),
+        ("selection.open_retries", open_retries),
+        ("selection.open_refusals", open_refusals),
+        ("selection.wrong_thread_refusals", wrong_thread_refusals),
+        ("selection.updates", updates),
+        ("selection.own_updates", own_updates),
+        ("selection.foreign_updates", foreign_updates),
+        ("selection.truncations", truncations),
+        ("selection.refused_formats", refused_formats),
+        ("selection.handle_formats", handle_formats),
+        (
+            "selection.listener_remove_failures",
+            listener_remove_failures,
+        ),
+        ("selection.restore_skips", restore_skips),
+        ("selection.restore_failures", restore_failures),
+    ];
+
+    let text = diag::render();
+    let mut missing: Vec<&str> = Vec::new();
+
+    for (name, value) in guard_rows.iter().chain(selection_rows.iter()) {
+        match row_named(&text, name) {
+            Some(row) => println!("{row}   (the reader answered {value})"),
+            None => missing.push(name),
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "rows missing from the dump: {missing:?}"
+    );
+
+    let guard_in_dump = text.lines().filter(|l| l.starts_with("guard.")).count();
+    let selection_in_dump = text.lines().filter(|l| l.starts_with("selection.")).count();
+
+    assert_eq!(
+        (guard_in_dump, selection_in_dump),
+        (guard_rows.len(), selection_rows.len()),
+        "the dump carries a `guard.` or `selection.` row the structures do not have"
+    );
 }

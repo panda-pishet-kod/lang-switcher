@@ -377,16 +377,19 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // * `CloseHandle(process)` takes `Kind::Process`, the same kind the plain `CloseHandle` row
     //   above already has, because it is the same operation on the same kind of handle.
     //
-    // ⚠ **The three the password-field probe of FR-71 reports under are absent on purpose.**
-    // They are `CoCreateInstance(…)`, `QueryInterface(…)` and the timeout setter of the automation
-    // interface, and every one of those names *contains* a UI Automation symbol. Acceptance point
-    // 9 of FR-71 — enforced by `tests\guard.rs`, `no_ui_automation_name_occurs_anywhere_near_the_hook`
-    // — requires that no such symbol occur anywhere under `src\` except in `src\guard.rs`, in code
-    // or in prose alike, so that a future edit putting UI Automation on the hook's path would have
-    // to write one of those symbols into `hook.rs` first. Adding the rows would put them here, and
-    // spelling them in pieces to slip past the sweep would defeat a guard rather than satisfy it.
-    // The three therefore stay `UNLISTED` until the owner of that requirement decides how a
-    // journal name and that sweep are to live together. See the report of task T-08-3.
+    // ⚠ **The three the password-field probe of FR-71 reported under were absent on purpose
+    // from task T-08-3 until task T-34-4.** They were `CoCreateInstance(…)`, `QueryInterface(…)`
+    // and the timeout setter of the automation interface, and every one of those names
+    // *contains* a UI Automation symbol. Acceptance point 9 of FR-71 — enforced by
+    // `tests\guard.rs`, `no_ui_automation_name_occurs_anywhere_near_the_hook` — requires that no
+    // such symbol occur anywhere under `src\` except in `src\guard.rs`, in code or in prose
+    // alike, so that a future edit putting UI Automation on the hook's path would have to write
+    // one of those symbols into `hook.rs` first. Adding the rows under those names would have put
+    // them here, and spelling them in pieces to slip past the sweep would have defeated a guard
+    // rather than satisfied it. **Решение 117.3 (Э34) answered the question T-08-3 asked:** the
+    // three carry neutral names — `password probe: client / interface / timeout`, at the end of
+    // this table — that say which step of the probe refused and contain no symbol the sweep
+    // looks for. The sweep is untouched.
     ("AddClipboardFormatListener", Kind::Selection),
     ("RemoveClipboardFormatListener", Kind::Selection),
     ("CloseClipboard", Kind::Selection),
@@ -619,6 +622,15 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // refused and what the system said — never what time it was. Appended at the end for the
     // reason every row above gives: an index already written must keep its meaning.
     ("GetTimeFormatEx", Kind::Process),
+    // Task T-34-4, finding Н95, решение 117.3: the three steps of the password-field probe of
+    // FR-71 that used to reach the ring as `(unlisted)` — creating the client, asking it for the
+    // bounded interface, setting its timeouts. Named by the step and not by the call, so that no
+    // symbol of acceptance point 9 of FR-71 stands in this file (see the note above the
+    // clipboard rows). `Kind::Process` — a COM object of this process, the kind the other
+    // `CoCreateInstance` of this table does not share only because that one switches a layout.
+    ("password probe: client", Kind::Process),
+    ("password probe: interface", Kind::Process),
+    ("password probe: timeout", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].
@@ -1261,7 +1273,9 @@ fn local_time() -> Option<String> {
 /// The counters printed are the *failure and health* counters named by this task: the hook
 /// going up and coming down, the recoveries of the watchdog, the layout cache that would not
 /// build, each method of the chain of FR-50, the `SendInput` return-value discrepancies, the
-/// refused `PostMessage`s.
+/// refused `PostMessage`s. Task T-34-4 (finding Н95) added the fourteen counters of the
+/// password-field guard (`guard.*`) and the fifteen of the clipboard path (`selection.*`),
+/// through the readers those two modules publish.
 ///
 /// `watchdog::counters` and `hook::hotkey_handoffs` are **left out on purpose**. They are
 /// honest counts of program events and SEC-07 would permit them, but they are proportional to
@@ -1383,10 +1397,73 @@ fn render_counters(out: &mut String) {
     row_u32(out, "switch.no_target", failures.no_target);
     row_u32(out, "switch.no_foreground", failures.no_foreground);
     row_u32(out, "switch.scope_unreadable", failures.scope_unreadable);
+
+    // Task T-34-4, finding Н95: the fourteen counters of the password-field guard of FR-70…FR-73
+    // and the fifteen of the clipboard path of FR-60…FR-65, through the public readers both
+    // modules already publish. Counts and nothing else — SEC-07 allows a number and forbids a
+    // name of what was observed, and none of these carries one. `tests\diag.rs` builds this list
+    // a second time by taking the two structures apart field by field, so a counter added there
+    // and not here is a compile error rather than a silent hole.
+    let guard = crate::guard::counters();
+    row_u32(out, "guard.focus_changes", guard.focus_changes);
+    row_u32(out, "guard.probes", guard.probes);
+    row_u32(out, "guard.stale_verdicts", guard.stale_verdicts);
+    row_u32(out, "guard.password_verdicts", guard.password_verdicts);
+    row_u32(out, "guard.ordinary_verdicts", guard.ordinary_verdicts);
+    row_u32(
+        out,
+        "guard.undetermined_verdicts",
+        guard.undetermined_verdicts,
+    );
+    row_u32(out, "guard.level1_verdicts", guard.level1_verdicts);
+    row_u32(out, "guard.level2_verdicts", guard.level2_verdicts);
+    row_u32(out, "guard.level2_timeouts", guard.level2_timeouts);
+    row_u32(out, "guard.level3_failures", guard.level3_failures);
+    row_u32(out, "guard.excluded_verdicts", guard.excluded_verdicts);
+    row_u32(out, "guard.exclusions", guard.exclusions);
+    row_u32(out, "guard.exclusions_refused", guard.exclusions_refused);
+    row_u32(
+        out,
+        "guard.exclusion_read_retries",
+        guard.exclusion_read_retries,
+    );
+
+    let clipboard = crate::selection::counters();
+    row_u32(out, "selection.opens", clipboard.opens);
+    row_u32(out, "selection.closes", clipboard.closes);
+    row_u32(out, "selection.close_failures", clipboard.close_failures);
+    row_u32(out, "selection.open_retries", clipboard.open_retries);
+    row_u32(out, "selection.open_refusals", clipboard.open_refusals);
+    row_u32(
+        out,
+        "selection.wrong_thread_refusals",
+        clipboard.wrong_thread_refusals,
+    );
+    row_u32(out, "selection.updates", clipboard.updates);
+    row_u32(out, "selection.own_updates", clipboard.own_updates);
+    row_u32(out, "selection.foreign_updates", clipboard.foreign_updates);
+    row_u32(out, "selection.truncations", clipboard.truncations);
+    row_u32(out, "selection.refused_formats", clipboard.refused_formats);
+    row_u32(out, "selection.handle_formats", clipboard.handle_formats);
+    row_u32(
+        out,
+        "selection.listener_remove_failures",
+        clipboard.listener_remove_failures,
+    );
+    row_u32(out, "selection.restore_skips", clipboard.restore_skips);
+    row_u32(
+        out,
+        "selection.restore_failures",
+        clipboard.restore_failures,
+    );
 }
 
 /// Width of the name column of the counter section. One place, so the columns line up.
-const NAME_WIDTH: usize = 34;
+// 34 until task T-34-4, when `selection.listener_remove_failures` — thirty-four characters —
+// arrived and its value stood glued to its name: a name as wide as the column leaves no gap.
+// Two wider than the longest name, and the test of the counters reads every row by «name,
+// then whitespace», so the next name to outgrow the column is caught there.
+const NAME_WIDTH: usize = 36;
 
 /// One counter row holding a `u32`.
 fn row_u32(out: &mut String, name: &str, value: u32) {
