@@ -18,7 +18,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use lang_switcher::layouts::{
     Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
     LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MappingKind, Mods, REBUILD_MESSAGES, SelectionError,
-    Session, cycle_for, enumerate, enumerate_all, needs_rebuild, published, selection_failures,
+    Session, cycle_for, enumerate, enumerate_all, layout_list_changed, needs_rebuild, published,
+    selection_failures,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -471,6 +472,41 @@ fn the_rebuild_trigger_is_the_pair_named_by_fr_21() {
     assert!(needs_rebuild(0x0051));
     assert!(needs_rebuild(0x0219));
     assert!(!needs_rebuild(0x0100)); // WM_KEYDOWN
+}
+
+/// **Finding Н11 — task T-39-4: the rebuild of FR-21 follows the layout list, not the active
+/// layout.**
+///
+/// The answers the task names: an unchanged list needs no rebuild; a layout added or removed needs
+/// one; and the same list with a different active layout needs none — the active layout is not an
+/// input of the rule at all, and that is the repair. A reordered list needs one too: the order is
+/// the system's, and FR-30 reads the first two layouts of it.
+#[test]
+fn the_rebuild_of_fr21_follows_the_layout_list_and_not_the_active_layout() {
+    const GERMAN: LayoutId = LayoutId::from_raw(0x0407_0407);
+
+    let cached = [RUSSIAN, US];
+
+    assert!(
+        !layout_list_changed(&[RUSSIAN, US], &cached),
+        "an unchanged list needs no rebuild"
+    );
+
+    // The user pressed `Alt+Shift` and US is active now. Which layout is active is no input: the
+    // list is the list, and the old rule paid a full sweep here.
+    assert!(
+        !layout_list_changed(&[RUSSIAN, US], &cached),
+        "the same list with another layout active needs no rebuild"
+    );
+
+    // Added without touching the active layout — the blind zone of the old rule.
+    assert!(layout_list_changed(&[RUSSIAN, US, GERMAN], &cached));
+
+    // Removed.
+    assert!(layout_list_changed(&[RUSSIAN], &cached));
+
+    // Moved: the system's order is the order FR-30 reads.
+    assert!(layout_list_changed(&[US, RUSSIAN], &cached));
 }
 
 #[test]

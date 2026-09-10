@@ -1534,7 +1534,14 @@ fn apply_capacity(requested: usize) {
 /// contract. Both call sites are on the input thread outside the callback: the start-up
 /// pipeline and the window procedure of FR-21.
 fn rebuild_layout_cache() {
-    publish_cache(cache_or_fallback(LayoutCache::build()));
+    // Finding Н7 — task T-39-4: whether a failure has a working cache to spare, asked of the
+    // buffer wherever FR-70 keeps it and handed to the decision as an argument. At start-up the
+    // buffer holds no cache yet, so the table of FR-25 arrives there exactly as before.
+    let keeping = with_recorder_wherever_it_is(|recorder| recorder.has_cache()).unwrap_or(false);
+
+    if let Some(cache) = cache_or_fallback(LayoutCache::build(), keeping) {
+        publish_cache(cache);
+    }
 
     // Instrumentation, feature `testing`. It is what lets the acceptance run tell a rebuild
     // that happened from one that was merely wired up: FR-21 has no visible effect of its own,
@@ -1544,22 +1551,38 @@ fn rebuild_layout_cache() {
     crate::control::note_cache_built();
 }
 
-/// The cache to use, given what [`LayoutCache::build`] answered — FR-25.
+/// The cache to use, given what [`LayoutCache::build`] answered and whether the buffer already
+/// holds one — FR-25, and **finding Н7, task T-39-4**.
 ///
 /// A failure to build is **not** a reason to end the program, and not a reason to run without a
 /// cache either: FR-25 has module `convert` carry a hardwired RU/EN table for exactly this, and
 /// point 4 of it is why `LayoutCache` refuses to be empty — "the cache did not build" has to
 /// stay distinguishable from "these keys carry no characters".
-fn cache_or_fallback(built: Result<LayoutCache, LayoutError>) -> LayoutCache {
+///
+/// ⭐ **But the table is for a buffer that has nothing better, and only then.** Until task T-39-4
+/// a failed *rebuild* replaced a working cache with it as well: every layout but the RU/EN pair
+/// stopped existing, a cycle of three broke, and nothing said so — not the rule
+/// [`LayoutCache::rebuild`] states for itself, that a failed rebuild leaves the previous cache as
+/// it was. Now `keeping` — "the buffer already holds a cache" — makes a failure answer `None`:
+/// publish nothing, keep what works. At start-up there is nothing to keep, and the table arrives
+/// exactly as before. Every failure is counted either way.
+///
+/// `keeping` is an argument rather than a read of the buffer, so that the decision reads no
+/// global state and can be driven from a test; [`rebuild_layout_cache`] asks the buffer.
+fn cache_or_fallback(
+    built: Result<LayoutCache, LayoutError>,
+    keeping: bool,
+) -> Option<LayoutCache> {
     match built {
-        Ok(cache) => cache,
+        Ok(cache) => Some(cache),
 
         // SEC-01, SEC-07: the reason is dropped unread rather than formatted. `LayoutError`
         // carries no keystroke, and the rule of this program is still that nothing on this path
-        // becomes a string. What is kept is the count.
+        // becomes a string. What is kept is the count — of every failure, cache kept or not.
         Err(_reason) => {
             LAYOUT_CACHE_FAILURES.fetch_add(1, Ordering::Relaxed);
-            crate::convert::fallback_cache()
+
+            (!keeping).then(crate::convert::fallback_cache)
         }
     }
 }
@@ -1645,8 +1668,8 @@ pub fn note_layout_switched(layout: LayoutId) {
     publish_active_layout(layout);
 }
 
-/// Re-reads the layout of the foreground window and rebuilds the cache if it really changed —
-/// **the delivery of FR-21**, task T-03-3.
+/// Re-reads the layout of the foreground window and the layout list of the session and follows
+/// them — the stamp the first, the cache the second — **the delivery of FR-21**, task T-03-3.
 ///
 /// # Why the program has to ask instead of being told
 ///
@@ -1685,15 +1708,26 @@ pub fn note_layout_switched(layout: LayoutId) {
 /// COM interface needing the `implement` feature of the `windows` crate, which is outside
 /// section 3.2 of SPEC and therefore the controller's decision, not this task's.
 ///
-/// # Why the rebuild is conditional
+/// # Why the rebuild is conditional, and on what — finding Н11, task T-39-4
 ///
 /// FR-20 is a sweep of virtual keys `0x08..=0xFF` against eight modifier combinations for every
 /// layout in the session — thousands of `ToUnicodeEx` calls, five milliseconds on the machine
 /// this was measured on. `EVENT_SYSTEM_FOREGROUND` fires on every `Alt+Tab`, and the window the
 /// user switched to is nearly always running the same layout as the one they left, so rebuilding
-/// unconditionally would pay the whole sweep for nothing many times a minute. The comparison is
-/// against the layout the buffer is recording under, which is the value the rebuild would change
-/// anyway.
+/// unconditionally would pay the whole sweep for nothing many times a minute.
+///
+/// ⚠ **Until task T-39-4 the condition was the wrong one.** The rebuild was decided by the same
+/// comparison as the stamp — «is the window's layout the one the buffer records under?» — which is
+/// a question about the *active* layout, while the cache is a function of the *list*. So every
+/// `Alt+Shift` paid the full sweep over a list that had not changed, and a layout added to the
+/// session without touching the active one was never taken in until the program restarted.
+/// Measured in process, before the repair, by the test
+/// `the_probe_of_fr21_rebuilds_for_a_changed_list_and_not_for_a_changed_window`: one rebuild
+/// wasted and one missing. Now the stamp keeps its comparison — [`layout_refresh_needed`] — and
+/// the cache is rebuilt when [`crate::layouts::layout_list_changed`] says the enumeration of
+/// FR-35 is no longer the list the cache holds: a layout added, removed or moved. One enumeration
+/// per probe, two Win32 calls on this thread's message loop, and the sweep only when it buys
+/// something.
 ///
 /// A zero answer — no foreground window at all, which happens while the desktop switches and on
 /// the secure desktop — is not a change and is not treated as one: publishing it would tell the
@@ -1715,18 +1749,43 @@ pub fn note_layout_switched(layout: LayoutId) {
 fn refresh_layout_and_cache() {
     let observed = foreground_layout();
 
-    if !layout_refresh_needed(
+    // FR-04: the stamp follows the window, exactly as it always did.
+    if layout_refresh_needed(
         observed,
         with_recorder_wherever_it_is(|recorder| recorder.active_layout()),
     ) {
-        return;
+        publish_active_layout(observed);
     }
 
-    publish_active_layout(observed);
-    rebuild_layout_cache();
+    // ⭐ Finding Н11 — task T-39-4: the cache follows the *list*. See the documentation above.
+    let Ok(session) = crate::layouts::enumerate() else {
+        // Nothing to compare against, and nothing a sweep could do better: `LayoutCache::build`
+        // starts with this very enumeration. The next probe asks again.
+        return;
+    };
+
+    let cached = with_recorder_wherever_it_is(|recorder| {
+        recorder.cache().map(|cache| {
+            cache
+                .maps()
+                .iter()
+                .map(|map| map.layout())
+                .collect::<Vec<_>>()
+        })
+    });
+
+    match cached {
+        // No buffer on this thread: nothing here owns a cache to rebuild.
+        None => {}
+        // The list the cache was built from is the list the session has.
+        Some(Some(cached)) if !crate::layouts::layout_list_changed(&session, &cached) => {}
+        // A layout was added, removed or moved — or there is no cache to compare yet.
+        Some(_) => rebuild_layout_cache(),
+    }
 }
 
-/// The decision of [`refresh_layout_and_cache`], as a function of its two inputs.
+/// The stamp half of [`refresh_layout_and_cache`], as a function of its two inputs — since task
+/// T-39-4 the rebuild half is [`crate::layouts::layout_list_changed`] (finding Н11).
 ///
 /// Split out for the same reason [`apply_capacity`] is: the rule can then be driven from a test
 /// without a foreground window and, more to the point, without running a real `LayoutCache::build`
@@ -3808,38 +3867,137 @@ mod tests {
         });
     }
 
-    /// FR-25. A cache that will not build is answered with the hardwired table of module
-    /// `convert`, the failure is counted, and the program carries on with a usable cache.
+    /// FR-25 and **finding Н7 — task T-39-4.** A cache that will not build is answered with the
+    /// hardwired table of module `convert` **only where there is no cache to keep** — at start-up,
+    /// before any cache has been published. A rebuild that fails over a working cache leaves that
+    /// cache in place: until this task it was replaced by the RU/EN table, every layout but those
+    /// two stopped existing, a cycle of three broke, and nobody was told. Every failure is counted
+    /// either way.
+    ///
+    /// ⚠ **The canon of this test moved with the task, as the task declared it would:** it used to
+    /// be `a_failed_build_falls_back_to_the_hardwired_table_of_fr25`, asserting the table for every
+    /// failure, a working cache or none.
     ///
     /// Both directions are one test on purpose: [`LAYOUT_CACHE_FAILURES`] is a counter of the
     /// process, `cargo test` runs the tests of a binary in parallel, and two tests asserting on
     /// the same counter would be asserting on each other's timing.
     #[test]
-    fn a_failed_build_falls_back_to_the_hardwired_table_of_fr25() {
+    fn a_failed_build_falls_back_to_fr25_only_where_there_is_no_cache_to_keep() {
         let built = crate::convert::fallback_cache();
         let before = layout_cache_failures();
 
-        // A cache that built is used exactly as it is, and nothing is counted.
-        assert_eq!(cache_or_fallback(Ok(built.clone())), built);
+        // A cache that built is used exactly as it is, whatever the buffer held, and nothing is
+        // counted.
+        assert_eq!(
+            cache_or_fallback(Ok(built.clone()), false),
+            Some(built.clone())
+        );
+        assert_eq!(
+            cache_or_fallback(Ok(built.clone()), true),
+            Some(built.clone())
+        );
         assert_eq!(layout_cache_failures(), before);
 
-        // Every way the build can fail ends on the table of FR-25 rather than on a panic, an
-        // empty cache or a dead program.
         for reason in [
             LayoutError::Enumeration,
             LayoutError::NoUsableLayouts,
             LayoutError::Empty,
         ] {
-            let fallen_back = cache_or_fallback(Err(reason));
+            // Start-up: nothing to keep, so the very cache FR-25 prescribes, and not an empty one —
+            // point 4 of FR-25 keeps "the cache did not build" apart from "no characters".
+            let fallen_back = cache_or_fallback(Err(reason), false);
+            assert_eq!(
+                fallen_back.as_ref(),
+                Some(&built),
+                "start-up, failure {reason:?}"
+            );
+            assert!(
+                fallen_back.is_some_and(|cache| !cache.is_empty()),
+                "failure {reason:?}"
+            );
 
-            // The very cache FR-25 prescribes, and not an empty one: point 4 of FR-25 is that
-            // "the cache did not build" stays distinguishable from "these keys carry no
-            // characters".
-            assert_eq!(fallen_back, built, "failure {reason:?}");
-            assert!(!fallen_back.is_empty(), "failure {reason:?}");
+            // Н7: a rebuild that failed over a working cache hands nothing back to replace it.
+            let replacement = cache_or_fallback(Err(reason), true);
+            assert!(
+                replacement.is_none(),
+                "Н7: a rebuild that failed ({reason:?}) over a working cache handed back FR-25's \
+                 two layouts to replace the session's"
+            );
         }
 
-        assert_eq!(layout_cache_failures(), before + 3);
+        assert_eq!(
+            layout_cache_failures(),
+            before + 6,
+            "every failure is counted"
+        );
+    }
+
+    /// **Finding Н11 — task T-39-4, and the instrument of premise П5 run in process.**
+    ///
+    /// The probe of FR-21 decided «rebuild the cache» by asking whether the layout of the window in
+    /// front differed from the stamp — a different question from the one it answered. So an
+    /// ordinary `Alt+Shift` ran the whole sweep of FR-20 over an unchanged list, and a layout added
+    /// to the session without touching the active one was never taken in. Both halves are measured
+    /// on `cache_builds`, the counter of completed builds, against the session this test runs in:
+    /// a window whose layout differs from the stamp over a cache that holds the whole list — a
+    /// rebuild there is wasted — and a stamp equal to the window over a cache that lacks a layout
+    /// of the session — a rebuild there is owed.
+    ///
+    /// It reads the real foreground window and the real layout list, and says so and measures
+    /// nothing on a session that cannot stage it.
+    #[cfg(feature = "testing")]
+    #[test]
+    fn the_probe_of_fr21_rebuilds_for_a_changed_list_and_not_for_a_changed_window() {
+        let Ok(session) = crate::layouts::enumerate() else {
+            println!("SKIPPED: the layout list of this session could not be read");
+            return;
+        };
+        let window = foreground_layout();
+
+        if window == LayoutId::default() || !session.contains(&window) {
+            println!("SKIPPED: no foreground window on a layout of this session");
+            return;
+        }
+
+        let Some(other) = session.iter().copied().find(|layout| *layout != window) else {
+            println!("SKIPPED: this session carries one layout, nothing to stage");
+            return;
+        };
+
+        let whole = LayoutCache::build().expect("the layouts of this session build a cache");
+        let short = LayoutCache::from_maps(
+            whole
+                .maps()
+                .iter()
+                .filter(|map| map.layout() != other)
+                .cloned()
+                .collect(),
+        )
+        .expect("the cache keeps every layout but one");
+
+        buffer::install_recorder(Recorder::with_capacity(16));
+
+        // The window moved off the stamp; the list is exactly the one the cache holds.
+        publish_cache(whole);
+        publish_active_layout(other);
+        let before = crate::control::snapshot().cache_builds;
+        refresh_layout_and_cache();
+        let wasted = crate::control::snapshot().cache_builds.wrapping_sub(before);
+
+        // The stamp is the window's; the session has a layout the cache does not.
+        publish_cache(short);
+        publish_active_layout(window);
+        let before = crate::control::snapshot().cache_builds;
+        refresh_layout_and_cache();
+        let owed = crate::control::snapshot().cache_builds.wrapping_sub(before);
+
+        buffer::uninstall();
+
+        assert!(
+            wasted == 0 && owed == 1,
+            "Н11: a probe over an unchanged list rebuilt the cache {wasted} time(s), expected 0; a \
+             probe over a list with a layout the cache lacks rebuilt it {owed} time(s), expected 1"
+        );
     }
 
     /// **FR-11.** Neither a new active layout nor a rebuilt cache flushes the buffer — the two

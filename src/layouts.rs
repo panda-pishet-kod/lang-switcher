@@ -177,6 +177,21 @@ pub fn needs_rebuild(message: u32) -> bool {
     REBUILD_MESSAGES.contains(&message)
 }
 
+/// Whether the layout list of the session is no longer the list a cache was built from — **the
+/// rebuild half of FR-21, finding Н11, task T-39-4**.
+///
+/// `session` is what [`enumerate`] answers now, `cached` the layouts of the cache in its own order
+/// ([`LayoutCache::maps`]). The comparison is of the length and the values **in order**: a layout
+/// added or removed changes the cache FR-20 has to build, and a layout moved changes which two are
+/// «первые две раскладки системного списка» of FR-30.
+///
+/// ⭐ **The active layout is not an input, and that is the repair.** The probe of FR-21 used to
+/// decide the rebuild by comparing the window's layout with the stamp — a question about which
+/// layout is active, answered for a cache that depends only on which layouts exist.
+pub fn layout_list_changed(session: &[LayoutId], cached: &[LayoutId]) -> bool {
+    session != cached
+}
+
 // ---------------------------------------------------------------------------------------
 // Layout identity
 // ---------------------------------------------------------------------------------------
