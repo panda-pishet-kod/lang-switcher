@@ -243,12 +243,6 @@ if (-not $SkipSign) {
         Write-Host '  timestamp: ABSENT -- DEVIATION, record it in the report'
     }
 }
-if ($AutostartDefaultOn) {
-    Write-Host ''
-    Write-Host '  *** MEASUREMENT BUILD: the autostart task is pre-ticked. ***'
-    Write-Host '  *** Rebuild without -AutostartDefaultOn before leaving   ***'
-    Write-Host '  *** this installer in place.                            ***'
-}
 Write-Host ''
 Write-Host '======================================================================'
 Write-Host ' RESULT: PASS'
