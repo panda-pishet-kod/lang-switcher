@@ -3683,6 +3683,20 @@ mod tests {
     /// which is an outcome and not an error (FR-23).
     const SOME_LAYOUT: LayoutId = LayoutId::from_raw(0x0409_0409);
 
+    /// The tests that rebuild the cache of FR-20 take this first — task T-39-5a.
+    ///
+    /// `cache_builds` is one counter for the whole process and `cargo test` runs the tests of this
+    /// binary on parallel threads: a device change answered by one test landed inside the
+    /// measurement of the other, and the instrument of finding Н11 read a rebuild it had not
+    /// caused. A poisoned gate is still a gate — the test that poisoned it has already reported.
+    static CACHE_BUILDS_GATE: Mutex<()> = Mutex::new(());
+
+    fn cache_builds_gate() -> std::sync::MutexGuard<'static, ()> {
+        CACHE_BUILDS_GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// A [`Beeper`] that writes down what it was asked for instead of making a sound —
     /// **FR-100, task Т-21-5**.
     ///
@@ -4008,6 +4022,8 @@ mod tests {
     #[cfg(feature = "testing")]
     #[test]
     fn the_probe_of_fr21_rebuilds_for_a_changed_list_and_not_for_a_changed_window() {
+        let _gate = cache_builds_gate();
+
         let Ok(session) = crate::layouts::enumerate() else {
             println!("SKIPPED: the layout list of this session could not be read");
             return;
@@ -4074,6 +4090,8 @@ mod tests {
     #[test]
     fn a_device_change_rebuilds_at_the_input_window_even_with_the_buffer_parked() {
         const WM_DEVICECHANGE: u32 = 0x0219;
+
+        let _gate = cache_builds_gate();
 
         let marker = || {
             LayoutCache::from_maps(vec![crate::convert::fallback_cache().maps()[0].clone()])
