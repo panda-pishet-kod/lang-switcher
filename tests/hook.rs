@@ -1527,7 +1527,10 @@ fn the_auto_repeat_of_a_yielded_hotkey_reaches_the_application_as_it_is() {
         );
 
         assert_eq!(outcome.decision, Decision::Pass);
-        assert!(!outcome.fire_hotkey, "FR-84: конвертации нет ни на одном повторе");
+        assert!(
+            !outcome.fire_hotkey,
+            "FR-84: конвертации нет ни на одном повторе"
+        );
     }
 
     assert_eq!(
@@ -1556,7 +1559,11 @@ fn the_exclusion_changes_nothing_for_an_ordinary_stroke() {
 
     for edge in [Edge::Down, Edge::Up] {
         assert_eq!(
-            hook::classify(armed_in_an_excluded_process(), &mut state, user_key(VK_A, edge)),
+            hook::classify(
+                armed_in_an_excluded_process(),
+                &mut state,
+                user_key(VK_A, edge)
+            ),
             passed_on(),
             "an ordinary stroke in an excluded process, {edge:?}"
         );

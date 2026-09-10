@@ -1441,8 +1441,8 @@ fn every_map_of_the_cache_is_asked_and_the_first_yes_is_enough() {
         KeyMapping::from_char('х'),
     );
 
-    let stand = LayoutCache::from_maps(vec![first.finish(), second.finish()])
-        .expect("two non-empty maps");
+    let stand =
+        LayoutCache::from_maps(vec![first.finish(), second.finish()]).expect("two non-empty maps");
 
     assert!(
         stand.produces_in_any_map(SCAN_BLANK_IN_FIRST, MAIN_BLOCK, Mods::NONE),

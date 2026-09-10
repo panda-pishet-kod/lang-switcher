@@ -262,12 +262,7 @@ fn english() -> LayoutMap {
             (SCAN_1, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('1')),
             (SCAN_0, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('0')),
             (SCAN_9, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('9')),
-            (
-                SCAN_NUMPAD1,
-                KEYPAD,
-                Mods::NONE,
-                KeyMapping::from_char('1'),
-            ),
+            (SCAN_NUMPAD1, KEYPAD, Mods::NONE, KeyMapping::from_char('1')),
             (SCAN_G, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('g')),
             (SCAN_H, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('h')),
             (SCAN_B, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('b')),
@@ -636,7 +631,10 @@ fn a_combination_the_cache_has_no_answer_for_is_stored_empty() {
     // **here** and significant **there** is still text, because FR-22 converts by the scan code.
     let mut recorder = fresh();
 
-    assert_eq!(press(&mut recorder, VK_OEM_4, SCAN_BRACKET), Recorded::Stored);
+    assert_eq!(
+        press(&mut recorder, VK_OEM_4, SCAN_BRACKET),
+        Recorded::Stored
+    );
 
     let stroke = recorder.stroke(0).expect("the stroke was stored anyway");
 
@@ -3733,7 +3731,11 @@ fn every_key_without_a_character_and_without_a_role_flushes() {
         (VK_CLEAR, 0x4C, "цифровая 5 при погашенном NumLock"),
         // The old hotkey after the user has moved the hotkey elsewhere: `classify` no longer
         // takes it, so it arrives here as an ordinary key — and it writes nothing.
-        (VK_PAUSE, 0x45, "прежняя горячая клавиша после переназначения"),
+        (
+            VK_PAUSE,
+            0x45,
+            "прежняя горячая клавиша после переназначения",
+        ),
     ] {
         let mut recorder = fresh();
         type_ghbdtn(&mut recorder);
@@ -3936,8 +3938,18 @@ fn every_switcher_of_the_system_dialog_keeps_the_buffer() {
     // same page binds the grave key. Every one of those arrived here as `Ctrl`-or-`Alt` plus a
     // key — the exact shape of the command row of FR-10 — and threw the word away.
     for (name, modifiers, vk, scan) in [
-        ("Ctrl+Shift+1", [VK_LCONTROL, VK_LSHIFT].as_slice(), VK_1, SCAN_1),
-        ("Alt+Shift+1", [VK_LMENU, VK_LSHIFT].as_slice(), VK_1, SCAN_1),
+        (
+            "Ctrl+Shift+1",
+            [VK_LCONTROL, VK_LSHIFT].as_slice(),
+            VK_1,
+            SCAN_1,
+        ),
+        (
+            "Alt+Shift+1",
+            [VK_LMENU, VK_LSHIFT].as_slice(),
+            VK_1,
+            SCAN_1,
+        ),
         (
             "Ctrl+Shift+гравис",
             [VK_LCONTROL, VK_LSHIFT].as_slice(),
@@ -3945,8 +3957,18 @@ fn every_switcher_of_the_system_dialog_keeps_the_buffer() {
             SCAN_GRAVE,
         ),
         // Both sides of every modifier, and the top-row digits at both ends of the range.
-        ("правый Ctrl+правый Shift+0", [VK_RCONTROL, VK_RSHIFT].as_slice(), VK_0, SCAN_0),
-        ("Ctrl+Shift+9", [VK_LCONTROL, VK_LSHIFT].as_slice(), VK_9, SCAN_9),
+        (
+            "правый Ctrl+правый Shift+0",
+            [VK_RCONTROL, VK_RSHIFT].as_slice(),
+            VK_0,
+            SCAN_0,
+        ),
+        (
+            "Ctrl+Shift+9",
+            [VK_LCONTROL, VK_LSHIFT].as_slice(),
+            VK_9,
+            SCAN_9,
+        ),
     ] {
         let mut recorder = fresh();
         type_ghbdtn(&mut recorder);
