@@ -4542,6 +4542,46 @@ pub fn cycle_from_rows(rows: &[LayoutRow], session: &[LayoutId]) -> Vec<String> 
         .collect()
 }
 
+/// What «ОК» and «Применить» write into `[layouts] cycle` — task T-55-8, findings С54 and С55.
+///
+/// **The string of the file goes back byte for byte unless its ticks were touched.**
+///
+/// * **С54 — an empty session is not an empty cycle.** The list is built from the layouts the
+///   session names right now ([`layout_rows`]); a session that named nothing — the enumeration
+///   refused, a layout was being reinstalled — gave an empty list, and «ОК» without a single edit
+///   wrote an empty cycle over the file's. With no session there is nothing to tick, so the cycle
+///   of the file stands whatever else happens. The section of the layouts already shows that
+///   moment: both layouts of the pair are then not in the session either, and the note under them
+///   says so — no string of its own was needed for it.
+/// * **С55 — a tick is not a rewrite.** `0x00000409` names every layout of the language 0x0409;
+///   with two of them in the session the list ticks both, and «ОК» wrote both back in the handle
+///   form: the cycle grew, its order of FR-31 changed, and the short form never came back.
+///
+/// **One mechanism for both, chosen over the other one the task allowed.** The task offered two:
+/// tick only the layout the resolution of the write would pick, or keep the string whose ticks
+/// nobody touched. The second is taken: it is the one of the two that keeps the file *byte for
+/// byte* — the invariant the task names — it leaves the list showing exactly what FR-31 and
+/// [`layout_rows`] show today, and it answers С54 with the same comparison.
+///
+/// **«Touched» is compared, not tracked:** the rows as the person leaves them against the rows as
+/// the dialog opened. A tick taken back is no edit; a real edit — a tick, an untick, a move — is
+/// written the way [`cycle_from_rows`] always wrote it; and two «ОК» in a row without edits give the
+/// same cycle twice.
+///
+/// Pure, and public for the reason [`layout_rows`] is.
+pub fn cycle_after_dialog(
+    cycle_at_open: &[String],
+    rows_at_open: &[LayoutRow],
+    rows: &[LayoutRow],
+    session: &[LayoutId],
+) -> Vec<String> {
+    if session.is_empty() || rows == rows_at_open {
+        return cycle_at_open.to_vec();
+    }
+
+    cycle_from_rows(rows, session)
+}
+
 /// Writes one layout the way section 7 writes one — and picks which of the two forms to use.
 ///
 /// A session with one layout per language gets the **language** form, `0x00000409`, which is
@@ -4716,6 +4756,10 @@ pub fn show_dialog(
 
     let session = layouts::enumerate().unwrap_or_default();
 
+    // Task T-55-8: the list as it opens, kept beside the one the person edits, so that «ОК» can
+    // tell an untouched cycle from an edited one.
+    let rows = layout_rows(&config.layouts, &session);
+
     // FR-92а, task T-11-4: the palette of this dialog, resolved once at initialisation —
     // the setting comes from the configuration the dialog was opened with, and the system
     // switch is read exactly once, so the first paint is one consistent palette. Who
@@ -4729,7 +4773,9 @@ pub fn show_dialog(
         checks: GlyphChecks::new(),
         state: RefCell::new(DialogState {
             working: config.clone(),
-            rows: layout_rows(&config.layouts, &session),
+            rows_at_open: rows.clone(),
+            rows,
+            cycle_at_open: config.layouts.cycle.clone(),
             session,
             apply,
             capture: None,
@@ -5237,6 +5283,12 @@ struct DialogState<'a> {
     working: Config,
     /// The layout list of FR-31, in display order.
     rows: Vec<LayoutRow>,
+    /// The list as the dialog opened, before any tick or move — task T-55-8. «ОК» compares
+    /// `rows` against it to know whether the cycle was touched at all ([`cycle_after_dialog`]).
+    rows_at_open: Vec<LayoutRow>,
+    /// `[layouts] cycle` as the file had it when the dialog opened — task T-55-8, the string that
+    /// goes back byte for byte when nobody touched its ticks.
+    cycle_at_open: Vec<String>,
     /// The layouts of this session, as `layouts::enumerate` gave them — FR-35 has already
     /// removed the IMEs.
     session: Vec<LayoutId>,
@@ -11923,7 +11975,14 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     }
 
     read_cycle_checks(hwnd, &mut state.rows);
-    state.working.layouts.cycle = cycle_from_rows(&state.rows, &state.session);
+    // Task T-55-8, findings С54 and С55: the cycle of the file goes back byte for byte unless its
+    // ticks were touched — an empty session or a list nobody edited rewrites nothing.
+    state.working.layouts.cycle = cycle_after_dialog(
+        &state.cycle_at_open,
+        &state.rows_at_open,
+        &state.rows,
+        &state.session,
+    );
 
     state.working.exclusions.processes = list_items(hwnd, IDC_EXCLUSIONS);
 

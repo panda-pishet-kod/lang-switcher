@@ -7981,6 +7981,128 @@ fn one_layout_per_language_is_written_in_the_language_form() {
 }
 
 // -----------------------------------------------------------------------------------------
+// Task T-55-8 — findings С54 and С55: an «ОК» without edits does not rewrite the cycle
+// -----------------------------------------------------------------------------------------
+
+/// **Finding С54 — an «ОК» on a session that named no layouts keeps the cycle of the file.** Until
+/// task T-55-8 the list was built from what the session named right then, and «ОК» wrote back
+/// exactly what was ticked: a session that named nothing — the enumeration refused, the layouts
+/// were being reinstalled — erased the cycle without a single edit (premise П9(а): two entries in,
+/// none out).
+#[test]
+fn an_ok_on_a_session_that_named_no_layouts_keeps_the_cycle_of_the_file() {
+    let file = vec!["0x00000419".to_owned(), "0x00000409".to_owned()];
+    let mut layouts = Config::default().layouts;
+    layouts.cycle = file.clone();
+
+    let at_open = settings::layout_rows(&layouts, &[]);
+    let written = settings::cycle_after_dialog(&file, &at_open, &at_open, &[]);
+
+    assert_eq!(
+        written, file,
+        "С54: the cycle of the file is written back as it was, entry for entry"
+    );
+}
+
+/// **Finding С55 — an entry in the language form is not lengthened by an «ОК» without edits.**
+/// `0x00000409` names every layout of the language 0x0409; with two of them in the session the
+/// list ticks both, and until task T-55-8 «ОК» wrote both back in the handle form — the cycle grew
+/// and its order changed (premise П9(б): one entry in, two out). The file's string whose ticks
+/// nobody touched goes back byte for byte.
+#[test]
+fn an_entry_in_the_language_form_is_not_lengthened_by_an_ok_without_edits() {
+    let session = [EN, EN_SECOND, RU];
+    let file = vec!["0x00000409".to_owned()];
+    let mut layouts = Config::default().layouts;
+    layouts.cycle = file.clone();
+
+    let at_open = settings::layout_rows(&layouts, &session);
+    let written = settings::cycle_after_dialog(&file, &at_open, &at_open, &session);
+
+    println!("rows at open: {at_open:?}, written: {written:?}");
+
+    assert_eq!(
+        written, file,
+        "С55: one entry in, one entry out, in its own form"
+    );
+}
+
+/// **The controls of task T-55-8: an edit of the ticks still reaches the cycle, a tick taken back
+/// is no edit, and «ОК» twice in a row without edits gives the same cycle twice** — the one the
+/// file had, on the very session that lengthened it before.
+#[test]
+fn an_edit_of_the_ticks_reaches_the_cycle_and_ok_twice_changes_nothing() {
+    let session = [EN, RU];
+    let file = vec!["0x00000409".to_owned(), "0x00000419".to_owned()];
+    let mut layouts = Config::default().layouts;
+    layouts.cycle = file.clone();
+
+    let at_open = settings::layout_rows(&layouts, &session);
+
+    // Unticking RU is an edit, and the cycle follows it.
+    let mut edited = at_open.clone();
+    for row in &mut edited {
+        if row.layout == RU {
+            row.checked = false;
+        }
+    }
+
+    let written = settings::cycle_after_dialog(&file, &at_open, &edited, &session);
+    assert_eq!(
+        written,
+        ["0x00000409"],
+        "an edit of the ticks reaches the cycle"
+    );
+
+    // Ticking it back is no edit at all: the file's string goes back as it was.
+    let written = settings::cycle_after_dialog(&file, &at_open, &at_open, &session);
+    assert_eq!(written, file, "a tick taken back is no change");
+
+    // «ОК» twice without edits, on the session that lengthened before.
+    let session = [EN, EN_SECOND, RU];
+    layouts.cycle = file.clone();
+
+    let at_open = settings::layout_rows(&layouts, &session);
+    let first = settings::cycle_after_dialog(&file, &at_open, &at_open, &session);
+    let second = settings::cycle_after_dialog(&file, &at_open, &at_open, &session);
+
+    assert_eq!(first, second, "two «ОК» in a row give the same cycle");
+    assert_eq!(
+        first, file,
+        "and it is the order and the length of the file, not a longer one"
+    );
+}
+
+/// **«ОК» goes through the rule of task T-55-8.** The body of `read_dialog` asks
+/// `cycle_after_dialog` and writes no `cycle_from_rows` of its own — swept over the source,
+/// because the pure rule above is only worth anything if the dialog is the one calling it.
+#[test]
+fn the_dialog_writes_the_cycle_through_the_rule_that_keeps_an_untouched_one() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {")
+        .expect("read_dialog must be in src\\settings.rs");
+    let body = &source[at..];
+    let body = &body[..body.find("\n}").expect("a function closes with its brace")];
+
+    assert!(
+        body.contains("cycle_after_dialog("),
+        "С54, С55: «ОК» must write the cycle through the rule that keeps an untouched one"
+    );
+    assert!(
+        !body.contains("cycle_from_rows("),
+        "and must not write the ticked rows straight back beside it"
+    );
+}
+
+// -----------------------------------------------------------------------------------------
 // Т-23-3, решение 82.1 — вариант В: имя раскладки чистое, различитель только при коллизии
 // -----------------------------------------------------------------------------------------
 //
