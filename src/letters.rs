@@ -470,10 +470,17 @@ impl FeedView<'_> {
 ///    slot: FR-101 shows it «сразу», because the program has just been installed and the
 ///    person is looking at the screen they installed it from.
 /// 2. **A quiet moment.** Everything else is a knock at somebody's door.
-/// 3. **One letter a day.** The four remaining letters share one slot, and the slot is spent
+/// 3. **One letter a day.** The three remaining letters share one slot, and the slot is spent
 ///    by whichever of them is shown.
-/// 4. **«Что нового» → «Обновление» → «Новость» → «Спасибо»** — the priority of FR-101, from
-///    the letter about the program the person is running to the letter about the author.
+/// 4. **«Обновление» → «Новость» → «Спасибо»** — the priority of FR-101, from the letter about
+///    the program the person is running to the letter about the author.
+///
+/// ⛔ **«Что нового» в этом порядке больше нет — решение владельца 118.5, задача T-53a-5.**
+/// Оно стояло третьим, между гейтами и «Обновлением»; ворота закрыты, потому что описание
+/// изменений должно приходить с сигналом ленты **до** установки, а не письмом после неё.
+/// Письмо, его строки и его место в приоритете целы — закрыто одно `if`, и подробности при
+/// нём. Число писем в этой доке — четыре, а не пять: доктекст, защищающий замысел, которого
+/// код не исполняет, хуже отсутствия доктекста (урок Э49).
 pub fn due(
     state: &Letters,
     today: Date,
@@ -489,9 +496,18 @@ pub fn due(
         return None;
     }
 
-    if state.last_seen_version != version {
-        return Some(Letter::WhatsNew);
-    }
+    // ⛔ **ВОРОТА «Что нового» ЗАКРЫТЫ — решение владельца 118.5 (Р5 ТЗ Э53а), 2026-09-10.**
+    // Здесь стояло `if state.last_seen_version != version { return Some(Letter::WhatsNew); }`.
+    // Описание изменений должно приходить ВМЕСТЕ с сигналом ленты о новой версии на сайте, ДО
+    // установки, а не письмом после неё: человек, уже поставивший обновление, читать о нём
+    // поздно. Ворота закрыты именно здесь, а не удалением письма: `Letter::WhatsNew` цел в
+    // перечислении, его строки целы в `app.rc`, `plan_for` и `toast_strings` отвечают, как
+    // отвечали, и `after_shown` по-прежнему двигает версию, — так что вернуть письмо значит
+    // вернуть одно `if`, а не восстанавливать разобранное.
+    //
+    // ⚠ **`last_seen_version` продолжает двигаться и без письма** — её ведёт [`initialise`] на
+    // каждом старте. Без этого отметка застыла бы на версии закрытия ворот, и человек,
+    // которому письмо однажды вернут, получил бы его за все пропущенные версии разом.
 
     if update_is_due(state, version, feed) {
         return Some(Letter::Update);
@@ -637,26 +653,40 @@ pub fn version_is_newer(candidate: &str, installed: &str) -> bool {
 /// function of the document and reads no clock, so the day of the migration is written here,
 /// on the first run after it, which is the same day.
 ///
-/// Two things happen, and only when `first_run` is empty:
+/// Две вещи, и у каждой своё условие:
 ///
-/// * `first_run` becomes today and `thanks_due` becomes thirty days from now (FR-101);
-/// * a machine that has **not** shown «Привет» yet — a fresh install, where
-///   `Config::for_a_first_run` left the flag off — is marked as having already seen this
-///   version's news. Nothing about a program installed today is «что нового», and without
-///   this line the «Что нового» letter would follow «Привет» within the hour.
+/// * **на всяком старте** — `last_seen_version` подводится к версии сборки. С решения
+///   **118.5** (задача T-53a-5) это единственное место, которое её двигает на живой машине:
+///   ворота письма «Что нового» закрыты, `after_shown` для него больше не вызывается, и без
+///   этой строки отметка застыла бы на версии закрытия ворот. Тогда человек, которому письмо
+///   однажды вернут, получил бы его за все пропущенные версии разом. ⚠ Отметка идёт **до**
+///   раннего возврата: у машины, считающей дни давно, `first_run` заполнен;
+/// * **только когда `first_run` пуст** — `first_run` становится сегодняшним днём, а
+///   `thanks_due` — тридцатым от него (FR-101).
+///
+/// ⛔ **Прежняя третья вещь ушла вместе с воротами.** До T-53a-5 версия помечалась виденной
+/// только на свежей установке (`welcome_shown` ещё не поднят), нарочно: обновившийся должен
+/// был получить «Что нового», а поставивший программу сегодня — нет, иначе письмо шло бы
+/// следом за «Привет» в тот же час. Теперь письма нет ни у кого, и различать эти два случая
+/// стало нечем — но условие «свежая установка молчит» соблюдено по-прежнему, и даже строже.
 ///
 /// Answers whether anything was written, because the caller has to save the file when it was.
 pub fn initialise(state: &mut Letters, today: Date, version: &str) -> bool {
+    // Решение 118.5: отметка виденной версии ведётся ЗДЕСЬ и на каждом старте — см. доктекст
+    // выше. Стоит первой, до раннего возврата: у машины, считающей дни давно, `first_run`
+    // заполнен, и всё, что ниже, её бы миновало.
+    let version_moved = state.last_seen_version != version;
+
+    if version_moved {
+        state.last_seen_version = version.to_owned();
+    }
+
     if state.first_run.is_some() {
-        return false;
+        return version_moved;
     }
 
     state.first_run = Some(today);
     state.thanks_due = Some(today.plus_days(THANKS_AFTER_DAYS));
-
-    if !state.welcome_shown {
-        state.last_seen_version = version.to_owned();
-    }
 
     true
 }

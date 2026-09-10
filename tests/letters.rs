@@ -380,8 +380,18 @@ fn a_fresh_installation_has_nothing_new_to_be_told_about() {
     assert_eq!(state.first_run, Some(today));
 }
 
-/// A machine that came through the migration **is** «обновившийся»: it has seen «Привет» and it
-/// has not seen this version, so the first thing it meets is «Что нового».
+/// A machine that came through the migration **is** «обновившийся»: it has seen «Привет», so
+/// «Привет» is not what it meets.
+///
+/// ⚠⚠ **ПЕРЕВЁРНУТ задачей T-53a-5, решение владельца 118.5.** До неё этот тест утверждал
+/// вторую половину: обновившийся встречает **«Что нового»**, и `initialise` не смеет эту
+/// версию молча пометить виденной («initialisation must not silence «Что нового» for somebody
+/// who updated»). Ворота письма закрыты — описание изменений приходит с сигналом ленты **до**
+/// установки, — и вместе с ними перевернулась ровно эта половина: теперь `initialise`
+/// **обязана** пометить версию виденной, потому что она единственная, кто отметку ещё двигает.
+///
+/// ⭐ **Первая половина правды цела и проверяется по-прежнему:** «Привет» обновившемуся не
+/// приходит. Ради неё тест и держится — без неё исчезновение письма скрыло бы и её.
 #[test]
 fn a_migrated_machine_is_told_what_is_new_and_not_hello() {
     let mut state = Letters {
@@ -393,12 +403,22 @@ fn a_migrated_machine_is_told_what_is_new_and_not_hello() {
 
     assert!(letters::initialise(&mut state, today, "0.39.0"));
     assert_eq!(
-        state.last_seen_version, "",
-        "initialisation must not silence «Что нового» for somebody who updated"
+        state.last_seen_version, "0.39.0",
+        "решение 118.5: отметку виденной версии ведёт `initialise`, и только она — иначе, \
+         когда письмо однажды вернут, оно придёт за все пропущенные версии разом"
+    );
+
+    // Половина, ради которой тест жив: «Привет» тому, кто его уже видел, не приходит.
+    let due = letters::due(&state, today, "0.39.0", FeedView::EMPTY, true);
+    assert_ne!(
+        due,
+        Some(Letter::Welcome),
+        "«Привет» показывается один раз и обновившемуся не приходит"
     );
     assert_eq!(
-        letters::due(&state, today, "0.39.0", FeedView::EMPTY, true),
-        Some(Letter::WhatsNew)
+        due, None,
+        "и «Что нового» с решения 118.5 не приходит тоже — ворота закрыты, лента расскажет \
+         об изменениях до установки"
     );
 }
 
@@ -407,43 +427,59 @@ fn a_migrated_machine_is_told_what_is_new_and_not_hello() {
 // =========================================================================================
 
 /// Everything but «Привет» waits for a quiet moment.
+///
+/// ⚠ **Повозку сменила задача T-53a-5** (решение 118.5): гейт тишины проверялся письмом
+/// «Что нового», а его ворота закрыты. Проверяемое правило то же — оно про **гейт**, а не про
+/// то письмо, — и теперь его везёт «Спасибо». ⛔ Тест не выброшен именно потому, что его
+/// правда ко второй задаче отношения не имеет.
 #[test]
 fn nothing_but_hello_arrives_while_the_moment_is_not_quiet() {
-    let state = settled("0.38.0");
+    let mut state = settled("0.39.0");
+    state.thanks_due = Some(day(2026, 9, 1));
     let today = day(2026, 9, 3);
 
     assert_eq!(
         letters::due(&state, today, "0.39.0", FeedView::EMPTY, false),
         None,
-        "«Что нового» is due and the moment is not quiet"
+        "«Спасибо» причитается, но минута не спокойная"
     );
     assert_eq!(
         letters::due(&state, today, "0.39.0", FeedView::EMPTY, true),
-        Some(Letter::WhatsNew)
+        Some(Letter::Thanks),
+        "и приходит, как только она спокойна, — гейт один на все письма, кроме «Привет»"
     );
 }
 
 /// One letter a day, and the day survives a restart because it is written in the file.
+///
+/// ⚠ **Повозку сменила задача T-53a-5** (решение 118.5): парой «Что нового» + «Спасибо»
+/// правило больше не покажешь. Пара теперь «Новость» + «Спасибо» — обе причитаются в один
+/// день, и приоритет FR-101 берёт первую. Правда теста прежняя: **день тратится одним
+/// письмом, и на другой день приходит следующее**.
 #[test]
 fn only_one_letter_a_day_reaches_the_screen() {
-    let mut state = settled("0.38.0");
+    let mut state = settled("0.39.0");
     state.thanks_due = Some(day(2026, 9, 1));
     let today = day(2026, 9, 3);
+    let items = [news(12)];
+    let feed = FeedView {
+        update: None,
+        news: &items,
+    };
 
-    // Two letters are due at once: «Что нового» and «Спасибо». The priority of FR-101 picks
-    // the first.
-    let first = letters::due(&state, today, "0.39.0", FeedView::EMPTY, true);
-    assert_eq!(first, Some(Letter::WhatsNew));
+    // Два письма причитаются разом: «Новость» и «Спасибо». Приоритет FR-101 берёт первое.
+    let first = letters::due(&state, today, "0.39.0", feed, true);
+    assert_eq!(first, Some(Letter::News(12)));
 
-    letters::after_shown(&mut state, Letter::WhatsNew, today, "0.39.0");
+    letters::after_shown(&mut state, Letter::News(12), today, "0.39.0");
     assert_eq!(state.last_letter, Some(today));
 
     // The second one waits for tomorrow — and this is the assertion that needs the day to be in
     // the file: the state has been written and read back in between on a real machine.
     assert_eq!(
-        letters::due(&state, today, "0.39.0", FeedView::EMPTY, true),
+        letters::due(&state, today, "0.39.0", feed, true),
         None,
-        "«Спасибо» must not follow «Что нового» on the same day"
+        "«Спасибо» не идёт следом за «Новостью» в тот же день"
     );
     assert_eq!(
         letters::due(&state, today.plus_days(1), "0.39.0", FeedView::EMPTY, true),
@@ -451,7 +487,14 @@ fn only_one_letter_a_day_reaches_the_screen() {
     );
 }
 
-/// The priority of FR-101, all four letters due at the same moment.
+/// The priority of FR-101, all the letters that can be due at the same moment.
+///
+/// ⚠⚠ **ПЕРЕВЁРНУТ задачей T-53a-5, решение владельца 118.5.** До неё первым в этом порядке
+/// шло «Что нового» — оно и стоит в имени теста, и имя оставлено нарочно: по нему видно, чего
+/// в порядке больше нет. Ворота письма закрыты, порядок из четырёх стал порядком из трёх, а
+/// вторая, третья и четвёртая ступени — «Обновление» → «Новость» → «Спасибо» — целы и
+/// проверяются ниже слово в слово, как проверялись. ⭐ Это и есть контроль (б) приёмки
+/// T-53a-5: закрыты **ворота одного письма**, а не письма вообще.
 #[test]
 fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
     let mut state = settled("0.38.0");
@@ -464,10 +507,14 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
         news: &items,
     };
 
+    // ⛔ Ступень, которой не стало: `last_seen_version` = «0.38.0» при сборке «0.39.0» — ровно
+    // то состояние, что прежде давало `Some(Letter::WhatsNew)` первым. Теперь первым идёт
+    // «Обновление», и это проверяется здесь же, до всякой правки состояния.
     assert_eq!(
         letters::due(&state, today, "0.39.0", feed, true),
-        Some(Letter::WhatsNew),
-        "first the letter about the program the person is running"
+        Some(Letter::Update),
+        "решение 118.5: непросмотренная версия письма больше не даёт — первым идёт \
+         «Обновление»"
     );
 
     state.last_seen_version = "0.39.0".to_owned();
@@ -499,29 +546,58 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
 // «Что нового» — FR-101
 // =========================================================================================
 
-/// Shown once per version, and the mark is the version itself.
+/// ⚠⚠ **ПЕРЕВЁРНУТ задачей T-53a-5, решение владельца 118.5: ворота закрыты.**
+///
+/// До неё тест утверждал «показывается один раз на версию, и метка — сама версия». Первой
+/// половины больше нет: письмо не показывается вовсе, потому что описание изменений приходит с
+/// сигналом ленты **до** установки. **Вторая половина цела и стала главной:** метка версии
+/// по-прежнему движется — без этого письмо, однажды возвращённое, пришло бы за все пропущенные
+/// версии разом. Двигает её теперь `initialise`, а не `after_shown`.
+///
+/// ⭐ И проверяется, что письмо **разобрано не было**: `after_shown` для него отвечает, как
+/// отвечал, — вернуть его значит вернуть одно `if` в `due`.
 #[test]
-fn whats_new_is_shown_once_for_each_version() {
+fn whats_new_is_not_shown_but_the_version_mark_keeps_moving() {
     let mut state = settled("0.38.0");
     let today = day(2026, 9, 3);
 
+    // Ворота: состояние ровно то, что прежде давало письмо, — и письма нет.
     assert_eq!(
         letters::due(&state, today, "0.39.0", FeedView::EMPTY, true),
-        Some(Letter::WhatsNew)
-    );
-
-    letters::after_shown(&mut state, Letter::WhatsNew, today, "0.39.0");
-    assert_eq!(state.last_seen_version, "0.39.0");
-
-    assert_eq!(
-        letters::due(&state, today.plus_days(1), "0.39.0", FeedView::EMPTY, true),
         None,
-        "the same version is not new twice"
+        "решение 118.5: непросмотренная версия письма «Что нового» больше не даёт"
+    );
+
+    // ⭐ Метка движется — и её двигает `initialise`, на всяком старте, а не показ письма.
+    assert!(
+        letters::initialise(&mut state, today, "0.39.0"),
+        "подвинутая версия обязана считаться записью — иначе файл не сохранится"
     );
     assert_eq!(
-        letters::due(&state, today.plus_days(2), "0.40.0", FeedView::EMPTY, true),
-        Some(Letter::WhatsNew),
-        "and the next one is"
+        state.last_seen_version, "0.39.0",
+        "иначе отметка застынет на версии закрытия ворот"
+    );
+    assert!(
+        !letters::initialise(&mut state, today, "0.39.0"),
+        "и второй раз на той же версии писать нечего"
+    );
+
+    // Следующая версия двигает её снова.
+    let later = today.plus_days(2);
+    assert!(letters::initialise(&mut state, later, "0.40.0"));
+    assert_eq!(state.last_seen_version, "0.40.0");
+
+    // ⛔ Письмо не разобрано: механика показа цела и вернётся вместе с воротами.
+    letters::after_shown(&mut state, Letter::WhatsNew, today, "0.41.0");
+    assert_eq!(
+        state.last_seen_version, "0.41.0",
+        "`after_shown` для «Что нового» обязан работать, как работал: закрыты ворота, а не \
+         письмо"
+    );
+    assert_eq!(
+        state.last_letter,
+        Some(today),
+        "и день оно по-прежнему тратит — FR-101 освобождает от этого только «Привет»"
     );
 }
 
