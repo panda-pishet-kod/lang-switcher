@@ -1538,8 +1538,18 @@ fn rebuild_layout_cache() {
     // buffer wherever FR-70 keeps it and handed to the decision as an argument. At start-up the
     // buffer holds no cache yet, so the table of FR-25 arrives there exactly as before.
     let keeping = with_recorder_wherever_it_is(|recorder| recorder.has_cache()).unwrap_or(false);
+    let built = LayoutCache::build();
 
-    if let Some(cache) = cache_or_fallback(LayoutCache::build(), keeping) {
+    // Finding Н10 — task T-39-6, decision 122г: the layouts the table of FR-25 is filed under,
+    // read only when the table is about to be used. A failed enumeration answers an empty list,
+    // and the table then carries the two identifiers it always did.
+    let session = if built.is_err() && !keeping {
+        crate::layouts::enumerate().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    if let Some(cache) = cache_or_fallback(built, keeping, &session) {
         publish_cache(cache);
     }
 
@@ -1567,11 +1577,19 @@ fn rebuild_layout_cache() {
 /// publish nothing, keep what works. At start-up there is nothing to keep, and the table arrives
 /// exactly as before. Every failure is counted either way.
 ///
-/// `keeping` is an argument rather than a read of the buffer, so that the decision reads no
-/// global state and can be driven from a test; [`rebuild_layout_cache`] asks the buffer.
+/// ⭐ **And the table is filed under the session's own layouts — finding Н10, task T-39-6.**
+/// `session` is the enumeration of FR-35 (empty when there is none to read), and
+/// [`crate::convert::fallback_cache_for`] files the table under its layouts of English and
+/// Russian, so that a buffer recording under «США — международная» finds its active layout in
+/// the reserve rather than nothing.
+///
+/// `keeping` and `session` are arguments rather than reads of the buffer and of the system, so
+/// that the decision reads no global state and can be driven from a test;
+/// [`rebuild_layout_cache`] asks both.
 fn cache_or_fallback(
     built: Result<LayoutCache, LayoutError>,
     keeping: bool,
+    session: &[LayoutId],
 ) -> Option<LayoutCache> {
     match built {
         Ok(cache) => Some(cache),
@@ -1582,7 +1600,7 @@ fn cache_or_fallback(
         Err(_reason) => {
             LAYOUT_CACHE_FAILURES.fetch_add(1, Ordering::Relaxed);
 
-            (!keeping).then(crate::convert::fallback_cache)
+            (!keeping).then(|| crate::convert::fallback_cache_for(session))
         }
     }
 }
@@ -3905,11 +3923,11 @@ mod tests {
         // A cache that built is used exactly as it is, whatever the buffer held, and nothing is
         // counted.
         assert_eq!(
-            cache_or_fallback(Ok(built.clone()), false),
+            cache_or_fallback(Ok(built.clone()), false, &[]),
             Some(built.clone())
         );
         assert_eq!(
-            cache_or_fallback(Ok(built.clone()), true),
+            cache_or_fallback(Ok(built.clone()), true, &[]),
             Some(built.clone())
         );
         assert_eq!(layout_cache_failures(), before);
@@ -3920,8 +3938,9 @@ mod tests {
             LayoutError::Empty,
         ] {
             // Start-up: nothing to keep, so the very cache FR-25 prescribes, and not an empty one —
-            // point 4 of FR-25 keeps "the cache did not build" apart from "no characters".
-            let fallen_back = cache_or_fallback(Err(reason), false);
+            // point 4 of FR-25 keeps "the cache did not build" apart from "no characters". With no
+            // session list to file it under, it carries the two identifiers it always did.
+            let fallen_back = cache_or_fallback(Err(reason), false, &[]);
             assert_eq!(
                 fallen_back.as_ref(),
                 Some(&built),
@@ -3933,7 +3952,7 @@ mod tests {
             );
 
             // Н7: a rebuild that failed over a working cache hands nothing back to replace it.
-            let replacement = cache_or_fallback(Err(reason), true);
+            let replacement = cache_or_fallback(Err(reason), true, &[]);
             assert!(
                 replacement.is_none(),
                 "Н7: a rebuild that failed ({reason:?}) over a working cache handed back FR-25's \
@@ -3941,9 +3960,34 @@ mod tests {
             );
         }
 
+        // Н10 — task T-39-6, decision 122г: the table is filed under the layouts the session really
+        // has in its two languages, so the buffer finds its active layout in it; a third language
+        // gets no table. In this test and not in its own, for the counter above.
+        let russian_typewriter = LayoutId::from_raw(0xF008_0419);
+        let us_international = LayoutId::from_raw(0xF002_0409);
+        let german = LayoutId::from_raw(0x0407_0407);
+
+        let filed = cache_or_fallback(
+            Err(LayoutError::Empty),
+            false,
+            &[russian_typewriter, german, us_international],
+        )
+        .expect("nothing to keep: the table of FR-25");
+        let (russian, us, third) = (
+            filed.contains(russian_typewriter),
+            filed.contains(us_international),
+            filed.contains(german),
+        );
+
+        assert!(
+            russian && us && !third,
+            "Н10: the table of FR-25 over the session — Russian (typewriter) found: {russian}; \
+             US-International found: {us}; German given a table: {third}"
+        );
+
         assert_eq!(
             layout_cache_failures(),
-            before + 6,
+            before + 7,
             "every failure is counted"
         );
     }

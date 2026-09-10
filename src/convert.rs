@@ -448,14 +448,31 @@ fn build_fallback(layout: LayoutId, russian: bool) -> LayoutMap {
     builder.finish()
 }
 
-/// The hardwired map of one of the two layouts of FR-25, or `None` for any other layout.
+/// The language of the Russian half of the table — the low word of [`FALLBACK_RUSSIAN`].
+const RUSSIAN_LANGUAGE: u16 = FALLBACK_RUSSIAN.language_id();
+
+/// The language of the English half of the table — the low word of [`FALLBACK_US`].
+const US_LANGUAGE: u16 = FALLBACK_US.language_id();
+
+/// The hardwired map of FR-25 for `layout`, filed under `layout` itself — or `None` when the
+/// layout is of neither of the table's two languages.
 ///
-/// `None` is the honest answer for a third layout: the fallback is a last resort for the
+/// `None` is the honest answer for a third language: the fallback is a last resort for the
 /// RU/EN pair, not a claim to know layouts the OS refused to describe.
+///
+/// ⭐ **Finding Н10 — task T-39-6, decision 122г: the language decides, not the whole
+/// identifier.** `00000409` and `00000419` are one layout each of English and Russian;
+/// «США — международная» and «Русская (машинопись)» are the same two languages under other
+/// device handles. Until this task only the two exact identifiers answered, so on those layouts
+/// the reserve had nothing to give — at the moment everything else had already failed. The map
+/// is filed under the identifier asked about, because that is what the buffer looks its active
+/// layout up by ([`LayoutCache::index_of`]); its characters are the table's, an approximation for
+/// a variant of the language and still far better than nothing on the emergency path. ⛔ No
+/// third language is added and no row of the table moves.
 pub fn fallback_map(layout: LayoutId) -> Option<LayoutMap> {
-    match layout {
-        FALLBACK_RUSSIAN => Some(build_fallback(layout, true)),
-        FALLBACK_US => Some(build_fallback(layout, false)),
+    match layout.language_id() {
+        RUSSIAN_LANGUAGE => Some(build_fallback(layout, true)),
+        US_LANGUAGE => Some(build_fallback(layout, false)),
         _ => None,
     }
 }
@@ -481,6 +498,21 @@ pub fn fallback_cache() -> LayoutCache {
     // them. Both maps above come from a constant table of 48 keys, so neither shape is
     // reachable; `the_fallback_cache_carries_both_layouts` pins that.
     LayoutCache::from_maps(maps).expect("the hardwired FR-25 table is never empty")
+}
+
+/// The hardwired table of FR-25 filed under the layouts the session really has in its two
+/// languages — **finding Н10, task T-39-6, decision 122г** — for use when [`LayoutCache::build`]
+/// failed and there is no working cache to keep.
+///
+/// `session` is the enumeration of FR-35, in the system's order, and the maps keep that order.
+/// Layouts of a third language get no map. When no layout of the session is of the table's two
+/// languages — or the caller has no list at all, because the enumeration itself is what failed —
+/// the answer is [`fallback_cache`], the table under its two standard identifiers, exactly as
+/// before this task.
+pub fn fallback_cache_for(session: &[LayoutId]) -> LayoutCache {
+    let maps: Vec<LayoutMap> = session.iter().copied().filter_map(fallback_map).collect();
+
+    LayoutCache::from_maps(maps).unwrap_or_else(|_| fallback_cache())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -857,6 +889,45 @@ mod tests {
         assert_eq!(render(&type_text(us, "ghbdtn"), ru), "привет");
 
         // Any other layout gets an honest `None` rather than a table invented for it.
+        assert!(fallback_map(LayoutId::from_raw(0x0407_0407)).is_none());
+    }
+
+    /// **Finding Н10 — task T-39-6, decision 122г: the table of FR-25 answers every layout of its
+    /// two languages.** `00000409` and `00000419` are one layout each of English and Russian;
+    /// «США — международная» and «Русская (машинопись)» are the same two languages under other
+    /// device handles, and on those the emergency reserve answered `None` — exactly when
+    /// everything else had already broken. The language part of the identifier is what counts
+    /// now, for the two languages of the table and for no third one.
+    #[test]
+    fn the_fallback_table_answers_every_layout_of_its_two_languages() {
+        const US_INTERNATIONAL: LayoutId = LayoutId::from_raw(0xF002_0409);
+        const RUSSIAN_TYPEWRITER: LayoutId = LayoutId::from_raw(0xF008_0419);
+
+        let us_international = fallback_map(US_INTERNATIONAL);
+        let russian_typewriter = fallback_map(RUSSIAN_TYPEWRITER);
+
+        assert!(
+            us_international.is_some() && russian_typewriter.is_some(),
+            "Н10: the table of FR-25 answers US-International: {}; Russian (typewriter): {}",
+            us_international.is_some(),
+            russian_typewriter.is_some()
+        );
+
+        let us_international = us_international.expect("asserted above");
+        let russian_typewriter = russian_typewriter.expect("asserted above");
+
+        // Filed under the identifier the session really has, which is what the buffer looks up...
+        assert_eq!(us_international.layout(), US_INTERNATIONAL);
+        assert_eq!(russian_typewriter.layout(), RUSSIAN_TYPEWRITER);
+
+        // ...and carrying the very table of its language: the same 48 keys, the same characters.
+        assert_eq!(us_international.len(), FALLBACK_KEYS.len() * 4);
+        assert_eq!(
+            render(&type_text(&us_international, "ghbdtn"), &russian_typewriter),
+            "привет"
+        );
+
+        // A third language is still an honest `None`.
         assert!(fallback_map(LayoutId::from_raw(0x0407_0407)).is_none());
     }
 

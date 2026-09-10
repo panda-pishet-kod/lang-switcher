@@ -2099,10 +2099,11 @@ struct Press {
 /// before anything is sent.
 ///
 /// The hardwired RU/EN table of FR-25 is still the emergency reserve and is still reached, by
-/// exactly the route FR-25 describes: `app::cache_or_fallback` publishes
-/// [`crate::convert::fallback_cache`] into the buffer when the sweep fails and there is no
-/// working cache to keep — since task T-39-4 (finding Н7) a failed *rebuild* leaves the cache it
-/// had — and the choice below is then made against that cache like any other.
+/// exactly the route FR-25 describes: `app::cache_or_fallback` publishes it into the buffer when
+/// the sweep fails and there is no working cache to keep — since task T-39-4 (finding Н7) a
+/// failed *rebuild* leaves the cache it had — filed since task T-39-6 (finding Н10) under the
+/// layouts of the session in its two languages ([`crate::convert::fallback_cache_for`]), and the
+/// choice below is then made against that cache like any other.
 fn take_press() -> Option<Press> {
     crate::buffer::with(|recorder| {
         let mut strokes = vec![Keystroke::default(); recorder.len()];
