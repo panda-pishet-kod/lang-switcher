@@ -245,6 +245,69 @@ impl Machine for Fake {
 }
 
 // ---------------------------------------------------------------------------------------
+// Finding Н8 — task T-39-7: the wait for the layout cannot become endless
+// ---------------------------------------------------------------------------------------
+
+/// A machine on which `Sleep` comes back having waited **zero** milliseconds — what Windows can
+/// answer when a sleep ends before a whole millisecond has passed and the measurement rounds
+/// down — and whose window never takes the layout it is asked for.
+///
+/// ⛔ **It panics at the ten-thousandth turn instead of hanging.** A test of an endless loop that
+/// is itself endless reports nothing and freezes whoever runs `cargo test`; the ceiling turns
+/// "would never end" into a red with a number.
+struct ZeroClock {
+    waits: u32,
+}
+
+/// The turn at which [`ZeroClock`] stops believing the loop will ever end.
+const ENDLESS: u32 = 10_000;
+
+impl Machine for ZeroClock {
+    fn read(&mut self) -> Reading {
+        Reading {
+            window: IN_FRONT,
+            layout: US,
+            blind: false,
+        }
+    }
+
+    fn post_request(&mut self, _window: Window, _target: LayoutId) -> bool {
+        true
+    }
+
+    fn wait(&mut self, _ms: u32) -> u32 {
+        self.waits += 1;
+
+        assert!(
+            self.waits < ENDLESS,
+            "Н8: the wait of FR-50 went round {ENDLESS} times on a clock that answers zero, and \
+             nothing in it would ever have ended it"
+        );
+
+        0
+    }
+}
+
+/// **Finding Н8 — task T-39-7.** `settled` was bounded only by the time it had slept, so a
+/// machine whose `wait` answers `0` kept the loop going for ever — on the input thread, the one
+/// that serves the keyboard hook. Time stays the rule and a count of turns is the fuse: the
+/// budget over the step, plus one — `20 / 1 + 1`, the numbers of task Т-14-4, written here
+/// rather than read back from the code under test.
+#[test]
+fn a_clock_that_answers_zero_cannot_make_the_wait_endless() {
+    let _counters = counters();
+    let mut machine = ZeroClock { waits: 0 };
+
+    let outcome = switch::to_in(&mut machine, RU);
+
+    assert_eq!(outcome, Err(SwitchError::NotSwitched));
+    assert_eq!(
+        machine.waits, 21,
+        "the fuse: 20 ms of budget over a step of 1 ms, plus one"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
 // Point 10 — the trap of the task
 // ---------------------------------------------------------------------------------------
 

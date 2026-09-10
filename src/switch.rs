@@ -917,6 +917,13 @@ pub const fn stamp_follows(outcome: Result<Outcome, SwitchError>) -> bool {
 /// The loop is bounded by [`VERIFY_BUDGET_MS`] of time actually waited, which is what
 /// [`Machine::wait`] answers. Time, and not a count of slices: see the constant.
 ///
+/// ⭐ **Time is the rule; turns are the fuse — finding Н8, task T-39-7.** Windows can come back
+/// from a sleep before a whole millisecond has passed, the measurement then rounds to zero, and
+/// a budget counted in time alone never grows: the loop went on for ever, on the input thread
+/// that serves the keyboard hook. [`VERIFY_TURNS`] — the budget over the step, plus one — ends
+/// it all the same. A machine whose waits report honest time never meets the fuse, because the
+/// budget runs out a turn earlier; the numbers of task Т-14-4 do not move.
+///
 /// ⚠ A reading that turns **blind** in the middle of the wait is not treated specially. It cannot
 /// equal the target — `LayoutId` carries no such value — so the wait runs out and the answer is
 /// "not settled". That is the honest answer to what such a reading means: the foreground window
@@ -924,9 +931,11 @@ pub const fn stamp_follows(outcome: Result<Outcome, SwitchError>) -> bool {
 /// window that was in front when the switch was made, and [`to_in`] applies it there.
 fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
     let mut waited: u32 = 0;
+    let mut turns: u32 = 0;
 
-    while waited < VERIFY_BUDGET_MS {
+    while waited < VERIFY_BUDGET_MS && turns < VERIFY_TURNS {
         waited = waited.saturating_add(machine.wait(VERIFY_POLL_MS));
+        turns += 1;
 
         let reading = machine.read();
 
@@ -937,6 +946,11 @@ fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
 
     false
 }
+
+/// **The fuse of [`settled`] — finding Н8, task T-39-7.** The budget over the step, plus one:
+/// a machine whose waits report honest time runs out of [`VERIFY_BUDGET_MS`] a turn before
+/// this, and one whose waits report zero stops here instead of never.
+const VERIFY_TURNS: u32 = VERIFY_BUDGET_MS / VERIFY_POLL_MS + 1;
 
 // ---------------------------------------------------------------------------------------
 // The method of FR-50 — PostMessage
