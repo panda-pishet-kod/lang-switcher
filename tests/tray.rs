@@ -3218,6 +3218,66 @@ fn the_start_of_the_tray_sweeps_an_abandoned_temporary() {
     );
 }
 
+/// **Task T-55-6 through the tray — a file that cannot be read is left alone for the session.** The
+/// tray starts on a `config.toml` held open by another program: the policy is `NotRead`, the
+/// journal says so under a name of its own, and neither a change of a setting nor the shutdown of
+/// FR-83 writes or moves anything — no `.bad`, and the bytes are still the person's.
+#[test]
+fn a_tray_on_a_file_that_cannot_be_read_writes_nothing_and_moves_nothing() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const NOT_READ: &str = "configuration file not read";
+
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-not-read");
+    current_file_saying(&home, false);
+    let before = fs::read(home.config()).expect("the configuration must be readable");
+
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(home.config())
+        .expect("the configuration must open");
+
+    let notes_before = diag::render().matches(NOT_READ).count();
+    let mut tray = install(&window, &home);
+    let notes_after = diag::render().matches(NOT_READ).count();
+    let policy = tray.save_policy();
+
+    // A change of a setting — the defaults came back with `autostart = true` — and then FR-83.
+    tray.set_autostart(false);
+    drop(tray);
+
+    drop(held);
+
+    println!(
+        "a tray on a held file: {policy:?}, journal lines {notes_before} -> {notes_after}, \
+         entries {:?}",
+        home.entries()
+    );
+
+    assert_eq!(
+        policy,
+        settings::SavePolicy::NotRead,
+        "решение 120.1: the tray lives on a file that could not be read, not on a damaged one"
+    );
+    assert_eq!(
+        notes_after,
+        notes_before + 1,
+        "and the journal names it, once"
+    );
+    assert_eq!(
+        fs::read(home.config()).expect("the configuration must still be there"),
+        before,
+        "neither the change nor the shutdown wrote anything"
+    );
+    assert_eq!(
+        home.entries(),
+        [CONFIG_FILE_NAME],
+        "and nothing was moved aside"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-24 — «Применить» does not write an autostart the registry refused
 //
@@ -3893,11 +3953,15 @@ fn a_build_that_may_not_register_itself_asks_the_registry_nothing() {
 /// configuration a person stands behind.**
 ///
 /// At the start that is a file read whole, or no file at all — a first run (`SavePolicy::Allowed`).
-/// A file this build could not read (`QuarantineFirst`), a file from a newer schema (`Forbidden`)
-/// and a session with no `%APPDATA%` put the program on configurations nobody chose, and the
-/// registry is asked nothing. The controls are the file read whole and the first run: exactly one
-/// write each. Every case says `autostart = true` to a registry with no value, so a write is always
-/// what agreement would call for, and its absence can only be the rule.
+/// A file this build could not parse (`QuarantineFirst`), a file held open that could not be read
+/// at all (`NotRead`, task T-55-6), a file from a newer schema (`Forbidden`) and a session with no
+/// `%APPDATA%` put the program on configurations nobody chose, and the registry is asked nothing.
+/// The controls are the file read whole and the first run: exactly one write each. Every case says
+/// `autostart = true` to a registry with no value, so a write is always what agreement would call
+/// for, and its absence can only be the rule.
+///
+/// On request — «Применить» and the check mark of FR-91, task T-55-2 — the person's choice is
+/// followed unless the file may not be written this session at all (`Forbidden`, `NotRead`).
 #[test]
 fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
     let _locale = locale_turn();
@@ -3913,44 +3977,68 @@ fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
     );
     let newer = "schema_version = 99\r\n\r\n[general]\r\nautostart = true\r\n".to_owned();
 
-    // (name, file text, whether there is a path at all, expected: (reads at the start, writes at
-    // the start, registry calls of «Применить», registry calls of the check mark of FR-91))
+    // (name, file text, whether another program holds the file open, whether there is a path at
+    // all, expected: (reads at the start, writes at the start, registry calls of «Применить»,
+    // registry calls of the check mark of FR-91))
     let cases = [
         (
             "a file read whole — Allowed",
             Some(&current),
+            false,
             true,
             (1, vec![true], 1, 1),
         ),
         (
             "no file, a first run — Allowed",
             None,
+            false,
             true,
             (1, vec![true], 1, 1),
         ),
         (
-            "a file this build could not read — QuarantineFirst",
+            "a file this build could not parse — QuarantineFirst",
             Some(&unreadable),
+            false,
             true,
             (0, vec![], 1, 1),
         ),
         (
-            "a file from a newer schema — Forbidden",
-            Some(&newer),
+            "a file held open that could not be read — NotRead",
+            Some(&current),
+            true,
             true,
             (0, vec![], 0, 0),
         ),
-        ("no %APPDATA% at all", None, false, (0, vec![], 1, 1)),
+        (
+            "a file from a newer schema — Forbidden",
+            Some(&newer),
+            false,
+            true,
+            (0, vec![], 0, 0),
+        ),
+        ("no %APPDATA% at all", None, false, false, (0, vec![], 1, 1)),
     ];
 
     let mut wrong = Vec::new();
 
-    for (index, (name, text, has_path, expected)) in cases.into_iter().enumerate() {
+    for (index, (name, text, held, has_path, expected)) in cases.into_iter().enumerate() {
+        use std::os::windows::fs::OpenOptionsExt;
+
         let home = TestDir::new(&format!("e55-rule-{index}"));
 
         if let Some(text) = text {
             fs::write(home.config(), text).expect("the configuration must be writable");
         }
+
+        // Another program holding the file with no sharing at all — task T-55-6. Declared after
+        // `home`, so it lets go of the file before the directory is removed.
+        let _held = held.then(|| {
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(home.config())
+                .expect("the configuration must open")
+        });
 
         let asked = RunKeyAsked::default();
         let path = has_path.then(|| home.config());

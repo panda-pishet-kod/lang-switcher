@@ -689,16 +689,16 @@ fn each_read_outcome_names_what_may_be_done_to_the_file() {
     assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
     assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::QuarantineFirst);
 
-    // A failure to read at all is treated the same way, and for the same reason: the defaults
-    // that came back are not what is on the disk, so the disk must not be overwritten with
-    // them until the bytes are safe somewhere.
+    // A failure to read at all — **turned round by решение 120.1, task T-55-6**, the precedent of
+    // Э29: a pinner reversed with its reason written beside it. Until that task a file that could
+    // not be *read* was treated like one that could not be *parsed*, and moved aside before the
+    // first write. A failure to read says nothing about what is in the file — held open by another
+    // program it is most likely whole and fine — so nothing is written and nothing is moved this
+    // session. The damaged file above is still quarantined: that half does not move.
     let unreadable: Result<ReadOutcome, ConfigError> = Err(ConfigError::Io(std::io::Error::from(
         std::io::ErrorKind::PermissionDenied,
     )));
-    assert_eq!(
-        SavePolicy::for_read(&unreadable),
-        SavePolicy::QuarantineFirst
-    );
+    assert_eq!(SavePolicy::for_read(&unreadable), SavePolicy::NotRead);
 
     // From a newer build: readable, and precisely therefore untouchable.
     let future = write_file(&dir, "schema_version = 99\n\n[general]\nenabled = false\n");
@@ -1662,6 +1662,142 @@ fn a_temporary_that_cannot_be_removed_is_counted() {
         "a temporary that would not go is a count, not silence"
     );
     assert!(temporary.exists(), "and it is still there");
+}
+
+/// **Task T-55-6, решение 120.1 — a file that is there and cannot be read is left alone, not
+/// quarantined.** Held open by another program with no sharing at all, `config.toml` cannot be
+/// read: the answer is an input-output failure, the policy is [`SavePolicy::NotRead`], and the
+/// file is exactly where and what it was, with no `.bad` beside it. Until this task the same file
+/// went to quarantine at the first save, and the settings in it were replaced by defaults.
+#[test]
+fn a_file_that_cannot_be_read_is_left_where_it_is_and_not_quarantined() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = TestDir::new("not_read");
+    let path = dir.config();
+
+    fs::write(
+        &path,
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F9\"\n"),
+    )
+    .expect("the configuration must be writable");
+    let before = fs::read(&path).expect("the configuration must be readable");
+
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&path)
+        .expect("the configuration must open");
+
+    let (_, outcome) = settings::read_or_default(&path);
+    let policy = SavePolicy::for_read(&outcome);
+
+    drop(held);
+
+    println!("a file held open: {outcome:?} -> {policy:?}");
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Io(_))),
+        "the read failed as a read: {outcome:?}"
+    );
+    assert_eq!(
+        policy,
+        SavePolicy::NotRead,
+        "решение 120.1: a file that could not be read is not damage"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the configuration must still be there"),
+        before,
+        "and it is exactly what it was"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "with no `.bad` beside it"
+    );
+}
+
+/// **The read is tried once more, and only once** — task T-55-6. Through the seam of `read_from`:
+/// a reader that fails the first time and answers the second is read as if nothing had happened;
+/// a reader that always fails is asked exactly twice — once and once more, not a loop.
+#[test]
+fn a_failed_read_is_tried_exactly_once_more() {
+    let dir = TestDir::new("read_twice");
+    let path = dir.config();
+    let text = format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F9\"\n");
+
+    // ERROR_SHARING_VIOLATION — what a file held open by another program answers.
+    const SHARING_VIOLATION: i32 = 32;
+
+    let calls = std::cell::Cell::new(0u32);
+    let outcome = settings::read_from_via(&path, |_| {
+        calls.set(calls.get() + 1);
+
+        if calls.get() == 1 {
+            Err(std::io::Error::from_raw_os_error(SHARING_VIOLATION))
+        } else {
+            Ok(text.clone().into_bytes())
+        }
+    });
+
+    println!(
+        "fails once, then answers: {outcome:?} after {} calls",
+        calls.get()
+    );
+
+    assert_eq!(calls.get(), 2, "a failed read is tried once more");
+
+    let (config, read) = outcome.expect("the second attempt answered");
+
+    assert_eq!(read, ReadOutcome::Current);
+    assert_eq!(config.hotkey.key, "F9", "and what it read is the file");
+
+    let calls = std::cell::Cell::new(0u32);
+    let outcome = settings::read_from_via(&path, |_| {
+        calls.set(calls.get() + 1);
+        Err(std::io::Error::from_raw_os_error(SHARING_VIOLATION))
+    });
+
+    assert_eq!(calls.get(), 2, "and only once more: not a loop");
+    assert!(
+        matches!(outcome, Err(ConfigError::Io(_))),
+        "a read that failed twice is a failed read: {outcome:?}"
+    );
+}
+
+/// **Text that is not UTF-8 is damage, not a failed read** — task T-55-6. An editor that saves the
+/// file as UTF-16, or as ANSI with a letter outside ASCII, leaves bytes that were read whole and
+/// that this build cannot take as text. The verdict is [`ConfigError::Malformed`], and the policy
+/// stays the quarantine it has always been: a file read whole and not understood is exactly what
+/// the quarantine is for, and calling it «not read» would leave the program unable to save, for
+/// good, until somebody found the encoding.
+#[test]
+fn text_that_is_not_utf8_is_damage_and_not_a_failed_read() {
+    let dir = TestDir::new("utf16");
+    let path = dir.config();
+
+    // UTF-16LE with its byte order mark, the way an editor saves «Unicode».
+    let mut bytes = vec![0xFF, 0xFE];
+
+    for unit in "[general]\r\nenabled = true\r\n".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    fs::write(&path, &bytes).expect("the configuration must be writable");
+
+    let (_, outcome) = settings::read_or_default(&path);
+
+    println!("a UTF-16 file: {outcome:?}");
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Malformed { at: None })),
+        "bytes read whole that are not text are damage: {outcome:?}"
+    );
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::QuarantineFirst,
+        "and damage is quarantined, as it always was"
+    );
 }
 
 // Criterion 21. The standard path is %APPDATA%\Lang_Switcher\config.toml. Checked by

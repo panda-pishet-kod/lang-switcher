@@ -925,6 +925,43 @@ fn a_temporary_the_start_could_not_remove_has_a_name_of_its_own() {
     );
 }
 
+/// **Task T-55-6, решение 120.1 — a configuration file that could not be read has a name of its
+/// own, apart from one that could not be parsed.** `configuration file unreadable` stays the name of
+/// the damaged file that is quarantined; this is the file that is there, could not be read twice,
+/// and is left alone for the session. `Kind::Process` like every configuration row.
+#[test]
+fn a_file_that_could_not_be_read_has_a_name_apart_from_a_damaged_one() {
+    let name = "configuration file not read";
+
+    let _gate = ring();
+
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» still reaches the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_ne!(
+        operation,
+        Operation::from_name("configuration file unreadable"),
+        "and it is not the name of the damaged file"
+    );
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "{name} landed in the wrong group"
+    );
+
+    diag::record(operation, OsCode::NONE);
+
+    assert!(
+        diag::render().contains(name),
+        "the dump does not print {name}"
+    );
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the

@@ -670,6 +670,16 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the name, not the process id in it, not the
     // count. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("configuration temporary not removed", Kind::Process),
+    // ⭐ **Task T-55-6, решение 120.1** — `config.toml` is there and could not be read, twice:
+    // held open by another program, closed to this account, a failing disk. Nothing is written and
+    // nothing is moved for the session. Not «configuration file unreadable» above, which is now the
+    // name of a file read whole and not understood — the quarantine; the two causes lead to two
+    // different fates, and a dump must be able to tell them apart. Appended at the end so that no
+    // index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the path, not the system's answer, not a
+    // byte of the file. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("configuration file not read", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

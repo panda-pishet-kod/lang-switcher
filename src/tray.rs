@@ -562,9 +562,11 @@ pub struct Tray {
     /// once, on the UI thread, and dropped as the process ends.
     ///
     /// The only transition is [`SavePolicy::QuarantineFirst`] to [`SavePolicy::Allowed`], and
-    /// it happens after the unreadable file has actually been moved aside.
+    /// it happens after the damaged file has actually been moved aside.
     /// [`SavePolicy::Forbidden`] never changes: a file from a newer schema is still from a
-    /// newer schema at shutdown.
+    /// newer schema at shutdown. Nor does [`SavePolicy::NotRead`] (task T-55-6): the one read of
+    /// the session has been made, and a file that could not be read is left alone until the
+    /// next start reads it.
     save_policy: SavePolicy,
     /// What `config.toml` is known to hold — task **T-55-4**, finding Н27.
     ///
@@ -646,6 +648,7 @@ impl Tray {
                     SavePolicy::Allowed => {}
                     SavePolicy::QuarantineFirst => note_configuration(CONFIG_UNREADABLE),
                     SavePolicy::Forbidden => note_configuration(CONFIG_NEWER_SCHEMA),
+                    SavePolicy::NotRead => note_configuration(CONFIG_NOT_READ),
                 }
 
                 // Task T-55-4: only a file read whole is known to hold this very configuration.
@@ -1368,9 +1371,13 @@ impl Tray {
     ///
     /// * [`SavePolicy::Allowed`] — the file was read whole; write it, exactly as before.
     /// * [`SavePolicy::QuarantineFirst`] — the bytes on the disk are text this build could not
-    ///   read. They are moved to `config.toml.bad` first, byte for byte, and only then is the
+    ///   parse. They are moved to `config.toml.bad` first, byte for byte, and only then is the
     ///   new file written. If they cannot be moved, nothing is written: the disk still holds
     ///   the only copy, and a save is never worth it.
+    /// * [`SavePolicy::NotRead`] — the file is there and could not be read, twice (решение 120.1,
+    ///   task T-55-6). Nothing is written and nothing is moved this session, for the reason of
+    ///   `Forbidden` below and under the same journal line: what is on the disk is most likely the
+    ///   person's whole configuration, and nothing this build holds is known to be it.
     /// * [`SavePolicy::Forbidden`] — the file came from a newer build. **Nothing is written,
     ///   ever, this session, and that includes the shutdown of FR-83.** FR-83 asks for
     ///   «сохранение конфигурации»; for this one file the way to save it is to leave it alone,
@@ -1409,7 +1416,10 @@ impl Tray {
         match self.save_policy {
             SavePolicy::Allowed => {}
 
-            SavePolicy::Forbidden => {
+            // Решение 120.1, task T-55-6: a file that could not be read is left alone for the
+            // session for the reason a newer one is — nothing this build could write is known to
+            // be what the person has on the disk.
+            SavePolicy::Forbidden | SavePolicy::NotRead => {
                 note_configuration(CONFIG_SAVE_SUPPRESSED);
                 return;
             }
@@ -1479,6 +1489,10 @@ const CONFIG_UNREADABLE: &str = "configuration file unreadable";
 
 /// The file carries a `schema_version` this build does not know. Saving is off for the session.
 const CONFIG_NEWER_SCHEMA: &str = "configuration file from a newer schema";
+
+/// ⭐ **Решение 120.1, task T-55-6.** The file is there and could not be read, twice. Nothing is
+/// written and nothing is moved for the session — [`SavePolicy::NotRead`].
+const CONFIG_NOT_READ: &str = "configuration file not read";
 
 /// The unreadable file was moved to `config.toml.bad` before the first write.
 const CONFIG_QUARANTINED: &str = "configuration file quarantined";

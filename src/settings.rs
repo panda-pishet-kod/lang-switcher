@@ -1659,19 +1659,58 @@ pub fn default_config_path() -> Option<PathBuf> {
 /// Reading never writes anything back, migration included: what to do with a file that
 /// was migrated, or with one from a newer schema, is the caller's decision.
 pub fn read_from(path: &Path) -> Result<(Config, ReadOutcome), ConfigError> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
+    read_from_via(path, |path| fs::read(path))
+}
+
+/// [`read_from`] with the reading of the bytes handed in — task T-55-6, решение 120.1.
+///
+/// # A file that could not be read is not a damaged file
+///
+/// Until that task every failure to read went the way of a file that could not be parsed: the
+/// session got [`SavePolicy::QuarantineFirst`], and the file was moved to `config.toml.bad` and
+/// replaced by defaults at the first save. A file held open by another program for a moment, or
+/// closed to this account, is most likely whole and fine — so a read that fails is **tried once
+/// more, at once, inside the same attempt** (not a loop, and not «in N seconds»), and a read that
+/// fails twice is answered as [`ConfigError::Io`], which [`SavePolicy::for_read`] turns into
+/// [`SavePolicy::NotRead`]: nothing written and nothing moved, this session. A file that is gone by
+/// the second attempt was there a moment ago — somebody is replacing it — and is answered the same
+/// way rather than as a first run.
+///
+/// # Bytes that are not UTF-8 are damage
+///
+/// A file an editor saved as UTF-16, or as ANSI with a letter outside ASCII, was read whole: it is
+/// the content this build cannot take, and the verdict is [`ConfigError::Malformed`] with no
+/// position — the quarantine such a file always went to. Calling it «not read» would leave the
+/// program unable to save, for good, until somebody found the encoding.
+///
+/// # Why the reading is an argument
+///
+/// The retry is the point, and a test cannot make the file system fail exactly once on cue:
+/// `tests\settings.rs` hands in a closure that fails and counts, and [`read_from`] hands in
+/// `fs::read`.
+pub fn read_from_via(
+    path: &Path,
+    mut read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
+) -> Result<(Config, ReadOutcome), ConfigError> {
+    let bytes = match read(path) {
+        Ok(bytes) => bytes,
         // ⭐ **Вопрос 95, task Т-29-3 — the one road on which the system is consulted.** There
         // is no file, so there is nothing of anybody's to preserve, and this is a first run:
         // the language of the configuration becomes the language of the user's Windows if this
-        // build has it, and `en` if it has not. Every other arm of this function, and
-        // `read_or_default` underneath it, keeps `Config::default` and its hard `ru` — those
-        // are files that exist.
+        // build has it, and `en` if it has not.
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             return Ok((Config::for_a_first_run(), ReadOutcome::NoFile));
         }
-        Err(err) => return Err(ConfigError::Io(err)),
+        // Решение 120.1: once more, at once — and whatever the second attempt answers is the
+        // answer.
+        Err(_) => read(path).map_err(ConfigError::Io)?,
     };
+
+    // Read whole, and not text: damage, not a failed read.
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Err(ConfigError::Malformed { at: None });
+    };
+
     Config::from_toml_str(&text)
 }
 
@@ -1714,9 +1753,10 @@ pub enum SavePolicy {
     /// file held has been understood and is in memory, so writing the memory back loses none
     /// of it. This is the ordinary case and the behaviour that was here before.
     Allowed,
-    /// The bytes on disk are somebody's text that this build could not read. They are moved to
-    /// [`quarantine_path_for`] before the first write, and if they cannot be moved, **nothing
-    /// is written at all**.
+    /// The bytes on disk are somebody's text that this build read whole and could not parse —
+    /// since task T-55-6 only that; a file that could not be read at all is
+    /// [`SavePolicy::NotRead`]. They are moved to [`quarantine_path_for`] before the first write,
+    /// and if they cannot be moved, **nothing is written at all**.
     ///
     /// Section 7 leaves the file editable by hand and the dialog of FR-92 has no field for
     /// `[buffer] capacity`, so editing it by hand is the only way to set one. A stray bracket
@@ -1738,24 +1778,46 @@ pub enum SavePolicy {
     /// configuration means**, and that is the sense in which FR-83 is honoured here rather than
     /// broken.
     Forbidden,
+    /// The file is there and could not be read at all — held open by another program, closed to
+    /// this account, a failing disk — **решение 120.1**, task T-55-6.
+    ///
+    /// Nothing is written and nothing is moved this session. A failure to read says nothing about
+    /// what is in the file: most likely it is the person's whole configuration, whole and fine,
+    /// and the next start will read it. Until that task this was [`SavePolicy::QuarantineFirst`] —
+    /// the file moved to `config.toml.bad` and replaced by defaults at the first save — which turned
+    /// a moment of contention into lost settings. The read has already been tried twice by then
+    /// ([`read_from`]); the session runs on the defaults, and the file stays exactly where it is.
+    ///
+    /// **Not [`SavePolicy::Forbidden`]**, although it forbids the same writes: the cause is
+    /// different — the file is not from the future, it simply could not be read just now — and
+    /// the journal says which of the two it was.
+    NotRead,
 }
 
 impl SavePolicy {
     /// The decision the second half of a [`read_or_default`] pair calls for.
     ///
-    /// Every failed read maps to [`SavePolicy::QuarantineFirst`] and not only
-    /// [`ConfigError::Malformed`]: a file that could not be *opened* is just as much text this
-    /// build has not seen, the defaults that came back in its place are just as much not what
-    /// is on the disk, and the move to [`quarantine_path_for`] either preserves those bytes or
-    /// refuses the write. There is no failure of a read after which overwriting the file is
-    /// known to be safe, so there is no arm here that says it is.
+    /// **A file that could not be parsed and a file that could not be read are two causes with
+    /// two fates — решение 120.1, task T-55-6.** [`ConfigError::Malformed`] is text this build
+    /// read whole and did not understand: [`SavePolicy::QuarantineFirst`], the bytes kept aside
+    /// before the first write. [`ConfigError::Io`] is a file that is there and could not be read,
+    /// twice: [`SavePolicy::NotRead`], nothing written and nothing moved this session.
+    ///
+    /// ⚠ **This reverses what task T-13-6 decided and section 10 made a rule of.** Every failed
+    /// read used to map to `QuarantineFirst`, on the reasoning that a file that could not be
+    /// opened is just as much text this build has not seen. That is true, and it is why neither
+    /// arm here overwrites the file; but moving the file aside was the wrong half of the answer —
+    /// a file held open for a moment is most likely whole and fine, and the quarantine turned that
+    /// moment into lost settings. There is still no failure of a read after which overwriting the
+    /// file is known to be safe, and still no arm here that says it is.
     pub fn for_read(outcome: &Result<ReadOutcome, ConfigError>) -> Self {
         match outcome {
             Ok(ReadOutcome::NoFile | ReadOutcome::Current | ReadOutcome::Migrated { .. }) => {
                 Self::Allowed
             }
             Ok(ReadOutcome::FromNewerSchema { .. }) => Self::Forbidden,
-            Err(_) => Self::QuarantineFirst,
+            Err(ConfigError::Io(_)) => Self::NotRead,
+            Err(ConfigError::Malformed { .. } | ConfigError::Serialize) => Self::QuarantineFirst,
         }
     }
 
@@ -1765,16 +1827,17 @@ impl SavePolicy {
     /// **The rule in one sentence: the `Run` key follows only a configuration a person stands
     /// behind** — at the start, the one read whole out of their file or made by a first run
     /// ([`SavePolicy::Allowed`]); on request, the one they have just chosen, as long as their file
-    /// may be written at all (anything but [`SavePolicy::Forbidden`]).
+    /// may be written at all (neither [`SavePolicy::Forbidden`] nor [`SavePolicy::NotRead`]).
     ///
     /// The two moments differ on exactly one policy, and on purpose. Under
     /// [`SavePolicy::QuarantineFirst`] the configuration at the start is the defaults standing in
-    /// for text this build could not read: nobody chose them, and the person's own autostart is
+    /// for text this build could not parse: nobody chose them, and the person's own autostart is
     /// somewhere in the bytes that were not understood, so the registry is left alone. The same
     /// policy on request is a person choosing in the dialog, and their choice is what the file will
-    /// carry once the unreadable bytes are moved aside — so the registry follows. Under
-    /// [`SavePolicy::Forbidden`] the file is from a newer build and is not written this session: a
-    /// registry made to follow anything then would disagree with that file for good.
+    /// carry once the damaged bytes are moved aside — so the registry follows. Under
+    /// [`SavePolicy::Forbidden`] the file is from a newer build and is not written this session,
+    /// and under [`SavePolicy::NotRead`] (task T-55-6) it could not even be read: a registry made
+    /// to follow anything then would disagree with that file for good.
     ///
     /// ⚠ A session with no `%APPDATA%` has read nothing and is not a policy; its caller,
     /// [`crate::tray`], answers that case where it asks.
@@ -1782,7 +1845,7 @@ impl SavePolicy {
         match self {
             Self::Allowed => true,
             Self::QuarantineFirst => moment == RunKeyMoment::Request,
-            Self::Forbidden => false,
+            Self::Forbidden | Self::NotRead => false,
         }
     }
 }
