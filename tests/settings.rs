@@ -8443,7 +8443,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 206] = [
+const FR_94_STRINGS: [(u16, &str, &str); 210] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8570,13 +8570,27 @@ const FR_94_STRINGS: [(u16, &str, &str); 206] = [
         "Эту клавишу занимает система — выберите другую.",
         "The system owns this key — choose another one.",
     ),
+    // Task T-34-5 (Н80, Н84, С1): the first line of «Состояние» speaks of the program. 3045…3047
+    // — the developer's «Перехват клавиатуры: {0} · восстановлений хука: {1} · …» and its two
+    // words — are retired holes now.
+    (settings::IDS_STATE_WORKING, "Работает", "Working"),
+    (settings::IDS_STATE_SUSPENDED, "Приостановлена", "Suspended"),
     (
-        settings::IDS_STATE_HOOK,
-        "Перехват клавиатуры: {0} · восстановлений хука: {1} · отказов установки: {2}",
-        "Keyboard hook: {0} · hook recoveries: {1} · install failures: {2}",
+        settings::IDS_STATE_HOOK_ABSENT,
+        "Перехват клавиатуры не установлен",
+        "The keyboard hook is not installed",
     ),
-    (settings::IDS_HOOK_UP, "установлен", "installed"),
-    (settings::IDS_HOOK_DOWN, "НЕ УСТАНОВЛЕН", "NOT INSTALLED"),
+    (
+        settings::IDS_STATE_DISABLED,
+        "Перехват установлен, но обработка отключена — нужен перезапуск",
+        "The hook is installed, but processing is off — restart the program",
+    ),
+    (
+        settings::IDS_STATE_HEALTH,
+        "тихих снятий перехвата: {0} · отказов установки: {1}",
+        "silent hook removals: {0} · install failures: {1}",
+    ),
+    (settings::IDS_STATE_JOINED, "{0} · {1}", "{0} · {1}"),
     (
         settings::IDS_STATE_LAYOUTS,
         "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}",
@@ -8658,6 +8672,11 @@ const FR_94_STRINGS: [(u16, &str, &str); 206] = [
     ),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
+    (
+        settings::IDS_MENU_RESUME_RESTART,
+        "Возобновить — нужен перезапуск",
+        "Resume — restart needed",
+    ),
     (settings::IDS_MENU_SETTINGS, "Настройки…", "Settings…"),
     (
         settings::IDS_MENU_AUTOSTART,
@@ -8680,7 +8699,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 206] = [
     // FR-90, task Т-31-4, решение 99.2 — the state of the program in the tooltip of the tray
     // icon. Two words that were Russian literals in `src\tray.rs` in all fourteen locales until
     // this task, and the gender is the program's: «программа активна», «the program is
-    // suspended» — not the hook's, which is what IDS_HOOK_UP above speaks of.
+    // suspended» — not the hook's, which is what the retired IDS_HOOK_UP spoke of until T-34-5.
     (settings::IDS_TIP_ACTIVE, "активна", "active"),
     (settings::IDS_TIP_PAUSED, "приостановлена", "suspended"),
     // FR-101, FR-102 and FR-103, task Т-32-2, вопрос 101 — the letters from the author. The
@@ -9382,6 +9401,173 @@ fn the_two_tables_hold_exactly_the_identifiers_the_crate_publishes() {
     assert_eq!(
         published, checked,
         "every interface string must be checked against both locales"
+    );
+}
+
+/// **Task T-34-5, findings Н80, Н84 and С1 — the red «before».** The first line of «Состояние»
+/// spoke of the hook to a developer: «восстановлений хука» counted the ticks of the FR-80 timer
+/// (finding С1 — `RECOVERIES` moves on every successful reinstallation, the thirty-second one
+/// included), and nothing in the interface said «Приостановлена» or «Работает» (Н80), or that
+/// processing had been switched off after failures (Н84). The vocabulary of the built binary
+/// is asked directly: no string may count hook recoveries any more, and the states of the
+/// program must be there as words.
+#[test]
+fn the_state_panel_speaks_of_the_program_and_not_of_hook_recoveries() {
+    let product = ProductImage::shared();
+    let strings: Vec<(u16, String, String)> = settings::INTERFACE_STRINGS
+        .iter()
+        .map(|&id| {
+            (
+                id,
+                product.string(settings::Language::Ru, id),
+                product.string(settings::Language::En, id),
+            )
+        })
+        .collect();
+
+    let offending: Vec<u16> = strings
+        .iter()
+        .filter(|(_, ru, en)| ru.contains("восстановлений хука") || en.contains("hook recoveries"))
+        .map(|(id, ..)| *id)
+        .collect();
+    assert!(
+        offending.is_empty(),
+        "these strings still count hook recoveries, which the FR-80 timer moves every thirty \
+         seconds: {offending:?}"
+    );
+
+    for (ru, en) in [("Работает", "Working"), ("Приостановлена", "Suspended")]
+    {
+        assert!(
+            strings.iter().any(|(_, r, e)| r == ru && e == en),
+            "the interface has no state «{ru}» / «{en}»"
+        );
+    }
+
+    assert!(
+        strings
+            .iter()
+            .any(|(_, ru, _)| ru.contains("нужен перезапуск")),
+        "no string tells the person that processing is off after failures and a restart is \
+         needed (FR-99, finding Н84)"
+    );
+}
+
+/// **Task T-34-5 — the pure half, all sixteen combinations.** `program_state` is a function of
+/// the four flags the modules publish and of nothing else, and every combination has exactly one
+/// answer, in the order the doc comment of the function gives: fail-safe first, then the hook
+/// being absent, then the pause, then «Работает».
+#[test]
+fn the_state_of_the_program_is_decided_the_same_way_for_all_sixteen_combinations() {
+    use settings::ProgramState;
+
+    let mut seen = std::collections::BTreeMap::new();
+
+    for bits in 0u8..16 {
+        let installed = bits & 1 != 0;
+        let down = bits & 2 != 0;
+        let active = bits & 4 != 0;
+        let fail_safe = bits & 8 != 0;
+
+        let state = settings::program_state(installed, down, active, fail_safe);
+        let expected = if fail_safe {
+            ProgramState::Disabled
+        } else if !installed || down {
+            ProgramState::HookAbsent
+        } else if !active {
+            ProgramState::Suspended
+        } else {
+            ProgramState::Working
+        };
+
+        println!(
+            "installed={installed} down={down} active={active} fail_safe={fail_safe} → {state:?}"
+        );
+        assert_eq!(state, expected, "combination {bits:#06b}");
+        *seen.entry(state).or_insert(0) += 1;
+    }
+
+    // Every state is reachable, and «Работает» by exactly one road: installed, not down,
+    // active, no fail-safe.
+    assert_eq!(seen.get(&ProgramState::Working), Some(&1));
+    assert_eq!(seen.get(&ProgramState::Suspended), Some(&1));
+    assert_eq!(seen.get(&ProgramState::HookAbsent), Some(&6));
+    assert_eq!(seen.get(&ProgramState::Disabled), Some(&8));
+
+    // The strings the states name are the ones of the table, and each state names its own.
+    let ids: std::collections::BTreeSet<u16> = [
+        ProgramState::Working,
+        ProgramState::Suspended,
+        ProgramState::HookAbsent,
+        ProgramState::Disabled,
+    ]
+    .into_iter()
+    .map(ProgramState::string_id)
+    .collect();
+    assert_eq!(
+        ids,
+        [
+            settings::IDS_STATE_WORKING,
+            settings::IDS_STATE_SUSPENDED,
+            settings::IDS_STATE_HOOK_ABSENT,
+            settings::IDS_STATE_DISABLED,
+        ]
+        .into_iter()
+        .collect()
+    );
+}
+
+/// **Task T-34-5 — the subject is back in every locale.** The audit found the German and the
+/// Hebrew line abbreviated into nonsense («Wiederherstellungen: 3 · Fehlschläge: 0» — of what?).
+/// The word for the keyboard hook of each locale — the one the retired first line already used
+/// as its subject — must stand in the line of the hook's health and in the line that says the
+/// hook is absent, in all fourteen built tables.
+#[test]
+fn the_state_lines_carry_their_subject_in_every_locale() {
+    let product = ProductImage::shared();
+
+    // The subject per locale, as the panel already spelled it before this task (glossary of the
+    // stage, `scratchpad-E34\glossary.md`); lower-case stems, matched case-insensitively.
+    let subject: [(&str, &str); 14] = [
+        ("ru", "перехват"),
+        ("en", "hook"),
+        ("uk", "перехоплення"),
+        ("de", "hook"),
+        ("fr", "interception"),
+        ("es", "interceptación"),
+        ("pt", "interceptação"),
+        ("it", "intercettazione"),
+        ("pl", "przechwytywani"),
+        ("cs", "zachytávání"),
+        ("tr", "yakalama"),
+        ("el", "παρακολούθηση"),
+        ("he", "מעקב"),
+        ("ar", "مراقبة"),
+    ];
+
+    let mut missing: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let stem = subject
+            .iter()
+            .find(|(t, _)| *t == tag)
+            .map(|(_, s)| *s)
+            .unwrap_or_else(|| panic!("no subject for locale {tag} in this test"));
+
+        for id in [settings::IDS_STATE_HEALTH, settings::IDS_STATE_HOOK_ABSENT] {
+            let line = product.string_of_langid(langid, id).to_lowercase();
+            println!("{tag} {id}: {line}");
+
+            if !line.contains(stem) {
+                missing.push(format!("{tag} {id}: «{line}» lacks «{stem}»"));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "the subject is missing from these state lines:\n{}",
+        missing.join("\n")
     );
 }
 
@@ -14489,14 +14675,16 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        206,
-        "two hundred and six identifiers in use — the mandate of Э32 authorised the canon \
+        210,
+        "two hundred and ten identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
          (FR-104, Т-32-8), the ONE the balloon of «Что нового» gained by задача Т-33а-4 — \
-         its own body, because it was knocking with the words of the update — and the TWO of \
-         task T-34-3: the button «Сохранить журнал…» and the sentence of its refusal"
+         its own body, because it was knocking with the words of the update — the TWO of \
+         task T-34-3 (the button «Сохранить журнал…» and the sentence of its refusal), and \
+         the SEVEN of task T-34-5 less the THREE it retired (3045…3047): the four states of \
+         the program, the health of the hook, their joiner and the greyed «Возобновить»"
     );
 
     let product = ProductImage::shared();

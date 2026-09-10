@@ -123,6 +123,19 @@ const FR_91_SUSPENDED: [Option<&str>; 8] = [
     Some("Выход"),
 ];
 
+/// The same seven lines with processing switched off after the panics of FR-99 — task T-34-5,
+/// finding Н84: the first line is greyed and says why, and nothing else moves.
+const FR_91_DISARMED: [Option<&str>; 8] = [
+    Some("Возобновить — нужен перезапуск"),
+    None,
+    Some("Настройки…"),
+    Some("Запускать при входе в систему"),
+    None,
+    Some("Написать автору…"),
+    Some("О программе"),
+    Some("Выход"),
+];
+
 /// The same seven lines in the other locale of FR-94 — task T-08-2.
 ///
 /// ⚠ The **composition** is identical and only the words move: five commands and the same two
@@ -361,6 +374,43 @@ fn the_first_entry_follows_the_state() {
         suspended.items()[1..],
         "no entry below the first may depend on the state"
     );
+
+    // And the suspended menu is the block of FR-91 word for word — the canon the disarmed
+    // menu of task T-34-5 departs from in exactly one label.
+    assert_menu_is(&suspended, &FR_91_SUSPENDED);
+}
+
+/// **Task T-34-5, finding Н84 — the red «before».** With processing switched off after the
+/// panics of FR-99 the first entry is greyed (`resume_is_refused`) and, until this task, said
+/// «Возобновить» exactly like the entry that works — a grey word with no reason. The tray has
+/// no tooltips (measured for the stage: not one `TTM_` in `src\tray.rs`), so the label is the
+/// only carrier of the reason, and it has to differ while still reading as «Возобновить».
+#[test]
+fn the_greyed_resume_entry_says_why_it_is_grey() {
+    let _locale = product_strings(settings::Language::Ru);
+
+    let plain = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
+    let refused = Menu::build(false, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+        .expect("the menu must be creatable");
+
+    let plain_label = &plain.items()[0].label;
+    let refused_label = &refused.items()[0].label;
+    println!("available: «{plain_label}», greyed: «{refused_label}»");
+
+    assert_ne!(
+        refused_label, plain_label,
+        "the greyed entry must say why it is grey"
+    );
+    assert!(
+        refused_label.starts_with("Возобновить"),
+        "it still has to read as «Возобновить»: «{refused_label}»"
+    );
+    assert_eq!(
+        plain.items()[1..],
+        refused.items()[1..],
+        "no entry below the first may depend on fail-safe"
+    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -569,11 +619,18 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
         is_disabled(menu.handle(), 0)
     );
 
+    // Task T-34-5, finding Н84: the greyed entry still reads as «Возобновить» and, since that
+    // task, says why it is grey — the tray has no tooltips, so the label carries the reason.
+    assert!(
+        menu.items()[0].label.starts_with("Возобновить"),
+        "the entry stays in the menu and stays readable — a line that vanished would say \
+         nothing at all: {:?}",
+        menu.items()[0].label
+    );
     assert_eq!(
         menu.items()[0].label,
-        "Возобновить",
-        "the entry stays in the menu and stays readable — a line that vanished would say \
-         nothing at all"
+        "Возобновить — нужен перезапуск",
+        "and it says why it is grey (task T-34-5)"
     );
     assert!(is_grayed(menu.handle(), 0), "and it is drawn unavailable");
     assert!(
@@ -599,8 +656,9 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
     }
 
     // And the block of FR-91 is still the block of FR-91 — seven entries, five commands, two
-    // rules, the same words. Greying is not a second menu.
-    assert_menu_is(&menu, &FR_91_SUSPENDED);
+    // rules, the same words but the first, which says why it is grey (task T-34-5). Greying is
+    // not a second menu.
+    assert_menu_is(&menu, &FR_91_DISARMED);
 }
 
 /// The other two states leave the first entry exactly as it was before this task.

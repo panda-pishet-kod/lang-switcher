@@ -1239,9 +1239,9 @@ END
 #define IDS_CAPTURE_EMERGENCY   3042
 #define IDS_CAPTURE_NAMELESS    3043
 #define IDS_CAPTURE_RESERVED    3044
-#define IDS_STATE_HOOK          3045
-#define IDS_HOOK_UP             3046
-#define IDS_HOOK_DOWN           3047
+// 3045…3047 — IDS_STATE_HOOK, IDS_HOOK_UP, IDS_HOOK_DOWN — retired by task T-34-5 (findings Н80,
+// Н84, С1) and left as holes, the way 3004 was: the first line of «Состояние» now speaks of the
+// program (IDS_STATE_WORKING…IDS_STATE_JOINED, 3215…3220).
 #define IDS_STATE_LAYOUTS       3048
 #define IDS_STATE_AUTOSTART     3049
 #define IDS_AUTOSTART_PRESENT   3050
@@ -1284,7 +1284,8 @@ END
 // the reason IDS_SOUND's does — above the tables that use them, or `error RC2104`.
 //
 // ⚠ The gender is the **program**'s and not the keyboard hook's, so these two do not have to
-// agree with IDS_HOOK_UP / IDS_HOOK_DOWN in the same window: there the subject is «перехват».
+// agree with IDS_STATE_HOOK_ABSENT in the same window (the retired IDS_HOOK_UP / IDS_HOOK_DOWN
+// until task T-34-5): there the subject is «перехват».
 // The glossary of the stage writes the choice down per language
 // (`scratchpad-Э31\глоссарий.md`, §1).
 #define IDS_TIP_ACTIVE          3080
@@ -1493,6 +1494,17 @@ END
 // its refusal shows. Same block as the toast above (3200…3215 is one resource of sixteen).
 #define IDS_LOG_SAVE            3213
 #define IDS_LOG_SAVE_FAILED     3214
+// Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
+// does NOW, in the words a person uses: four states, the health of the hook (silent removals,
+// not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
+// on, and the joiner between the two — in the table, so that a locale may change it. 3215 closes
+// the block 3200…3215; 3216…3220 open the next.
+#define IDS_STATE_WORKING       3215
+#define IDS_STATE_SUSPENDED     3216
+#define IDS_STATE_HOOK_ABSENT   3217
+#define IDS_STATE_DISABLED      3218
+#define IDS_STATE_HEALTH        3219
+#define IDS_STATE_JOINED        3220
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -1550,9 +1562,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварийный выход, эта комбинация не назначается."
     IDS_CAPTURE_NAMELESS    "У этой клавиши нет имени в файле настроек — выберите другую."
     IDS_CAPTURE_RESERVED    "Эту клавишу занимает система — выберите другую."
-    IDS_STATE_HOOK          "Перехват клавиатуры: {0} · восстановлений хука: {1} · отказов установки: {2}"
-    IDS_HOOK_UP             "установлен"
-    IDS_HOOK_DOWN           "НЕ УСТАНОВЛЕН"
+    IDS_STATE_WORKING       "Работает"
+    IDS_STATE_SUSPENDED     "Приостановлена"
+    IDS_STATE_HOOK_ABSENT   "Перехват клавиатуры не установлен"
+    IDS_STATE_DISABLED      "Перехват установлен, но обработка отключена — нужен перезапуск"
+    IDS_STATE_HEALTH        "тихих снятий перехвата: {0} · отказов установки: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}"
     IDS_STATE_AUTOSTART     "Автозапуск в реестре (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "есть, {0}"
@@ -1766,9 +1781,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 is the emergency exit; it cannot be assigned."
     IDS_CAPTURE_NAMELESS    "This key has no name in the settings file — choose another one."
     IDS_CAPTURE_RESERVED    "The system owns this key — choose another one."
-    IDS_STATE_HOOK          "Keyboard hook: {0} · hook recoveries: {1} · install failures: {2}"
-    IDS_HOOK_UP             "installed"
-    IDS_HOOK_DOWN           "NOT INSTALLED"
+    IDS_STATE_WORKING       "Working"
+    IDS_STATE_SUSPENDED     "Suspended"
+    IDS_STATE_HOOK_ABSENT   "The keyboard hook is not installed"
+    IDS_STATE_DISABLED      "The hook is installed, but processing is off — restart the program"
+    IDS_STATE_HEALTH        "silent hook removals: {0} · install failures: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts in the session: {0} · exclusions published: {1} · journal entries: {2}"
     IDS_STATE_AUTOSTART     "Autostart in the registry (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "yes, {0}"
@@ -1995,9 +2013,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварійний вихід, це сполучення не призначається."
     IDS_CAPTURE_NAMELESS    "У цієї клавіші немає імені у файлі налаштувань — виберіть іншу."
     IDS_CAPTURE_RESERVED    "Цю клавішу займає система — виберіть іншу."
-    IDS_STATE_HOOK          "Перехоплення клавіатури: {0} · відновлень хука: {1} · відмов встановлення: {2}"
-    IDS_HOOK_UP             "активне"
-    IDS_HOOK_DOWN           "НЕАКТИВНЕ"
+    IDS_STATE_WORKING       "Працює"
+    IDS_STATE_SUSPENDED     "Призупинено"
+    IDS_STATE_HOOK_ABSENT   "Перехоплення клавіатури не встановлено"
+    IDS_STATE_DISABLED      "Перехоплення встановлено, але обробку вимкнено — потрібен перезапуск"
+    IDS_STATE_HEALTH        "тихих знять перехоплення: {0} · відмов встановлення: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Розкладок у сеансі: {0} · винятків опубліковано: {1} · записів у журналі: {2}"
     IDS_STATE_AUTOSTART     "Автозапуск у реєстрі (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "є, {0}"
@@ -2207,9 +2228,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 ist der Notausstieg und wird nicht vergeben."
     IDS_CAPTURE_NAMELESS    "Diese Taste hat keinen Namen in der Einstellungsdatei — wählen Sie eine andere."
     IDS_CAPTURE_RESERVED    "Diese Taste gehört dem System — wählen Sie eine andere."
-    IDS_STATE_HOOK          "Tastatur-Hook: {0} · Wiederherstellungen: {1} · Fehlschläge: {2}"
-    IDS_HOOK_UP             "aktiv"
-    IDS_HOOK_DOWN           "NICHT AKTIV"
+    IDS_STATE_WORKING       "Läuft"
+    IDS_STATE_SUSPENDED     "Angehalten"
+    IDS_STATE_HOOK_ABSENT   "Der Tastatur-Hook ist nicht installiert"
+    IDS_STATE_DISABLED      "Der Hook ist installiert, aber die Verarbeitung ist abgeschaltet — Neustart nötig"
+    IDS_STATE_HEALTH        "stille Hook-Entfernungen: {0} · Installationsfehler: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts in der Sitzung: {0} · Ausnahmen veröffentlicht: {1} · Protokolleinträge: {2}"
     IDS_STATE_AUTOSTART     "Autostart in der Registrierung (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "ja, {0}"
@@ -2421,9 +2445,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 est la sortie d'urgence ; elle ne s'attribue pas."
     IDS_CAPTURE_NAMELESS    "Cette touche n'a pas de nom dans le fichier de paramètres — choisissez-en une autre."
     IDS_CAPTURE_RESERVED    "Le système occupe cette touche — choisissez-en une autre."
-    IDS_STATE_HOOK          "Interception clavier : {0} · rétablissements : {1} · échecs : {2}"
-    IDS_HOOK_UP             "actif"
-    IDS_HOOK_DOWN           "INACTIF"
+    IDS_STATE_WORKING       "En marche"
+    IDS_STATE_SUSPENDED     "En pause"
+    IDS_STATE_HOOK_ABSENT   "L'interception clavier n'est pas installée"
+    IDS_STATE_DISABLED      "L'interception est installée, mais le traitement est arrêté — redémarrage nécessaire"
+    IDS_STATE_HEALTH        "retraits silencieux de l'interception : {0} · échecs d'installation : {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Dispositions dans la session : {0} · exceptions publiées : {1} · entrées du journal : {2}"
     IDS_STATE_AUTOSTART     "Démarrage automatique dans le registre (HKCU\\…\\Run) : {0}"
     IDS_AUTOSTART_PRESENT   "oui, {0}"
@@ -2632,9 +2659,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 es la salida de emergencia; no se asigna."
     IDS_CAPTURE_NAMELESS    "Esta tecla no tiene nombre en el archivo de configuración — elija otra."
     IDS_CAPTURE_RESERVED    "El sistema ocupa esta tecla — elija otra."
-    IDS_STATE_HOOK          "Interceptación de teclado: {0} · restauraciones: {1} · fallos: {2}"
-    IDS_HOOK_UP             "activo"
-    IDS_HOOK_DOWN           "INACTIVO"
+    IDS_STATE_WORKING       "En marcha"
+    IDS_STATE_SUSPENDED     "En pausa"
+    IDS_STATE_HOOK_ABSENT   "La interceptación de teclado no está instalada"
+    IDS_STATE_DISABLED      "La interceptación está instalada, pero el procesamiento está desactivado: reinicie el programa"
+    IDS_STATE_HEALTH        "retiradas silenciosas de la interceptación: {0} · fallos de instalación: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Distribuciones en la sesión: {0} · excepciones publicadas: {1} · entradas del registro: {2}"
     IDS_STATE_AUTOSTART     "Inicio automático en el registro (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "sí, {0}"
@@ -2841,9 +2871,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 é a saída de emergência; não se atribui."
     IDS_CAPTURE_NAMELESS    "Esta tecla não tem nome no arquivo de configurações — escolha outra."
     IDS_CAPTURE_RESERVED    "O sistema ocupa esta tecla — escolha outra."
-    IDS_STATE_HOOK          "Interceptação do teclado: {0} · restaurações: {1} · falhas: {2}"
-    IDS_HOOK_UP             "ativa"
-    IDS_HOOK_DOWN           "INATIVA"
+    IDS_STATE_WORKING       "Em execução"
+    IDS_STATE_SUSPENDED     "Em pausa"
+    IDS_STATE_HOOK_ABSENT   "A interceptação do teclado não está instalada"
+    IDS_STATE_DISABLED      "A interceptação está instalada, mas o processamento está desligado — reinicie o programa"
+    IDS_STATE_HEALTH        "remoções silenciosas da interceptação: {0} · falhas de instalação: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts na sessão: {0} · exceções publicadas: {1} · entradas do registro: {2}"
     IDS_STATE_AUTOSTART     "Inicialização automática no registro (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "sim, {0}"
@@ -3055,9 +3088,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 è l'uscita di emergenza e non si assegna."
     IDS_CAPTURE_NAMELESS    "Questo tasto non ha un nome nel file delle impostazioni — scegline un altro."
     IDS_CAPTURE_RESERVED    "Il sistema occupa questo tasto — scegline un altro."
-    IDS_STATE_HOOK          "Intercettazione tastiera: {0} · ripristini: {1} · errori: {2}"
-    IDS_HOOK_UP             "attiva"
-    IDS_HOOK_DOWN           "NON ATTIVA"
+    IDS_STATE_WORKING       "In funzione"
+    IDS_STATE_SUSPENDED     "In pausa"
+    IDS_STATE_HOOK_ABSENT   "L'intercettazione della tastiera non è installata"
+    IDS_STATE_DISABLED      "L'intercettazione è installata, ma l'elaborazione è disattivata: riavvia il programma"
+    IDS_STATE_HEALTH        "rimozioni silenziose dell'intercettazione: {0} · errori di installazione: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layout nella sessione: {0} · eccezioni pubblicate: {1} · voci nel registro: {2}"
     IDS_STATE_AUTOSTART     "Avvio automatico nel registro (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "sì, {0}"
@@ -3269,9 +3305,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 to awaryjne wyjście — tej kombinacji nie przypisuje się."
     IDS_CAPTURE_NAMELESS    "Ten klawisz nie ma nazwy w pliku ustawień — wybierz inny."
     IDS_CAPTURE_RESERVED    "Ten klawisz zajmuje system — wybierz inny."
-    IDS_STATE_HOOK          "Przechwytywanie klawiatury: {0} · przywróceń: {1} · niepowodzeń: {2}"
-    IDS_HOOK_UP             "aktywne"
-    IDS_HOOK_DOWN           "NIEAKTYWNE"
+    IDS_STATE_WORKING       "Działa"
+    IDS_STATE_SUSPENDED     "Wstrzymany"
+    IDS_STATE_HOOK_ABSENT   "Przechwytywanie klawiatury nie jest zainstalowane"
+    IDS_STATE_DISABLED      "Przechwytywanie jest zainstalowane, ale przetwarzanie jest wyłączone — potrzebne ponowne uruchomienie"
+    IDS_STATE_HEALTH        "ciche zdjęcia przechwytywania: {0} · niepowodzenia instalacji: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Układów w sesji: {0} · opublikowanych wyjątków: {1} · wpisów w dzienniku: {2}"
     IDS_STATE_AUTOSTART     "Autostart w rejestrze (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "jest, {0}"
@@ -3479,9 +3518,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 je nouzové ukončení a nepřiřazuje se."
     IDS_CAPTURE_NAMELESS    "Tato klávesa nemá v souboru nastavení název — zvolte jinou."
     IDS_CAPTURE_RESERVED    "Tuto klávesu zabírá systém — zvolte jinou."
-    IDS_STATE_HOOK          "Zachytávání klávesnice: {0} · obnovení: {1} · selhání: {2}"
-    IDS_HOOK_UP             "aktivní"
-    IDS_HOOK_DOWN           "NEAKTIVNÍ"
+    IDS_STATE_WORKING       "Běží"
+    IDS_STATE_SUSPENDED     "Pozastaveno"
+    IDS_STATE_HOOK_ABSENT   "Zachytávání klávesnice není nainstalováno"
+    IDS_STATE_DISABLED      "Zachytávání je nainstalováno, ale zpracování je vypnuto — je potřeba restart"
+    IDS_STATE_HEALTH        "tichá odebrání zachytávání: {0} · selhání instalace: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Rozložení v relaci: {0} · zveřejněných výjimek: {1} · záznamů v protokolu: {2}"
     IDS_STATE_AUTOSTART     "Automatické spuštění v registru (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "ano, {0}"
@@ -3692,9 +3734,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 acil çıkıştır, atanamaz."
     IDS_CAPTURE_NAMELESS    "Bu tuşun ayar dosyasında adı yok — başka bir tuş seçin."
     IDS_CAPTURE_RESERVED    "Bu tuşu sistem kullanıyor — başka bir tuş seçin."
-    IDS_STATE_HOOK          "Klavye yakalama: {0} · geri yükleme: {1} · kurulum hatası: {2}"
-    IDS_HOOK_UP             "etkin"
-    IDS_HOOK_DOWN           "ETKİN DEĞİL"
+    IDS_STATE_WORKING       "Çalışıyor"
+    IDS_STATE_SUSPENDED     "Duraklatıldı"
+    IDS_STATE_HOOK_ABSENT   "Klavye yakalama kurulu değil"
+    IDS_STATE_DISABLED      "Yakalama kurulu, ancak işleme kapalı — yeniden başlatma gerekiyor"
+    IDS_STATE_HEALTH        "sessiz yakalama kaldırmaları: {0} · kurulum hataları: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Oturumdaki düzen: {0} · yayımlanan istisna: {1} · günlük kaydı: {2}"
     IDS_STATE_AUTOSTART     "Kayıt defterinde otomatik başlatma (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "var, {0}"
@@ -3909,9 +3954,12 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 είναι η έξοδος έκτακτης ανάγκης και δεν ανατίθεται."
     IDS_CAPTURE_NAMELESS    "Αυτό το πλήκτρο δεν έχει όνομα στο αρχείο ρυθμίσεων — επιλέξτε άλλο."
     IDS_CAPTURE_RESERVED    "Το σύστημα κρατά αυτό το πλήκτρο — επιλέξτε άλλο."
-    IDS_STATE_HOOK          "Παρακολούθηση πληκτρολογίου: {0} · αποκαταστάσεις: {1} · αποτυχίες: {2}"
-    IDS_HOOK_UP             "ενεργή"
-    IDS_HOOK_DOWN           "ΑΝΕΝΕΡΓΗ"
+    IDS_STATE_WORKING       "Λειτουργεί"
+    IDS_STATE_SUSPENDED     "Σε παύση"
+    IDS_STATE_HOOK_ABSENT   "Η παρακολούθηση πληκτρολογίου δεν είναι εγκατεστημένη"
+    IDS_STATE_DISABLED      "Η παρακολούθηση είναι εγκατεστημένη, αλλά η επεξεργασία είναι απενεργοποιημένη — χρειάζεται επανεκκίνηση"
+    IDS_STATE_HEALTH        "σιωπηλές αφαιρέσεις παρακολούθησης: {0} · αποτυχίες εγκατάστασης: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Διατάξεις στη συνεδρία: {0} · δημοσιευμένες εξαιρέσεις: {1} · εγγραφές καταγραφής: {2}"
     IDS_STATE_AUTOSTART     "Αυτόματη εκκίνηση στο μητρώο (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "ναι, {0}"
@@ -4130,11 +4178,15 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 היא יציאת חירום, והצירוף הזה אינו ניתן להקצאה."
     IDS_CAPTURE_NAMELESS    "למקש הזה אין שם בקובץ ההגדרות — בחרו אחר."
     IDS_CAPTURE_RESERVED    "המערכת תופסת את המקש הזה — בחרו אחר."
-    IDS_STATE_HOOK          "מעקב מקלדת: {0} · שחזורים: {1} · כשלים: {2}"
-    IDS_HOOK_UP             "פעיל"
-    // ⚠ Глоссарий Э30 §0-RTL.11: у иврита нет регистра, кричать заглавными нечем — усиление
-    // несёт само слово.
-    IDS_HOOK_DOWN           "לא פעיל"
+    // Task T-34-5: the shouting «НЕ УСТАНОВЛЕН» of IDS_HOOK_DOWN is gone with the row, so the
+    // remark of глоссарий Э30 §0-RTL.11 (no capitals in Hebrew — the word carries the weight)
+    // no longer applies here; the four states are plain sentences.
+    IDS_STATE_WORKING       "פועלת"
+    IDS_STATE_SUSPENDED     "מושהית"
+    IDS_STATE_HOOK_ABSENT   "מעקב המקלדת אינו מותקן"
+    IDS_STATE_DISABLED      "המעקב מותקן, אך העיבוד כבוי — נדרשת הפעלה מחדש"
+    IDS_STATE_HEALTH        "הסרות שקטות של המעקב: {0} · כשלי התקנה: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "פריסות בהפעלה: {0} · חריגים שפורסמו: {1} · רשומות ביומן: {2}"
     IDS_STATE_AUTOSTART     "הפעלה אוטומטית ברישום (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "כן, {0}"
@@ -4338,10 +4390,13 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 هو مخرج الطوارئ، ولا يمكن تعيين هذه التركيبة."
     IDS_CAPTURE_NAMELESS    "هذا المفتاح بلا اسم في ملف الإعدادات — اختر غيره."
     IDS_CAPTURE_RESERVED    "النظام يحجز هذا المفتاح — اختر غيره."
-    IDS_STATE_HOOK          "مراقبة لوحة المفاتيح: {0} · عمليات الاستعادة: {1} · حالات الإخفاق: {2}"
-    IDS_HOOK_UP             "نشطة"
-    // ⚠ То же, что у иврита: регистра нет, усиление несёт слово.
-    IDS_HOOK_DOWN           "غير نشطة"
+    // Task T-34-5: as in Hebrew above — the shouting row is gone, the states are sentences.
+    IDS_STATE_WORKING       "يعمل"
+    IDS_STATE_SUSPENDED     "متوقف مؤقتًا"
+    IDS_STATE_HOOK_ABSENT   "مراقبة لوحة المفاتيح غير مثبّتة"
+    IDS_STATE_DISABLED      "المراقبة مثبّتة، لكن المعالجة متوقفة — يلزم إعادة التشغيل"
+    IDS_STATE_HEALTH        "إزالات صامتة للمراقبة: {0} · حالات إخفاق التثبيت: {1}"
+    IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "التخطيطات في الجلسة: {0} · الاستثناءات المنشورة: {1} · إدخالات السجل: {2}"
     // ⚠ Глоссарий Э30 §3.1: реестр — «سجل النظام», журнал — «السجل». Одно арабское слово на два
     // русских понятия разведено ЗДЕСЬ, а не по месту.
@@ -4518,12 +4573,19 @@ END
 #define IDS_MENU_AUTOSTART      3075
 #define IDS_MENU_ABOUT          3076
 #define IDS_MENU_EXIT           3077
+// Task T-34-5, finding Н84: the label of the greyed «Возобновить» when processing is switched
+// off after the panics of FR-99. The tray has no tooltips, so the label is the one carrier of
+// the reason. ⚠ Not in the menu's block: 3078 there is IDS_SOUND (FR-100) and 3079…3081 are
+// taken as well, so the number continues the block of the state strings, 3216…3231 — the
+// first attempt at 3078 died in rc.exe with RC2151, «cannot reuse string constants».
+#define IDS_MENU_RESUME_RESTART 3221
 
 LANGUAGE 0x19, 0x01
 STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Приостановить"
     IDS_MENU_RESUME         "Возобновить"
+    IDS_MENU_RESUME_RESTART "Возобновить — нужен перезапуск"
     IDS_MENU_SETTINGS       "Настройки…"
     IDS_MENU_AUTOSTART      "Запускать при входе в систему"
     IDS_MENU_ABOUT          "О программе"
@@ -4535,6 +4597,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Suspend"
     IDS_MENU_RESUME         "Resume"
+    IDS_MENU_RESUME_RESTART "Resume — restart needed"
     IDS_MENU_SETTINGS       "Settings…"
     IDS_MENU_AUTOSTART      "Start when I sign in"
     IDS_MENU_ABOUT          "About"
@@ -4554,6 +4617,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Призупинити"
     IDS_MENU_RESUME         "Відновити"
+    IDS_MENU_RESUME_RESTART "Відновити — потрібен перезапуск"
     IDS_MENU_SETTINGS       "Налаштування…"
     IDS_MENU_AUTOSTART      "Запускати під час входу в систему"
     IDS_MENU_ABOUT          "Про програму"
@@ -4565,6 +4629,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Anhalten"
     IDS_MENU_RESUME         "Fortsetzen"
+    IDS_MENU_RESUME_RESTART "Fortsetzen — Neustart nötig"
     IDS_MENU_SETTINGS       "Einstellungen…"
     IDS_MENU_AUTOSTART      "Beim Anmelden starten"
     IDS_MENU_ABOUT          "Über"
@@ -4576,6 +4641,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Suspendre"
     IDS_MENU_RESUME         "Reprendre"
+    IDS_MENU_RESUME_RESTART "Reprendre — redémarrage nécessaire"
     IDS_MENU_SETTINGS       "Paramètres…"
     IDS_MENU_AUTOSTART      "Démarrer à l'ouverture de session"
     IDS_MENU_ABOUT          "À propos"
@@ -4587,6 +4653,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Pausar"
     IDS_MENU_RESUME         "Reanudar"
+    IDS_MENU_RESUME_RESTART "Reanudar: hace falta reiniciar"
     IDS_MENU_SETTINGS       "Configuración…"
     IDS_MENU_AUTOSTART      "Iniciar al iniciar sesión"
     IDS_MENU_ABOUT          "Acerca de"
@@ -4598,6 +4665,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Pausar"
     IDS_MENU_RESUME         "Retomar"
+    IDS_MENU_RESUME_RESTART "Retomar — é preciso reiniciar"
     IDS_MENU_SETTINGS       "Configurações…"
     IDS_MENU_AUTOSTART      "Iniciar ao entrar no sistema"
     IDS_MENU_ABOUT          "Sobre"
@@ -4609,6 +4677,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Sospendi"
     IDS_MENU_RESUME         "Riprendi"
+    IDS_MENU_RESUME_RESTART "Riprendi — serve un riavvio"
     IDS_MENU_SETTINGS       "Impostazioni…"
     IDS_MENU_AUTOSTART      "Avvia all'accesso"
     IDS_MENU_ABOUT          "Informazioni"
@@ -4620,6 +4689,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Wstrzymaj"
     IDS_MENU_RESUME         "Wznów"
+    IDS_MENU_RESUME_RESTART "Wznów — potrzebne ponowne uruchomienie"
     IDS_MENU_SETTINGS       "Ustawienia…"
     IDS_MENU_AUTOSTART      "Uruchamiaj przy logowaniu"
     IDS_MENU_ABOUT          "O programie"
@@ -4631,6 +4701,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Pozastavit"
     IDS_MENU_RESUME         "Pokračovat"
+    IDS_MENU_RESUME_RESTART "Pokračovat — je potřeba restart"
     IDS_MENU_SETTINGS       "Nastavení…"
     IDS_MENU_AUTOSTART      "Spouštět při přihlášení"
     IDS_MENU_ABOUT          "O programu"
@@ -4642,6 +4713,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Duraklat"
     IDS_MENU_RESUME         "Sürdür"
+    IDS_MENU_RESUME_RESTART "Sürdür — yeniden başlatma gerekiyor"
     IDS_MENU_SETTINGS       "Ayarlar…"
     IDS_MENU_AUTOSTART      "Oturum açıldığında başlat"
     IDS_MENU_ABOUT          "Hakkında"
@@ -4653,6 +4725,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "Παύση"
     IDS_MENU_RESUME         "Συνέχιση"
+    IDS_MENU_RESUME_RESTART "Συνέχιση — χρειάζεται επανεκκίνηση"
     IDS_MENU_SETTINGS       "Ρυθμίσεις…"
     IDS_MENU_AUTOSTART      "Εκκίνηση με τη σύνδεση"
     IDS_MENU_ABOUT          "Σχετικά"
@@ -4664,6 +4737,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "השהה"
     IDS_MENU_RESUME         "המשך"
+    IDS_MENU_RESUME_RESTART "המשך — נדרשת הפעלה מחדש"
     IDS_MENU_SETTINGS       "הגדרות…"
     IDS_MENU_AUTOSTART      "הפעלה עם הכניסה למערכת"
     IDS_MENU_ABOUT          "אודות"
@@ -4675,6 +4749,7 @@ STRINGTABLE
 BEGIN
     IDS_MENU_SUSPEND        "إيقاف مؤقت"
     IDS_MENU_RESUME         "استئناف"
+    IDS_MENU_RESUME_RESTART "استئناف — يلزم إعادة التشغيل"
     IDS_MENU_SETTINGS       "الإعدادات…"
     IDS_MENU_AUTOSTART      "التشغيل عند تسجيل الدخول"
     IDS_MENU_ABOUT          "حول"

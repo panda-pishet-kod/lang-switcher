@@ -2173,12 +2173,8 @@ pub const IDS_CAPTURE_EMERGENCY: u16 = 3042;
 pub const IDS_CAPTURE_NAMELESS: u16 = 3043;
 /// [`Refusal::Reserved`].
 pub const IDS_CAPTURE_RESERVED: u16 = 3044;
-/// The first line of the «Состояние» group, with three places to fill in.
-pub const IDS_STATE_HOOK: u16 = 3045;
-/// The hook is installed.
-pub const IDS_HOOK_UP: u16 = 3046;
-/// The hook is not installed — FR-80.
-pub const IDS_HOOK_DOWN: u16 = 3047;
+// 3045…3047 — IDS_STATE_HOOK, IDS_HOOK_UP, IDS_HOOK_DOWN — retired by task T-34-5 and left as
+// holes: the first line of «Состояние» is IDS_STATE_WORKING…IDS_STATE_JOINED now.
 /// The second line of the «Состояние» group.
 pub const IDS_STATE_LAYOUTS: u16 = 3048;
 /// The third line of the «Состояние» group.
@@ -2255,6 +2251,9 @@ pub const IDS_MENU_AUTOSTART: u16 = 3075;
 pub const IDS_MENU_ABOUT: u16 = 3076;
 /// Fifth item of FR-91.
 pub const IDS_MENU_EXIT: u16 = 3077;
+/// The greyed «Возобновить» when processing is off after the panics of FR-99 — task T-34-5,
+/// finding Н84: the label is the one carrier of the reason, the tray has no tooltips.
+pub const IDS_MENU_RESUME_RESTART: u16 = 3221;
 /// The caption of the sound switch of FR-100 — task Т-21-5.
 pub const IDS_SOUND: u16 = 3078;
 /// The hint under the field while a capture is armed — «Esc или клик мимо — отмена», task
@@ -2415,6 +2414,21 @@ pub const IDS_TOAST_WHATSNEW: u16 = 3212;
 pub const IDS_LOG_SAVE: u16 = 3213;
 /// The one sentence the person sees when that write is refused — task T-34-3.
 pub const IDS_LOG_SAVE_FAILED: u16 = 3214;
+/// «Работает» — the first line of «Состояние», task T-34-5, finding Н80.
+pub const IDS_STATE_WORKING: u16 = 3215;
+/// «Приостановлена» — FR-90.
+pub const IDS_STATE_SUSPENDED: u16 = 3216;
+/// «Перехват клавиатуры не установлен» — FR-80.
+pub const IDS_STATE_HOOK_ABSENT: u16 = 3217;
+/// «Перехват установлен, но обработка отключена — нужен перезапуск» — FR-99, finding Н84.
+pub const IDS_STATE_DISABLED: u16 = 3218;
+/// The health of the hook after the state, shown only when the journal is on — finding С1:
+/// silent removals and install failures, two places to fill in.
+pub const IDS_STATE_HEALTH: u16 = 3219;
+/// The joiner «{0} · {1}» between the two halves of a state line — the state and the health of
+/// the hook (task T-34-5), the acting pair and its refusals (task T-34-6) — in the table so
+/// that a locale may change it.
+pub const IDS_STATE_JOINED: u16 = 3220;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -2608,7 +2622,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 206] = [
+pub const INTERFACE_STRINGS: [u16; 210] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2648,9 +2662,12 @@ pub const INTERFACE_STRINGS: [u16; 206] = [
     IDS_CAPTURE_EMERGENCY,
     IDS_CAPTURE_NAMELESS,
     IDS_CAPTURE_RESERVED,
-    IDS_STATE_HOOK,
-    IDS_HOOK_UP,
-    IDS_HOOK_DOWN,
+    IDS_STATE_WORKING,
+    IDS_STATE_SUSPENDED,
+    IDS_STATE_HOOK_ABSENT,
+    IDS_STATE_DISABLED,
+    IDS_STATE_HEALTH,
+    IDS_STATE_JOINED,
     IDS_STATE_LAYOUTS,
     IDS_STATE_AUTOSTART,
     IDS_AUTOSTART_PRESENT,
@@ -2676,6 +2693,7 @@ pub const INTERFACE_STRINGS: [u16; 206] = [
     IDS_ABOUT_HELP_5,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
+    IDS_MENU_RESUME_RESTART,
     IDS_MENU_SETTINGS,
     IDS_MENU_AUTOSTART,
     IDS_MENU_ABOUT,
@@ -11178,30 +11196,91 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     enable_by_mode(hwnd, state.working.layouts.mode);
 }
 
+/// What the program is doing now — the subject of the first line of «Состояние», task T-34-5,
+/// findings Н80 and Н84.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ProgramState {
+    /// The hook is in place and processing keystrokes.
+    Working,
+    /// Paused by the person — FR-90, «Приостановить».
+    Suspended,
+    /// The hook is not installed, or the watchdog has seen it fall — FR-80.
+    HookAbsent,
+    /// The hook is installed but processing is switched off after the panics of FR-99; only a
+    /// restart brings it back.
+    Disabled,
+}
+
+impl ProgramState {
+    /// The string of the interface that names this state.
+    pub const fn string_id(self) -> u16 {
+        match self {
+            Self::Working => IDS_STATE_WORKING,
+            Self::Suspended => IDS_STATE_SUSPENDED,
+            Self::HookAbsent => IDS_STATE_HOOK_ABSENT,
+            Self::Disabled => IDS_STATE_DISABLED,
+        }
+    }
+}
+
+/// The state of the program out of the four flags the modules publish — pure, so that
+/// `tests\settings.rs` walks all sixteen combinations.
+///
+/// The order is the order of what the person can do about it. Fail-safe comes first: a restart
+/// is the one remedy, and it is the person's — the watchdog puts a fallen hook back by itself
+/// (FR-80), so «not installed» is usually a passing state, but it is still the second thing to
+/// say, because a paused program with no hook is not «paused», it is deaf. The pause of FR-90
+/// is third, and only a program that is none of those is «Работает».
+pub fn program_state(installed: bool, down: bool, active: bool, fail_safe: bool) -> ProgramState {
+    if fail_safe {
+        ProgramState::Disabled
+    } else if !installed || down {
+        ProgramState::HookAbsent
+    } else if !active {
+        ProgramState::Suspended
+    } else {
+        ProgramState::Working
+    }
+}
+
 /// The three read-only lines of the «Состояние» group.
 ///
 /// **Every number here comes from another module's public reader** — `watchdog`, `layouts`,
 /// `guard`, `diag` — and nothing is written back to any of them. Section 6.2: the dialog shows
 /// their state, it does not own it. SEC-07: counts and a folder path, never a stroke.
+///
+/// Since task T-34-5 the first line says what the program does **now**, in the words a person
+/// uses ([`program_state`]), and the health of the hook follows it only when the journal is on:
+/// those two numbers are for the reader of the dump. `silent_removals` and not `recoveries`
+/// (finding С1): the latter grows on every thirty-second tick of the FR-80 timer and read as
+/// trouble where there was none.
 fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
     let health = crate::watchdog::health();
 
-    set_text(
-        hwnd,
-        IDC_STATE_HOOK,
-        &format_text(
-            IDS_STATE_HOOK,
-            &[
-                &text(if crate::watchdog::hook_down() {
-                    IDS_HOOK_DOWN
-                } else {
-                    IDS_HOOK_UP
-                }),
-                &health.recoveries.to_string(),
-                &health.install_failures.to_string(),
-            ],
-        ),
+    let program = program_state(
+        crate::hook::is_installed(),
+        crate::watchdog::hook_down(),
+        crate::hook::is_active(),
+        crate::hook::fail_safe(),
     );
+    let first = if state.working.diagnostics.log_enabled {
+        format_text(
+            IDS_STATE_JOINED,
+            &[
+                &text(program.string_id()),
+                &format_text(
+                    IDS_STATE_HEALTH,
+                    &[
+                        &health.silent_removals.to_string(),
+                        &health.install_failures.to_string(),
+                    ],
+                ),
+            ],
+        )
+    } else {
+        text(program.string_id())
+    };
+    set_text(hwnd, IDC_STATE_HOOK, &first);
 
     set_text(
         hwnd,

@@ -1953,6 +1953,11 @@ impl Menu {
         // state of its own.
         let first = settings::text(if enabled {
             settings::IDS_MENU_SUSPEND
+        } else if resume_is_refused(enabled, fail_safe) {
+            // Task T-34-5, finding Н84: the entry is grey, and the label is the one carrier of
+            // the reason — this menu has no tooltips (measured for the stage: not one `TTM_` in
+            // this file), so «Возобновить» alone would be a grey word with no explanation.
+            settings::IDS_MENU_RESUME_RESTART
         } else {
             settings::IDS_MENU_RESUME
         });
