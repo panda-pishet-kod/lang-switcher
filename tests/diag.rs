@@ -863,6 +863,37 @@ fn a_suppressed_change_of_autostart_has_a_name_of_its_own() {
     );
 }
 
+/// **Task T-55-3, finding Н26 — clearing the read-only attribute of `config.toml` has a name of its
+/// own.** The program changed an attribute a person may have set by hand, and a fact like that is
+/// worth a line; the shape of the configuration rows, and `Kind::Process` like them.
+#[test]
+fn clearing_the_read_only_attribute_of_the_configuration_has_a_name_of_its_own() {
+    let name = "configuration read-only attribute cleared";
+
+    let _gate = ring();
+
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» still reaches the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "{name} landed in the wrong group"
+    );
+
+    diag::record(operation, OsCode::NONE);
+
+    assert!(
+        diag::render().contains(name),
+        "the dump does not print {name}"
+    );
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the

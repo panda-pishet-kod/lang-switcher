@@ -3956,6 +3956,67 @@ fn the_check_mark_of_fr_91_on_a_newer_file_asks_the_registry_nothing_and_says_so
     drop(attached);
 }
 
+/// **Task T-55-3 through the tray: a save over a read-only file lands, and the journal names the
+/// cleared attribute.** `Tray::set_autostart` is the file half of FR-93 and asks the registry
+/// nothing, so the save is driven with no seam at all. The journal is read as a count of the one
+/// name, which no other test of this binary produces.
+#[test]
+fn a_save_over_a_read_only_configuration_lands_and_names_the_cleared_attribute() {
+    const CLEARED: &str = "configuration read-only attribute cleared";
+
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-read-only");
+    current_file_saying(&home, true);
+
+    let mut permissions = fs::metadata(home.config())
+        .expect("the configuration must be there")
+        .permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(home.config(), permissions).expect("the attribute must be settable");
+
+    let mut tray = install(&window, &home);
+    let notes_before = diag::render().matches(CLEARED).count();
+
+    tray.set_autostart(false);
+
+    let notes_after = diag::render().matches(CLEARED).count();
+    let text = fs::read_to_string(home.config()).expect("the configuration must be readable");
+    let read_only = fs::metadata(home.config())
+        .expect("the configuration must be there")
+        .permissions()
+        .readonly();
+
+    println!(
+        "a save over a read-only file: read_only now {read_only}, journal lines {notes_before} -> \
+         {notes_after}, autostart = false in the file: {}",
+        text.contains("autostart = false")
+    );
+
+    // Leave the directory removable whatever the assertions below say.
+    if read_only {
+        let mut permissions = fs::metadata(home.config())
+            .expect("the configuration must be there")
+            .permissions();
+        // Windows: this clears `FILE_ATTRIBUTE_READONLY` and touches no mode bits.
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(home.config(), permissions);
+    }
+
+    drop(tray);
+
+    assert!(
+        text.contains("autostart = false"),
+        "Н26: the save must land on a read-only configuration"
+    );
+    assert_eq!(
+        notes_after,
+        notes_before + 1,
+        "and the journal names the cleared attribute, once"
+    );
+    assert!(!read_only, "the attribute is left cleared");
+}
+
 /// **Решение 120.4 (б), the other direction.** A configuration that says `false` meets a value of
 /// ours in the `Run` key, and the value is removed; with no value there, nothing is written at all.
 #[test]

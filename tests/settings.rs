@@ -1436,6 +1436,123 @@ fn successful_write_leaves_no_temporary_file() {
     assert_eq!(config, a_thoroughly_customised_config());
 }
 
+/// Clears the read-only attribute of a file on the way out of a test, whatever the test did, so
+/// that [`TestDir`] can remove its directory — task T-55-3.
+struct ReadOnlyCleared<'a>(&'a Path);
+
+impl Drop for ReadOnlyCleared<'_> {
+    fn drop(&mut self) {
+        if let Ok(metadata) = fs::metadata(self.0) {
+            let mut permissions = metadata.permissions();
+            // Windows: this clears `FILE_ATTRIBUTE_READONLY` and touches no mode bits.
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(self.0, permissions);
+        }
+    }
+}
+
+/// Puts the read-only attribute on `path` — task T-55-3.
+fn set_read_only(path: &Path) {
+    let mut permissions = fs::metadata(path)
+        .expect("the file must be there")
+        .permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions).expect("the attribute must be settable");
+}
+
+/// **Task T-55-3, finding Н26 — a read-only `config.toml` takes the write after its attribute is
+/// cleared once.** Before this task the rename over a file with `+R` answered «доступ запрещён»
+/// every time: the dialog closed as if nothing had happened, and the change was gone at the next
+/// start. Now the attribute is cleared, the rename is tried once more, and the file carries the new
+/// configuration — with the attribute left cleared, which the doc of `write_to` decides.
+#[test]
+fn a_read_only_configuration_is_written_after_the_attribute_is_cleared_once() {
+    let dir = TestDir::new("read_only");
+    let path = dir.config();
+    let _cleared = ReadOnlyCleared(&path);
+
+    settings::write_to(&path, &Config::default()).expect("the first write must succeed");
+    set_read_only(&path);
+
+    let changed = a_thoroughly_customised_config();
+    let outcome = settings::write_to(&path, &changed);
+
+    println!("a write over a read-only file: {outcome:?}");
+
+    assert!(
+        matches!(
+            outcome,
+            Ok(settings::WriteOutcome::WrittenAfterClearingReadOnly)
+        ),
+        "Н26: a read-only configuration must take the write after its attribute is cleared once, \
+         and the write must say that it was: {outcome:?}"
+    );
+
+    let (read, _) = settings::read_from(&path).expect("the written file must be readable");
+
+    assert_eq!(read, changed, "and the file carries the new configuration");
+    assert!(
+        !fs::metadata(&path)
+            .expect("the file must be there")
+            .permissions()
+            .readonly(),
+        "the attribute is left cleared — the decision the doc of `write_to` writes down"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "and no temporary is left beside it"
+    );
+}
+
+/// **The other half of task T-55-3: a refusal the attribute does not explain is still a refusal.**
+/// The file is read-only **and** held open by a handle that shares nothing but reading, so no
+/// rename can replace it whatever happens to the attribute. The write answers `Err`, the bytes on
+/// the disk are the old ones, and the temporary is removed in this branch as in every other. The
+/// visible trace is the caller's journal — `configuration write failed` of `Tray::save_config`.
+#[test]
+fn a_refusal_the_read_only_attribute_does_not_explain_is_still_a_refusal() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let dir = TestDir::new("read_only_and_held");
+    let path = dir.config();
+    let _cleared = ReadOnlyCleared(&path);
+
+    settings::write_to(&path, &Config::default()).expect("the first write must succeed");
+    let before = fs::read(&path).expect("the file must be readable");
+    set_read_only(&path);
+
+    // FILE_SHARE_READ and nothing else: no writer and no rename may come near the file while this
+    // handle is open.
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&path)
+        .expect("the file must open for reading");
+
+    let outcome = settings::write_to(&path, &a_thoroughly_customised_config());
+
+    println!("a write over a read-only file that is held open: {outcome:?}");
+
+    drop(held);
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Io(_))),
+        "a refusal no attribute explains is returned as the refusal it is: {outcome:?}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("the file must still be there"),
+        before,
+        "and the bytes on the disk are the old ones"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "and the temporary is removed in this branch too"
+    );
+}
+
 // Criterion 21. The standard path is %APPDATA%\Lang_Switcher\config.toml. Checked by
 // building the string: no file and no directory is created anywhere near the real
 // %APPDATA%, which belongs to whoever is running the tests.

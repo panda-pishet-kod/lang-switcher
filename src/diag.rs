@@ -654,6 +654,14 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the state asked for, not the state kept.
     // `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("autostart change suppressed", Kind::Process),
+    // ⭐ **Task T-55-3, finding Н26** — `config.toml` carried the read-only attribute, the rename
+    // of the atomic write was refused for it, and the write cleared the attribute once and landed.
+    // A person may have set that attribute by hand, and the program changed it: a fact worth a
+    // line. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the path, not the attributes, not the
+    // configuration. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("configuration read-only attribute cleared", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

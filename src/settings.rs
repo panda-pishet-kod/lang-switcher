@@ -1863,14 +1863,15 @@ pub fn quarantine(path: &Path) -> Result<Quarantined, ConfigError> {
 /// The write goes to a temporary file beside the target, is flushed to the device, and
 /// only then replaces the target with a single rename. The rename is same-directory and
 /// therefore same-volume, which is what makes it atomic; `fs::rename` replaces an existing
-/// destination on Windows. A crash, a power cut or a killed process leaves either the old
-/// file or the new one, never half of either — the configuration is written by the UI
-/// thread while the program runs, and a truncated file would silently reset every setting
-/// the user has.
+/// destination on Windows — **unless the destination carries the read-only attribute**, which
+/// [`replace_read_only_once`] answers (task T-55-3). A crash, a power cut or a killed process
+/// leaves either the old file or the new one, never half of either — the configuration is
+/// written by the UI thread while the program runs, and a truncated file would silently reset
+/// every setting the user has.
 ///
 /// The temporary file is removed if anything after its creation fails, so a failed write
 /// leaves no litter next to the configuration.
-pub fn write_to(path: &Path, config: &Config) -> Result<(), ConfigError> {
+pub fn write_to(path: &Path, config: &Config) -> Result<WriteOutcome, ConfigError> {
     let text = config.to_toml_string()?;
 
     if let Some(parent) = path.parent()
@@ -1884,11 +1885,82 @@ pub fn write_to(path: &Path, config: &Config) -> Result<(), ConfigError> {
         let _ = fs::remove_file(&temporary);
         return Err(err);
     }
-    if let Err(err) = fs::rename(&temporary, path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(ConfigError::Io(err));
+    match replace_read_only_once(&temporary, path) {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => {
+            let _ = fs::remove_file(&temporary);
+            Err(ConfigError::Io(err))
+        }
     }
-    Ok(())
+}
+
+/// What [`write_to`] did — task T-55-3.
+///
+/// The ordinary answer is [`WriteOutcome::Written`]. The other one is a write that landed only
+/// after the read-only attribute of the target was cleared, and the caller — the tray, the one
+/// writer of this file — names it in the journal: a person may have set that attribute by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// The file was replaced by the one rename.
+    Written,
+    /// The rename was refused for the read-only attribute; the attribute was cleared, and the
+    /// second rename replaced the file. The attribute stays cleared — the doc of [`write_to`].
+    WrittenAfterClearingReadOnly,
+}
+
+/// Puts `temporary` over `path` — the one rename of [`write_to`], and **one** retry for a target
+/// that carries the read-only attribute — task T-55-3, finding Н26.
+///
+/// # The finding
+///
+/// `fs::rename` over a file with `FILE_ATTRIBUTE_READONLY` answers `ERROR_ACCESS_DENIED`, and it
+/// answers it every time (premise П5 of the stage, measured: `raw_os_error = 5`, the temporary
+/// left behind). The refusal reached only the journal: «Применить» closed the dialog as if nothing
+/// had happened, and the change was gone at the next start. This module had no word for the
+/// attribute at all.
+///
+/// # What is done, and what is not
+///
+/// * **Only after the refusal, and only for that refusal.** The attribute is not looked at before a
+///   rename fails, so the ordinary write is the one it always was. A refusal of another kind — or
+///   `PermissionDenied` on a file that is *not* read-only, which then has another cause, a handle
+///   held open or the permissions of the folder — is handed back as it came.
+/// * **Once, not in a loop.** The attribute is cleared, the rename is tried a second time, and
+///   whatever the second attempt answers is the answer. Nothing waits and nothing repeats.
+/// * **The attribute is left cleared**, whatever the second attempt answered. Putting it back after
+///   a write that landed would make the next save fail in exactly the same way, and the one after
+///   that — the very defect this repairs; putting it back after a write that did not land would buy
+///   nothing, because the write is about to be reported as failed anyway. A person who set the
+///   attribute to keep the program away is told: a write that landed is named in the journal by
+///   the caller (`configuration read-only attribute cleared`), and one that did not is reported as
+///   the failed write it is.
+///
+/// Atomicity is untouched: the retry is the same single rename of the same finished temporary.
+fn replace_read_only_once(temporary: &Path, path: &Path) -> io::Result<WriteOutcome> {
+    let refusal = match fs::rename(temporary, path) {
+        Ok(()) => return Ok(WriteOutcome::Written),
+        Err(refusal) => refusal,
+    };
+
+    let Ok(metadata) = fs::metadata(path) else {
+        return Err(refusal);
+    };
+    let mut permissions = metadata.permissions();
+
+    if refusal.kind() != io::ErrorKind::PermissionDenied || !permissions.readonly() {
+        return Err(refusal);
+    }
+
+    // Windows: this clears `FILE_ATTRIBUTE_READONLY` and touches no mode bits — the Unix concern of
+    // the lint does not exist on the one platform this program is built for.
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+
+    if fs::set_permissions(path, permissions).is_err() {
+        return Err(refusal);
+    }
+
+    fs::rename(temporary, path).map(|()| WriteOutcome::WrittenAfterClearingReadOnly)
 }
 
 /// Names the temporary file used by [`write_to`], beside the target.

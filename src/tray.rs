@@ -1399,17 +1399,26 @@ impl Tray {
             },
         }
 
-        if let Err(error) = settings::write_to(path, &self.config) {
-            // A failed save must not take the process down: in the FR-83 case the program is
-            // on its way out anyway, and in the toggle case the state is already right in
-            // memory and on the screen.
-            //
-            // ⭐ **Task Т-22-9 — the debt of task T-06-4 closed, finding м12 of the audit of
-            // 2026-09-01.** Not taking the process down is not the same as saying nothing: the
-            // user pressed «Применить», the dialog closed, the setting is right on the screen
-            // and wrong on the disk, and until this task the only configuration event of the
-            // six that left no trace was this one — the one that loses the user's choice.
-            note_configuration_failure(CONFIG_WRITE_FAILED, &error);
+        match settings::write_to(path, &self.config) {
+            Ok(settings::WriteOutcome::Written) => {}
+            // ⭐ **Task T-55-3, finding Н26.** The file carried the read-only attribute, and the
+            // write cleared it once and landed. A person may have set that attribute by hand, so
+            // the fact is named rather than taken silently.
+            Ok(settings::WriteOutcome::WrittenAfterClearingReadOnly) => {
+                note_configuration(CONFIG_READ_ONLY_CLEARED);
+            }
+            Err(error) => {
+                // A failed save must not take the process down: in the FR-83 case the program is
+                // on its way out anyway, and in the toggle case the state is already right in
+                // memory and on the screen.
+                //
+                // ⭐ **Task Т-22-9 — the debt of task T-06-4 closed, finding м12 of the audit of
+                // 2026-09-01.** Not taking the process down is not the same as saying nothing: the
+                // user pressed «Применить», the dialog closed, the setting is right on the screen
+                // and wrong on the disk, and until this task the only configuration event of the
+                // six that left no trace was this one — the one that loses the user's choice.
+                note_configuration_failure(CONFIG_WRITE_FAILED, &error);
+            }
         }
     }
 }
@@ -1439,6 +1448,10 @@ const CONFIG_SAVE_SUPPRESSED: &str = "configuration save suppressed";
 /// since task T-13-6, and this — the only one that loses a choice the user has already been shown
 /// as applied — carried the open `TODO` of task T-06-4 and a dropped error instead.
 const CONFIG_WRITE_FAILED: &str = "configuration write failed";
+
+/// ⭐ **Task T-55-3, finding Н26.** The save landed only after the read-only attribute of
+/// `config.toml` was cleared once — [`settings::WriteOutcome::WrittenAfterClearingReadOnly`].
+const CONFIG_READ_ONLY_CLEARED: &str = "configuration read-only attribute cleared";
 
 /// ⭐ **Решение 120.4 (б), task T-55-1.** A start found `general.autostart = true` and no value of
 /// this image under `HKCU\…\Run`, and wrote one — [`reconcile_autostart`].
