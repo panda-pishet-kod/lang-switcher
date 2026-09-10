@@ -2211,6 +2211,7 @@ fn clipboard_text(owner: HWND) -> Option<String> {
     lang_switcher::selection::read_unicode_text(owner)
         .ok()
         .flatten()
+        .map(|text| text.to_string())
 }
 
 /// Title of the bench's own window for position 15 — the string the position adopts by.

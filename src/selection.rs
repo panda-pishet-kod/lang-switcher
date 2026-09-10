@@ -131,9 +131,16 @@
 //! now, the last of them on the failure paths as well. Note what this is and is not: SEC-02 of
 //! SPEC is a rule about the **typing buffer**, and none of this was a breach of it. It is the
 //! rule this module wrote for itself in the list above, kept in the places it was not being kept.
+//!
+//! **And the copy nobody was counting — finding С29 of the audit of 2026-09-04, task T-38-9A.**
+//! The text step 4 decodes out of that block, the one copy steps 5 and 6 work from, was still a
+//! bare `String` released as it stood, while the source sweep meant to catch such a thing counted
+//! calls of the zeroing and found its seven. It is born inside [`ClipboardText`] now, which zeroes
+//! it when it is dropped, and the sweep names every copy the module makes instead of counting.
 
 use core::fmt;
 use core::marker::PhantomData;
+use core::ops::Deref;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::sync::{Mutex, PoisonError};
@@ -1871,13 +1878,14 @@ fn note_read_oversized() {
 /// expects.
 ///
 /// SEC-01, SEC-07: the answer is returned to the caller and is not logged, formatted or
-/// journalled anywhere on the way.
+/// journalled anywhere on the way. It comes in a [`ClipboardText`], which zeroes it when it is
+/// dropped — finding С29, task T-38-9A.
 ///
 /// The copy `read_block` makes is the user's clipboard in plain form, and it is zeroed before
 /// this frame releases it — SEC-01, SEC-02, task **T-13-15**. Until the audit of 2026-08-24 it
 /// was not zeroed at all, which made it one of the three holes in a rule the rest of this module
 /// keeps.
-pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> {
+pub fn read_unicode_text(owner: HWND) -> Result<Option<ClipboardText>, ClipboardError> {
     let clipboard = Clipboard::open(owner)?;
 
     let Some(handle) = clipboard.block(CF_UNICODETEXT) else {
@@ -1910,7 +1918,57 @@ pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> 
     Ok(Some(text))
 }
 
-/// Turns the bytes of a `CF_UNICODETEXT` block into a string.
+/// The text step 4 of FR-61 reads off the clipboard, and the buffer holding it — **finding С29 of
+/// the audit of 2026-09-04, task T-38-9A**.
+///
+/// Overwritten with zeroes when it is dropped, the treatment [`Recoded`] gives the text of step 5
+/// and [`Snapshot`] gives the blocks of step 1. Until task T-38-9A this was a bare `String`: the
+/// block it was decoded from and the code units in between were zeroed, and the text itself — the
+/// one copy steps 5 and 6 work from, alive from the read to the end of the pass — went back to the
+/// allocator as it stood, while the sweep meant to catch that counted zeroing calls and found its
+/// seven.
+///
+/// Reads as a `str` and as nothing else: no `Display`, and a hand-written `Debug` that prints a
+/// count — SEC-01, SEC-07. `From<String>` is for a [`Path`] that reads no real clipboard, the
+/// bench of the tests, whose text is its own.
+pub struct ClipboardText {
+    text: String,
+}
+
+impl Deref for ClipboardText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.text
+    }
+}
+
+impl From<String> for ClipboardText {
+    fn from(text: String) -> Self {
+        Self { text }
+    }
+}
+
+impl fmt::Debug for ClipboardText {
+    /// Counts, never characters — SEC-01, SEC-07. A derived `Debug` would print the text.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClipboardText")
+            .field("chars", &self.text.chars().count())
+            .finish()
+    }
+}
+
+impl Drop for ClipboardText {
+    fn drop(&mut self) {
+        // SAFETY: the argument of the `Drop` of `Recoded`, word for word — every byte becomes
+        // `0x00`, a run of NUL bytes is valid UTF-8, the length does not change and the vector is
+        // not reallocated; `crate::buffer::zero_slice` writes into the elements of the slice it is
+        // handed and does nothing else.
+        crate::buffer::zero_slice(unsafe { self.text.as_mut_vec() }.as_mut_slice());
+    }
+}
+
+/// Turns the bytes of a `CF_UNICODETEXT` block into the text of step 4.
 ///
 /// A pure function, so that the awkward parts — an odd number of bytes, a missing terminator, an
 /// unpaired surrogate — are driven by unit tests rather than by whatever happens to be on the
@@ -1918,9 +1976,10 @@ pub fn read_unicode_text(owner: HWND) -> Result<Option<String>, ClipboardError> 
 /// the whole clipboard over it would be the wrong trade.
 ///
 /// `units` is a second copy of the same text, and it is zeroed before it is released — SEC-01,
-/// SEC-02, task **T-13-15**. The string that comes out is the caller's to look after, and
-/// [`Recoded`] is what looks after it further down the path.
-fn decode_utf16(bytes: &[u8]) -> String {
+/// SEC-02, task **T-13-15**. The text that comes out is born inside [`ClipboardText`], which
+/// zeroes it when it is dropped — task **T-38-9A** — and [`Recoded`] looks after what step 5
+/// makes of it.
+fn decode_utf16(bytes: &[u8]) -> ClipboardText {
     let mut units: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
@@ -1931,7 +1990,7 @@ fn decode_utf16(bytes: &[u8]) -> String {
 
     crate::buffer::zero_slice(&mut units);
 
-    text
+    ClipboardText { text }
 }
 
 /// Turns a string into the bytes of a `CF_UNICODETEXT` block, terminator included.
@@ -3087,7 +3146,10 @@ pub trait Path {
     fn sequence(&mut self) -> u32;
 
     /// **Step 4** — read `CF_UNICODETEXT`.
-    fn read(&mut self) -> Result<Option<String>, ClipboardError>;
+    ///
+    /// The text comes in a [`ClipboardText`], which zeroes it when it is dropped — finding С29,
+    /// task T-38-9A.
+    fn read(&mut self) -> Result<Option<ClipboardText>, ClipboardError>;
 
     /// **Step 6, first half** — put the recoded text on the clipboard.
     fn write(&mut self, text: &str) -> Result<(), ClipboardError>;
@@ -3543,7 +3605,7 @@ impl Path for Machine {
         sequence_number()
     }
 
-    fn read(&mut self) -> Result<Option<String>, ClipboardError> {
+    fn read(&mut self) -> Result<Option<ClipboardText>, ClipboardError> {
         read_unicode_text(self.owner)
     }
 
@@ -4163,20 +4225,20 @@ mod tests {
             // terminator of the format, so everything after it is not part of the text.
             let expected = text.split('\u{0}').next().unwrap_or_default();
 
-            assert_eq!(back, expected, "round trip of {text:?}");
+            assert_eq!(&*back, expected, "round trip of {text:?}");
         }
     }
 
     #[test]
     fn an_odd_or_truncated_block_decodes_instead_of_panicking() {
         // Three bytes: one complete UTF-16 unit and a stray one. `chunks_exact` drops the tail.
-        assert_eq!(decode_utf16(&[0x41, 0x00, 0x42]), "A");
+        assert_eq!(&*decode_utf16(&[0x41, 0x00, 0x42]), "A");
         // No terminator at all.
-        assert_eq!(decode_utf16(&[0x41, 0x00, 0x42, 0x00]), "AB");
+        assert_eq!(&*decode_utf16(&[0x41, 0x00, 0x42, 0x00]), "AB");
         // Nothing at all.
-        assert_eq!(decode_utf16(&[]), "");
+        assert_eq!(&*decode_utf16(&[]), "");
         // An unpaired surrogate is replaced rather than refused.
-        assert_eq!(decode_utf16(&[0x00, 0xD8, 0x00, 0x00]), "\u{FFFD}");
+        assert_eq!(&*decode_utf16(&[0x00, 0xD8, 0x00, 0x00]), "\u{FFFD}");
     }
 
     #[test]

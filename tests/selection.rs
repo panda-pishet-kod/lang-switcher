@@ -1088,8 +1088,10 @@ fn a_clipboard_over_the_budget_keeps_the_text_and_says_so() {
 
     assert!(raw_write(window.0, &[(CF_UNICODETEXT, text_block(small))]));
     assert_eq!(
-        selection::read_unicode_text(window.0).expect("the read"),
-        Some(small.to_owned()),
+        selection::read_unicode_text(window.0)
+            .expect("the read")
+            .as_deref(),
+        Some(small),
         "a block under the ceiling is read as it always was"
     );
 }
@@ -2309,12 +2311,12 @@ impl SelectionPath for Bench {
         self.sequence_now
     }
 
-    fn read(&mut self) -> Result<Option<String>, ClipboardError> {
+    fn read(&mut self) -> Result<Option<selection::ClipboardText>, ClipboardError> {
         if self.note(Step::Read) {
             return Err(ClipboardError::Busy);
         }
 
-        Ok(self.reads.clone())
+        Ok(self.reads.clone().map(selection::ClipboardText::from))
     }
 
     fn write(&mut self, text: &str) -> Result<(), ClipboardError> {
@@ -4697,7 +4699,212 @@ fn body_after(source: &str, signature: &str) -> String {
     cut_at(remainder, "\n}\n", signature).to_string()
 }
 
-/// **The audit of 2026-08-24, the middle finding: `fill` is not a zeroing that survives.**
+/// How a copy of the user's text is released — task T-38-9A, see
+/// [`every_working_copy_of_the_text_is_released_through_the_volatile_zeroing`].
+enum Release {
+    /// By a volatile zeroing in the function that makes the copy — the needle is that call.
+    ZeroedHere(&'static str),
+    /// By the `impl Drop` of the type the copy is moved into, in the function that makes it.
+    DroppedBy(&'static str),
+}
+
+/// One copy of the user's text that `src\selection.rs` makes, by name — task T-38-9A.
+struct TextCopy {
+    /// What the copy is: the name a failure is reported under.
+    name: &'static str,
+    /// The signature the copy is made under, spelt as the module spells it.
+    function: &'static str,
+    /// The code that makes the copy. It begins with a needle of [`BUFFER_MAKERS`] or
+    /// [`HANDED_BACK`], so that the sweep in the other direction arrives at the same place.
+    made_by: &'static str,
+    /// What releases it.
+    released: Release,
+}
+
+/// A buffer `src\selection.rs` makes that holds none of the user's text, and why — task T-38-9A.
+struct NotTheText {
+    /// The signature the buffer is made under.
+    function: &'static str,
+    /// The code that makes it, beginning with a needle as [`TextCopy::made_by`] does.
+    made_by: &'static str,
+    /// Why nothing of the user's text is in it.
+    why: &'static str,
+}
+
+/// Every copy of the user's text the module makes, and what releases each one — task T-38-9A.
+///
+/// **This table is the canon, and it is changed by name.** A new copy is a new row with the code
+/// that zeroes it; a copy that stops being made is a row taken out.
+const TEXT_COPIES: [TextCopy; 9] = [
+    TextCopy {
+        name: "the block step 1 keeps of each format on the user's clipboard",
+        function: "pub fn snapshot(owner: HWND)",
+        made_by: "read_block(handle, size)",
+        released: Release::DroppedBy("Snapshot"),
+    },
+    TextCopy {
+        name: "the block step 4 copies off the clipboard",
+        function: "pub fn read_unicode_text(",
+        made_by: "read_block(handle, size)",
+        released: Release::ZeroedHere("buffer::zero_slice(&mut bytes)"),
+    },
+    TextCopy {
+        name: "the code units step 4 decodes out of that block",
+        function: "fn decode_utf16(",
+        made_by: ".collect()",
+        released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
+    },
+    TextCopy {
+        name: "the text step 4 reads, which steps 5 and 6 work from",
+        function: "fn decode_utf16(",
+        made_by: "String::from_utf16_lossy(&units)",
+        released: Release::DroppedBy("ClipboardText"),
+    },
+    TextCopy {
+        name: "the code units `recode` fills",
+        function: "pub fn recode(",
+        made_by: "Vec::with_capacity(text.len() + 1)",
+        released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
+    },
+    TextCopy {
+        name: "the text `recode` answers with, which step 6 writes",
+        function: "pub fn recode(",
+        made_by: "String::from_utf16_lossy(&units)",
+        released: Release::DroppedBy("Recoded"),
+    },
+    TextCopy {
+        name: "the code units `recode_words` fills",
+        function: "fn recode_words(",
+        made_by: "Vec::with_capacity(text.len() + 1)",
+        released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
+    },
+    TextCopy {
+        name: "the text `recode_words` answers with, which step 6 writes",
+        function: "fn recode_words(",
+        made_by: "String::from_utf16_lossy(&units)",
+        released: Release::DroppedBy("Recoded"),
+    },
+    TextCopy {
+        name: "the block step 6 encodes for the clipboard",
+        function: "pub fn write_unicode_text(",
+        made_by: "encode_utf16(text)",
+        released: Release::ZeroedHere("buffer::zero_slice(&mut bytes)"),
+    },
+];
+
+/// Every other buffer the product half of the module makes, with the reason it holds no text.
+const NOT_THE_TEXT: [NotTheText; 11] = [
+    NotTheText {
+        function: "fn formats(&self)",
+        made_by: "Vec::new()",
+        why: "format numbers — constants of the system, not content",
+    },
+    NotTheText {
+        function: "impl Snapshot {",
+        made_by: "Vec::new()",
+        why: "the list of an empty snapshot, which holds nothing",
+    },
+    NotTheText {
+        function: "pub fn snapshot(owner: HWND)",
+        made_by: "Vec::with_capacity(listed.len())",
+        why: "the handles and sizes of the formats, and no byte of any of them",
+    },
+    NotTheText {
+        function: "pub fn snapshot(owner: HWND)",
+        made_by: "Vec::new()",
+        why: "the numbers of the privacy markers found without data",
+    },
+    NotTheText {
+        function: "pub fn snapshot(owner: HWND)",
+        made_by: "Vec::with_capacity(sizes.len()",
+        why: "the list the kept blocks go into — each block is a copy of its own, named above",
+    },
+    NotTheText {
+        function: "pub fn snapshot(owner: HWND)",
+        made_by: ".to_vec()",
+        why: "the four zero bytes this program writes for a privacy marker, decision 121.7",
+    },
+    NotTheText {
+        function: "fn read_block(",
+        made_by: "vec![0_u8; size]",
+        why: "made for the caller: the copy is named at each call of `read_block`",
+    },
+    NotTheText {
+        function: "fn encode_utf16(",
+        made_by: "Vec::with_capacity(",
+        why: "made for the caller: the copy is named at the call of `encode_utf16`",
+    },
+    NotTheText {
+        function: "pub fn detect_source(",
+        made_by: "vec![0usize; maps.len()]",
+        why: "a score per layout — counts, not characters",
+    },
+    NotTheText {
+        function: "fn plan_for_press()",
+        made_by: "Vec::with_capacity(cycle.len())",
+        why: "the maps of the layouts of the cycle",
+    },
+    NotTheText {
+        function: "fn plan_for_press()",
+        made_by: ".clone()",
+        why: "a layout map out of the cache",
+    },
+];
+
+/// What makes an owned buffer, as `std` spells it — the needles of the sweep of task T-38-9A.
+const BUFFER_MAKERS: [&str; 13] = [
+    "Vec::new(",
+    "Vec::with_capacity(",
+    "vec![",
+    "String::new(",
+    "String::with_capacity(",
+    "String::from(",
+    "String::from_utf16",
+    ".to_vec()",
+    ".to_string()",
+    ".to_owned()",
+    ".clone()",
+    ".collect",
+    "format!(",
+];
+
+/// The module's own functions that hand back a bare buffer they made — needles of the same sweep,
+/// taken only as calls: `fn read_block(` declares one, and `.encode_utf16()` is a method of `str`.
+const HANDED_BACK: [&str; 2] = ["read_block(", "encode_utf16("];
+
+/// The starts of a line that declares a function rather than makes anything.
+const DECLARATIONS: [&str; 4] = ["fn ", "pub fn ", "const fn ", "pub const fn "];
+
+/// Where `made_by` stands under `function` in `product` — an offset into `product` — or `None`
+/// when it does not stand there exactly once. Task T-38-9A.
+fn made_at(product: &str, function: &str, made_by: &str) -> Option<usize> {
+    let start = product.find(function)? + function.len();
+    let body = body_after(product, function);
+
+    if body.matches(made_by).count() != 1 {
+        return None;
+    }
+
+    body.find(made_by).map(|at| start + at)
+}
+
+/// The name of the function `at` stands in, for a failure message: the nearest `fn ` before it.
+fn enclosing_function(product: &str, at: usize) -> &str {
+    let Some(declared) = product[..at].rfind("fn ") else {
+        return "?";
+    };
+
+    let name = &product[declared + 3..];
+    let end = name
+        .find(|ch: char| ch != '_' && !ch.is_alphanumeric())
+        .unwrap_or(name.len());
+
+    &name[..end]
+}
+
+/// **The audit of 2026-08-24, the middle finding: `fill` is not a zeroing that survives** — and
+/// **finding С29 of the audit of 2026-09-04, task T-38-9A: every working copy of the text, by
+/// name.**
 ///
 /// Every place in the module that overwrites a copy of the user's text before releasing it goes
 /// through `buffer::zero_slice` — the `write_volatile` plus `compiler_fence` the ring is zeroed
@@ -4707,6 +4914,26 @@ fn body_after(source: &str, signature: &str) -> String {
 /// The one `.fill(` left in the module is `Block::fill`, and it is not a zeroing at all: it
 /// copies the caller's bytes **into** a freshly allocated clipboard block. The name collides and
 /// nothing else does, so it is named here rather than being allowed to fail the sweep later.
+///
+/// # The copies are named, not counted — С29
+///
+/// Until task T-38-9A the second half of this test counted the calls of `buffer::zero_slice(` and
+/// wanted seven. A copy that is **not** zeroed moves no such count, so the test could not fail on
+/// the one thing it was written for — and it did not: the text step 4 reads off the clipboard,
+/// which steps 5 and 6 work from, was released as a bare `String` all the while the count stood at
+/// seven. The number was a canon and not a principle; it had gone from six to seven by a push.
+///
+/// Now every copy is named in [`TEXT_COPIES`] with the code that makes it and the code that
+/// releases it: a volatile zeroing in the same function, or the `impl Drop` of the type it is
+/// moved into. And the other direction is swept: every place in the product half that makes an
+/// owned buffer — a needle of [`BUFFER_MAKERS`], or a call of one of [`HANDED_BACK`] — is one of
+/// those copies or is named in [`NOT_THE_TEXT`] with the reason it holds no text. A new copy fails
+/// under the name of the function it appears in, whether or not anybody remembered to zero it.
+///
+/// What the sweep does not see: a buffer made by a construct outside those needles — an `into()`
+/// of a `&str`, a `Box<str>`, a `Cow` — or text grown into a buffer that already exists. It covers
+/// what the module makes its buffers with today and what a copy would most plausibly be made
+/// with; it is a sweep of the source, not a proof.
 #[test]
 fn every_working_copy_of_the_text_is_released_through_the_volatile_zeroing() {
     let source = source_of("selection.rs");
@@ -4724,18 +4951,110 @@ fn every_working_copy_of_the_text_is_released_through_the_volatile_zeroing() {
         fills[0]
     );
 
-    // Seven buffers, seven calls: the three the finding named, the three that were not zeroed
-    // at all, and the working buffer of `recode_words` — the second recoder, added by task
-    // Т-48-3 when step 5 began deciding the script per word. The count is asserted so that an
-    // eighth copy of the user's text added later cannot quietly arrive without one; it went
-    // from six to seven the moment a seventh copy existed, which is the whole point of it being
-    // a number.
-    let zeroed = code_lines_with(&source, "buffer::zero_slice(");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
+    let mut named: Vec<(usize, &str)> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
 
-    assert_eq!(
-        zeroed.len(),
-        7,
-        "every working copy is zeroed through the helper: {zeroed:?}"
+    // Every copy by name: where it is made, and what releases it.
+    for copy in &TEXT_COPIES {
+        let Some(made) = made_at(product, copy.function, copy.made_by) else {
+            failures.push(format!(
+                "{}: `{}` does not stand once under `{}`",
+                copy.name, copy.made_by, copy.function
+            ));
+            continue;
+        };
+
+        named.push((made, copy.name));
+
+        let body = body_after(product, copy.function);
+
+        let released = match copy.released {
+            Release::ZeroedHere(zeroing) => body.contains(zeroing),
+            Release::DroppedBy(owner) => {
+                let drop_impl = format!("impl Drop for {owner} {{");
+
+                body.contains(&format!("{owner} {{"))
+                    && product.contains(&drop_impl)
+                    && body_after(product, &drop_impl).contains("buffer::zero_slice(")
+            }
+        };
+
+        if !released {
+            failures.push(format!(
+                "{}: made by `{}` under `{}`, and nothing zeroes it before it is released",
+                copy.name, copy.made_by, copy.function
+            ));
+        }
+    }
+
+    // And the other direction: every buffer the product half makes is one of those copies, or is
+    // named as holding none of the text.
+    for entry in &NOT_THE_TEXT {
+        match made_at(product, entry.function, entry.made_by) {
+            Some(made) => named.push((made, entry.why)),
+            None => failures.push(format!(
+                "`{}` does not stand once under `{}`, where it is named as holding no text",
+                entry.made_by, entry.function
+            )),
+        }
+    }
+
+    let mut seen = Vec::new();
+    let mut offset = 0;
+
+    for (index, line) in product.split_inclusive('\n').enumerate() {
+        let code = line.trim_start();
+        let start = offset + (line.len() - code.len());
+
+        offset += line.len();
+
+        let declared = DECLARATIONS.iter().any(|start| code.starts_with(start));
+
+        if code.starts_with("//") || declared {
+            continue;
+        }
+
+        let makers = BUFFER_MAKERS.iter().map(|&maker| (maker, false));
+        let calls = HANDED_BACK.iter().map(|&maker| (maker, true));
+
+        for (maker, only_called) in makers.chain(calls) {
+            for (at, _) in code.match_indices(maker) {
+                let before = code[..at].chars().next_back();
+                let method_or_name =
+                    before.is_some_and(|ch| ch == '.' || ch == '_' || ch.is_alphanumeric());
+
+                if only_called && method_or_name {
+                    continue;
+                }
+
+                seen.push(start + at);
+
+                if !named.iter().any(|&(made, _)| made == start + at) {
+                    failures.push(format!(
+                        "line {}, under `fn {}`: `{}` makes a buffer that is neither a named copy \
+                         of the text nor named as holding none",
+                        index + 1,
+                        enclosing_function(product, start + at),
+                        code.trim_end()
+                    ));
+                }
+            }
+        }
+    }
+
+    for &(made, what) in &named {
+        if !seen.contains(&made) {
+            failures.push(format!(
+                "{what}: named in the tables, and the sweep sees no buffer made there"
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "every working copy of the text is named and zeroed:\n{}",
+        failures.join("\n")
     );
 }
 
