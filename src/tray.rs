@@ -667,8 +667,9 @@ impl Tray {
             // `%APPDATA%` is not set. A resident utility still has to run, and the defaults
             // of section 7 are a complete configuration, so this is not a reason to refuse.
             // Nothing was read and nothing will be written — `save_config` leaves on the same
-            // `None` — so the policy is the one that changes nothing.
-            None => (Config::default(), SavePolicy::Allowed, None),
+            // `None` — so the policy is the one that changes nothing. Task T-55-9, finding Н67:
+            // nothing was read, which is exactly a first run, so the language is the system's.
+            None => (Config::for_a_first_run(), SavePolicy::Allowed, None),
         };
 
         // SAFETY: `TASKBAR_CREATED` is a NUL-terminated `'static` UTF-16 literal, so the

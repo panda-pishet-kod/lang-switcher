@@ -1531,28 +1531,48 @@ fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
 }
 
 impl Config {
-    /// The configuration a machine that has **no file yet** starts with — **вопрос 95**, task
-    /// Т-29-3.
+    /// The configuration the program starts with when it has **no usable file** — **вопрос 95**,
+    /// task Т-29-3, and since task T-55-9 (findings С20 and Н67) every road on which the program
+    /// lives by defaults.
     ///
     /// [`Config::default`] with one field chosen instead of fixed: `general.language` is the
     /// interface language of this user's Windows when this build has it, and `en` when it has
     /// not — [`system_language_for_a_first_run`].
     ///
-    /// ⚠ **This is the whole of where the system is consulted, and that is the point.** Every
-    /// other road into a configuration — a file that parses, a file that migrates, a file this
-    /// build could not read at all — goes on reaching [`Config::default`] and its hard `ru`,
-    /// because on every one of those roads a file already exists and it is somebody's. Вопрос 95
-    /// says «существующий конфиг не трогается никогда», and the way that is made true is by
-    /// there being exactly one caller of this function: the `NotFound` arm of [`read_from`].
+    /// ⚠ **Who calls it, by name — and why that is still вопрос 95.** Until task T-55-9 this doc
+    /// said «exactly one caller», the `NotFound` arm of [`read_from`], and every other road —
+    /// a file that could not be read or parsed, a file from a newer schema, no `%APPDATA%` —
+    /// reached [`Config::default`] and its hard `ru`: somebody who rolled a build back met a
+    /// Russian menu, and on the road of a newer file could not even change it. The callers now
+    /// are the roads on which **there is no file the program could use**:
+    ///
+    /// * the `NotFound` arm of [`read_from_via`] — no file at all, вопрос 95 itself;
+    /// * the branch of [`Config::from_toml_str_via`] for a file from a newer schema that did not
+    ///   parse — none of its fields were understood;
+    /// * the `Err` arm of [`read_or_default_via`] — a file that could not be read or parsed;
+    /// * `tray::Tray::install_at` with no `%APPDATA%` — nothing was read at all (Н67).
+    ///
+    /// **No byte of any file is touched on any of them.** «Существующий конфиг не трогается
+    /// никогда» is about what the file holds, and it holds what it held; what changes is only the
+    /// language the program speaks in memory while it has no usable file. A file that parses —
+    /// current or migrated — is somebody's file, and a language missing from it is still the `ru`
+    /// of section 7, never the system's.
     ///
     /// It is deliberately **not** `Default::default`. A `Default` that reads the operating
     /// system is a `Default` that answers differently on two machines, and this type is
     /// compared for equality all over the tests; the difference has to be visible at the call
     /// site, which is what a named constructor gives.
     pub fn for_a_first_run() -> Self {
+        Self::for_a_first_run_in(system_language_for_a_first_run())
+    }
+
+    /// [`Config::for_a_first_run`] with the language handed in — task T-55-9. Pure, so that a test
+    /// on a machine whose Windows is Russian can still tell the language of the system from the
+    /// `ru` of section 7.
+    pub fn for_a_first_run_in(language: Language) -> Self {
         Self {
             general: General {
-                language: system_language_for_a_first_run(),
+                language,
                 ..General::default()
             },
             ..Self::default()
@@ -1587,6 +1607,25 @@ impl Config {
     /// still keeps every field this build understood, which an early return could not have
     /// given it.
     pub fn from_toml_str(text: &str) -> Result<(Self, ReadOutcome), ConfigError> {
+        Self::from_toml_str_via(text, &system_language_for_a_first_run)
+    }
+
+    /// [`Config::from_toml_str`] with the language of a first run handed in — task T-55-9, finding
+    /// С20.
+    ///
+    /// The one branch that asks for it is the file from a newer schema that did not parse: none of
+    /// its fields were understood, so the program lives by defaults, and since that task their
+    /// language is the system's ([`Config::for_a_first_run_in`]) rather than the hard `ru` of
+    /// section 7 — a person who rolled a build back no longer meets a Russian menu that, on the
+    /// road of a newer file, they could not even change. The argument is lazy and no other road
+    /// calls it: a document that parses keeps the language it names, and no byte of the file is
+    /// touched on any road. [`Config::from_toml_str`] hands in
+    /// [`system_language_for_a_first_run`]; `tests\settings.rs` hands in a staged language, the
+    /// only way to tell the two answers apart on a machine whose Windows is Russian.
+    pub fn from_toml_str_via(
+        text: &str,
+        system_language: &dyn Fn() -> Language,
+    ) -> Result<(Self, ReadOutcome), ConfigError> {
         // Task T-55-7: the count of softened fields belongs to this read and to nothing before it.
         SOFTENED.with(|count| count.set(0));
 
@@ -1612,12 +1651,13 @@ impl Config {
         if let Some(version) = claimed_schema_version(text)
             && version > CURRENT_SCHEMA_VERSION
         {
-            // The defaults of section 7, carrying the version the file claims. Nothing of the
-            // file itself is kept — none of it was understood — and nothing of it is lost
-            // either: `FromNewerSchema` forbids the write, so the bytes stay where they are.
+            // The configuration of a first run, carrying the version the file claims — task
+            // T-55-9, finding С20: its language is the system's. Nothing of the file itself is
+            // kept — none of it was understood — and nothing of it is lost either:
+            // `FromNewerSchema` forbids the write, so the bytes stay where they are.
             let config = Self {
                 schema_version: version,
-                ..Self::default()
+                ..Self::for_a_first_run_in(system_language())
             };
 
             return Ok((config, ReadOutcome::FromNewerSchema { version }));
@@ -1944,9 +1984,26 @@ pub fn read_from_via(
 /// A failed read never leads to the file being rewritten from here: overwriting is a
 /// decision, not a side effect.
 pub fn read_or_default(path: &Path) -> (Config, Result<ReadOutcome, ConfigError>) {
+    read_or_default_via(path, &system_language_for_a_first_run)
+}
+
+/// [`read_or_default`] with the language of a first run handed in — task T-55-9, finding С20.
+///
+/// A file that could not be read or parsed leaves the program on defaults, and since that task
+/// their language is the system's ([`Config::for_a_first_run_in`]) rather than the hard `ru` of
+/// section 7: the program has no usable file there, which is exactly the case вопрос 95 answered
+/// for a file that is missing. No byte of the file is touched — a damaged file is still kept
+/// aside before the first write, a file that could not be read is still left alone — and a file
+/// that parses keeps the language it names. The argument is lazy and asked only on the failed
+/// road; [`read_or_default`] hands in [`system_language_for_a_first_run`], `tests\settings.rs` a
+/// staged language.
+pub fn read_or_default_via(
+    path: &Path,
+    system_language: &dyn Fn() -> Language,
+) -> (Config, Result<ReadOutcome, ConfigError>) {
     match read_from(path) {
         Ok((config, outcome)) => (config, Ok(outcome)),
-        Err(err) => (Config::default(), Err(err)),
+        Err(err) => (Config::for_a_first_run_in(system_language()), Err(err)),
     }
 }
 

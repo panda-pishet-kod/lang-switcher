@@ -3337,6 +3337,50 @@ fn a_tray_on_a_file_with_one_bad_number_keeps_everything_else() {
     );
 }
 
+/// **Task T-55-9, finding Н67 — with no `%APPDATA%` the tray lives by the configuration of a first
+/// run.** Nothing was read, which is exactly the first run `Config::for_a_first_run` exists for;
+/// until this task the tray took the bare defaults and their hard `ru`.
+///
+/// ⚠ On a machine whose Windows is Russian the behavioural half cannot fail — the system answers
+/// `ru`, the very default of section 7 — so the half that can is the source: the `None` arm of the
+/// read in `Tray::install_at` names `Config::for_a_first_run()`.
+#[test]
+fn a_tray_with_no_appdata_lives_by_the_configuration_of_a_first_run() {
+    let window = TestWindow::new();
+    let product = ProductImage::open();
+    let tray = Tray::install_at(window.handle, product.instance(), None)
+        .expect("the tray must install: the icons are in the product binary's resources");
+
+    let lives_by = tray.config().clone();
+
+    drop(tray);
+
+    assert_eq!(
+        lives_by,
+        settings::Config::for_a_first_run(),
+        "Н67: nothing was read, so this is a first run"
+    );
+
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("SavePolicy::Allowed, None),")
+        .expect("the `None` arm of the read must be in src\\tray.rs");
+    let start = source[..at].rfind('\n').map_or(0, |line| line + 1);
+    let arm = &source[start..at];
+
+    assert!(
+        arm.contains("Config::for_a_first_run()"),
+        "Н67: the `None` arm must build the configuration of a first run: {arm}"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-24 — «Применить» does not write an autostart the registry refused
 //

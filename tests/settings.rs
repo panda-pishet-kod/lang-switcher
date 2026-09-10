@@ -16196,10 +16196,12 @@ fn a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining
         SavePolicy::QuarantineFirst,
         "a damaged file of this schema is still damaged — the stamp is what tells the two apart"
     );
+    // Task T-55-9, finding С20: the defaults that came back in its place speak the language of the
+    // system now, not the hard `ru` of section 7. ⚠ On a Russian Windows the two are the same word.
     assert_eq!(
-        config.general.language.tag(),
-        "ru",
-        "what came back in its place is the default of section 7"
+        config.general.language,
+        settings::system_language_for_a_first_run(),
+        "what came back in its place is the configuration of a first run"
     );
 }
 
@@ -17036,8 +17038,12 @@ fn only_a_first_run_takes_the_language_of_the_system() {
         "a migration is not a first run either"
     );
 
-    // And a file this build could not read at all falls back to the defaults of section 7,
-    // because those bytes are somebody's configuration and this is not a fresh machine.
+    // A file this build could not use — **turned round by task T-55-9** (findings С20 and Н67).
+    // Until that task a damaged file fell back to the `ru` of section 7, on the reasoning that its
+    // bytes are somebody's configuration. They still are, and they are still not touched; but the
+    // program lives by defaults there, not by that configuration, and the language of those
+    // defaults is now the system's. ⚠ On a machine whose Windows is Russian this line cannot fail —
+    // the system answers `ru` — and the staged test below is the one that can.
     let broken = dir.path.join("broken.toml");
     fs::write(&broken, "[general\nenabled = = true\n").expect("writable");
     let (config, outcome) = settings::read_or_default(&broken);
@@ -17045,8 +17051,106 @@ fn only_a_first_run_takes_the_language_of_the_system() {
     assert!(outcome.is_err());
     assert_eq!(
         config.general.language,
+        settings::system_language_for_a_first_run(),
+        "a file this build could not use speaks the language of the system"
+    );
+}
+
+/// **Task T-55-9, finding С20 — a file this build could not use lives in the language of the
+/// system, and a file that parses does not.**
+///
+/// The language of the system is staged as German, so that the answer can be told from the `ru`
+/// of section 7 on a machine whose Windows is Russian. (а) A damaged file, (а′) a file held open
+/// that could not be read, (б) a file from a newer schema that did not parse — all three leave the
+/// program on defaults, and those defaults speak the system's language; nothing else of them
+/// moves. The controls: a newer file that **did** parse keeps its own language, and (г) — the
+/// second half of вопрос 95 — a sound file without a `language` line is still `ru`.
+#[test]
+fn a_file_this_build_could_not_use_lives_in_the_language_of_the_system() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let german = || Language::De;
+    let dir = TestDir::new("language_of_an_unusable_file");
+
+    // (а) A damaged file.
+    let broken = dir.path.join("broken.toml");
+    fs::write(&broken, "[general\nenabled = = true\n").expect("writable");
+
+    let (config, outcome) = settings::read_or_default_via(&broken, &german);
+
+    assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
+    assert_eq!(
+        config,
+        Config::for_a_first_run_in(Language::De),
+        "С20: the defaults a damaged file leaves the program on speak the system's language, and \
+         nothing else of them moves"
+    );
+
+    // (а′) A file held open by another program, which could not be read — task T-55-6.
+    let held_path = dir.path.join("held.toml");
+    fs::write(&held_path, "schema_version = 6\n").expect("writable");
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&held_path)
+        .expect("the file must open");
+
+    let (config, outcome) = settings::read_or_default_via(&held_path, &german);
+
+    drop(held);
+
+    assert!(matches!(outcome, Err(ConfigError::Io(_))));
+    assert_eq!(
+        config.general.language,
+        Language::De,
+        "a file that could not be read leaves the program on the same defaults"
+    );
+
+    // (б) A file from a newer schema that did not parse.
+    let (config, outcome) = Config::from_toml_str_via(
+        "schema_version = 99\n\n[general]\nlanguage = \"zz\"\n",
+        &german,
+    )
+    .expect("a newer file is read, not refused");
+
+    assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: 99 });
+    assert_eq!(
+        config.general.language,
+        Language::De,
+        "С20: a newer file this build did not understand speaks the system's language"
+    );
+    assert_eq!(config.schema_version, 99, "and carries its stamp as before");
+
+    // The control of (б): a newer file that did parse is somebody's file, and keeps its language.
+    let (config, outcome) = Config::from_toml_str_via(
+        "schema_version = 99\n\n[general]\nlanguage = \"fr\"\n",
+        &german,
+    )
+    .expect("a newer file that parses is read");
+
+    assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: 99 });
+    assert_eq!(
+        config.general.language,
+        Language::Fr,
+        "a newer file that parsed keeps the language it names"
+    );
+
+    // (г) The control of вопрос 95: a sound file without a `language` line.
+    let sound = dir.path.join("sound.toml");
+    fs::write(
+        &sound,
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nenabled = false\n"),
+    )
+    .expect("writable");
+
+    let (config, outcome) = settings::read_or_default_via(&sound, &german);
+
+    assert_eq!(outcome.ok(), Some(ReadOutcome::Current));
+    assert_eq!(
+        config.general.language,
         Language::Ru,
-        "a damaged file is not a first run"
+        "вопрос 95: a file that exists and says nothing about the language is somebody's file — \
+         its language is the `ru` of section 7, never the system's"
     );
 }
 
