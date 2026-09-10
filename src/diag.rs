@@ -680,6 +680,14 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the path, not the system's answer, not a
     // byte of the file. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("configuration file not read", Kind::Process),
+    // ⭐ **Task T-55-7, решение 120.2** — a number of `config.toml` that was not a whole number its
+    // field can hold was read as the default of that field, and the rest of the file was read as it
+    // is. One line per such field; before this task one such value sent the whole file to
+    // quarantine. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not which field, not what stood there, not the
+    // default it became. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("configuration field read as its default", Kind::Process),
 ];
 
 /// What happened, as an index into [`OPERATIONS`].

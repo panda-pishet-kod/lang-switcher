@@ -629,6 +629,13 @@ impl Tray {
 
                 let (config, outcome) = settings::read_or_default(path);
 
+                // Решение 120.2, task T-55-7: one line of the journal for every number of the file
+                // that was read as its default — taken right after the read, on the thread that
+                // read.
+                for _ in 0..settings::take_softened_fields() {
+                    note_configuration(CONFIG_FIELD_DEFAULTED);
+                }
+
                 // **This is the place `read_or_default` returns a pair for** — task T-13-6.
                 // The configuration half is usable whatever happened, which is what that
                 // function exists for; the other half is the fate of the *file*, and it is a
@@ -1493,6 +1500,10 @@ const CONFIG_NEWER_SCHEMA: &str = "configuration file from a newer schema";
 /// ⭐ **Решение 120.1, task T-55-6.** The file is there and could not be read, twice. Nothing is
 /// written and nothing is moved for the session — [`SavePolicy::NotRead`].
 const CONFIG_NOT_READ: &str = "configuration file not read";
+
+/// ⭐ **Решение 120.2, task T-55-7.** A number of the file was not a whole number its field can
+/// hold and was read as the default of that field; the rest of the file was read as it is.
+const CONFIG_FIELD_DEFAULTED: &str = "configuration field read as its default";
 
 /// The unreadable file was moved to `config.toml.bad` before the first write.
 const CONFIG_QUARANTINED: &str = "configuration file quarantined";

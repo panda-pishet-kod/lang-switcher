@@ -1800,6 +1800,198 @@ fn text_that_is_not_utf8_is_damage_and_not_a_failed_read() {
     );
 }
 
+/// A document of section 7 whose `[general]`, `[hotkey]` and `[layouts]` carry values a person
+/// chose, with one more `line` in a `[section]` of its own — task T-55-7.
+fn living_document_with(section: &str, line: &str) -> String {
+    format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n\
+         [general]\nlanguage = \"de\"\ntheme = \"dark\"\n\n\
+         [hotkey]\nkey = \"F9\"\n\n\
+         [layouts]\ncycle = [\"0x00000419\", \"0x00000409\"]\n\n\
+         [{section}]\n{line}\n"
+    )
+}
+
+/// **Task T-55-7, решение 120.2 — one bad number loses only itself.**
+///
+/// Решение 81 took the numbers of section 7 off the dialog, so they are edited by hand — and until
+/// this task a value of the wrong type in any one of them (`-1`, `1.5`, `"300"`) declared the whole
+/// document damaged: the file went to `.bad`, and the hotkey, the exclusions, the cycle, the
+/// language and the theme were replaced by defaults with it (premise П8 of the stage, 15 of 15).
+/// Now such a value is the default **of its own field**, everything else is read, and the read
+/// reports one softened field.
+///
+/// **The soft fields, by name:** `replacement.inter_event_delay_ms`,
+/// `selection.clipboard_timeout_ms`, `selection.clipboard_restore_delay_ms`, `buffer.capacity`,
+/// `buffer.idle_timeout_s` — five, where the decision named four (поправка 120.8).
+#[test]
+fn one_bad_number_loses_only_itself() {
+    type ValueOf = fn(&Config) -> u64;
+
+    let fields: [(&str, &str, ValueOf, u64); 5] = [
+        (
+            "replacement",
+            "inter_event_delay_ms",
+            |config| u64::from(config.replacement.inter_event_delay_ms),
+            0,
+        ),
+        (
+            "selection",
+            "clipboard_timeout_ms",
+            |config| u64::from(config.selection.clipboard_timeout_ms),
+            300,
+        ),
+        (
+            "selection",
+            "clipboard_restore_delay_ms",
+            |config| u64::from(config.selection.clipboard_restore_delay_ms),
+            200,
+        ),
+        (
+            "buffer",
+            "capacity",
+            |config| u64::try_from(config.buffer.capacity).expect("a capacity fits in u64"),
+            256,
+        ),
+        (
+            "buffer",
+            "idle_timeout_s",
+            |config| u64::from(config.buffer.idle_timeout_s),
+            300,
+        ),
+    ];
+
+    let mut wrong = Vec::new();
+
+    for (section, field, value_of, default) in fields {
+        for bad in ["-1", "1.5", "\"300\""] {
+            let _ = settings::take_softened_fields();
+
+            let text = living_document_with(section, &format!("{field} = {bad}"));
+            let outcome = Config::from_toml_str(&text);
+            let softened = settings::take_softened_fields();
+
+            match &outcome {
+                Ok((config, ReadOutcome::Current))
+                    if value_of(config) == default
+                        && config.general.language == Language::De
+                        && config.hotkey.key == "F9"
+                        && config.layouts.cycle == ["0x00000419", "0x00000409"]
+                        && softened == 1 => {}
+                _ => wrong.push(format!(
+                    "[{section}] {field} = {bad}: softened {softened}, {:?}",
+                    outcome
+                        .as_ref()
+                        .map(|(config, read)| (read, value_of(config)))
+                )),
+            }
+        }
+    }
+
+    assert!(wrong.is_empty(), "решение 120.2: {wrong:#?}");
+}
+
+/// **The closed sets and the stamp stay loud** — task T-55-7, the insurance of решение 94. A soft
+/// field written generically would soften everything, and `language = "xx"` passing silently is
+/// exactly what section 7 forbids for the three enumerated fields. And a read that fails as a
+/// whole reports no softened field, even when a bad number stood beside the loud failure.
+#[test]
+fn the_closed_sets_and_the_stamp_stay_loud_while_the_numbers_are_soft() {
+    for (section, line) in [
+        ("general", "language = \"xx\""),
+        ("layouts", "mode = \"spiral\""),
+        ("replacement", "method = \"teleport\""),
+    ] {
+        let _ = settings::take_softened_fields();
+
+        let text = format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[{section}]\n{line}\n");
+        let outcome = Config::from_toml_str(&text);
+
+        assert!(
+            matches!(outcome, Err(ConfigError::Malformed { .. })),
+            "решение 94: `{line}` must fail the read, loudly: {outcome:?}"
+        );
+        assert_eq!(
+            settings::take_softened_fields(),
+            0,
+            "and nothing was softened on the way"
+        );
+    }
+
+    let outcome = Config::from_toml_str("schema_version = \"six\"\n\n[general]\nenabled = true\n");
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Malformed { .. })),
+        "a stamp that is not a number is not softened into the current one: {outcome:?}"
+    );
+
+    let text = format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nlanguage = \"xx\"\n\n[buffer]\ncapacity = -1\n"
+    );
+    let _ = settings::take_softened_fields();
+    let outcome = Config::from_toml_str(&text);
+
+    assert!(matches!(outcome, Err(ConfigError::Malformed { .. })));
+    assert_eq!(
+        settings::take_softened_fields(),
+        0,
+        "a read that failed as a whole reports no softened field"
+    );
+}
+
+/// **Where the softness ends: `300ms` is not a value at all** — task T-55-7. A number with a unit
+/// glued to it is a syntax error of the document, and the parser stops before any field sees it
+/// (premise П8: the column is the `m`, not the start of the value). A soft field — the way
+/// `general.theme` is soft, решение 120.2 — softens values the document holds, so this one still
+/// fails the read. ⚠ Put to the owner as a question on 2026-09-10; this is variant А.
+#[test]
+fn a_number_with_a_unit_glued_on_is_a_broken_document_and_not_a_soft_field() {
+    let text = living_document_with("replacement", "inter_event_delay_ms = 300ms");
+    let outcome = Config::from_toml_str(&text);
+
+    assert!(
+        matches!(outcome, Err(ConfigError::Malformed { .. })),
+        "`300ms` is not a value a field could soften: {outcome:?}"
+    );
+}
+
+/// **The soft fields are five, by name, and no more** — task T-55-7. Swept over the source, because
+/// softness spreads by copying an attribute: a sixth `deserialize_with = "soft_…"` on a closed set
+/// would be the silent pass section 7 forbids, and no behavioural test of the five would notice.
+#[test]
+fn exactly_the_five_numbers_of_section_7_are_soft() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let needle = "deserialize_with = \"soft_";
+    let soft: Vec<&str> = source
+        .match_indices(needle)
+        .map(|(at, _)| {
+            let rest = &source[at + needle.len() - "soft_".len()..];
+            &rest[..rest.find('"').expect("an attribute closes its string")]
+        })
+        .collect();
+
+    println!("soft fields in src\\settings.rs: {soft:?}");
+
+    assert_eq!(
+        soft,
+        [
+            "soft_inter_event_delay_ms",
+            "soft_clipboard_timeout_ms",
+            "soft_clipboard_restore_delay_ms",
+            "soft_buffer_capacity",
+            "soft_buffer_idle_timeout_s",
+        ],
+        "решение 120.2: exactly the five numbers of section 7 are soft, in this order"
+    );
+}
+
 // Criterion 21. The standard path is %APPDATA%\Lang_Switcher\config.toml. Checked by
 // building the string: no file and no directory is created anywhere near the real
 // %APPDATA%, which belongs to whoever is running the tests.

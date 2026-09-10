@@ -764,8 +764,9 @@ pub struct Replacement {
     /// How the typed run is replaced. Default `auto` — FR-42а.
     #[serde(default)]
     pub method: ReplacementMethod,
-    /// Pause inserted between synthesised input events, milliseconds. Default `0`.
-    #[serde(default)]
+    /// Pause inserted between synthesised input events, milliseconds. Default `0`. Soft —
+    /// решение 120.2, `soft_whole_number`.
+    #[serde(default, deserialize_with = "soft_inter_event_delay_ms")]
     pub inter_event_delay_ms: u32,
 }
 
@@ -776,12 +777,18 @@ pub struct Selection {
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// How long to wait for the clipboard to carry the selection, milliseconds.
-    /// Default `300`.
-    #[serde(default = "default_clipboard_timeout_ms")]
+    /// Default `300`. Soft — решение 120.2, `soft_whole_number`.
+    #[serde(
+        default = "default_clipboard_timeout_ms",
+        deserialize_with = "soft_clipboard_timeout_ms"
+    )]
     pub clipboard_timeout_ms: u32,
     /// How long to wait before restoring the previous clipboard, milliseconds.
-    /// Default `200`.
-    #[serde(default = "default_clipboard_restore_delay_ms")]
+    /// Default `200`. Soft — решение 120.2, `soft_whole_number`.
+    #[serde(
+        default = "default_clipboard_restore_delay_ms",
+        deserialize_with = "soft_clipboard_restore_delay_ms"
+    )]
     pub clipboard_restore_delay_ms: u32,
 }
 
@@ -798,8 +805,12 @@ impl Default for Selection {
 /// Section `[buffer]` of section 7.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Buffer {
-    /// Capacity of the typing buffer in characters. Default `256`.
-    #[serde(default = "default_buffer_capacity")]
+    /// Capacity of the typing buffer in characters. Default `256`. Soft — решение 120.2,
+    /// `soft_whole_number`.
+    #[serde(
+        default = "default_buffer_capacity",
+        deserialize_with = "soft_buffer_capacity"
+    )]
     pub capacity: usize,
     /// **How long a word may sit in the buffer with nothing happening to it, seconds — FR-15**,
     /// task T-52-4. Default `300`; `0` switches the rule off.
@@ -816,7 +827,13 @@ pub struct Buffer {
     /// would find their configuration quarantined as «из будущего»
     /// ([`ReadOutcome::FromNewerSchema`]), which is a real cost paid for a key whose absence
     /// already has a defined meaning.
-    #[serde(default = "default_buffer_idle_timeout_s")]
+    ///
+    /// Soft — решение 120.2, `soft_whole_number`: a value that is not a whole number this field
+    /// can hold is its default, and costs nothing else of the file.
+    #[serde(
+        default = "default_buffer_idle_timeout_s",
+        deserialize_with = "soft_buffer_idle_timeout_s"
+    )]
     pub idle_timeout_s: u32,
 }
 
@@ -1217,6 +1234,110 @@ fn default_buffer_idle_timeout_s() -> u32 {
     300
 }
 
+thread_local! {
+    /// How many soft fields the last [`Config::from_toml_str`] on this thread read as their
+    /// default — task T-55-7. Taken by the caller with [`take_softened_fields`].
+    static SOFTENED: Cell<u32> = const { Cell::new(0) };
+}
+
+/// How many soft fields the last read of a configuration on this thread read as their default,
+/// and zero from then on — task T-55-7, решение 120.2.
+///
+/// A side channel, and deliberately one: this module writes no journal, and the value of a field
+/// that fell back to its default is, by construction, not in the configuration any more. The tray
+/// reads the configuration on its own thread, takes this count right after the read and puts one
+/// line in the journal per field. A read that failed as a whole leaves zero — nothing of it is
+/// used.
+pub fn take_softened_fields() -> u32 {
+    SOFTENED.with(|count| count.replace(0))
+}
+
+/// Counts one soft field read as its default.
+fn note_softened() {
+    SOFTENED.with(|count| count.set(count.get().saturating_add(1)));
+}
+
+/// A number of section 7 that is soft — решение 120.2, task T-55-7.
+///
+/// **Soft means: a value of the document that is not a whole number this field can hold is the
+/// default of this field**, and it is counted ([`take_softened_fields`]). A negative number, a
+/// fraction, a string, a boolean, a number too large for the field — every one of them costs the
+/// field and nothing else. Until that task any of them declared the whole document damaged, and the
+/// hotkey, the exclusions, the cycle, the language and the theme went to quarantine with it.
+///
+/// **Soft is about the type, not the range.** A whole number the field can hold passes through as
+/// it is, however large or small: the ceilings of `buffer` and `inject` take it to their bounds
+/// where the value is published (finding Н49 — words in section 7, not code here), and softness
+/// must not be mistaken for them.
+///
+/// **Five fields, by name, and no more:** `replacement.inter_event_delay_ms`,
+/// `selection.clipboard_timeout_ms`, `selection.clipboard_restore_delay_ms`, `buffer.capacity` and
+/// `buffer.idle_timeout_s` — the numbers решение 81 left to be edited by hand. The closed sets of
+/// section 7 (`general.language`, `layouts.mode`, `replacement.method`) and `schema_version` stay
+/// loud: a value outside a closed set must not pass silently, and a stamp read as a default would
+/// blind the recognition of a file from a newer schema. `tests\settings.rs` sweeps this file for
+/// exactly these five.
+///
+/// ⚠ A number with a unit glued to it (`300ms`) is not a value at all but a syntax error of the
+/// document, which no field ever sees: it still fails the read.
+fn soft_whole_number<'de, D, T>(deserializer: D, default: T) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: TryFrom<i64>,
+{
+    let value = toml::Value::deserialize(deserializer)?;
+
+    let whole = match value {
+        toml::Value::Integer(number) => T::try_from(number).ok(),
+        _ => None,
+    };
+
+    Ok(whole.unwrap_or_else(|| {
+        note_softened();
+        default
+    }))
+}
+
+/// `replacement.inter_event_delay_ms`, soft — [`soft_whole_number`].
+fn soft_inter_event_delay_ms<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    soft_whole_number(deserializer, 0)
+}
+
+/// `selection.clipboard_timeout_ms`, soft — [`soft_whole_number`].
+fn soft_clipboard_timeout_ms<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    soft_whole_number(deserializer, default_clipboard_timeout_ms())
+}
+
+/// `selection.clipboard_restore_delay_ms`, soft — [`soft_whole_number`].
+fn soft_clipboard_restore_delay_ms<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    soft_whole_number(deserializer, default_clipboard_restore_delay_ms())
+}
+
+/// `buffer.capacity`, soft — [`soft_whole_number`].
+fn soft_buffer_capacity<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    soft_whole_number(deserializer, default_buffer_capacity())
+}
+
+/// `buffer.idle_timeout_s`, soft — [`soft_whole_number`].
+fn soft_buffer_idle_timeout_s<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    soft_whole_number(deserializer, default_buffer_idle_timeout_s())
+}
+
 /// Serde default for `general.theme` — the default FR-92а names.
 ///
 /// A function rather than `#[serde(default)]` because [`ThemeSetting`] implements no
@@ -1416,6 +1537,9 @@ impl Config {
     /// still keeps every field this build understood, which an early return could not have
     /// given it.
     pub fn from_toml_str(text: &str) -> Result<(Self, ReadOutcome), ConfigError> {
+        // Task T-55-7: the count of softened fields belongs to this read and to nothing before it.
+        SOFTENED.with(|count| count.set(0));
+
         let error = match toml::from_str::<Self>(text) {
             Ok(mut config) => {
                 let outcome = config.migrate();
@@ -1423,6 +1547,9 @@ impl Config {
             }
             Err(error) => error,
         };
+
+        // A read that failed as a whole uses nothing it softened on the way.
+        SOFTENED.with(|count| count.set(0));
 
         // The parser refused. If the document names a schema this build is too old for, that
         // refusal is the expected answer to a file from the future and not a verdict on it.

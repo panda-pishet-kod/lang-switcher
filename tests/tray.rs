@@ -3278,6 +3278,65 @@ fn a_tray_on_a_file_that_cannot_be_read_writes_nothing_and_moves_nothing() {
     );
 }
 
+/// **Task T-55-7 through the tray — one bad number is one line of the journal, and the rest of the
+/// file is the program's.** The file carries a hotkey a person chose and a capacity of `-1`: the
+/// tray lives by `F9` and by the default capacity, the policy is `Allowed` rather than quarantine,
+/// the journal says once that a field was read as its default, and the file is not rewritten — the
+/// person's typo stays where the person can see it (task T-55-4).
+#[test]
+fn a_tray_on_a_file_with_one_bad_number_keeps_everything_else() {
+    const DEFAULTED: &str = "configuration field read as its default";
+
+    let window = TestWindow::new();
+    let home = TestDir::new("e55-soft");
+
+    fs::write(
+        home.config(),
+        format!(
+            "schema_version = {}\r\n\r\n[hotkey]\r\nkey = \"F9\"\r\n\r\n[buffer]\r\ncapacity = -1\r\n",
+            settings::CURRENT_SCHEMA_VERSION
+        ),
+    )
+    .expect("the configuration must be writable");
+    let before = fs::read(home.config()).expect("the configuration must be readable");
+
+    let notes_before = diag::render().matches(DEFAULTED).count();
+    let tray = install(&window, &home);
+    let notes_after = diag::render().matches(DEFAULTED).count();
+
+    let policy = tray.save_policy();
+    let key = tray.config().hotkey.key.clone();
+    let capacity = tray.config().buffer.capacity;
+
+    drop(tray);
+
+    println!(
+        "one bad number: {policy:?}, key {key}, capacity {capacity}, journal lines {notes_before} \
+         -> {notes_after}"
+    );
+
+    assert_eq!(
+        policy,
+        settings::SavePolicy::Allowed,
+        "решение 120.2: a file with one bad number is not damage"
+    );
+    assert_eq!(key, "F9", "and everything else in it is the program's");
+    assert_eq!(
+        capacity, 256,
+        "the bad number is the default of its own field"
+    );
+    assert_eq!(
+        notes_after,
+        notes_before + 1,
+        "and the journal says so, once"
+    );
+    assert_eq!(
+        fs::read(home.config()).expect("the configuration must still be there"),
+        before,
+        "and the file is not rewritten: the typo stays where the person can see it"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-24 — «Применить» does not write an autostart the registry refused
 //

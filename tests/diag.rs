@@ -962,6 +962,37 @@ fn a_file_that_could_not_be_read_has_a_name_apart_from_a_damaged_one() {
     );
 }
 
+/// **Task T-55-7, решение 120.2 — a field read as its default has a name of its own.** One bad
+/// number in `config.toml` costs that number and nothing else, and the journal says that it did —
+/// not which field, not what stood there. `Kind::Process` like every configuration row.
+#[test]
+fn a_field_read_as_its_default_has_a_name_of_its_own() {
+    let name = "configuration field read as its default";
+
+    let _gate = ring();
+
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» still reaches the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Process,
+        "{name} landed in the wrong group"
+    );
+
+    diag::record(operation, OsCode::NONE);
+
+    assert!(
+        diag::render().contains(name),
+        "the dump does not print {name}"
+    );
+}
+
 /// **SEC-01 and SEC-07 for those five rows: they name a fate, and a fate is not a file.**
 ///
 /// A configuration file can be edited by hand and filled with anything at all, which is the
