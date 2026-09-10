@@ -3008,31 +3008,42 @@ fn a_readable_configuration_is_written_back_exactly_as_before() {
     );
 }
 
-/// **Т-29-2, сторож: «ОК» writes the file — always, and not only when something changed.**
+/// **Т-29-2, сторож — перевёрнут задачей T-55-4 (Н27): «ОК» writes a configuration that changed,
+/// and leaves an unchanged one where it is.**
 ///
 /// Три сообщения о том, что смена языка «не доходит до диска» (вопросы 83.3 и 94.4, находка
 /// м-Э29-1) all had the same shape: the file untouched, byte for byte and to the millisecond.
 /// The obvious cause would have been a «write only when it changed» rule somewhere on the road
-/// from the dialog to [`settings::write_to`]. **There is no such rule, and this test is what
-/// keeps it that way** — the reports turned out to be readings of a broken instrument, and the
-/// stand of Э29 measured all 296 «откуда → куда» cases writing the file.
+/// from the dialog to [`settings::write_to`], and task Т-29-2 kept such a rule out with this test —
+/// the reports turned out to be readings of a broken instrument, and the stand of Э29 measured all
+/// 296 «откуда → куда» cases writing the file.
 ///
-/// The measurement is deliberately not «did the timestamp move»: the system clock ticks about
-/// every 15.6 ms, so two writes can honestly share one. Instead the file on the disk is
-/// **replaced by something else** between the two saves, and the question is whether
-/// [`Tray::replace_config`] puts the configuration back. It can only do that by writing, and it
-/// is handed a configuration equal to the one it already holds — so nothing in memory changed,
-/// and the file changed all the same.
+/// **Task T-55-4 brought exactly such a rule in, on purpose** — finding Н27: a file printed afresh
+/// from memory on every exit loses a person's comments at the first start. So the test holds both
+/// halves of the new truth. The first half is the one Т-29-2 existed for, and it is unchanged: a
+/// language the person picked **does** reach the file. The second is turned round: the file is
+/// replaced by something else behind the tray's back, «ОК» is pressed on a dialog where nothing
+/// changed, and the text put there stays — the tray compares with what it last knew the file to
+/// hold, and nothing it holds differs from that.
+///
+/// ⚠ **The comparison is with what is on the disk, not with what was read at the start.** A tray
+/// that compared with its first read would not save a person's way back: A → B → A would leave B
+/// on the disk. The last half of this test is that way back, from a file the tray started on.
 #[test]
-fn a_save_writes_the_file_even_when_the_configuration_did_not_change() {
+fn a_changed_configuration_reaches_the_file_and_an_unchanged_one_leaves_it_alone() {
     let _turn = toggle_turn();
     let window = TestWindow::new();
-    let home = TestDir::new("save-is-unconditional");
+    let home = TestDir::new("save-only-what-changed");
+
+    // A current file, so that the tray starts on something it has read.
+    settings::write_to(&home.config(), &settings::Config::default())
+        .expect("the configuration must be writable");
 
     let mut tray = install(&window, &home);
+    let first = tray.config().clone();
 
     // The first save: the language the person picked reaches the file.
-    let mut chosen = tray.config().clone();
+    let mut chosen = first.clone();
     chosen.general.language = Language::De;
     tray.replace_config(chosen.clone());
 
@@ -3042,8 +3053,7 @@ fn a_save_writes_the_file_even_when_the_configuration_did_not_change() {
         "the language of «ОК» must reach the file: {written}"
     );
 
-    // Now the file says something else, and the tray does not know it. A rule that skipped a
-    // save because «nothing changed» would leave this text exactly where it is.
+    // Now the file says something else, and the tray does not know it.
     let meanwhile = "schema_version = 1\n\n[general]\nlanguage = \"en\"\nenabled = false\n";
     fs::write(home.config(), meanwhile).expect("the file must be writable");
 
@@ -3051,13 +3061,22 @@ fn a_save_writes_the_file_even_when_the_configuration_did_not_change() {
     // where the person changed nothing.
     tray.replace_config(chosen.clone());
 
+    assert_eq!(
+        fs::read_to_string(home.config()).expect("the file must be readable"),
+        meanwhile,
+        "T-55-4: an unchanged configuration is not written — the text put there stays"
+    );
+
+    // The way back to what the tray read at the start. A tray that compared with its first read
+    // would take this for «nothing changed» and leave the text above on the disk.
+    tray.replace_config(first.clone());
+
     let (back, outcome) = settings::read_or_default(&home.config());
 
     assert!(outcome.is_ok(), "the file must parse: {:?}", outcome.err());
     assert_eq!(
-        back.general.language,
-        Language::De,
-        "an unchanged configuration is still written: the file was put back"
+        back.general.language, first.general.language,
+        "the way back to the first choice is a change, and it reaches the file"
     );
     assert!(
         back.general.enabled,
@@ -3074,6 +3093,98 @@ fn a_save_writes_the_file_even_when_the_configuration_did_not_change() {
         [CONFIG_FILE_NAME],
         "a readable file is written in place and copied nowhere"
     );
+}
+
+/// **Task T-55-4, finding Н27 — an unchanged configuration is left alone at shutdown.**
+///
+/// The file is printed afresh from memory whenever it is written — comments, the order of the
+/// lines and the fields of a later schema do not survive a write — and until this task it was
+/// written on **every** way out of the program, changed or not. Starting the product once was
+/// enough to turn a file a person had commented into a machine's. Now the tray remembers what the
+/// file holds and writes only when the configuration it lives by is different.
+///
+/// Both numbers are measured, because either alone cannot fail: a rewrite of an unchanged
+/// configuration prints the very same bytes (premise П6 of the stage — 633 of 633, and a new time
+/// on the file). The controls are the other two halves of the rule: a changed field is written,
+/// and a file that needed a migration is written although nobody changed anything.
+#[test]
+fn an_unchanged_configuration_is_left_alone_at_shutdown() {
+    let window = TestWindow::new();
+
+    // A current file, printed by this very build — nothing in it asks for a migration.
+    let home = TestDir::new("e55-unchanged");
+    settings::write_to(&home.config(), &settings::Config::default())
+        .expect("the configuration must be writable");
+
+    let bytes_before = fs::read(home.config()).expect("the configuration must be readable");
+    let time_before = fs::metadata(home.config())
+        .and_then(|metadata| metadata.modified())
+        .expect("the time of the file must be readable");
+
+    // The clock of the file system ticks about every 15.6 ms, and a rewrite within the same tick
+    // could honestly share the old time.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    drop(install(&window, &home));
+
+    let bytes_after = fs::read(home.config()).expect("the configuration must still be there");
+    let time_after = fs::metadata(home.config())
+        .and_then(|metadata| metadata.modified())
+        .expect("the time of the file must be readable");
+
+    println!(
+        "a start and an exit with nothing changed: bytes equal {}, time {time_before:?} -> \
+         {time_after:?}",
+        bytes_after == bytes_before
+    );
+
+    assert_eq!(
+        bytes_after, bytes_before,
+        "Н27: the bytes of an unchanged configuration are the ones on the disk"
+    );
+    assert_eq!(
+        time_after, time_before,
+        "Н27: and the file was not written at all — not even its time moved"
+    );
+    assert_eq!(
+        home.entries(),
+        [CONFIG_FILE_NAME],
+        "and nothing was left beside it"
+    );
+
+    // The control: one field changed, and the file is written.
+    let mut tray = install(&window, &home);
+    let mut changed = tray.config().clone();
+    changed.buffer.capacity = 1024;
+    tray.replace_config(changed);
+    drop(tray);
+
+    let (read, _) = settings::read_or_default(&home.config());
+
+    assert_eq!(
+        read.buffer.capacity, 1024,
+        "a changed field reaches the file"
+    );
+
+    // The control: a file that needed a migration is written although nobody changed anything —
+    // otherwise the migration would never reach the disk.
+    let old = TestDir::new("e55-unchanged-migrated");
+    fs::write(
+        old.config(),
+        "schema_version = 2\r\n\r\n[general]\r\nenabled = true\r\n",
+    )
+    .expect("the old file must be writable");
+
+    drop(install(&window, &old));
+
+    let (migrated, outcome) = settings::read_or_default(&old.config());
+
+    assert_eq!(
+        outcome.ok(),
+        Some(settings::ReadOutcome::Current),
+        "the migration reached the disk: the file reads as current now"
+    );
+    assert_eq!(migrated.schema_version, settings::CURRENT_SCHEMA_VERSION);
 }
 
 // ---------------------------------------------------------------------------------------

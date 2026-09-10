@@ -566,6 +566,15 @@ pub struct Tray {
     /// [`SavePolicy::Forbidden`] never changes: a file from a newer schema is still from a
     /// newer schema at shutdown.
     save_policy: SavePolicy,
+    /// What `config.toml` is known to hold — task **T-55-4**, finding Н27.
+    ///
+    /// `Some` only while the file on the disk is known to be exactly this configuration: read
+    /// whole at the start ([`settings::ReadOutcome::Current`]) or written by [`Tray::save_config`]
+    /// since. `None` for everything else — no file yet, a file that needed a migration, a file
+    /// this build could not read, a file from a newer schema — and then the first save writes, as
+    /// it always did. [`Tray::save_config`] leaves the file alone while the configuration equals
+    /// this.
+    on_disk: Option<Config>,
     /// What `RegisterWindowMessageW("TaskbarCreated")` returned — FR-81. Zero means the
     /// registration failed, and zero is also `WM_NULL`, so it must never be compared against.
     taskbar_created: u32,
@@ -608,7 +617,7 @@ impl Tray {
         // стоит одной записи в журнале и возвращает шару прежний вид (NFR-13).
         let balloon = BalloonIcons::load(instance);
 
-        let (config, save_policy) = match config_path.as_deref() {
+        let (config, save_policy, on_disk) = match config_path.as_deref() {
             Some(path) => {
                 let (config, outcome) = settings::read_or_default(path);
 
@@ -617,8 +626,8 @@ impl Tray {
                 // function exists for; the other half is the fate of the *file*, and it is a
                 // decision this tray has to take, because this tray is the only thing in the
                 // program that ever writes that file back. Dropping it here was the defect:
-                // `save_config` below is unconditional and FR-83 reaches it on every exit, so
-                // a file this build could not read was overwritten with defaults at the first
+                // `save_config` below was unconditional then and FR-83 reached it on every exit,
+                // so a file this build could not read was overwritten with defaults at the first
                 // toggle or the first shutdown.
                 let policy = SavePolicy::for_read(&outcome);
 
@@ -633,13 +642,17 @@ impl Tray {
                     SavePolicy::Forbidden => note_configuration(CONFIG_NEWER_SCHEMA),
                 }
 
-                (config, policy)
+                // Task T-55-4: only a file read whole is known to hold this very configuration.
+                let on_disk =
+                    matches!(outcome, Ok(settings::ReadOutcome::Current)).then(|| config.clone());
+
+                (config, policy, on_disk)
             }
             // `%APPDATA%` is not set. A resident utility still has to run, and the defaults
             // of section 7 are a complete configuration, so this is not a reason to refuse.
             // Nothing was read and nothing will be written — `save_config` leaves on the same
             // `None` — so the policy is the one that changes nothing.
-            None => (Config::default(), SavePolicy::Allowed),
+            None => (Config::default(), SavePolicy::Allowed, None),
         };
 
         // SAFETY: `TASKBAR_CREATED` is a NUL-terminated `'static` UTF-16 literal, so the
@@ -666,6 +679,7 @@ impl Tray {
             config,
             config_path,
             save_policy,
+            on_disk,
             taskbar_created,
             icon_present: false,
             add_calls: 0,
@@ -1039,9 +1053,10 @@ impl Tray {
     /// changed and everything else — `general.enabled`, `[buffer] capacity`, `schema_version` —
     /// exactly as it found them.
     ///
-    /// Saving is not optional here: the tray is the in-memory owner of the configuration and
-    /// writes it out again at shutdown (FR-83), so a change kept only in the file would be
-    /// overwritten by this copy on the way out.
+    /// Saving is not optional here: the tray is the in-memory owner of the configuration, and a
+    /// change kept only in memory would reach the disk at shutdown (FR-83) or never. Since task
+    /// T-55-4 a configuration equal to what the file holds is not written again — see
+    /// [`Tray::save_config`].
     pub fn replace_config(&mut self, config: Config) {
         self.config = config;
         self.refresh_icon();
@@ -1356,12 +1371,34 @@ impl Tray {
     ///   because everything this build could write back is a strict subset of what is in it —
     ///   see [`SavePolicy::Forbidden`], where that reasoning is written out in full against
     ///   the module's own promise at [`settings::ReadOutcome::FromNewerSchema`].
+    ///
+    /// # Only what changed — task T-55-4, finding Н27
+    ///
+    /// The file is printed afresh from memory whenever it is written, so a write is not free: a
+    /// person's comments, the order of the lines and the fields of a later schema are gone after
+    /// it. Until that task every one of the four ways wrote on every call, and the shutdown of
+    /// FR-83 is one of them — a single start of the product turned a file a person had commented
+    /// into a machine's. Now the tray remembers what the file holds ([`Tray::on_disk`]), and while
+    /// the configuration equals it, **nothing is touched**: no temporary, no rename, no new time
+    /// on the file. FR-83's «сохранение конфигурации» is honoured all the same — the configuration
+    /// is on the disk already.
+    ///
+    /// The comparison is with what is on the disk, not with what was read at the start: a person
+    /// who changes a setting and then changes it back has made two changes, and the second must
+    /// reach the file as surely as the first. No file at all, a file that needed a migration and a
+    /// file this build could not read leave nothing to compare with, and their first save writes,
+    /// as it always did.
     fn save_config(&mut self) {
         let Some(path) = self.config_path.as_deref() else {
             // No `%APPDATA%`: there is nowhere to save to, and nothing was read from there
             // either, so the state simply does not outlive the session.
             return;
         };
+
+        // Task T-55-4: the file already holds exactly this configuration.
+        if self.on_disk.as_ref() == Some(&self.config) {
+            return;
+        }
 
         match self.save_policy {
             SavePolicy::Allowed => {}
@@ -1400,12 +1437,16 @@ impl Tray {
         }
 
         match settings::write_to(path, &self.config) {
-            Ok(settings::WriteOutcome::Written) => {}
-            // ⭐ **Task T-55-3, finding Н26.** The file carried the read-only attribute, and the
-            // write cleared it once and landed. A person may have set that attribute by hand, so
-            // the fact is named rather than taken silently.
-            Ok(settings::WriteOutcome::WrittenAfterClearingReadOnly) => {
-                note_configuration(CONFIG_READ_ONLY_CLEARED);
+            Ok(outcome) => {
+                // Task T-55-4: what was just written is what the file holds now.
+                self.on_disk = Some(self.config.clone());
+
+                // ⭐ **Task T-55-3, finding Н26.** The file carried the read-only attribute, and
+                // the write cleared it once and landed. A person may have set that attribute by
+                // hand, so the fact is named rather than taken silently.
+                if outcome == settings::WriteOutcome::WrittenAfterClearingReadOnly {
+                    note_configuration(CONFIG_READ_ONLY_CLEARED);
+                }
             }
             Err(error) => {
                 // A failed save must not take the process down: in the FR-83 case the program is
