@@ -58,8 +58,8 @@ use lang_switcher::inject::{self, Dispatched, Modifiers};
 use lang_switcher::layouts::{Cycle, KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, Mods};
 use lang_switcher::selection::{
     self, CF_UNICODETEXT, CHORD_EVENTS, ClipboardError, OPEN_ATTEMPTS, OPEN_RETRY_INTERVAL, Origin,
-    Outcome, Path as SelectionPath, Plan, Refusal, SNAPSHOT_BUDGET_BYTES, Snapshot, Update,
-    WORST_CASE_OPEN, Wait,
+    Outcome, Path as SelectionPath, Plan, ProbeAnswer, Refusal, SNAPSHOT_BUDGET_BYTES, Snapshot,
+    Update, WORST_CASE_OPEN, Wait,
 };
 use lang_switcher::settings;
 
@@ -704,7 +704,12 @@ fn nothing_that_can_block_runs_on_the_thread_that_owns_the_hook() {
         Err(ClipboardError::WrongThread)
     ));
     assert!(matches!(
-        selection::restore_after(window.0, &Snapshot::empty(), Duration::from_millis(200), 0),
+        selection::restore_after(
+            window.0,
+            &Snapshot::empty(),
+            Duration::from_millis(200),
+            ProbeAnswer::NONE,
+        ),
         Err(ClipboardError::WrongThread)
     ));
     assert_eq!(
@@ -1322,9 +1327,11 @@ fn the_delayed_restore_waits_the_configured_time() {
     selection::write_unicode_text(window.0, "during the pause").expect("our own write");
 
     let started = Instant::now();
-    // The probe number is the "nothing was answered" value: this test is about the delay and
-    // about the own-write path, which is the arm `is_own_change` decides. Task Т-18-1.
-    let restored = selection::restore_after(window.0, &snapshot, delay, 0).expect("the restore");
+    // The answer to the probe is the "nothing was answered" value: this test is about the delay
+    // and about the own-write path, which is the arm `is_own_change` decides. Tasks Т-18-1 and
+    // T-38-2.
+    let restored = selection::restore_after(window.0, &snapshot, delay, ProbeAnswer::NONE)
+        .expect("the restore");
     let elapsed = started.elapsed();
 
     assert!(restored.placed >= 1);
@@ -1381,9 +1388,12 @@ fn the_snapshot_goes_back_when_the_path_refused_before_it_ever_wrote() {
     );
 
     // Steps 4 to 7 refuse — no text, no direction, no write. Step 8 runs through the one door,
-    // carrying the number step 3 saw. That number is the whole of the repair.
-    let restored = selection::restore_after(window.0, &snapshot, Duration::ZERO, probe)
-        .expect("step 8 answers");
+    // carrying the answer step 3 saw. That answer is the whole of the repair of Т-18-1; the
+    // number standing after step 4's read, which T-38-2 adds, is this very number here — the raw
+    // write above closed the clipboard before anything looked at it.
+    let restored =
+        selection::restore_after(window.0, &snapshot, Duration::ZERO, ProbeAnswer::at(probe))
+            .expect("step 8 answers");
 
     assert_eq!(
         raw_read(window.0, CF_UNICODETEXT),
@@ -1847,24 +1857,27 @@ struct Bench {
     panic_at: Option<Step>,
     /// What step 3 answers.
     wait: Wait,
-    /// What the sequence number reads *after* step 3 gave up — task T-13-11.
+    /// What the sequence number reads outside step 3 — after step 3 gave up, task T-13-11, and
+    /// after step 4 read the clipboard, task T-38-2.
     ///
     /// The baseline of a bench is `Snapshot::empty().sequence()`, so the default answers "the
-    /// clipboard did not move" and every test written before T-13-11 sees what it saw.
+    /// clipboard did not move" and every test written before T-13-11 sees what it saw; and being
+    /// below every answer to the probe, the default widens no answer, so every test written
+    /// before T-38-2 sees what it saw as well.
     sequence_now: u32,
     /// How many times the sequence number was asked for outside step 3. **Not a [`Step`]**: the
     /// tape records the steps of FR-61 and FR-40, and this is neither.
     sequence_probes: u32,
     /// The baseline step 3 was given — acceptance point 11.
     baseline_seen: Option<u32>,
-    /// The probe number step 8 was handed through [`SelectionPath::restore_clipboard`].
+    /// The answer to the probe step 8 was handed through [`SelectionPath::restore_clipboard`].
     ///
     /// **Not a [`Step`]** for the same reason `sequence_probes` is not one, and the single most
     /// load-bearing field of this bench since task Т-18-1: the tape says step 8's door opened,
     /// and this says whether what came through it lets the gate of П-5 open too. Before Т-18-1
     /// the first was true on every failure path and the second was false, and the user's
-    /// clipboard was the difference.
-    restore_probe: Option<u32>,
+    /// clipboard was the difference. Task T-38-2 made it an answer rather than one number.
+    restore_answer: Option<ProbeAnswer>,
     /// What step 4 answers.
     reads: Option<String>,
     /// What step 6 wrote.
@@ -1887,7 +1900,7 @@ impl Bench {
             sequence_now: Snapshot::empty().sequence(),
             sequence_probes: 0,
             baseline_seen: None,
-            restore_probe: None,
+            restore_answer: None,
             reads: Some(text.to_owned()),
             written: None,
             switched: None,
@@ -1924,6 +1937,13 @@ impl Bench {
 
     fn panicking_at(mut self, step: Step) -> Self {
         self.panic_at = Some(step);
+        self
+    }
+
+    /// The same bench, with the clipboard's sequence number standing at `sequence` whenever it is
+    /// asked outside step 3 — an application still writing after step 3 looked, task T-38-2.
+    fn with_clipboard_at(mut self, sequence: u32) -> Self {
+        self.sequence_now = sequence;
         self
     }
 
@@ -2023,9 +2043,9 @@ impl SelectionPath for Bench {
         Modifiers::NONE
     }
 
-    fn restore_clipboard(&mut self, _snapshot: &Snapshot, probe: u32) {
+    fn restore_clipboard(&mut self, _snapshot: &Snapshot, answer: ProbeAnswer) {
         self.note(Step::RestoreClipboard);
-        self.restore_probe = Some(probe);
+        self.restore_answer = Some(answer);
     }
 
     fn reclaim_clipboard(&mut self, _snapshot: &Snapshot) {
@@ -2205,8 +2225,8 @@ fn every_failure_path_hands_step_eight_the_number_step_three_saw() {
             bench.steps
         );
         assert_eq!(
-            bench.restore_probe,
-            Some(PROBE_ANSWER),
+            bench.restore_answer,
+            Some(ProbeAnswer::at(PROBE_ANSWER)),
             "{what}: and step 8 was handed the number step 3 answered with"
         );
     }
@@ -2222,9 +2242,85 @@ fn every_failure_path_hands_step_eight_the_number_step_three_saw() {
     );
     assert!(!quiet.ran(Step::RestoreClipboard));
     assert_eq!(
-        quiet.restore_probe, None,
-        "no probe was answered, so there is no number and no step 8"
+        quiet.restore_answer, None,
+        "no probe was answered, so there is no answer and no step 8"
     );
+}
+
+/// **Task T-38-2, finding С14 — step 8 is handed the whole of the answer, up to step 4's read.**
+///
+/// Step 3 answers the first number it sees move, and an application still writing moves the
+/// counter on after that: Word, measured 2026-09-10, by nineteen per copy, and once in twenty step
+/// 3 looked at the first of them. Step 4's read can only happen once the writer has closed the
+/// clipboard, so the number standing after it is the last of the same answer — and on the three
+/// paths where this program never writes, that answer is everything the gate of П-5 has. A read
+/// that failed looked at nothing, and widens nothing.
+///
+/// The expectations are written as literals and not through [`ProbeAnswer::through`]: a test that
+/// built its expectation with the code under test could not tell a broken widening from a working
+/// one.
+#[test]
+fn step_eight_is_handed_the_answer_up_to_the_number_after_the_read_of_step_four() {
+    // Word, 2026-09-10: nineteen numbers per copy, and step 3 once saw the first of them.
+    let ran_on = PROBE_ANSWER + 18;
+
+    let cases: Vec<(&str, Bench, LayoutId, ProbeAnswer)> = vec![
+        (
+            "step 4 found no text",
+            Bench::with_selection("").with_clipboard_at(ran_on),
+            convert::FALLBACK_US,
+            ProbeAnswer {
+                first: PROBE_ANSWER,
+                last: ran_on,
+            },
+        ),
+        (
+            "step 5 could not decide a direction",
+            Bench::with_selection("123").with_clipboard_at(ran_on),
+            LayoutId::default(),
+            ProbeAnswer {
+                first: PROBE_ANSWER,
+                last: ran_on,
+            },
+        ),
+        (
+            "step 6 could not write",
+            Bench::with_selection("ghbdtn")
+                .failing_at(Step::Write)
+                .with_clipboard_at(ran_on),
+            convert::FALLBACK_US,
+            ProbeAnswer {
+                first: PROBE_ANSWER,
+                last: ran_on,
+            },
+        ),
+        (
+            "step 4 could not read — it looked at nothing, so it widens nothing",
+            Bench::with_selection("ghbdtn")
+                .failing_at(Step::Read)
+                .with_clipboard_at(ran_on),
+            convert::FALLBACK_US,
+            ProbeAnswer {
+                first: PROBE_ANSWER,
+                last: PROBE_ANSWER,
+            },
+        ),
+    ];
+
+    for (what, mut bench, foreground, expected) in cases {
+        let _ = selection::run(&mut bench, &pair_plan(foreground));
+
+        assert!(
+            bench.ran(Step::RestoreClipboard),
+            "{what}: step 8's door opened: {:?}",
+            bench.steps
+        );
+        assert_eq!(
+            bench.restore_answer,
+            Some(expected),
+            "{what}: step 8 was handed the answer up to the number after step 4"
+        );
+    }
 }
 
 /// **Acceptance point 10, the hardest path.** A panic between steps 4 and 7 still restores.
@@ -2359,12 +2455,13 @@ fn the_delayed_restore_asks_the_thread_first_and_the_sequence_number_last() {
         .expect("the delay of step 8 is waited out");
     // ⚠ Т-18-1 moved this needle, and it is worth saying why rather than letting a reader think
     // the sweep was loosened. It used to read `restore_is_due(sequence_number())`. The gate now
-    // takes a second argument — the number step 3 saw — and the needle names it, so the sweep
-    // still fails if the question stops being asked, and now fails as well if it is asked
-    // without the number that makes it answerable on the failure paths.
+    // takes a second argument — the answer to the probe of step 2 — and the needle names it, so
+    // the sweep still fails if the question stops being asked, and now fails as well if it is
+    // asked without the numbers that make it answerable on the failure paths. T-38-2 turned the
+    // argument from the one number step 3 saw into the whole answer, and the needle followed it.
     let asks = body
-        .find("restore_is_due(sequence_number(), probe)")
-        .expect("П-5: the sequence number is asked once more, against the probe of step 3");
+        .find("restore_is_due(sequence_number(), answer)")
+        .expect("П-5: the sequence number is asked once more, against the answer to the probe");
     let puts = body
         .find("restore(owner, snapshot)")
         .expect("the restore itself is still here");
@@ -2631,7 +2728,7 @@ fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_
     assert!(!quiet.ran(Step::RestoreClipboard));
     assert_eq!(
         quiet.sequence_probes, 1,
-        "the question is asked once, and only on the timeout"
+        "on this path the question is asked once, on the timeout"
     );
 
     let quiet_after = selection::path_counters();

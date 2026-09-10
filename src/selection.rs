@@ -1322,24 +1322,25 @@ pub fn restore(owner: HWND, snapshot: &Snapshot) -> Result<Restored, ClipboardEr
 /// > новую копию пользователя снимком недопустимо.
 ///
 /// So the sequence number is read once more when the sleep ends and put to [`restore_is_due`],
-/// **together with `probe`**. The two numbers between them describe everything the clipboard is
-/// allowed to be holding: a write of this program's own, which step 6 left behind in
-/// [`write_unicode_text`] and the ring of [`is_own_change`] remembers, or the answer the
-/// application gave to the probe of step 2, whose number `probe` carries. Anything else is the
-/// third writer П-5 exists for.
+/// **together with `answer`**. Between them they describe everything the clipboard is allowed to
+/// be holding: a write of this program's own, which step 6 left behind in [`write_unicode_text`]
+/// and the ring of [`is_own_change`] remembers, or the answer the application gave to the probe
+/// of step 2, whose numbers `answer` carries. Anything else is the third writer П-5 exists for.
 ///
-/// # `probe`, and why it is a parameter — task Т-18-1
+/// # `answer`, and why it is a parameter — tasks Т-18-1 and T-38-2
 ///
-/// It is the sequence number [`Wait::Changed`] reported at step 3, handed down through
-/// [`Owed::StepEight`] and [`Path::restore_clipboard`]. Callers that are not step 8 of a
-/// selection pass — and there are none in the product — pass the number the clipboard held when
-/// they last knew it to be theirs to put back.
+/// It is the answer to the probe of step 2 as [`run`] saw it — the number [`Wait::Changed`]
+/// reported at step 3 and, since task T-38-2, the number standing after step 4 read the
+/// clipboard — handed down through [`Owed::StepEight`] and [`Path::restore_clipboard`]. See
+/// [`ProbeAnswer`] for why one number was not enough. Callers that are not step 8 of a selection
+/// pass — and there are none in the product — pass [`ProbeAnswer::at`] the number the clipboard
+/// held when they last knew it to be theirs to put back, or [`ProbeAnswer::NONE`].
 ///
-/// **Not through the ring.** Putting `probe` into [`OWN_MARK`] would have been one line fewer and
-/// would have made [`handle_clipboard_message`] classify an application's write as this
+/// **Not through the ring.** Putting the answer into [`OWN_MARK`] would have been one line fewer
+/// and would have made [`handle_clipboard_message`] classify an application's write as this
 /// program's own: `own_updates` would count a change the program did not make, `foreign_updates`
 /// would lose it, and FR-63 asks those two to mean what they say. The ring holds writes; this
-/// parameter holds a number the caller vouches for.
+/// parameter holds numbers the caller vouches for.
 ///
 /// `Ok(Restored::default())` is the answer when the restore is skipped: nothing was placed and
 /// nothing was refused, which is the truth of it. What happened is in
@@ -1348,13 +1349,13 @@ pub fn restore_after(
     owner: HWND,
     snapshot: &Snapshot,
     delay: Duration,
-    probe: u32,
+    answer: ProbeAnswer,
 ) -> Result<Restored, ClipboardError> {
     require_blocking_thread()?;
 
     sleep(delay);
 
-    if !restore_is_due(sequence_number(), probe) {
+    if !restore_is_due(sequence_number(), answer) {
         return Ok(Restored::default());
     }
 
@@ -1364,15 +1365,16 @@ pub fn restore_after(
 /// Whether step 8 may still write — **the note to step 8 of §4.7, decision П-5**.
 ///
 /// `current` is the clipboard sequence number as it stands when the delay of step 8 has run out.
-/// `probe` is the number it took when the application answered the `Ctrl+C` of step 2 — see
-/// [`restore_after`], which is where both come from.
+/// `answer` is the run of numbers the clipboard took while the application answered the `Ctrl+C`
+/// of step 2 — see [`restore_after`], which is where both come from, and [`ProbeAnswer`].
 ///
 /// Two questions, and either one of them owes the snapshot back:
 ///
-/// * `current == probe` — **nothing at all has happened since the application answered the
-///   probe.** The window station's counter only ever goes up, so equality is not evidence, it is
-///   proof. What is on the clipboard is the selection this program asked for, and putting the
-///   user's content back over it is the whole purpose of the module;
+/// * `answer.contains(current)` — **nothing has happened since the application answered the probe
+///   but that answer itself.** The window station's counter only ever goes up, so a number inside
+///   the answer is not evidence, it is proof. What is on the clipboard is the selection this
+///   program asked for, and putting the user's content back over it is the whole purpose of the
+///   module;
 /// * [`is_own_change`] against the ring [`OWN_MARK`], which holds the numbers this process's own
 ///   writes produced — step 6 of FR-61 among them. A `current` the ring knows means nothing has
 ///   touched the clipboard since this program wrote.
@@ -1388,12 +1390,22 @@ pub fn restore_after(
 /// user copied something — that was true. On **every failure path of steps 4 to 6 it was exactly
 /// backwards**: there is no write of ours anywhere on those paths, the ring is silent by
 /// construction, and the price of reading that silence as a foreign copy was not a redundant
-/// restore but the user's clipboard, permanently. `probe` is what makes the sentence true again,
-/// by giving the safe direction something to be safe about.
+/// restore but the user's clipboard, permanently. The answer to the probe is what makes the
+/// sentence true again, by giving the safe direction something to be safe about.
 ///
-/// A zero `probe` is refused for the reason [`is_own_change`] refuses a zero sequence: zero is
-/// what `GetClipboardSequenceNumber` answers to a process without clipboard access, and two
-/// zeroes compared are not a fact about anybody's clipboard.
+/// # One number was not enough — task T-38-2
+///
+/// Т-18-1 carried the number step 3 saw, and that number is the **first** of the answer, not
+/// always the last: an application still writing when step 3 looks goes on moving the counter,
+/// and a gate that asked «`current` equals that number» read the application's own later numbers
+/// as a stranger's copy — on exactly the failure paths Т-18-1 was about. Measured on Word, one
+/// copy in twenty; see [`ProbeAnswer`]. The answer now runs to the number standing after step 4's
+/// read. What П-5 gives up for it is honest and small: a third writer's copy that lands **between
+/// step 3's look and step 4's read** now reads as part of the answer. That gap is the application
+/// writing with the clipboard held open, and a stranger gets in only between its close and the
+/// read's open; a copy made **after** the read is past `last` and keeps its place, as before.
+///
+/// A zero answer is refused — see [`ProbeAnswer::contains`].
 ///
 /// # Why a refusal is counted and journalled
 ///
@@ -1401,8 +1413,8 @@ pub fn restore_after(
 /// not kept. It is right here — and it is not nothing, so it leaves a counter and one entry in
 /// the journal behind it. **Only a real П-5 skip reaches those two lines**: a restore made on a
 /// failure path is a restore, not a skip, and the counter says what it always said.
-fn restore_is_due(current: u32, probe: u32) -> bool {
-    if probe != 0 && current == probe {
+fn restore_is_due(current: u32, answer: ProbeAnswer) -> bool {
+    if answer.contains(current) {
         return true;
     }
 
@@ -1415,6 +1427,68 @@ fn restore_is_due(current: u32, probe: u32) -> bool {
     note_restore_skipped();
 
     false
+}
+
+/// The clipboard sequence numbers of the application's answer to the probe of step 2 — **task
+/// T-38-2, finding С14 of the audit of 2026-09-04**.
+///
+/// One copy is not one number. `EmptyClipboard` moves the window station's counter, every
+/// `SetClipboardData` moves it again, and `CloseClipboard` moves it once more for each format it
+/// synthesises — Э19 measured +1, +1 and +3 (see [`own_change_number`]). [`wait_for_change`]
+/// looks every [`POLL_INTERVAL`] and answers the **first** number it sees move, so an application
+/// still writing when step 3 looks leaves it holding the first number of many rather than the
+/// last. Measured 2026-09-10 on the machine this program was written for: one copy out of Word
+/// moves the counter by nineteen, and on one copy in twenty step 3 answered 1182 while Word went
+/// on to 1200; Notepad and Edge, forty copies between them, finished inside a single look.
+///
+/// `first` is the number step 3 answered with. `last` is the number standing once step 4 has read
+/// the clipboard — a read that has to wait for the writer to close it first, which is why in all
+/// twenty copies out of Word that number was already the final one. Every number from `first` to
+/// `last` is the same answer, and step 8's gate owes the snapshot for any of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProbeAnswer {
+    /// The number [`Wait::Changed`] reported at step 3.
+    pub first: u32,
+    /// The number standing after step 4 read the clipboard — `first` when it did not.
+    pub last: u32,
+}
+
+impl ProbeAnswer {
+    /// No probe was answered: the value for a restore that is not step 8 of a selection pass.
+    pub const NONE: Self = Self { first: 0, last: 0 };
+
+    /// An answer known by the one number step 3 saw.
+    pub const fn at(sequence: u32) -> Self {
+        Self {
+            first: sequence,
+            last: sequence,
+        }
+    }
+
+    /// The same answer, known to have run on to `sequence`.
+    ///
+    /// A number below `last` widens nothing: the window station's counter only goes up, so a lower
+    /// number is not a later look. A counter that wrapped past `u32::MAX` inside one pass would
+    /// need four thousand million changes in a few hundred milliseconds, and is not a case.
+    pub const fn through(self, sequence: u32) -> Self {
+        Self {
+            first: self.first,
+            last: if sequence > self.last {
+                sequence
+            } else {
+                self.last
+            },
+        }
+    }
+
+    /// Whether `current` is a number of this answer.
+    ///
+    /// Zero is never one, for the reason [`is_own_change`] refuses a zero sequence: it is what
+    /// `GetClipboardSequenceNumber` answers to a process without clipboard access, and a zero
+    /// compared with a zero is not a fact about anybody's clipboard.
+    pub const fn contains(self, current: u32) -> bool {
+        self.first != 0 && current >= self.first && current <= self.last
+    }
 }
 
 /// Puts the journal entry the skipped restore of decision П-5 leaves behind.
@@ -2758,11 +2832,13 @@ pub trait Path {
 
     /// **Step 8** — put the user's clipboard back, after the delay of section 7.
     ///
-    /// `probe` is the sequence number step 3 saw: the one the clipboard took when the application
-    /// answered the `Ctrl+C` of step 2. It travels this far because the gate of decision П-5 is
-    /// at the far end of the delay and needs to know which changes are this pass's own — see
-    /// [`restore_after`], and task **Т-18-1** for what its absence cost.
-    fn restore_clipboard(&mut self, snapshot: &Snapshot, probe: u32);
+    /// `answer` is the run of sequence numbers the clipboard took while the application answered
+    /// the `Ctrl+C` of step 2: from the number step 3 saw to the number standing after step 4 read
+    /// the clipboard. It travels this far because the gate of decision П-5 is at the far end of
+    /// the delay and needs to know which changes are this pass's own — see [`restore_after`], task
+    /// **Т-18-1** for what the absence of the first number cost, and task **T-38-2** for what the
+    /// absence of the last one did.
+    fn restore_clipboard(&mut self, snapshot: &Snapshot, answer: ProbeAnswer);
 
     /// **Not step 8** — the user's clipboard back **at once**, after a late `Ctrl+C`.
     ///
@@ -2860,10 +2936,11 @@ impl Outcome {
 /// promise about the outcome.** It was not one: the door opened on every one of those rows and
 /// the gate of decision П-5 behind it refused, because on the failure paths of steps 4 to 6 this
 /// program has written nothing for [`is_own_change`] to recognise. Four rows of a table that
-/// says «restores» described a clipboard that never came back. The number [`Owed::StepEight`]
-/// now carries is what makes the table true, and the price of getting it wrong again is the
+/// says «restores» described a clipboard that never came back. The answer [`Owed::StepEight`]
+/// now carries — the first number step 3 saw since Т-18-1, and the last one step 4's read saw
+/// since T-38-2 — is what makes the table true, and the price of getting it wrong again is the
 /// user's clipboard — so both halves are tested: that the door opens, and that what comes
-/// through it is a number the gate accepts.
+/// through it is an answer the gate accepts.
 ///
 /// # [`Owed`], and why a restore is not always right
 ///
@@ -2900,12 +2977,13 @@ enum Owed {
     /// **Step 8 of FR-61.** Step 3 said the clipboard holds the selection, so what is on it is
     /// this program's to put back — after the delay of section 7, and subject to the note П-5.
     ///
-    /// `probe` is the number [`Wait::Changed`] reported, carried here rather than in a field of
+    /// `answer` is the answer to the probe — the number [`Wait::Changed`] reported, widened to the
+    /// number standing after step 4 read the clipboard — carried here rather than in a field of
     /// [`Session`] so that it exists exactly where it means something: there is no step 8 owed
-    /// without a probe that was answered, and no answered probe that owes no step 8. Task
-    /// **Т-18-1** — it is what lets the gate of П-5 tell this pass's own doing from a third
-    /// writer's on the paths where the program never wrote at all.
-    StepEight { probe: u32 },
+    /// without a probe that was answered, and no answered probe that owes no step 8. Tasks
+    /// **Т-18-1** and **T-38-2** — it is what lets the gate of П-5 tell this pass's own doing
+    /// from a third writer's on the paths where the program never wrote at all.
+    StepEight { answer: ProbeAnswer },
     /// **The late `Ctrl+C`.** Step 3 gave up and the clipboard moved anyway — see [`run`].
     LateCopy,
 }
@@ -2920,7 +2998,7 @@ impl<P: Path> Drop for Session<'_, P> {
 
         match self.owed {
             Owed::Nothing => {}
-            Owed::StepEight { probe } => self.path.restore_clipboard(&self.snapshot, probe),
+            Owed::StepEight { answer } => self.path.restore_clipboard(&self.snapshot, answer),
             Owed::LateCopy => self.path.reclaim_clipboard(&self.snapshot),
         }
     }
@@ -2964,11 +3042,12 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     // foreground window have a selection"; the answer is the result of this wait and of nothing
     // else. No change means no selection, and the press goes down the typing-buffer path.
     //
-    // The number the wait answers with is **kept** — task Т-18-1. It is the clipboard as the
-    // application left it when it answered the probe, and step 8's gate is the only thing that
-    // can tell that apart from a stranger's copy two hundred milliseconds later. It used to be
-    // dropped here, and the gate had nothing but the ring of FR-63 to ask, which is silent on
-    // every path where step 6 never wrote.
+    // The number the wait answers with is **kept** — task Т-18-1. It is the first number of the
+    // application's answer to the probe, and step 8's gate is the only thing that can tell that
+    // answer apart from a stranger's copy two hundred milliseconds later. It used to be dropped
+    // here, and the gate had nothing but the ring of FR-63 to ask, which is silent on every path
+    // where step 6 never wrote. It is the **first** number and not always the last — task T-38-2,
+    // at step 4 below.
     let probe = match session.path.wait(baseline) {
         Wait::Changed { sequence, .. } => sequence,
         Wait::TimedOut { .. } => {
@@ -3009,12 +3088,29 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     };
 
     // From here the clipboard holds the selection and not what the user put there. Step 8 is
-    // now owed, whatever happens below — see [`Session`] — and it is owed **with** the number
-    // that says what the clipboard held when it stopped being the user's.
-    session.owed = Owed::StepEight { probe };
+    // now owed, whatever happens below — see [`Session`] — and it is owed **with** the numbers
+    // that say what the clipboard held when it stopped being the user's.
+    session.owed = Owed::StepEight {
+        answer: ProbeAnswer::at(probe),
+    };
 
     // ---- step 4 — read CF_UNICODETEXT ---------------------------------------------------
-    let text = match session.path.read() {
+    let read = session.path.read();
+
+    // ⭐ **Task T-38-2, finding С14.** The number step 3 answered with is the first number of the
+    // application's answer, not always the last: an application still writing moves the counter
+    // on after step 3 looked — Word by nineteen per copy, and once in twenty step 3 saw the first
+    // of them (measured 2026-09-10). A successful read has had to wait for the writer to close
+    // the clipboard, so the number standing now is the end of the same answer, and step 8 is owed
+    // with all of it. A read that failed looked at nothing and widens nothing. The one gap this
+    // opens, and why it is the only one, is in the documentation of [`restore_is_due`].
+    if read.is_ok() {
+        session.owed = Owed::StepEight {
+            answer: ProbeAnswer::at(probe).through(session.path.sequence()),
+        };
+    }
+
+    let text = match read {
         Ok(Some(text)) if !text.is_empty() => text,
         Ok(_) => return Outcome::Refused(Refusal::NoText),
         Err(_) => return Outcome::Refused(Refusal::Clipboard),
@@ -3156,12 +3252,12 @@ impl Path for Machine {
         held
     }
 
-    fn restore_clipboard(&mut self, snapshot: &Snapshot, probe: u32) {
+    fn restore_clipboard(&mut self, snapshot: &Snapshot, answer: ProbeAnswer) {
         // The result is dropped: `Restored` counts what went back and what the clipboard
         // refused, this module counts the refusals of FR-62, and there is nothing a caller could
         // do with the answer that it is not already doing. What must not happen is an early
         // return that skips this, and there is none — this is the whole body.
-        let _ = restore_after(self.owner, snapshot, self.restore_delay, probe);
+        let _ = restore_after(self.owner, snapshot, self.restore_delay, answer);
     }
 
     fn reclaim_clipboard(&mut self, snapshot: &Snapshot) {
@@ -3727,10 +3823,11 @@ mod tests {
         // changed by the lock; it only keeps the two readers out of each other's arithmetic.
         let _serialised = P5.lock().unwrap_or_else(PoisonError::into_inner);
 
-        // Т-18-1 also gave the gate a second number to ask about. This test is about the first
-        // one — the ring — so the second is the "no probe was answered" value throughout, and
-        // every assertion below still turns on `is_own_change` alone, exactly as it did.
-        const NO_PROBE: u32 = 0;
+        // Т-18-1 also gave the gate a second thing to ask about — since T-38-2, the whole answer
+        // to the probe. This test is about the first one — the ring — so the second is the "no
+        // probe was answered" value throughout, and every assertion below still turns on
+        // `is_own_change` alone, exactly as it did.
+        const NO_PROBE: ProbeAnswer = ProbeAnswer::NONE;
 
         let ours = u32::MAX - 24;
         let theirs = u32::MAX - 25;
@@ -3853,7 +3950,7 @@ mod tests {
         // И-1. Nothing has touched the clipboard since the application answered the probe, so
         // what is on it is this program's doing and the snapshot is owed.
         assert!(
-            restore_is_due(probe, probe),
+            restore_is_due(probe, ProbeAnswer::at(probe)),
             "И-1: the answer to our own probe is not a stranger's copy"
         );
 
@@ -3866,7 +3963,7 @@ mod tests {
 
         // И-2. П-5 still holds: a third writer after the answer to the probe keeps its copy.
         assert!(
-            !restore_is_due(third, probe),
+            !restore_is_due(third, ProbeAnswer::at(probe)),
             "И-2: a copy made after the probe was answered is not ours to overwrite"
         );
         assert_eq!(
@@ -3881,6 +3978,93 @@ mod tests {
                 .iter()
                 .any(|event| event.operation.name() == "clipboard restore skipped"),
             "the skipped restore left no entry behind it"
+        );
+    }
+
+    /// **Task T-38-2, finding С14 — the whole of the answer opens the gate, and nothing past it.**
+    ///
+    /// Step 3 answers the first number it sees move, and an application still writing moves the
+    /// counter on: Word, measured 2026-09-10, by nineteen per copy, and once in twenty step 3
+    /// looked at the first of them. The gate is given the answer from that first number to the
+    /// one standing after step 4's read, so a number the application went on to is the same
+    /// answer and owes the snapshot — while a number one past the read is a third writer's, and
+    /// П-5 keeps its copy exactly as before. The numbers are ones no clipboard in this binary
+    /// reaches, and none is put into the ring: the path measured is the one with no write of
+    /// ours on it.
+    #[test]
+    fn a_number_the_answer_ran_on_to_opens_the_gate_and_one_past_its_last_does_not() {
+        let _serialised = P5.lock().unwrap_or_else(PoisonError::into_inner);
+
+        let baseline = u32::MAX - 60;
+        // Step 3 looked while the application was still writing and saw the first number of the
+        // answer; step 4's read saw the answer end four numbers later.
+        let answer = ProbeAnswer::at(baseline + 1).through(baseline + 5);
+
+        assert!(
+            (baseline + 1..=baseline + 6).all(|n| !is_own_change(n)),
+            "no number of the test is a write of this program, and the test rests on that"
+        );
+
+        let before = counters();
+
+        assert!(
+            restore_is_due(baseline + 2, answer),
+            "a number the application went on to after step 3 looked is the same answer: \
+             {answer:?}"
+        );
+        assert_eq!(
+            counters().restore_skips,
+            before.restore_skips,
+            "an owed restore counts no skip"
+        );
+
+        assert!(
+            !restore_is_due(baseline + 6, answer),
+            "П-5: a number past the last look of step 4 is a third writer's: {answer:?}"
+        );
+        assert_eq!(
+            counters().restore_skips,
+            before.restore_skips + 1,
+            "exactly one skip is counted"
+        );
+    }
+
+    /// **Task T-38-2 — the contract of [`ProbeAnswer`].** An answer widens only upwards, holds both
+    /// of its ends and nothing outside them, and one that begins at zero is no answer at all.
+    #[test]
+    fn an_answer_widens_only_upwards_and_zero_is_never_one() {
+        let answer = ProbeAnswer::at(100);
+
+        assert_eq!(
+            answer.through(99),
+            answer,
+            "a lower number is not a later look"
+        );
+
+        let widened = answer.through(119);
+
+        assert_eq!(
+            widened,
+            ProbeAnswer {
+                first: 100,
+                last: 119
+            }
+        );
+        assert!(
+            widened.contains(100) && widened.contains(119),
+            "both ends are the answer"
+        );
+        assert!(
+            !widened.contains(99) && !widened.contains(120),
+            "and nothing outside them is"
+        );
+        assert!(
+            !ProbeAnswer::NONE.contains(0),
+            "zero compared with zero is not a fact about a clipboard"
+        );
+        assert!(
+            !ProbeAnswer::at(0).through(5).contains(3),
+            "an answer that begins at zero is no answer"
         );
     }
 
