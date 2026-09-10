@@ -4751,37 +4751,37 @@ const TEXT_COPIES: [TextCopy; 9] = [
     TextCopy {
         name: "the code units step 4 decodes out of that block",
         function: "fn decode_utf16(",
-        made_by: ".collect()",
+        made_by: "Vec::with_capacity(bytes.len() / 2)",
         released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
     },
     TextCopy {
         name: "the text step 4 reads, which steps 5 and 6 work from",
         function: "fn decode_utf16(",
-        made_by: "String::from_utf16_lossy(&units)",
+        made_by: "string_from_units(&units)",
         released: Release::DroppedBy("ClipboardText"),
     },
     TextCopy {
         name: "the code units `recode` fills",
         function: "pub fn recode(",
-        made_by: "Vec::with_capacity(text.len() + 1)",
+        made_by: "Vec::with_capacity(recoded_len(text, source, target))",
         released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
     },
     TextCopy {
         name: "the text `recode` answers with, which step 6 writes",
         function: "pub fn recode(",
-        made_by: "String::from_utf16_lossy(&units)",
+        made_by: "string_from_units(&units)",
         released: Release::DroppedBy("Recoded"),
     },
     TextCopy {
         name: "the code units `recode_words` fills",
         function: "fn recode_words(",
-        made_by: "Vec::with_capacity(text.len() + 1)",
+        made_by: "Vec::with_capacity(units_bound(text, &plan.maps))",
         released: Release::ZeroedHere("buffer::zero_slice(&mut units)"),
     },
     TextCopy {
         name: "the text `recode_words` answers with, which step 6 writes",
         function: "fn recode_words(",
-        made_by: "String::from_utf16_lossy(&units)",
+        made_by: "string_from_units(&units)",
         released: Release::DroppedBy("Recoded"),
     },
     TextCopy {
@@ -4793,7 +4793,7 @@ const TEXT_COPIES: [TextCopy; 9] = [
 ];
 
 /// Every other buffer the product half of the module makes, with the reason it holds no text.
-const NOT_THE_TEXT: [NotTheText; 11] = [
+const NOT_THE_TEXT: [NotTheText; 12] = [
     NotTheText {
         function: "fn formats(&self)",
         made_by: "Vec::new()",
@@ -4835,6 +4835,11 @@ const NOT_THE_TEXT: [NotTheText; 11] = [
         why: "made for the caller: the copy is named at the call of `encode_utf16`",
     },
     NotTheText {
+        function: "fn string_from_units(",
+        made_by: "String::with_capacity(",
+        why: "made for the caller: the text is named at each call of `string_from_units`",
+    },
+    NotTheText {
         function: "pub fn detect_source(",
         made_by: "vec![0usize; maps.len()]",
         why: "a score per layout — counts, not characters",
@@ -4870,7 +4875,7 @@ const BUFFER_MAKERS: [&str; 13] = [
 
 /// The module's own functions that hand back a bare buffer they made — needles of the same sweep,
 /// taken only as calls: `fn read_block(` declares one, and `.encode_utf16()` is a method of `str`.
-const HANDED_BACK: [&str; 2] = ["read_block(", "encode_utf16("];
+const HANDED_BACK: [&str; 3] = ["read_block(", "encode_utf16(", "string_from_units("];
 
 /// The starts of a line that declares a function rather than makes anything.
 const DECLARATIONS: [&str; 4] = ["fn ", "pub fn ", "const fn ", "pub const fn "];

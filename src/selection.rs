@@ -137,6 +137,11 @@
 //! bare `String` released as it stood, while the source sweep meant to catch such a thing counted
 //! calls of the zeroing and found its seven. It is born inside [`ClipboardText`] now, which zeroes
 //! it when it is dropped, and the sweep names every copy the module makes instead of counting.
+//!
+//! **And the copies a growth makes — finding Н34, task T-38-9B.** A `Vec<u16>` or a `String` that
+//! grows copies the text into a new block and hands the old one back as it stands, beyond the
+//! reach of any zeroing. The working buffers of steps 4 and 5 are made once, at a size counted
+//! before they are filled; `tests\selection_growth.rs` counts the growths and wants none.
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -1979,18 +1984,54 @@ impl Drop for ClipboardText {
 /// SEC-02, task **T-13-15**. The text that comes out is born inside [`ClipboardText`], which
 /// zeroes it when it is dropped — task **T-38-9A** — and [`Recoded`] looks after what step 5
 /// makes of it.
-fn decode_utf16(bytes: &[u8]) -> ClipboardText {
-    let mut units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .take_while(|&unit| unit != 0)
-        .collect();
+///
+/// Public for the growth probe of task **T-38-9B**, `tests\selection_growth.rs`, which drives step 4
+/// without a clipboard — the reason [`read_refuses_size`] is public.
+pub fn decode_utf16(bytes: &[u8]) -> ClipboardText {
+    // Task T-38-9B, finding Н34: there are at most half as many code units as bytes, so a vector
+    // of that capacity is filled without growing. A collect after `take_while` knows no length and
+    // grew it — ten times for four thousand units, each growth a copy of the text left behind.
+    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
 
-    let text = String::from_utf16_lossy(&units);
+    units.extend(
+        bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|&unit| unit != 0),
+    );
+
+    let text = string_from_units(&units);
 
     crate::buffer::zero_slice(&mut units);
 
     ClipboardText { text }
+}
+
+/// The text of `units`, in a string allocated once at its final length — **finding Н34 of the
+/// audit of 2026-09-04, task T-38-9B**.
+///
+/// The answer of `String::from_utf16_lossy`, lossiness included — an unpaired surrogate becomes
+/// U+FFFD — without its allocation: that one collects, a collect grows the string it collects
+/// into, and every growth hands a block holding part of the user's text back to the allocator as
+/// it stands, where no zeroing done afterwards can reach it. Measured before this task: twice for
+/// 3500 characters of Russian, three times for 12 500 units of a ligature. So the length in UTF-8
+/// is counted first, over the same decoding, and the string is made at that length and filled.
+///
+/// Hands the string back bare, and every caller moves it at once into the type that zeroes it:
+/// [`decode_utf16`] into [`ClipboardText`], [`recode`] and [`recode_words`] into [`Recoded`].
+fn string_from_units(units: &[u16]) -> String {
+    let decoded = || {
+        char::decode_utf16(units.iter().copied())
+            .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+    };
+
+    let mut text = String::with_capacity(decoded().map(char::len_utf8).sum());
+
+    for ch in decoded() {
+        text.push(ch);
+    }
+
+    text
 }
 
 /// Turns a string into the bytes of a `CF_UNICODETEXT` block, terminator included.
@@ -2795,13 +2836,16 @@ pub fn detect_source(text: &str, maps: &[LayoutMap], fallback: LayoutId) -> Opti
 /// not a participant. Dropping any of them would silently delete the user's text; refusing the
 /// whole selection over one of them would make the feature useless on any real sentence.
 ///
-/// Allocates one string of the result's size and nothing per character.
+/// Allocates the code units and the string once each, at the sizes [`recoded_len`] and
+/// [`string_from_units`] count before filling them — task **T-38-9B** — and nothing per character.
 pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
-    let mut units: Vec<u16> = Vec::with_capacity(text.len() + 1);
+    // Finding Н34: the old estimate was the length of `text` in bytes, and a key may make up to
+    // `MAX_UNITS` code units — a ligature grew this vector twice, leaving the text behind each time.
+    let mut units: Vec<u16> = Vec::with_capacity(recoded_len(text, source, target));
 
     let (mapped, carried) = recode_into(text, source, target, &mut units);
 
-    let recoded = String::from_utf16_lossy(&units);
+    let recoded = string_from_units(&units);
 
     // The working buffer held the user's text — SEC-01, SEC-02. Volatile since task T-13-15:
     // `units` is dropped two lines below, and a plain `fill` in front of that is a dead store.
@@ -2845,6 +2889,53 @@ fn recode_into(
     }
 
     (mapped, carried)
+}
+
+/// The number of code units [`recode`] writes for `text` — the walk of [`recode_into`] without the
+/// writing, the question [`crate::convert::converted_len`] answers for strokes. **Task T-38-9B,
+/// finding Н34**: a vector made at this capacity is filled without growing.
+fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
+    text.chars()
+        .map(|ch| match source.find_key(ch) {
+            Some(key) => {
+                let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+                crate::convert::convert_stroke(stroke, target).units().len()
+            }
+            None => ch.len_utf16(),
+        })
+        .sum()
+}
+
+/// The most code units [`recode_words`] can write for `text` under the layouts of a plan — **task
+/// T-38-9B, finding Н34**.
+///
+/// For each character, the larger of what it is as it stands and of what any key producing it in
+/// any of `maps` makes in any of `maps`: the word it stands in is either recoded between two of
+/// them or carried over, and both answers are among those counted. Where every key of the layouts
+/// makes one unit, as the layouts of a pair of real scripts do, this is the exact count; a ligature
+/// on a key of a layout the text is not in makes it larger than needed, and never smaller.
+///
+/// # Why not the exact count, the way [`recoded_len`] gives it for [`recode`]
+///
+/// The exact count needs the source and the target of every word, and the target is
+/// [`target_for`], which asks [`crate::layouts::Cycle::target`] — and that function counts every
+/// refusal it makes. A counting pass that decided every word a second time would count every
+/// refused word twice. This bound decides nothing and counts nothing.
+fn units_bound(text: &str, maps: &[LayoutMap]) -> usize {
+    text.chars()
+        .map(|ch| {
+            maps.iter()
+                .filter_map(|source| source.find_key(ch).map(|key| (source, key)))
+                .flat_map(|(source, key)| {
+                    let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+
+                    maps.iter().map(move |target| {
+                        crate::convert::convert_stroke(stroke, target).units().len()
+                    })
+                })
+                .fold(ch.len_utf16(), usize::max)
+        })
+        .sum()
 }
 
 /// Appends `text` onto `units` exactly as it stands, and answers how many characters that was.
@@ -2906,11 +2997,14 @@ fn separates_words(ch: char) -> bool {
 /// 4. **separators** — whitespace and control characters — are carried over exactly as they
 ///    stand, two spaces as two spaces and a line break as a line break.
 ///
-/// Allocates the one string of the result, as [`recode`] does, and one small score vector per
-/// word inside [`detect_source`]. This runs on the UI thread in answer to a hotkey, never in
+/// Allocates the code units once, at [`units_bound`], and the string once, at the length
+/// [`string_from_units`] counts — task **T-38-9B** — and one small score vector per word inside
+/// [`detect_source`]. This runs on the UI thread in answer to a hotkey, never in
 /// the hook callback: NFR-01 to NFR-05 are about that callback and are untouched here.
 fn recode_words(text: &str, plan: &Plan, fallback: &LayoutMap, target: &LayoutMap) -> Recoded {
-    let mut units: Vec<u16> = Vec::with_capacity(text.len() + 1);
+    // Finding Н34: made at the most code units the text can come to, counted without deciding a
+    // single word — see [`units_bound`] for why not the exact count.
+    let mut units: Vec<u16> = Vec::with_capacity(units_bound(text, &plan.maps));
     let mut mapped = 0usize;
     let mut carried = 0usize;
 
@@ -2950,7 +3044,7 @@ fn recode_words(text: &str, plan: &Plan, fallback: &LayoutMap, target: &LayoutMa
         carried += carry_into(separator, &mut units);
     }
 
-    let recoded = String::from_utf16_lossy(&units);
+    let recoded = string_from_units(&units);
 
     // SEC-01, SEC-02 — the same wipe [`recode`] does, and for the same reason.
     crate::buffer::zero_slice(&mut units);
