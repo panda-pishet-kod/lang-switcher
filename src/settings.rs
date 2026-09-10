@@ -1789,6 +1789,12 @@ fn step_0_to_1(config: &mut Config) {
 /// schema ≤ 1 file is what the absence of a choice looks like — the value the program put
 /// there itself — and it is raised to the new default, `auto`.
 ///
+/// ⚠ **The other half of that reading — решение 120.3, finding Т9.** A file without
+/// `schema_version`, or with one below 2, is taken for one the program wrote, and nothing in it
+/// can say otherwise: a `backspace` typed into such a file by hand is raised to `auto` the same
+/// way, and the choice it stood for is lost. Section 7 of SPEC.md says so where a person reads
+/// about the file.
+///
 /// `selection` is left exactly as it is: it was never a default of any schema, so a file
 /// holding it holds a decision a person made (the compatibility mode of FR-42), and a
 /// migration that overrode a decision would be damage, not maintenance.
