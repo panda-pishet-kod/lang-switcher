@@ -848,6 +848,9 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
 /// shows that a write really would have been seen.
 #[test]
 fn an_open_dialog_takes_the_two_configuration_commands_away_from_the_handler() {
+    // Task T-55-1a: the positive control at the foot of this test suspends the program through
+    // `CMD_TOGGLE`, and suspending asks for the wipe of row 9 — the counter [`TOGGLE`] guards.
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("dialog-gate");
     let _attached = attach_ui(&window, &home);
@@ -952,6 +955,10 @@ fn an_open_dialog_takes_the_two_configuration_commands_away_from_the_handler() {
 #[test]
 fn closing_the_dialog_gives_both_entries_back() {
     let _locale = product_strings(settings::Language::Ru);
+    // Task T-55-1a: the same command with the dialog closed suspends the program, and suspending
+    // asks for the wipe of row 9 — see [`TOGGLE`]. Taken after `LOCALE`, and no test in this file
+    // takes the two the other way round, so the pair cannot deadlock.
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("dialog-return");
     let _attached = attach_ui(&window, &home);
