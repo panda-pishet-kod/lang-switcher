@@ -2536,6 +2536,64 @@ fn the_conversion_session_ends_with_a_full_clearance_and_survives_a_partial_one(
     assert!(!recorder.in_conversion());
 }
 
+/// **Finding Н6 of the audit of 2026-09-04 — task T-39-1: a partial clearance zeroes the position
+/// counter of FR-32 as well.**
+///
+/// A partial clearance of FR-12 takes strokes out of the ring without going through
+/// `Recorder::clear_ring`, and until this task that function was the only place a flush zeroed the
+/// counter. The counter therefore stayed where the earlier presses of the hotkey had left it, and
+/// the next press took the step of the cycle that belonged to a text no longer in the buffer: it
+/// erased the wrong number of characters and set the wrong layout.
+///
+/// The session is another matter, and the test above pins it: one of the converted strokes is still
+/// in the ring, so the next key still ends a session that is still open. Only the counter goes —
+/// and only when something was really taken out. An event older than every stroke removes nothing,
+/// and the position over an untouched buffer is still the position.
+#[test]
+fn a_partial_clearance_zeroes_the_position_counter_and_keeps_the_session() {
+    let mut recorder = fresh_of(8);
+
+    for time in [10, 20] {
+        press_at(&mut recorder, time);
+    }
+
+    recorder.note_conversion();
+    counter_at_three(&mut recorder);
+
+    assert_eq!(
+        recorder.reset_up_to(10),
+        ResetOutcome::Partial {
+            removed: 1,
+            kept: 1
+        }
+    );
+    assert_eq!(
+        recorder.cycle_position(),
+        0,
+        "Н6: the strokes the counter was a position over are gone, so the position goes with them"
+    );
+    assert!(
+        recorder.in_conversion(),
+        "FR-12: the session of the stroke that is left is still open"
+    );
+
+    // The control: nothing taken out, nothing zeroed.
+    let mut recorder = fresh_of(8);
+
+    for time in [10, 20] {
+        press_at(&mut recorder, time);
+    }
+
+    counter_at_three(&mut recorder);
+
+    assert_eq!(recorder.reset_up_to(5), ResetOutcome::Kept { kept: 2 });
+    assert_eq!(
+        recorder.cycle_position(),
+        3,
+        "a clearance that removed nothing moves nothing"
+    );
+}
+
 // -------------------------------------------------------------------------------------
 // The position counter of FR-32 — task T-05-2
 // -------------------------------------------------------------------------------------

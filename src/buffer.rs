@@ -1411,9 +1411,10 @@ pub struct Recorder {
     /// a `usize` is indivisible, allocates nothing (NFR-03), blocks nothing (NFR-04) and touches
     /// no file (NFR-05).
     ///
-    /// **FR-34.** It is zeroed by [`Recorder::clear_ring`] and by nothing else, so it cannot be
-    /// left behind by a flush: every rule of FR-10 that empties the ring empties it through that
-    /// one function.
+    /// **FR-34.** It is zeroed by [`Recorder::clear_ring`], which every rule of FR-10 that empties
+    /// the ring goes through, so it cannot be left behind by a flush; by the partial arm of
+    /// [`Recorder::reset_up_to`], which takes strokes out without emptying the ring (finding Н6,
+    /// task T-39-1); and by [`Recorder::set_capacity`], which replaces the ring.
     cycle: usize,
     /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
     /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
@@ -2391,7 +2392,8 @@ impl Recorder {
     /// the controller as a choice. Task T-04-3-3 was given the one line and took the narrower
     /// half of it: **all three places now publish**, and how the counter is written is still
     /// untouched. Making it single-writer like `len` remains open and belongs to whoever is
-    /// allowed to change the shape of this type.
+    /// allowed to change the shape of this type. Task T-39-1 (finding Н6) added a fourth write,
+    /// the partial arm of [`Recorder::reset_up_to`], and it publishes like the other three.
     ///
     /// NFR-01 to NFR-05: this function is reached from inside the hook callback, and what the
     /// feature adds to that path is one relaxed atomic store. In a build without it — every
@@ -2470,6 +2472,21 @@ impl Recorder {
         }
 
         let kept = self.ring.retain_after(event_time);
+
+        // **Finding Н6 — task T-39-1.** The strokes that went took with them the text the
+        // position counter of FR-32 was a position over, so the counter goes too: FR-34 for the
+        // part of the ring this clearance removes. `clear_ring` is not called — FR-12 keeps the
+        // newer strokes and the conversion session they belong to, which is the canon of
+        // `the_conversion_session_ends_with_a_full_clearance_and_survives_a_partial_one`.
+        //
+        // Here and not before the branches, where the rule of FR-14 stands: the `Kept` arm
+        // removes nothing and must leave the position where it is, and the full-clearance arm
+        // reaches `clear_ring`, which zeroes the counter already.
+        self.cycle = 0;
+
+        // The mirror of SEC-04a sees this write as it sees the others — see `clear_ring`.
+        #[cfg(feature = "testing")]
+        crate::control::note_cycle_position(0);
 
         ResetOutcome::Partial {
             removed: live - kept,
