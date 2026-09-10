@@ -3986,14 +3986,22 @@ fn the_save_journal_button_stands_in_the_slot_of_decision_117_5() {
             .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
     };
 
+    // ⚠ Решение 117б: 322 × 94 and not the 344 × 72 of 117.5 — the fit stand measured
+    // «Enregistrer le journal…» at 131 px and «Αποθήκευση καταγραφής…» at 160 px against the
+    // 126 px of a 72-unit slot, so the row was split 88 + 94 between the two buttons; the
+    // window did not grow for it.
     let save = bounds(1064).expect("the dialog must carry «Сохранить журнал…» (1064)");
     println!("«Сохранить журнал…» (1064): {save:?}");
-    assert_eq!(save, (344, 270, 72, 14), "the slot of решение 117.5");
+    assert_eq!(save, (322, 270, 94, 14), "the slot of решения 117.5 и 117б");
 
     let (ax, ay, acx, _) = bounds(1063).expect("the dialog must carry «Написать автору» (1063)");
     assert_eq!(ay, 270, "the two buttons share a row");
+    assert_eq!(
+        acx, 88,
+        "«Написать автору» gave up 22 units to its neighbour — решение 117б"
+    );
     assert!(
-        ax + acx <= 344,
+        ax + acx <= 322,
         "«Написать автору» must end before the slot begins"
     );
 

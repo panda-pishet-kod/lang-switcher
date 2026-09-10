@@ -769,9 +769,12 @@ BEGIN
     LTEXT           "", IDC_LOG_DIR, 230, 252, 186, 16, SS_OWNERDRAW
     // The way into the wizard of FR-104 — task Т-32-8. Under the path and inside the group:
     // 270 + 14 = 284 against the group's own bottom edge at 289.
-    PUSHBUTTON      "", IDC_WRITE_AUTHOR, 230, 270, 110, 14, BS_OWNERDRAW
-    // Task T-34-3, решение 117.5: the free slot of the row, 344…416 — the panel does not grow.
-    PUSHBUTTON      "Сохранить журнал…", IDC_LOG_SAVE, 344, 270, 72, 14, BS_OWNERDRAW
+    // Task T-34-3, решение 117.5: the two buttons share the row and the panel does not grow.
+    // ⚠ Решение 117б (T-34-9): the row is split 88 + 94 and not 110 + 72 — the fit stand found
+    // «Enregistrer le journal…» (131 px) and «Αποθήκευση καταγραφής…» (160 px) clipped in the
+    // 72-unit slot (126 px), while «Написать автору» needs 151 px at most (el) and had 192.
+    PUSHBUTTON      "", IDC_WRITE_AUTHOR, 230, 270, 88, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Сохранить журнал…", IDC_LOG_SAVE, 322, 270, 94, 14, BS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     //
