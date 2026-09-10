@@ -125,6 +125,10 @@
 #define IDC_STATE_HOOK         1070
 #define IDC_STATE_LAYOUTS      1071
 #define IDC_STATE_AUTOSTART    1072
+// The fourth line of «Состояние» — task T-34-6, finding Н102: the pair (or the cycle) that
+// acts when the key is pressed, and how often the choice was refused. Решение 117.5 grew the
+// panel and the window by one pitch for it.
+#define IDC_STATE_PAIR         1073
 #define IDC_APPLY              1080
 
 // Identifiers of the static text of the dialog — the group boxes and the labels, which task
@@ -576,7 +580,7 @@ END
 // ниже, и вместе с ними расширена левая колонка — 200 → 210 единиц, — а правая сдвинута на
 // те же 10. Окно 420 → 430 по ширине; по высоте те же 364 единицы, которые теперь просто
 // длиннее в пикселях.
-IDD_SETTINGS DIALOGEX 0, 0, 430, 364
+IDD_SETTINGS DIALOGEX 0, 0, 430, 375
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, spelled numerically like every other constant here — task
 // T-21-4, the user's finding П-1: with the window open there was no button on the task bar.
@@ -778,19 +782,24 @@ BEGIN
     // the candidate first shown and 39 in every build up to e25.
     // «Состояние» идёт во всю ширину окна и потому растёт вместе с ней: 406 → 416, строки
     // 392 → 402.
-    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 293, 416, 44
+    // Task T-34-6, решение 117.5: a fourth line — the acting pair and the refusals of
+    // selection — did not fit under the three (six units free at a pitch of eleven), so the
+    // panel is 55 tall instead of 44, the three buttons below stand eleven units lower and the
+    // window is 375 instead of 364. Width untouched. A visible change, accepted by eye.
+    CONTROL         "Состояние", IDC_GROUP_STATE, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 7, 293, 416, 55
     LTEXT           "", IDC_STATE_HOOK, 14, 305, 402, 9, SS_OWNERDRAW
     LTEXT           "", IDC_STATE_LAYOUTS, 14, 316, 402, 9, SS_OWNERDRAW
     LTEXT           "", IDC_STATE_AUTOSTART, 14, 327, 402, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_STATE_PAIR, 14, 338, 402, 9, SS_OWNERDRAW
 
     // «ОК» was DEFPUSHBUTTON until task T-11-5a. BS_OWNERDRAW is a button type and occupies
     // the same low nibble BS_DEFPUSHBUTTON lived in, so the default-button *style* cannot
     // survive owner drawing. The behaviour survives by the documented replacement: the dialog
     // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
     // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
-    PUSHBUTTON      "ОК", IDOK, 263, 343, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Отмена", IDCANCEL, 317, 343, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Применить", IDC_APPLY, 371, 343, 52, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 263, 354, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 317, 354, 50, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 371, 354, 52, 14, BS_OWNERDRAW
 END
 
 // ---------------------------------------------------------------------------------------
@@ -1505,6 +1514,15 @@ END
 #define IDS_STATE_DISABLED      3218
 #define IDS_STATE_HEALTH        3219
 #define IDS_STATE_JOINED        3220
+// Task T-34-6, finding Н102 — the fourth line of «Состояние»: what acts when the key is pressed
+// (the pair, or the cycle, or nothing), and how often the choice was refused — the sum of the
+// four counters the dump prints as layouts.*; zero is said in words. 3221 is the greyed menu
+// entry of T-34-5.
+#define IDS_STATE_PAIR          3222
+#define IDS_STATE_CYCLE         3223
+#define IDS_STATE_PAIR_NONE     3224
+#define IDS_STATE_NO_FAILURES   3225
+#define IDS_STATE_FAILURES      3226
 
 // ---------------------------------------------------------------------------------------
 // Russian — the default of section 7, `[general] language = "ru"`.
@@ -1567,6 +1585,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Перехват клавиатуры не установлен"
     IDS_STATE_DISABLED      "Перехват установлен, но обработка отключена — нужен перезапуск"
     IDS_STATE_HEALTH        "тихих снятий перехвата: {0} · отказов установки: {1}"
+    IDS_STATE_PAIR          "Действующая пара: {0} → {1}"
+    IDS_STATE_CYCLE         "Действующий цикл: {0}"
+    IDS_STATE_PAIR_NONE     "Действующая пара не выбрана"
+    IDS_STATE_NO_FAILURES   "отказов выбора не было"
+    IDS_STATE_FAILURES      "отказов выбора: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}"
     IDS_STATE_AUTOSTART     "Автозапуск в реестре (HKCU\\…\\Run): {0}"
@@ -1786,6 +1809,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "The keyboard hook is not installed"
     IDS_STATE_DISABLED      "The hook is installed, but processing is off — restart the program"
     IDS_STATE_HEALTH        "silent hook removals: {0} · install failures: {1}"
+    IDS_STATE_PAIR          "Acting pair: {0} → {1}"
+    IDS_STATE_CYCLE         "Acting cycle: {0}"
+    IDS_STATE_PAIR_NONE     "No acting pair"
+    IDS_STATE_NO_FAILURES   "no selection failures"
+    IDS_STATE_FAILURES      "selection failures: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts in the session: {0} · exclusions published: {1} · journal entries: {2}"
     IDS_STATE_AUTOSTART     "Autostart in the registry (HKCU\\…\\Run): {0}"
@@ -2018,6 +2046,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Перехоплення клавіатури не встановлено"
     IDS_STATE_DISABLED      "Перехоплення встановлено, але обробку вимкнено — потрібен перезапуск"
     IDS_STATE_HEALTH        "тихих знять перехоплення: {0} · відмов встановлення: {1}"
+    IDS_STATE_PAIR          "Чинна пара: {0} → {1}"
+    IDS_STATE_CYCLE         "Чинний цикл: {0}"
+    IDS_STATE_PAIR_NONE     "Чинну пару не вибрано"
+    IDS_STATE_NO_FAILURES   "відмов вибору не було"
+    IDS_STATE_FAILURES      "відмов вибору: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Розкладок у сеансі: {0} · винятків опубліковано: {1} · записів у журналі: {2}"
     IDS_STATE_AUTOSTART     "Автозапуск у реєстрі (HKCU\\…\\Run): {0}"
@@ -2233,6 +2266,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Der Tastatur-Hook ist nicht installiert"
     IDS_STATE_DISABLED      "Der Hook ist installiert, aber die Verarbeitung ist abgeschaltet — Neustart nötig"
     IDS_STATE_HEALTH        "stille Hook-Entfernungen: {0} · Installationsfehler: {1}"
+    IDS_STATE_PAIR          "Aktives Paar: {0} → {1}"
+    IDS_STATE_CYCLE         "Aktiver Zyklus: {0}"
+    IDS_STATE_PAIR_NONE     "Kein aktives Paar"
+    IDS_STATE_NO_FAILURES   "keine Auswahlfehler"
+    IDS_STATE_FAILURES      "Auswahlfehler: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts in der Sitzung: {0} · Ausnahmen veröffentlicht: {1} · Protokolleinträge: {2}"
     IDS_STATE_AUTOSTART     "Autostart in der Registrierung (HKCU\\…\\Run): {0}"
@@ -2450,6 +2488,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "L'interception clavier n'est pas installée"
     IDS_STATE_DISABLED      "L'interception est installée, mais le traitement est arrêté — redémarrage nécessaire"
     IDS_STATE_HEALTH        "retraits silencieux de l'interception : {0} · échecs d'installation : {1}"
+    IDS_STATE_PAIR          "Paire active : {0} → {1}"
+    IDS_STATE_CYCLE         "Cycle actif : {0}"
+    IDS_STATE_PAIR_NONE     "Aucune paire active"
+    IDS_STATE_NO_FAILURES   "aucun échec de sélection"
+    IDS_STATE_FAILURES      "échecs de sélection : {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Dispositions dans la session : {0} · exceptions publiées : {1} · entrées du journal : {2}"
     IDS_STATE_AUTOSTART     "Démarrage automatique dans le registre (HKCU\\…\\Run) : {0}"
@@ -2664,6 +2707,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "La interceptación de teclado no está instalada"
     IDS_STATE_DISABLED      "La interceptación está instalada, pero el procesamiento está desactivado: reinicie el programa"
     IDS_STATE_HEALTH        "retiradas silenciosas de la interceptación: {0} · fallos de instalación: {1}"
+    IDS_STATE_PAIR          "Par activo: {0} → {1}"
+    IDS_STATE_CYCLE         "Ciclo activo: {0}"
+    IDS_STATE_PAIR_NONE     "No hay par activo"
+    IDS_STATE_NO_FAILURES   "sin fallos de selección"
+    IDS_STATE_FAILURES      "fallos de selección: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Distribuciones en la sesión: {0} · excepciones publicadas: {1} · entradas del registro: {2}"
     IDS_STATE_AUTOSTART     "Inicio automático en el registro (HKCU\\…\\Run): {0}"
@@ -2876,6 +2924,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "A interceptação do teclado não está instalada"
     IDS_STATE_DISABLED      "A interceptação está instalada, mas o processamento está desligado — reinicie o programa"
     IDS_STATE_HEALTH        "remoções silenciosas da interceptação: {0} · falhas de instalação: {1}"
+    IDS_STATE_PAIR          "Par ativo: {0} → {1}"
+    IDS_STATE_CYCLE         "Ciclo ativo: {0}"
+    IDS_STATE_PAIR_NONE     "Nenhum par ativo"
+    IDS_STATE_NO_FAILURES   "sem falhas de seleção"
+    IDS_STATE_FAILURES      "falhas de seleção: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layouts na sessão: {0} · exceções publicadas: {1} · entradas do registro: {2}"
     IDS_STATE_AUTOSTART     "Inicialização automática no registro (HKCU\\…\\Run): {0}"
@@ -3093,6 +3146,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "L'intercettazione della tastiera non è installata"
     IDS_STATE_DISABLED      "L'intercettazione è installata, ma l'elaborazione è disattivata: riavvia il programma"
     IDS_STATE_HEALTH        "rimozioni silenziose dell'intercettazione: {0} · errori di installazione: {1}"
+    IDS_STATE_PAIR          "Coppia attiva: {0} → {1}"
+    IDS_STATE_CYCLE         "Ciclo attivo: {0}"
+    IDS_STATE_PAIR_NONE     "Nessuna coppia attiva"
+    IDS_STATE_NO_FAILURES   "nessun errore di selezione"
+    IDS_STATE_FAILURES      "errori di selezione: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Layout nella sessione: {0} · eccezioni pubblicate: {1} · voci nel registro: {2}"
     IDS_STATE_AUTOSTART     "Avvio automatico nel registro (HKCU\\…\\Run): {0}"
@@ -3310,6 +3368,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Przechwytywanie klawiatury nie jest zainstalowane"
     IDS_STATE_DISABLED      "Przechwytywanie jest zainstalowane, ale przetwarzanie jest wyłączone — potrzebne ponowne uruchomienie"
     IDS_STATE_HEALTH        "ciche zdjęcia przechwytywania: {0} · niepowodzenia instalacji: {1}"
+    IDS_STATE_PAIR          "Aktywna para: {0} → {1}"
+    IDS_STATE_CYCLE         "Aktywny cykl: {0}"
+    IDS_STATE_PAIR_NONE     "Brak aktywnej pary"
+    IDS_STATE_NO_FAILURES   "bez niepowodzeń wyboru"
+    IDS_STATE_FAILURES      "niepowodzenia wyboru: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Układów w sesji: {0} · opublikowanych wyjątków: {1} · wpisów w dzienniku: {2}"
     IDS_STATE_AUTOSTART     "Autostart w rejestrze (HKCU\\…\\Run): {0}"
@@ -3523,6 +3586,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Zachytávání klávesnice není nainstalováno"
     IDS_STATE_DISABLED      "Zachytávání je nainstalováno, ale zpracování je vypnuto — je potřeba restart"
     IDS_STATE_HEALTH        "tichá odebrání zachytávání: {0} · selhání instalace: {1}"
+    IDS_STATE_PAIR          "Aktivní pár: {0} → {1}"
+    IDS_STATE_CYCLE         "Aktivní cyklus: {0}"
+    IDS_STATE_PAIR_NONE     "Žádný aktivní pár"
+    IDS_STATE_NO_FAILURES   "bez selhání výběru"
+    IDS_STATE_FAILURES      "selhání výběru: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Rozložení v relaci: {0} · zveřejněných výjimek: {1} · záznamů v protokolu: {2}"
     IDS_STATE_AUTOSTART     "Automatické spuštění v registru (HKCU\\…\\Run): {0}"
@@ -3739,6 +3807,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Klavye yakalama kurulu değil"
     IDS_STATE_DISABLED      "Yakalama kurulu, ancak işleme kapalı — yeniden başlatma gerekiyor"
     IDS_STATE_HEALTH        "sessiz yakalama kaldırmaları: {0} · kurulum hataları: {1}"
+    IDS_STATE_PAIR          "Etkin çift: {0} → {1}"
+    IDS_STATE_CYCLE         "Etkin döngü: {0}"
+    IDS_STATE_PAIR_NONE     "Etkin çift yok"
+    IDS_STATE_NO_FAILURES   "seçim hatası yok"
+    IDS_STATE_FAILURES      "seçim hataları: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Oturumdaki düzen: {0} · yayımlanan istisna: {1} · günlük kaydı: {2}"
     IDS_STATE_AUTOSTART     "Kayıt defterinde otomatik başlatma (HKCU\\…\\Run): {0}"
@@ -3959,6 +4032,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "Η παρακολούθηση πληκτρολογίου δεν είναι εγκατεστημένη"
     IDS_STATE_DISABLED      "Η παρακολούθηση είναι εγκατεστημένη, αλλά η επεξεργασία είναι απενεργοποιημένη — χρειάζεται επανεκκίνηση"
     IDS_STATE_HEALTH        "σιωπηλές αφαιρέσεις παρακολούθησης: {0} · αποτυχίες εγκατάστασης: {1}"
+    IDS_STATE_PAIR          "Ενεργό ζεύγος: {0} → {1}"
+    IDS_STATE_CYCLE         "Ενεργός κύκλος: {0}"
+    IDS_STATE_PAIR_NONE     "Κανένα ενεργό ζεύγος"
+    IDS_STATE_NO_FAILURES   "καμία αποτυχία επιλογής"
+    IDS_STATE_FAILURES      "αποτυχίες επιλογής: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "Διατάξεις στη συνεδρία: {0} · δημοσιευμένες εξαιρέσεις: {1} · εγγραφές καταγραφής: {2}"
     IDS_STATE_AUTOSTART     "Αυτόματη εκκίνηση στο μητρώο (HKCU\\…\\Run): {0}"
@@ -4186,6 +4264,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "מעקב המקלדת אינו מותקן"
     IDS_STATE_DISABLED      "המעקב מותקן, אך העיבוד כבוי — נדרשת הפעלה מחדש"
     IDS_STATE_HEALTH        "הסרות שקטות של המעקב: {0} · כשלי התקנה: {1}"
+    IDS_STATE_PAIR          "הזוג הפעיל: {0} → {1}"
+    IDS_STATE_CYCLE         "המחזור הפעיל: {0}"
+    IDS_STATE_PAIR_NONE     "אין זוג פעיל"
+    IDS_STATE_NO_FAILURES   "לא היו כשלי בחירה"
+    IDS_STATE_FAILURES      "כשלי בחירה: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "פריסות בהפעלה: {0} · חריגים שפורסמו: {1} · רשומות ביומן: {2}"
     IDS_STATE_AUTOSTART     "הפעלה אוטומטית ברישום (HKCU\\…\\Run): {0}"
@@ -4396,6 +4479,11 @@ BEGIN
     IDS_STATE_HOOK_ABSENT   "مراقبة لوحة المفاتيح غير مثبّتة"
     IDS_STATE_DISABLED      "المراقبة مثبّتة، لكن المعالجة متوقفة — يلزم إعادة التشغيل"
     IDS_STATE_HEALTH        "إزالات صامتة للمراقبة: {0} · حالات إخفاق التثبيت: {1}"
+    IDS_STATE_PAIR          "الزوج الفعّال: {0} → {1}"
+    IDS_STATE_CYCLE         "الدورة الفعّالة: {0}"
+    IDS_STATE_PAIR_NONE     "لا يوجد زوج فعّال"
+    IDS_STATE_NO_FAILURES   "لا حالات إخفاق في الاختيار"
+    IDS_STATE_FAILURES      "حالات إخفاق الاختيار: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
     IDS_STATE_LAYOUTS       "التخطيطات في الجلسة: {0} · الاستثناءات المنشورة: {1} · إدخالات السجل: {2}"
     // ⚠ Глоссарий Э30 §3.1: реестр — «سجل النظام», журнал — «السجل». Одно арабское слово на два

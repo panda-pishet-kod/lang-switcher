@@ -2429,6 +2429,17 @@ pub const IDS_STATE_HEALTH: u16 = 3219;
 /// the hook (task T-34-5), the acting pair and its refusals (task T-34-6) — in the table so
 /// that a locale may change it.
 pub const IDS_STATE_JOINED: u16 = 3220;
+/// «Действующая пара: {0} → {1}» — the fourth line of «Состояние», task T-34-6, finding Н102.
+pub const IDS_STATE_PAIR: u16 = 3222;
+/// «Действующий цикл: {0}» — the same line in mode «cycle», the layouts joined by «→».
+pub const IDS_STATE_CYCLE: u16 = 3223;
+/// «Действующая пара не выбрана» — nothing acts: fewer than two layouts, or a pair that
+/// resolves to nothing.
+pub const IDS_STATE_PAIR_NONE: u16 = 3224;
+/// «отказов выбора не было» — zero said in words, not «отказов: 0».
+pub const IDS_STATE_NO_FAILURES: u16 = 3225;
+/// «отказов выбора: {0}» — the sum of the four counters of `layouts::selection_failures`.
+pub const IDS_STATE_FAILURES: u16 = 3226;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -2622,7 +2633,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 210] = [
+pub const INTERFACE_STRINGS: [u16; 215] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2668,6 +2679,11 @@ pub const INTERFACE_STRINGS: [u16; 210] = [
     IDS_STATE_DISABLED,
     IDS_STATE_HEALTH,
     IDS_STATE_JOINED,
+    IDS_STATE_PAIR,
+    IDS_STATE_CYCLE,
+    IDS_STATE_PAIR_NONE,
+    IDS_STATE_NO_FAILURES,
+    IDS_STATE_FAILURES,
     IDS_STATE_LAYOUTS,
     IDS_STATE_AUTOSTART,
     IDS_AUTOSTART_PRESENT,
@@ -3777,6 +3793,8 @@ const IDC_LOG_SAVE: i32 = 1064;
 const IDC_STATE_HOOK: i32 = 1070;
 const IDC_STATE_LAYOUTS: i32 = 1071;
 const IDC_STATE_AUTOSTART: i32 = 1072;
+/// The fourth line of «Состояние» — the acting pair and the refusals of selection, task T-34-6.
+const IDC_STATE_PAIR: i32 = 1073;
 const IDC_APPLY: i32 = 1080;
 
 // The static text of the dialog — group boxes and labels. They carried -1 until FR-94 needed
@@ -5277,7 +5295,7 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
 ///
 /// ⚠ This is a list of *controls*, not of colours: the colour role of every one of them comes
 /// from [`static_color_role`], which task T-11-4 wrote and this task reuses unchanged.
-pub const OWNER_DRAWN_LABELS: [i32; 14] = [
+pub const OWNER_DRAWN_LABELS: [i32; 15] = [
     IDC_LANGUAGE_LABEL,
     IDC_THEME_LABEL,
     IDC_HOTKEY_LABEL,
@@ -5292,6 +5310,7 @@ pub const OWNER_DRAWN_LABELS: [i32; 14] = [
     IDC_STATE_HOOK,
     IDC_STATE_LAYOUTS,
     IDC_STATE_AUTOSTART,
+    IDC_STATE_PAIR,
 ];
 
 /// The `SS_OWNERDRAW` labels of the about template — the same gate for the other window.
@@ -11243,7 +11262,42 @@ pub fn program_state(installed: bool, down: bool, active: bool, fail_safe: bool)
     }
 }
 
-/// The three read-only lines of the «Состояние» group.
+/// What acts when the hotkey is pressed — the subject of the fourth line of «Состояние», task
+/// T-34-6, finding Н102.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Acting {
+    /// Mode «pair» — the two layouts the hotkey switches between, named as the lists name them.
+    Pair(String, String),
+    /// Mode «cycle» — the layouts in the order the hotkey walks them.
+    Cycle(Vec<String>),
+    /// Nothing acts: fewer than two layouts in the session, or a pair that resolves to nothing.
+    None,
+}
+
+/// The fourth line of «Состояние»: what acts, and how often the choice was refused — pure, so
+/// that `tests\settings.rs` can build every shape of it out of the built string tables.
+///
+/// `refusals` is the sum of the four counters of `layouts::selection_failures`, the ones the
+/// dump prints as `layouts.*`; a person whose key stays silent reads here that the choice was
+/// refused and by how much, without switching the journal on. Zero is said in words — «отказов
+/// выбора не было» — because «отказов: 0 · пара: —» is a table row, not a sentence.
+pub fn acting_line(acting: &Acting, refusals: u32) -> String {
+    let what = match acting {
+        Acting::Pair(source, target) => format_text(IDS_STATE_PAIR, &[source, target]),
+        Acting::Cycle(names) => format_text(IDS_STATE_CYCLE, &[&names.join(" → ")]),
+        Acting::None => text(IDS_STATE_PAIR_NONE),
+    };
+
+    let refused = if refusals == 0 {
+        text(IDS_STATE_NO_FAILURES)
+    } else {
+        format_text(IDS_STATE_FAILURES, &[&refusals.to_string()])
+    };
+
+    format_text(IDS_STATE_JOINED, &[&what, &refused])
+}
+
+/// The four read-only lines of the «Состояние» group.
 ///
 /// **Every number here comes from another module's public reader** — `watchdog`, `layouts`,
 /// `guard`, `diag` — and nothing is written back to any of them. Section 6.2: the dialog shows
@@ -11306,6 +11360,43 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
             }],
         ),
     );
+
+    // Task T-34-6, finding Н102: what acts when the key is pressed — the very selection the
+    // hotkey makes, `layouts::cycle_for` over the published configuration and the layouts of
+    // this session (the first `MAX_CYCLE` of them, which is what the hotkey sees too), named
+    // the way the lists above name them — and how often the choice was refused, out of the four
+    // counters the dump already prints. Nothing here decides anything: `MAX_CYCLE` and the
+    // choice of the pair belong to `layouts`, this line only reads them back.
+    let available: Vec<LayoutId> = state
+        .session
+        .iter()
+        .copied()
+        .take(layouts::MAX_CYCLE)
+        .collect();
+    let session = layouts::Session::of(available.len(), state.session.len());
+    let acting = match layouts::cycle_for(layouts::published(), &available, session) {
+        Ok(cycle) => {
+            let names = layout_labels(cycle.layouts(), &state.session);
+
+            match (layouts::published().mode(), names.as_slice()) {
+                (LayoutMode::Pair, [source, target]) => {
+                    Acting::Pair(source.clone(), target.clone())
+                }
+                (_, names) if names.len() >= 2 => Acting::Cycle(names.to_vec()),
+                _ => Acting::None,
+            }
+        }
+        Err(_) => Acting::None,
+    };
+
+    let failures = layouts::selection_failures();
+    let refusals = failures
+        .ime_layout
+        .saturating_add(failures.no_layouts)
+        .saturating_add(failures.origin_outside)
+        .saturating_add(failures.too_many_layouts);
+
+    set_text(hwnd, IDC_STATE_PAIR, &acting_line(&acting, refusals));
 }
 
 /// Reads every control back into the working configuration.

@@ -1978,6 +1978,7 @@ fn the_static_colour_roles_follow_the_table_of_fr_92a() {
         (1070, "IDC_STATE_HOOK"),
         (1071, "IDC_STATE_LAYOUTS"),
         (1072, "IDC_STATE_AUTOSTART"),
+        (1073, "IDC_STATE_PAIR"),
         (1001, "IDC_AUTOSTART"),
     ] {
         assert_eq!(
@@ -2950,7 +2951,7 @@ const TEMPLATE_TEXT: [&str; 30] = [
 ///
 /// ⚠ **Thirty-seven since task Т-31-3**: 1092, «вступит в силу после перезапуска», left with
 /// its sentence (решение 99.4). Its number is retired, not freed, exactly as the eleven above.
-const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 39] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1003, "Общие: оформление — FR-92а"),
@@ -2994,6 +2995,10 @@ const TEMPLATE_CONTROLS: [(u32, &str); 38] = [
     (1107, "Диагностика: подпись «Папка журнала»"),
     (1108, "Состояние: заголовок группы"),
     (1109, "Общие: подпись «Оформление» — FR-92а"),
+    (
+        1073,
+        "Состояние: действующая пара и отказы выбора — task T-34-6",
+    ),
 ];
 
 // -----------------------------------------------------------------------------------------
@@ -3252,10 +3257,13 @@ fn the_window_carries_the_geometry_chosen_at_the_control_point() {
     // at both sizes, measured), so the two labels that were already tight — «Язык интерфейса:»
     // and «Клавиша:» — needed the ten units this number carries. The user asked for exactly
     // this: «расширить модуль и соответственно окно самой программы».
+    // ⚠ 364 → 375 by решение 117.5 (task T-34-6): the fourth line of «Состояние» — the acting
+    // pair and the refusals of selection — did not fit under the three (six units free at a
+    // pitch of eleven), so the panel grew 44 → 55 and the window with it. Width untouched.
     assert_eq!(
         template.size,
-        (430, 364),
-        "the window of решения 83 и 87 is 430 × 364 dialog units"
+        (430, 375),
+        "the window of решения 83, 87 и 117.5 is 430 × 375 dialog units"
     );
 
     let bottom = |panel: u32| -> i32 {
@@ -3496,7 +3504,7 @@ fn the_six_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
 // `SS_ICON` is the type that loads the 32 px frame of the `.ico`, and it draws no text.
 
 /// Every `LTEXT` of the settings template, by identifier and by what it says on the window.
-const OWNER_DRAWN_LABELS: [(u32, &str); 14] = [
+const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
     (1091, "Общие: подпись «Язык интерфейса»"),
     (1109, "Общие: подпись «Оформление»"),
     // 1092 — «вступит в силу после перезапуска» — снят задачей Т-31-3, решение 99.4.
@@ -3512,6 +3520,10 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 14] = [
     (1070, "Состояние: перехват клавиатуры"),
     (1071, "Состояние: раскладки сеанса"),
     (1072, "Состояние: автозапуск в реестре"),
+    (
+        1073,
+        "Состояние: действующая пара и отказы выбора — task T-34-6",
+    ),
 ];
 
 /// Every `LTEXT` of the about template. The `ICON` is not one of them — see above; neither is
@@ -3816,8 +3828,8 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // see the sister test for why that is a horizontal matter and this one is not.
     assert_eq!(
         template.size,
-        (430, 364),
-        "the settings dialog has to be 430 x 364 dialog units — решения 83 п. 3 и 87 п. 3"
+        (430, 375),
+        "the settings dialog has to be 430 x 375 dialog units — решения 83 п. 3, 87 п. 3 и 117.5"
     );
 
     // The eight rectangles that moved, in full: a `y` alone would say nothing about a width
@@ -3829,15 +3841,28 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // `y`, width and height is exactly what it was. That is the whole shape of the change and
     // the reason it is safe: the right column was **moved**, not re-cut — «Диагностика» keeps
     // its own 200 × 74 — and the two full-width rows grew by the ten units the window grew by.
-    const MOVED: [(u32, &str, i32, i32, i32, i32); 8] = [
+    //
+    // ⚠ **And since решение 117.5 (task T-34-6) «Состояние» is 55 units tall, not 44, with a
+    // fourth line at 338 — the acting pair and the refusals of selection — and the three buttons
+    // stand eleven units lower (343 → 354), as does the bottom of the window (364 → 375).**
+    // Nothing else moved: «Диагностика» keeps its 200 × 74, the width its 430.
+    const MOVED: [(u32, &str, i32, i32, i32, i32); 9] = [
         (1106, "Диагностика: панель", 223, 215, 200, 74),
-        (1108, "Состояние: панель", 7, 293, 416, 44),
+        (1108, "Состояние: панель", 7, 293, 416, 55),
         (1070, "Состояние: перехватчик", 14, 305, 402, 9),
         (1071, "Состояние: раскладки", 14, 316, 402, 9),
         (1072, "Состояние: автозапуск", 14, 327, 402, 9),
-        (1, "ОК", 263, 343, 50, 14),
-        (2, "Отмена", 317, 343, 50, 14),
-        (1080, "Применить", 371, 343, 52, 14),
+        (
+            1073,
+            "Состояние: действующая пара — T-34-6",
+            14,
+            338,
+            402,
+            9,
+        ),
+        (1, "ОК", 263, 354, 50, 14),
+        (2, "Отмена", 317, 354, 50, 14),
+        (1080, "Применить", 371, 354, 52, 14),
     ];
 
     for (id, what, x, y, cx, cy) in MOVED {
@@ -8443,7 +8468,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 210] = [
+const FR_94_STRINGS: [(u16, &str, &str); 215] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -8591,6 +8616,32 @@ const FR_94_STRINGS: [(u16, &str, &str); 210] = [
         "silent hook removals: {0} · install failures: {1}",
     ),
     (settings::IDS_STATE_JOINED, "{0} · {1}", "{0} · {1}"),
+    // Task T-34-6 (Н102): the fourth line — what acts, and the refusals of selection.
+    (
+        settings::IDS_STATE_PAIR,
+        "Действующая пара: {0} → {1}",
+        "Acting pair: {0} → {1}",
+    ),
+    (
+        settings::IDS_STATE_CYCLE,
+        "Действующий цикл: {0}",
+        "Acting cycle: {0}",
+    ),
+    (
+        settings::IDS_STATE_PAIR_NONE,
+        "Действующая пара не выбрана",
+        "No acting pair",
+    ),
+    (
+        settings::IDS_STATE_NO_FAILURES,
+        "отказов выбора не было",
+        "no selection failures",
+    ),
+    (
+        settings::IDS_STATE_FAILURES,
+        "отказов выбора: {0}",
+        "selection failures: {0}",
+    ),
     (
         settings::IDS_STATE_LAYOUTS,
         "Раскладок в сеансе: {0} · исключений опубликовано: {1} · записей в журнале: {2}",
@@ -9451,6 +9502,97 @@ fn the_state_panel_speaks_of_the_program_and_not_of_hook_recoveries() {
         "no string tells the person that processing is off after failures and a restart is \
          needed (FR-99, finding Н84)"
     );
+}
+
+/// **Task T-34-6, finding Н102 — the red «before».** The four counters of the refusals of
+/// selection (`layouts::selection_failures`) were visible only in the dump, which is off by
+/// default, and the pair that acts was shown nowhere — a person whose key stays silent had
+/// nothing to read. The vocabulary must name the acting pair and say «no refusals» in words
+/// when there were none, rather than «отказов: 0 · пара: —».
+#[test]
+fn the_state_panel_names_the_acting_pair_and_the_refusals_of_selection() {
+    let product = ProductImage::shared();
+    let strings: Vec<(u16, String, String)> = settings::INTERFACE_STRINGS
+        .iter()
+        .map(|&id| {
+            (
+                id,
+                product.string(settings::Language::Ru, id),
+                product.string(settings::Language::En, id),
+            )
+        })
+        .collect();
+
+    for (ru, en) in [
+        ("Действующая пара: {0} → {1}", "Acting pair: {0} → {1}"),
+        ("отказов выбора не было", "no selection failures"),
+        ("отказов выбора: {0}", "selection failures: {0}"),
+    ] {
+        assert!(
+            strings.iter().any(|(_, r, e)| r == ru && e == en),
+            "the interface has no string «{ru}» / «{en}»"
+        );
+    }
+}
+
+/// **Task T-34-6 — the pure half: every shape of the fourth line, out of the built tables.**
+/// A pair, a cycle and nothing, each with and without refusals; zero is words, a number is a
+/// number, and the two halves are joined the way the table joins them.
+#[test]
+fn the_acting_line_is_built_from_the_pair_and_the_four_counters_and_says_zero_in_words() {
+    use settings::{Acting, acting_line};
+
+    let _gate = with_product_strings();
+
+    let pair = Acting::Pair("Русский".to_owned(), "English".to_owned());
+    let cycle = Acting::Cycle(vec![
+        "Русский".to_owned(),
+        "English".to_owned(),
+        "Deutsch".to_owned(),
+    ]);
+
+    let cases = [
+        (
+            &pair,
+            0,
+            "Действующая пара: Русский → English · отказов выбора не было",
+        ),
+        (
+            &pair,
+            7,
+            "Действующая пара: Русский → English · отказов выбора: 7",
+        ),
+        (
+            &cycle,
+            0,
+            "Действующий цикл: Русский → English → Deutsch · отказов выбора не было",
+        ),
+        (
+            &cycle,
+            1,
+            "Действующий цикл: Русский → English → Deutsch · отказов выбора: 1",
+        ),
+        (
+            &Acting::None,
+            0,
+            "Действующая пара не выбрана · отказов выбора не было",
+        ),
+        (
+            &Acting::None,
+            3,
+            "Действующая пара не выбрана · отказов выбора: 3",
+        ),
+    ];
+
+    for (acting, refusals, expected) in cases {
+        let line = acting_line(acting, refusals);
+        println!("{line}");
+        assert_eq!(line, expected);
+        assert!(
+            !line.contains(": 0"),
+            "zero must be said in words, never as «: 0»: {line}"
+        );
+    }
 }
 
 /// **Task T-34-5 — the pure half, all sixteen combinations.** `program_state` is a function of
@@ -14675,8 +14817,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        210,
-        "two hundred and ten identifiers in use — the mandate of Э32 authorised the canon \
+        215,
+        "two hundred and fifteen identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
@@ -14684,7 +14826,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
          its own body, because it was knocking with the words of the update — the TWO of \
          task T-34-3 (the button «Сохранить журнал…» and the sentence of its refusal), and \
          the SEVEN of task T-34-5 less the THREE it retired (3045…3047): the four states of \
-         the program, the health of the hook, their joiner and the greyed «Возобновить»"
+         the program, the health of the hook, their joiner and the greyed «Возобновить» — and \
+         the FIVE of task T-34-6: the acting pair, the acting cycle, no pair, no refusals and \
+         the refusals counted"
     );
 
     let product = ProductImage::shared();
