@@ -1,6 +1,6 @@
 [package]
 name = "lang_switcher"
-version = "0.51.0"
+version = "0.52.0"
 edition = "2024"
 
 # Two targets on purpose. Integration tests under tests\ can only link against a library

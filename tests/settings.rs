@@ -8764,25 +8764,28 @@ const FR_94_STRINGS: [(u16, &str, &str); 204] = [
         "Three changes",
     ),
     // ⚠ Три строки «Что нового» меняются КАЖДОЙ поставкой — это их назначение. Здесь слова
-    // **трёх** поставок (задача T-51-2): 0.51.0, 0.50.0 и 0.49.0 — ровно тех, о которых письмо
-    // пользователю ещё не показывалось (`last_seen_version = "0.48.0"`: FR-101 показывает не
-    // больше одного письма в сутки, и дневная доля ушла на 0.48.0). Правило Э47: слот не
-    // опустошать, а нести в нём то, чего пользователь ещё не читал. Три поставки на три слота
-    // сошлись без остатка.
+    // **четырёх** поставок (задача T-52-6): 0.51.0 и 0.50.0 сведены в один слот, 0.49.0 стоит
+    // как стояло, третий слот отдан 0.52.0. Ни одно из этих писем пользователю ещё не
+    // показывалось (`last_seen_version = "0.48.0"`: FR-101 показывает не больше одного письма в
+    // сутки), и правило Э47 — слот не опустошать, а нести в нём то, чего пользователь ещё не
+    // читал — соблюдено: сведение не выбрасывает ни одной поставки, а лишь укладывает две
+    // близкие по смыслу (кегль окон и высота строк списка — обе про вид окон) в одну строку.
+    // Решение пользователя 2026-09-09. Две оставшиеся строки 0.52.0 — таймаут покоя FR-15 и
+    // горячая клавиша в исключённом процессе FR-84 — идут в долг следующей поставке.
     (
         settings::IDS_WHATSNEW_1,
-        "Все окна программы теперь одного кегля — как в окне настроек.",
-        "Every window of the program now uses one type size — the one the settings window has.",
+        "Окна программы приведены к одному виду: единый кегль и одинаковая высота строк в списках.",
+        "The windows of the program have been brought to one look: one type size, and list rows of one height.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "Строка выпадающего списка раскладок стала одной высоты во всех окнах программы.",
-        "A row of the drop-down layout list is now the same height in every window of the program.",
+        "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно.",
+        "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно.",
-        "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose.",
+        "Клавиши без символа — F1–F24, PrintScreen, клавиша меню — теперь закрывают слово, как щелчок мыши; громкость и медиа-клавиши его не трогают.",
+        "Keys that write nothing — F1–F24, PrintScreen, the menu key — now end the word, like a mouse click; the volume and media keys leave it alone.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
