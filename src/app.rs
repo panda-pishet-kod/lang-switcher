@@ -1784,6 +1784,27 @@ fn refresh_layout_and_cache() {
     }
 }
 
+/// The device half of FR-21 at one window — `WM_DEVICECHANGE`, and `WM_INPUTLANGCHANGE` beside it
+/// in [`crate::layouts::REBUILD_MESSAGES`] — **finding Н25, task T-39-5**.
+///
+/// `at_the_input_window` is [`is_input_window`] as the window procedure asks it. It is an argument
+/// so that the rule can be driven from a test without a window of the input thread; the rebuild
+/// itself reaches a buffer parked by FR-70 through [`with_recorder_wherever_it_is`], like every
+/// other publication of FR-21.
+fn answer_device_change(message: u32, at_the_input_window: bool) {
+    if crate::layouts::needs_rebuild(message) && at_the_input_window {
+        // Task T-08-4: the count that lets a run *show* FR-21 being delivered rather
+        // than assert it. It answers `false` for `WM_INPUTLANGCHANGE`, which is the
+        // other message of the list and is not a device change; the result is dropped
+        // because the rebuild below happens for both alike. SEC-07 — a count of events,
+        // never a device name.
+        let _ = crate::watchdog::note_device_change(message);
+
+        publish_active_layout(foreground_layout());
+        rebuild_layout_cache();
+    }
+}
+
 /// The stamp half of [`refresh_layout_and_cache`], as a function of its two inputs — since task
 /// T-39-4 the rebuild half is [`crate::layouts::layout_list_changed`] (finding Н11).
 ///
@@ -2679,11 +2700,14 @@ unsafe extern "system" fn window_proc(
             // and NFR-02 confine it: the sweep is thousands of `ToUnicodeEx` calls, three
             // orders of magnitude past the callback's budget.
             //
-            // `buffer::is_installed` is what says "this is the input thread": section 6.3 gives
-            // the buffer to that thread and to no other. The test is not decoration — the UI
-            // window is top-level, `WM_DEVICECHANGE` is broadcast to top-level windows, and
-            // without it every device change in the machine would run a full sweep on the
-            // thread section 6.1 exists to keep free.
+            // ⭐ **Finding Н25 — task T-39-5: the register of windows says "this is the input
+            // window", not the buffer.** The test used to be `buffer::is_installed`, and FR-70
+            // takes the buffer off this very thread for the interval of a password field: a
+            // keyboard plugged in during it was dropped unread and the cache never rebuilt. The
+            // probe branch below had the same trap closed in task T-10-0f. The test is still not
+            // decoration — the UI and watcher windows are top-level, `WM_DEVICECHANGE` is
+            // broadcast to every top-level window, and without it every device change in the
+            // machine would run a full sweep on a thread section 6.1 exists to keep free.
             //
             // ⚠ **FR-11: neither call flushes the buffer.** See `publish_cache` and
             // `publish_active_layout`; there is no `reset` anywhere on this path.
@@ -2691,18 +2715,10 @@ unsafe extern "system" fn window_proc(
             // SEC-05: a process at the same integrity level can post either message. All that
             // buys it is a rebuild of our own cache out of the system's own layout list — an
             // idempotent operation over memory of ours, which is the same standing the wake-up
-            // message has.
-            if crate::layouts::needs_rebuild(message) && crate::buffer::is_installed() {
-                // Task T-08-4: the count that lets a run *show* FR-21 being delivered rather
-                // than assert it. It answers `false` for `WM_INPUTLANGCHANGE`, which is the
-                // other message of the list and is not a device change; the result is dropped
-                // because the rebuild below happens for both alike. SEC-07 — a count of events,
-                // never a device name.
-                let _ = crate::watchdog::note_device_change(message);
-
-                publish_active_layout(foreground_layout());
-                rebuild_layout_cache();
-            }
+            // message has. ⚠ Task T-39-5 does not weaken it: a forged message at the UI or
+            // watcher window is refused by the register of our own windows exactly as it was
+            // refused by the missing buffer, and one at the input window buys what it always did.
+            answer_device_change(message, is_input_window(hwnd));
 
             // FR-10, FR-12, FR-13 — task T-03-3. The two asynchronous flush sources of the
             // FR-10 table arrive here: a mouse button as the `WM_INPUT` of Raw Input, and the
@@ -3997,6 +4013,53 @@ mod tests {
             wasted == 0 && owed == 1,
             "Н11: a probe over an unchanged list rebuilt the cache {wasted} time(s), expected 0; a \
              probe over a list with a layout the cache lacks rebuilt it {owed} time(s), expected 1"
+        );
+    }
+
+    /// **Finding Н25 — task T-39-5: a device change reaches the cache while the buffer is parked.**
+    ///
+    /// `WM_DEVICECHANGE` — a keyboard plugged in or pulled out — is answered at the input window
+    /// with a rebuild of the cache of FR-20. The branch asked `buffer::is_installed` whether this
+    /// was the input thread, and FR-70 takes the buffer off that very thread for the interval of a
+    /// password field: a keyboard arriving then was thrown away unread and the cache stayed as it
+    /// was. The layout probe beside it had the same trap repaired in task T-10-0f, by asking the
+    /// register of windows instead.
+    ///
+    /// Observed on the recorder itself rather than on a counter of the process: a cache that is not
+    /// the session's — one map of FR-25 — is published first, and a rebuild is what replaces it.
+    #[test]
+    fn a_device_change_rebuilds_at_the_input_window_even_with_the_buffer_parked() {
+        const WM_DEVICECHANGE: u32 = 0x0219;
+
+        let marker = || {
+            LayoutCache::from_maps(vec![crate::convert::fallback_cache().maps()[0].clone()])
+                .expect("one map of FR-25 is a cache")
+        };
+
+        // At the input window, with the buffer parked by the gate of FR-70.
+        buffer::install_recorder(Recorder::with_capacity(8));
+        publish_cache(marker());
+        park_buffer();
+        answer_device_change(WM_DEVICECHANGE, true);
+        let rebuilt_while_parked =
+            with_recorder_wherever_it_is(|recorder| recorder.cache().cloned())
+                != Some(Some(marker()));
+        restore_buffer();
+        buffer::uninstall();
+
+        // At a window that is not the input one: the UI and watcher windows hear the broadcast too.
+        buffer::install_recorder(Recorder::with_capacity(8));
+        publish_cache(marker());
+        answer_device_change(WM_DEVICECHANGE, false);
+        let rebuilt_elsewhere =
+            buffer::with(|recorder| recorder.cache().cloned()) != Some(Some(marker()));
+        buffer::uninstall();
+
+        assert!(
+            rebuilt_while_parked && !rebuilt_elsewhere,
+            "Н25: a device change at the input window with the buffer parked rebuilt the cache: \
+             {rebuilt_while_parked}; one at a window that is not the input one rebuilt it: \
+             {rebuilt_elsewhere}"
         );
     }
 
