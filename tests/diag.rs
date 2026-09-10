@@ -1259,6 +1259,44 @@ fn a_dump_of_the_running_session_differs_from_the_dump_of_shutdown() {
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-34-7 — the prose at the dump call tells the truth about the order of shutdown
+// -------------------------------------------------------------------------------------
+
+/// **Task T-34-7, finding Н99.** The comment above `diag::dump_on_shutdown()` in `src\app.rs`
+/// used to promise that the paths which report into the journal at the very end had run before
+/// the dump. They had not: the hook comes off on the input thread and the subscriptions of
+/// FR-80 on the watcher thread, both joined on the main thread after the UI thread has already
+/// written the file. The order is kept — moving the dump behind `join_all` would put file
+/// input-output on the main thread, which section 6.1 forbids — and the sentence is what
+/// changed. A sweep over `src\app.rs`, so that the promise cannot quietly come back; the file
+/// swept is not this one.
+#[test]
+fn the_prose_at_the_dump_call_no_longer_promises_the_other_threads_were_heard() {
+    let app = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("app.rs"),
+    )
+    .expect("src\\app.rs must be readable");
+
+    for stale in [
+        "report into the journal last",
+        "leave their failures in a ring nobody reads",
+    ] {
+        assert!(
+            !app.contains(stale),
+            "src\\app.rs still says «{stale}» — the promise of T-06-4 that task T-34-7 withdrew"
+        );
+    }
+
+    assert!(
+        app.contains("lands in the ring **after** the dump"),
+        "src\\app.rs must say that what the other two threads record at shutdown lands after \
+         the dump"
+    );
+}
+
+// -------------------------------------------------------------------------------------
 // Task T-34-4 — the counters of the password-field guard and of the clipboard are in the dump
 // -------------------------------------------------------------------------------------
 

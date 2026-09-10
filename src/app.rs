@@ -1164,13 +1164,20 @@ fn thread_body(role: Role) -> WinResult<()> {
         // the UI thread and forbids it to the input thread, so the one place the journal may
         // reach a file is here, on this thread, once, after `serve_window` has returned.
         //
-        // After and not inside: the tray attachment, the window and the watchdog
-        // subscriptions are undone by `Drop` implementations *inside* that call, and those
-        // are precisely the paths that report into the journal last. Dumping before they ran
-        // would leave their failures in a ring nobody reads.
+        // After and not inside: the tray attachment, the window and **this thread's**
+        // subscriptions are undone by `Drop` implementations *inside* that call, so what they
+        // report is in the ring before the file is written. ⚠ **What is NOT in it — task
+        // T-34-7, finding Н99:** the hook comes off on the input thread and the system
+        // subscriptions of FR-80 on the watcher thread, and both are joined by `join_all` on
+        // the main thread *after* this thread has returned. Whatever those two record while
+        // they come down lands in the ring **after** the dump, and reaches no file: the last
+        // dump of a session is a picture of the UI thread's shutdown, not of the whole
+        // program's. Moving the dump behind `join_all` would put file input-output on the main
+        // thread, which section 6.1 does not allow — so the order stays and the sentence says
+        // what it means (вариант 2 of Н99, решение 117).
         //
-        // Off unless `[diagnostics] log_enabled` says otherwise — section 7 — in which case
-        // this creates nothing at all.
+        // Off unless the session's published `[diagnostics] log_enabled` says otherwise —
+        // section 7, task T-34-2 — in which case this creates nothing at all.
         Role::Ui => {
             let served = serve_window(role);
 
