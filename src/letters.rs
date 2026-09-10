@@ -6902,6 +6902,12 @@ fn fill_layout_combo(hwnd: HWND, wizard: &Wizard) {
             // copies it — `CBS_HASSTRINGS` is what makes that true.
             settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_ADDSTRING, 0, wide.as_ptr() as isize);
         }
+
+        // Правило 118.1, задача T-53a-1 — ЗДЕСЬ, внутри ветви перестроения, и это ровно то
+        // «после заполнения и заново при всяком изменении числа строк», которого правило
+        // требует: ветвь срабатывает тогда и только тогда, когда число строк разошлось с
+        // записанным. Высота считается слоем `widgets::combo`, своей арифметики у мастера нет.
+        let _taken = widgets::combo::set_dropped_height(hwnd, IDC_WZ_LAYOUT);
     }
 
     let chosen = wizard
@@ -7170,7 +7176,22 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
 
             let combo = width / 2;
 
-            place(hwnd, IDC_WZ_LAYOUT, pad, y, combo, metrics.y(12));
+            // ⛔ **Здесь стояла `metrics.y(12)`, и в ней был дефект Э53а** — задача T-53a-1,
+            // правило 118.1. У выпадающего комбобокса высота ОКНА есть высота РАСКРЫТОГО
+            // состояния вместе с полем, а не высота ряда вёрстки. Пока 12 единиц диалога были
+            // меньше закрытой части, Windows запрос отбрасывала и держала высоту шаблона —
+            // и всё работало; Э51 подняла шрифт мастера 9 → 10 pt, `base_y` 15 → 17, и те же
+            // 12 единиц стали 25 пикселями, ровно закрытой частью: запрос приняли, на строки
+            // не осталось ничего. Замер: окно списка 203 × **2** px, ноль строк.
+            //
+            // Поэтому вёрстка назначает место и ширину, а ВЫСОТУ — общий слой, вызовом сразу
+            // следом: `fill_wizard` идёт до `layout_wizard`, и без этого вызова разметка
+            // затирала бы высоту, поставленную при заполнении списка.
+            //
+            // NFR-13: отказ слоя разобран — комбобокс остаётся при высоте ряда, то есть при
+            // прежнем поведении, а не при нулевой высоте.
+            place(hwnd, IDC_WZ_LAYOUT, pad, y, combo, step_height);
+            widgets::combo::set_dropped_height(hwnd, IDC_WZ_LAYOUT);
 
             let pressed = settings::get_text(hwnd, IDC_WZ_PRESSED_LABEL);
             // SAFETY: as above.

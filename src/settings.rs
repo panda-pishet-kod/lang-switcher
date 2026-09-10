@@ -6383,6 +6383,38 @@ fn set_combo_closed_height(hwnd: HWND) -> usize {
     taken
 }
 
+/// Приводит РАСКРЫТУЮ высоту всех четырёх комбобоксов окна к правилу **118.1** — задача
+/// **T-53a-1**.
+///
+/// Дальняя половина пары к [`set_combo_closed_height`], и делит с ней разделение труда:
+/// арифметика и сообщение живут в `widgets::combo`, у окна остаётся **список своих
+/// комбобоксов**. Мастер FR-104 получает то же правило своим вызовом того же слоя.
+///
+/// ⚠ **Зовётся из [`relabel_dialog`], а не из [`fill_dialog`], и это выбор, а не случайность.**
+/// Правило требует задавать высоту после заполнения списка и заново при всяком изменении числа
+/// строк. `relabel_dialog` — единственное место, которое исполняет оба условия одним вызовом:
+/// на `WM_INITDIALOG` он идёт **последним** в `fill_dialog`, когда все четыре списка уже
+/// заполнены, и он же идёт отдельно при смене языка, когда список темы перезаполняется
+/// заново. В `widgets::combo::attach` эту высоту задать нельзя вовсе — там список ещё пуст.
+///
+/// Число строк ни один вызывающий не сообщает: его спрашивают у самого контрола.
+///
+/// Отказ не журналируется по той же причине, что у соседа выше (reviews\T-11-1.md): комбобокс,
+/// оставшийся при высоте шаблона, — деградация видимая, а не молчаливая. Отвечает, сколько из
+/// четырёх высоту взяли, — чтобы предложение выше было замером, а не надеждой.
+fn set_combo_dropped_heights(hwnd: HWND) -> usize {
+    let mut taken = 0;
+
+    for control in COMBO_BOXES {
+        // NFR-13: examined right here — see the doc comment above.
+        if widgets::combo::set_dropped_height(hwnd, control) {
+            taken += 1;
+        }
+    }
+
+    taken
+}
+
 /// Whether one item change of the layout list is refused — FR-31, task T-11-7-2: the pure
 /// half of the gate of [`on_notify`].
 ///
@@ -11016,6 +11048,12 @@ fn relabel_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     show_log_dir(hwnd);
 
     fill_state_lines(hwnd, state);
+
+    // Правило 118.1, задача T-53a-1 — ПОСЛЕДНИМ и здесь, а не в `fill_dialog`: списки к этому
+    // мгновению заполнены на обеих дорогах — и на `WM_INITDIALOG`, где `fill_dialog` кончается
+    // этим вызовом, и при смене языка, где список темы только что перезаполнен. Почему именно
+    // это место — в доке `set_combo_dropped_heights`.
+    let _taken = set_combo_dropped_heights(hwnd);
 }
 
 /// The note of the layouts section — the sentence FR-92 asks for when a layout named in
