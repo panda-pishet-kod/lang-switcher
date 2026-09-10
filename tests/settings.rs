@@ -8893,20 +8893,22 @@ const FR_94_STRINGS: [(u16, &str, &str); 215] = [
     // близкие по смыслу (кегль окон и высота строк списка — обе про вид окон) в одну строку.
     // Решение пользователя 2026-09-09. Две оставшиеся строки 0.52.0 — таймаут покоя FR-15 и
     // горячая клавиша в исключённом процессе FR-84 — идут в долг следующей поставке.
+    // 0.53.0 (Э34, task T-34-9): the three lines of this delivery — the state panel, the
+    // «Сохранить журнал…» button with the dump header, and the journal's reliability.
     (
         settings::IDS_WHATSNEW_1,
-        "Окна программы приведены к одному виду: единый кегль и одинаковая высота строк в списках.",
-        "The windows of the program have been brought to one look: one type size, and list rows of one height.",
+        "Панель «Состояние» говорит по-человечески: работает / приостановлена / перехват не установлен / нужен перезапуск — и показывает действующую пару раскладок и отказы выбора.",
+        "The «State» panel speaks plainly: working / suspended / the hook is not installed / a restart is needed — and shows the acting pair of layouts and the refusals of selection.",
     ),
     (
         settings::IDS_WHATSNEW_2,
-        "В поле пароля нажатие больше не молчит: программа отвечает глухим стуком — переключение здесь запрещено намеренно.",
-        "A press in a password field is no longer answered by silence: the program knocks dully — switching there is forbidden on purpose.",
+        "Кнопка «Сохранить журнал…» пишет журнал сейчас; в его шапке — время снятия и признак «сеанс продолжается».",
+        "The «Save the journal…» button writes the journal now; its header carries the time it was taken and says whether the session was still running.",
     ),
     (
         settings::IDS_WHATSNEW_3,
-        "Клавиши без символа — F1–F24, PrintScreen, клавиша меню — теперь закрывают слово, как щелчок мыши; громкость и медиа-клавиши его не трогают.",
-        "Keys that write nothing — F1–F24, PrintScreen, the menu key — now end the word, like a mouse click; the volume and media keys leave it alone.",
+        "Журнал надёжнее: неудачная запись не портит прежний файл, галка «Вести журнал» действует сразу в этом сеансе, а серый пункт «Возобновить» говорит, почему он серый.",
+        "The journal is more reliable: a failed write does not damage the previous file, «Keep a journal» acts at once in this session, and the greyed «Resume» says why it is grey.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,

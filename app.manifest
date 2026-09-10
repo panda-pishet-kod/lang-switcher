@@ -3,7 +3,7 @@
   <assemblyIdentity
       type="win32"
       name="Panda_Pishet_Kod.LangSwitcher"
-      version="0.52.0.0"
+      version="0.53.0.0"
       processorArchitecture="amd64"/>
 
   <!-- Release manifest. Section 8.1 of SPEC: the process stays at medium integrity, the
