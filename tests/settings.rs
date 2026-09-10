@@ -1939,20 +1939,142 @@ fn the_closed_sets_and_the_stamp_stay_loud_while_the_numbers_are_soft() {
     );
 }
 
-/// **Where the softness ends: `300ms` is not a value at all** — task T-55-7. A number with a unit
-/// glued to it is a syntax error of the document, and the parser stops before any field sees it
-/// (premise П8: the column is the `m`, not the start of the value). A soft field — the way
-/// `general.theme` is soft, решение 120.2 — softens values the document holds, so this one still
-/// fails the read. ⚠ Put to the owner as a question on 2026-09-10; this is variant А.
+/// **Решение 120.9 (variant Б of решение 120.2), task T-55-7a — a typo that breaks the syntax of
+/// one soft number costs that number and nothing else.**
+///
+/// `300ms` is not a value at all but a syntax error of the document, and the parser stops before
+/// any field sees it (premise П8: the column is the `m`, not the start of the value). Under variant
+/// А — the one task T-55-7 shipped first — such a typo still sent the whole file to quarantine. The
+/// owner chose variant Б: the one line the parser stopped on is taken out of the text **in memory**
+/// — only a `key = …` line of one of the five soft keys, standing in its own `[section]` — and the
+/// document is read again. Turned round from the pin of variant А that stood here.
 #[test]
-fn a_number_with_a_unit_glued_on_is_a_broken_document_and_not_a_soft_field() {
-    let text = living_document_with("replacement", "inter_event_delay_ms = 300ms");
-    let outcome = Config::from_toml_str(&text);
+fn a_syntax_typo_in_one_soft_number_costs_that_number_and_nothing_else() {
+    type ValueOf = fn(&Config) -> u64;
 
-    assert!(
-        matches!(outcome, Err(ConfigError::Malformed { .. })),
-        "`300ms` is not a value a field could soften: {outcome:?}"
+    let fields: [(&str, &str, ValueOf, u64); 5] = [
+        (
+            "replacement",
+            "inter_event_delay_ms",
+            |config| u64::from(config.replacement.inter_event_delay_ms),
+            0,
+        ),
+        (
+            "selection",
+            "clipboard_timeout_ms",
+            |config| u64::from(config.selection.clipboard_timeout_ms),
+            300,
+        ),
+        (
+            "selection",
+            "clipboard_restore_delay_ms",
+            |config| u64::from(config.selection.clipboard_restore_delay_ms),
+            200,
+        ),
+        (
+            "buffer",
+            "capacity",
+            |config| u64::try_from(config.buffer.capacity).expect("a capacity fits in u64"),
+            256,
+        ),
+        (
+            "buffer",
+            "idle_timeout_s",
+            |config| u64::from(config.buffer.idle_timeout_s),
+            300,
+        ),
+    ];
+
+    let mut wrong = Vec::new();
+
+    for (section, field, value_of, default) in fields {
+        for typo in ["300ms", "3 00", "5 min"] {
+            let _ = settings::take_softened_fields();
+
+            let text = living_document_with(section, &format!("{field} = {typo}"));
+            let outcome = Config::from_toml_str(&text);
+            let softened = settings::take_softened_fields();
+
+            match &outcome {
+                Ok((config, ReadOutcome::Current))
+                    if value_of(config) == default
+                        && config.general.language == Language::De
+                        && config.hotkey.key == "F9"
+                        && config.layouts.cycle == ["0x00000419", "0x00000409"]
+                        && softened == 1 => {}
+                _ => wrong.push(format!(
+                    "[{section}] {field} = {typo}: softened {softened}, {:?}",
+                    outcome
+                        .as_ref()
+                        .map(|(config, read)| (read, value_of(config)))
+                )),
+            }
+        }
+    }
+
+    assert!(wrong.is_empty(), "решение 120.9: {wrong:#?}");
+}
+
+/// **Two syntax typos in two soft numbers cost two numbers** — task T-55-7a. Both lines are taken
+/// out, one read after the other, and the read counts two softened fields.
+#[test]
+fn two_syntax_typos_in_two_soft_numbers_cost_two_numbers() {
+    let text = format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F9\"\n\n[buffer]\ncapacity = 300 chars\nidle_timeout_s = 5min\n"
     );
+
+    let _ = settings::take_softened_fields();
+    let outcome = Config::from_toml_str(&text);
+    let softened = settings::take_softened_fields();
+
+    println!("two typos: softened {softened}, {outcome:?}");
+
+    let (config, read) = outcome.expect("two soft typos are two soft fields, not a damaged file");
+
+    assert_eq!(read, ReadOutcome::Current);
+    assert_eq!(
+        (config.buffer.capacity, config.buffer.idle_timeout_s),
+        (256, 300),
+        "each typo is the default of its own field"
+    );
+    assert_eq!(config.hotkey.key, "F9", "and the rest of the file is read");
+    assert_eq!(softened, 2, "two fields, two lines of the journal");
+}
+
+/// **The recovery of решение 120.9 is narrow, and everything outside it stays loud** — task
+/// T-55-7a. A closed set written without its quotes, a soft name standing in a section where it is
+/// not soft, a soft key written as a dotted key at the top level, a stamp with a unit glued to it:
+/// every one is a syntax error on a line that is not a soft key in its own section, and every one
+/// still fails the read with nothing softened. So does a soft typo beside a loud failure — the read
+/// fails as a whole.
+#[test]
+fn the_syntax_recovery_takes_only_the_line_of_a_soft_key_in_its_own_section() {
+    let loud = [
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nlanguage = de\n"),
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[layouts]\nmode = spiral\n"),
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[replacement]\nmethod = auto mode\n"),
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\ncapacity = 300ms\n"),
+        format!("schema_version = {CURRENT_SCHEMA_VERSION}\nbuffer.capacity = 300ms\n"),
+        "schema_version = 6x\n\n[buffer]\ncapacity = 256\n".to_owned(),
+        format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[general]\nlanguage = \"xx\"\n\n[buffer]\ncapacity = 300ms\n"
+        ),
+    ];
+
+    for text in loud {
+        let _ = settings::take_softened_fields();
+        let outcome = Config::from_toml_str(&text);
+
+        assert!(
+            matches!(outcome, Err(ConfigError::Malformed { .. })),
+            "outside the five soft lines a broken document stays broken: {text:?} -> {outcome:?}"
+        );
+        assert_eq!(
+            settings::take_softened_fields(),
+            0,
+            "and a read that failed as a whole reports nothing softened: {text:?}"
+        );
+    }
 }
 
 /// **The soft fields are five, by name, and no more** — task T-55-7. Swept over the source, because

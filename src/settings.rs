@@ -1279,7 +1279,9 @@ fn note_softened() {
 /// exactly these five.
 ///
 /// ⚠ A number with a unit glued to it (`300ms`) is not a value at all but a syntax error of the
-/// document, which no field ever sees: it still fails the read.
+/// document, which no field ever sees. That typo is answered by the narrow recovery of решение
+/// 120.9, task T-55-7a: [`Config::from_toml_str`] takes the one line out of a copy of the text,
+/// counts the field here, and reads again.
 fn soft_whole_number<'de, D, T>(deserializer: D, default: T) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1336,6 +1338,54 @@ where
     D: serde::Deserializer<'de>,
 {
     soft_whole_number(deserializer, default_buffer_idle_timeout_s())
+}
+
+/// The five soft keys by their `[section]` and name — решение 120.9, task T-55-7a.
+///
+/// The fields [`soft_whole_number`] softens, spelled here the way they stand in the file, because
+/// the recovery of [`Config::from_toml_str`] reads text and not fields. `tests\settings.rs` drives
+/// every one of them with a syntax typo, and drives the closed sets, a soft name in a foreign
+/// section, a dotted key and the stamp to show that no other line is ever taken out.
+const SOFT_KEYS: [(&str, &str); 5] = [
+    ("replacement", "inter_event_delay_ms"),
+    ("selection", "clipboard_timeout_ms"),
+    ("selection", "clipboard_restore_delay_ms"),
+    ("buffer", "capacity"),
+    ("buffer", "idle_timeout_s"),
+];
+
+/// The byte range of the line of `text` that holds `offset`, without its line break — **if** that
+/// line assigns one of [`SOFT_KEYS`] in the canonical form, `key = …`, under its own `[section]`.
+///
+/// The narrow recovery of решение 120.9 asks this about the position a refused parse stopped at.
+/// Everything that is not exactly that answers `None`, and the document is then as damaged as it
+/// always was: a closed set written without its quotes, a soft name in another section, a dotted
+/// key at the top level, a quoted key, a stamp with a unit glued to it.
+fn soft_key_line_at(text: &str, offset: usize) -> Option<std::ops::Range<usize>> {
+    let offset = offset.min(text.len());
+    let start = text.get(..offset)?.rfind('\n').map_or(0, |at| at + 1);
+    let end = text
+        .get(offset..)?
+        .find('\n')
+        .map_or(text.len(), |at| offset + at);
+
+    let (key, _) = text[start..end].split_once('=')?;
+    let key = key.trim();
+
+    // The section is the nearest header above the line: `[name]`, and never `[[name]]`.
+    let header = text[..start]
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| line.starts_with('['))?;
+    let section = header
+        .strip_prefix('[')
+        .filter(|rest| !rest.starts_with('['))?
+        .split(']')
+        .next()?
+        .trim();
+
+    SOFT_KEYS.contains(&(section, key)).then_some(start..end)
 }
 
 /// Serde default for `general.theme` — the default FR-92а names.
@@ -1548,6 +1598,12 @@ impl Config {
             Err(error) => error,
         };
 
+        // ⭐ **Решение 120.9, task T-55-7a** — a syntax typo on the line of a soft number costs
+        // that number and nothing else: see [`Config::without_broken_soft_lines`].
+        if let Some(recovered) = Self::without_broken_soft_lines(text, &error) {
+            return Ok(recovered);
+        }
+
         // A read that failed as a whole uses nothing it softened on the way.
         SOFTENED.with(|count| count.set(0));
 
@@ -1570,6 +1626,44 @@ impl Config {
         Err(ConfigError::Malformed {
             at: error.span().map(|span| line_and_column(text, span.start)),
         })
+    }
+
+    /// The narrow recovery of **решение 120.9** — variant Б of решение 120.2, task T-55-7a.
+    ///
+    /// A soft number with a typo that breaks the syntax — `300ms`, `3 00` — is not a value its
+    /// field could soften: the parser refuses the document before any field is read. So when the
+    /// refused parse stopped on the line of a soft key in its own section ([`soft_key_line_at`]),
+    /// that line is taken out of a copy of the text, the field is counted as softened, and the
+    /// copy is read again — once per such line, and never more times than there are soft keys.
+    /// The file is not touched: this is a copy in memory, and the person's typo stays on the disk
+    /// where they can see it (an unchanged configuration is not written back, task T-55-4).
+    ///
+    /// Anything else — a stop on a line that is not a soft key, a copy that still refuses for a
+    /// reason outside those lines — answers `None`, and the caller reports the **original**
+    /// refusal, position included, exactly as before.
+    fn without_broken_soft_lines(
+        text: &str,
+        error: &toml::de::Error,
+    ) -> Option<(Self, ReadOutcome)> {
+        let mut copy = text.to_owned();
+        let mut stopped_at = error.span()?.start;
+
+        for _ in 0..SOFT_KEYS.len() {
+            let line = soft_key_line_at(&copy, stopped_at)?;
+
+            copy.replace_range(line, "");
+            note_softened();
+
+            match toml::from_str::<Self>(&copy) {
+                Ok(mut config) => {
+                    let outcome = config.migrate();
+                    return Some((config, outcome));
+                }
+                Err(next) => stopped_at = next.span()?.start,
+            }
+        }
+
+        None
     }
 
     /// Renders the configuration as a TOML document holding every section of section 7.
