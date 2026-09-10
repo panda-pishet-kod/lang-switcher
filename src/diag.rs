@@ -31,7 +31,7 @@
 //! | `ordinal` | `u64` | [`record`] itself, from the internal counter |
 //! | `at_ms` | `u32` | [`record`] itself, from the internal clock |
 //! | `operation` | [`Operation`] | an index into the closed table [`OPERATIONS`] |
-//! | `code` | [`OsCode`] | an `HRESULT`, and only ever from a [`windows::core::Error`] |
+//! | `code` | [`OsCode`] | an `HRESULT`, only ever from a [`windows::core::Error`] or from the Win32 number of an `io::Error` of this module's own file write |
 //!
 //! There is no `String`, no `&str`, no `char`, no `[u8]` and no caller-chosen integer. The
 //! first two fields are produced inside [`record`], so a caller cannot put anything into them
@@ -44,9 +44,13 @@
 //!   [`Operation::UNLISTED`] for everything else — **keeping nothing of the text**. A name
 //!   built out of a keystroke does not reach the journal as a name; it reaches it as the
 //!   value "unlisted".
-//! - [`OsCode`] wraps a private `i32` with no constructor that takes an integer. The only way
-//!   to obtain one is [`OsCode::of`] from a real OS error, or [`OsCode::NONE`]. A scan code
-//!   cannot be turned into an `OsCode`; there is no function that would do it.
+//! - [`OsCode`] wraps a private `i32` with no constructor that takes an integer. The only ways
+//!   to obtain one are [`OsCode::of`] from a real OS error, [`OsCode::of_io`] from the Win32
+//!   number an `io::Error` of this module's own file write carries (task T-34-1), or
+//!   [`OsCode::NONE`]. Both constructors take an error object the operating system produced
+//!   and keep its number only; a scan code cannot be turned into an `OsCode`, because there is
+//!   no function that takes an integer, and `tests\diag.rs` keeps the second road inside this
+//!   module.
 //!
 //! So the sentence "we do not put characters into the journal" is not a rule anybody has to
 //! remember. `diag::record(Operation, OsCode)` is the only door into the ring, and neither
@@ -95,15 +99,17 @@
 //! in `%APPDATA%\Lang_Switcher\`, because section 7 states that `%ProgramFiles%` is not
 //! writable by an ordinary user.
 
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering, fence};
 use std::time::Instant;
 
-use windows::core::Error as WinError;
+use windows::core::{Error as WinError, HRESULT};
 
 use crate::CONFIG_DIR_NAME;
 use crate::settings;
@@ -148,10 +154,11 @@ pub const fn footprint_bytes() -> usize {
 /// An operating system error code, and nothing that is not one.
 ///
 /// **SEC-07.** The private field has no public constructor that takes a number. [`OsCode::of`]
-/// is the only way to obtain a non-zero value and it demands a [`windows::core::Error`], which
-/// this program only ever produces from a Win32 call that failed. A scan code, a virtual key
-/// or a character cannot be made into an `OsCode`: there is no function with that signature,
-/// and adding one would be the change a reviewer is looking for.
+/// demands a [`windows::core::Error`], which this program only ever produces from a Win32 call
+/// that failed; [`OsCode::of_io`] (task T-34-1) demands an `io::Error` and keeps the Win32
+/// number it carries and nothing else — the road a refused write of the journal file takes. A
+/// scan code, a virtual key or a character cannot be made into an `OsCode`: there is no
+/// function with that signature, and adding one would be the change a reviewer is looking for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OsCode(i32);
 
@@ -162,6 +169,28 @@ impl OsCode {
     /// The `HRESULT` of a failed Win32 call.
     pub fn of(error: &WinError) -> Self {
         Self(error.code().0)
+    }
+
+    /// The `HRESULT` of a failed file operation of **this module** — task T-34-1, finding Н101.
+    ///
+    /// The second road into an `OsCode`, and it is as narrow as the first. An `io::Error` that
+    /// came from a system call carries the Win32 number the system gave; `HRESULT::from_win32`
+    /// turns it into the same `HRESULT` every other failure of this program is journalled
+    /// under, and [`OsCode::of`] narrows that. **Nothing of the error's text survives** — not
+    /// the message, not the kind, not a path. An `io::Error` this program built itself carries
+    /// no system number and answers [`OsCode::NONE`]: there is no number to report and none is
+    /// invented.
+    ///
+    /// The idiom `tray::os_code_of` has drawn for a refused configuration write since task
+    /// Т-22-9, brought to the one `io::Error` this module produces. `tests\diag.rs` sweeps the
+    /// sources and keeps every call of this function inside this file.
+    pub fn of_io(error: &io::Error) -> Self {
+        error
+            .raw_os_error()
+            .and_then(|code| u32::try_from(code).ok())
+            .map_or(Self::NONE, |code| {
+                Self::of(&WinError::from_hresult(HRESULT::from_win32(code)))
+            })
     }
 
     /// The code as the number the operating system gave, for a formatter.
@@ -967,13 +996,83 @@ pub fn log_path_in(app_data: &Path) -> PathBuf {
 /// The file is replaced, not appended to: the ring belongs to one run of the program, and a
 /// journal that grew without bound would be a second way of filling somebody's disk.
 ///
+/// # Replaced whole, or not at all — task T-34-1, finding Н101
+///
+/// The dump goes to a temporary file beside the target, is flushed to the device, and is then
+/// renamed over the target — the shape `settings::write_to` has for `config.toml`, and for the
+/// same reason. A write that opened the target itself and then failed would leave the dump of
+/// the previous run truncated or empty, which is the one copy a person still had of what went
+/// wrong last time. Now a refusal at any step leaves that file exactly as it was, and the
+/// temporary file is removed on both failing branches.
+///
+/// # A refusal is recorded here, with its code
+///
+/// Whatever step refused, the ring receives `journal write refused` **with the Win32 number
+/// the system gave** ([`OsCode::of_io`]) — not `S_OK`, which is what stood here before and made
+/// every refusal look like nothing at all. Recorded in this function rather than by its
+/// callers, so that there is one place, and so that the error is still handed back for the
+/// caller to act on (NFR-13).
+///
 /// **UI thread only** — section 6.1.
 pub fn write_to(path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
+    let outcome = write_replacing(path);
+
+    if let Err(error) = &outcome {
+        record(Operation::JOURNAL_WRITE_REFUSED, OsCode::of_io(error));
+    }
+
+    outcome
+}
+
+/// The three steps of [`write_to`]: the folder, the temporary file, the rename.
+fn write_replacing(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
         fs::create_dir_all(parent)?;
     }
 
-    fs::write(path, render())
+    let temporary = temporary_path_for(path);
+
+    // The removals below are the cleanup of a file this function created a moment ago. Their
+    // result is not examined (NFR-13) for the reason `settings::write_to` gives: the error that
+    // matters is the one being returned, and a `.tmp` that refused to go away is a stray file
+    // beside the dump and nothing worse.
+    if let Err(error) = write_and_sync(&temporary, render().as_bytes()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+
+    Ok(())
+}
+
+/// Names the temporary file [`write_replacing`] writes before the rename, beside the target.
+///
+/// Beside it and not in `%TEMP%`, because a rename is atomic within one volume only and
+/// `%TEMP%` may be on another. The process id keeps two instances of the program from
+/// colliding on one name; within one process the dump is written by the UI thread alone
+/// (section 6.1), so nothing finer is needed.
+fn temporary_path_for(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map_or_else(|| OsString::from(LOG_FILE_NAME), |name| name.to_os_string());
+    name.push(format!(".{}.tmp", std::process::id()));
+    path.with_file_name(name)
+}
+
+/// Writes `bytes` to `path` and flushes them to the device before returning.
+///
+/// The flush is the point: without it the rename can reach the disk ahead of the contents,
+/// and a power cut leaves an empty dump where a whole one was promised.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Dumps the journal if the configuration asks for it. Called once, on the **UI thread**, as
@@ -1030,12 +1129,13 @@ pub fn dump_on_shutdown() {
     // Recorded before the dump is rendered so that the file says it was written.
     record(Operation::JOURNAL_WRITTEN, OsCode::NONE);
 
-    if write_to(&target).is_err() {
-        // NFR-13: the result is examined rather than discarded. There is nowhere left to
-        // report it — the place a report would go is the file that just refused — so it goes
-        // into the ring, which the next dump of this process would carry. The `io::Error`
-        // itself is dropped: it is text, and nothing in this module keeps text.
-        record(Operation::JOURNAL_WRITE_REFUSED, OsCode::NONE);
+    if let Err(_recorded) = write_to(&target) {
+        // NFR-13: the outcome is examined here as well as inside `write_to`, which has already
+        // put the refusal into the ring with the code the system gave (task T-34-1). Nothing
+        // more can be done with it on this path: the place a report would go is the file that
+        // just refused, and this is the last write of the process. The `io::Error` itself goes
+        // no further — its number is in the ring, and its text is text, which nothing in this
+        // module keeps.
     }
 }
 

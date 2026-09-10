@@ -815,3 +815,263 @@ fn nothing_that_could_have_been_in_the_configuration_reaches_the_journal() {
         "a fragment of the file reached the dump through a name built around a real row"
     );
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-34-1 — a refused write neither destroys the previous dump nor loses its code
+// -------------------------------------------------------------------------------------
+
+/// Plants the dump of a «previous run» in a folder of its own and holds it open with every
+/// sharing right withheld — which is what an editor or an antivirus does to a file it is
+/// reading, and the one refusal a test can produce at will.
+///
+/// Answers the folder, the target and the handle; the handle is what keeps the refusal alive,
+/// and it has to be dropped before the file can be read back.
+fn a_previous_dump_held_open(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::fs::File) {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let folder = std::env::temp_dir().join(format!("lang_switcher-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("the temporary folder could not be created");
+
+    let target = folder.join(LOG_FILE_NAME);
+    std::fs::write(&target, PREVIOUS_DUMP).expect("the previous dump could not be planted");
+
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&target)
+        .expect("the previous dump could not be held open");
+
+    (folder, target, held)
+}
+
+/// What the previous run left on the disk. Bytes chosen so that the test can tell them from
+/// anything the current process would render — the header names a run that never happened.
+const PREVIOUS_DUMP: &[u8] =
+    b"Lang Switcher diagnostic journal\r\n\r\n(the dump of the previous run)\r\n";
+
+/// Plants the dump of a «previous run» and takes an **exclusive byte-range lock** over it while
+/// leaving every sharing right open — the one arrangement under which a writer that opens the
+/// target itself gets as far as truncating it and is refused only on the write.
+///
+/// That is the order that destroys a dump: `CREATE_ALWAYS` succeeds and empties the file, the
+/// `WriteFile` that follows answers `ERROR_LOCK_VIOLATION`, and what is left on the disk is
+/// zero bytes and a refusal. A full disk produces the same order and cannot be ordered by a
+/// test; a lock can. Measured before this test was written (probe of 2026-09-10): a naive
+/// writer left the file at length 0.
+fn a_previous_dump_locked(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::fs::File) {
+    let folder = std::env::temp_dir().join(format!("lang_switcher-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("the temporary folder could not be created");
+
+    let target = folder.join(LOG_FILE_NAME);
+    std::fs::write(&target, PREVIOUS_DUMP).expect("the previous dump could not be planted");
+
+    let held = std::fs::File::open(&target).expect("the previous dump could not be opened");
+    held.lock().expect("the previous dump could not be locked");
+
+    (folder, target, held)
+}
+
+/// **Task T-34-1 (a), finding Н101.** Whatever happens to a write, the file on the disk is never
+/// a partial dump: after a refusal it is the previous dump **byte for byte**, after a success it
+/// is a whole new one, and in neither case is a temporary file left beside it.
+///
+/// The arrangement is [`a_previous_dump_locked`]: a writer that opens the target itself — which
+/// is what `fs::write` did before this task — truncates it and is then refused, leaving zero
+/// bytes; that is the red «before» of this test, and it is a real one. The repaired write goes
+/// to a temporary file and renames it over the target, so the target is either untouched or
+/// replaced whole. Which of the two happens under the lock depends on the rename Windows
+/// performs (a rename with POSIX semantics goes through an open handle that shares deletion; the
+/// older one is refused), so both outcomes are accepted and the outcome is printed — what is
+/// asserted is the invariant, not the road.
+///
+/// **The positive control comes first:** the same lock is shown to let a naive writer truncate
+/// a second file to nothing, so that «the bytes are intact» below cannot be true for the wrong
+/// reason (a lock that refused the open altogether would prove nothing).
+#[test]
+fn a_refused_write_leaves_the_previous_dump_intact() {
+    let _gate = ring();
+
+    // Positive control: under this lock a writer that opens the target itself destroys it.
+    let (control_folder, control, control_lock) = a_previous_dump_locked("T-34-1a-control");
+    let naive = std::fs::write(&control, b"what a naive writer would put there");
+    drop(control_lock);
+    let destroyed = std::fs::read(&control).expect("the control file could not be read back");
+    assert!(
+        naive.is_err() && destroyed.is_empty(),
+        "the control did not reproduce the destructive order (refused: {}, {} bytes left)",
+        naive.is_err(),
+        destroyed.len()
+    );
+    std::fs::remove_dir_all(&control_folder).expect("the control folder could not be removed");
+
+    let (folder, target, held) = a_previous_dump_locked("T-34-1a");
+
+    let outcome = diag::write_to(&target);
+
+    drop(held);
+
+    let after = std::fs::read(&target).expect("the dump could not be read back");
+
+    match outcome {
+        Err(error) => {
+            println!("the write was refused ({error}); the previous dump must be untouched");
+            assert_eq!(
+                after, PREVIOUS_DUMP,
+                "a refused write changed the bytes of the previous dump"
+            );
+        }
+        Ok(()) => {
+            println!("the rename went through the lock; the dump must be a whole new one");
+            assert!(
+                after.starts_with(b"Lang Switcher diagnostic journal")
+                    && contains(&after, b"--- events ---"),
+                "a write that reported success left a partial dump of {} bytes",
+                after.len()
+            );
+        }
+    }
+
+    let left_behind: Vec<String> = std::fs::read_dir(&folder)
+        .expect("the temporary folder could not be listed")
+        .map(|entry| {
+            entry
+                .expect("a directory entry must be readable")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name != LOG_FILE_NAME)
+        .collect();
+    assert!(
+        left_behind.is_empty(),
+        "a refused write left something beside the dump: {left_behind:?}"
+    );
+
+    std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+}
+
+/// **Task T-34-1 (b), finding Н101.** A refused write reaches the ring as
+/// `journal write refused` **with the code the system gave** — not with `S_OK`, which is what
+/// the base recorded and what made every refusal look like nothing at all.
+///
+/// The code is checked against the `io::Error` the write answered with: the Win32 number it
+/// carries, turned into the same `HRESULT` every other failure of this program is journalled
+/// under. That is the one road an `io::Error` may take into an `OsCode` (SEC-07): the number the
+/// operating system gave, and none of the error's text.
+#[test]
+fn a_refused_write_is_recorded_with_the_code_the_system_gave() {
+    use windows::core::HRESULT;
+
+    let _gate = ring();
+
+    let (folder, target, held) = a_previous_dump_held_open("T-34-1b");
+
+    let first_new_ordinal = diag::recorded();
+    let error =
+        diag::write_to(&target).expect_err("the write must be refused while the file is held");
+
+    drop(held);
+    std::fs::remove_dir_all(&folder).expect("the temporary folder could not be removed");
+
+    let raw = error
+        .raw_os_error()
+        .expect("a refused open carries the Win32 code of the refusal");
+    let expected = HRESULT::from_win32(u32::try_from(raw).expect("a Win32 code is not negative"));
+
+    let refusal = diag::snapshot()
+        .into_iter()
+        .filter(|event| event.ordinal >= first_new_ordinal)
+        .find(|event| event.operation == Operation::JOURNAL_WRITE_REFUSED)
+        .expect("the refusal did not reach the journal");
+
+    assert_ne!(
+        refusal.code,
+        OsCode::NONE,
+        "the refusal was recorded with no code at all"
+    );
+    assert_eq!(
+        refusal.code.raw(),
+        expected.0,
+        "the refusal carries a code other than the one the system gave"
+    );
+}
+
+/// **Task T-34-1 (c) — the negative control of the bridge.** An `io::Error` reaches an
+/// `OsCode` through its Win32 number and through nothing else: one this program built out of
+/// text — the text here is what a careless caller might write a scan code into — carries no
+/// number and answers `NONE`, and one that came from the system answers the `HRESULT` of its
+/// number, the same one `OsCode::of` answers for a `windows::core::Error` of that failure.
+///
+/// The second half is a sweep: the bridge is called from `src\diag.rs` and from nowhere else,
+/// so that an `io::Error` built somewhere out of input never finds a road into the ring. The
+/// sweep counts the sites it finds, and one is the least it may find — a sweep over nothing
+/// would pass for the wrong reason.
+#[test]
+fn an_io_error_reaches_the_journal_by_its_number_only_and_only_from_module_diag() {
+    let out_of_text = std::io::Error::other("scan 0x1E");
+    assert_eq!(out_of_text.raw_os_error(), None);
+    assert_eq!(
+        OsCode::of_io(&out_of_text),
+        OsCode::NONE,
+        "an error carrying text and no system number must answer NONE"
+    );
+
+    let number = i32::try_from(ERROR_ACCESS_DENIED.0).expect("a Win32 code fits an i32");
+    let from_the_system = std::io::Error::from_raw_os_error(number);
+    let through_windows = WinError::from_hresult(ERROR_ACCESS_DENIED.to_hresult());
+
+    assert_eq!(
+        OsCode::of_io(&from_the_system),
+        OsCode::of(&through_windows)
+    );
+    assert_eq!(
+        OsCode::of_io(&from_the_system).raw(),
+        ERROR_ACCESS_DENIED.to_hresult().0,
+        "the number must arrive as the HRESULT every other failure is journalled under"
+    );
+
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sites: Vec<String> = Vec::new();
+
+    for entry in std::fs::read_dir(&sources).expect("the source directory must be readable") {
+        let path = entry.expect("a directory entry must be readable").path();
+
+        if path.extension().is_none_or(|kind| kind != "rs") {
+            continue;
+        }
+
+        let file = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let text = std::fs::read_to_string(&path).expect("a source file must be readable");
+
+        for (index, line) in text.lines().enumerate() {
+            let line = line.trim_start();
+
+            // A call and not the definition, and not a sentence about either. The first
+            // redaction of this sweep looked for `of_io(&` and found nothing at all, because the
+            // one real call passes a reference it already holds — the positive control below is
+            // what caught that.
+            if line.starts_with("//") || !line.contains("of_io(") || line.contains("fn of_io(") {
+                continue;
+            }
+
+            sites.push(format!("{file}:{}", index + 1));
+        }
+    }
+
+    println!("call sites of OsCode::of_io: {sites:?}");
+
+    assert!(
+        !sites.is_empty(),
+        "the sweep found no call of OsCode::of_io at all — it is measuring nothing"
+    );
+    assert!(
+        sites.iter().all(|site| site.starts_with("diag.rs:")),
+        "OsCode::of_io is called outside module diag: {sites:?}"
+    );
+}
