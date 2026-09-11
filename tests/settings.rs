@@ -3604,9 +3604,10 @@ const TEMPLATE_TEXT: [&str; 30] = [
     "Вести журнал",
     "Открыть папку журнала",
     "Папка журнала:",
-    // Task T-34-3: «Сохранить журнал…» stands after «Написать автору» (which carries no caption
-    // of its own in the template) and before the panel «Состояние».
-    "Сохранить журнал…",
+    // Task T-34-3: «Сохранить журнал» stands after «Написать автору» (which carries no caption
+    // of its own in the template) and before the panel «Состояние». Task T-39-11 took the
+    // ellipsis off (решение 122.5): the button opens no dialog.
+    "Сохранить журнал",
     "Состояние",
     "ОК",
     "Отмена",
@@ -4645,7 +4646,234 @@ const PANELS: [(u32, &str); 6] = [
     (1108, "Состояние"),
 ];
 
-/// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал…» (1064) stands in the slot
+/// **Task T-39-11, решение 122.5 — the red «before».** The live acceptance of `e56` found the
+/// button silent: «после нажатия кнопки сохранить журнал визуально ничего не происходит, хотя по
+/// факту журнал сохраняется». After a write that succeeded the button says «Журнал сохранён», and
+/// the one timer of the dialog puts its own caption back.
+///
+/// A hidden popup of the test's own stands in for the dialog, with one owner-drawn button under
+/// the identifier `app.rc` gives «Сохранить журнал» (1064): both functions take the dialog and
+/// find the button by identifier, so that is the whole of what they need. That the timer was
+/// armed is proven by `KillTimer` answering for its identifier; where the dialog calls the two
+/// functions from is pinned by the test after this one.
+#[test]
+fn a_saved_journal_says_so_on_its_button_until_the_timer_takes_it_off() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BS_OWNERDRAW, CreateWindowExW, DestroyWindow, HMENU, KillTimer, SetWindowTextW,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_POPUP,
+    };
+    use windows::core::{PCWSTR, w};
+
+    /// The popup, destroyed on the way out with its button — panic or no panic.
+    struct Popup(HWND);
+
+    impl Drop for Popup {
+        fn drop(&mut self) {
+            // SAFETY: the window was created on this thread by this test and is destroyed once.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    const IDC_LOG_SAVE: i32 = 1064;
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::Ru);
+
+    // SAFETY: a system class, no parent and no creation data; the handle is owned by `Popup`.
+    let popup = Popup(
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                240,
+                60,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden popup must be creatable"),
+    );
+
+    // SAFETY: as above; a child's identifier travels in the menu slot, and the popup stays its
+    // parent for the whole of the test.
+    let button = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("BUTTON"),
+            None,
+            WS_CHILD | WINDOW_STYLE(BS_OWNERDRAW as u32),
+            0,
+            0,
+            180,
+            24,
+            Some(popup.0),
+            Some(HMENU(std::ptr::without_provenance_mut(1064))),
+            None,
+            None,
+        )
+    }
+    .expect("the button must be creatable");
+
+    // The caption the dialog puts on the button when it opens — whatever the table says today.
+    let own: Vec<u16> = settings::text(settings::IDS_LOG_SAVE)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: `own` is NUL-terminated and outlives the call, which copies it.
+    unsafe { SetWindowTextW(button, PCWSTR(own.as_ptr())) }
+        .expect("the button must take its caption");
+
+    settings::show_journal_saved(popup.0);
+
+    let shown = settings::text_of(popup.0, IDC_LOG_SAVE);
+    println!("after a write that succeeded the button says «{shown}»");
+    assert_eq!(
+        shown, "Журнал сохранён",
+        "after a write that succeeded the button still says «{shown}» — the press looks \
+         unfinished, which is what the live acceptance of e56 found"
+    );
+
+    // SAFETY: the popup is alive; the call asks the system about a timer of this window only.
+    let armed = unsafe { KillTimer(Some(popup.0), settings::JOURNAL_SAVED_TIMER) };
+    assert!(
+        armed.is_ok(),
+        "no timer {} on the dialog — «Журнал сохранён» would stay on the button for good",
+        settings::JOURNAL_SAVED_TIMER
+    );
+
+    settings::show_journal_saved(popup.0);
+    settings::end_journal_saved(popup.0);
+
+    let back = settings::text_of(popup.0, IDC_LOG_SAVE);
+    println!("after the timer the button says «{back}»");
+    assert_eq!(
+        back, "Сохранить журнал",
+        "the timer must put the button's own caption back"
+    );
+
+    // SAFETY: as above.
+    let left = unsafe { KillTimer(Some(popup.0), settings::JOURNAL_SAVED_TIMER) };
+    assert!(
+        left.is_err(),
+        "putting the caption back must disarm the timer as well"
+    );
+}
+
+/// **Task T-39-11** — where the dialog changes the caption of «Сохранить журнал» from. A write
+/// that succeeded shows «Журнал сохранён»; a refusal takes the word of an earlier press off
+/// before its box; the timer arm of the dialog procedure takes it off after
+/// [`settings::JOURNAL_SAVED_MS`]. The test before this one proves what the two functions do,
+/// this one that the dialog calls them.
+#[test]
+fn the_dialog_shows_and_ends_the_saved_caption_where_it_must() {
+    let source = settings_module_source();
+
+    let save = function_body(&source, "fn save_journal(");
+    let (refusal, _) = save
+        .split_once("MessageBoxW(")
+        .expect("a refused write must still show its box");
+
+    assert!(
+        save.contains("show_journal_saved(hwnd)"),
+        "save_journal must show «Журнал сохранён» after a write that succeeded"
+    );
+    assert!(
+        refusal.contains("end_journal_saved(hwnd)"),
+        "a refusal must take «Журнал сохранён» of an earlier press off before its box"
+    );
+
+    let procedure = function_body(&source, "unsafe extern \"system\" fn dialog_proc(");
+    let (_, timer) = procedure
+        .split_once("WM_TIMER =>")
+        .expect("the dialog procedure must answer the timer of «Журнал сохранён»");
+
+    assert!(
+        timer.contains("JOURNAL_SAVED_TIMER") && timer.contains("end_journal_saved(hwnd)"),
+        "the WM_TIMER arm must put the caption back for the timer of «Журнал сохранён»"
+    );
+}
+
+/// **Task T-39-11** — both captions of the button fit its 94 units in all fourteen languages.
+///
+/// The stand of Э34 measured this slot on a live window and found «Enregistrer le journal…» and
+/// «Αποθήκευση καταγραφής…» clipped in the 72 units it had then (решение 117б). A caption that
+/// changes by itself for two seconds is out of that stand's reach — it measures what a window
+/// shows when it opens — so the measurement is made here, in the dialog's own face, at the
+/// horizontal base unit the dialog manager maps the template by (the average width of the
+/// fifty-two Latin letters, as `GdiGetCharDimensions` takes it).
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
+    const SLOT_UNITS: i32 = 94;
+    const SLOT_BEFORE_117B: i32 = 72;
+
+    let _guard = with_product_strings();
+
+    let (font, sheet) = template_font_and_sheet();
+    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+
+    let letters = extent_of(
+        &sheet,
+        &face,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let base = (letters / 26 + 1) / 2;
+    let slot = (SLOT_UNITS * base + 2) / 4;
+
+    // Контроль прибора: находка 117б стенда Э34 обязана воспроизводиться — «Enregistrer le
+    // journal…» не влезала в 72 единицы. Прибор, который её не видит, мерит не то.
+    let old_slot = (SLOT_BEFORE_117B * base + 2) / 4;
+    let clipped = extent_of(&sheet, &face, "Enregistrer le journal…").cx;
+    println!(
+        "base unit {base}: slot {slot} px; control «Enregistrer le journal…» {clipped} px in {old_slot} px"
+    );
+    assert!(
+        clipped > old_slot,
+        "the instrument does not see the clip of решение 117б: {clipped} px in {old_slot} px"
+    );
+
+    let mut widest = (0, String::new());
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for id in [settings::IDS_LOG_SAVE, settings::IDS_LOG_SAVED] {
+            let caption = settings::text(id);
+
+            assert!(
+                !caption.trim().is_empty(),
+                "{language:?}: string {id} did not load — the instrument would measure nothing"
+            );
+
+            let width = extent_of(&sheet, &face, &caption).cx;
+
+            if width > widest.0 {
+                widest = (width, format!("{language:?} «{caption}»"));
+            }
+
+            assert!(
+                width <= slot,
+                "{language:?}: «{caption}» takes {width} px and the button is {slot} px \
+                 ({SLOT_UNITS} units at a base unit of {base}) — the caption would be clipped"
+            );
+        }
+    }
+
+    println!("the widest caption: {} px — {}", widest.0, widest.1);
+
+    settings::set_ui_language(Language::Ru);
+}
+
+/// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал» (1064) stands in the slot
 /// the user chose: beside «Написать автору», on its row, inside «Диагностика», and the window
 /// has not grown for it.
 ///
@@ -4668,8 +4896,8 @@ fn the_save_journal_button_stands_in_the_slot_of_decision_117_5() {
     // «Enregistrer le journal…» at 131 px and «Αποθήκευση καταγραφής…» at 160 px against the
     // 126 px of a 72-unit slot, so the row was split 88 + 94 between the two buttons; the
     // window did not grow for it.
-    let save = bounds(1064).expect("the dialog must carry «Сохранить журнал…» (1064)");
-    println!("«Сохранить журнал…» (1064): {save:?}");
+    let save = bounds(1064).expect("the dialog must carry «Сохранить журнал» (1064)");
+    println!("«Сохранить журнал» (1064): {save:?}");
     assert_eq!(save, (322, 270, 94, 14), "the slot of решения 117.5 и 117б");
 
     let (ax, ay, acx, _) = bounds(1063).expect("the dialog must carry «Написать автору» (1063)");
@@ -9558,7 +9786,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 215] = [
+const FR_94_STRINGS: [(u16, &str, &str); 216] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -9624,16 +9852,18 @@ const FR_94_STRINGS: [(u16, &str, &str); 215] = [
         "Открыть папку журнала",
         "Open the journal folder",
     ),
+    // Task T-39-11, решение 122.5: no ellipsis — the button opens no dialog.
     (
         settings::IDS_LOG_SAVE,
-        "Сохранить журнал…",
-        "Save the journal…",
+        "Сохранить журнал",
+        "Save the journal",
     ),
     (
         settings::IDS_LOG_SAVE_FAILED,
         "Не удалось сохранить журнал.",
         "The journal could not be saved.",
     ),
+    (settings::IDS_LOG_SAVED, "Журнал сохранён", "Journal saved"),
     (
         settings::IDS_LOG_DIR_LABEL,
         "Папка журнала:",
@@ -15909,18 +16139,19 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        215,
-        "two hundred and fifteen identifiers in use — the mandate of Э32 authorised the canon \
+        216,
+        "two hundred and sixteen identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
          (FR-104, Т-32-8), the ONE the balloon of «Что нового» gained by задача Т-33а-4 — \
          its own body, because it was knocking with the words of the update — the TWO of \
-         task T-34-3 (the button «Сохранить журнал…» and the sentence of its refusal), and \
+         task T-34-3 (the button «Сохранить журнал» and the sentence of its refusal), and \
          the SEVEN of task T-34-5 less the THREE it retired (3045…3047): the four states of \
          the program, the health of the hook, their joiner and the greyed «Возобновить» — and \
          the FIVE of task T-34-6: the acting pair, the acting cycle, no pair, no refusals and \
-         the refusals counted"
+         the refusals counted — and the ONE of task T-39-11, решение 122.5: «Журнал сохранён» \
+         on the button after a write that succeeded"
     );
 
     let product = ProductImage::shared();

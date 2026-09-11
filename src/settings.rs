@@ -119,17 +119,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE,
     GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
     GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
-    IDOK, IMAGE_ICON, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
-    LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING,
-    MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
-    WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON,
-    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDPROC, WS_EX_LAYOUTRTL,
+    IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
+    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW,
+    MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL,
+    SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP,
+    WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
+    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
+    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT,
+    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -3003,8 +3003,9 @@ pub const IDS_TOAST_UPDATE: u16 = 3138;
 /// ⭐ Заголовок остался общий с письмом — [`IDS_WHATSNEW_TITLE`]: слова там те же, они уже
 /// переведены на четырнадцать языков, и шар с письмом обязаны говорить одно и то же.
 pub const IDS_TOAST_WHATSNEW: u16 = 3212;
-/// «Сохранить журнал…» — the button of «Диагностика» that writes the dump of the running
-/// session now; task T-34-3, finding С48.
+/// «Сохранить журнал» — the button of «Диагностика» that writes the dump of the running
+/// session now; task T-34-3, finding С48. No ellipsis since task T-39-11 (решение 122.5): the
+/// button opens no dialog.
 pub const IDS_LOG_SAVE: u16 = 3213;
 /// The one sentence the person sees when that write is refused — task T-34-3.
 pub const IDS_LOG_SAVE_FAILED: u16 = 3214;
@@ -3034,6 +3035,10 @@ pub const IDS_STATE_PAIR_NONE: u16 = 3224;
 pub const IDS_STATE_NO_FAILURES: u16 = 3225;
 /// «отказов выбора: {0}» — the sum of the four counters of `layouts::selection_failures`.
 pub const IDS_STATE_FAILURES: u16 = 3226;
+/// «Журнал сохранён» — what the button «Сохранить журнал» says for [`JOURNAL_SAVED_MS`] after a
+/// write that succeeded; task T-39-11, решение 122.5. The live acceptance of `e56` found the
+/// button silent on success. 3227 continues the block of the state strings, as 3221 did.
+pub const IDS_LOG_SAVED: u16 = 3227;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3227,7 +3232,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 215] = [
+pub const INTERFACE_STRINGS: [u16; 216] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3254,6 +3259,7 @@ pub const INTERFACE_STRINGS: [u16; 215] = [
     IDS_LOG_OPEN,
     IDS_LOG_SAVE,
     IDS_LOG_SAVE_FAILED,
+    IDS_LOG_SAVED,
     IDS_LOG_DIR_LABEL,
     IDS_GROUP_STATE,
     IDS_OK,
@@ -5736,6 +5742,18 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: the sender owns the struct `lparam` names for the length of the send,
             // and this procedure is inside that send.
             unsafe { on_notify(hwnd, lparam) }
+        }
+
+        // Task T-39-11, решение 122.5: the one timer of this window takes «Журнал сохранён» off
+        // the button. SEC-05: nothing is taken out of the message but the identifier, and a
+        // forged `WM_TIMER` carrying it buys its sender the button's own caption put back — the
+        // safe direction. Any other identifier is not this window's, and it is left alone.
+        WM_TIMER => {
+            if wparam.0 == JOURNAL_SAVED_TIMER {
+                end_journal_saved(hwnd);
+            }
+
+            0
         }
 
         WM_COMMAND => {
@@ -12544,7 +12562,7 @@ fn open_log_folder(hwnd: HWND) {
     }
 }
 
-/// Writes the journal to its file **now** — the button «Сохранить журнал…» of «Диагностика»,
+/// Writes the journal to its file **now** — the button «Сохранить журнал» of «Диагностика»,
 /// task T-34-3, finding С48.
 ///
 /// The neighbouring button opens the folder, and until this task the only file in it was the
@@ -12552,8 +12570,10 @@ fn open_log_folder(hwnd: HWND) {
 /// person is looking at. This button writes the same dump while the session runs; the header
 /// says so (`journal.session  continues`) and carries the wall clock of the moment.
 ///
-/// It does exactly one thing, and it is not the thing С26 found next door: nothing is
-/// launched, no shell is asked, no folder is opened. `diag::write_to` creates the folder if
+/// It writes and says so, and it is not the thing С26 found next door: nothing is launched,
+/// no shell is asked, no folder is opened. The saying is [`show_journal_saved`] — task T-39-11,
+/// решение 122.5: the live acceptance of `e56` found a press that wrote the file and showed
+/// nothing, and a press with no answer looks unfinished. `diag::write_to` creates the folder if
 /// it is absent, writes a temporary file beside the target and renames it over — the file is
 /// whole or untouched (task T-34-1). It writes whether or not the journal is switched on: a
 /// press of the button is a request, and the setting of section 7 governs what happens at
@@ -12570,8 +12590,12 @@ fn save_journal(hwnd: HWND) {
     };
 
     if crate::diag::write_to(&target).is_ok() {
+        show_journal_saved(hwnd);
         return;
     }
+
+    // A refusal must not stand under «Журнал сохранён» of a press before it.
+    end_journal_saved(hwnd);
 
     let sentence = wide(&text(IDS_LOG_SAVE_FAILED));
     let caption = wide(crate::APP_NAME);
@@ -12594,6 +12618,61 @@ fn save_journal(hwnd: HWND) {
         // in the ring; this one joins it.
         crate::app::report_non_critical("MessageBoxW", &WinError::from_thread());
     }
+}
+
+/// How long «Журнал сохранён» stands on the button after a write that succeeded — task T-39-11,
+/// решение 122.5: «кнопка на 2 с говорит „Журнал сохранён“».
+pub const JOURNAL_SAVED_MS: u32 = 2_000;
+
+/// The identifier of the timer that takes «Журнал сохранён» off the button — task T-39-11.
+///
+/// The one timer of the settings dialog: before this task the window armed none, so the number
+/// collides with nothing. It is set on the dialog and not on the button, so that the `WM_TIMER`
+/// arrives at [`dialog_proc`], the procedure that owns the caption.
+pub const JOURNAL_SAVED_TIMER: usize = 1;
+
+/// Puts «Журнал сохранён» on the button and arms the timer that takes it off — task T-39-11,
+/// решение 122.5.
+///
+/// The live acceptance of `e56` found the press silent: «после нажатия кнопки сохранить журнал
+/// визуально ничего не происходит, хотя по факту журнал сохраняется». The answer stands where
+/// the press was made, for [`JOURNAL_SAVED_MS`], and it needs no room the panel does not have —
+/// the row is «Написать автору» and this button, and the panel does not grow (решение 117.5).
+/// Nothing is launched (С26) and nothing is modal.
+///
+/// A second press while the word stands writes the journal again and arms the timer anew:
+/// `SetTimer` with an identifier the window already has replaces that timer.
+///
+/// Public for `tests\settings.rs`, which stands a window of its own in for the dialog.
+pub fn show_journal_saved(dialog: HWND) {
+    set_text(dialog, IDC_LOG_SAVE, &text(IDS_LOG_SAVED));
+    widgets::repaint::control(dialog, IDC_LOG_SAVE);
+
+    // SAFETY: `dialog` is the live window of the caller. No timer procedure is given, so the
+    // timer arrives as `WM_TIMER` at the window's own procedure, and the call keeps no pointer.
+    if unsafe { SetTimer(Some(dialog), JOURNAL_SAVED_TIMER, JOURNAL_SAVED_MS, None) } == 0 {
+        // NFR-13: without the timer the word would stay on the button for good — a sentence
+        // that stops being true is worse than none — so the caption goes back at once, and the
+        // refusal is journaled.
+        crate::app::report_non_critical("SetTimer", &WinError::from_thread());
+        end_journal_saved(dialog);
+    }
+}
+
+/// Puts the button's own caption back and disarms the timer — task T-39-11.
+///
+/// Called by the timer arm of [`dialog_proc`], and by [`save_journal`] before the box of a
+/// refusal, so that a refusal never stands under the word of an earlier press.
+///
+/// The refusal of `KillTimer` is not journaled: it means there was no timer to kill — the
+/// ordinary case for a refusal with no success before it, and for the timer arm itself, which
+/// is reached after the system has already delivered the tick — and neither is a fault.
+pub fn end_journal_saved(dialog: HWND) {
+    // SAFETY: `dialog` is the live window of the caller; the call touches no memory of ours.
+    let _ = unsafe { KillTimer(Some(dialog), JOURNAL_SAVED_TIMER) };
+
+    set_text(dialog, IDC_LOG_SAVE, &text(IDS_LOG_SAVE));
+    widgets::repaint::control(dialog, IDC_LOG_SAVE);
 }
 
 /// Moves the selected row of the cycle list by `step` and keeps it selected — FR-31's «задание

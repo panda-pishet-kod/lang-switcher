@@ -118,9 +118,10 @@
 // («Диагностика» → кнопка рядом с «Открыть папку журнала»). It says exactly what the tray
 // entry says and shares its string, IDS_WRITE_TO_AUTHOR.
 #define IDC_WRITE_AUTHOR       1063
-// «Сохранить журнал…» — task T-34-3, finding С48, решение 117.5: writes the dump of the running
+// «Сохранить журнал» — task T-34-3, finding С48, решение 117.5: writes the dump of the running
 // session now, beside «Написать автору» on its row, so that the folder the button above opens
-// holds a file about THIS session and not only about the previous one.
+// holds a file about THIS session and not only about the previous one. Task T-39-11 (решение
+// 122.5): no ellipsis — it opens no dialog — and «Журнал сохранён» for two seconds after a success.
 #define IDC_LOG_SAVE           1064
 #define IDC_STATE_HOOK         1070
 #define IDC_STATE_LAYOUTS      1071
@@ -774,7 +775,7 @@ BEGIN
     // «Enregistrer le journal…» (131 px) and «Αποθήκευση καταγραφής…» (160 px) clipped in the
     // 72-unit slot (126 px), while «Написать автору» needs 151 px at most (el) and had 192.
     PUSHBUTTON      "", IDC_WRITE_AUTHOR, 230, 270, 88, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Сохранить журнал…", IDC_LOG_SAVE, 322, 270, 94, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Сохранить журнал", IDC_LOG_SAVE, 322, 270, 94, 14, BS_OWNERDRAW
 
     // -- Состояние: читатели модулей, не конфигурация -------------------------------------
     //
@@ -1502,10 +1503,14 @@ END
 // в {0}», уже переведённые на четырнадцать языков, и шар с письмом обязаны говорить одно и то
 // же. Новая строка ровно одна.
 #define IDS_TOAST_WHATSNEW      3212
-// Task T-34-3, finding С48 — the button «Сохранить журнал…» of «Диагностика» and the one sentence
+// Task T-34-3, finding С48 — the button «Сохранить журнал» of «Диагностика» and the one sentence
 // its refusal shows. Same block as the toast above (3200…3215 is one resource of sixteen).
 #define IDS_LOG_SAVE            3213
 #define IDS_LOG_SAVE_FAILED     3214
+// Task T-39-11, решение 122.5 — «Журнал сохранён», what the button says for two seconds after a
+// write that succeeded: the live acceptance of e56 found the press silent. The number continues
+// the block of the state strings, 3216…3231, as IDS_MENU_RESUME_RESTART did.
+#define IDS_LOG_SAVED           3227
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -1568,8 +1573,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Диагностика"
     IDS_LOG_ENABLED         "Вести журнал"
     IDS_LOG_OPEN            "Открыть папку журнала"
-    IDS_LOG_SAVE            "Сохранить журнал…"
+    IDS_LOG_SAVE            "Сохранить журнал"
     IDS_LOG_SAVE_FAILED     "Не удалось сохранить журнал."
+    IDS_LOG_SAVED           "Журнал сохранён"
     IDS_LOG_DIR_LABEL       "Папка журнала:"
     IDS_GROUP_STATE         "Состояние"
     IDS_OK                  "ОК"
@@ -1792,8 +1798,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Diagnostics"
     IDS_LOG_ENABLED         "Keep a journal"
     IDS_LOG_OPEN            "Open the journal folder"
-    IDS_LOG_SAVE            "Save the journal…"
+    IDS_LOG_SAVE            "Save the journal"
     IDS_LOG_SAVE_FAILED     "The journal could not be saved."
+    IDS_LOG_SAVED           "Journal saved"
     IDS_LOG_DIR_LABEL       "Journal folder:"
     IDS_GROUP_STATE         "State"
     IDS_OK                  "OK"
@@ -2029,8 +2036,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Діагностика"
     IDS_LOG_ENABLED         "Вести журнал"
     IDS_LOG_OPEN            "Відкрити теку журналу"
-    IDS_LOG_SAVE            "Зберегти журнал…"
+    IDS_LOG_SAVE            "Зберегти журнал"
     IDS_LOG_SAVE_FAILED     "Не вдалося зберегти журнал."
+    IDS_LOG_SAVED           "Журнал збережено"
     IDS_LOG_DIR_LABEL       "Тека журналу:"
     IDS_GROUP_STATE         "Стан"
     IDS_OK                  "ОК"
@@ -2249,8 +2257,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Diagnose"
     IDS_LOG_ENABLED         "Protokoll führen"
     IDS_LOG_OPEN            "Protokollordner öffnen"
-    IDS_LOG_SAVE            "Protokoll speichern…"
+    IDS_LOG_SAVE            "Protokoll speichern"
     IDS_LOG_SAVE_FAILED     "Das Protokoll konnte nicht gespeichert werden."
+    IDS_LOG_SAVED           "Protokoll gespeichert"
     IDS_LOG_DIR_LABEL       "Protokollordner:"
     IDS_GROUP_STATE         "Status"
     IDS_OK                  "OK"
@@ -2471,8 +2480,9 @@ BEGIN
     // ⚠ Т-28-4: «Ouvrir le dossier du journal» demandait 160 px sur les 151 du bouton, et
     // «Dossier du journal :» 114 px sur les 105 de l'étiquette. Raccourcis, pas remis en page.
     IDS_LOG_OPEN            "Ouvrir le dossier"
-    IDS_LOG_SAVE            "Enregistrer le journal…"
+    IDS_LOG_SAVE            "Enregistrer le journal"
     IDS_LOG_SAVE_FAILED     "Le journal n'a pas pu être enregistré."
+    IDS_LOG_SAVED           "Journal enregistré"
     IDS_LOG_DIR_LABEL       "Dossier :"
     IDS_GROUP_STATE         "État"
     IDS_OK                  "OK"
@@ -2690,8 +2700,9 @@ BEGIN
     // ⚠ Т-28-4: «Abrir la carpeta del registro» pedía 163 px de los 151 del botón, y «Carpeta
     // del registro:» 121 px de los 105 de la etiqueta. Acortados; la maquetación no se toca.
     IDS_LOG_OPEN            "Abrir la carpeta"
-    IDS_LOG_SAVE            "Guardar el registro…"
+    IDS_LOG_SAVE            "Guardar el registro"
     IDS_LOG_SAVE_FAILED     "No se pudo guardar el registro."
+    IDS_LOG_SAVED           "Registro guardado"
     IDS_LOG_DIR_LABEL       "Carpeta:"
     IDS_GROUP_STATE         "Estado"
     IDS_OK                  "Aceptar"
@@ -2907,8 +2918,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Diagnóstico"
     IDS_LOG_ENABLED         "Manter um registro"
     IDS_LOG_OPEN            "Abrir a pasta do registro"
-    IDS_LOG_SAVE            "Salvar o registro…"
+    IDS_LOG_SAVE            "Salvar o registro"
     IDS_LOG_SAVE_FAILED     "Não foi possível salvar o registro."
+    IDS_LOG_SAVED           "Registro salvo"
     IDS_LOG_DIR_LABEL       "Pasta do registro:"
     IDS_GROUP_STATE         "Estado"
     IDS_OK                  "OK"
@@ -3129,8 +3141,9 @@ BEGIN
     // ⚠ Т-28-4: «Apri la cartella del registro» chiedeva 156 px sui 151 del pulsante, e
     // «Cartella del registro:» 119 px sui 105 dell'etichetta. Accorciati, non rimpaginati.
     IDS_LOG_OPEN            "Apri la cartella"
-    IDS_LOG_SAVE            "Salva il registro…"
+    IDS_LOG_SAVE            "Salva il registro"
     IDS_LOG_SAVE_FAILED     "Impossibile salvare il registro."
+    IDS_LOG_SAVED           "Registro salvato"
     IDS_LOG_DIR_LABEL       "Cartella:"
     IDS_GROUP_STATE         "Stato"
     IDS_OK                  "OK"
@@ -3351,8 +3364,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Diagnostyka"
     IDS_LOG_ENABLED         "Prowadź dziennik"
     IDS_LOG_OPEN            "Otwórz folder dziennika"
-    IDS_LOG_SAVE            "Zapisz dziennik…"
+    IDS_LOG_SAVE            "Zapisz dziennik"
     IDS_LOG_SAVE_FAILED     "Nie udało się zapisać dziennika."
+    IDS_LOG_SAVED           "Dziennik zapisany"
     IDS_LOG_DIR_LABEL       "Folder dziennika:"
     IDS_GROUP_STATE         "Stan"
     IDS_OK                  "OK"
@@ -3569,8 +3583,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Diagnostika"
     IDS_LOG_ENABLED         "Vést protokol"
     IDS_LOG_OPEN            "Otevřít složku protokolu"
-    IDS_LOG_SAVE            "Uložit protokol…"
+    IDS_LOG_SAVE            "Uložit protokol"
     IDS_LOG_SAVE_FAILED     "Protokol se nepodařilo uložit."
+    IDS_LOG_SAVED           "Protokol uložen"
     IDS_LOG_DIR_LABEL       "Složka protokolu:"
     IDS_GROUP_STATE         "Stav"
     IDS_OK                  "OK"
@@ -3790,8 +3805,9 @@ BEGIN
     IDS_GROUP_DIAGNOSTICS   "Tanılama"
     IDS_LOG_ENABLED         "Günlük tut"
     IDS_LOG_OPEN            "Günlük klasörünü aç"
-    IDS_LOG_SAVE            "Günlüğü kaydet…"
+    IDS_LOG_SAVE            "Günlüğü kaydet"
     IDS_LOG_SAVE_FAILED     "Günlük kaydedilemedi."
+    IDS_LOG_SAVED           "Günlük kaydedildi"
     IDS_LOG_DIR_LABEL       "Günlük klasörü:"
     IDS_GROUP_STATE         "Durum"
     IDS_OK                  "Tamam"
@@ -4015,8 +4031,9 @@ BEGIN
     // ⚠ Т-28-4: «Άνοιγμα φακέλου καταγραφής» ζητούσε 181 px από τα 151 του κουμπιού, και
     // «Φάκελος καταγραφής:» 131 px από τα 105 της ετικέτας. Συντομεύτηκαν, χωρίς αλλαγή σχεδίου.
     IDS_LOG_OPEN            "Άνοιγμα φακέλου"
-    IDS_LOG_SAVE            "Αποθήκευση καταγραφής…"
+    IDS_LOG_SAVE            "Αποθήκευση καταγραφής"
     IDS_LOG_SAVE_FAILED     "Η καταγραφή δεν αποθηκεύτηκε."
+    IDS_LOG_SAVED           "Καταγραφή αποθηκεύτηκε"
     IDS_LOG_DIR_LABEL       "Φάκελος:"
     IDS_GROUP_STATE         "Κατάσταση"
     IDS_OK                  "OK"
@@ -4244,8 +4261,9 @@ BEGIN
     // ⚠ Э28 §4 и глоссарий Э30 §3.2: «פתיחת תיקיית היומן» длиннее кнопки. Какой именно папки —
     // сказано подписью прямо под кнопкой.
     IDS_LOG_OPEN            "פתיחת התיקייה"
-    IDS_LOG_SAVE            "שמירת היומן…"
+    IDS_LOG_SAVE            "שמירת היומן"
     IDS_LOG_SAVE_FAILED     "לא ניתן היה לשמור את היומן."
+    IDS_LOG_SAVED           "היומן נשמר"
     IDS_LOG_DIR_LABEL       "תיקייה:"
     IDS_GROUP_STATE         "מצב"
     IDS_OK                  "אישור"
@@ -4461,8 +4479,9 @@ BEGIN
     IDS_LOG_ENABLED         "حفظ السجل"
     // ⚠ То же основание, что у иврита выше: «فتح مجلد السجل» длиннее кнопки.
     IDS_LOG_OPEN            "فتح المجلد"
-    IDS_LOG_SAVE            "حفظ السجل الآن…"
+    IDS_LOG_SAVE            "حفظ السجل الآن"
     IDS_LOG_SAVE_FAILED     "تعذّر حفظ السجل."
+    IDS_LOG_SAVED           "حُفظ السجل"
     IDS_LOG_DIR_LABEL       "المجلد:"
     IDS_GROUP_STATE         "الحالة"
     IDS_OK                  "موافق"

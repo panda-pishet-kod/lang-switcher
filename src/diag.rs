@@ -70,7 +70,7 @@
 //! That is why the ring is a `static` array of atomics and not a `Vec` behind a `Mutex`, and
 //! why an entry is four numbers rather than a formatted line. **Nothing is formatted while
 //! recording.** Text appears only in [`render_as`], which runs on the UI thread — at shutdown,
-//! and when the button «Сохранить журнал…» of the settings dialog asks for a dump (task T-34-3).
+//! and when the button «Сохранить журнал» of the settings dialog asks for a dump (task T-34-3).
 //!
 //! Publication uses a sequence stamp rather than a lock: the writer takes a ticket with one
 //! `fetch_add`, clears the stamp of the slot it landed on, stores the fields, and puts the
@@ -92,7 +92,7 @@
 //! [`dump_on_shutdown`] is not. Section 6.1 gives file input-output to the **UI thread** and
 //! forbids it to the input thread outright, so that function is called from one place, on that
 //! thread, once, as it leaves its message loop. Since task T-34-3 the file has a second writer —
-//! [`write_to`], pressed as the button «Сохранить журнал…» of the settings dialog — and it lives
+//! [`write_to`], pressed as the button «Сохранить журнал» of the settings dialog — and it lives
 //! on the same thread, because the dialog does.
 //!
 //! # The file — section 7
@@ -1250,7 +1250,7 @@ pub fn dump_on_shutdown_to(target: &Path) -> bool {
 /// the journal folder could not say which run they were reading about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Session {
-    /// Written while the program runs — the button «Сохранить журнал…» of the settings dialog.
+    /// Written while the program runs — the button «Сохранить журнал» of the settings dialog.
     Continues,
     /// Written by [`dump_on_shutdown`], the last act of the UI thread.
     Ended,
