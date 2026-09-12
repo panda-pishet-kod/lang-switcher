@@ -2735,30 +2735,59 @@ fn the_zeroing_is_nowhere_near_the_hook_callback() {
 /// Three assertions, and they are three because the sound could arrive on the wrong thread in
 /// three different ways:
 ///
-/// * `hook.rs` — the callback and the module that owns it — must not name the sound at all;
-/// * `inject.rs` — the replacement itself, on the input thread — must not either;
+/// * `hook.rs` — the callback and the module that owns it — must not **make** a sound;
+/// * `inject.rs` — the replacement itself, on the input thread — must not name one at all;
 /// * in `app.rs`, where both ends live, `MessageBeep` must be reached from exactly one place.
 ///   The input thread's branch *posts* (`WM_APP_SOUND_DONE` / `WM_APP_SOUND_IDLE`) and the UI
 ///   thread's window procedure is what answers, so a second caller appearing later would be a
 ///   sound made on whichever thread happened to run it.
+///
+/// ⚠ **The canon moved in task T-36-4 (finding Н40), by decision 123 and not by squeezing.**
+/// Until then `hook.rs` was forbidden to name `SOUND_` at all, which was a proxy for "the hook
+/// does not make sounds" and read as one for as long as the hook had nothing to say about them.
+/// Н40 gives it something: when the handoff of a recognised press fails, the press is lost and
+/// **nothing at all used to happen** — no replacement and no sound either, which to the person at
+/// the keyboard is a program that has stopped working. So the callback now *posts*
+/// `WM_APP_SOUND_IDLE` to the UI window on its failure branches — one atomic load and one
+/// `PostMessageW`, the two calls NFR-05 permits — and the sound is still made on the UI thread
+/// and nowhere else. The assertion is therefore what it always meant: nothing that **plays**.
+/// The exact shape of that post is pinned in `tests\hook.rs`
+/// (`a_lost_hotkey_press_is_answered_with_the_idle_tone`).
 #[test]
 fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
     for module in ["hook.rs", "inject.rs"] {
         let source = source_of(module);
 
-        for forbidden in [
-            "PlaySound",
-            "MessageBeep",
-            "sound_press",
-            "answer_press",
-            "SOUND_",
-        ] {
+        for forbidden in ["PlaySound", "MessageBeep", "sound_press", "answer_press"] {
             assert!(
                 code_lines_with(&source, forbidden).is_empty(),
                 "{module} must not name {forbidden}: the sound of FR-100 is the UI thread's"
             );
         }
     }
+
+    // The replacement path has no business naming a sound at all — it neither plays one nor
+    // asks for one; `app::on_hotkey` is what posts after it returns.
+    assert!(
+        code_lines_with(&source_of("inject.rs"), "SOUND_").is_empty(),
+        "inject.rs must not name the sound messages either"
+    );
+
+    // And in `hook.rs` the only sound message named is the one Н40 asks for: the idle tone of a
+    // press that reached nobody. A refusal (`WM_APP_SOUND_REFUSED`) is a decision this program
+    // makes on the UI side (FR-70, FR-84) and has no business being posted from the callback.
+    let hook_source = source_of("hook.rs");
+    let hook_sounds = code_lines_with(&hook_source, "SOUND_");
+
+    assert_eq!(
+        hook_sounds.len(),
+        1,
+        "the callback names exactly one sound message — the idle tone of Н40: {hook_sounds:?}"
+    );
+    assert!(
+        hook_sounds[0].1.contains("WM_APP_SOUND_IDLE"),
+        "and it is the idle tone, not the refusal one: {hook_sounds:?}"
+    );
 
     let app = source_of("app.rs");
     let product = app.split("mod tests {").next().unwrap_or(&app);

@@ -5015,6 +5015,84 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-36-4, finding Н40** — the health line fits its 402 units in all fourteen languages
+/// **with the third number in it**.
+///
+/// The line of the panel that says how the hook is doing gained a third number: presses the user
+/// made that reached nobody (`hook::lost_hotkeys`). A row of its own was the other way to show
+/// it; the appearance is frozen by the owner's word of 2026-09-10 and stage Э34 had already
+/// grown the window once, so the number joined the line instead. That trade is only honest if
+/// the longer line still fits, and in every language rather than in Russian.
+///
+/// What is measured is the whole line as the panel builds it — `IDS_STATE_JOINED` of the program
+/// state and `IDS_STATE_HEALTH` — against the 402 units of `IDC_STATE_HOOK` (`app.rc`, the
+/// settings template), at the horizontal base unit the dialog manager maps the template by.
+/// The counters are given three digits each: a panel that fits «0» and clips «144» would be a
+/// panel that fits nothing worth reading.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn the_health_line_of_the_state_panel_fits_in_all_fourteen_languages() {
+    const SLOT_UNITS: i32 = 402;
+
+    let _guard = with_product_strings();
+
+    let (font, sheet) = template_font_and_sheet();
+    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+
+    let letters = extent_of(
+        &sheet,
+        &face,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let base = (letters / 26 + 1) / 2;
+    let slot = (SLOT_UNITS * base + 2) / 4;
+
+    // Контроль прибора: строка, которая заведомо не влезает, обязана быть увидена. Без него
+    // «клипов 0» значило бы только то, что прибор молчит.
+    let too_long = "x".repeat(400);
+    let too_wide = extent_of(&sheet, &face, &too_long).cx;
+    println!("base unit {base}: slot {slot} px; the control string of 400 'x' is {too_wide} px");
+    assert!(
+        too_wide > slot,
+        "the instrument cannot see a clip at all: {too_wide} px in {slot} px"
+    );
+
+    let mut widest = (0, String::new());
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let health = settings::format_text(settings::IDS_STATE_HEALTH, &["144", "144", "144"]);
+        let line = settings::format_text(
+            settings::IDS_STATE_JOINED,
+            &[&settings::text(settings::IDS_STATE_WORKING), &health],
+        );
+
+        assert!(
+            line.contains("144"),
+            "{language:?}: the numbers did not reach the line — «{line}»"
+        );
+
+        let width = extent_of(&sheet, &face, &line).cx;
+
+        if width > widest.0 {
+            widest = (width, format!("{language:?} «{line}»"));
+        }
+
+        assert!(
+            width <= slot,
+            "{language:?}: «{line}» takes {width} px and the control is {slot} px \
+             ({SLOT_UNITS} units at a base unit of {base}) — the line would be clipped"
+        );
+    }
+
+    println!("the widest health line: {} px — {}", widest.0, widest.1);
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Task T-42-2, finding С44, решение 124.4** — every sentence of the «Как пользоваться»
 /// panel fits the slot the template gives it, in all fourteen locales, at 100 %.
 ///
@@ -11159,10 +11237,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 216] = [
         "Перехват установлен, но обработка отключена — нужен перезапуск",
         "The hook is installed, but processing is off — restart the program",
     ),
+    // ⚠ Task T-36-4 (Н40) gave this line a **third** number: presses that reached nobody
+    // (`hook::lost_hotkeys`). A row of its own was the other way to show it, and the appearance
+    // is frozen by the owner's word of 2026-09-10 — so the number joined the line instead, and
+    // that made this a changed string in all fourteen tables rather than a new one. The count of
+    // `INTERFACE_STRINGS` is therefore unchanged.
     (
         settings::IDS_STATE_HEALTH,
-        "тихих снятий перехвата: {0} · отказов установки: {1}",
-        "silent hook removals: {0} · install failures: {1}",
+        "тихих снятий перехвата: {0} · отказов установки: {1} · потерянных нажатий: {2}",
+        "silent hook removals: {0} · install failures: {1} · lost presses: {2}",
     ),
     (settings::IDS_STATE_JOINED, "{0} · {1}", "{0} · {1}"),
     // Task T-34-6 (Н102): the fourth line — what acts, and the refusals of selection.

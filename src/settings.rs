@@ -12299,6 +12299,17 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
                     &[
                         &health.silent_removals.to_string(),
                         &health.install_failures.to_string(),
+                        // **Task T-36-4, finding Н40 — the third number.** Presses the user
+                        // made that reached nobody: the callback recognised one, FR-95 had
+                        // already swallowed the key, and the handoff failed. A row of its own
+                        // was the other way to show it, and the appearance is frozen (слово
+                        // владельца 2026-09-10) — so it joins the line the panel already has.
+                        //
+                        // ⚠ `hook::lost_hotkeys` and not `hook::post_failures`: that counter is
+                        // shared with the layout probe of FR-21, whose failure costs a re-read
+                        // and nothing a person would care about. A number that summed the two
+                        // would mean nothing.
+                        &crate::hook::lost_hotkeys().to_string(),
                     ],
                 ),
             ],

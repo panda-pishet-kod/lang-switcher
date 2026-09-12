@@ -771,6 +771,18 @@ static HOTKEY_HANDOFFS: AtomicU32 = AtomicU32::new(0);
 /// (task T-06-4) arrives it may read this, and it must not put a call to itself in here.
 static POST_FAILURES: AtomicU32 = AtomicU32::new(0);
 
+/// **Hotkey presses that reached nobody — task T-36-4, finding Н40.**
+///
+/// A subset of [`POST_FAILURES`], counted apart because it means something a person can be told.
+/// That counter is shared with [`post_layout_probe`], whose failure costs a re-read of the layout
+/// list and nothing else; a failure *here* is a press the user made, FR-95 swallowed and nobody
+/// acted on — the program looks broken. A row in the panel of section 4.10 that summed the two
+/// would be a number with no meaning, so the two are separate atomics and the sum is never taken.
+///
+/// One relaxed increment on a path that already takes one (the shared counter keeps counting, so
+/// the dump keeps its old meaning), and nothing at all on the path where the post succeeds.
+static LOST_HOTKEYS: AtomicU32 = AtomicU32::new(0);
+
 /// `UnhookWindowsHookEx` calls that failed — NFR-13, same argument as [`POST_FAILURES`].
 static UNHOOK_FAILURES: AtomicU32 = AtomicU32::new(0);
 
@@ -1089,8 +1101,21 @@ pub fn hotkey_handoffs() -> u32 {
 }
 
 /// Failed `PostMessageW` calls made from the callback — NFR-13.
+///
+/// ⚠ **A sum of two different events**: the handoff of a recognised press ([`post_hotkey`]) and
+/// the layout probe of FR-21 ([`post_layout_probe`]), plus the sound post of task T-36-4. Use
+/// [`lost_hotkeys`] for the one of them that means something to a person.
 pub fn post_failures() -> u32 {
     POST_FAILURES.load(Ordering::Relaxed)
+}
+
+/// Recognised hotkey presses whose handoff failed — task T-36-4, finding Н40.
+///
+/// The press was swallowed (FR-95) and nobody acted on it. Non-zero means conversions were lost,
+/// which is why this is the number the panel of section 4.10 shows rather than
+/// [`post_failures`].
+pub fn lost_hotkeys() -> u32 {
+    LOST_HOTKEYS.load(Ordering::Relaxed)
 }
 
 /// Failed `UnhookWindowsHookEx` calls, and the `HRESULT` of the last of them — NFR-13.
@@ -2043,6 +2068,24 @@ fn decide_here(key: KeyEvent) -> Outcome {
 }
 
 /// Posts [`WM_APP_HOTKEY`] to the input thread's window — the handoff of FR-02.
+///
+/// # What a failed handoff sounds like — task T-36-4, finding Н40
+///
+/// The callback does no work itself: it recognises the press, the key is already swallowed
+/// (FR-95), and everything that follows is the input thread's. When the handoff fails — no
+/// window, or a queue that refused the message — **nothing whatever used to happen**: no
+/// replacement, and no sound either, because the sound is FR-100's answer *to an outcome* and the
+/// outcome never arrived. To the person at the keyboard that is indistinguishable from a program
+/// that has stopped working.
+///
+/// So a failure answers with the idle tone — one atomic load of the UI window and one
+/// `PostMessageW` of [`crate::app::WM_APP_SOUND_IDLE`], on the **failure branches only**: the
+/// path where the handoff works gains nothing at all, which is what NFR-01 and NFR-02 are about.
+/// The tone is the idle one and deliberately not `WM_APP_SOUND_REFUSED`: a refusal is a decision
+/// this program made (a password field, FR-70/FR-84), and a lost press is not a decision — it is
+/// a press that did nothing, which is exactly what «нечего конвертировать» sounds like.
+///
+/// NFR-05: the failure of *that* post is counted in an atomic too, never journalled.
 fn post_hotkey() {
     let raw = HOTKEY_TARGET.load(Ordering::Relaxed);
 
@@ -2050,6 +2093,8 @@ fn post_hotkey() {
         // No window to post to. Recorded rather than ignored (NFR-13); it can only happen
         // between the window being destroyed and the hook being removed.
         POST_FAILURES.fetch_add(1, Ordering::Relaxed);
+        LOST_HOTKEYS.fetch_add(1, Ordering::Relaxed);
+        answer_lost_hotkey();
         return;
     }
 
@@ -2071,6 +2116,50 @@ fn post_hotkey() {
     if posted.is_err() {
         // NFR-13: examined and recorded. NFR-05: recorded in an atomic, not in a journal —
         // this is the callback.
+        POST_FAILURES.fetch_add(1, Ordering::Relaxed);
+        LOST_HOTKEYS.fetch_add(1, Ordering::Relaxed);
+        answer_lost_hotkey();
+    }
+}
+
+/// Asks the UI thread for the idle tone after a lost press — task T-36-4, finding Н40.
+///
+/// Reached from the two failure branches of [`post_hotkey`] and from nowhere else. What it is
+/// allowed to be is set by NFR-01…NFR-05, and this is the whole of it: **one atomic load and one
+/// `PostMessageW`**, no allocation, no lock, no journal, no third Win32 call. The target is the
+/// UI thread's window rather than the input thread's, because the input thread is precisely the
+/// one that did not receive the handoff; `app::window_proc` answers the message there, and its
+/// gate (`is_ui_window`, task T-36-4) lets this post through because it really is aimed at that
+/// window.
+///
+/// A window may not exist — early in start-up, late in shutdown — and then there is nothing to
+/// do and nothing to report: the press is already counted in [`LOST_HOTKEYS`]. A refused post is
+/// counted in [`POST_FAILURES`] with the rest (NFR-13), and the press it belonged to is not
+/// counted twice.
+fn answer_lost_hotkey() {
+    let ui = crate::app::ui_window_raw();
+
+    if ui == NO_HANDLE {
+        return;
+    }
+
+    // SAFETY: `ui` is the value `app` published for the UI thread's own window out of the
+    // register of section 6.1, converted back exactly as `app::ui_window_raw` documents.
+    // `PostMessageW` queues the message and returns without dereferencing either parameter —
+    // both are zero — and without blocking, which is what NFR-01, NFR-02 and NFR-04 require of
+    // anything called from the callback. A window destroyed between the load and this call makes
+    // the post fail, which is the branch below, not undefined behaviour.
+    let posted = unsafe {
+        PostMessageW(
+            Some(HWND(ui as *mut c_void)),
+            crate::app::WM_APP_SOUND_IDLE,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    };
+
+    if posted.is_err() {
+        // NFR-13: examined and recorded, in an atomic and not in a journal (NFR-05).
         POST_FAILURES.fetch_add(1, Ordering::Relaxed);
     }
 }

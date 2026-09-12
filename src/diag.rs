@@ -1419,6 +1419,10 @@ fn render_counters(out: &mut String) {
         crate::hook::consecutive_panics(),
     );
     row_u32(out, "hook.post_failures", crate::hook::post_failures());
+    // Task T-36-4, finding Н40: the presses among those failures that were the user's own and
+    // reached nobody. Beside the sum rather than instead of it — the sum keeps the meaning every
+    // earlier dump gave it.
+    row_u32(out, "hook.lost_hotkeys", crate::hook::lost_hotkeys());
     row_u32(out, "hook.unhook_failures", unhook_failures);
     row_hex(out, "hook.last_unhook_error", last_unhook_error as i32);
     row_flag(

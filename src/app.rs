@@ -321,12 +321,13 @@ pub fn layout_cache_failures() -> u32 {
 /// threads. The conversion back is exact, and `hook` performs it inside the `unsafe` block
 /// whose safety comment accounts for it.
 ///
-/// Compiled only where FR-99 is: under `panic = "abort"`, which is what the Release profile
-/// of section 3.2 sets, a panic in the callback ends the process instead of being absorbed,
-/// there is no fail-safe transition to signal, and this accessor would be a function nobody
-/// calls. The `cfg` is the same one `hook::guarded_decision` is selected on, and keeping the
-/// two identical is what leaves the Release build free of unreachable code.
-#[cfg(panic = "unwind")]
+/// ⚠ **The `cfg(panic = "unwind")` came off in task T-36-4** (finding Н40), and the paragraph it
+/// used to carry said why it was there: FR-99 exists only where a panic can be absorbed, so under
+/// the `panic = "abort"` of the Release profile (section 3.2) this accessor had no caller and
+/// would have been unreachable code. It has one in both configurations now — `hook::post_hotkey`
+/// answers a failed handoff with `WM_APP_SOUND_IDLE` at this very window, and that function is
+/// not selected on the panic strategy. Criterion 29 of section 13 (no `#[allow(dead_code)]` in
+/// the shipped binary) is satisfied by the caller rather than by the `cfg`.
 pub(crate) fn ui_window_raw() -> usize {
     WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire)
 }
@@ -657,6 +658,11 @@ pub const fn tone_for(press: Press, enabled: bool) -> Option<Tone> {
 /// replacement. The input thread learns the outcome and *posts* it — [`WM_APP_SOUND_DONE`],
 /// [`WM_APP_SOUND_IDLE`] or [`WM_APP_SOUND_REFUSED`] — and `PostMessageW` queues and returns.
 /// The selection path already runs here and calls this directly.
+///
+/// ⚠ **"Nowhere else" is enforced since task T-36-4** and was a description before it: the branch
+/// of [`window_proc`] that answers the three messages used to answer them at whichever window
+/// they arrived at, so a forged one (SEC-05) aimed at the **input** window played the sound on
+/// the thread that holds the hook. [`is_ui_window`] is the gate that makes the sentence true.
 pub fn answer_press<B: Beeper>(beeper: &mut B, press: Press, enabled: bool) {
     if let Some(tone) = tone_for(press, enabled) {
         beeper.beep(tone);
@@ -666,7 +672,8 @@ pub fn answer_press<B: Beeper>(beeper: &mut B, press: Press, enabled: bool) {
 /// Answers one press with the system's own voice — [`answer_press`] with [`SystemBeeper`].
 ///
 /// The one line of the program that is allowed to make a sound, and the only caller of the
-/// production [`Beeper`]. Reached from the UI thread's window procedure and from nowhere else.
+/// production [`Beeper`]. Reached from the UI thread's window procedure and from nowhere else —
+/// which task T-36-4 turned from a description into a gate, [`is_ui_window`].
 fn sound_press(press: Press) {
     answer_press(&mut SystemBeeper, press, sound_enabled());
 }
@@ -2045,6 +2052,43 @@ fn is_input_window(hwnd: HWND) -> bool {
     raw != NO_WINDOW && raw == hwnd.0 as usize
 }
 
+/// Whether `hwnd` is the UI thread's own window — **task T-36-4, finding С15**.
+///
+/// The third of the family, and the last branch of [`window_proc`] to get one. The sound of
+/// FR-100 is answered wherever its message lands, and section 6.1 forbids exactly that: the
+/// input thread holds the hook, FR-80 takes the hook off a thread that stops answering, and
+/// playing a sound there is work that thread has no budget for. A process at the same integrity
+/// level can post any of the three sound messages (SEC-05) — to the **input** window as easily
+/// as to the UI one — and until this gate the branch could not tell the difference, while four
+/// gates of [`is_input_window`] and one of [`is_watcher_window`] stood beside it doing exactly
+/// that for their own messages.
+///
+/// ⛔ Reads the register directly and **not** through [`ui_window_raw`]: that accessor exists
+/// only under `panic = "unwind"` (FR-99 has nothing to signal where a panic ends the process),
+/// and this gate compiles in both configurations because the branch it guards does.
+fn is_ui_window(hwnd: HWND) -> bool {
+    let raw = WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire);
+
+    raw != NO_WINDOW && raw == hwnd.0 as usize
+}
+
+/// Which press one of the three sound messages asks for **at this window** — task T-36-4.
+///
+/// The predicate of the gate above, as a function of its arguments rather than as an `if` inside
+/// the procedure: `at_the_ui_window` is computed there and the decision is made here, which is
+/// the shape task T-39-5 gave `answer_device_change` and the only shape a test can drive.
+///
+/// **SEC-05.** A forged message aimed at the input or the watcher window now buys its sender
+/// nothing at all, and one aimed at the UI window buys what it always did — one playback of a
+/// click, a sound any process may make for itself, with the setting of FR-100 still obeyed.
+const fn press_of_sound_message_at(message: u32, at_the_ui_window: bool) -> Option<Press> {
+    if at_the_ui_window {
+        press_of_sound_message(message)
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // FR-70 — the typing buffer is switched off in a password field (task T-06-1)
 // ---------------------------------------------------------------------------------------
@@ -3070,14 +3114,20 @@ unsafe extern "system" fn window_proc(
             }
 
             // **FR-100, task Т-21-5 — the far end of the input thread's post.** The one place in
-            // the program where a sound is made, and it is on the UI thread by construction:
-            // these two messages are posted to the UI window and nothing else answers them.
+            // the program where a sound is made, and it is on the UI thread **because this gate
+            // says so** — task T-36-4, finding С15. The three messages of the family
+            // (`WM_APP_SOUND_DONE`, `_IDLE`, `_REFUSED`) are posted to the UI window by this
+            // program; until the gate, a message that arrived anywhere else was answered just
+            // the same, and the window it could arrive at is the **input** one — the thread that
+            // holds the hook, whose budget section 6.1 protects and whom FR-80 unhooks if it
+            // stops answering.
             //
-            // SEC-05: a process at the same integrity level can post either of these. What it
-            // buys the sender is one playback of a click — a sound any process may make for
-            // itself — and nothing of this program is read or changed by it. The setting of
-            // FR-100 still holds: with the sound off, a posted message is as silent as a press.
-            if let Some(press) = press_of_sound_message(message) {
+            // SEC-05: a process at the same integrity level can post any of the three. At the UI
+            // window that buys the sender one playback of a click — a sound any process may make
+            // for itself — and nothing of this program is read or changed by it; anywhere else it
+            // now buys nothing. The setting of FR-100 still holds: with the sound off, a posted
+            // message is as silent as a press.
+            if let Some(press) = press_of_sound_message_at(message, is_ui_window(hwnd)) {
                 sound_press(press);
             }
 
@@ -3967,6 +4017,98 @@ mod tests {
         );
         assert_eq!(press_of_sound_message(crate::hook::WM_APP_HOTKEY), None);
         assert_eq!(press_of_sound_message(WM_APP_SOUND_REFUSED + 1), None);
+    }
+
+    /// **A sound message answered only at the UI window — task T-36-4, finding С15.**
+    ///
+    /// The branch used to answer wherever the message landed, while four gates of
+    /// `is_input_window` and one of `is_watcher_window` stood beside it in the same procedure
+    /// asking exactly this question for their own messages. The window a forger would aim at is
+    /// the **input** one: that thread holds the hook, section 6.1 gives it no budget for this
+    /// kind of work, and FR-80 takes the hook off a thread that stops answering.
+    ///
+    /// All **three** messages of the family are checked, not two: task Т-49-2 added
+    /// `WM_APP_SOUND_REFUSED` and widened the surface a forgery has.
+    #[test]
+    fn a_sound_message_is_answered_at_the_ui_window_and_nowhere_else() {
+        for press in [Press::Replaced, Press::Idle, Press::Refused] {
+            let message = sound_message_for(press);
+
+            assert_eq!(
+                press_of_sound_message_at(message, true),
+                Some(press),
+                "{press:?} must still be answered at the UI window — this is the program's own \
+                 post, including the one `hook::post_hotkey` makes when a press is lost (Н40)"
+            );
+            assert_eq!(
+                press_of_sound_message_at(message, false),
+                None,
+                "SEC-05: {press:?} posted to the input or the watcher window buys nothing"
+            );
+        }
+
+        // And the gate does not turn a stranger into a sound at the right window either.
+        assert_eq!(
+            press_of_sound_message_at(crate::hook::WM_APP_HOTKEY, true),
+            None
+        );
+    }
+
+    /// **The gate of С15 is on the branch, and the ungated call is gone — task T-36-4.**
+    ///
+    /// The pure function above says what the gate decides; this says that the window procedure
+    /// really goes through it. Both halves are needed: a predicate nobody calls is as silent as
+    /// no predicate at all.
+    ///
+    /// ⚠ The needles are identifiers with their opening bracket and never whole call lines —
+    /// `rustfmt` reflows a line and a needle written as one stops matching without anything
+    /// having changed (the trap of stage Э32). The product half of the file only, for the reason
+    /// `the_shutdown_handshake_walks_on_seqcst` states: the needles are written out here, and a
+    /// sweep over the whole text would find them in their own argument lists.
+    ///
+    /// The positive control is the count itself: the gated form must appear **once**, so a zero —
+    /// which is what a removed gate leaves behind — fails.
+    #[test]
+    fn the_sound_branch_of_the_window_procedure_goes_through_the_gate() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join("app.rs"),
+        )
+        .expect("src/app.rs must be readable")
+        .replace("\r\n", "\n");
+
+        let product = source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .expect("this file ends in its own test module")
+            .0;
+
+        // The procedure itself, not the whole file: the ungated call is legitimate — and
+        // necessary — inside the definition of the gate, which is where the family is decoded.
+        let procedure = product
+            .split_once("unsafe extern \"system\" fn window_proc(")
+            .expect("the window procedure must be in this file")
+            .1;
+
+        let gated = procedure.matches("press_of_sound_message_at(").count();
+        let ungated = procedure.matches("press_of_sound_message(message)").count();
+
+        println!("window_proc: gated x{gated}, ungated x{ungated}");
+
+        assert_eq!(
+            gated, 1,
+            "С15: the branch calls the gated form, and it is the only call of it here"
+        );
+        assert_eq!(
+            ungated, 0,
+            "С15: and the ungated call is gone from the procedure; a sound message aimed at the \
+             input window must not be answered on the thread that holds the hook"
+        );
+        assert_eq!(
+            product.matches("fn is_ui_window(").count(),
+            1,
+            "the third gate of the family exists beside is_input_window and is_watcher_window"
+        );
     }
 
     /// Types one ordinary key into the buffer of this thread.

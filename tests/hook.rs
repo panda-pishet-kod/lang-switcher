@@ -105,8 +105,13 @@ fn user_key(vk: u16, edge: Edge) -> KeyEvent {
 /// swallowed without touching [`hook::DEFAULT_HOTKEY_VK`].
 #[test]
 fn the_hook_starts_disarmed_until_the_configuration_is_published() {
+    // Через переменную, а не `assert!(!hook::DEFAULT_ACTIVE, …)`: clippy справедливо зовёт
+    // утверждение над константой утверждением с постоянным значением. Значение от этого не
+    // меняется — тест краснеет ровно тогда, когда умолчание вернётся к «вооружён».
+    let default_the_callback_sees = hook::DEFAULT_ACTIVE;
+
     assert!(
-        !hook::DEFAULT_ACTIVE,
+        !default_the_callback_sees,
         "С19: the hook must go up disarmed — the callback sees this value until \
          `app::publish_configuration` publishes the user's own `general.enabled`"
     );
@@ -1730,6 +1735,125 @@ fn the_exclusion_verdict_reaches_the_callback_through_this_modules_own_static() 
     assert!(!hook::current_mode().hotkey_yields);
 
     hook::set_hotkey_yields(restore);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-36-4 — a press that reached nobody is answered with a sound (finding Н40)
+// -------------------------------------------------------------------------------------
+
+/// **Both failure branches of `post_hotkey` ask for the idle tone — task T-36-4, finding Н40.**
+///
+/// # Why this test reads the source
+///
+/// `post_hotkey` is private, runs inside the callback and is reached only from
+/// `keyboard_hook_proc`, which the system calls with a pointer no test can produce (the header of
+/// this file says why no test installs a hook). Its two failure branches need a window that has
+/// just been destroyed or a message queue that is full — neither is producible on demand. So what
+/// is checked is the shape, which is also what a reviewer checks; the behaviour of the gate the
+/// post has to pass is measured separately, as a pure function, in `src\app.rs`.
+///
+/// # What is asserted
+///
+/// Inside the body of `post_hotkey`: **two** counted failures, **two** calls to
+/// `answer_lost_hotkey`, and that the function it calls posts `WM_APP_SOUND_IDLE` — the idle tone
+/// and not `WM_APP_SOUND_REFUSED`, which task Т-49-2 gave to refusals the program *decides*
+/// (FR-70, FR-84). A lost press is not a decision.
+///
+/// The needles are identifiers with their opening bracket, never whole call lines: a line splits
+/// when `rustfmt` reflows it and a needle written as one would stop matching without anything
+/// having changed (the trap of stage Э32). The positive control is below — each needle is
+/// counted, and a count of zero fails.
+#[test]
+fn a_lost_hotkey_press_is_answered_with_the_idle_tone() {
+    // ⚠ Normalised first, for the reason `the_capslock_seed_is_outside_the_callback` states:
+    // `.gitattributes` makes the canonical checkout CRLF, and a verdict about the shape of a
+    // function must not depend on how a checkout stored its newlines.
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let post_hotkey = source
+        .split_once("fn post_hotkey() {")
+        .expect("post_hotkey must be in this file")
+        .1
+        .split_once("\n}\n")
+        .expect("the body must end")
+        .0;
+
+    let count = |haystack: &str, needle: &str| haystack.matches(needle).count();
+
+    let lost_counted = count(post_hotkey, "LOST_HOTKEYS.fetch_add(");
+    let answered = count(post_hotkey, "answer_lost_hotkey(");
+    let post_failures = count(post_hotkey, "POST_FAILURES.fetch_add(");
+
+    println!(
+        "post_hotkey: POST_FAILURES x{post_failures}, LOST_HOTKEYS x{lost_counted}, \
+         answer_lost_hotkey x{answered}"
+    );
+
+    assert_eq!(
+        post_failures, 2,
+        "the two failure branches of the handoff — no window, and a refused post"
+    );
+    assert_eq!(
+        lost_counted, 2,
+        "Н40: each of them is a press the user made that reached nobody, and each is counted \
+         apart from the shared POST_FAILURES"
+    );
+    assert_eq!(
+        answered, 2,
+        "Н40: and each of them answers with a sound — silence is what makes a lost press \
+         indistinguishable from a broken program"
+    );
+
+    // The tone itself, in the function those two calls reach.
+    let answer = source
+        .split_once("fn answer_lost_hotkey() {")
+        .expect("answer_lost_hotkey must be in this file")
+        .1
+        .split_once("\n}\n")
+        .expect("the body must end")
+        .0;
+
+    assert_eq!(
+        count(answer, "WM_APP_SOUND_IDLE"),
+        1,
+        "the idle tone, once: a press that reached nobody did nothing, which is what «нечего \
+         конвертировать» sounds like — not WM_APP_SOUND_REFUSED, which Т-49-2 gave to the \
+         refusals this program decides (FR-70, FR-84)"
+    );
+    assert_eq!(
+        count(answer, "WM_APP_SOUND_REFUSED"),
+        0,
+        "and not the refusal tone"
+    );
+
+    // NFR-01…NFR-05 on the path this task touched: one atomic load, one PostMessageW, and
+    // nothing that allocates, locks or journals.
+    for forbidden in [
+        "format!",
+        "to_string",
+        "String::",
+        "Vec::",
+        "Mutex",
+        "OnceLock",
+        "crate::diag",
+    ] {
+        assert_eq!(
+            count(answer, forbidden),
+            0,
+            "NFR-01…NFR-05: {forbidden} has no place on the callback's path"
+        );
+    }
+    assert_eq!(
+        count(answer, "PostMessageW("),
+        1,
+        "exactly one Win32 call, and it is the one NFR-05 allows"
+    );
 }
 
 // -------------------------------------------------------------------------------------
