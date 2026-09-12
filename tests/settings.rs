@@ -5714,6 +5714,82 @@ fn a_window_taller_than_its_monitor_is_shortened_and_scrolls() {
     }
 }
 
+/// **Task T-42-12a, finding 124б.3** — the scroll bar covers no control: the window is widened
+/// by exactly the bar it was given.
+///
+/// # The defect, in the numbers the owner met on `e61`
+///
+/// `WS_VSCROLL` takes its width out of the **client** area, and every control of this window was
+/// placed against the client width the template declared. At 125 % the client is 967 px wide,
+/// «Применить» ends at 952 px, and the bar is 21 px — it starts at 946 and ran **over the
+/// bottom row of buttons**: «прокрутка налезает на кнопки». The cure is to give the window those
+/// pixels back, so the client area stays as wide as the template asked.
+///
+/// The test is of the arithmetic, so it holds at any scale on any machine: the rightmost control
+/// of the template is found in the built resource, and its right edge is held against the client
+/// width with and without the widening — the first fails, which is the defect, and the second
+/// passes, which is the cure.
+#[test]
+fn the_scroll_bar_covers_no_control_because_the_window_is_widened_by_it() {
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    // The rightmost edge any control of this window reaches, in dialog units.
+    let rightmost = template
+        .bounds
+        .iter()
+        .map(|(_, x, _, cx, _)| x + cx)
+        .max()
+        .expect("the settings template carries controls");
+
+    let (width_units, _) = template.size;
+
+    println!("окно {width_units} ед, самый правый контрол кончается на {rightmost} ед");
+
+    assert!(
+        rightmost <= width_units,
+        "a control may not stand outside the window at all"
+    );
+
+    // At 125 %: the base unit by x is 9, so the client is (430 × 9 + 2) / 4 = 967 px and the
+    // rightmost control ends at (423 × 9 + 2) / 4 = 952. The bar is 21 px at that scale —
+    // measured through GetSystemMetricsForDpi(SM_CXVSCROLL, 120).
+    let unit_x = 9;
+    let bar = 21;
+    let px = |units: i32| (units * unit_x + 2) / 4;
+
+    let client = px(width_units);
+    let control = px(rightmost);
+
+    println!("125 %: клиент {client} px, контрол до {control} px, полоса {bar} px");
+
+    // ⛔ The defect: with the window left as wide as it was, the bar eats the right-hand side of
+    // the client area, and the control is under it. This assertion is the red before, written
+    // the way round that keeps it true only while the defect would exist.
+    assert!(
+        control > client - bar,
+        "the premise of the finding: without widening, the rightmost control ({control} px) \
+         would stand under a bar that starts at {} px",
+        client - bar
+    );
+
+    // …and the cure: the window is widened by the bar, so the client keeps its width and the
+    // control stands clear of it.
+    let widened = settings::widened_for_scroll_bar(client, bar);
+
+    assert!(
+        control <= widened - bar,
+        "with the window widened to {widened} px the bar starts at {} px and the rightmost \
+         control ends at {control} px — nothing is covered",
+        widened - bar
+    );
+
+    // A refused metric — a zero or a negative bar — widens nothing rather than shrinking the
+    // window (NFR-13).
+    assert_eq!(settings::widened_for_scroll_bar(client, 0), client);
+    assert_eq!(settings::widened_for_scroll_bar(client, -5), client);
+}
+
 /// **Task T-42-4, finding Н79, решение 124.5** — «в сеансе нет раскладки из файла» is shown
 /// whole: two lines in every locale, and the list above it still shows three layouts.
 ///

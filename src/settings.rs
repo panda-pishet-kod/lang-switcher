@@ -125,17 +125,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING,
     MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN,
     SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS,
-    SIF_RANGE, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    ScrollWindowEx, SendDlgItemMessageW, SetDlgItemTextW, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
-    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
-    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
-    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
+    SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE,
+    SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetDlgItemTextW,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, SystemParametersInfoW,
+    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -14403,6 +14403,19 @@ pub fn shortened_client_height(wanted_client: i32, frame: i32, work_area: i32) -
     Some((work_area - frame).max(1))
 }
 
+/// How wide the window has to be so that a scroll bar covers none of its controls — task
+/// T-42-12a, finding 124б.3.
+///
+/// `WS_VSCROLL` takes its width out of the **client** area, and every control of this window was
+/// laid out against the client width the template declared. So a window given a scroll bar
+/// without being widened loses that much of its right-hand side **under the bar** — which is
+/// exactly what the owner saw on `e61`: «прокрутка налезает на кнопки».
+///
+/// Pure, and public so the test calls the very function the window calls.
+pub fn widened_for_scroll_bar(window_width: i32, bar: i32) -> i32 {
+    window_width + bar.max(0)
+}
+
 /// Shortens the window to the monitor it opened on and gives it a scroll bar — task T-42-12,
 /// finding 124б.1, решение 124б.1.
 ///
@@ -14455,6 +14468,19 @@ unsafe fn fit_window_to_work_area(hwnd: HWND) {
         return;
     };
 
+    // ⛔⛔ **The window grows WIDER by the width of the scroll bar** — task T-42-12a, the defect
+    // the owner met on `e61`: «прокрутка налезает на кнопки».
+    //
+    // `WS_VSCROLL` takes its width out of the **client area**, and every control of this window
+    // is laid out against the client width the template declared: «Применить» ends 7 units
+    // short of the right edge, and the bar is wider than those seven. So the bar was drawn over
+    // the bottom row of buttons and over the right-hand panels. Giving the window those pixels
+    // back leaves the client area exactly as wide as the template asked, and nothing is
+    // covered. 21 px at 125 %, and it follows the scale for the reason
+    // `tray::metric_at_window_dpi` gives: in a `PerMonitorV2` process the bare metric is the
+    // 96-DPI one whatever the monitor does.
+    let bar = crate::tray::metric_at_window_dpi(Some(hwnd), SM_CXVSCROLL, 17);
+
     // SAFETY: `hwnd` is the live dialog being initialised; the call is given plain numbers and
     // keeps no pointer. The window is not on the screen yet — it is shown when the procedure
     // returns — so the change lands before the first paint.
@@ -14464,7 +14490,7 @@ unsafe fn fit_window_to_work_area(hwnd: HWND) {
             None,
             0,
             0,
-            window.right - window.left,
+            widened_for_scroll_bar(window.right - window.left, bar),
             page + frame,
             SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
         )

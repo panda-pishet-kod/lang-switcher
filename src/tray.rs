@@ -4384,7 +4384,11 @@ fn window_dpi(hwnd: Option<HWND>) -> i32 {
 /// `GetSystemMetricsForDpi` is not reachable: it lives in the `Win32_UI_HiDpi` feature, and the
 /// feature list is closed (SEC-03, §2 of the задание). The arithmetic is the same one the
 /// drawing does: the metric at 96 DPI, scaled to the window's.
-fn metric_at_window_dpi(hwnd: Option<HWND>, index: SYSTEM_METRICS_INDEX, at_96: i32) -> i32 {
+pub(crate) fn metric_at_window_dpi(
+    hwnd: Option<HWND>,
+    index: SYSTEM_METRICS_INDEX,
+    at_96: i32,
+) -> i32 {
     // SAFETY: `GetSystemMetrics` reads a system-wide value, takes no pointer and touches no
     // memory of ours. It returns zero for an index the system does not know, which is why the
     // result is examined rather than passed on (NFR-13): a zero would ask `LoadImageW` for the
