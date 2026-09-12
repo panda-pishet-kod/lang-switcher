@@ -5011,6 +5011,193 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-42-3, findings С45 and С36, решение 124.1** — the language row holds its own: the
+/// two labels of the left column fit their slot in all fourteen locales at all five scales, and
+/// the closed language combo shows the longest language name whole.
+///
+/// # The two findings, as numbers
+///
+/// **С45.** «Interface language:» takes 111 px of the 112 the 64-unit label had at 100 % — one
+/// pixel of slack — and at 125 % it takes **147 px of 144**: the label's slot grows by the base
+/// unit (1,286) and the text grows by the face (1,32), so the two part company at the first
+/// step of scaling. The label is an `SS_OWNERDRAW` static that wraps, so what a person saw was
+/// «Язык» on one line and the rest of the word cut off by the rectangle.
+///
+/// **С36.** The list of interface languages carries «Português (Brasil)», and the **closed**
+/// part of the combo gave its text 77 px of the 95 the 54-unit control had — the rest goes to
+/// the inset and the chevron. The name takes 102 px. `DT_END_ELLIPSIS` turns that into
+/// «Português (Br…», which is the finding.
+///
+/// ⚠ Решение 124.1 asked for the smallest change that closes the clip — widening only the
+/// **dropped** list, if that closes it. It does not: the name is cut in the closed half, which
+/// the dropped width does not touch. So the whole control is widened, which the same решение
+/// sanctions in its second half, and the sealed 54 of решение 82.2 moves by a decision rather
+/// than by a hand.
+///
+/// The measurement is the drawing's own arithmetic: the inset of `FIELD_TEXT_INSET_DLU`, the
+/// chevron of `theme::combo_chevron_points` and the gap of `COMBO_CHEVRON_TEXT_GAP` — the three
+/// the closed-combo branch of `draw_combo` subtracts before it calls `DrawTextW`.
+#[test]
+fn the_language_row_fits_its_labels_and_its_longest_language_name() {
+    let _guard = with_product_strings();
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let font = template
+        .font
+        .clone()
+        .expect("the settings template declares DS_SETFONT");
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+            .unwrap_or_else(|| panic!("the settings template must carry the control {id}"))
+    };
+
+    let language_label = bounds(1091);
+    let language_combo = bounds(1002);
+    let theme_label = bounds(1109);
+    let theme_combo = bounds(1003);
+
+    println!(
+        "«Язык интерфейса» {language_label:?}, комбо {language_combo:?}; \
+         «Оформление» {theme_label:?}, комбо {theme_combo:?}"
+    );
+
+    // 1. The two columns. The labels stand in one, their combos in another, and the pair does
+    //    not overlap — «расширить только верхнюю значит разломать колонку» (ТЗ T-42-3 п. 2).
+    assert_eq!(
+        (language_label.0, language_label.2),
+        (theme_label.0, theme_label.2),
+        "both labels of the left column must keep one x and one width"
+    );
+    assert_eq!(
+        language_combo.0, theme_combo.0,
+        "both combos must start at one x — they are the second column"
+    );
+    assert!(
+        language_label.0 + language_label.2 < language_combo.0,
+        "the label column must end before the combo column starts: {} against {}",
+        language_label.0 + language_label.2,
+        language_combo.0
+    );
+
+    // The rows of the «Общие» panel run to x = 210 — the width of the check boxes above them.
+    for (name, combo) in [("языка", language_combo), ("оформления", theme_combo)] {
+        assert!(
+            combo.0 + combo.2 <= 210,
+            "комбо {name} доходит до {} — правее строк панели (210)",
+            combo.0 + combo.2
+        );
+    }
+
+    // 2. The text, at every scale the fitting stand measures (П2).
+    let mut tightest_label = (i32::MAX, String::new());
+    let mut tightest_combo = (i32::MAX, String::new());
+
+    for dpi in [96, 120, 144, 168, 192] {
+        let sheet = Sheet::new(64);
+        let base = LOGFONTW {
+            lfHeight: -((i32::from(font.points) * dpi + 36) / 72),
+            lfWeight: i32::from(font.weight),
+            lfItalic: font.italic,
+            lfCharSet: FONT_CHARSET(font.charset),
+            lfQuality: CLEARTYPE_QUALITY,
+            lfFaceName: manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY).lfFaceName,
+            ..Default::default()
+        };
+        let face = Face::new(theme::smoothed_logfont(base));
+
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit = (letters / 26 + 1) / 2;
+        let px = |units: i32| (units * unit + 2) / 4;
+
+        // What the label's rectangle gives the text: an owner-drawn label writes from edge to
+        // edge, so the slot is the whole width.
+        let label_slot = px(language_label.2);
+
+        // What the closed combo gives it: the inset, the chevron and the gap before it —
+        // `draw_combo`, the branch that draws the closed half.
+        let combo_slot = px(language_combo.2)
+            - px(settings::FIELD_TEXT_INSET_DLU)
+            - theme::scaled(theme::COMBO_CHEVRON_INSET_X, dpi)
+            - theme::scaled(theme::COMBO_CHEVRON_ARM_X, dpi).max(1)
+            - theme::scaled(settings::COMBO_CHEVRON_TEXT_GAP, dpi);
+
+        println!(
+            "{}%: base unit {unit}/4, подпись {} ед = {label_slot} px, комбо {} ед = {combo_slot} px под текст",
+            dpi * 100 / 96,
+            language_label.2,
+            language_combo.2
+        );
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            for id in [settings::IDS_LANGUAGE_LABEL, settings::IDS_THEME_LABEL] {
+                let caption = settings::text(id);
+                let width = extent_of(&sheet, &face, &caption).cx;
+
+                assert!(
+                    !caption.trim().is_empty(),
+                    "{language:?}: string {id} did not load — the instrument would measure nothing"
+                );
+
+                if label_slot - width < tightest_label.0 {
+                    tightest_label = (
+                        label_slot - width,
+                        format!("{}% {language:?} «{caption}»", dpi * 100 / 96),
+                    );
+                }
+
+                assert!(
+                    width <= label_slot,
+                    "{language:?} at {}%: «{caption}» takes {width} px and the label is \
+                     {label_slot} px ({} units at a base unit of {unit}) — the word would wrap \
+                     and its tail would be cut off by the rectangle (finding С45)",
+                    dpi * 100 / 96,
+                    language_label.2
+                );
+            }
+        }
+
+        // The names in the list are the languages' own — the longest is «Português (Brasil)».
+        for language in Language::ALL {
+            let name = language.native_name();
+            let width = extent_of(&sheet, &face, name).cx;
+
+            if combo_slot - width < tightest_combo.0 {
+                tightest_combo = (combo_slot - width, format!("{}% «{name}»", dpi * 100 / 96));
+            }
+
+            assert!(
+                width <= combo_slot,
+                "at {}%: «{name}» takes {width} px and the closed combo gives its text \
+                 {combo_slot} px ({} units at a base unit of {unit}) — DT_END_ELLIPSIS would \
+                 cut it short (finding С36)",
+                dpi * 100 / 96,
+                language_combo.2
+            );
+        }
+    }
+
+    println!(
+        "the tightest label: {} px to spare — {}; the tightest name: {} px to spare — {}",
+        tightest_label.0, tightest_label.1, tightest_combo.0, tightest_combo.1
+    );
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал» (1064) stands in the slot
 /// the user chose: beside «Написать автору», on its row, inside «Диагностика», and the window
 /// has not grown for it.

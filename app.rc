@@ -646,8 +646,29 @@ BEGIN
     // ⚠ 64 единицы и не 58: задача Т-26-3 замерила подпись в лице, которым её рисуют, — 60,6
     // единицы. При 58 она переносилась, и в окне оставалось «Язык». Ширина комбо — 54, как
     // запечатало решение 82.2 «по содержимому»: место взято ростом колонки, а не ужатием комбо.
-    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 64, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_LANGUAGE, 80, 32, 54, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    //
+    // ⚠⚠ **64 → 68 и 54 → 74 задачей T-42-2а/T-42-3** (находки С45 и С36, решение 124.1), и оба
+    // числа — ЗАМЕР, а не подгонка.
+    //
+    // **С45.** Т-26-3 мерила одну локаль на одном масштабе: «Interface language:» занимает 111 px
+    // из 112 отведённых при 100 % — запас в один пиксель, — а при 125 % слот растёт по базовой
+    // единице (1,286), текст по лицу (1,32), и выходит **147 px против 144**. Подпись переносится
+    // и хвост срезается её же прямоугольником. Самая широкая из 14 подписей просит 66 единиц на
+    // 125 % — взято 68, запас 6 px.
+    //
+    // **С36.** В списке стоит «Português (Brasil)» — 102 px, а закрытая часть комбо отдаёт тексту
+    // 74 px из 95: остальное забирают отступ `FIELD_TEXT_INSET_DLU`, шеврон и зазор до него
+    // (`draw_combo`). `DT_END_ELLIPSIS` превращал имя в «Português (Br…». Решение 124.1 велело
+    // взять наименьшее изменение вида — расширить ТОЛЬКО раскрытый список, если это закрывает
+    // клип; замер говорит, что не закрывает: режется закрытая половина, которой ширина раскрытого
+    // списка не касается. Поэтому расширен весь контрол, и запечатанные решением 82.2 пятьдесят
+    // четыре единицы двинуты решением, а не рукой.
+    //
+    // Колонка сдвинута ЦЕЛИКОМ: подписи языка и оформления стоят одной колонкой, их комбо —
+    // второй, и расширить одну подпись значило бы разломать колонку (ТЗ T-42-3 п. 2). Зазор между
+    // колонками — прежние две единицы: 14 + 68 = 82, комбо с 84.
+    LTEXT           "Язык интерфейса:", IDC_LANGUAGE_LABEL, 14, 34, 68, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_LANGUAGE, 84, 32, 74, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     // ⚠ The «Оформление» row sits at y = 54 and not at the 46 it had until task T-12-3, and the
     // number does not move now that the hint beside the language row is gone. Until task Т-31-3
     // this y was arithmetic — «two units below the bottom of the hint», 32 + 18 = 50 — because an
@@ -658,8 +679,12 @@ BEGIN
     // is**: решение 87 accepted these coordinates by eye, and a row that moved because a
     // neighbour left would be a change nobody asked for. The place right of the language combo
     // is simply empty now.
-    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 64, 9, SS_OWNERDRAW
-    COMBOBOX        IDC_THEME, 80, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
+    // ⚠ 64 → 68 и x комбо 80 → 84 задачей T-42-3 — та же колонка, что у строки языка выше: обе
+    // подписи ходят вместе, оба комбо вместе. Ширина этого комбо (100) не тронута, его правый
+    // край 184 по-прежнему левее строк панели (210); y = 54 не двинут — это принцип «окно не
+    // перекраивается».
+    LTEXT           "Оформление:", IDC_THEME_LABEL, 14, 54, 68, 9, SS_OWNERDRAW
+    COMBOBOX        IDC_THEME, 84, 52, 100, 80, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     // FR-100, task Т-21-5 — the sound switch, a row of «Общие» like the three above it.
     //
     // ⚠ It was nine units tall at y = 64 for one delivery, wedged into the strip left over
