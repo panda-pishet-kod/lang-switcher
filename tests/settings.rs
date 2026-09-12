@@ -5153,6 +5153,195 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-42-2, п. 3** — no row of the help panel ever overlaps its neighbour or its own
+/// numeral, at any of the fourteen locales and any of the five scales.
+///
+/// ⛔ **Why this is checked by arithmetic and not by eye.** Two owner-drawn statics that overlap
+/// do not merely look wrong: each fills its own rectangle with the panel's ground before it
+/// writes a word, so the upper one **erases** the top of the lower — defect Г-1, which this
+/// template has paid for once already. The layout is computed at run time now
+/// (`settings::fit_about_help`), so the question is no longer «do these five numbers overlap»
+/// but «can the arithmetic ever produce an overlap», and that is 14 × 5 × 2 positions.
+///
+/// The arithmetic itself is `settings::stacked_tops` — the very function the window lays the
+/// panel out by, called here with the very heights `theme::measure_chip_row` answers.
+#[test]
+fn the_help_rows_never_overlap_at_any_scale_or_locale() {
+    let _guard = with_product_strings();
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    let font = template
+        .font
+        .clone()
+        .expect("the about template declares DS_SETFONT");
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
+    };
+
+    let rows = [
+        (1131_u32, 1126_u32, settings::IDS_ABOUT_HELP_1),
+        (1132, 1127, settings::IDS_ABOUT_HELP_2),
+        (1133, 1128, settings::IDS_ABOUT_HELP_3),
+        (1134, 1129, settings::IDS_ABOUT_HELP_4),
+        (1135, 1130, settings::IDS_ABOUT_HELP_5),
+    ];
+
+    let panel = bounds(1125);
+    let mut worst = (i32::MAX, String::new());
+
+    for dpi in [96, 120, 144, 168, 192] {
+        let sheet = Sheet::new(64);
+        let manager = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
+        let base = LOGFONTW {
+            lfHeight: -((i32::from(font.points) * dpi + 36) / 72),
+            ..manager
+        };
+
+        let body = Face::new(settings::about_body_logfont(base));
+        let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
+        let chip = Face::new(chip_logical);
+
+        let metrics = theme::ChipRowMetrics {
+            body: Some(body.0),
+            chip_face: Some((chip.0, chip_logical.lfHeight)),
+            pitch: settings::about_body_line_pitch(
+                settings::about_body_logfont(base).lfHeight.abs(),
+            ),
+            dpi,
+        };
+
+        let letters = extent_of(
+            &sheet,
+            &Face::new(base),
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit_x = (letters / 26 + 1) / 2;
+        let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
+
+        let px_x = |units: i32| (units * unit_x + 2) / 4;
+        let px_y = |units: i32| (units * unit_y + 4) / 8;
+
+        // The air the template itself declares between two rows — read off it, never written
+        // down again, exactly as `fit_about_help` reads it off the live window.
+        let air =
+            px_y(bounds(rows[1].0).1) - (px_y(bounds(rows[0].0).1) + px_y(bounds(rows[0].0).3));
+
+        let widest_key = (1_u16..=254)
+            .filter_map(settings::key_name)
+            .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
+            .expect("the program must name at least one key");
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            for key in [widest_key.as_str(), "Pause"] {
+                // The heights the window would lay the panel out by: the measured height, never
+                // less than the template's own — `fit_about_help` grows downwards only.
+                let heights: Vec<i32> = rows
+                    .iter()
+                    .map(|(row, _, string)| {
+                        let sentence = settings::text(*string);
+                        let (_, cx, _, cy) = bounds(*row);
+                        let width = px_x(cx);
+
+                        // SAFETY: the sheet's DC is live and both faces outlive the call.
+                        let (_, needed) = unsafe {
+                            theme::measure_chip_row(
+                                sheet.dc,
+                                width,
+                                theme::chip_row(&sentence, key),
+                                metrics,
+                            )
+                        }
+                        .expect("the memory DC must answer the metrics of its own face");
+
+                        needed.max(px_y(cy))
+                    })
+                    .collect();
+
+                let first = px_y(bounds(rows[0].0).1);
+                let tops = settings::stacked_tops(first, &heights, air);
+
+                // 1. No row reaches into the next one's top.
+                for index in 1..rows.len() {
+                    let bottom = tops[index - 1] + heights[index - 1];
+
+                    if tops[index] - bottom < worst.0 {
+                        worst = (
+                            tops[index] - bottom,
+                            format!(
+                                "{}% {language:?} key «{key}»: rows {} and {}",
+                                dpi * 100 / 96,
+                                index,
+                                index + 1
+                            ),
+                        );
+                    }
+
+                    assert!(
+                        bottom <= tops[index],
+                        "{language:?} at {}% with «{key}»: row {} ends at {bottom} px and row {} \
+                         starts at {} px — two owner-drawn statics that overlap erase each other \
+                         (defect Г-1)",
+                        dpi * 100 / 96,
+                        index,
+                        index + 1,
+                        tops[index]
+                    );
+                }
+
+                // 2. Every numeral stands inside its own row's band: the window moves it by the
+                //    offset it had in the template, so it must not reach the row below.
+                for (index, (row, numeral, _)) in rows.iter().enumerate() {
+                    let offset = px_y(bounds(*numeral).1) - px_y(bounds(*row).1);
+                    let numeral_top = tops[index] + offset;
+                    let numeral_bottom = numeral_top + px_y(bounds(*numeral).3);
+
+                    assert!(
+                        numeral_top >= tops[index]
+                            && numeral_bottom <= tops[index] + heights[index],
+                        "{language:?} at {}%: numeral {} stands {numeral_top}..{numeral_bottom} \
+                         and its row stands {}..{} — the numeral must live inside its own row",
+                        dpi * 100 / 96,
+                        index + 1,
+                        tops[index],
+                        tops[index] + heights[index]
+                    );
+                }
+
+                // 3. The panel grows under the rows, and the window under the panel — both by
+                //    the same number, which is what `fit_about_help` moves everything by.
+                let grow = tops[rows.len() - 1] + heights[rows.len() - 1]
+                    - (px_y(bounds(rows[4].0).1) + px_y(bounds(rows[4].0).3));
+
+                assert!(
+                    tops[rows.len() - 1] + heights[rows.len() - 1]
+                        <= px_y(panel.1) + px_y(panel.3) + grow.max(0),
+                    "{language:?} at {}%: the last row must end inside the panel once the panel \
+                     has grown with it",
+                    dpi * 100 / 96
+                );
+            }
+        }
+    }
+
+    println!(
+        "the tightest gap between two rows: {} px — {}",
+        worst.0, worst.1
+    );
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Task T-42-3, findings С45 and С36, решение 124.1** — the language row holds its own: the
 /// two labels of the left column fit their slot in all fourteen locales at all five scales, and
 /// the closed language combo shows the longest language name whole.

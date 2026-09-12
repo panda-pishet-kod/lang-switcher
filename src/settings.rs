@@ -15422,15 +15422,9 @@ unsafe fn fit_about_help(hwnd: HWND) {
         .min()
         .unwrap_or(0);
 
-    // Where each row goes now. The first one does not move — the panel's own top padding is
-    // part of the look решение 87 accepted by eye.
-    let mut tops = Vec::with_capacity(rows.len());
-    let mut top = rows.first().map_or(0, |first| first.2.top);
-
-    for (.., needed) in &rows {
-        tops.push(top);
-        top += needed + air;
-    }
+    // Where each row goes now — the arithmetic of the stack, apart from the moving of windows.
+    let heights: Vec<i32> = rows.iter().map(|(.., needed)| *needed).collect();
+    let tops = stacked_tops(rows.first().map_or(0, |first| first.2.top), &heights, air);
 
     let grow = rows.last().map_or(0, |(.., rect, _, needed)| {
         tops[rows.len() - 1] + needed - rect.bottom
@@ -15498,6 +15492,30 @@ unsafe fn fit_about_help(hwnd: HWND) {
         // sentence, and the journal is told.
         crate::app::report_non_critical("SetWindowPos", &error);
     }
+}
+
+/// Where a stack of rows starts, each under the last with `air` between them — task T-42-2.
+///
+/// The whole arithmetic of [`fit_about_help`], and the reason it is a function of its own: a
+/// row that overlapped its neighbour would not merely look wrong — two owner-drawn statics
+/// **erase** each other (defect Г-1), and the numeral of the row below would go under the tail
+/// of the row above. That cannot be checked by eye on one locale at one scale; it is checked by
+/// a test walking all fourteen locales and all five scales
+/// (`the_help_rows_never_overlap_at_any_scale_or_locale`), and a test needs the arithmetic
+/// without a window.
+///
+/// Pure. `first` is where the first row stands — the panel's own top padding, which does not
+/// move (решение 87 accepted it by eye).
+pub fn stacked_tops(first: i32, heights: &[i32], air: i32) -> Vec<i32> {
+    let mut tops = Vec::with_capacity(heights.len());
+    let mut top = first;
+
+    for height in heights {
+        tops.push(top);
+        top += height + air;
+    }
+
+    tops
 }
 
 /// One child's rectangle in the client coordinates of its dialog, or `None` on any refusal.
