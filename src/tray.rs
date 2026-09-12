@@ -848,19 +848,19 @@ impl Tray {
             // `Ignored`, not `Handled`: the broadcast goes on to `DefWindowProcW` like any
             // other message that is not ours to consume.
             //
-            // SEC-05 verbatim: the string `lParam` names is compared against
-            // `"ImmersiveColorSet"` and is used for nothing further. The reading is
-            // careful — it happens only when there is somebody to hand the answer to
-            // (task T-13-20, [`on_setting_change`]), a null pointer is not ours, at most
-            // [`SETTING_NAME_CAP`] UTF-16 units are ever looked at, the comparison is
-            // exact — and nothing of the message is kept: the copy lives on that frame
-            // and dies with it.
+            // ⭐ **SEC-05, task T-41-2, finding В2: `lparam` is not passed on and is not read.**
+            // Up to this task the arm handed the pointer to a reader that dereferenced it —
+            // carefully, and still a dereference of a number a stranger wrote. What the far
+            // end did with the answer was compare it against one word; so that word is handed
+            // over directly, out of this build's own memory, and the message's content plays
+            // no part in this program at all. The needless repaint the comparison used to
+            // spare is spared by the third check inside
+            // [`settings::repaint_for_system_theme`], which was always there.
             //
-            // The setting is read out of `self` **here**, on the way in, because that is
-            // the one cheap local fact this arm has and [`on_setting_change`] must have
-            // before it looks at anything of the message.
+            // The setting is read out of `self` here, on the way in, because it is the one
+            // cheap local fact this arm has and the gate inside needs it.
             WM_SETTINGCHANGE => {
-                on_setting_change(lparam, self.config().general.theme);
+                on_setting_change(self.config().general.theme);
 
                 Reaction::Ignored
             }
@@ -1824,15 +1824,7 @@ pub fn with_tray<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
     UI_TRAY.with(|slot| slot.borrow_mut().as_mut().map(f))
 }
 
-/// The ceiling on how many UTF-16 units of a `WM_SETTINGCHANGE` string are ever looked at —
-/// FR-92а, task T-11-9, the reading bounds of SEC-05.
-///
-/// `"ImmersiveColorSet"` is 17 units; 64 is that with room to spare, and a string still
-/// running at 64 is one this program was never going to match.
-const SETTING_NAME_CAP: usize = 64;
-
-/// Whether the string a `WM_SETTINGCHANGE` names is worth reading at all — FR-92а, SEC-05,
-/// task T-13-20.
+/// Whether a `WM_SETTINGCHANGE` is worth acting on at all — FR-92а, SEC-05, task T-13-20.
 ///
 /// Two facts line up, and both of them are this program's **own**: there is somebody to hand
 /// the string to — one of the two windows of FR-92а is up — and the setting in force is
@@ -1849,7 +1841,12 @@ const SETTING_NAME_CAP: usize = 64;
 /// arguments and a table can close it. **SEC-05, R-20:** all three arguments are published
 /// values of this process — two thread-locals of the UI thread and one field of the
 /// configuration the tray holds. No `wParam`, no `lParam` and no pointer reaches this
-/// decision, which is what makes it safe to take *before* the message is looked at.
+/// decision.
+///
+/// ⭐ **Task T-41-2 left the name and took away the reading.** Since finding В2 nothing reads the
+/// message at all, so this rule no longer guards a dereference — it guards a repaint. The name
+/// is kept because the rule is the same rule and task T-13-20's table closes it; what it means
+/// now is «стоит ли вообще будить окна», and the answer is unchanged.
 pub fn setting_name_is_wanted(
     dialog_open: bool,
     about_open: bool,
@@ -1859,40 +1856,47 @@ pub fn setting_name_is_wanted(
 }
 
 /// The whole of the `WM_SETTINGCHANGE` arm of [`Tray::handle_message`] — FR-92а, SEC-05,
-/// task T-13-20.
+/// tasks T-13-20 and **T-41-2**.
 ///
-/// # The order of the checks *is* the repair
+/// # The message is not read at all — finding В2
 ///
-/// The audit of 2026-08-24 found this arm calling [`setting_change_name`] on **every**
-/// `WM_SETTINGCHANGE` that reached the hidden window — a dereference of a foreign pointer
-/// after one null check — while the only consumer of the answer, at a closed dialog, left on
-/// its first line. `WM_SETTINGCHANGE` is *posted*, and a posted message is not marshalled:
-/// the number in `lParam` is whatever the sender put there, so a forged one, or the merely
-/// wrong one a third-party program is known to broadcast, was a read of an arbitrary address
-/// and an access violation.
+/// The audit of 2026-08-24 found this arm dereferencing the pointer in `lParam` after a single
+/// null check, and task T-13-20 narrowed the window in which it did so: only when a window of
+/// FR-92а was up under the `system` theme. **The audit of 2026-09-04 asked for the question to
+/// be closed instead of narrowed a third time**, and this is that closure — the pointer is not
+/// passed in, so there is nothing here to read, and after it `tray.rs` dereferences nothing that
+/// arrives on a message at all.
 ///
-/// So the two cheap local facts are established **first**, on the lines below, and `lparam`
-/// is not touched at all unless they both hold. Written the other way round — the string read
-/// and the gate applied to the result — this function would be exactly the finding again,
-/// with a comment on top.
+/// `WM_SETTINGCHANGE` is *posted*, and a posted message is not marshalled: the number in
+/// `lParam` is whatever the sender put there. Any process at this integrity level could send a
+/// number naming nothing — as could a third-party program broadcasting a malformed one by
+/// accident — and the read was an access violation and **the end of the process**: no panic
+/// hook, the keyboard hook left installed, the icon left in the tray, the configuration unsaved.
+/// Measured, not assumed: premise П4 of this stage took the test binary down with
+/// `STATUS_ACCESS_VIOLATION` on the code this task replaced.
 ///
-/// `setting` is `[general].theme` as the tray holds it, copied out by the caller before this
-/// call: the same value the settings dialog was opened with and the same one
-/// [`show_about_dialog`](settings::show_about_dialog) was handed, since «Применить» is the
-/// one road that moves it and it moves both at once.
+/// # What replaces the reading, and why it costs nothing
 ///
-/// # SEC-05
+/// The only use the answer was ever put to is one comparison against
+/// [`settings::IMMERSIVE_COLOR_SET`]. So that word is handed over directly, out of this build's
+/// own memory: it is what the neighbouring `WM_THEMECHANGED` arm has always done, and the two
+/// arms now say the same thing in the same way.
 ///
-/// Nothing here believes the message. A string that gets read is compared against
-/// [`settings::IMMERSIVE_COLOR_SET`] and used for nothing else; the reaction on the far side
-/// of that comparison is [`settings::on_system_theme_message`], which asks *the system* what
-/// the theme now is and repaints this program's own window. A gate that refuses costs two
-/// thread-local reads and one comparison of an enum, and the message goes on to
-/// `DefWindowProcW` as it always did.
-fn on_setting_change(lparam: LPARAM, setting: theme::ThemeSetting) {
-    // Task T-13-20. **Before** `lparam` is looked at, and that is the whole of the repair —
-    // see above. `dialog_is_open` and `about_is_open` are thread-locals of this, the UI
-    // thread; `setting` is already on this frame.
+/// The needless repaint that comparison used to spare is spared where it always really was —
+/// [`settings::repaint_for_system_theme`] asks three questions, and the third is whether the
+/// palette the system now resolves to differs from the one on the screen. A `WM_SETTINGCHANGE`
+/// about something else therefore costs one reading of the personalization switch and one
+/// comparison of two pointers, and repaints nothing.
+///
+/// `setting` is `[general].theme` as the tray holds it, copied out by the caller: the same value
+/// the settings dialog was opened with and the same one
+/// [`show_about_dialog`](settings::show_about_dialog) was handed, since «Применить» is the one
+/// road that moves it and it moves both at once.
+fn on_setting_change(setting: theme::ThemeSetting) {
+    // Task T-13-20, and it still stands: with no window of FR-92а up, or under a theme fixed by
+    // hand, there is nobody to repaint and no reason to ask the system anything. Both facts are
+    // this program's own — two thread-locals of this, the UI thread, and one field of the
+    // configuration the tray holds.
     if !setting_name_is_wanted(
         settings::dialog_is_open(),
         settings::about_is_open(),
@@ -1901,95 +1905,53 @@ fn on_setting_change(lparam: LPARAM, setting: theme::ThemeSetting) {
         return;
     }
 
-    // SAFETY: this is the window procedure of this program's own hidden window, inside the
-    // delivery of the `WM_SETTINGCHANGE` whose `lParam` this is — the two preconditions the
-    // reader states — and the gate above has just established that there is a window to hand
-    // the answer to, which is the third. The reader checks for null and never looks past the
-    // terminator or the cap.
-    let name = unsafe { setting_change_name(lparam) };
+    note_theme_handoff(Some(settings::IMMERSIVE_COLOR_SET));
 
-    settings::on_system_theme_message(name.as_deref());
+    settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
 }
+
+/// Remembers what the arm handed on to [`settings::on_system_theme_message`] — task T-41-2,
+/// finding В2. Test-only; the product has no such record.
+///
+/// The number task T-13-20's acceptance read was «сколько раз входили в читателя». Task T-41-2
+/// takes the reader away altogether, so what has to be shown in its place is the other half of
+/// the same sentence: that the arm hands on **the program's own word**, and hands it on whatever
+/// the message carried.
+#[cfg(test)]
+fn note_theme_handoff(name: Option<&str>) {
+    THEME_HANDOFF.with(|last| *last.borrow_mut() = Some(name.map(str::to_owned)));
+}
+
+/// Nothing at all in the product — see the test-only twin above.
+#[cfg(not(test))]
+#[expect(
+    clippy::inline_always,
+    reason = "an empty function on the message path, and the point of it is to leave no code"
+)]
+#[inline(always)]
+fn note_theme_handoff(_name: Option<&str>) {}
 
 #[cfg(test)]
 thread_local! {
-    /// How many times [`setting_change_name`] has been **entered** on this thread — task
-    /// T-13-20.
-    ///
-    /// Test-only, and counted on the reader's very first line — before its null check and
-    /// long before any dereference — on purpose. What criterion 5 has to establish is
-    /// «читателя не звали», and a counter placed after the null check would answer
-    /// «читатель не разыменовывал», which is a different and weaker sentence: it is
-    /// satisfied by a null `lParam` the gate had nothing to do with.
-    static SETTING_NAME_READS: Cell<u32> = const { Cell::new(0) };
+    /// What the `WM_SETTINGCHANGE` arm last handed to [`settings::on_system_theme_message`] on
+    /// this thread — task T-41-2. `None` means the arm has not reached the hand-off at all.
+    /// The signature is `Option<&str>` and not the constant on purpose: the instrument records
+    /// **whatever the arm hands over**, so a future edit that started reading the message again
+    /// would be caught by the same assertion rather than pass it by construction.
+    static THEME_HANDOFF: std::cell::RefCell<Option<Option<String>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-/// The string a `WM_SETTINGCHANGE` names, read within the bounds of SEC-05 — task T-11-9,
-/// narrowed by task T-13-20.
-///
-/// ⚠ **This function dereferences a pointer that arrived on a window message, and it has no
-/// way of checking that the pointer is real.** `WM_SETTINGCHANGE` is posted and is therefore
-/// not marshalled: the number in `lParam` is whatever the sender wrote there, and a non-null
-/// number naming nothing readable is an access violation and the end of the process. The null
-/// check below is **necessary and not sufficient** — the finding behind task T-13-20 is
-/// precisely that a non-null pointer can be a foreign one. There is one caller,
-/// [`on_setting_change`], it establishes the preconditions below before it calls, and nothing
-/// else in this program may call this at all.
-///
-/// `None` for a null `lParam` (then it is not ours), for a string that shows no terminator
-/// within [`SETTING_NAME_CAP`] units, and for units that are not UTF-16 — whatever either of
-/// those is, it is not the one word this program compares against. The value lives on the
-/// caller's frame and dies with the comparison it was read for: nothing of the message is
-/// kept.
-///
-/// # Safety
-///
-/// The pointer in `lparam` counts as fit to read only while **all** of the following hold,
-/// and not one of them is checkable here:
-///
-/// 1. `lparam` is the `lParam` of a `WM_SETTINGCHANGE` that Windows **delivered to this
-///    thread**, and the read happens *inside* that delivery — the call is on the stack of the
-///    window procedure that received it. For exactly that long the system keeps the string
-///    the broadcast names readable in this process; a number saved and read afterwards, or
-///    read on another thread, has nothing keeping it alive.
-/// 2. The message reached the window procedure of this program's own hidden window — the one
-///    window of this process that reads this message (§6.2) — rather than being handed in by
-///    a caller that made the number up.
-/// 3. The gate of [`setting_name_is_wanted`] has just answered `true`. This one is not a
-///    memory precondition and is a precondition all the same: the read is worth its risk only
-///    when there is a window waiting for the answer, and calling without it is the finding of
-///    the audit of 2026-08-24 restored.
-///
-/// Given those, the loop below reads one unit at a time, never past the terminator and never
-/// past the cap.
-unsafe fn setting_change_name(lparam: LPARAM) -> Option<String> {
-    // Task T-13-20, the number criterion 5 reads: entries into the reader, counted before
-    // anything else happens in it — see [`SETTING_NAME_READS`]. Compiled only into the
-    // unit-test build; the product has no counter.
-    #[cfg(test)]
-    SETTING_NAME_READS.with(|count| count.set(count.get().saturating_add(1)));
-
-    if lparam.0 == 0 {
-        return None;
-    }
-
-    let text = lparam.0 as *const u16;
-    let mut units = Vec::with_capacity(SETTING_NAME_CAP);
-
-    for offset in 0..SETTING_NAME_CAP {
-        // SAFETY: see above — every unit before `offset` was read and found non-zero, so
-        // the read is behind the terminator and below the cap.
-        let unit = unsafe { text.add(offset).read_unaligned() };
-
-        if unit == 0 {
-            return String::from_utf16(&units).ok();
-        }
-
-        units.push(unit);
-    }
-
-    None
-}
+// ⛔ **`setting_change_name` stood here until task T-41-2 (finding В2), and it is not coming
+// back.** It read the string a `WM_SETTINGCHANGE` names by dereferencing the pointer in
+// `lParam` — bounded by a cap and a null check, and still a dereference of a number a stranger
+// wrote. Twice the window it did that in was narrowed (tasks T-11-9 and T-13-20); the audit of
+// 2026-09-04 asked instead for the question to be closed, and closing it cost nothing, because
+// the one use the answer was ever put to was a comparison against a word this build owns.
+//
+// This note is left for the reader who comes looking for the function: after this task **no
+// code of `tray.rs` dereferences anything that arrived on a message**, and `tests\tray.rs`
+// sweeps the file to keep it so. Its cap and its test-only counter went with it.
 
 /// The window-procedure entry point of the tray.
 ///
@@ -5017,38 +4979,32 @@ mod tests {
     // the published half: the table of [`setting_name_is_wanted`] and the product's own
     // call sites.
     //
-    // ⚠ Every thread-local these read — the counter, [`settings::dialog_is_open`],
-    // [`settings::about_is_open`] — belongs to the thread running the test, so the four
-    // tests below do not see each other however `cargo test` schedules them.
+    // ⚠ Every thread-local these read — the hand-off record, [`settings::dialog_is_open`],
+    // [`settings::about_is_open`] — belongs to the thread running the test, so the tests
+    // below do not see each other however `cargo test` schedules them.
+    //
+    // ⭐ **Task T-41-2 changed what they measure, and the change is the repair.** The number
+    // these tests used to read was «сколько раз входили в читателя»; there is no reader any
+    // more, so the question «читателя не звали» has no meaning and its successor is «дошло ли
+    // дело до передачи и что именно передано». Criteria 5, 6, 7 and ловушка 3 of task T-13-20
+    // are all statements about the gate, and the gate is exactly where it was — only the thing
+    // it guards changed, from a dereference to a repaint.
 
-    /// The number the reader moves: entries into [`setting_change_name`] on this thread.
-    fn reads() -> u32 {
-        SETTING_NAME_READS.with(Cell::get)
+    /// What the arm last handed to `settings::on_system_theme_message` on this thread — task
+    /// T-41-2. The outer `None` means the arm never reached the hand-off.
+    fn handoff() -> Option<Option<String>> {
+        THEME_HANDOFF.with(|last| last.borrow().clone())
     }
 
-    /// The «мусорный ненулевой `lParam`» of criterion 5 — a number that is a pointer to
-    /// nothing.
-    ///
-    /// Deliberately unreadable, and deliberately harmless in being so. Windows reserves the
-    /// first 64 KiB of every process's address space — the null partition — and maps nothing
-    /// there ever, so this number cannot alias a page of the test, of the runtime or of
-    /// anybody else, and a read of it is an access violation and nothing subtler.
-    ///
-    /// That is the point of choosing it. The proof these tests offer is that execution
-    /// **never reached** the read; a pointer that happened to survive being read would prove
-    /// nothing at all about the gate.
-    fn a_pointer_to_nothing() -> LPARAM {
-        LPARAM(0x2A2A)
+    /// Forgets it again, so that a test measures its own call and not its neighbour's.
+    fn forget_handoff() {
+        THEME_HANDOFF.with(|last| *last.borrow_mut() = None);
     }
 
-    /// A legitimate `WM_SETTINGCHANGE` payload: the one word of FR-92а, NUL-terminated, on
-    /// the caller's own frame.
-    fn immersive_color_set() -> Vec<u16> {
-        settings::IMMERSIVE_COLOR_SET
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect()
-    }
+    // ⛔ Two helpers of task T-13-20 stood here: `a_pointer_to_nothing`, the «мусорный
+    // ненулевой `lParam`» of criterion 5, and `immersive_color_set`, a well-formed payload for
+    // criterion 6. Task T-41-2 took the reading away, so neither a good payload nor a bad
+    // pointer has anywhere to go — the arm is not given one.
 
     /// A handle that names no window — the record test of task T-13-17 uses the same trick
     /// and for the same reason: what is under test is the *record*, not the dialog manager.
@@ -5058,20 +5014,15 @@ mod tests {
         HWND(0x1357 as *mut std::ffi::c_void)
     }
 
-    /// **Criterion 5 of task T-13-20 — «некому отдать».**
+    /// **Criterion 5 of task T-13-20 — «некому отдать», re-aimed by task T-41-2.**
     ///
-    /// The state the audit found: no window of FR-92а on the screen, and a `WM_SETTINGCHANGE`
-    /// carrying a non-null `lParam` that names nothing. Before this task the arm read up to 64
-    /// UTF-16 units from that address and handed the result to a consumer that left on its
-    /// first line. Now the reader is not entered at all — and the counter says so on the line
-    /// *before* the null check, so the assertion is «читателя не звали» and not the weaker
-    /// «читатель ничего не разыменовал».
-    ///
-    /// That this test returns at all is the second half of the proof: the address is in the
-    /// null partition, and a build that let execution through to the read would not fail this
-    /// assertion — it would take the whole test process down with an access violation.
+    /// The state the audit of 2026-08-24 found: no window of FR-92а on the screen, and a
+    /// `WM_SETTINGCHANGE` arriving all the same. What the gate used to spare was a dereference
+    /// of the sender's pointer; since task T-41-2 there is no pointer to spare, and what it
+    /// spares is a reading of the personalization switch and a walk over two empty records.
+    /// The sentence is the same sentence: with nobody to tell, nothing happens.
     #[test]
-    fn a_setting_change_with_nobody_to_tell_never_looks_at_its_lparam() {
+    fn a_setting_change_with_nobody_to_tell_goes_no_further() {
         assert!(
             !settings::dialog_is_open(),
             "this thread has no settings dialog"
@@ -5087,83 +5038,67 @@ mod tests {
             theme::ThemeSetting::System,
         );
 
-        let before = reads();
-        on_setting_change(a_pointer_to_nothing(), theme::ThemeSetting::System);
-        let after = reads();
+        forget_handoff();
+        on_setting_change(theme::ThemeSetting::System);
+        let handed = handoff();
 
-        println!("gate: {wanted}; reader entries: {before} -> {after}");
+        println!("gate: {wanted}; handed on: {handed:?}");
 
         assert!(!wanted, "with neither window up there is nobody to tell");
         assert_eq!(
-            after, before,
-            "and the reader must not have been entered — the finding of the audit of \
-             2026-08-24 is exactly this call happening anyway"
+            handed, None,
+            "and the arm must not have reached the hand-off — the finding of the audit of \
+             2026-08-24 is exactly this call carrying on anyway"
         );
     }
 
     /// **Criterion 6 of task T-13-20 — «есть кому отдать».** The dialog is open and the theme
-    /// is `system`: the string is read, exactly as before this task, and it comes out as the
-    /// word FR-92а names.
+    /// is `system`: the arm goes through, and what it hands over is the word FR-92а names.
     ///
     /// The flag is raised through [`settings::DialogSession`] — the product's own guard and
     /// the only thing that raises it — so what the gate reads here is what it reads in the
     /// running program. No window is behind the flag, so `on_system_theme_message` stops at
     /// its own empty record; that half of the road belongs to `tests\settings.rs`, which
     /// closes it by a table.
+    ///
+    /// ⭐ **Task T-41-2: the message is not involved.** This test used to build a well-formed
+    /// `WM_SETTINGCHANGE` payload and assert that the arm read it back correctly; now there is
+    /// nothing to build, because the word travels out of this build's own memory.
     #[test]
     fn an_open_dialog_under_the_system_theme_is_told_as_it_always_was() {
-        let text = immersive_color_set();
-        let lparam = LPARAM(text.as_ptr() as isize);
-
         let _open = settings::DialogSession::open();
 
         assert!(settings::dialog_is_open(), "the guard raised the flag");
 
-        let before = reads();
-        on_setting_change(lparam, theme::ThemeSetting::System);
-        let after = reads();
+        forget_handoff();
+        on_setting_change(theme::ThemeSetting::System);
+        let handed = handoff();
 
-        // The value itself, over the very buffer the arm was handed: the reading half of
-        // task T-11-9 is unchanged, and this is where that is said.
-        //
-        // SAFETY: `text` is a NUL-terminated UTF-16 buffer owned by this frame and alive
-        // across the call — a stronger guarantee than the delivery of a real broadcast gives
-        // — and the gate above has just answered yes, which is the third precondition.
-        let name = unsafe { setting_change_name(lparam) };
-
-        println!("reader entries: {before} -> {after}; the string read: {name:?}");
+        println!("handed on: {handed:?}");
 
         assert_eq!(
-            after,
-            before + 1,
-            "the arm must have entered the reader exactly once"
-        );
-        assert_eq!(
-            name.as_deref(),
-            Some(settings::IMMERSIVE_COLOR_SET),
-            "and the reading itself is what it was before this task"
+            handed,
+            Some(Some(settings::IMMERSIVE_COLOR_SET.to_owned())),
+            "the arm goes through, and it hands over the one word FR-92а names"
         );
     }
 
     /// **Criterion 7 of task T-13-20 — тема задана вручную.** The dialog is open, so there is
     /// a window on the screen; but `[general].theme` is `light` or `dark`, and under those
     /// FR-92а fixes the palette outright. The system's switch has no say, nothing would be
-    /// repainted whatever the string said, and so the string is not read.
-    ///
-    /// Driven with the same pointer to nothing as criterion 5: this branch has to refuse
-    /// before the dereference too, not merely refuse afterwards.
+    /// repainted whatever the switch said, and so nothing is asked of the system at all.
     #[test]
-    fn a_theme_fixed_by_hand_stops_the_reading_even_with_a_window_up() {
+    fn a_theme_fixed_by_hand_stops_the_arm_even_with_a_window_up() {
         let _open = settings::DialogSession::open();
 
         assert!(settings::dialog_is_open(), "a window *is* up for this test");
 
-        let before = reads();
+        forget_handoff();
 
         for setting in [theme::ThemeSetting::Light, theme::ThemeSetting::Dark] {
             let wanted = setting_name_is_wanted(true, false, setting);
 
-            on_setting_change(a_pointer_to_nothing(), setting);
+            on_setting_change(setting);
 
             println!("{setting:?}: gate {wanted}");
 
@@ -5173,14 +5108,14 @@ mod tests {
             );
         }
 
-        let after = reads();
+        let handed = handoff();
 
-        println!("reader entries: {before} -> {after}");
+        println!("handed on: {handed:?}");
 
         assert_eq!(
-            after, before,
-            "neither fixed theme may reach the reader — the message changes nothing under \
-             them, so the pointer is a risk taken for no purpose at all"
+            handed, None,
+            "neither fixed theme may reach the hand-off — FR-92а pins the palette under both, \
+             so waking the windows would be work done for no purpose at all"
         );
     }
 
@@ -5193,9 +5128,6 @@ mod tests {
     /// following the system theme, and task T-13-17's repair would be undone in silence.
     #[test]
     fn the_about_window_alone_is_somebody_to_tell() {
-        let text = immersive_color_set();
-        let lparam = LPARAM(text.as_ptr() as isize);
-
         let _about = settings::AboutSession::open();
         settings::AboutSession::record(a_handle_that_names_no_window());
 
@@ -5205,17 +5137,32 @@ mod tests {
         );
         assert!(settings::about_is_open(), "and the second one is true");
 
-        let before = reads();
-        on_setting_change(lparam, theme::ThemeSetting::System);
-        let after = reads();
+        forget_handoff();
+        on_setting_change(theme::ThemeSetting::System);
+        let handed = handoff();
 
-        println!("reader entries with only the about window up: {before} -> {after}");
+        println!("handed on with only the about window up: {handed:?}");
 
         assert_eq!(
-            after,
-            before + 1,
+            handed,
+            Some(Some(settings::IMMERSIVE_COLOR_SET.to_owned())),
             "the about window is somebody to tell, and a gate that asked only about the \
              settings dialog would have refused here"
         );
     }
+
+    // ⛔ **Two scaffolding tests of task T-41-2 stood here and were taken away with the thing
+    // they measured.** `the_arm_hands_on_the_programs_own_word_whatever_the_message_named`
+    // built a well-formed `WM_SETTINGCHANGE` naming «Environment» and asserted that what went
+    // on to `settings::on_system_theme_message` was this build's own word: it failed on the old
+    // code with `Some("Environment")` against `Some("ImmersiveColorSet")` — the honest red of
+    // this task, journal `scratchpad-E41\red-T-41-2-handoff.log`.
+    // `a_forged_lparam_no_longer_ends_the_process` drove the pointer to nothing through the arm
+    // and **took the test binary down** with `STATUS_ACCESS_VIOLATION` on the old code — premise
+    // П4 measured, journal `scratchpad-E41\premise-P4-crash.log`.
+    //
+    // Neither can be written now, and that is the repair: `on_setting_change` has no `lParam`
+    // to be given. What is left of them lives in two places — the criteria above, which say what
+    // the arm hands over, and the sweep of `tests\tray.rs`, which says that no code of this file
+    // dereferences anything arriving on a message.
 }

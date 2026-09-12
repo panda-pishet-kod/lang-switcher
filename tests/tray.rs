@@ -1673,6 +1673,40 @@ fn a_setting_change_naming_a_pointer_to_nothing_is_survived() {
 
     assert_eq!(reaction, Reaction::Ignored, "and this one is ignored too");
 
+    // ⭐⭐ **Task T-41-2, criterion (в) of finding В2 — the half this test never dared drive.**
+    //
+    // The gate wide open: a window of FR-92а is up **and** the theme is `system`. Until this
+    // task that state plus a pointer to nothing was an access violation and the end of the
+    // process — no panic hook, the keyboard hook left installed, the icon left in the tray,
+    // the configuration unsaved — so the two halves above were the most a test could ask for.
+    // Premise П4 of stage Э41 measured it rather than assuming it: the same call took the test
+    // binary down with `STATUS_ACCESS_VIOLATION`, journal
+    // `scratchpad-E41\premise-P4-crash.log`.
+    //
+    // Now the pointer goes nowhere: the arm does not pass it on and nothing reads it. **That
+    // this test finishes is the assertion.**
+    let mut system = tray.config().clone();
+    system.general.theme = ThemeSetting::System;
+    tray.replace_config(system);
+
+    assert!(settings::dialog_is_open(), "the window is still up");
+    assert_eq!(
+        tray.config().general.theme,
+        ThemeSetting::System,
+        "and now the other half of the gate is open too — this is the state that used to be \
+         fatal"
+    );
+
+    let reaction = tray.handle_message(WM_SETTINGCHANGE, WPARAM(0), nowhere);
+
+    println!("WM_SETTINGCHANGE with the gate wide open -> {reaction:?}");
+
+    assert_eq!(
+        reaction,
+        Reaction::Ignored,
+        "the broadcast is ignored here as well, and the process is still alive to say so"
+    );
+
     drop(dialog);
 }
 
@@ -1750,11 +1784,34 @@ fn the_refused_configuration_write_is_journalled_and_the_todo_is_gone() {
     );
 }
 
+/// **Task T-41-2, finding В2 — `tray.rs` dereferences nothing that arrives on a message.**
+///
+/// Until this stage the test in this place asserted an **order**: that the cheap local checks
+/// of task T-13-20 stood in front of the pointer read, and that the reader had exactly one
+/// caller. That was the best a narrowing could be held to. The audit of 2026-09-04 asked for
+/// the question to be closed rather than narrowed a third time, so what is held to now is the
+/// stronger sentence, and it needs no order at all: **the read is not in the file.**
+///
+/// Three claims:
+///
+/// * the arm of `handle_message` hands the theme to `on_setting_change` and hands it nothing
+///   else — `lparam` is not passed on;
+/// * `on_setting_change` hands `settings::on_system_theme_message` the program's own
+///   `IMMERSIVE_COLOR_SET`, the same way the neighbouring `WM_THEMECHANGED` arm always has;
+/// * and the product half of the file contains no `as *const u16` and no `read_unaligned` at
+///   all — the two spellings the removed reader used.
+///
+/// ⚠ **The third claim is not hypothetical, and it was measured on the base rather than
+/// assumed:** the same cut and the same two needles over `7455732` answer `1` and `1`, both of
+/// them inside the removed reader, and over this tree `0` and `0`. That measurement is the
+/// positive control of the instrument — a sweep that cannot find what it looks for is not a
+/// sweep — and its journal is `scratchpad-E41\red-T-41-2-sweep.log`.
+///
 /// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
 /// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF, and a
 /// needle written with `\n` has to be matched against a text normalised to `\n`.
 #[test]
-fn the_cheap_checks_stand_in_front_of_the_pointer_and_name_both_windows() {
+fn nothing_of_a_window_message_is_dereferenced_in_the_tray() {
     let source = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src")
@@ -1763,9 +1820,8 @@ fn the_cheap_checks_stand_in_front_of_the_pointer_and_name_both_windows() {
     .expect("src\\tray.rs must be readable")
     .replace("\r\n", "\n");
 
-    // The product half of the file. The module's own unit tests reach the reader too — that
-    // is what closes criteria 5 to 7 — and counting their calls beside the product's would
-    // measure the suite instead of the program.
+    // The product half of the file. The module's own unit tests drive the arm too, and their
+    // text beside the product's would measure the suite instead of the program.
     let at = source
         .find("\n#[cfg(test)]\nmod tests {")
         .expect("the unit-test module must be at the foot of this file");
@@ -1782,85 +1838,47 @@ fn the_cheap_checks_stand_in_front_of_the_pointer_and_name_both_windows() {
          system have a say"
     );
 
-    // The arm of `handle_message`: one call, and the theme travels in as an argument.
+    // The arm of `handle_message`: the theme travels in, and nothing else does.
     assert!(
-        source.contains("on_setting_change(lparam, self.config().general.theme)"),
-        "the arm hands the reading to one function, with the cheap local fact already in hand"
-    );
-    assert_eq!(
-        source.matches("unsafe { setting_change_name(").count(),
-        1,
-        "and the product half of the module has exactly one call site for the reader"
+        source.contains("on_setting_change(self.config().general.theme)"),
+        "the arm hands over the one cheap local fact and does not hand over `lparam`"
     );
 
     let at = source
-        .find("fn on_setting_change(lparam: LPARAM, setting: theme::ThemeSetting) {")
-        .expect("on_setting_change must be in this file");
+        .find("fn on_setting_change(setting: theme::ThemeSetting) {")
+        .expect("on_setting_change must be in this file, and must take no `lparam`");
     let body = &source[at..];
     let end = body.find("\n}").expect("a function closes with its brace");
     let body = &body[..end];
 
     println!("--- on_setting_change ---\n{body}");
 
-    let gate = body
-        .find("if !setting_name_is_wanted(")
-        .expect("the gate of task T-13-20 must be in the body");
-    let read = body
-        .find("setting_change_name(lparam)")
-        .expect("and so must the reading it guards");
-
     assert!(
-        gate < read,
-        "the cheap local checks stand **before** any use of `lparam` — after it, the repair \
-         does nothing at all"
+        body.contains("settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET))"),
+        "and what goes on to the far side is this build's own word, not the message's"
     );
     assert!(
         body.contains("settings::dialog_is_open()") && body.contains("settings::about_is_open()"),
-        "and «кому отдать» is both windows of FR-92а: task T-13-17 made the about window a \
+        "«кому отдать» is both windows of FR-92а: task T-13-17 made the about window a \
          listener, and a gate asking only the dialog would silently undo it"
     );
-
-    // The contract of the reader names the preconditions — criterion 8.
-    let at = source
-        .find("/// The string a `WM_SETTINGCHANGE` names, read within the bounds of SEC-05")
-        .expect("the reader's doc comment must be in this file");
-    let contract = &source[at..];
-    let end = contract
-        .find("\nunsafe fn setting_change_name(")
-        .expect("the doc comment sits on the function");
-    let contract = &contract[..end];
-
-    println!("--- the contract of setting_change_name ---\n{contract}");
-
-    // Flattened to one line so that the claims below are about the *words* of the contract
-    // and not about where its author happened to wrap them.
-    let contract: String = contract
-        .lines()
-        .map(|line| line.trim().trim_start_matches("///").trim())
-        .collect::<Vec<_>>()
-        .join(" ");
-
     assert!(
-        contract.contains("dereferences a pointer that arrived on a window message"),
-        "the contract says in as many words what the function does with a foreign pointer"
+        !body.contains("lparam") && !body.contains("LPARAM"),
+        "and the message is not so much as named inside the function"
     );
-    assert!(
-        contract.contains("necessary and not sufficient"),
-        "and that the null check is not the whole of the protection — ловушка 2"
-    );
-    assert!(
-        contract.contains("# Safety"),
-        "and it states the preconditions under NFR-14's own heading"
-    );
-    for precondition in [
-        "delivered to this thread",
-        "hidden window",
-        "setting_name_is_wanted",
-    ] {
-        assert!(
-            contract.contains(precondition),
-            "the preconditions must name «{precondition}» — that is what makes the pointer \
-             fit to read"
+
+    // The claim of the whole file, and the one the finding asks for. Both spellings, because
+    // the removed reader used both on the same line of work: `lparam.0 as *const u16` and then
+    // `read_unaligned` over it.
+    for needle in ["as *const u16", "read_unaligned"] {
+        let count = source.matches(needle).count();
+
+        println!("«{needle}» in the product half of src\\tray.rs: {count}");
+
+        assert_eq!(
+            count, 0,
+            "«{needle}» is how the pointer of a window message used to be read here, and after \
+             finding В2 there is no such read in this file"
         );
     }
 }
