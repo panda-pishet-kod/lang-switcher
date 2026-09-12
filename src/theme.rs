@@ -3270,6 +3270,24 @@ pub fn chip_row<'a>(template: &'a str, key: &'a str) -> ChipRow<'a> {
 ///
 /// A value rather than eight arguments — `clippy::too_many_arguments` is a denied warning in
 /// this crate, and a row of this window needs every one of these.
+/// The part of [`ChipRowStyle`] a **measurement** needs: the two faces, the line pitch and the
+/// DPI — no colour, no brush, nothing that can be drawn with.
+///
+/// Task T-42-2. Separate from the style rather than borrowed out of it, because the measuring
+/// happens at `WM_INITDIALOG`, where the window has its faces but its brushes may still be
+/// refused (NFR-13) — and because a type that carries no ink cannot be used to write.
+#[derive(Clone, Copy)]
+pub struct ChipRowMetrics {
+    /// The face of the sentence.
+    pub body: Option<HFONT>,
+    /// The face of the key name inside the chip, and that face's `lfHeight`.
+    pub chip_face: Option<(HFONT, i32)>,
+    /// The distance from one line of the row to the next, in pixels of the window.
+    pub pitch: i32,
+    /// The DPI of the window, for the frame thickness of the chip.
+    pub dpi: i32,
+}
+
 #[derive(Clone, Copy)]
 pub struct ChipRowStyle {
     /// The ground of the whole rectangle, laid before a word is written.
@@ -3425,10 +3443,43 @@ unsafe fn lay_chip_row(dc: HDC, rect: RECT, row: ChipRow<'_>, style: ChipRowStyl
     // The words, in reading order, each with its own width.
     let mut atoms: Vec<Placed<'_>> = Vec::new();
 
-    match (&chip, row.key) {
+    // SAFETY: the body face is in the DC; every width below is measured in it.
+    unsafe { push_row_atoms(dc, &mut atoms, row, folded.as_deref(), chip.as_ref()) };
+
+    // SAFETY: see the caller — the clip is narrowed and every handle is alive.
+    unsafe { draw_atoms(dc, rect, &atoms, space, &style, chip, body_metrics) };
+
+    // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+    unsafe { restore_face(dc, previous_face) };
+}
+
+/// Builds the atoms of one help row — the **one** place a row becomes a list of words, shared
+/// by the drawing and by [`measure_chip_row`].
+///
+/// Task T-42-2, finding С44. Until this task the measuring half did not exist at all: the
+/// template's five heights were numbers fitted by hand, and the fitting stand of the контур
+/// modelled the wrap with `DrawTextW` over the sentence *including* the `{0}` placeholder —
+/// two models of one thing, and they disagreed (a row the product draws in two lines was
+/// called three). Whatever is built here is what both the pen and the measurement see.
+///
+/// `folded` is the sentence with the key name written back into it, for a row whose chip could
+/// not be made; `chip` is the measured figure, `None` when there is none.
+///
+/// # Safety
+///
+/// `dc` is live and carries the **body** face — every width is measured in the face the word
+/// will be drawn in.
+unsafe fn push_row_atoms<'a>(
+    dc: HDC,
+    atoms: &mut Vec<Placed<'a>>,
+    row: ChipRow<'a>,
+    folded: Option<&'a str>,
+    chip: Option<&(HFONT, ChipBox, FaceMetrics)>,
+) {
+    match (chip, row.key) {
         (Some((_, box_of, _)), Some(key)) => {
-            // SAFETY: the body face is in the DC; every width below is measured in it.
-            unsafe { push_words(dc, &mut atoms, row.prefix, false) };
+            // SAFETY: see the contract — the body face is in the DC.
+            unsafe { push_words(dc, atoms, row.prefix, false) };
 
             atoms.push(Placed {
                 atom: Atom::Chip(key),
@@ -3438,22 +3489,16 @@ unsafe fn lay_chip_row(dc: HDC, rect: RECT, row: ChipRow<'_>, style: ChipRowStyl
 
             let space_after = row.suffix.starts_with(char::is_whitespace);
 
-            // SAFETY: the body face is in the DC — the chip's face was put back above.
-            unsafe { push_words(dc, &mut atoms, row.suffix, space_after) };
+            // SAFETY: as above — the chip's face is put back by the caller before this.
+            unsafe { push_words(dc, atoms, row.suffix, space_after) };
         }
         _ => {
-            let plain = folded.as_deref().unwrap_or(row.prefix);
+            let plain = folded.unwrap_or(row.prefix);
 
             // SAFETY: as above.
-            unsafe { push_words(dc, &mut atoms, plain, false) };
+            unsafe { push_words(dc, atoms, plain, false) };
         }
     }
-
-    // SAFETY: see the caller — the clip is narrowed and every handle is alive.
-    unsafe { draw_atoms(dc, rect, &atoms, space, &style, chip, body_metrics) };
-
-    // SAFETY: `previous_face` is what `select_face` answered for this same DC.
-    unsafe { restore_face(dc, previous_face) };
 }
 
 /// Appends the words of `text` to `atoms`, each measured in the face now in `dc`.
@@ -3502,12 +3547,65 @@ unsafe fn draw_atoms(
 ) {
     let limit = rect.right - rect.left;
 
-    let mut x = 0;
-    let mut line = 0;
-
     // SAFETY: `dc` is a handle passed by value; the call writes an attribute of the DC.
     unsafe { SetTextColor(dc, style.ink) };
 
+    // The wrap, once, by the one function the measurement calls too — task T-42-2.
+    let mut placements = Vec::new();
+    let _ = wrap_atoms(atoms, space, limit, &mut placements);
+
+    for (start, end, line, mut x) in placements {
+        let top = rect.top + line * style.pitch;
+
+        for placed in &atoms[start..end] {
+            match placed.atom {
+                Atom::Word(word) => {
+                    // SAFETY: `dc` carries the body face and the ink set above; the buffer is a
+                    // live local of this frame.
+                    unsafe { draw_run(dc, rect.left + x, top, word) };
+                }
+                Atom::Chip(key) => {
+                    if let Some(chip) = chip {
+                        // SAFETY: see the caller — every handle is alive and the DC is clipped.
+                        unsafe { draw_chip(dc, rect.left + x, top, key, chip, style, body) };
+
+                        // The ink the sentence is drawn in, back after the figure.
+                        //
+                        // SAFETY: `dc` is a handle passed by value.
+                        unsafe { SetTextColor(dc, style.ink) };
+                    }
+                }
+            }
+
+            x += placed.width;
+        }
+    }
+}
+
+/// Wraps a laid-out row greedily by clusters — **the one model of the wrap**, called by the
+/// drawing above and by [`measure_chip_row`] below, and the whole of task T-42-2.
+///
+/// Fills `out` with one entry per cluster — `(first atom, one past the last, line, x of the
+/// first)` — and answers how many lines the row takes. A «cluster» is one word together with
+/// everything glued to it (the atoms whose `space_before` is false): breaking inside one would
+/// put a colon at the start of a line, or take the chip away from the punctuation after it.
+///
+/// ⚠ **Why one function and not two passes.** Two independent passes over the same rule agree
+/// until the day they do not, and that day is what finding С44 was: the five heights of the
+/// help panel were fitted by hand against one model of the wrap, the product drew by another,
+/// and the first row of the panel lost its last line. A height that comes out of the very
+/// arithmetic the pen follows cannot drift from it.
+///
+/// Pure: no DC, no handle, no window — every width was measured by the caller in the face the
+/// word will be drawn in.
+fn wrap_atoms(
+    atoms: &[Placed<'_>],
+    space: i32,
+    limit: i32,
+    out: &mut Vec<(usize, usize, i32, i32)>,
+) -> i32 {
+    let mut x = 0;
+    let mut line = 0;
     let mut index = 0;
 
     while index < atoms.len() {
@@ -3540,31 +3638,90 @@ unsafe fn draw_atoms(
             x += lead;
         }
 
-        let top = rect.top + line * style.pitch;
+        out.push((start, index, line, x));
 
         for placed in &atoms[start..index] {
-            match placed.atom {
-                Atom::Word(word) => {
-                    // SAFETY: `dc` carries the body face and the ink set above; the buffer is a
-                    // live local of this frame.
-                    unsafe { draw_run(dc, rect.left + x, top, word) };
-                }
-                Atom::Chip(key) => {
-                    if let Some(chip) = chip {
-                        // SAFETY: see the caller — every handle is alive and the DC is clipped.
-                        unsafe { draw_chip(dc, rect.left + x, top, key, chip, style, body) };
-
-                        // The ink the sentence is drawn in, back after the figure.
-                        //
-                        // SAFETY: `dc` is a handle passed by value.
-                        unsafe { SetTextColor(dc, style.ink) };
-                    }
-                }
-            }
-
             x += placed.width;
         }
     }
+
+    if atoms.is_empty() { 0 } else { line + 1 }
+}
+
+/// What one help row needs vertically: how many lines it wraps into, and how many pixels tall
+/// it is — task T-42-2, finding С44.
+///
+/// The **measuring twin** of [`paint_chip_row`], and deliberately not a second model of it:
+/// both go through [`push_row_atoms`] and [`wrap_atoms`], so the number answered here is the
+/// number the pen will draw. Nothing is drawn and no DC state is left behind.
+///
+/// `width` is the width of the rectangle the row will be drawn in. The answer is
+/// `(lines − 1) × pitch + one line of the body face`, which is exactly how far down the last
+/// line's character cell reaches in [`draw_atoms`]; `None` is a DC that would not answer its
+/// metrics (NFR-13), and a caller that gets it leaves the template's own height standing.
+///
+/// # Safety
+///
+/// `dc` is live; `metrics.body` and `metrics.chip_face` are faces alive for the length of the
+/// call. Unlike the painting, the DC needs no clip — nothing is written to it.
+pub unsafe fn measure_chip_row(
+    dc: HDC,
+    width: i32,
+    row: ChipRow<'_>,
+    metrics: ChipRowMetrics,
+) -> Option<(i32, i32)> {
+    let thickness = scaled(BORDER_THICKNESS, metrics.dpi).max(1);
+
+    // SAFETY: see the contract; the face is put back on every path below.
+    let previous_face = unsafe { select_face(dc, metrics.body) };
+
+    // SAFETY: the face is selected above.
+    let Some(body) = (unsafe { face_metrics(dc) }) else {
+        // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+        unsafe { restore_face(dc, previous_face) };
+        return None;
+    };
+
+    // SAFETY: as above — the width of one space in the face now in the DC.
+    let space = unsafe { text_width(dc, " ") };
+
+    // The chip, measured in its own face exactly as the drawing measures it.
+    let chip = match (row.key, metrics.chip_face) {
+        (Some(key), Some((face, em))) => {
+            // SAFETY: the body face is put back immediately after the two measurements.
+            let previous = unsafe { select_face(dc, Some(face)) };
+
+            // SAFETY: the chip face is in the DC for exactly these two calls.
+            let measured = unsafe { face_metrics(dc).map(|m| (m, text_width(dc, key))) };
+
+            // SAFETY: `previous` is what `select_face` answered a moment ago.
+            unsafe { restore_face(dc, previous) };
+
+            measured.map(|(m, inside)| (face, chip_box(inside, em, m.height, thickness), m))
+        }
+        _ => None,
+    };
+
+    // A row whose chip could not be made keeps its key name all the same — the two halves are
+    // folded back into one sentence, as the drawing does (NFR-13). Declared before `atoms`,
+    // because the words borrow from it.
+    let folded = match (&chip, row.key) {
+        (None, Some(key)) => Some(format!("{}{key}{}", row.prefix, row.suffix)),
+        _ => None,
+    };
+
+    let mut atoms: Vec<Placed<'_>> = Vec::new();
+
+    // SAFETY: the body face is in the DC — every width is measured in it.
+    unsafe { push_row_atoms(dc, &mut atoms, row, folded.as_deref(), chip.as_ref()) };
+
+    let mut placements = Vec::new();
+    let lines = wrap_atoms(&atoms, space, width, &mut placements);
+
+    // SAFETY: `previous_face` is what `select_face` answered for this same DC.
+    unsafe { restore_face(dc, previous_face) };
+
+    Some((lines, (lines - 1).max(0) * metrics.pitch + body.height))
 }
 
 /// Draws one chip: the figure of [`paint_rounded`], then the key name inside it.

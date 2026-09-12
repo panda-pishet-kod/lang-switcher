@@ -882,6 +882,170 @@ fn a_help_row_splits_at_the_placeholder_and_nowhere_else() {
     );
 }
 
+/// **Task T-42-2, finding С44** — the measuring twin and the pen put a help row on the same
+/// number of lines, and they agree **in pixels**.
+///
+/// `theme::measure_chip_row` is what the about window lays its help panel out by
+/// (`settings::fit_about_help`); `theme::paint_chip_row` is what draws it. They share
+/// `push_row_atoms` and `wrap_atoms` by construction — but a construction is a promise, and
+/// this test is the measurement: the row is **drawn** on a sheet, the runs of ink are counted
+/// off the pixels, and the count is held against the number the twin answered.
+///
+/// ⚠ **Not against a literal** — the приём of Э33. What is compared is two ways of asking the
+/// same question, so the test keeps holding when the wrap itself is deliberately changed; a
+/// literal would have to be edited then, and an edited literal proves nothing.
+///
+/// Rows with a chip and rows without are both taken: the chip is the atom that cannot be
+/// broken, and it is exactly where the second model of the wrap went wrong before this task —
+/// the fitting stand of the контур called a two-line Polish row three lines long.
+#[test]
+fn the_measuring_twin_and_the_pen_put_a_help_row_on_the_same_number_of_lines() {
+    use lang_switcher::theme::{
+        ChipColors, ChipRowMetrics, ChipRowStyle, chip_row, measure_chip_row, paint_chip_row,
+    };
+    use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, LOGFONTW};
+
+    let sheet = Sheet::new(320, false);
+
+    let mut logical = LOGFONTW {
+        lfHeight: -14,
+        lfWeight: 400,
+        ..Default::default()
+    };
+
+    for (slot, unit) in logical.lfFaceName.iter_mut().zip("Segoe UI".encode_utf16()) {
+        *slot = unit;
+    }
+
+    let mut chip_logical = logical;
+    chip_logical.lfHeight = -12;
+
+    // SAFETY: both structures are live locals of this frame; the handles are freed at the end.
+    let (body, chip) = unsafe {
+        (
+            CreateFontIndirectW(&raw const logical),
+            CreateFontIndirectW(&raw const chip_logical),
+        )
+    };
+
+    let pitch = 20;
+
+    let metrics = ChipRowMetrics {
+        body: Some(body),
+        chip_face: Some((chip, chip_logical.lfHeight)),
+        pitch,
+        dpi: 96,
+    };
+
+    // SAFETY: plain colours in, handles out, both freed at the end.
+    let (ground, fill) = unsafe {
+        (
+            CreateSolidBrush(COLORREF(0x00FF_FFFF)),
+            CreateSolidBrush(COLORREF(0x00FF_FFFF)),
+        )
+    };
+
+    // Five sentences that matter: one that wraps far, one that wraps once, one with no chip at
+    // all, one whose chip lands mid-row, and one short enough for a single line.
+    let sentences = [
+        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится.",
+        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane.",
+        "Пауза, настройки и выход — в значке в трее.",
+        "Повторное нажатие {0} возвращает всё назад.",
+        "Готово.",
+    ];
+
+    for width in [140, 200, 260] {
+        for sentence in sentences {
+            for key in ["PrintScreen", "Pause", ""] {
+                let row = chip_row(sentence, key);
+
+                // SAFETY: the sheet's DC is live and both faces outlive the call.
+                let (lines, needed) = unsafe { measure_chip_row(sheet.dc, width, row, metrics) }
+                    .expect("the memory DC must answer the metrics of its own face");
+
+                let area = RECT {
+                    left: 4,
+                    top: 4,
+                    right: 4 + width,
+                    bottom: sheet.side,
+                };
+
+                // SAFETY: own DC, own rectangle, live brushes and faces — the drawing half of
+                // the pair, asked the same question.
+                unsafe {
+                    FillRect(sheet.dc, &area, ground);
+
+                    paint_chip_row(
+                        sheet.dc,
+                        area,
+                        row,
+                        ChipRowStyle {
+                            ground,
+                            ink: COLORREF(0),
+                            body: Some(body),
+                            chip_face: Some((chip, chip_logical.lfHeight)),
+                            chip: ChipColors {
+                                outline: COLORREF(0),
+                                fill,
+                                ink: COLORREF(0),
+                            },
+                            pitch,
+                            dpi: 96,
+                        },
+                    );
+                }
+
+                // Where the ink is. ⚠ Runs of inked rows are **not** the lines: a chip is a
+                // figure taller than the text it holds, so it joins two lines into one run —
+                // measured, and it is why this test counts **bands** instead. A band is the
+                // `pitch` pixels a line of `draw_atoms` is placed on.
+                let pixels = sheet.pixels();
+                let inked = |y: i32| {
+                    y >= 0
+                        && y < sheet.side
+                        && (area.left..area.right).any(|x| {
+                            pixels[(y * sheet.side + x) as usize] & 0x00FF_FFFF != 0x00FF_FFFF
+                        })
+                };
+
+                // Every band the twin promised carries ink…
+                for band in 0..lines {
+                    let from = area.top + band * pitch;
+
+                    assert!(
+                        (from..from + pitch).any(inked),
+                        "width {width}, key «{key}»: the twin says {lines} lines, and line \
+                         {band} — pixels {from}..{} — was never drawn. The two models of the \
+                         wrap have parted. Sentence: «{sentence}»",
+                        from + pitch
+                    );
+                }
+
+                // …and nothing is drawn past the height it answered. This is the whole of what
+                // `fit_about_help` relies on: a row laid out by `needed` is not clipped.
+                let below = (area.top + needed..sheet.side).find(|y| inked(*y));
+
+                assert!(
+                    below.is_none(),
+                    "width {width}, key «{key}»: the twin asked for {needed} px and the pen \
+                     drew at {} px — a row laid out by that number would be clipped. Sentence: \
+                     «{sentence}»",
+                    below.unwrap_or(0) - area.top
+                );
+            }
+        }
+    }
+
+    // SAFETY: every handle was made here, handed to nobody, and is freed exactly once.
+    unsafe {
+        let _ = DeleteObject(body.into());
+        let _ = DeleteObject(chip.into());
+        let _ = DeleteObject(ground.into());
+        let _ = DeleteObject(fill.into());
+    }
+}
+
 // =========================================================================================
 // The straight tick in a mirrored window — вопрос 97 п. 1, task Т-30-3
 // =========================================================================================

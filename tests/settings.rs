@@ -4873,6 +4873,144 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-42-2, finding С44, решение 124.4** — every sentence of the «Как пользоваться»
+/// panel fits the slot the template gives it, in all fourteen locales, at 100 %.
+///
+/// The form is the one of the test above (T-39-11): the template's own font, the manager's own
+/// arithmetic for the dialog unit, and the measurement made by the very code that draws. What
+/// differs is the instrument — a help row is not a button caption: it wraps, and it carries a
+/// **chip** where `{0}` stands, so its height comes from [`theme::measure_chip_row`], the
+/// measuring twin of `theme::paint_chip_row`.
+///
+/// ⚠ **The red before.** On the tree this task started from the first row is 29 units tall and
+/// `ru`, `uk` and `es` need four lines in it — 76 px against 62 — so the last line of «Набрали
+/// слово не в той раскладке…» was cut off **at 100 %**, before any scaling. The audit's finding
+/// said «at 125 % and above»; the fitting stand of the контур, once its two lies were mended,
+/// said 100 %, and this test is that measurement without a window.
+///
+/// The runtime lays the panel out under the measured heights all the same
+/// (`settings::fit_about_help`), so a locale that needs more than the template allows is not
+/// clipped either way. This test holds the **template**: what the window opens as, before a
+/// single control is moved, so that the starting layout does not jump.
+#[test]
+fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
+    let _guard = with_product_strings();
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    let font = template
+        .font
+        .clone()
+        .expect("the about template declares DS_SETFONT");
+
+    let sheet = Sheet::new(64);
+    let base = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
+
+    // The body face and the chip face the window builds out of the manager's — the very two
+    // `DialogFonts` hands the drawing.
+    let body = Face::new(settings::about_body_logfont(base));
+    let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
+    let chip = Face::new(chip_logical);
+
+    let metrics = theme::ChipRowMetrics {
+        body: Some(body.0),
+        chip_face: Some((chip.0, chip_logical.lfHeight)),
+        pitch: settings::about_body_line_pitch(settings::about_body_logfont(base).lfHeight.abs()),
+        dpi: 96,
+    };
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, _, _, cx, cy)| (*cx, *cy))
+            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
+    };
+
+    // The base unit of this template, by the manager's own rule — see the test above.
+    let letters = extent_of(
+        &sheet,
+        &Face::new(base),
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let unit_x = (letters / 26 + 1) / 2;
+    let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
+
+    println!("about template: base unit {unit_x}/4 by x, {unit_y}/8 by y");
+
+    // The name the chip is drawn with: the **widest** one the program can put there, so the
+    // row is measured at its worst (finding Н85 — the fitting stand used to measure one).
+    let widest_key = (1_u16..=254)
+        .filter_map(settings::key_name)
+        .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
+        .expect("the program must name at least one key");
+
+    println!("the widest key name: «{widest_key}»");
+
+    let mut tightest = (i32::MAX, String::new());
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for (row, string) in [
+            (1131_u32, settings::IDS_ABOUT_HELP_1),
+            (1132, settings::IDS_ABOUT_HELP_2),
+            (1133, settings::IDS_ABOUT_HELP_3),
+            (1134, settings::IDS_ABOUT_HELP_4),
+            (1135, settings::IDS_ABOUT_HELP_5),
+        ] {
+            let sentence = settings::text(string);
+
+            assert!(
+                !sentence.trim().is_empty(),
+                "{language:?}: string {string} did not load — the instrument would measure nothing"
+            );
+
+            let (units_w, units_h) = bounds(row);
+            let width = (units_w * unit_x + 2) / 4;
+            let height = (units_h * unit_y + 4) / 8;
+
+            for key in [widest_key.as_str(), "Pause"] {
+                // SAFETY: the sheet's DC is live and both faces outlive the call; nothing is
+                // drawn — this is the measuring half of the pair.
+                let (lines, needed) = unsafe {
+                    theme::measure_chip_row(
+                        sheet.dc,
+                        width,
+                        theme::chip_row(&sentence, key),
+                        metrics,
+                    )
+                }
+                .expect("the memory DC must answer the metrics of its own face");
+
+                if height - needed < tightest.0 {
+                    tightest = (
+                        height - needed,
+                        format!("{language:?} row {row} key «{key}»: {lines} lines"),
+                    );
+                }
+
+                assert!(
+                    needed <= height,
+                    "{language:?}: row {row} wraps into {lines} lines and wants {needed} px, \
+                     the template gives it {units_h} units = {height} px — the last line would \
+                     be cut off by the clip of paint_chip_row. Sentence: «{sentence}»"
+                );
+            }
+        }
+    }
+
+    println!(
+        "the tightest row: {} px to spare — {}",
+        tightest.0, tightest.1
+    );
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал» (1064) stands in the slot
 /// the user chose: beside «Написать автору», on its row, inside «Диагностика», and the window
 /// has not grown for it.
@@ -7802,10 +7940,18 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // instead of the 1,33 `DrawTextW` gives — every row of text takes more room, and the room
     // is taken downwards. The number moves by a decision of the user and never by a hand that
     // found it inconvenient (правило [[canon]]); the width is untouched, as both decisions say.
+    //
+    // ⚠⚠ **256 → 263 by решение 124.1** (task T-42-2, finding С44). The first row of the help
+    // panel was 29 units tall and `ru`, `uk` and `es` wrap it into four lines — 76 px against
+    // 62 — so the last line was cut off **at 100 %**. The row was given the height the
+    // measurement asks for (36 units) and the window grew by the same seven, by the rule this
+    // comment states: the number moved by a decision of the user, who named влезание текста as
+    // the one thing allowed to move a frozen look. The width is still the 191 it has always
+    // been.
     assert_eq!(
         template.size,
-        (191, 256),
-        "the about window of решения 82.5 и 87 is 191 × 256 dialog units"
+        (191, 263),
+        "the about window of решения 82.5, 87 и 124.1 is 191 × 263 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its

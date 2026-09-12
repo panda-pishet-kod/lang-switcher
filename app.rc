@@ -869,7 +869,10 @@ END
 // numbers below are **read off the raised window in both locales**, exactly as task Т-23-4 read
 // its own — `scratchpad-Э26\Т-26-1-*.png` — because `MeasureString` overestimates the wrap and
 // has already cost this template a row of air once (see the note at the help panel).
-IDD_ABOUT DIALOGEX 0, 0, 191, 256
+// ⚠⚠ **256 → 263 задачей T-42-2** (находка С44, решение 124.4): панель справки выросла на семь
+// единиц под ЗАМЕРЕННУЮ высоту своей первой строки, и окно выросло ровно на них. Ширина 191 не
+// тронута — решения 82.5 и 87 говорят «окно растёт только вниз», и это по-прежнему так.
+IDD_ABOUT DIALOGEX 0, 0, 191, 263
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -922,25 +925,44 @@ BEGIN
     // fourth row, one line in both locales until this task, is **two** now — the same sentence
     // in a wider face — and that is measured, not predicted. The air between rows stays the
     // mock-up's `margin-top: 7px`, which is 4 units here.
-    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 142
+    // ⚠⚠ **Высоты пяти строк и всё, что под ними, переставлены задачей T-42-2 (находка С44,
+    // решение 124.4).** Прежние 29 / 19 / 19 / 19 / 19 были подогнаны рукой под одну локаль на
+    // одном масштабе, и первая строка **обрезалась уже при 100 %**: `ru`, `uk` и `es` просят у
+    // неё четыре строки — 76 px против отведённых 62. Числа ниже — не подгонка, а ЗАМЕР:
+    // `theme::measure_chip_row` на лице этого шаблона, все четырнадцать локалей, самое широкое
+    // имя клавиши («PrintScreen»); держит их тест
+    // `every_help_sentence_fits_its_template_slot_in_all_fourteen_languages`.
+    //
+    // Первая строка 29 → **36** единиц (77 px при 76 нужных на `ru`), остальные четыре просят
+    // 38 px при отведённых 40 и потому не тронуты; всё, что стоит ниже первой строки, съезжает
+    // на те же 7 единиц, и воздух между строками остаётся прежними 4 единицами. Окно выросло
+    // ровно на них — 256 → 263, — а рост ради влезания разрешён владельцем (решение 124.1);
+    // ширина 191 не тронута, как и говорят решения 82.5 и 87 («окно растёт только вниз»).
+    //
+    // ⚠ Локаль, которой и этого мало — а при 125…200 % такие есть, — раздвигается **в живом
+    // окне**: `settings::fit_about_help` мерит те же строки тем же близнецом и опускает панель,
+    // обе кнопки и нижнюю границу. Числа здесь — стартовая раскладка, чтобы она не прыгала.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 149
     LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 97, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_1, 30, 97, 142, 29, SS_OWNERDRAW
-    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 130, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_2, 30, 130, 142, 19, SS_OWNERDRAW
-    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 153, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_3, 30, 153, 142, 19, SS_OWNERDRAW
-    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 176, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_4, 30, 176, 142, 19, SS_OWNERDRAW
-    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 199, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_5, 30, 199, 142, 19, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_1, 30, 97, 142, 36, SS_OWNERDRAW
+    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 137, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_2, 30, 137, 142, 19, SS_OWNERDRAW
+    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 160, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_3, 30, 160, 142, 19, SS_OWNERDRAW
+    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 183, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_4, 30, 183, 142, 19, SS_OWNERDRAW
+    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 206, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_5, 30, 206, 142, 19, SS_OWNERDRAW
 
     // FR-103, task Т-32-4: the way into «От автора». It stands to the left of «ОК» and the
     // window does not grow — решение 101 п. 7 — which is why it takes the air that was already
     // there rather than a row of its own. 86 units is 150 px at 96 DPI: the longest of the
     // fourteen captions measured by the fitting stand with room to spare, and it stops 46 units
     // short of «ОК», so the two never meet however wide a locale writes it.
-    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 235, 86, 14, BS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 144, 235, 39, 14, BS_OWNERDRAW
+    // ⚠ 235 → **242**: обе кнопки опущены на те же семь единиц, на какие выросла панель справки
+    // (T-42-2). Поле под ними осталось прежним — 263 − 256 = 7, как было 256 − 249.
+    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 242, 86, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 144, 242, 39, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================

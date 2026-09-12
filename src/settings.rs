@@ -122,7 +122,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
     LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW,
     MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL,
-    SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetTimer,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetTimer,
     SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP,
     WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
     WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
@@ -151,16 +151,16 @@ use crate::widgets;
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
     self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
-    CORNER_RADIUS, CheckMark, ChipColors, ChipRowStyle, ComboBorderRole, ComboChevronRole,
-    ComboFillRole, CornerColors, GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole,
-    GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting, caption_advance,
-    check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles, combo_fill_brush,
-    combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
+    CORNER_RADIUS, CheckMark, ChipColors, ChipRowMetrics, ChipRowStyle, ComboBorderRole,
+    ComboChevronRole, ComboFillRole, CornerColors, GlyphFillRole, GlyphFrameRole, GlyphKind,
+    GlyphMarkRole, GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting,
+    caption_advance, check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles,
+    combo_fill_brush, combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
     draw_combo_chevron, glyph_color_roles, label_ink, list_frame_air, list_frame_box,
-    list_item_color_roles, paint_caption_underline, paint_chip_row, paint_ellipse, paint_label,
-    paint_label_at_pitch, paint_rounded, paint_rounded_corners, paint_selection_stripe,
-    resolve_button_colors, restore_face, scaled, scaled_tenths_offset, select_face,
-    smoothed_logfont, title_bar_is_dark,
+    list_item_color_roles, measure_chip_row, paint_caption_underline, paint_chip_row,
+    paint_ellipse, paint_label, paint_label_at_pitch, paint_rounded, paint_rounded_corners,
+    paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
+    select_face, smoothed_logfont, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -14753,6 +14753,15 @@ unsafe extern "system" fn about_proc(
                 })
             };
 
+            // Task T-42-2, finding С44: the help panel is laid under the **measured** height of
+            // its five sentences. **After** `DialogFonts::new` — the measurement is made in the
+            // faces the drawing will use — and before the window is shown, so the growth lands
+            // ahead of the first paint.
+            //
+            // SAFETY: as above — the state pointer was stored at the top of this arm and the
+            // faces have just been built.
+            unsafe { fit_about_help(hwnd) };
+
             // FR-92а, task T-12-1: the icon of the caption — the settings dialog's path, and
             // its discipline: the handles leave the borrow before the messages are posted.
             //
@@ -14988,6 +14997,241 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
     }
 
     set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
+}
+
+/// Lays the «Как пользоваться» panel under the **measured** height of its five sentences —
+/// task T-42-2, finding С44, решение 124.4 (вариант 1 «мерить, а не угадывать»).
+///
+/// # What was wrong
+///
+/// The five heights in `app.rc` — 29 / 19 / 19 / 19 / 19 units — were fitted by hand against
+/// one locale at one scale. A sentence that wraps into one more line than those numbers allow
+/// is **cut off**: an owner-drawn static answers for its own rectangle and `paint_chip_row`
+/// narrows the clip to it, so the last line simply is not there. Measured by the fitting stand
+/// of the контур on the dialog's own arithmetic: 28 clips over fourteen locales and five
+/// scales, all of them in rows 1 and 3, four of them at **100 %** — `ru`, `uk` and `es` lose
+/// the fourth line of «Набрали слово не в той раскладке…».
+///
+/// # What is done instead
+///
+/// Every row is measured here by [`theme::measure_chip_row`] — the measuring twin of the very
+/// function that draws it, sharing its atoms and its wrap — and the rows are then laid out top
+/// to bottom with the air the template itself declares. The panel grows under the sum, and the
+/// two buttons of the bottom row and the window's own edge come down with it.
+///
+/// ⚠ **Only downwards.** A row shorter than its template height keeps the template height, so
+/// a locale that fits today looks exactly as it did: the внешний вид is frozen (решение 124.1)
+/// and what is allowed is the growth влезание asks for, nothing else. A window that needs
+/// nothing does not move a pixel — the function then ends at the `grow <= 0` gate.
+///
+/// NFR-13: every refusal on the way — no faces, no DC, an unreadable rectangle — leaves the
+/// template's own layout standing, which is the layout this window had before this task.
+///
+/// # Safety
+///
+/// Called from the `WM_INITDIALOG` arm of [`about_proc`] only, after the state pointer has been
+/// stored and the faces built.
+unsafe fn fit_about_help(hwnd: HWND) {
+    // The faces and the key name leave the borrow before a single message is sent — the
+    // discipline of this file's every `WM_INITDIALOG` step.
+    //
+    // SAFETY: see the contract — the state pointer was stored at the top of the arm.
+    let Some(Some((faces, key))) = (unsafe {
+        with_about_state(hwnd, |state| {
+            let fonts = state.fonts.as_ref()?;
+
+            Some((
+                (fonts.body(), fonts.chip(), fonts.body_pitch()),
+                state.hotkey.clone(),
+            ))
+        })
+    }) else {
+        return;
+    };
+
+    let (body, chip, pitch) = faces;
+
+    // SAFETY: `hwnd` is the live dialog; the DC is released on every path below.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    if dc.is_invalid() {
+        return;
+    }
+
+    let metrics = ChipRowMetrics {
+        body: Some(body),
+        chip_face: Some(chip),
+        pitch,
+        dpi: dc_dpi(dc),
+    };
+
+    // The rectangles the template gave the five rows and their numerals, in the client
+    // coordinates of the dialog — through the one conversion of this file that survives a
+    // mirrored window ([`screen_rect_in_client`]).
+    let mut rows = Vec::with_capacity(ABOUT_HELP_ROWS.len());
+
+    for (numeral, row, string) in ABOUT_HELP_ROWS {
+        let (Some(text_rect), Some(numeral_rect)) = (
+            child_rect_in_client(hwnd, row),
+            child_rect_in_client(hwnd, numeral),
+        ) else {
+            // SAFETY: the DC was taken from this window a few lines above.
+            unsafe { ReleaseDC(Some(hwnd), dc) };
+            return;
+        };
+
+        let sentence = text(string);
+        let width = text_rect.right - text_rect.left;
+        let height = text_rect.bottom - text_rect.top;
+
+        // SAFETY: `dc` is live and both faces belong to the window's state, which outlives this
+        // call; nothing is drawn and no DC state is left behind.
+        let measured =
+            unsafe { measure_chip_row(dc, width, theme::chip_row(&sentence, &key), metrics) };
+
+        let Some((_, needed)) = measured else {
+            // SAFETY: as above.
+            unsafe { ReleaseDC(Some(hwnd), dc) };
+            return;
+        };
+
+        rows.push((row, numeral, text_rect, numeral_rect, needed.max(height)));
+    }
+
+    // SAFETY: the DC was taken from this window above and is not needed past this point.
+    unsafe { ReleaseDC(Some(hwnd), dc) };
+
+    // The air between two rows, read off the template rather than written down again: the four
+    // units live in `app.rc`, and a literal here would be a second copy of them.
+    let air = rows
+        .windows(2)
+        .map(|pair| pair[1].2.top - pair[0].2.bottom)
+        .min()
+        .unwrap_or(0);
+
+    // Where each row goes now. The first one does not move — the panel's own top padding is
+    // part of the look решение 87 accepted by eye.
+    let mut tops = Vec::with_capacity(rows.len());
+    let mut top = rows.first().map_or(0, |first| first.2.top);
+
+    for (.., needed) in &rows {
+        tops.push(top);
+        top += needed + air;
+    }
+
+    let grow = rows.last().map_or(0, |(.., rect, _, needed)| {
+        tops[rows.len() - 1] + needed - rect.bottom
+    });
+
+    if grow <= 0 {
+        return;
+    }
+
+    // The rows and their numerals, each to its new top; the sentence also takes its measured
+    // height, so the clip of `paint_chip_row` is the height the text actually needs.
+    for (index, (row, numeral, rect, numeral_rect, needed)) in rows.iter().enumerate() {
+        move_child(hwnd, *row, tops[index], Some(*needed), rect);
+        move_child(
+            hwnd,
+            *numeral,
+            tops[index] + (numeral_rect.top - rect.top),
+            None,
+            numeral_rect,
+        );
+    }
+
+    // The panel under them, then the two buttons of the bottom row, then the window itself —
+    // FR-103 put «От автора…» beside «ОК», and **both** come down (task Т-32-4).
+    if let Some(panel) = child_rect_in_client(hwnd, IDC_ABOUT_HELP) {
+        move_child(
+            hwnd,
+            IDC_ABOUT_HELP,
+            panel.top,
+            Some(panel.bottom - panel.top + grow),
+            &panel,
+        );
+    }
+
+    for button in [IDC_ABOUT_AUTHOR, OK_COMMAND] {
+        if let Some(rect) = child_rect_in_client(hwnd, button) {
+            move_child(hwnd, button, rect.top + grow, None, &rect);
+        }
+    }
+
+    let mut frame = RECT::default();
+
+    // SAFETY: `hwnd` is the live dialog and the buffer is a live local of this frame.
+    if unsafe { GetWindowRect(hwnd, &raw mut frame) }.is_err() {
+        return;
+    }
+
+    // SAFETY: `hwnd` is the live dialog being initialised; the call is given plain numbers and
+    // keeps no pointer. The window is not on the screen yet — it is shown when this procedure
+    // returns — so the growth lands before the first paint, exactly as the move of решение
+    // 99.1(б) does in the settings dialog.
+    if let Err(error) = unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            frame.right - frame.left,
+            frame.bottom - frame.top + grow,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
+        )
+    } {
+        // NFR-13: the panel is taller and the window is not, so the last row is cut by the
+        // window's edge instead of by the panel's. Worse than the growth, better than a clipped
+        // sentence, and the journal is told.
+        crate::app::report_non_critical("SetWindowPos", &error);
+    }
+}
+
+/// One child's rectangle in the client coordinates of its dialog, or `None` on any refusal.
+///
+/// The pair of [`screen_rect_in_client`] for a **named** control: [`child_rects_in_client`]
+/// walks every child, and task T-42-2 needs twelve of them by identifier.
+fn child_rect_in_client(hwnd: HWND, control: i32) -> Option<RECT> {
+    // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
+    let child = unsafe { GetDlgItem(Some(hwnd), control) }.ok()?;
+
+    let mut rect = RECT::default();
+
+    // SAFETY: the control is live and the buffer is a live local of this frame.
+    unsafe { GetWindowRect(child, &raw mut rect) }.ok()?;
+
+    screen_rect_in_client(hwnd, &rect)
+}
+
+/// Moves one child to `top`, keeping its left edge and its width — task T-42-2.
+///
+/// ⚠ **`left` comes out of [`screen_rect_in_client`], which has already put the corners back in
+/// order.** In a mirrored window `ScreenToClient` swaps the two x's, so the smaller of them is
+/// the left edge in the window's **own** coordinates — the very number `SetWindowPos` wants
+/// back. Handing it the unswapped one would move the control by the width of the client area,
+/// which is the shape defect Т-30-2 already paid for once.
+fn move_child(hwnd: HWND, control: i32, top: i32, height: Option<i32>, rect: &RECT) {
+    // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
+    let Ok(child) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        return;
+    };
+
+    // SAFETY: the control is live and the call is given plain numbers; no pointer is kept.
+    if let Err(error) = unsafe {
+        SetWindowPos(
+            child,
+            None,
+            rect.left,
+            top,
+            rect.right - rect.left,
+            height.unwrap_or(rect.bottom - rect.top),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    } {
+        // NFR-13: this one control stays where the template put it — the row above it has
+        // already moved, so the panel reads worse and still reads.
+        crate::app::report_non_critical("SetWindowPos", &error);
+    }
 }
 
 /// The version line of the about window: [`IDS_ABOUT_VERSION`] with the version number
