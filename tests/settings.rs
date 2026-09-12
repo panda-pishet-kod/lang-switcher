@@ -5550,6 +5550,170 @@ fn the_language_row_fits_its_labels_and_its_longest_language_name() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-42-12, finding 124б.1, решение 124б.1** — a window taller than its monitor is
+/// shortened to it and scrolls; a window that fits is not touched at all.
+///
+/// # The defect, in the numbers the owner met
+///
+/// `IDD_SETTINGS` is 375 dialog units tall, and a dialog unit follows the display scale — 17 px
+/// at 100 %, 23 px at 125 %. The window is therefore ~826 px on one scale and **~1113 px** on
+/// the other, against a work area of **1032 px** on a 1080p screen with a task bar. At 125 %
+/// the bottom row of buttons stood off the edge of the screen and could not be clicked at all:
+/// «нижняя часть окна приложения не вписывается в экран и у меня нет возможности нажать
+/// кнопки».
+///
+/// ⚠ **Shrinking the layout is not a cure, and that is why the scroll was chosen** (решение
+/// 124б.1): 28 units would have to go for 125 %, but at 150 % the window wants ~1330 px and at
+/// 200 % ~1770 px — no layout fits those on a 1080p screen.
+///
+/// The test is of the arithmetic the window lays itself out by, so it runs at every scale on
+/// any machine: `shortened_client_height` decides whether to shorten and by how much, and
+/// `scrolled_to` answers every command a scroll bar can send.
+#[test]
+fn a_window_taller_than_its_monitor_is_shortened_and_scrolls() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SB_BOTTOM, SB_ENDSCROLL, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION,
+        SB_THUMBTRACK, SB_TOP,
+    };
+
+    // 1. The decision to shorten at all. The frame — caption plus borders — is what the window
+    //    costs besides its client area: 29 + 6 at 125 %, measured through GetSystemMetricsForDpi.
+    let frame = 35;
+    let work_area = 1032;
+
+    // 100 %: 375 units at 17 px per 8 units is 797 px of client, 832 with the frame — it fits,
+    // and NOTHING is done. The look of решение 124.1 is untouched at the scale it was accepted
+    // at, and that is the whole of the promise.
+    assert_eq!(
+        settings::shortened_client_height(797, frame, work_area),
+        None,
+        "a window that fits its monitor is not shortened, and gets no scroll bar"
+    );
+
+    // 125 %: 375 units at 23 px is 1078 px of client, 1113 with the frame — 81 px too tall.
+    assert_eq!(
+        settings::shortened_client_height(1078, frame, work_area),
+        Some(work_area - frame),
+        "a window taller than the work area is cut to exactly what fits"
+    );
+
+    // 150 %, 175 %, 200 %: taller still, and each is cut to the same fitting height — the
+    // contents differ, the window does not.
+    for wanted in [1313, 1453, 1734] {
+        assert_eq!(
+            settings::shortened_client_height(wanted, frame, work_area),
+            Some(work_area - frame),
+            "every scale above the fitting one is cut to the work area"
+        );
+    }
+
+    // A monitor so short that even the frame does not fit leaves one pixel of client rather
+    // than a negative height (NFR-13).
+    assert_eq!(
+        settings::shortened_client_height(1078, 200, 100),
+        Some(1),
+        "a client area is never asked to be zero or negative"
+    );
+
+    // Exactly the work area is not «too tall»: the boundary belongs to the window.
+    assert_eq!(
+        settings::shortened_client_height(work_area - frame, frame, work_area),
+        None,
+        "a window exactly as tall as the work area fits it"
+    );
+
+    // 2. The scroll itself. The view of the 125 % case: 1078 px of contents in 997 px of window.
+    let view = settings::ScrollView {
+        offset: 0,
+        content: 1078,
+        page: work_area - frame,
+    };
+
+    println!(
+        "125 %: содержимое {} px, окно {} px, прокрутка до {} px",
+        view.content,
+        view.page,
+        view.most()
+    );
+
+    assert_eq!(
+        view.most(),
+        1078 - 997,
+        "the scroll ends where the contents do"
+    );
+
+    // A line down and a line up come back to where they started — the arrows of the bar.
+    let down = settings::scrolled_to(view, SB_LINEDOWN.0, 0);
+    assert!(down > 0, "a line down moves the contents");
+    assert_eq!(
+        settings::scrolled_to(
+            settings::ScrollView {
+                offset: down,
+                ..view
+            },
+            SB_LINEUP.0,
+            0
+        ),
+        0,
+        "a line up undoes a line down"
+    );
+
+    // The page commands move by the height of the window, and neither runs past an end.
+    assert_eq!(
+        settings::scrolled_to(view, SB_PAGEUP.0, 0),
+        0,
+        "a page up at the top stays at the top"
+    );
+    assert_eq!(
+        settings::scrolled_to(view, SB_PAGEDOWN.0, 0),
+        view.most(),
+        "a page down from the top lands at the bottom — the contents are less than two pages"
+    );
+
+    // The thumb goes where it is dragged, and not past the ends.
+    assert_eq!(settings::scrolled_to(view, SB_THUMBTRACK.0, 40), 40);
+    assert_eq!(settings::scrolled_to(view, SB_THUMBTRACK.0, -5), 0);
+    assert_eq!(
+        settings::scrolled_to(view, SB_THUMBPOSITION.0, 9999),
+        view.most(),
+        "a thumb dragged past the end stops at the end"
+    );
+
+    // The ends themselves, and the command that means «the drag is over»: it moves nothing.
+    assert_eq!(settings::scrolled_to(view, SB_BOTTOM.0, 0), view.most());
+    assert_eq!(
+        settings::scrolled_to(settings::ScrollView { offset: 40, ..view }, SB_TOP.0, 0),
+        0
+    );
+    assert_eq!(
+        settings::scrolled_to(
+            settings::ScrollView { offset: 40, ..view },
+            SB_ENDSCROLL.0,
+            0
+        ),
+        40,
+        "SB_ENDSCROLL leaves the scroll exactly where the drag left it"
+    );
+
+    // 3. A window that fits has nothing to scroll: every command answers zero, so a stray
+    //    `WM_VSCROLL` cannot move a window that was never shortened.
+    let whole = settings::ScrollView {
+        offset: 0,
+        content: 797,
+        page: 797,
+    };
+
+    assert_eq!(whole.most(), 0, "contents that fit have nowhere to scroll");
+
+    for command in [SB_LINEDOWN.0, SB_PAGEDOWN.0, SB_BOTTOM.0, SB_THUMBTRACK.0] {
+        assert_eq!(
+            settings::scrolled_to(whole, command, 500),
+            0,
+            "a window that fits stays at the top whatever the scroll bar says"
+        );
+    }
+}
+
 /// **Task T-42-4, finding Н79, решение 124.5** — «в сеансе нет раскладки из файла» is shown
 /// whole: two lines in every locale, and the list above it still shows three layouts.
 ///

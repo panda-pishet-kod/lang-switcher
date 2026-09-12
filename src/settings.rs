@@ -76,10 +76,11 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DT_CALCRECT,
     DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect,
-    DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetObjectW, GetTextExtentPoint32W,
-    GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGFONTW, PAINTSTRUCT,
-    ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor,
-    TRANSPARENT, TextOutW,
+    DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW, GetObjectW,
+    GetTextExtentPoint32W, GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
+    LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ReleaseDC,
+    SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
+    TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -98,9 +99,9 @@ use windows::Win32::UI::Controls::{
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
-    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
-    NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT,
-    ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, WM_MOUSELEAVE,
+    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NM_SETFOCUS, NMCUSTOMDRAW_DRAW_STATE_FLAGS,
+    NMHDR, NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT,
+    ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, SetScrollInfo, WM_MOUSELEAVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
@@ -113,24 +114,28 @@ use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL,
-    CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW, DLGC_STATIC, DLGC_WANTALLKEYS,
-    DLGPROC, DLGTEMPLATE, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon,
-    DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
-    GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
-    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
-    ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
-    LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
-    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY,
-    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDPROC,
-    WS_EX_LAYOUTRTL,
+    BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CB_RESETCONTENT,
+    CB_SETCURSEL, CBN_SETFOCUS, CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW,
+    DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC, DLGTEMPLATE, DM_SETDEFID, DWLP_MSGRESULT,
+    DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN,
+    EC_RIGHTMARGIN, EN_SETFOCUS, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
+    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
+    KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+    LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING,
+    MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN,
+    SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS,
+    SIF_RANGE, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    ScrollWindowEx, SendDlgItemMessageW, SetDlgItemTextW, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
+    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
+    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -5013,6 +5018,9 @@ pub fn show_dialog(
             fonts: None,
             // `None` until the first `WM_ERASEBKGND`, which is where the picture is built.
             background: None,
+            // Task T-42-12: `None` until `WM_INITDIALOG` finds the window taller than the
+            // monitor it opened on — which at 100 % it never is.
+            scroll: None,
             // FR-92а, task T-12-1: loaded before the window exists, because a resource does
             // not need one; shown on `WM_INITDIALOG`, which is where a window does.
             icon: CaptionIcons::load(),
@@ -5559,6 +5567,13 @@ struct DialogState<'a> {
     /// build, which [`on_erase_background`] answers by painting straight into the message's
     /// DC as it did before this task.
     background: Option<BackgroundCache>,
+    /// How far the contents are scrolled, when the window had to be shortened — task T-42-12,
+    /// finding 124б.1.
+    ///
+    /// `None` is a window that fits its monitor whole, which is every window at 100 % and the
+    /// only case that existed before this task. `Some` carries the scroll position in pixels
+    /// and the height the contents really need, and the window then wears `WS_VSCROLL`.
+    scroll: Option<ScrollView>,
     /// The icon the caption is shown by `WM_SETICON` — task T-12-1.
     ///
     /// Owned here for exactly the reason [`CaptionIcons`] gives: the handles must outlive the
@@ -5689,6 +5704,14 @@ unsafe extern "system" fn dialog_proc(
             // changed sits down where the previous one stood, and takes the focus back to the
             // combo the hand was on.
             //
+            // Task T-42-12, finding 124б.1: a window taller than the monitor it opened on is
+            // shortened to it and given a scroll bar. **Before** the move of решение 99.1(б)
+            // below, so that a window reopened in place is measured against the monitor it is
+            // about to stand on; at 100 % this call does nothing at all.
+            //
+            // SAFETY: as above — the pointer was stored at the top of this arm.
+            unsafe { fit_window_to_work_area(hwnd) };
+
             // SAFETY: as above — the pointer was stored at the top of this arm.
             let opening = unsafe { with_state(hwnd, |state| state.opening) };
 
@@ -5769,6 +5792,24 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
             // and the value it names is alive for the whole of this modal call.
             unsafe { on_erase_background(hwnd, wparam) }
+        }
+
+        // Task T-42-12, finding 124б.1 — the scroll of a window that had to be shortened.
+        //
+        // Both arms do nothing at all in a window that fits its monitor: `state.scroll` is
+        // `None` there, and `scroll_contents_to` returns on its first line. ⚠ SEC-05: neither
+        // message carries a pointer, and the only thing either can buy a forger is one scroll
+        // of a window this program is already showing.
+        WM_VSCROLL => {
+            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG`.
+            unsafe { on_vertical_scroll(hwnd, wparam) };
+            0
+        }
+
+        WM_MOUSEWHEEL => {
+            // SAFETY: as above.
+            unsafe { on_mouse_wheel(hwnd, wparam) };
+            0
         }
 
         // FR-92а, task T-11-5a: the nine owner-drawn buttons. Handled here and nowhere
@@ -7386,8 +7427,11 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
     let header = unsafe { &*(lparam.0 as *const NMHDR) };
     let (from_window, from_id, code) = (header.hwndFrom, header.idFrom, header.code);
 
-    // SEC-05: the three comparisons, before any work.
-    if (code != NM_CUSTOMDRAW && code != LVN_ITEMCHANGING)
+    // SEC-05: the three comparisons, before any work. ⚠ `NM_SETFOCUS` joined the two of task
+    // T-11-7-2 with task T-42-12: the layout list is the one control of this window that
+    // announces its focus through `WM_NOTIFY` rather than `WM_COMMAND`, and a shortened window
+    // has to scroll to whatever the Tab key just reached.
+    if (code != NM_CUSTOMDRAW && code != LVN_ITEMCHANGING && code != NM_SETFOCUS)
         || from_id != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX)
     {
         return 0;
@@ -7396,6 +7440,16 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
     // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
     // ours, and answers a handle or an error.
     if unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() != Some(from_window) {
+        return 0;
+    }
+
+    // Task T-42-12: the Tab key reached the layout list, and in a shortened window the list may
+    // be below the bottom edge. Nothing is read out of the payload — the header is the whole
+    // message here.
+    if code == NM_SETFOCUS {
+        // SAFETY: see the caller.
+        unsafe { show_control_whole(hwnd, IDC_CYCLE_LIST) };
+
         return 0;
     }
 
@@ -12452,6 +12506,20 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
     // very click has just made it, not as it was before.
     restore_self_switching(hwnd, control, notification);
 
+    // Task T-42-12: in a window that had to be shortened, the Tab key must not walk the focus
+    // off the bottom edge. Four of the five kinds of control this window has announce their own
+    // focus — a button, an edit, a combo and a list box — and the fifth, the layout list, does
+    // it through `NM_SETFOCUS` in [`on_notify`]. In a window that fits, this call returns at
+    // once: there is no scroll to move.
+    //
+    // SAFETY: see the caller.
+    if matches!(
+        u32::from(notification),
+        BN_SETFOCUS | EN_SETFOCUS | CBN_SETFOCUS | LBN_SETFOCUS
+    ) {
+        unsafe { show_control_whole(hwnd, control) };
+    }
+
     match control {
         // Applying and leaving are one operation followed by the other, which is why «ОК»
         // makes the same call «Применить» makes and then ends the dialog.
@@ -14288,6 +14356,373 @@ fn read_cycle_checks(hwnd: HWND, rows: &mut [LayoutRow]) {
 /// paints of [`cycle_row_paint`]. The two arrow buttons keep the honest disable — owner
 /// drawing paints a disabled button grey with the palette's own colours, so the defect never
 /// touched them.
+/// A window that had to be shortened, and how far its contents are scrolled — task T-42-12,
+/// finding 124б.1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScrollView {
+    /// How many pixels of the contents are above the top edge of the client area. Zero is the
+    /// top; [`ScrollView::most`] is the bottom.
+    pub offset: i32,
+    /// The height the contents need — the client height the template asked for, before the
+    /// window was shortened.
+    pub content: i32,
+    /// The client height the window really got: what fits the monitor.
+    pub page: i32,
+}
+
+impl ScrollView {
+    /// The largest offset that still shows contents — the bottom of the scroll.
+    pub fn most(self) -> i32 {
+        (self.content - self.page).max(0)
+    }
+
+    /// `offset` brought inside `0..=most` — every road into the scroll goes through this.
+    pub fn clamped(self, offset: i32) -> i32 {
+        offset.clamp(0, self.most())
+    }
+}
+
+/// How tall a window may be on the monitor it opened on, and how tall it wants to be — the
+/// arithmetic of task T-42-12, apart from the windows.
+///
+/// Answers `Some` with the client height the window has to settle for, or `None` when the
+/// window fits whole and nothing is to be done — which is every window at 100 % and was the
+/// only case before this task.
+///
+/// `frame` is what the window costs besides its client area: the caption and the two borders.
+///
+/// Pure, and public so the test calls the very function the window calls.
+pub fn shortened_client_height(wanted_client: i32, frame: i32, work_area: i32) -> Option<i32> {
+    let wanted_whole = wanted_client + frame;
+
+    if wanted_whole <= work_area {
+        return None;
+    }
+
+    // At least one pixel of client area, however small the monitor claims to be (NFR-13).
+    Some((work_area - frame).max(1))
+}
+
+/// Shortens the window to the monitor it opened on and gives it a scroll bar — task T-42-12,
+/// finding 124б.1, решение 124б.1.
+///
+/// # The defect
+///
+/// `IDD_SETTINGS` is 375 dialog units tall, and a dialog unit follows the font, which follows
+/// the display scale: 17 px at 100 % and **23 px at 125 %**. So the window is ~826 px on one
+/// and **~1113 px** on the other, against a work area of 1032 px on a 1080p screen — and the
+/// bottom row of buttons is off the edge of the screen. The owner met it on the live product:
+/// «нижняя часть окна приложения не вписывается в экран и у меня нет возможности нажать
+/// кнопки».
+///
+/// ⚠ **It is not a defect of the layout, and shrinking the layout would not cure it.** Twenty
+/// eight units would have to go for 125 %; at 150 % the window wants ~1330 px and at 200 %
+/// ~1770 px, and no amount of shrinking fits those on a 1080p screen. What cures it is the
+/// window ceasing to be taller than the work area — the contents scroll instead.
+///
+/// # What is done
+///
+/// The window keeps the size the template gave it whenever that size fits, so **the look at
+/// 100 % does not change by a pixel** (вид заморожен, решение 124.1). When it does not fit, the
+/// client area is cut to what fits, `WS_VSCROLL` goes on, and the scroll bar is given the real
+/// height of the contents.
+///
+/// # Safety
+///
+/// Called from the `WM_INITDIALOG` arm of [`dialog_proc`] only, after the state pointer has
+/// been stored.
+unsafe fn fit_window_to_work_area(hwnd: HWND) {
+    let mut window = RECT::default();
+    let mut client = RECT::default();
+
+    // SAFETY: `hwnd` is the live dialog and both buffers are live locals of this frame.
+    if unsafe { GetWindowRect(hwnd, &raw mut window) }.is_err()
+        || unsafe { GetClientRect(hwnd, &raw mut client) }.is_err()
+    {
+        return;
+    }
+
+    let wanted_client = client.bottom - client.top;
+    let frame = (window.bottom - window.top) - wanted_client;
+
+    // The work area of the monitor this window opened on — not of the primary one: a second
+    // monitor may be shorter, and `DS_CENTER` has already put the window on one of them.
+    let Some(work_area) = monitor_work_area(hwnd) else {
+        return;
+    };
+
+    let Some(page) = shortened_client_height(wanted_client, frame, work_area) else {
+        return;
+    };
+
+    // SAFETY: `hwnd` is the live dialog being initialised; the call is given plain numbers and
+    // keeps no pointer. The window is not on the screen yet — it is shown when the procedure
+    // returns — so the change lands before the first paint.
+    if let Err(error) = unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            window.right - window.left,
+            page + frame,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
+        )
+    } {
+        // NFR-13: the window stays as tall as the template asked, which is the defect this
+        // function exists to cure — but nothing is broken and the journal is told.
+        crate::app::report_non_critical("SetWindowPos", &error);
+        return;
+    }
+
+    let view = ScrollView {
+        offset: 0,
+        content: wanted_client,
+        page,
+    };
+
+    // SAFETY: see the contract — the state pointer was stored at the top of the arm.
+    unsafe { with_state(hwnd, |state| state.scroll = Some(view)) };
+
+    show_scroll_bar(hwnd, view);
+}
+
+/// The work area — the screen less the task bar — of the monitor `hwnd` is on, in pixels.
+///
+/// `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST` is the documented way to ask «which
+/// screen is this window on», and it answers a handle for every window, including one that has
+/// not been shown yet: the manager has already placed this one by `DS_CENTER`.
+///
+/// NFR-13: a refusal answers `None` and the caller leaves the window as the template made it.
+fn monitor_work_area(hwnd: HWND) -> Option<i32> {
+    // SAFETY: `hwnd` is a live window; the call reads a system table and keeps no pointer.
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(size_of::<MONITORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: the handle came from the call above and the buffer is a live local of this frame
+    // whose `cbSize` the call reads first, as it documents.
+    if !unsafe { GetMonitorInfoW(monitor, &raw mut info) }.as_bool() {
+        return None;
+    }
+
+    Some(info.rcWork.bottom - info.rcWork.top)
+}
+
+/// Puts the scroll bar on the window and tells it what it is scrolling — task T-42-12.
+fn show_scroll_bar(hwnd: HWND, view: ScrollView) {
+    let info = SCROLLINFO {
+        cbSize: u32::try_from(size_of::<SCROLLINFO>()).unwrap_or(0),
+        fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+        nMin: 0,
+        // The range of a scroll bar is inclusive, and a page of `page` pixels covers
+        // `nMax - nPage + 1` of it — the documented arithmetic, written out rather than
+        // guessed at.
+        nMax: view.content.max(1) - 1,
+        nPage: u32::try_from(view.page.max(1)).unwrap_or(1),
+        nPos: view.offset,
+        nTrackPos: 0,
+    };
+
+    // SAFETY: `hwnd` is the live dialog and `info` is a live local this call only reads.
+    unsafe { SetScrollInfo(hwnd, SB_VERT, &raw const info, true) };
+}
+
+/// Scrolls the contents to `offset`, in pixels from the top — task T-42-12.
+///
+/// Everything in the window moves together, the bottom row of buttons included: the alternative
+/// — a fixed footer with a scrolling body — is a second layout to keep in step with the first,
+/// and решение 124.1 froze the look rather than opened it for a re-cut.
+///
+/// # Safety
+///
+/// Called from the message arms of [`dialog_proc`], with the `hwnd` of the dialog they belong
+/// to.
+unsafe fn scroll_contents_to(hwnd: HWND, offset: i32) {
+    // SAFETY: see the contract.
+    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
+        return;
+    };
+
+    let target = view.clamped(offset);
+    let delta = view.offset - target;
+
+    if delta == 0 {
+        return;
+    }
+
+    // SAFETY: as above. ⚠ The background is a **picture**, cached by client size and palette —
+    // neither of which a scroll changes — so it has to be dropped by hand, exactly as
+    // `relabel_in_place` drops it: the panels are drawn at the children's coordinates, and the
+    // children have just moved. Урок Э31: invalidating the window does not mend a stale cache.
+    unsafe {
+        with_state(hwnd, |state| {
+            state.scroll = Some(ScrollView {
+                offset: target,
+                ..view
+            });
+            state.background = None;
+        });
+    };
+
+    // SAFETY: `hwnd` is the live dialog; the three `None`s ask for the whole client area and
+    // for no region back. `SW_SCROLLCHILDREN` moves the controls with the picture — which is
+    // the whole of the scroll, since every control of this window is a child of it.
+    unsafe {
+        let _ = ScrollWindowEx(
+            hwnd,
+            0,
+            delta,
+            None,
+            None,
+            None,
+            None,
+            SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE,
+        );
+    };
+
+    show_scroll_bar(
+        hwnd,
+        ScrollView {
+            offset: target,
+            ..view
+        },
+    );
+
+    // The whole window, and not the uncovered strip alone: the background is one picture and
+    // the panels it draws now stand at new coordinates.
+    widgets::repaint::whole(hwnd);
+}
+
+/// Scrolls until `control` stands whole inside the window — task T-42-12.
+///
+/// The keyboard half of the scroll: Tab walks the focus through controls that may be below the
+/// bottom edge of a shortened window, and a focus nobody can see is worse than no scroll at
+/// all. Does nothing in a window that fits (`state.scroll` is `None` there) and nothing when
+/// the control is already whole inside.
+///
+/// # Safety
+///
+/// Called from [`on_command`] and [`on_notify`] with the `hwnd` of the dialog they belong to.
+unsafe fn show_control_whole(hwnd: HWND, control: i32) {
+    // SAFETY: see the contract.
+    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
+        return;
+    };
+
+    let Some(rect) = child_rect_in_client(hwnd, control) else {
+        return;
+    };
+
+    // The rectangle is in client coordinates, so it already carries the scroll: a control above
+    // the top edge has a negative `top`, one below the bottom has a `bottom` past the page.
+    let wanted = if rect.top < 0 {
+        view.offset + rect.top
+    } else if rect.bottom > view.page {
+        view.offset + (rect.bottom - view.page)
+    } else {
+        return;
+    };
+
+    // SAFETY: as above.
+    unsafe { scroll_contents_to(hwnd, wanted) };
+}
+
+/// How far one line of the scroll goes, in pixels — task T-42-12.
+///
+/// A row of the layout list is twelve dialog units and the tallest thing in the window that a
+/// person steps past; a line of the scroll is deliberately smaller than that, so that the arrow
+/// of the scroll bar moves the contents by less than one row and nothing is skipped over.
+const SCROLL_LINE: i32 = 16;
+
+/// Where the scroll goes for one `WM_VSCROLL` — the pure half of [`on_vertical_scroll`].
+///
+/// `command` is the low word of `wparam`, `track` its high word — the position the thumb is
+/// being dragged to, which only the two `SB_THUMB*` commands carry.
+///
+/// Public so the test walks every command the scroll bar can send without a window.
+pub fn scrolled_to(view: ScrollView, command: i32, track: i32) -> i32 {
+    let offset = match command {
+        v if v == SB_LINEUP.0 => view.offset - SCROLL_LINE,
+        v if v == SB_LINEDOWN.0 => view.offset + SCROLL_LINE,
+        v if v == SB_PAGEUP.0 => view.offset - view.page,
+        v if v == SB_PAGEDOWN.0 => view.offset + view.page,
+        v if v == SB_THUMBTRACK.0 || v == SB_THUMBPOSITION.0 => track,
+        v if v == SB_TOP.0 => 0,
+        v if v == SB_BOTTOM.0 => view.most(),
+        // Every other command — `SB_ENDSCROLL` among them — leaves the scroll where it is.
+        _ => view.offset,
+    };
+
+    view.clamped(offset)
+}
+
+/// Answers `WM_VSCROLL` — task T-42-12.
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] with the `hwnd` of the dialog it belongs to.
+unsafe fn on_vertical_scroll(hwnd: HWND, wparam: WPARAM) {
+    // SAFETY: see the contract.
+    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
+        return;
+    };
+
+    let command = i32::try_from(wparam.0 & 0xFFFF).unwrap_or(-1);
+    let track = i32::try_from((wparam.0 >> 16) & 0xFFFF).unwrap_or(0);
+
+    // SAFETY: as above.
+    unsafe { scroll_contents_to(hwnd, scrolled_to(view, command, track)) };
+}
+
+/// Answers `WM_MOUSEWHEEL` — task T-42-12.
+///
+/// The wheel moves the contents by whole lines of [`SCROLL_LINE`], the number of them taken
+/// from the system's own «lines per notch» setting through `SPI_GETWHEELSCROLLLINES`: a person
+/// who set their wheel to three lines gets three here too.
+///
+/// # Safety
+///
+/// As [`on_vertical_scroll`].
+unsafe fn on_mouse_wheel(hwnd: HWND, wparam: WPARAM) {
+    // SAFETY: see the contract.
+    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
+        return;
+    };
+
+    // The high word is a **signed** delta in multiples of `WHEEL_DELTA`: positive is away from
+    // the user, which scrolls the contents up.
+    let notches = i32::from(((wparam.0 >> 16) & 0xFFFF) as u16 as i16);
+
+    let mut lines = 0_u32;
+
+    // SAFETY: the buffer is a live local of this frame, and its size is what the documented
+    // signature of `SPI_GETWHEELSCROLLLINES` asks for.
+    let asked = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWHEELSCROLLLINES,
+            0,
+            Some(std::ptr::from_mut(&mut lines).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+
+    // Three is what Windows ships with, and the fallback for a refused read (NFR-13).
+    let lines = if asked.is_ok() && lines > 0 && lines < 100 {
+        i32::try_from(lines).unwrap_or(3)
+    } else {
+        3
+    };
+
+    let delta = -notches * lines * SCROLL_LINE / 120;
+
+    // SAFETY: as above.
+    unsafe { scroll_contents_to(hwnd, view.offset + delta) };
+}
+
 fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
     let cycle = matches!(mode, LayoutMode::Cycle);
 
