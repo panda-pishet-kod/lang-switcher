@@ -36,9 +36,13 @@ use lang_switcher::tray::{self, Attachment, Menu, Pending, Reaction, Tray};
 use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
 use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+    ERROR_ACCESS_DENIED, FreeLibrary, HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT,
+    WPARAM,
 };
-use windows::Win32::Graphics::Gdi::{CLEARTYPE_QUALITY, LOGFONTW};
+use windows::Win32::Graphics::Gdi::{
+    CLEARTYPE_QUALITY, GetMonitorInfoW, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MonitorFromPoint,
+};
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
@@ -49,9 +53,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
     MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
     RT_DIALOG, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
-    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
-    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
-    WS_EX_TOOLWINDOW, WS_POPUP,
+    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP,
+    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION,
+    WM_SETTINGCHANGE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -1304,8 +1308,10 @@ fn the_re_entry_gate_wraps_the_modal_call_and_lets_go_before_the_dialog() {
         .expect("src\\tray.rs must carry its unit tests at the end");
     let product = &source[..end];
 
+    // ⚠ The signature grew a third argument in task T-41-3 (finding Н44): whose point the menu
+    // opens at depends on whether the showing came from the mouse or the keyboard.
     let at = product
-        .find("fn show_menu(x: i32, y: i32) {")
+        .find("fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {")
         .expect("show_menu must be in this file");
     let body = &product[at..];
     let end = body
@@ -1781,6 +1787,204 @@ fn the_refused_configuration_write_is_journalled_and_the_todo_is_gone() {
     assert!(
         !save.contains("let _ = error"),
         "and the line that dropped it is gone rather than kept beside the new one"
+    );
+}
+
+/// The work area — the screen less the task bar — of the monitor the point `(x, y)` lands on.
+///
+/// Asked of Windows here in the test, and not of the product: what is being checked is a
+/// **property** of the point the tray answers with — «она лежит на рабочем столе» — and a check
+/// that recomputed the product's own formula would agree with it whatever it said (урок Э53а).
+fn work_area_around(x: i32, y: i32) -> RECT {
+    // SAFETY: both calls read system tables and keep nothing of ours. `MONITOR_DEFAULTTONEAREST`
+    // is documented to answer a monitor for **every** point, including one far off every screen,
+    // so the handle below is always a real one.
+    let monitor = unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) };
+
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(size_of::<MONITORINFO>()).expect("the struct fits in a u32"),
+        ..Default::default()
+    };
+
+    // SAFETY: the handle came from the call above; `info` is a live local whose `cbSize` the
+    // call reads first, as it documents.
+    assert!(
+        unsafe { GetMonitorInfoW(monitor, &raw mut info) }.as_bool(),
+        "the system must be able to describe the monitor nearest ({x}, {y})"
+    );
+
+    info.rcWork
+}
+
+/// The two screen coordinates packed into `wParam` the way the shell packs them under
+/// `NOTIFYICON_VERSION_4` — the low word is x, the high word is y, both signed.
+fn packed_point(x: i32, y: i32) -> WPARAM {
+    let word = |value: i32, name: &str| {
+        usize::from(u16::from_le_bytes(
+            i16::try_from(value)
+                .unwrap_or_else(|_| panic!("the test's own {name} fits in a word"))
+                .to_le_bytes(),
+        ))
+    };
+
+    let low = word(x, "x");
+    let high = word(y, "y");
+
+    WPARAM(low | (high << 16))
+}
+
+/// **Task T-41-3, finding Н44 — the table of the three rules the menu's point is chosen by.**
+///
+/// All three are pure, because the awkward cases are not the middle of the screen: they are the
+/// edges, the far negative numbers a forged message names, `i32::MAX`, and a rectangle a display
+/// driver answered nonsense with.
+#[test]
+fn the_point_the_menu_opens_at_follows_its_three_rules() {
+    // A work area with a task bar at the bottom, of the shape this machine really has.
+    let area = RECT {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1032,
+    };
+
+    for (point, expected, what) in [
+        ((900, 500), (900, 500), "inside, and not moved by a pixel"),
+        ((0, 0), (0, 0), "the very corner is inside"),
+        ((1920, 1032), (1920, 1032), "and so is the far one"),
+        ((-1, 500), (0, 500), "one pixel past the left edge"),
+        ((1921, 500), (1920, 500), "one past the right"),
+        ((900, -1), (900, 0), "one above the top"),
+        (
+            (900, 1033),
+            (900, 1032),
+            "one below the work area — the task bar",
+        ),
+        (
+            (-30_000, -30_000),
+            (0, 0),
+            "the forgery the acceptance names",
+        ),
+        (
+            (i32::MAX, i32::MAX),
+            (1920, 1032),
+            "and the largest number there is",
+        ),
+        (
+            (i32::MIN, i32::MIN),
+            (0, 0),
+            "and the smallest, which is not -i32::MAX",
+        ),
+    ] {
+        let answer = tray::clamp_to_work_area(point, area);
+
+        println!("{point:?} -> {answer:?} ({what})");
+
+        assert_eq!(answer, expected, "{what}");
+    }
+
+    // A rectangle whose right edge is left of its left: the point is left alone rather than the
+    // process ended. `i32::clamp` panics when `min > max`, and this is the guard against it.
+    let degenerate = RECT {
+        left: 100,
+        top: 100,
+        right: -100,
+        bottom: -100,
+    };
+
+    assert_eq!(
+        tray::clamp_to_work_area((7, 9), degenerate),
+        (7, 9),
+        "a rectangle that makes no sense must leave the point alone, not end the program"
+    );
+
+    // Whose point wins.
+    assert_eq!(
+        tray::menu_point_of((10, 20), Some((30, 40)), false),
+        (30, 40),
+        "a showing from the mouse follows the cursor and ignores what the message said"
+    );
+    assert_eq!(
+        tray::menu_point_of((10, 20), None, false),
+        (10, 20),
+        "unless the system will not say where the cursor is — NFR-13"
+    );
+    assert_eq!(
+        tray::menu_point_of((10, 20), Some((30, 40)), true),
+        (10, 20),
+        "a showing from the keyboard follows the icon, because the cursor may be anywhere"
+    );
+
+    // And when the foreground may be taken.
+    for (gap, expected, what) in [
+        (0, true, "the click that is happening right now"),
+        (
+            tray::FOREGROUND_GRACE_MS,
+            true,
+            "a slow machine still inside the grace",
+        ),
+        (
+            tray::FOREGROUND_GRACE_MS + 1,
+            false,
+            "one millisecond past it",
+        ),
+        (60_000, false, "a message at a machine nobody has touched"),
+        (u32::MAX, false, "and one at a machine long since left"),
+    ] {
+        let answer = tray::may_take_the_foreground(gap);
+
+        println!("gap {gap} ms -> may take the foreground: {answer} ({what})");
+
+        assert_eq!(answer, expected, "{what}");
+    }
+}
+
+/// **Task T-41-3, finding Н44 — a forged menu point does not put the menu off the desktop.**
+///
+/// The icon's menu is opened by a message, and until this task the point came straight out of
+/// its `wParam` with no look at who sent it. Any process at this integrity level could post one
+/// with any coordinates at all: the menu unrolled in the middle of nowhere, and the program
+/// pulled itself to the front to do it.
+///
+/// The road here is the product's own — a real tray, a real `Tray::handle_message`, the real
+/// `WM_APP_TRAY` of `NOTIFYICON_VERSION_4` — and the forgery is the one the acceptance names,
+/// `(-30000, -30000)`. **This is an honest red on the base commit**: there the answer is that
+/// very pair, which is off every screen this machine has.
+///
+/// ⚠ The assertion is a *property* — «точка лежит в рабочей области своего монитора» — asked of
+/// Windows and not of the product. A test that clamped the point itself and compared would agree
+/// with the product whatever the product did.
+#[test]
+fn a_forged_menu_point_is_pulled_back_onto_the_desktop() {
+    let window = TestWindow::new();
+    let home = TestDir::new("menu_point_forged");
+    let mut tray = install(&window, &home);
+
+    let asked = (-30_000, -30_000);
+    let reaction = tray.handle_message(
+        WM_APP + 2,
+        packed_point(asked.0, asked.1),
+        LPARAM(WM_CONTEXTMENU as isize),
+    );
+
+    println!("forged WM_CONTEXTMENU at {asked:?} -> {reaction:?}");
+
+    let Reaction::ShowMenu { x, y, .. } = reaction else {
+        panic!("the icon's context menu is what this message asks for, not {reaction:?}");
+    };
+
+    let area = work_area_around(x, y);
+
+    println!("the answer ({x}, {y}); the work area around it {area:?}");
+
+    assert_ne!(
+        (x, y),
+        asked,
+        "the point of a forged message must not be taken as it stands"
+    );
+    assert!(
+        (area.left..=area.right).contains(&x) && (area.top..=area.bottom).contains(&y),
+        "and it must land on the desktop — ({x}, {y}) against {area:?}"
     );
 }
 

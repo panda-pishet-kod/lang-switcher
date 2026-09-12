@@ -352,6 +352,13 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // reason — the subject of both is a window of this program.
     ("GetWindowRect", Kind::Window),
     ("SetWindowPos", Kind::Window),
+    // Task T-41-3, finding Н44: the two questions the tray asks the system before it opens the
+    // menu of FR-91 — where the cursor is, and where the desktop of that monitor ends. A refusal
+    // of either is NFR-13 (the menu still opens, at the point the message asked for, pulled onto
+    // the desktop or not), and a refusal nobody could see would be a menu in the wrong place with
+    // no explanation.
+    ("GetCursorPos", Kind::Window),
+    ("GetMonitorInfoW", Kind::Window),
     ("ShellExecuteW", Kind::Window),
     // Task T-41-1, finding С52: an address the gate of `letters::links::is_allowed` turned away.
     // Beside `ShellExecuteW` and in its group, because it is the same subject seen from the

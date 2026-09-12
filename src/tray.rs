@@ -126,15 +126,18 @@ use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{
+    HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+};
 use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE,
     DWMWCP_ROUNDSMALL, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     CreateFontIndirectW, CreateSolidBrush, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-    DrawTextW, FillRect, GetDC, GetTextExtentPoint32W, HBRUSH, HDC, HFONT, HGDIOBJ, LOGFONTW,
-    ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+    DrawTextW, FillRect, GetDC, GetMonitorInfoW, GetTextExtentPoint32W, HBRUSH, HDC, HFONT,
+    HGDIOBJ, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ReleaseDC,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -148,11 +151,11 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CWPSTRUCT, CallNextHookEx, CreatePopupMenu, DestroyIcon, DestroyMenu,
-    GetClassNameW, GetSystemMetrics, HHOOK, HICON, HMENU, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
-    MENUINFO, MF_CHECKED, MF_DISABLED, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR,
-    MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
-    RegisterWindowMessageW, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYMENU,
-    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_METRICS_INDEX,
+    GetClassNameW, GetCursorPos, GetMessageTime, GetSystemMetrics, HHOOK, HICON, HMENU, IMAGE_ICON,
+    LR_DEFAULTCOLOR, LoadImageW, MENUINFO, MF_CHECKED, MF_DISABLED, MF_ENABLED, MF_GRAYED,
+    MF_OWNERDRAW, MF_SEPARATOR, MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW,
+    RT_VERSION, RegisterWindowMessageW, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON,
+    SM_CYMENU, SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_METRICS_INDEX,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo, SetTimer,
     SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU,
@@ -403,10 +406,18 @@ pub enum Reaction {
     Handled(LRESULT),
     /// Handled, except that the menu of FR-91 has to be shown at this point on the screen.
     ShowMenu {
-        /// Screen x of the cursor, taken from `wParam` — the version 4 convention.
+        /// Screen x the menu opens at — **task T-41-3**: the point the message asked for,
+        /// pulled onto the work area of the monitor nearest it.
         x: i32,
-        /// Screen y of the cursor, taken from `wParam`.
+        /// Screen y, pulled the same way.
         y: i32,
+        /// Whether this showing came from the keyboard (`NIN_KEYSELECT`) rather than the mouse.
+        ///
+        /// It decides whose point wins in [`show_menu`]: the mouse's showings follow the
+        /// **cursor**, asked of the system there; the keyboard's follow the shell's own point,
+        /// which is the icon's, because the cursor may be anywhere at all when a person opens
+        /// the menu with Enter — on another monitor, in another program's window.
+        from_the_keyboard: bool,
     },
     /// Handled, except that the settings dialog of FR-92 has to be opened.
     ///
@@ -890,10 +901,25 @@ impl Tray {
             // the program at this stage, that showing it is idempotent and reversible, and
             // that toggling the state on a stray click would disarm a resident utility
             // without telling anybody.
-            WM_CONTEXTMENU | NIN_SELECT | NIN_KEYSELECT => Reaction::ShowMenu {
-                x: coordinate(low_word(wparam.0)),
-                y: coordinate(high_word(wparam.0)),
-            },
+            // ⭐ **Task T-41-3, finding Н44: the point is not believed.** Until this task the two
+            // words of `wParam` went straight to `TrackPopupMenuEx`, and the sender was not
+            // asked about. `WM_APP_TRAY` is posted like any other message, so any process at this
+            // integrity level could name any coordinates at all — and the menu unrolled in the
+            // middle of the screen, or past its edge, while the program pulled itself to the
+            // front to do it. It is [`menu_point`] that takes the point back onto the desktop;
+            // whose point it is at all is settled a moment later, in [`show_menu`].
+            notification @ (WM_CONTEXTMENU | NIN_SELECT | NIN_KEYSELECT) => {
+                let (x, y) = menu_point((
+                    coordinate(low_word(wparam.0)),
+                    coordinate(high_word(wparam.0)),
+                ));
+
+                Reaction::ShowMenu {
+                    x,
+                    y,
+                    from_the_keyboard: notification == NIN_KEYSELECT,
+                }
+            }
 
             // A double click opens the settings dialog of FR-92, which is the convention every
             // resident program on this system follows. With the mouse this arm is not usually
@@ -1990,8 +2016,12 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
         Reaction::Ignored => None,
         Reaction::Handled(result) => Some(result),
         // Outside the borrow on purpose — see the module documentation.
-        Reaction::ShowMenu { x, y } => {
-            show_menu(x, y);
+        Reaction::ShowMenu {
+            x,
+            y,
+            from_the_keyboard,
+        } => {
+            show_menu(x, y, from_the_keyboard);
             Some(LRESULT(0))
         }
         // Outside the borrow for the same reason: the dialog of FR-92 is modal.
@@ -3358,6 +3388,186 @@ fn apply_menu_frame(hwnd: HWND) {
     };
 }
 
+// ---------------------------------------------------------------------------------------
+// Where the menu opens, and whether it may take the foreground — task T-41-3, finding Н44
+// ---------------------------------------------------------------------------------------
+
+/// Pulls a point onto a work area — task T-41-3, finding Н44.
+///
+/// Pure, so that the table of `tests\tray.rs` can close it: the awkward cases are not the middle
+/// of the screen but the edges, the far negative numbers a forged message names, and
+/// [`i32::MAX`].
+///
+/// ⚠ A degenerate rectangle — one whose right edge is left of its left, which a display driver
+/// coming back from sleep has been known to answer with — leaves the point alone rather than
+/// панicking: `i32::clamp` requires `min <= max` and is documented to panic otherwise, and a
+/// menu in the wrong place is a far better outcome than a process that ends.
+pub fn clamp_to_work_area(point: (i32, i32), area: RECT) -> (i32, i32) {
+    let pull = |value: i32, low: i32, high: i32| {
+        if high < low {
+            value
+        } else {
+            value.clamp(low, high)
+        }
+    };
+
+    (
+        pull(point.0, area.left, area.right),
+        pull(point.1, area.top, area.bottom),
+    )
+}
+
+/// The work area — the screen less the task bar — of the monitor nearest `point`.
+///
+/// `MONITOR_DEFAULTTONEAREST` answers a monitor for **every** point, including one far off every
+/// screen, which is exactly the case this function exists for.
+///
+/// ⚠ **Not `GetSystemMetrics`, and that is the lesson of stage Э42:** this process declares
+/// `PerMonitorV2`, and in such a process the screen metrics answer for 96 DPI whatever the
+/// monitor really is, while `GetSystemMetricsForDpi` lives behind a feature this program does not
+/// carry. A monitor's own rectangle has no such trouble — it is in physical pixels by
+/// definition.
+///
+/// NFR-13: a refusal answers `None`, is journalled, and leaves the caller with the point it was
+/// given.
+fn work_area_around(point: (i32, i32)) -> Option<RECT> {
+    // SAFETY: reads a system table, keeps nothing of ours, and is documented to answer a handle
+    // for every point under `MONITOR_DEFAULTTONEAREST`.
+    let monitor = unsafe {
+        MonitorFromPoint(
+            POINT {
+                x: point.0,
+                y: point.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        )
+    };
+
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(size_of::<MONITORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: the handle came from the call above; `info` is a live local of this frame whose
+    // `cbSize` the call reads first, as it documents, and it is the only memory touched.
+    if !unsafe { GetMonitorInfoW(monitor, &raw mut info) }.as_bool() {
+        app::report_non_critical("GetMonitorInfoW", &WinError::from_thread());
+        return None;
+    }
+
+    Some(info.rcWork)
+}
+
+/// The point the menu of FR-91 is answered with — task T-41-3, finding Н44.
+///
+/// The coordinates a `WM_APP_TRAY` names, taken back onto the desktop. For a real click they are
+/// the cursor's and the pull changes nothing at all — **the ordinary click does not move by a
+/// pixel**, which is the requirement this task was given. For a forged message they are whatever
+/// the sender wrote, and the menu no longer opens in the void.
+fn menu_point(asked: (i32, i32)) -> (i32, i32) {
+    work_area_around(asked).map_or(asked, |area| clamp_to_work_area(asked, area))
+}
+
+/// Whose point the menu opens at — task T-41-3, finding Н44. Pure, and a table closes it.
+///
+/// `asked` is what the message named, already pulled onto the desktop by [`menu_point`].
+/// `cursor` is what the system answered, or `None` if it would not answer.
+///
+/// The cursor wins whenever there is one and the showing came from the mouse: a message can name
+/// any coordinates its sender likes, and where the pointer is is not a thing it can lie about.
+/// **It is not a change for an ordinary click** — a real one puts the cursor exactly where the
+/// shell's own point is.
+///
+/// From the keyboard the message's point wins instead, and that is not a concession: a person
+/// pressing Enter on the icon may have left the pointer on another monitor entirely, and the
+/// shell's point is the icon's — which is where they are looking.
+pub fn menu_point_of(
+    asked: (i32, i32),
+    cursor: Option<(i32, i32)>,
+    from_the_keyboard: bool,
+) -> (i32, i32) {
+    if from_the_keyboard {
+        asked
+    } else {
+        cursor.unwrap_or(asked)
+    }
+}
+
+/// How long ago the person must have touched the keyboard or the mouse for the menu to count as
+/// theirs — task T-41-3, finding Н44. Milliseconds.
+///
+/// A second is very long beside the few milliseconds the shell takes to turn a click on the icon
+/// into the message this program answers, and very short beside «человек отошёл». It is generous
+/// on purpose: a machine under load must not lose the foreground call on a real click, because
+/// that call is half of the documented way a popup menu is dismissed.
+pub const FOREGROUND_GRACE_MS: u32 = 1_000;
+
+/// Whether this program may pull itself to the front to show the menu — task T-41-3.
+///
+/// `gap` is how long passed between the last thing the person did and the message being
+/// handled, in milliseconds — see [`last_input_gap`], which is where the two ticks meet.
+///
+/// ⚠ **What the rule does not cover, said plainly.** A forged message sent while the person is
+/// busy typing in another program passes: nothing here can tell that click from this one. What
+/// it does cover is the case the finding describes — a message arriving at an idle machine, the
+/// menu unrolling by itself and taking the foreground away from whatever was in front.
+pub fn may_take_the_foreground(gap: u32) -> bool {
+    gap <= FOREGROUND_GRACE_MS
+}
+
+/// Milliseconds between the last thing the person did and the message being handled — the
+/// argument of [`may_take_the_foreground`], task T-41-3.
+///
+/// Two ticks of the same wrapping millisecond counter: `GetMessageTime` answers with the tick of
+/// **the message this thread is handling** — which, on this road, is the click on the icon — and
+/// `GetLastInputInfo` with the tick of the last input the session saw. `wrapping_sub` is right
+/// across the wrap that happens every forty-nine days, the machine FR-80 exists for.
+///
+/// Under load both numbers move together, so a slow machine does not lose the foreground on a
+/// real click: the gap between the two is what is measured, not how long this program took to
+/// get here.
+///
+/// NFR-13: a refusal of `GetLastInputInfo` answers **zero** — «только что», — because the harm
+/// of refusing a real click (a menu that will not dismiss) is greater than the harm of granting
+/// a forged one (a menu in front), and a system that will not answer is not evidence of a
+/// forgery.
+fn last_input_gap() -> u32 {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+
+    let mut info = LASTINPUTINFO {
+        cbSize: u32::try_from(size_of::<LASTINPUTINFO>()).unwrap_or(0),
+        dwTime: 0,
+    };
+
+    // SAFETY: `info` is a live local of this frame whose `cbSize` describes it, which is the
+    // only memory the call touches.
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        app::report_non_critical("GetLastInputInfo", &WinError::from_thread());
+        return 0;
+    }
+
+    // SAFETY: takes no arguments and touches no memory of ours.
+    let message = unsafe { GetMessageTime() } as u32;
+
+    message.wrapping_sub(info.dwTime)
+}
+
+/// The cursor, if the system will say where it is — task T-41-3.
+///
+/// NFR-13: a refusal is journalled and answers `None`, and the caller falls back on the point the
+/// message named.
+fn cursor_point() -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+
+    // SAFETY: `point` is a live local of this frame and the only memory the call writes.
+    if let Err(error) = unsafe { GetCursorPos(&raw mut point) } {
+        app::report_non_critical("GetCursorPos", &error);
+        return None;
+    }
+
+    Some((point.x, point.y))
+}
+
 /// Shows the menu of FR-91 at a point on the screen and carries out what was chosen.
 ///
 /// Called with no borrow of the tray held: `TrackPopupMenuEx` runs a modal message loop that
@@ -3384,12 +3594,30 @@ fn apply_menu_frame(hwnd: HWND) {
 /// opened over that dialog is a legitimate showing that task T-13-14 greys two entries of.
 /// Holding the right across `dispatch_command` would refuse it and undo that task; releasing
 /// it any earlier would reopen the window this one closes.
-fn show_menu(x: i32, y: i32) {
+///
+/// # Whose point, and whose foreground — task T-41-3, finding Н44
+///
+/// `x` and `y` are what the message asked for, already pulled onto the desktop by [`menu_point`].
+/// For a showing that came from the **mouse** they are overruled by [`cursor_point`] — the
+/// system's own answer to «где указатель», which a message cannot lie about; for one that came
+/// from the **keyboard** they stand, because the cursor then has nothing to do with where the
+/// person is looking and the shell's point is the icon's.
+///
+/// The foreground is taken only when [`may_take_the_foreground`] says the right is really
+/// there. It is not removed — `SetForegroundWindow` and the empty `PostMessageW` below are the
+/// two halves of the documented way a popup menu is dismissed by a click outside it, and a menu
+/// that will not go away would be a worse defect than the one being repaired.
+fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {
     // Task T-13-18. Held from here to the `drop` below; every early return of this function
     // gives it up on the way out, and so does an unwind — see [`MenuOnScreen`].
     let Some(on_screen) = MenuOnScreen::raise() else {
         return;
     };
+
+    // Task T-41-3. The mouse's showings follow the system's cursor and not the message's word
+    // for it; a refusal of the system leaves the point the message named, already pulled onto
+    // the desktop (NFR-13). The rule itself is [`menu_point_of`] and a table closes it.
+    let (x, y) = menu_point_of((x, y), cursor_point(), from_the_keyboard);
 
     // The number the acceptance of task T-13-18 reads — see [`MENU_SHOWINGS`] for why it is
     // counted here, past the gate, and not inside it. Test-only; the product has no counter.
@@ -3443,16 +3671,23 @@ fn show_menu(x: i32, y: i32) {
     // on the screen until something else dismisses it. `SetForegroundWindow` here and the
     // empty `PostMessageW` below are the two halves of the published workaround.
     //
-    // SAFETY: `hwnd` is the live window this tray was installed on; the call reads no memory
-    // of ours.
-    let foreground = unsafe { SetForegroundWindow(hwnd) };
+    // ⭐ **Task T-41-3: asked for only when the right is really there.** The finding is that a
+    // forged `WM_APP_TRAY` made this program take the foreground away from whatever the person
+    // was doing. [`may_take_the_foreground`] compares the tick of **this message** with the tick
+    // of the last thing the person did: a click on the icon puts them milliseconds apart, a
+    // message posted at an idle machine puts them minutes apart.
+    if may_take_the_foreground(last_input_gap()) {
+        // SAFETY: `hwnd` is the live window this tray was installed on; the call reads no memory
+        // of ours.
+        let foreground = unsafe { SetForegroundWindow(hwnd) };
 
-    if !foreground.as_bool() {
-        // NFR-13. The call fails when this process has no right to take the foreground — the
-        // system grants that right to whoever the user last interacted with, and the user has
-        // just clicked our icon, so in practice it succeeds. Not fatal when it does not: the
-        // menu still appears, it may merely need a second click to be dismissed.
-        app::report_non_critical("SetForegroundWindow", &WinError::from_thread());
+        if !foreground.as_bool() {
+            // NFR-13. The call fails when this process has no right to take the foreground — the
+            // system grants that right to whoever the user last interacted with, and the user has
+            // just clicked our icon, so in practice it succeeds. Not fatal when it does not: the
+            // menu still appears, it may merely need a second click to be dismissed.
+            app::report_non_critical("SetForegroundWindow", &WinError::from_thread());
+        }
     }
 
     // The gate of SEC-05 goes up here, immediately before `TrackPopupMenuEx`: from the
@@ -4803,7 +5038,7 @@ mod tests {
         let before = showings();
 
         // The second entry. With the flag up this returns on its first line.
-        show_menu(7, 11);
+        show_menu(7, 11, false);
 
         let after = showings();
 
@@ -4867,7 +5102,7 @@ mod tests {
 
         let before = showings();
 
-        show_menu(7, 11);
+        show_menu(7, 11, false);
 
         let after = showings();
 
@@ -4919,7 +5154,7 @@ mod tests {
         // `with_tray` one line later, so nothing of the shell is touched — but the counter
         // has already moved, which is what says the gate let it through.
         let before = showings();
-        show_menu(7, 11);
+        show_menu(7, 11, false);
         let after = showings();
         let after_show = MENU_ON_SCREEN.with(Cell::get);
 
@@ -4933,7 +5168,7 @@ mod tests {
 
         // And the menu is not wedged shut afterwards.
         let before_again = showings();
-        show_menu(7, 11);
+        show_menu(7, 11, false);
         let after_again = showings();
 
         println!("a second raise while the first is up refused: {while_up}");
