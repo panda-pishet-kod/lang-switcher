@@ -80,6 +80,83 @@ fn user_key(vk: u16, edge: Edge) -> KeyEvent {
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-36-2 — the hook starts disarmed (finding С19, variant 1)
+// -------------------------------------------------------------------------------------
+
+/// **Nothing is swallowed and nothing is buffered before the configuration is published —
+/// task T-36-2.**
+///
+/// The two threads of section 6.1 do not wait for each other. The input thread installs the
+/// hook at once, because NFR-08 gives the program under fifty milliseconds to have one; the UI
+/// thread meanwhile creates its window, loads icons, reads `config.toml`, builds the tray, and
+/// only then calls `app::publish_configuration`, whose `hook::set_active(config.general.enabled)`
+/// is the first word the callback hears about the user's settings. Between the two there is a
+/// window of tens to hundreds of milliseconds, and finding С19 is about what the program does in
+/// it: on an armed default it suppresses `Pause` in whatever application has the focus, records
+/// strokes into a buffer the user may have switched off, and honours no exclusions, because none
+/// have been published either.
+///
+/// So the default is "disarmed", and this test states it as a value and then as behaviour: the
+/// mode the callback really computes before any publication ([`hook::current_mode`] would read
+/// the same statics) passes the hotkey on and buffers nothing.
+///
+/// ⚠ The default of the **hotkey** is untouched and must stay so: `classify` answers on
+/// `!mode.active` before it ever compares `key.vk` with `mode.hotkey_vk`, so `Pause` stops being
+/// swallowed without touching [`hook::DEFAULT_HOTKEY_VK`].
+#[test]
+fn the_hook_starts_disarmed_until_the_configuration_is_published() {
+    assert!(
+        !hook::DEFAULT_ACTIVE,
+        "С19: the hook must go up disarmed — the callback sees this value until \
+         `app::publish_configuration` publishes the user's own `general.enabled`"
+    );
+
+    let unpublished = Mode {
+        active: hook::DEFAULT_ACTIVE,
+        fail_safe: false,
+        hotkey_vk: hook::DEFAULT_HOTKEY_VK,
+        hotkey_yields: false,
+    };
+
+    // FR-95 suppresses the hotkey "когда программа активна", and this program is not yet known
+    // to be. The press of the default hotkey goes to whoever owns the focus.
+    let mut state = HotkeyState::default();
+    let hotkey = hook::classify(unpublished, &mut state, user_key(VK_PAUSE, Edge::Down));
+
+    assert_eq!(
+        hotkey,
+        passed_on(),
+        "the default hotkey is not swallowed before the configuration is read"
+    );
+    assert!(
+        !state.hotkey_down,
+        "and no hold is remembered from a press this program did not take"
+    );
+
+    // The other half of С19: an ordinary stroke must not reach the ring either. `classify`
+    // returns above `buffer::record` on `!active`, and this measures that from the buffer's own
+    // side rather than by reading the source.
+    {
+        use lang_switcher::buffer::{self, Recorder};
+
+        buffer::install_recorder(Recorder::with_capacity(8));
+        assert_eq!(buffer::len(), 0, "the ring starts empty");
+
+        let typed = hook::classify(unpublished, &mut state, user_key(b'A'.into(), Edge::Down));
+
+        assert_eq!(typed, passed_on(), "an ordinary stroke is handed on untouched");
+        assert_eq!(
+            buffer::len(),
+            0,
+            "С19: a stroke made before the configuration was published must not be recorded — \
+             the user may have left the program suspended (FR-90)"
+        );
+
+        buffer::uninstall();
+    }
+}
+
+// -------------------------------------------------------------------------------------
 // FR-02, FR-95 — the hotkey is recognised in the callback and always suppressed
 // -------------------------------------------------------------------------------------
 
@@ -832,6 +909,16 @@ fn a_forged_fail_safe_message_finds_the_flag_down_and_does_nothing() {
         "no callback of this process has panicked four times running"
     );
 
+    // ⚠ **Armed explicitly since task T-36-2, and the previous value is put back below.** This
+    // test is about what a forgery can do to an **armed** program, and it used to take the
+    // arming from the default of `hook::ACTIVE`, which was `true`. Finding С19 moved that
+    // default to "disarmed" — the hook goes up before the configuration is published and must
+    // swallow nothing in that window — and a test binary publishes no configuration, so the
+    // arming has to be stated here. The pattern is the one
+    // `the_genuine_fail_safe_message_still_disarms_the_program` below already uses.
+    let was_active = hook::is_active();
+    hook::set_active(true);
+
     let before = (
         hook::is_active(),
         hook::hotkey_handoffs(),
@@ -867,6 +954,8 @@ fn a_forged_fail_safe_message_finds_the_flag_down_and_does_nothing() {
         hook::is_active(),
         "the program is still armed — FR-90, FR-95"
     );
+
+    hook::set_active(was_active);
 }
 
 /// **Criterion 6 of task T-13-9.** Past the gate the message does what it always did.
@@ -1006,8 +1095,19 @@ fn removing_a_hook_that_is_not_there_is_safe_and_says_so() {
     assert!(!hook::is_installed());
 }
 
+/// What the callback matches against before anything has been published — the window NFR-08
+/// exists to keep short.
+///
+/// ⚠ **This test carried the previous default and was moved by task T-36-2** (finding С19). It
+/// used to be `the_program_starts_armed_on_the_default_hotkey` and to assert `mode.active` with
+/// the reason «a resident utility starts armed». That is what the finding is about: the hook is
+/// up tens to hundreds of milliseconds before `app::publish_configuration` says whether the user
+/// left the program running or suspended, and acting on a guess in that window swallows `Pause`
+/// in other applications and records strokes the user switched off. The default is now
+/// [`hook::DEFAULT_ACTIVE`], the arming comes from the configuration, and the canon moved by
+/// decision 123 rather than by being squeezed into the old number.
 #[test]
-fn the_program_starts_armed_on_the_default_hotkey() {
+fn the_program_starts_disarmed_on_the_default_hotkey() {
     // ⚠ `ACTIVE` is process-wide and the tests of one binary run on parallel threads. Task
     // T-13-9 added a test that moves it and puts it back — see [`PUBLISHED_MODE`] — and this
     // one asserts what the value is, so the two take the same lock.
@@ -1015,11 +1115,15 @@ fn the_program_starts_armed_on_the_default_hotkey() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    // What the callback matches against before the UI thread has published anything — the
-    // window NFR-08 exists to keep short.
     let mode = hook::current_mode();
 
-    assert!(mode.active, "a resident utility starts armed");
+    assert_eq!(
+        mode.active,
+        hook::DEFAULT_ACTIVE,
+        "С19: until the UI thread publishes `general.enabled`, the callback sees the default — \
+         and that default is 'disarmed'"
+    );
+    assert!(!mode.active, "and the default is disarmed");
     assert!(!mode.fail_safe);
     assert_eq!(mode.hotkey_vk, hook::DEFAULT_HOTKEY_VK);
     assert_eq!(hook::consecutive_panics(), 0);

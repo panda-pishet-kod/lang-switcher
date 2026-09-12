@@ -717,7 +717,29 @@ static HOTKEY_TARGET: AtomicUsize = AtomicUsize::new(NO_HANDLE);
 static HOTKEY_VK: AtomicU32 = AtomicU32::new(DEFAULT_HOTKEY_VK as u32);
 
 /// `general.enabled` as the callback sees it — FR-90, FR-95. Published by the UI thread.
-static ACTIVE: AtomicBool = AtomicBool::new(true);
+///
+/// **Disarmed until the configuration says otherwise — task T-36-2, finding С19.** The two
+/// threads do not wait for each other: NFR-08 puts the hook up within fifty milliseconds of
+/// start-up, while the UI thread is still creating its window, loading icons, reading
+/// `config.toml` and building the tray — and only then publishes the settings through
+/// [`set_active`]. The window in between is tens to hundreds of milliseconds long, and an
+/// armed default spends it acting on settings nobody has read yet: a user who left the program
+/// suspended (FR-90) gets `Pause` swallowed in another application at every sign-in, strokes
+/// recorded into a buffer that was supposed to be off, and exclusions that do not yet exist.
+///
+/// Starting disarmed costs nothing in the other direction. FR-95 suppresses the hotkey only
+/// while the program is active, so a program that is not yet known to be active suppresses
+/// nothing; [`classify`] answers `PASS` on `!mode.active` **before** it compares the key code,
+/// so the default hotkey stops being swallowed on its own and [`DEFAULT_HOTKEY_VK`] needs no
+/// change. The first publication arms it, which is `app::publish_configuration`.
+static ACTIVE: AtomicBool = AtomicBool::new(DEFAULT_ACTIVE);
+
+/// What [`ACTIVE`] holds before the UI thread has published anything — task T-36-2.
+///
+/// Named rather than written into the initialiser so that the default is a value a test can
+/// state: a test binary publishes no configuration, so `is_active()` in one of them is this
+/// constant, and the rule "the hook starts disarmed" is measurable instead of inferred.
+pub const DEFAULT_ACTIVE: bool = false;
 
 /// FR-99 has disarmed buffering.
 static FAIL_SAFE: AtomicBool = AtomicBool::new(false);
