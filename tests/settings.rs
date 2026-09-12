@@ -19146,3 +19146,116 @@ fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
 
     assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: 7 });
 }
+
+// =========================================================================================
+// The one door out of this program — finding С26, task T-41-4
+// =========================================================================================
+
+/// **Finding С26, task T-41-4 — this program asks for something to be opened in exactly one
+/// place.**
+///
+/// Opening something is the only thing this program does that starts somebody else's code, and
+/// the audit's warning about a second door was not hypothetical: by the time the repair arrived
+/// there were **three** such places, and two of them opened the *same* journal folder by
+/// different code — the button of the «Диагностика» section and «Сохранить в папку журнала» of
+/// the letter wizard (FR-104).
+///
+/// # What this test is, and what it is not
+///
+/// It counts **calls**, not mentions: the lines of every `src\*.rs` that are comments are
+/// thrown away first, which is what keeps the prose of the repair — and the row
+/// `("ShellExecuteW", Kind::Window)` of the journal's vocabulary — out of the count. Э22's
+/// lesson in one line: before believing a sweep, ask whether it can hit itself.
+///
+/// ⚠ **The instrument's positive control is measured, not assumed.** The very same cut and
+/// needle over `7455732` — the commit this stage began at — answer **3**, in the two files the
+/// finding names. The journal is `scratchpad-E41\red-T-41-4-sweep.log`, and the assertion below
+/// that the count is at least one keeps a mistyped needle from passing on an empty answer.
+///
+/// ⚠ **What this test does NOT say** is that the one door is *safe*. The mechanism inside it is
+/// still `ShellExecuteW`, and under `uiAccess` that is the finding's other half; both roads the
+/// terms of reference named for repairing it are closed in this crate's configuration
+/// (`scratchpad-E41\probe-shell-T-41-4.md`), and the question went to the owner as дополнение
+/// 125б. One door is what a second door costs nothing to become, and that is why it is worth
+/// having on its own.
+#[test]
+fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut doors = Vec::new();
+    let mut files = 0;
+
+    for entry in fs::read_dir(&sources).expect("the source directory must be readable") {
+        let path = entry.expect("a directory entry must be readable").path();
+
+        if path.extension().is_none_or(|kind| kind != "rs") {
+            continue;
+        }
+
+        files += 1;
+
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let text = fs::read_to_string(&path).expect("a source file must be readable");
+
+        for (number, line) in text.lines().enumerate() {
+            // Comments first: the repair explains itself at length, and an explanation is not
+            // a door.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+
+            if line.contains("ShellExecuteW(") {
+                doors.push(format!("{name}:{}", number + 1));
+            }
+        }
+    }
+
+    println!("files read: {files}; doors found: {doors:?}");
+
+    assert!(
+        files >= 15,
+        "the sweep must have read the whole of src\\, not {files} files"
+    );
+    assert_eq!(
+        doors.len(),
+        1,
+        "this program may ask for something to be opened in exactly one place — found {doors:?}"
+    );
+
+    // And it is the shared door, not one of the three the finding names.
+    let settings = fs::read_to_string(sources.join("settings.rs"))
+        .expect("src\\settings.rs must be readable")
+        .replace("\r\n", "\n");
+
+    let at = settings
+        .find("pub fn open_in_the_shell(target: &str) -> bool {")
+        .expect("the one door is `settings::open_in_the_shell`");
+    let body = &settings[at..];
+    let end = body
+        .find("\n}")
+        .expect("a function closes with a brace of its own");
+
+    assert!(
+        body[..end].contains("ShellExecuteW("),
+        "and the one call the sweep found stands inside it"
+    );
+
+    // The three callers, by name, so that a fourth has to be added here on purpose.
+    let letters = fs::read_to_string(sources.join("letters.rs"))
+        .expect("src\\letters.rs must be readable")
+        .replace("\r\n", "\n");
+
+    assert_eq!(
+        letters.matches("settings::open_in_the_shell(").count(),
+        2,
+        "«Открыть ссылку» and «Сохранить в папку журнала» both go through the door"
+    );
+    assert_eq!(
+        settings.matches("open_in_the_shell(&dir.display()").count(),
+        1,
+        "and so does «Открыть папку журнала»"
+    );
+}

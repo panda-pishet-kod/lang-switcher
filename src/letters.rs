@@ -1667,7 +1667,6 @@ use windows::Win32::UI::Controls::{
     ODT_COMBOBOX, ODT_STATIC,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     DM_SETDEFID, DestroyWindow, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDCANCEL,
     KillTimer, MSG, MapDialogRect, PostMessageW, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
@@ -1677,7 +1676,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
     WM_INITDIALOG, WM_MEASUREITEM, WM_NCDESTROY, WM_TIMER,
 };
-use windows::core::{Error as WinError, PCWSTR, w};
+use windows::core::{Error as WinError, PCWSTR};
 
 use crate::settings::{self, Language};
 use crate::theme::{self, StaticColorRole, ThemeSetting};
@@ -5376,9 +5375,9 @@ fn perform(hwnd: HWND, action: Action) {
         // call site would be a second place that can forget the guard of `dialog_is_open`.
         Action::OpenSettings => crate::tray::dispatch_command(owner, crate::tray::CMD_SETTINGS),
 
-        Action::OpenChannel => open_link(hwnd, links::CHANNEL_URL),
-        Action::OpenSupport => open_link(hwnd, links::SUPPORT_URL),
-        Action::OpenDownload | Action::OpenLink => open_link(hwnd, &link),
+        Action::OpenChannel => open_link(links::CHANNEL_URL),
+        Action::OpenSupport => open_link(links::SUPPORT_URL),
+        Action::OpenDownload | Action::OpenLink => open_link(&link),
 
         Action::OpenAuthor => open_author(owner),
         Action::OpenLetters => open_list(owner),
@@ -5399,11 +5398,14 @@ fn perform(hwnd: HWND, action: Action) {
 ///
 /// # The gate of С52 — task T-41-1
 ///
-/// [`links::is_allowed`] is asked **here**, where `ShellExecuteW` is called, and not in the
-/// reading of the feed. A check in the parser would be a check one future caller can walk
-/// round; a check on the door is the door. The button of an address that fails it is not drawn
-/// either, and that is a second courtesy rather than the protection.
-fn open_link(hwnd: HWND, url: &str) {
+/// [`links::is_allowed`] is asked **here**, on the near side of the one door of the program,
+/// and not in the reading of the feed. A check in the parser would be a check one future caller
+/// can walk round; a check on the door is the door. The button of an address that fails it is
+/// not drawn either, and that is a second courtesy rather than the protection.
+///
+/// ⚠ The owner window went with task T-41-4: [`settings::open_in_the_shell`] is shared by three
+/// callers and has no one window to give the shell's error box to.
+fn open_link(url: &str) {
     if url.is_empty() || links::is_placeholder(url) {
         return;
     }
@@ -5413,28 +5415,10 @@ fn open_link(hwnd: HWND, url: &str) {
         return;
     }
 
-    let wide = settings::wide(url);
-
-    // SAFETY: `wide` is a NUL-terminated UTF-16 buffer owned by this frame and neither moved
-    // nor dropped until the call returns; the two null pointers are the documented way to pass
-    // no arguments and no working directory. `hwnd` is the live window and becomes the owner of
-    // any error box the shell decides to show.
-    let result = unsafe {
-        ShellExecuteW(
-            Some(hwnd),
-            w!("open"),
-            PCWSTR(wide.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-
-    // NFR-13. `ShellExecuteW` reports failure as a value of 32 or below in what is nominally a
-    // module handle — the one Win32 return value that is neither a `BOOL` nor an error code.
-    if result.0 as usize <= 32 {
-        crate::app::report_non_critical("ShellExecuteW", &WinError::from_thread());
-    }
+    // Finding С26, task T-41-4: through the one door of the program. What that door does
+    // inside itself is an open question — see [`settings::open_in_the_shell`] — but there is
+    // one of it, and a sweep keeps it so.
+    settings::open_in_the_shell(url);
 }
 
 /// Writes down that an address was turned away by the gate of С52 — task T-41-1.
@@ -8339,7 +8323,7 @@ fn wizard_command(hwnd: HWND, control: i32, notification: u16) -> bool {
         // «Открыть канал» on the thanks — задача Т-33-3. Dead while the address is a
         // placeholder, and the button is disabled to say so (П7).
         IDC_WZ_CHANNEL => {
-            open_link(hwnd, links::CHANNEL_URL);
+            open_link(links::CHANNEL_URL);
             return true;
         }
         _ => {}
@@ -8999,7 +8983,7 @@ fn wizard_copy(hwnd: HWND) {
     let live = !links::is_placeholder(links::CHANNEL_URL);
 
     if written && live {
-        open_link(hwnd, links::CHANNEL_URL);
+        open_link(links::CHANNEL_URL);
     }
 
     let said = match (written, live) {
@@ -9060,24 +9044,11 @@ fn wizard_save(hwnd: HWND) {
 
 /// Opens a folder in the shell — the road the journal folder of the settings window takes.
 fn open_folder(folder: &std::path::Path) {
-    let wide = settings::wide(&folder.display().to_string());
-
-    // SAFETY: both buffers are NUL-terminated and live for the length of the call; `SW_SHOW`
-    // is a plain value. ⛔ Nothing is run: «open» on a folder hands it to the file manager.
-    let answer = unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            PCWSTR(wide.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
-        )
-    };
-
-    if answer.0 as isize <= 32 {
-        crate::app::report_non_critical("ShellExecuteW", &WinError::from_thread());
-    }
+    // ⭐ **Finding С26, task T-41-4 — this is the door the finding warned about.** It opens the
+    // *same* journal folder as the button «Открыть папку журнала» of the settings dialog, by
+    // different code: «вторая дверь через полгода» had already happened by the time the repair
+    // arrived. Both now go through [`settings::open_in_the_shell`].
+    settings::open_in_the_shell(&folder.display().to_string());
 }
 
 /// Writes one line into the wizard's status line and shows it.

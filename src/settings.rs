@@ -12666,7 +12666,7 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
         // SAFETY: see the caller.
         IDC_CYCLE_DOWN => unsafe { move_cycle_row(hwnd, 1) },
 
-        IDC_LOG_OPEN => open_log_folder(hwnd),
+        IDC_LOG_OPEN => open_log_folder(),
         IDC_LOG_SAVE => save_journal(hwnd),
 
         // FR-104, task Т-32-8: the third way into the wizard, beside the tray entry and the
@@ -12981,31 +12981,58 @@ fn remove_exclusion(hwnd: HWND) {
     show_exclusion_ceiling(hwnd);
 }
 
-/// Opens the journal folder in the shell — the button of the «Диагностика» section.
+// ---------------------------------------------------------------------------------------
+// The one door out of this program — finding С26, task T-41-4
+// ---------------------------------------------------------------------------------------
+
+/// Asks the shell to open `target`, and is **the one place in this program that asks anything
+/// to be opened at all** — finding С26, task T-41-4.
 ///
-/// The folder is not created if it is absent: an empty folder appearing because somebody
-/// pressed a button is a side effect nobody asked for, and the folder exists as soon as
-/// anything has been written to it.
-fn open_log_folder(hwnd: HWND) {
-    let Some(dir) = crate::diag::log_dir() else {
-        return;
-    };
+/// # Why one door
+///
+/// Opening something is the only thing this program does that starts somebody else's code, and
+/// the audit's warning about it was not hypothetical: by the time the repair arrived there were
+/// **three** such places, and two of them opened the *same* journal folder by different code —
+/// the button «Открыть папку журнала» of this dialog and «Сохранить в папку журнала» of the
+/// letter wizard (`letters::open_folder`, FR-104). «Вторая дверь через полгода» is the shape of
+/// the finding, and it had already happened. A sweep in `tests\settings.rs` keeps the count at
+/// one from here on.
+///
+/// # ⚠ The mechanism inside the door is NOT repaired, and that is an open question, not an
+/// oversight
+///
+/// This process carries `uiAccess`. `ShellExecuteW` asks Windows to open the thing **from
+/// here**, and when that means creating a process — the shell is not up, or a third-party file
+/// manager is registered for folders — **the new process inherits this program's token**: the
+/// raised rights and the right to reach across the window boundary Windows otherwise keeps.
+/// The installer has defended against the trap with an explicit flag since stage E9; the
+/// product never said a word about it.
+///
+/// The repair the terms of reference ask for is to hand the job to the **already running**
+/// shell, so that what comes up is its child and not ours. Both roads they name were measured
+/// and **both are closed in this crate's configuration** (`scratchpad-E41\probe-shell-T-41-4.md`):
+/// `SHOpenFolderAndSelectItems` is not generated at all, and neither are `IShellBrowser` and
+/// `IShellView`; `IShellDispatch2` exists as a type, but **not one method of the chain does**,
+/// because every one of them passes a `VARIANT` — and `VARIANT` is not generated either, with
+/// the `Win32_System_Variant` feature added or without it. Adding that feature costs nothing
+/// (`cargo tree` is 83 either way) and buys nothing; going further would mean moving the crate
+/// version, which SEC-03 closes and only the owner may open.
+///
+/// So the door is one door, and what it does inside it is what it always did. The question of
+/// the mechanism is the owner's — вопрос 125, дополнение **125б**.
+pub fn open_in_the_shell(target: &str) -> bool {
+    let wide = wide(target);
 
-    if !dir.is_dir() {
-        return;
-    }
-
-    let path = wide(&dir.display().to_string());
-
-    // SAFETY: `path` is a NUL-terminated UTF-16 buffer owned by this frame and neither moved
+    // SAFETY: `wide` is a NUL-terminated UTF-16 buffer owned by this frame and neither moved
     // nor dropped until the call returns; the two null pointers are the documented way to pass
-    // no arguments and no working directory. `hwnd` is the live dialog and becomes the owner of
-    // any error box the shell decides to show.
+    // no arguments and no working directory. No owner window is passed: a door shared by three
+    // callers has no one window to own the shell's error box, and the shell puts it on the
+    // desktop instead — which is what the two callers in `letters.rs` already did.
     let result = unsafe {
         ShellExecuteW(
-            Some(hwnd),
+            None,
             w!("open"),
-            PCWSTR(path.as_ptr()),
+            PCWSTR(wide.as_ptr()),
             PCWSTR::null(),
             PCWSTR::null(),
             SW_SHOWNORMAL,
@@ -13016,7 +13043,28 @@ fn open_log_folder(hwnd: HWND) {
     // module handle — the one Win32 return value that is neither a `BOOL` nor an error code.
     if result.0 as usize <= 32 {
         crate::app::report_non_critical("ShellExecuteW", &WinError::from_thread());
+        return false;
     }
+
+    true
+}
+
+/// Opens the journal folder in the shell — the button of the «Диагностика» section.
+///
+/// The folder is not created if it is absent: an empty folder appearing because somebody
+/// pressed a button is a side effect nobody asked for, and the folder exists as soon as
+/// anything has been written to it.
+fn open_log_folder() {
+    let Some(dir) = crate::diag::log_dir() else {
+        return;
+    };
+
+    if !dir.is_dir() {
+        return;
+    }
+
+    // Finding С26, task T-41-4: through the one door, like the two in `letters.rs`.
+    open_in_the_shell(&dir.display().to_string());
 }
 
 /// Writes the journal to its file **now** — the button «Сохранить журнал» of «Диагностика»,
