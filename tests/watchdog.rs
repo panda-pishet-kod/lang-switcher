@@ -2063,17 +2063,35 @@ fn send_pause(edge: Edge) {
 /// by FR-95 but handed off to nobody — so the user pressed `Pause` and nothing happened, once
 /// per lost release, silently.
 ///
-/// The staging is the defect's own: press, take the hook away and put it back through the FR-80
-/// door, press again. The second press has to hand off too. The release is never sent — it does
-/// not have to be, because the state a lost release leaves behind is precisely "we still think
-/// it is down", and that is the state the first press already put here.
+/// ⚠⚠ **The canon of this test moved in task T-36-3 (finding Н39, решение 123), and both halves of
+/// the rule are driven here now.**
+///
+/// It used to press, reinstall through the FR-80 door with [`watchdog::Reason::Timer`], press again
+/// and demand a second handoff — with **no release in between**. That staging is not the defect of
+/// Т-22-1 at all: with no release sent, the second press is the auto-repeat of a key still held,
+/// and FR-08 is right to read it as one. What the old assertion really pinned was "a reinstallation
+/// forgets **always**", and finding Н39 is about the price of that: FR-80 puts the hook back every
+/// thirty seconds whether anything happened or not, so a user holding the hotkey across a tick had
+/// the hold forgotten under their finger and the word converted a **second** time, against FR-08.
+///
+/// So the two situations are told apart, and this test drives them both:
+///
+/// * **the planned tick that found its own hook standing** — the hold survives, and a press during
+///   it is an auto-repeat that hands off to nobody. That is the repair of Н39;
+/// * **a reason other than the timer** — a desktop switch, a session change, a resume — means
+///   something happened while this program was not watching, a release may have been missed, and
+///   the hold is forgotten. That is the repair of Т-22-1, still in force.
+///
+/// The rule itself is `watchdog::clears_hotkey_state`, and its whole table — five reasons × two ×
+/// two — is in `tests\hook.rs`, where no hook is needed to drive it. This is the live half: the
+/// same two answers, through the real door, with a real hook and real strokes.
 ///
 /// ⚠ `#[ignore]`d, and named to sort after `the_gap_without_a_hook_is_microseconds`, for the
 /// reasons that test states: it installs a **live global `WH_KEYBOARD_LL` hook**, and it moves
-/// `recoveries` by one.
+/// `recoveries` by two.
 #[test]
 #[ignore = "installs a live global WH_KEYBOARD_LL hook and sends synthetic Pause; run deliberately with --ignored --test-threads=1"]
-fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
+fn the_hotkey_state_of_fr08_survives_a_planned_tick_and_not_a_real_absence() {
     let _turn = notice_turn();
 
     // SAFETY: `None` asks for the handle of the running executable, which cannot be unloaded
@@ -2108,7 +2126,8 @@ fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
         "the first press must reach the far end of the handoff"
     );
 
-    // Act 2 — the gap of FR-80, through the door the watchdog uses.
+    // Act 2 — the planned tick of FR-80, through the door the watchdog uses. The hook was
+    // standing and this program took it off itself, so no stroke can have been missed.
     assert!(
         watchdog::reinstall_hook(window.handle, watchdog::Reason::Timer),
         "the reinstallation must end with a hook"
@@ -2116,14 +2135,38 @@ fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
 
     drain_the_queue();
 
-    // Act 3 — the next press. It is the first press of a program that has just started seeing
-    // the keyboard again, and FR-08 has to read it as one.
+    // Act 3 — the key is still held, and the next `WM_KEYDOWN` the system sends is its
+    // auto-repeat. FR-08 has to read it as one: the word was converted on the press, and a second
+    // conversion under one finger is the defect of Н39.
     send_pause(Edge::Down);
 
-    let after_second = pump_until_handoffs(after_first + 1, Duration::from_secs(2));
+    // Nothing to wait **for** here, so the wait is a bounded one for the absence: two seconds of
+    // pumping, and the count must not have moved.
+    pump_for(Duration::from_secs(1));
+    let after_repeat = lang_switcher::hook::hotkey_handoffs();
+
+    // Act 4 — the release, which the hook is there to see, and then a real press. This one is a
+    // first press again and must hand off.
+    send_pause(Edge::Up);
+    pump_for(Duration::from_millis(200));
+
+    send_pause(Edge::Down);
+    let after_third = pump_until_handoffs(after_first + 1, Duration::from_secs(2));
+
+    // Act 5 — a reason that is **not** the timer, with the key held. Something happened while the
+    // program was not watching, so the hold is forgotten and the next press counts as a first one.
+    assert!(
+        watchdog::reinstall_hook(window.handle, watchdog::Reason::SessionChange),
+        "the second reinstallation must end with a hook too"
+    );
+
+    drain_the_queue();
+
+    send_pause(Edge::Down);
+    let after_forgotten = pump_until_handoffs(after_third + 1, Duration::from_secs(2));
 
     // The release, now that there is a hook to eat it: the machine must not be left with `Pause`
-    // held down. Sent before the assertion, so that a red test leaves the keyboard as it found
+    // held down. Sent before the assertions, so that a red test leaves the keyboard as it found
     // it.
     send_pause(Edge::Up);
     pump_for(Duration::from_millis(200));
@@ -2134,10 +2177,22 @@ fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
     assert!(!lang_switcher::hook::is_installed());
 
     assert_eq!(
-        after_second,
+        after_repeat, after_first,
+        "Н39: a planned tick of FR-80 must NOT forget that the hotkey is held — the auto-repeat \
+         that follows it is an auto-repeat, and converting the word a second time under one \
+         finger is what this task repaired"
+    );
+    assert_eq!(
+        after_third,
         after_first + 1,
-        "Т-22-1: a reinstallation must forget the FR-08 down state, or the first press after it \
-         is read as auto-repeat and handed off to nobody"
+        "and a genuine press after a genuine release still hands off"
+    );
+    assert_eq!(
+        after_forgotten,
+        after_third + 1,
+        "Т-22-1, still in force: a reinstallation for any reason but the timer forgets the down \
+         state — a release made while the hook was off was seen by nobody, and the next press \
+         must not be read as auto-repeat"
     );
 }
 
