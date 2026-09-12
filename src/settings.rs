@@ -6567,7 +6567,7 @@ impl CaptionIcons {
         // the answer follows the display scale. `crate::tray` asks the same question for the
         // notification area and its function is the one asked here, rather than a second
         // copy of the same `GetSystemMetrics` pair (§6.2).
-        let (small_cx, small_cy) = crate::tray::small_icon_size();
+        let (small_cx, small_cy) = crate::tray::small_icon_size(None);
 
         // SAFETY: `instance` is the module handle whose resources carry `IDI_APP_ACTIVE`
         // — the very module the interface strings are read from — and the "name" is an

@@ -27,7 +27,14 @@ $ErrorActionPreference = 'Stop'
 
 # The script lives in tools\, the icons live in res\ of the same working copy.
 $OutDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'res'
-$SIZES  = @(16, 20, 24, 32, 48, 64, 256)
+# Task T-42-11, finding 124б.2. 28, 40 and 56 were added because the product asks for exactly
+# those and for nothing near them: the tray icon is SM_CXSMICON (16 at 96 DPI) scaled to the
+# monitor -- 16/20/24/28/32 at 100/125/150/175/200 % -- and the balloon icon is SM_CXICON (32)
+# on the same scale -- 32/40/48/56/64. Before this task the file had 16/20/24/32/48/64/256, so
+# at 175 % the shell was handed a 24 px frame stretched to 28, and at 125 % a 32 px one
+# stretched to 40. Every frame is DRAWN from the same vector description, not resampled from a
+# bigger one, so three more of them cost nothing but bytes.
+$SIZES  = @(16, 20, 24, 28, 32, 40, 48, 56, 64, 256)
 
 # Supersampling factor. The glyph is drawn at SIZE*SS and boxed down, which is what keeps the
 # 2 px shaft of the arrow from breaking up at 16 px.

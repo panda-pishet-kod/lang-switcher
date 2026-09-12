@@ -152,11 +152,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MENUINFO, MF_CHECKED, MF_DISABLED, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR,
     MF_UNCHECKED, MIM_BACKGROUND, NONCLIENTMETRICSW, PostMessageW, RT_VERSION,
     RegisterWindowMessageW, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYMENU,
-    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow,
-    SetMenuInfo, SetTimer, SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP,
-    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE,
-    WM_NULL, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
+    SM_CYSMICON, SPI_GETNONCLIENTMETRICS, SYSTEM_METRICS_INDEX,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenuInfo, SetTimer,
+    SetWindowsHookExW, SystemParametersInfoW, TPM_LAYOUTRTL, TPM_NONOTIFY, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenuEx, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_APP, WM_CONTEXTMENU,
+    WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
 };
 use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
 
@@ -606,7 +607,7 @@ impl Tray {
         instance: HINSTANCE,
         config_path: Option<PathBuf>,
     ) -> WinResult<Self> {
-        let icon_size = small_icon_size();
+        let icon_size = small_icon_size(Some(hwnd));
         let active = Icon::load(instance, IDI_APP_ACTIVE, icon_size)?;
         let paused = Icon::load(instance, IDI_APP_PAUSED, icon_size)?;
         // FR-90's third state, task Т-32-4 — loaded here with the other two so that the dot
@@ -617,7 +618,7 @@ impl Tray {
         // Задача Т-33а-1: те же четыре значка ещё раз, крупным кадром — для шара уведомления.
         // ⚠ Без `?`: значок уведомления — украшение письма, а письмо — нет. Отказ загрузки
         // стоит одной записи в журнале и возвращает шару прежний вид (NFR-13).
-        let balloon = BalloonIcons::load(instance);
+        let balloon = BalloonIcons::load(Some(hwnd), instance);
 
         let (config, save_policy, on_disk) = match config_path.as_deref() {
             Some(path) => {
@@ -4302,8 +4303,8 @@ impl BalloonIcons {
     ///
     /// The failure is journaled once and is not an error of the tray: everything the tray does
     /// works without these, and only the picture in the balloon is poorer for it.
-    fn load(instance: HINSTANCE) -> Option<Self> {
-        let size = large_icon_size();
+    fn load(hwnd: Option<HWND>, instance: HINSTANCE) -> Option<Self> {
+        let size = large_icon_size(hwnd);
 
         let load = |id: u16| match Icon::load(instance, id, size) {
             Ok(icon) => Some(icon),
@@ -4334,45 +4335,92 @@ impl Drop for Icon {
     }
 }
 
+/// The DPI of the monitor `hwnd` is on — task T-42-10, finding 124б.2.
+///
+/// The one road this file takes to the display scale, and the same one the drawing takes:
+/// `theme::dc_dpi` of a DC belonging to the **window**. `GetDpiForWindow` would say it in one
+/// call, but it lives in the `Win32_UI_HiDpi` feature and the list of features of section 3.2
+/// is closed (SEC-03) — and this road is not a workaround, it is what every painted pixel of
+/// this program already goes through.
+///
+/// ⚠ `None` is a caller that has **no window yet** — [`crate::settings::CaptionIcons`] loads the
+/// caption icon before `WM_INITDIALOG`, because a resource does not need a window and a window
+/// does not exist yet. The screen DC then answers 96 in this process, which is the size that
+/// caller asked for before this task and no worse than it was.
+///
+/// NFR-13: a DC that could not be got leaves the caller at 96 DPI, which is the 100 % look.
+fn window_dpi(hwnd: Option<HWND>) -> i32 {
+    // SAFETY: `hwnd` is a live window of this process or `None` for the screen; the DC is
+    // released below on the same thread, as `ReleaseDC` requires.
+    let dc = unsafe { GetDC(hwnd) };
+
+    if dc.is_invalid() {
+        return 96;
+    }
+
+    let dpi = crate::theme::dc_dpi(dc);
+
+    // SAFETY: the DC was taken from this same window a line above.
+    unsafe { ReleaseDC(hwnd, dc) };
+
+    dpi
+}
+
+/// One system metric at the scale of the monitor `hwnd` is on — task T-42-10.
+///
+/// # ⛔ Why the metric has to be scaled by hand
+///
+/// The manifest declares this process **`PerMonitorV2`** (section 8.1), and in such a process
+/// `GetSystemMetrics` answers for the DPI of the **thread's awareness context**, which is 96 —
+/// there is no single DPI a per-monitor process could be asked about, which is exactly why
+/// `GetSystemMetricsForDpi` exists. Measured on this machine: `GetSystemMetrics(SM_CXSMICON)`
+/// answers **16** where 125 % needs **20**, and `GetSystemMetrics(SM_CXICON)` answers 32 where
+/// it needs 40.
+///
+/// So the icon of FR-90 was loaded at 16 px and stretched to 20 by the shell, and the owner saw
+/// it on the live product: «Ярлык в трее размытый и не четкий» (решение 124б.2). The `.ico`
+/// files carry a 20 px frame — nobody was asking for it.
+///
+/// `GetSystemMetricsForDpi` is not reachable: it lives in the `Win32_UI_HiDpi` feature, and the
+/// feature list is closed (SEC-03, §2 of the задание). The arithmetic is the same one the
+/// drawing does: the metric at 96 DPI, scaled to the window's.
+fn metric_at_window_dpi(hwnd: Option<HWND>, index: SYSTEM_METRICS_INDEX, at_96: i32) -> i32 {
+    // SAFETY: `GetSystemMetrics` reads a system-wide value, takes no pointer and touches no
+    // memory of ours. It returns zero for an index the system does not know, which is why the
+    // result is examined rather than passed on (NFR-13): a zero would ask `LoadImageW` for the
+    // resource's own size and quietly defeat the point of the call.
+    let measured = unsafe { GetSystemMetrics(index) };
+
+    // The documented value at 100 % is the fallback for a refused metric.
+    let base = if measured > 0 { measured } else { at_96 };
+
+    (base * window_dpi(hwnd) + 48) / 96
+}
+
 /// The size the shell wants a notification-area icon in — FR-90.
 ///
-/// Asked of the system rather than fixed at 16: the value follows the display scale, and a
-/// hard-wired 16 on a scaled monitor is stretched into a blurred icon. Both `.ico` files
-/// carry 16/20/24/32 px frames, and `LoadImageW` picks the frame nearest what is asked for.
-pub fn small_icon_size() -> (i32, i32) {
-    // SAFETY: `GetSystemMetrics` reads a system-wide value, takes no pointer and touches no
-    // memory of ours. It returns zero for an index the system does not know, which is why
-    // the result is examined below rather than passed on (NFR-13): a zero would ask
-    // `LoadImageW` for the resource's own size and quietly defeat the point of the call.
-    let width = unsafe { GetSystemMetrics(SM_CXSMICON) };
-
-    // SAFETY: as above.
-    let height = unsafe { GetSystemMetrics(SM_CYSMICON) };
-
-    // A metric that came back zero or negative is unusable. Sixteen is what the small-icon
-    // metric is at 100% scale and is the safe fallback.
-    let usable = |value: i32| if value > 0 { value } else { 16 };
-
-    (usable(width), usable(height))
+/// Asked of the system and **scaled to the window's monitor** ([`metric_at_window_dpi`]): the
+/// value follows the display scale, and a 16 px frame on a scaled monitor is stretched into a
+/// blurred icon. The four `.ico` files carry 16/20/24/32/48/64 px frames, and `LoadImageW`
+/// picks the frame nearest what is asked for — 16 at 100 %, 20 at 125 %, 24 at 150 %, 32 at
+/// 200 %, every one of them an exact frame.
+pub fn small_icon_size(hwnd: Option<HWND>) -> (i32, i32) {
+    (
+        metric_at_window_dpi(hwnd, SM_CXSMICON, 16),
+        metric_at_window_dpi(hwnd, SM_CYSMICON, 16),
+    )
 }
 
 /// The size the shell draws the icon of a **balloon** at — задача Т-33а-1.
 ///
-/// `SM_CXICON` and not a fixed 32: like the small metric it follows the display scale — 32 px at
-/// 100 %, 40 at 125 %, 48 at 150 %, — and the four `.ico` files carry 32, 48 and 64 px frames,
-/// so `LoadImageW` has an exact frame to hand back at each of those and nothing is stretched.
-pub fn large_icon_size() -> (i32, i32) {
-    // SAFETY: as in `small_icon_size` — a system-wide read that takes no pointer. A zero would
-    // ask `LoadImageW` for the resource's own size, so the result is examined (NFR-13).
-    let width = unsafe { GetSystemMetrics(SM_CXICON) };
-
-    // SAFETY: as above.
-    let height = unsafe { GetSystemMetrics(SM_CYICON) };
-
-    // Thirty-two is what the large-icon metric is at 100% scale and is the safe fallback.
-    let usable = |value: i32| if value > 0 { value } else { 32 };
-
-    (usable(width), usable(height))
+/// `SM_CXICON` and not a fixed 32, and scaled to the window's monitor for the reason
+/// [`metric_at_window_dpi`] gives: 32 px at 100 %, 40 at 125 %, 48 at 150 %, 64 at 200 %. The
+/// four `.ico` files carry 32, 40, 48 and 64 px frames, so nothing is stretched at any of them.
+pub fn large_icon_size(hwnd: Option<HWND>) -> (i32, i32) {
+    (
+        metric_at_window_dpi(hwnd, SM_CXICON, 32),
+        metric_at_window_dpi(hwnd, SM_CYICON, 32),
+    )
 }
 
 /// A resource identifier in the `MAKEINTRESOURCE` form the resource loader expects.
@@ -4653,12 +4701,58 @@ mod tests {
 
     #[test]
     fn the_small_icon_metric_is_a_usable_size() {
-        let (width, height) = small_icon_size();
+        let (width, height) = small_icon_size(None);
 
         assert!(
             width > 0 && height > 0,
             "SM_CXSMICON and SM_CYSMICON must give a usable size"
         );
+    }
+
+    /// **Task T-42-10, finding 124б.2** — the size of an icon follows the scale of the monitor,
+    /// and the frames the `.ico` files carry are exactly the sizes it takes.
+    ///
+    /// ⛔ The defect this closes: in a `PerMonitorV2` process `GetSystemMetrics` answers for
+    /// 96 DPI whatever the monitor does, so the tray icon was loaded at 16 px and stretched to
+    /// 20 by the shell. The owner saw it on the live product — «Ярлык в трее размытый и не
+    /// четкий».
+    ///
+    /// The measurement is of the arithmetic, not of this machine's scale: `metric_at_window_dpi`
+    /// multiplies a 96-DPI metric by the window's DPI, and the values it must produce at the
+    /// five scales are the frames that exist in the resources.
+    #[test]
+    fn an_icon_size_follows_the_scale_and_lands_on_a_frame_that_exists() {
+        // The frames all four `.ico` files carry — `res\langswitcher-*.ico`, checked by
+        // `tools\verify-icons.ps1`.
+        let frames = [16, 20, 24, 28, 32, 40, 48, 56, 64, 256];
+
+        // What the arithmetic of `metric_at_window_dpi` gives for the two metrics at the five
+        // scales the fitting stand of the контур measures.
+        let scaled = |at_96: i32, dpi: i32| (at_96 * dpi + 48) / 96;
+
+        for (dpi, percent) in [(96, 100), (120, 125), (144, 150), (168, 175), (192, 200)] {
+            let small = scaled(16, dpi);
+            let large = scaled(32, dpi);
+
+            println!("{percent}%: значок трея {small} px, значок шара {large} px");
+
+            for (what, size) in [("трея", small), ("шара", large)] {
+                assert!(
+                    frames.contains(&size),
+                    "at {percent}% the icon {what} is asked for at {size} px, and no frame of \
+                     that size exists — the shell would stretch the nearest one and the icon \
+                     would be blurred, which is finding 124б.2"
+                );
+            }
+        }
+
+        // The three sizes the задача had to add frames for, spelled out: 125 % of the small
+        // metric is 20, 175 % of it is 28, and 125 % of the large one is 40. ⚠ The middle one
+        // is why this test exists at all — the first draft of the fix assumed 30 and the test
+        // said 28, which is what the arithmetic really gives.
+        assert_eq!(scaled(16, 120), 20, "125 % of the small metric is 20 px");
+        assert_eq!(scaled(16, 168), 28, "175 % of the small metric is 28 px");
+        assert_eq!(scaled(32, 120), 40, "125 % of the large metric is 40 px");
     }
 
     // -----------------------------------------------------------------------------------

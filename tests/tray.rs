@@ -2421,17 +2421,22 @@ fn the_balloon_icon_is_the_large_metric_and_not_the_small_one() {
     let expected = unsafe { (GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)) };
 
     println!("SM_CXICON={} SM_CYICON={}", expected.0, expected.1);
-    println!("large_icon_size()={:?}", tray::large_icon_size());
-    println!("small_icon_size()={:?}", tray::small_icon_size());
+    println!("large_icon_size()={:?}", tray::large_icon_size(None));
+    println!("small_icon_size()={:?}", tray::small_icon_size(None));
 
+    // ⚠ `None` — «без окна», то есть по экранному DC. Задача T-42-11 (находка 124б.2) сделала
+    // обе мерки зависимыми от DPI МОНИТОРА, на котором стоит окно, — потому что в процессе
+    // PerMonitorV2 `GetSystemMetrics` отвечает за 96 DPI, чем бы монитор ни был. Здесь окна
+    // нет, оба ответа получены на одном и том же DPI, и потому сравнение с самой метрикой
+    // по-прежнему законно: это тот же 96, что у `GetSystemMetrics` выше.
     assert_eq!(
-        tray::large_icon_size(),
+        tray::large_icon_size(None),
         expected,
         "Т-33а-1: размер значка шара идёт от SM_CXICON и не написан числом"
     );
 
     assert!(
-        tray::large_icon_size().0 > tray::small_icon_size().0,
+        tray::large_icon_size(None).0 > tray::small_icon_size(None).0,
         "Т-33а-1: большой значок обязан быть больше малого — иначе лечения нет"
     );
 }

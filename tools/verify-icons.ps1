@@ -74,7 +74,11 @@ function Get-LoadedIconSize([string]$path, [int]$px) {
 # and not two -- the state of the program and the state of the letters are independent.
 $files = @('langswitcher-active.ico','langswitcher-paused.ico',
            'langswitcher-active-unread.ico','langswitcher-paused-unread.ico')
-$SIZES = @(16,20,24,32,48,64,256)
+# Task T-42-11, finding 124б.2: 28, 40 and 56 joined the list. The product asks for the small
+# metric (16 at 96 DPI) and the large one (32) scaled to the monitor -- 16/20/24/28/32 and
+# 32/40/48/56/64 at 100/125/150/175/200 % -- and before this task the shell was handed a 24 px
+# frame stretched to 28 at 175 %, and a 32 px one stretched to 40 at 125 %.
+$SIZES = @(16,20,24,28,32,40,48,56,64,256)
 $fail = 0
 
 foreach ($f in $files) {
