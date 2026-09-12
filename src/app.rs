@@ -180,25 +180,171 @@ pub fn run() -> ExitCode {
     install_panic_hook();
 
     match SingleInstance::acquire() {
-        Ok(Acquisition::Acquired(instance)) => run_as_first_instance(instance),
-        Ok(Acquisition::AlreadyRunning) => {
-            // The notification of FR-82, unless this is a debug build on a bench — see
-            // `already_running_is_silent`, task Т-25-2. The exit code is the same either way:
-            // what is withheld is the window, not the refusal to start.
-            if !already_running_is_silent() {
-                notify_already_running();
-            }
+        Ok(acquisition) => {
+            // ⭐ **Finding Н24, task T-41-5: the name is not the only question asked.** A held
+            // name used to end the matter — «кто-то уже работает», and out. Any program of this
+            // user could create an object of that name first and make this one refuse to start
+            // for good; nothing was written down, and the person saw «программа не
+            // запускается» with no cause and no trace. So a second fact is asked for: is there
+            // a window of **our own class** anywhere in this session.
+            let taken = matches!(acquisition, Acquisition::AlreadyRunning(_));
+            let verdict = instance_verdict(taken, taken && a_window_of_ours_is_up());
+            let instance = acquisition.into_guard();
 
-            ExitCode::from(EXIT_ALREADY_RUNNING)
+            match verdict {
+                InstanceVerdict::TheInstance => run_as_first_instance(instance),
+
+                // There is a window of ours: a real second copy, and FR-82 answers exactly as
+                // it always has — the notification, unless this is a debug build on a bench
+                // (`already_running_is_silent`, task Т-25-2), and the exit code the acceptance
+                // of task T-01-2 and the installer both read.
+                InstanceVerdict::SecondCopy => {
+                    if !already_running_is_silent() {
+                        notify_already_running();
+                    }
+
+                    flush_the_journal_of_an_early_exit();
+
+                    ExitCode::from(EXIT_ALREADY_RUNNING)
+                }
+
+                // The name is held and no window of ours is anywhere: somebody else has the
+                // name. This program starts — and says so in the journal, because a program
+                // that carried on silently after finding its own name in a stranger's hands
+                // would be the same silence from the other side.
+                InstanceVerdict::NameTakenByAStranger => {
+                    crate::diag::record(
+                        crate::diag::Operation::from_name(NAME_TAKEN_BY_A_STRANGER),
+                        crate::diag::OsCode::NONE,
+                    );
+
+                    run_as_first_instance(instance)
+                }
+            }
         }
         Err(error) => {
             // FR-82 cannot be honoured if the mutex cannot be created at all, and starting
             // anyway would mean two copies hooking the keyboard. Refusing to start is the
             // only answer that keeps the requirement true.
             report_non_critical("CreateMutexW", &error);
+
+            flush_the_journal_of_an_early_exit();
+
             ExitCode::FAILURE
         }
     }
+}
+
+/// The journal row of a name held by somebody who is not this program — task T-41-5.
+const NAME_TAKEN_BY_A_STRANGER: &str = "single-instance name held by a stranger";
+
+/// What the two facts about the single-instance name add up to — finding Н24, task T-41-5.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstanceVerdict {
+    /// The name was free. This process is the instance of FR-82.
+    TheInstance,
+    /// The name is held **and** a window of this program's own class is up in this session:
+    /// a real second copy, and FR-82's answer is unchanged.
+    SecondCopy,
+    /// The name is held and no window of ours is anywhere. Somebody else took the name — by
+    /// accident far more likely than by design, the name being a plain string any program can
+    /// name an object with.
+    NameTakenByAStranger,
+}
+
+/// The rule of FR-82 as it stands after task T-41-5 — pure, and a table of four closes it.
+///
+/// `our_window_found` is only meaningful when `name_taken`; the caller does not ask the system
+/// at all when the name was free, and the table says so by answering the same thing either way.
+pub fn instance_verdict(name_taken: bool, our_window_found: bool) -> InstanceVerdict {
+    match (name_taken, our_window_found) {
+        (false, _) => InstanceVerdict::TheInstance,
+        (true, true) => InstanceVerdict::SecondCopy,
+        (true, false) => InstanceVerdict::NameTakenByAStranger,
+    }
+}
+
+/// How long a window of ours is waited for before the name is called a stranger's — task
+/// T-41-5. Milliseconds.
+///
+/// ⚠ **This is not politeness, it is the race.** A real second copy started a tenth of a second
+/// after the first finds the name already taken and the first copy's window **not yet created**
+/// — the name is acquired here, at the top of `run`, and the windows are built much later, on
+/// the three threads. Without the wait that second copy would call the first one a stranger and
+/// start, and two copies of this program would hook the keyboard: exactly what FR-82 exists to
+/// prevent. Two seconds is far longer than the gap between the two lines and far shorter than
+/// anybody's patience.
+///
+/// It costs nothing in the two ordinary cases. A free name is not asked about at all, and a
+/// genuine second copy finds the window on the first look.
+const WINDOW_SEARCH_BUDGET_MS: u64 = 2_000;
+
+/// One step of that wait.
+const WINDOW_SEARCH_STEP_MS: u64 = 50;
+
+/// Whether a window of this program's own class is up in this session — task T-41-5.
+///
+/// ⚠ **It cannot find this process's own window, and the order of `run` is why.** The name is
+/// acquired on the line above this call; the windows are created inside `run_as_first_instance`,
+/// on the threads it spawns, which this process has not reached. There is nothing of ours to
+/// find yet, so what a hit means is unambiguous: another copy of this program is up.
+fn a_window_of_ours_is_up() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    let steps = WINDOW_SEARCH_BUDGET_MS / WINDOW_SEARCH_STEP_MS;
+
+    for step in 0..=steps {
+        // SAFETY: both arguments are `'static` UTF-16 literals of this build, and the call
+        // reads a system table and keeps nothing of ours. A class that is not registered
+        // anywhere in the session is an `Err`, which is the answer «нет такого окна» and not a
+        // failure to report.
+        if unsafe { FindWindowW(WINDOW_CLASS_NAME, PCWSTR::null()) }.is_ok() {
+            return true;
+        }
+
+        if step < steps {
+            std::thread::sleep(std::time::Duration::from_millis(WINDOW_SEARCH_STEP_MS));
+        }
+    }
+
+    false
+}
+
+/// Writes the ring to the file on a path that never reaches the threads — task T-41-5, part (а)
+/// of finding Н24.
+///
+/// # Why this exists at all
+///
+/// `diag::dump_on_shutdown` is called from exactly one place — `thread_body(Role::Ui)`, as the
+/// UI thread leaves its message loop — and **both early exits of `run` return before any thread
+/// is spawned**. So until this task everything the ring held on those two paths died in memory:
+/// the refusal of `CreateMutexW` was recorded and never written, which is the half of finding
+/// Н24 the repair of the verdict above does not by itself answer.
+///
+/// # ⚠ And why it is still not the whole answer
+///
+/// The dump is written only when `[diagnostics] log_enabled` is on, and section 7 has it **off
+/// by default**. On this path nothing has read the configuration yet — the publication that
+/// normally tells `diag` about it happens after the threads are up — so it is read here, once,
+/// for this one question.
+///
+/// With the journal off there is still nothing on the disk, and what to do about *that* is not
+/// the executor's to decide: it is the owner's, вопрос 125 п. 5, and it is asked as дополнение
+/// **125а**. This function is part (а) — «довести запись до файла», — and it does exactly that
+/// and no more.
+fn flush_the_journal_of_an_early_exit() {
+    let Some(path) = settings::default_config_path() else {
+        return;
+    };
+
+    let Ok((config, _)) = settings::read_from(&path) else {
+        // NFR-13: a file that will not read is not a reason to invent a setting. The dump does
+        // not happen, and the person's `log_enabled` is not guessed at.
+        return;
+    };
+
+    crate::diag::set_log_enabled(config.diagnostics.log_enabled);
+    crate::diag::dump_on_shutdown();
 }
 
 /// Asks every thread of the process to leave its message loop. Idempotent, callable from
@@ -826,8 +972,26 @@ const ALREADY_RUNNING_TEXT: PCWSTR = w!("Lang Switcher is already running in thi
 enum Acquisition {
     /// This process is the instance; the mutex lives as long as the guard.
     Acquired(SingleInstance),
-    /// Another instance holds the name already.
-    AlreadyRunning,
+    /// The name was already held when this process asked for it.
+    ///
+    /// ⭐ **It carries the guard too, since task T-41-5.** The handle is a real, open handle to
+    /// the object — `CreateMutexW` answers one whether it made the object or found it — and
+    /// until this task it was dropped on this line, because the only thing left to do was
+    /// leave. Now there is a second road out of this arm: when no window of ours can be found,
+    /// the name is a stranger's and this process starts anyway, and it starts **holding this
+    /// handle**. Holding it is the right thing on that road: the name then stays taken for as
+    /// long as this copy lives, so a genuine second copy of ours still sees it held — and finds
+    /// this one's window, and refuses, exactly as FR-82 says.
+    AlreadyRunning(SingleInstance),
+}
+
+impl Acquisition {
+    /// The guard, whichever arm carried it — task T-41-5.
+    fn into_guard(self) -> SingleInstance {
+        match self {
+            Self::Acquired(instance) | Self::AlreadyRunning(instance) => instance,
+        }
+    }
 }
 
 /// Ownership of the named mutex behind FR-82.
@@ -864,11 +1028,15 @@ impl SingleInstance {
         // second instance is required to close its handle too: it is a real, open handle to
         // the first instance's object, and leaking it would keep the kernel object alive
         // past the moment the first instance exits.
+        //
+        // ⭐ **Task T-41-5 hands it out on both roads instead of dropping it here.** It is still
+        // closed either way — the guard's `Drop` is what closes it, and `run` lets it go the
+        // moment it decides to leave — but the decision of *which* road this is belongs to
+        // `run` and not to this function, which knows only that the name was held.
         let instance = Self { handle };
 
         if last_error == ERROR_ALREADY_EXISTS {
-            drop(instance);
-            return Ok(Acquisition::AlreadyRunning);
+            return Ok(Acquisition::AlreadyRunning(instance));
         }
 
         Ok(Acquisition::Acquired(instance))

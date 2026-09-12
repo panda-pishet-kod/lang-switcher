@@ -1411,3 +1411,124 @@ fn a_password_field_does_not_give_the_hotkey_away() {
         "FR-70: the hotkey must not be given away on a password field"
     );
 }
+
+// =========================================================================================
+// FR-82 — a held name is not by itself a second copy. Finding Н24, task T-41-5
+// =========================================================================================
+
+/// **Finding Н24, task T-41-5 — the table of four the verdict of FR-82 is decided by.**
+///
+/// «Один экземпляр на сеанс» stood on one fact: a named object either existed or did not. Any
+/// program of this user could create an object of that name **first** — by design, or by the
+/// far likelier accident of choosing the same string — and the real Lang Switcher would then
+/// decide it was the second copy, say so, and leave. Worse, and this is what the finding is
+/// named for: with the name held by an object of the wrong *type*, or with rights that refuse
+/// us, the leaving was **silent**. The person saw a program that would not start, with no cause
+/// on the screen and nothing on the disk.
+///
+/// A second fact closes it: a window of this program's **own class**, anywhere in the session.
+/// The two together say which of the three things happened, and nothing about either fact comes
+/// out of a message or a stranger's memory.
+#[test]
+fn a_held_name_is_a_second_copy_only_when_a_window_of_ours_answers() {
+    use lang_switcher::app::{InstanceVerdict, instance_verdict};
+
+    for (taken, window, expected, what) in [
+        (
+            false,
+            false,
+            InstanceVerdict::TheInstance,
+            "the ordinary start: nobody had the name",
+        ),
+        (
+            false,
+            true,
+            InstanceVerdict::TheInstance,
+            "a free name settles it whatever else is on the screen",
+        ),
+        (
+            true,
+            true,
+            InstanceVerdict::SecondCopy,
+            "held, and a window of ours answers — FR-82 exactly as before",
+        ),
+        (
+            true,
+            false,
+            InstanceVerdict::NameTakenByAStranger,
+            "held, and nothing of ours anywhere — the name is somebody else's",
+        ),
+    ] {
+        let verdict = instance_verdict(taken, window);
+
+        println!("name taken {taken}, our window {window} -> {verdict:?} ({what})");
+
+        assert_eq!(verdict, expected, "{what}");
+    }
+}
+
+/// **The two halves of task T-41-5 that no table can drive, swept over `src\app.rs`.**
+///
+/// * the search for a window of ours stands **after** the name is asked for and **before** any
+///   window of this process exists — so a hit can only be another copy, never this one;
+/// * both early exits of `run` write the ring to the file before they return. Until this task
+///   `diag::dump_on_shutdown` had exactly one caller — `thread_body(Role::Ui)` — and neither
+///   early exit reaches a thread, so everything the ring held on those paths died in memory.
+///   That is part (а) of the finding, and it is the half that could be paid at once.
+#[test]
+fn both_early_exits_of_the_program_write_the_journal_to_the_file() {
+    let app = source_of("app.rs");
+
+    let body_at = app
+        .find("pub fn run() -> ExitCode {")
+        .expect("`run` must be in app.rs");
+    let body = &app[body_at..];
+    let end = body
+        .find("\n}\n")
+        .expect("`run` closes with a brace of its own");
+    let body = &body[..end];
+
+    println!("--- run ---\n{body}");
+
+    let acquire = body
+        .find("SingleInstance::acquire()")
+        .expect("the name is asked for in `run`");
+    let search = body
+        .find("a_window_of_ours_is_up()")
+        .expect("and a window of ours is looked for in `run`");
+
+    assert!(
+        acquire < search,
+        "the window is looked for **after** the name — before it there is nothing to decide"
+    );
+    assert!(
+        !body.contains("run_as_first_instance(instance);\n    a_window_of_ours_is_up"),
+        "and before this process has built a window of its own, so a hit is never itself"
+    );
+
+    // Both early exits flush. Two calls: the `SecondCopy` arm and the `Err` arm of `acquire`.
+    assert_eq!(
+        body.matches("flush_the_journal_of_an_early_exit();")
+            .count(),
+        2,
+        "both paths that leave `run` without spawning a thread must write the ring to the file"
+    );
+
+    // And the flush really is a write and not a record: it publishes the setting the dump asks
+    // about and then calls the dump.
+    let flush_at = app
+        .find("fn flush_the_journal_of_an_early_exit() {")
+        .expect("the flush must be in app.rs");
+    let flush = &app[flush_at..];
+    let flush_end = flush
+        .find("\n}")
+        .expect("the flush closes with a brace of its own");
+    let flush = &flush[..flush_end];
+
+    assert!(
+        flush.contains("crate::diag::set_log_enabled(")
+            && flush.contains("crate::diag::dump_on_shutdown()"),
+        "the configuration has not been read on this path, so the setting is published here \
+         before the dump is asked for — otherwise the dump would always see the default, off"
+    );
+}

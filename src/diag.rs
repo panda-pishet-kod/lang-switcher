@@ -275,6 +275,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("journal write refused", Kind::Journal),
     // `app` — the process.
     ("CreateMutexW", Kind::Process),
+    // Task T-41-5, finding Н24: the name of FR-82 was held, and no window of this program's own
+    // class answered anywhere in the session — so the name is somebody else's and this copy
+    // started all the same. **The whole of the finding is that this used to happen in silence**:
+    // the person saw a program that would not start, with no cause and no trace.
+    ("single-instance name held by a stranger", Kind::Process),
     ("GetModuleHandleW", Kind::Process),
     ("RegisterClassExW", Kind::Process),
     ("UnregisterClassW", Kind::Process),
