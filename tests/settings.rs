@@ -5198,6 +5198,215 @@ fn the_language_row_fits_its_labels_and_its_longest_language_name() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-42-4, finding Н79, решение 124.5** — «в сеансе нет раскладки из файла» is shown
+/// whole: two lines in every locale, and the list above it still shows three layouts.
+///
+/// # The finding, as numbers
+///
+/// `IDS_LAYOUT_NOTE` is a sentence with a placeholder — the words of the two halves of the pair
+/// that could not be resolved — and the worst case is both of them at once. It takes 376…567 px
+/// across the fourteen locales, the label is 196 units = 343 px wide, and **all fourteen** wrap
+/// into two lines. The label was ten units tall: one line of seventeen pixels. The second line
+/// was simply not there, and what a person read was half a sentence.
+///
+/// # The road taken, and what the other two would have cost (решение 124.5)
+///
+/// **(а) — taken.** The list of layouts is shortened and the note rises into the room. A row of
+/// that list is [`settings::LAYOUT_ROW_HEIGHT_DLU`] = 12 units tall, and 44 units showed three
+/// rows with 8 units left over: 37 units still show **three** — at every one of the five scales,
+/// which this test checks rather than assumes. So the road costs no layout row at all, which is
+/// what ТЗ expected it to cost.
+///
+/// **(б)** — growing the «Раскладки» panel downwards would move the «Состояние» panel, the
+/// bottom row of buttons and the height of the window, and rewrite the two tests that hold
+/// them — `the_window_carries_the_geometry_chosen_at_the_control_point` and
+/// `the_window_carries_the_sixteen_units_the_appearance_row_took`, nine absolute rectangles
+/// between them.
+///
+/// **(в)** — leaving one line and writing the limitation into §10 of `SPEC.md` costs nothing in
+/// code and leaves the defect standing.
+#[test]
+fn the_layout_note_is_shown_whole_and_the_list_still_holds_three_rows() {
+    let _guard = with_product_strings();
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let font = template
+        .font
+        .clone()
+        .expect("the settings template declares DS_SETFONT");
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+            .unwrap_or_else(|| panic!("the settings template must carry the control {id}"))
+    };
+
+    let panel = bounds(1095);
+    let list = bounds(1024);
+    let note = bounds(1027);
+    let buttons = [bounds(1025), bounds(1026)];
+
+    println!("панель {panel:?}, список {list:?}, подсказка {note:?}");
+
+    // 1. The geometry: nothing overlaps and everything stands inside the panel.
+    assert!(
+        list.1 + list.3 < note.1,
+        "the note must stand below the list: the list ends at {} and the note starts at {}",
+        list.1 + list.3,
+        note.1
+    );
+
+    for (name, control) in [("список", list), ("подсказка", note)] {
+        assert!(
+            control.1 + control.3 <= panel.1 + panel.3,
+            "{name} выходит за панель «Раскладки»: низ {} против {}",
+            control.1 + control.3,
+            panel.1 + panel.3
+        );
+    }
+
+    for (index, button) in buttons.iter().enumerate() {
+        assert!(
+            button.1 + button.3 <= note.1,
+            "кнопка {} нижним краем {} налезает на подсказку, начинающуюся с {}",
+            index + 1,
+            button.1 + button.3,
+            note.1
+        );
+    }
+
+    // 2. The text, at every scale.
+    let mut tightest = (i32::MAX, String::new());
+
+    for dpi in [96, 120, 144, 168, 192] {
+        let sheet = Sheet::new(64);
+        let manager = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
+        let base = LOGFONTW {
+            lfHeight: -((i32::from(font.points) * dpi + 36) / 72),
+            ..manager
+        };
+        let face = Face::new(theme::smoothed_logfont(base));
+
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit_x = (letters / 26 + 1) / 2;
+        let unit_y = extent_of(&sheet, &face, "A").cy;
+
+        let width = (note.2 * unit_x + 2) / 4;
+        let height = (note.3 * unit_y + 4) / 8;
+
+        // The list still shows three rows: a row is LAYOUT_ROW_HEIGHT_DLU units of this window.
+        let row = (settings::LAYOUT_ROW_HEIGHT_DLU * unit_y + 4) / 8;
+        let shown = (list.3 * unit_y + 4) / 8 / row.max(1);
+
+        println!(
+            "{}%: подсказка {} ед = {width} px при {height} px высоты; строка списка {row} px, \
+             видно строк {shown}",
+            dpi * 100 / 96,
+            note.2
+        );
+
+        assert!(
+            shown >= 3,
+            "at {}%: the list shows {shown} rows of {row} px in {} units — решение 124.5 took \
+             road (а) on the ground that three rows survive the shortening",
+            dpi * 100 / 96,
+            list.3
+        );
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            // The worst case of the placeholder: both halves of the pair unresolved at once.
+            let both = format!(
+                "{}, {}",
+                settings::text(settings::IDS_LAYOUT_WORD_SOURCE),
+                settings::text(settings::IDS_LAYOUT_WORD_TARGET)
+            );
+            let sentence = settings::format_text(settings::IDS_LAYOUT_NOTE, &[&both]);
+
+            // The label is measured the way it is drawn: `DrawTextW` with the very format
+            // `theme::paint_label` uses, and the pitch of `theme::label_model_pitch`.
+            let (lines, natural) = wrapped_lines(&sheet, &face, &sentence, width);
+            let pitch =
+                theme::label_model_pitch(lines, natural, theme::scaled(23, dpi)).unwrap_or(natural);
+            let needed = (lines - 1).max(0) * pitch + natural;
+
+            if height - needed < tightest.0 {
+                tightest = (
+                    height - needed,
+                    format!("{}% {language:?}: {lines} строк", dpi * 100 / 96),
+                );
+            }
+
+            assert!(
+                needed <= height,
+                "{language:?} at {}%: the note wraps into {lines} lines and wants {needed} px, \
+                 the template gives it {} units = {height} px — the rest of the sentence would \
+                 not be there (finding Н79). Sentence: «{sentence}»",
+                dpi * 100 / 96,
+                note.3
+            );
+        }
+    }
+
+    println!("the tightest: {} px to spare — {}", tightest.0, tightest.1);
+
+    settings::set_ui_language(Language::Ru);
+}
+
+/// How many lines `DrawTextW` makes of `text` in a rectangle `width` wide, and how tall one
+/// line of the face is — the two numbers `theme::paint_label` lays a wrapped label out by.
+fn wrapped_lines(sheet: &Sheet, face: &Face, text: &str, width: i32) -> (i32, i32) {
+    // SAFETY: the sheet's DC is live and the face is a handle this frame owns.
+    let previous = unsafe { SelectObject(sheet.dc, face.0.into()) };
+
+    let mut buffer: Vec<u16> = text.encode_utf16().collect();
+
+    let mut whole = RECT {
+        left: 0,
+        top: 0,
+        right: width.max(1),
+        bottom: 0,
+    };
+    let mut single = whole;
+
+    // SAFETY: both rectangles and the buffer are live locals of this frame; `DT_CALCRECT`
+    // measures and writes no pixel.
+    let (all, natural) = unsafe {
+        (
+            DrawTextW(
+                sheet.dc,
+                &mut buffer,
+                &raw mut whole,
+                theme::LABEL_TEXT_FORMAT | windows::Win32::Graphics::Gdi::DT_CALCRECT,
+            ),
+            DrawTextW(
+                sheet.dc,
+                &mut buffer,
+                &raw mut single,
+                theme::LABEL_TEXT_FORMAT
+                    | windows::Win32::Graphics::Gdi::DT_CALCRECT
+                    | windows::Win32::Graphics::Gdi::DT_SINGLELINE,
+            ),
+        )
+    };
+
+    // SAFETY: `previous` is what the DC carried a moment ago.
+    unsafe { SelectObject(sheet.dc, previous) };
+
+    (if natural > 0 { all / natural } else { 0 }, natural)
+}
+
 /// **Task T-34-3, finding С48, решение 117.5** — «Сохранить журнал» (1064) stands in the slot
 /// the user chose: beside «Написать автору», on its row, inside «Диагностика», and the window
 /// has not grown for it.
