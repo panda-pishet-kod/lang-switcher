@@ -1285,8 +1285,16 @@ fn the_latency_instrument_reports_the_recorded_distribution() {
 /// is stated here is the state such a press leaves behind when it is missed — the tracker
 /// disagreeing with the machine — which no keystroke this binary could make would produce,
 /// because a test binary installs no hook (the header of this file says why).
+///
+/// # ⚠ What this test does **not** measure — task T-36-1
+///
+/// **It checks the tracker, not the reading of the machine.** The name says so since T-36-1: the
+/// reference on both sides of the seed is `hook::caps_lock_on()` itself, so a reading stuck on any
+/// constant — which is exactly what finding С2 of the audit of 2026-09-04 suspects — passes every
+/// line here. The reading is measured against the cause instead by
+/// [`the_capslock_reading_follows_the_toggle_this_test_moves`], which moves the toggle itself.
 #[test]
-fn the_resumption_of_fr90_seeds_capslock_on_the_thread_that_owns_the_buffer() {
+fn the_resumption_of_fr90_seeds_the_tracker_from_the_reading_of_the_machine() {
     use lang_switcher::buffer::{self, Recorder};
     use windows::Win32::Foundation::{LPARAM, WPARAM};
 
@@ -1614,4 +1622,145 @@ fn the_exclusion_verdict_reaches_the_callback_through_this_modules_own_static() 
     assert!(!hook::current_mode().hotkey_yields);
 
     hook::set_hotkey_yields(restore);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-36-1 — a CapsLock probe that can fail (finding С2, variant 3)
+// -------------------------------------------------------------------------------------
+
+/// **The reading of `CapsLock` has to follow the toggle — task T-36-1.**
+///
+/// # Why the existing test could not answer this
+///
+/// [`the_resumption_of_fr90_seeds_the_tracker_from_the_reading_of_the_machine`] checks
+/// `hook::caps_lock_on()` against **itself**: it reads the function, puts the opposite into the
+/// tracker, and demands that the seed bring the tracker back to what that same call answered. A
+/// function that always answered `false` would satisfy every line of it, which is exactly what
+/// finding С2 of the audit of 2026-09-04 suspects — `GetKeyState` answers "as of the last
+/// keyboard message this thread dispatched", and the input thread dispatches none. An instrument
+/// that cannot fail is not a measurement (`bad-instruments-list`).
+///
+/// # What is the reference here
+///
+/// **The cause, not a second reading of the same place.** This test moves the toggle itself with
+/// `SendInput` and counts how many times it moved it: one move must invert the answer and two
+/// must bring it back. A `caps_lock_on` stuck on any constant fails the first assertion, and so
+/// does one that reads a state frozen at thread start.
+///
+/// The starting point is one reading of the function — there is nothing else on the machine to
+/// anchor to — but nothing is asserted **about** it: what is asserted is the difference the tap
+/// makes, and a constant has no difference.
+///
+/// # What it touches and gives back
+///
+/// The `CapsLock` of whoever is running the tests, which is why it is `#[ignore]`. The guard
+/// restores the toggle even if an assertion unwinds, and the restoration is verified on the way
+/// out as well as recorded on the way in — a probe that moves a person's setting checks it at
+/// both ends.
+///
+/// ⛔ No `WH_KEYBOARD_LL` is installed: the header of this file says why, and nothing here needs
+/// one. `SendInput` is real input, so it resets `GetLastInputInfo` (FR-101's schedule) and any
+/// live copy of the product hears the tap — run with the product stopped where that matters.
+#[test]
+#[ignore = "moves the machine's CapsLock; run deliberately with --ignored --test-threads=1"]
+fn the_capslock_reading_follows_the_toggle_this_test_moves() {
+    /// Puts the toggle back where it was found, whatever happened in between.
+    struct Toggle {
+        /// How the machine was found, as the product's own reading saw it.
+        at_entry: bool,
+        /// Taps this test has issued. Odd means the machine is inverted right now.
+        taps: u32,
+    }
+
+    impl Drop for Toggle {
+        fn drop(&mut self) {
+            if self.taps % 2 == 1 {
+                tap_capslock();
+            }
+        }
+    }
+
+    let mut toggle = Toggle {
+        at_entry: hook::caps_lock_on(),
+        taps: 0,
+    };
+
+    tap_capslock();
+    toggle.taps += 1;
+    assert_eq!(
+        hook::caps_lock_on(),
+        !toggle.at_entry,
+        "one tap of CapsLock must change what the program reads (finding С2): entry was {}",
+        toggle.at_entry
+    );
+
+    tap_capslock();
+    toggle.taps += 1;
+    assert_eq!(
+        hook::caps_lock_on(),
+        toggle.at_entry,
+        "two taps must bring the reading back to where it started"
+    );
+
+    // The machine is already back at `at_entry` here — the guard has nothing to do — and this
+    // is the exit check the rule asks for: entry and exit are both stated, not assumed.
+    assert_eq!(
+        hook::caps_lock_on(),
+        toggle.at_entry,
+        "the machine is given back as it was found"
+    );
+}
+
+/// One press and release of `CapsLock`, as the machine's own input — the reference of
+/// [`the_capslock_reading_follows_the_toggle_this_test_moves`].
+///
+/// Written with the plain signature (`dwExtraInfo` zero): this is deliberately **not** the
+/// program's own injection, which carries `hook::INJECTED_SIGNATURE`, because the point is to
+/// move the real toggle the way a person's finger does.
+fn tap_capslock() {
+    use std::{thread::sleep, time::Duration};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CAPITAL,
+    };
+
+    let down = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_CAPITAL,
+                ..Default::default()
+            },
+        },
+    };
+    let up = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_CAPITAL,
+                dwFlags: KEYEVENTF_KEYUP,
+                ..Default::default()
+            },
+        },
+    };
+
+    let events = [down, up];
+
+    // SAFETY: `SendInput` reads the slice it is given and copies the events into the system's
+    // input queue; it dereferences nothing of ours afterwards, and the size argument is the one
+    // the structure really has. The return value is the count accepted — examined below rather
+    // than discarded (NFR-13), because a refusal (UIPI, a wrong size) is silent otherwise and
+    // would turn this whole test into a green nothing.
+    let sent = unsafe { SendInput(&events, size_of::<INPUT>() as i32) };
+
+    assert_eq!(
+        sent as usize,
+        events.len(),
+        "SendInput refused the tap: {} of {} events accepted — the probe measured nothing",
+        sent,
+        events.len()
+    );
+
+    // The toggle is the system's state, set while the events are dispatched; the reading that
+    // follows has to happen after that, and this is the shortest wait that is still a wait.
+    sleep(Duration::from_millis(120));
 }
