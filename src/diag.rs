@@ -353,6 +353,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("GetWindowRect", Kind::Window),
     ("SetWindowPos", Kind::Window),
     ("ShellExecuteW", Kind::Window),
+    // Task T-41-1, finding С52: an address the gate of `letters::links::is_allowed` turned away.
+    // Beside `ShellExecuteW` and in its group, because it is the same subject seen from the
+    // other side — what was **not** handed to the shell. Without this row the refusal would be
+    // a silence, and a silence is what the finding asks to make visible.
+    ("link refused", Kind::Window),
     ("RegSetValueExW", Kind::Process),
     ("RegCloseKey", Kind::Process),
     ("FindResourceExW", Kind::Process),

@@ -1007,6 +1007,72 @@ fn every_address_in_the_program_is_https_and_named_here() {
     assert!(links::SUPPORT_URL.starts_with("https://"));
 }
 
+/// **С52, task T-41-1 — the gatekeeper of the one door.** What the shell is handed is `https://`
+/// at a host this program carries in `mod links`; everything else is refused.
+///
+/// The process runs with `uiAccess`, so whatever `ShellExecuteW` starts inherits that pass. The
+/// address travels in the feed, the feed is signed, and a signature names the **author** and not
+/// the safety of a string: one typo in the TOML is enough. This table is the whole of what may
+/// get through, and the refusals below are the finding written out.
+#[test]
+fn only_https_at_a_host_of_this_program_reaches_the_shell() {
+    let refused = [
+        // Nothing at all.
+        "",
+        // The examples the finding names.
+        "file:///C:/Windows/System32/cmd.exe",
+        "ms-settings:privacy",
+        "http://example.com",
+        "http://example.invalid/news.toml",
+        "javascript:alert(1)",
+        r"\\сервер\общая\пуск.exe",
+        r"C:\Windows\System32\cmd.exe",
+        "https://злой.example.org/",
+        // A foreign host — the reason a white list exists at all.
+        "https://example.com/news.toml",
+        // A host that merely **ends** with ours, and one that merely starts with it.
+        "https://evil-example.invalid/",
+        "https://example.invalid.evil.example/",
+        // Credentials and a port: the reading of the host must not be talked into answering
+        // the left half of either.
+        "https://example.invalid@evil.example/",
+        "https://example.invalid:8080/",
+        // A backslash is a slash to every browser, so it ends the host here too — otherwise
+        // `evil.example` would be read as one long host and refused for the wrong reason,
+        // and a browser would go somewhere this program never allowed.
+        r"https://evil.example\example.invalid/",
+        // Degenerate shapes of the scheme itself.
+        "https://",
+        "https:/example.invalid/",
+        "https:example.invalid",
+    ];
+
+    for url in refused {
+        assert!(!links::is_allowed(url), "{url} must not reach the shell");
+    }
+
+    let allowed = [
+        // The three addresses of this program — «Открыть канал» and «Открыть страницу
+        // поддержки» take theirs from constants and go through the same gate, which is what
+        // makes the door one door.
+        links::FEED_URLS[0],
+        links::CHANNEL_URL,
+        links::SUPPORT_URL,
+        // The hard-wired host, and the same host with a path, a query and a fragment under it.
+        "https://example.invalid/news.toml",
+        "https://example.invalid/a/b/c?d=e#f",
+        // A scheme is a scheme in whatever case it is written, and so is a host name.
+        "HTTPS://EXAMPLE.INVALID/news.toml",
+    ];
+
+    for url in allowed {
+        assert!(
+            links::is_allowed(url),
+            "{url} is an address of this program"
+        );
+    }
+}
+
 // =========================================================================================
 // The demonstration of «Привет» — FR-101
 // =========================================================================================
@@ -1139,7 +1205,12 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     with_product_strings();
 
     let mut item = news(12);
-    item.link = "https://example.com/post".to_owned();
+    // ⚠ **Task T-41-1: this address used to be `https://example.com/post`.** The button of a
+    // news entry is drawn for an address the gate of `links::is_allowed` passes, and that gate
+    // knows only the hosts this build carries — which is the whole of finding С52. The host
+    // below is one of them; that it is also the reserved one is why the button comes out dead,
+    // and the assertion right after says so.
+    item.link = "https://example.invalid/post".to_owned();
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
@@ -1161,8 +1232,8 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert_eq!(plan.panel_text, item.text, "and so is the text");
     assert_eq!(plan.panel_buttons.len(), 1, "and the link it carried");
     assert!(
-        plan.panel_buttons[0].enabled,
-        "a real address is a live button — the rule is about placeholders, not about links"
+        !plan.panel_buttons[0].enabled,
+        "the reserved domain leaves the button drawn and dead — П5"
     );
     assert!(
         plan.accent
@@ -1173,6 +1244,28 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert!(
         !plan.foot.is_empty(),
         "the line under it says what «Позже» promises — FR-101, word for word from the mock-up"
+    );
+
+    // **Task T-41-1, finding С52 — the road an empty address already took.** A news entry whose
+    // link points at a host this build does not carry keeps its heading, its text and its place
+    // in the list; what it does not get is a button. The entry is not thrown away — a person
+    // reads the news either way — and nothing this program can be talked into opening is opened.
+    let mut foreign = news(12);
+    foreign.link = "https://example.com/post".to_owned();
+
+    let plan = letters::plan_for(
+        Letter::News(12),
+        &letters::PlanContext {
+            item: Some(&foreign),
+            ..context.clone()
+        },
+    );
+
+    assert_eq!(plan.panel_title, foreign.title, "the entry is still shown");
+    assert_eq!(plan.panel_text, foreign.text, "with all of its text");
+    assert!(
+        plan.panel_buttons.is_empty(),
+        "and no button at all for an address this build will not open — С52"
     );
 
     // An update has nothing to mark as read: its accented button is the download page, and the
@@ -1454,7 +1547,12 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
         "a placeholder address leaves the button drawn and dead — П5"
     );
 
-    // And a real one does not.
+    // ⚠ **Task T-41-1 moved this half of the test, and the move is the finding С52 itself.**
+    // Until this stage the sentence here read «an address that is not on the reserved domain is
+    // a live button», and `https://example.com/download` proved it. That is precisely what the
+    // finding is about: the address travels in the feed, and a signature names the author of
+    // the feed rather than the safety of the string in it. A foreign host is now a dead button
+    // too — the gate of `links::is_allowed` passes only the hosts this build carries.
     announced.link = "https://example.com/download".to_owned();
 
     let plan = letters::plan_for(
@@ -1469,8 +1567,8 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
     );
 
     assert!(
-        plan.accent.as_ref().is_some_and(|button| button.enabled),
-        "an address that is not on the reserved domain is a live button"
+        plan.accent.as_ref().is_some_and(|button| !button.enabled),
+        "a host this build does not carry is a dead button as well — С52"
     );
 }
 

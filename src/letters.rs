@@ -803,6 +803,71 @@ pub mod links {
     pub fn feed_is_configured() -> bool {
         FEED_URLS.iter().any(|url| !is_placeholder(url))
     }
+
+    /// The one scheme this program opens anything under — finding С52, task T-41-1.
+    const HTTPS_SCHEME: &str = "https://";
+
+    /// The host of an `https://` address, or `None` when the string is not one.
+    ///
+    /// The scheme is compared **without regard to case**, because `HTTPS://` is the same scheme
+    /// to every browser and a check that missed it would be a check anybody could walk past.
+    ///
+    /// The host ends at the first `/`, `\`, `?` or `#`. The backslash is not decoration: every
+    /// browser reads `https://evil.example\ours.invalid/` as a page at `evil.example`, so a
+    /// reader that did not stop there would compare a host no browser will ever visit.
+    ///
+    /// `:` and `@` in what is left make the answer `None` rather than a shorter host — a port
+    /// and a set of credentials are both ways of writing a host that is not the host it looks
+    /// like, and neither of the three addresses of this program has either. The same two
+    /// characters are refused for the same reason by [`super::feed::split_https`].
+    fn host_of(url: &str) -> Option<&str> {
+        if !url
+            .get(..HTTPS_SCHEME.len())
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case(HTTPS_SCHEME))
+        {
+            return None;
+        }
+
+        let host = url[HTTPS_SCHEME.len()..]
+            .split(['/', '\\', '?', '#'])
+            .next()
+            .unwrap_or_default();
+
+        (!host.is_empty() && !host.contains(':') && !host.contains('@')).then_some(host)
+    }
+
+    /// Every host this program is allowed to reach — the three constants above **and nothing
+    /// else**.
+    ///
+    /// Read out of the constants rather than written down a second time: a separate list is a
+    /// second place to forget, and the day the author's real addresses replace the placeholders
+    /// this gate follows them with no edit at all.
+    fn allowed_hosts() -> impl Iterator<Item = &'static str> {
+        FEED_URLS
+            .iter()
+            .copied()
+            .chain([CHANNEL_URL, SUPPORT_URL])
+            .filter_map(host_of)
+    }
+
+    /// Whether this program may hand `url` to the shell — finding С52, task T-41-1.
+    ///
+    /// # Why a white list, and why here
+    ///
+    /// The process carries `uiAccess`, so **whatever `ShellExecuteW` starts inherits that pass**
+    /// — the raised rights and the right to reach across the window boundary Windows otherwise
+    /// keeps. The address comes out of the feed; the feed is signed; and a signature attests the
+    /// author, not the safety of a string. `file:///…`, `ms-settings:`, a UNC path, a path to an
+    /// `.exe` and a foreign host would every one of them be opened by the shell, and one typo in
+    /// the author's TOML is enough to do it.
+    ///
+    /// Pure, allocation-free, and **the answer does not depend on the placeholder check**: that
+    /// one is a separate fact about a separate question (is there a real address yet), and
+    /// [`is_placeholder`] goes on answering it beside this.
+    pub fn is_allowed(url: &str) -> bool {
+        host_of(url)
+            .is_some_and(|host| allowed_hosts().any(|allowed| allowed.eq_ignore_ascii_case(host)))
+    }
 }
 
 // =========================================================================================
@@ -1216,11 +1281,17 @@ impl Button {
 
     /// A button that opens `url` — live if the address is real, drawn and disabled while it is
     /// a placeholder (полномочия П5, П7 и П8).
+    ///
+    /// **Task T-41-1, finding С52:** and disabled just the same for an address the gate of
+    /// [`links::is_allowed`] turns away. The layout does not move — the button keeps its place
+    /// and its word, exactly as it does for a placeholder — because the appearance is frozen and
+    /// because a button that vanishes says less than one that is plainly not available. The
+    /// address is refused at the door as well; this is the half the person can see.
     fn link(label: String, action: Action, url: &str) -> Self {
         Self {
             label,
             action,
-            enabled: !links::is_placeholder(url),
+            enabled: links::is_allowed(url) && !links::is_placeholder(url),
         }
     }
 }
@@ -1470,14 +1541,18 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                 subtitle: released,
                 panel_title: item.title.clone(),
                 panel_text: item.text.clone(),
-                panel_buttons: if item.link.is_empty() {
-                    Vec::new()
-                } else {
+                // Task T-41-1, finding С52: the road an empty address already took is the road
+                // an address the gate refuses takes now. A placeholder still gets its button —
+                // [`links::is_allowed`] passes it on the host and [`links::is_placeholder`]
+                // draws it disabled — so nothing about today's appearance moves.
+                panel_buttons: if links::is_allowed(&item.link) {
                     vec![Button::link(
                         text(IDS_NEWS_OPEN_LINK),
                         Action::OpenLink,
                         &item.link,
                     )]
+                } else {
+                    Vec::new()
                 },
                 // FR-101: closing is postponing, and the button says so. «Закрыть» here would
                 // promise an end the letter does not give — it comes back in a week.
@@ -5321,8 +5396,20 @@ fn perform(hwnd: HWND, action: Action) {
 /// A placeholder never reaches here — the button that would open it is drawn disabled — and the
 /// check is made again all the same: a disabled button is a fact about the screen, and this is
 /// a fact about the program.
+///
+/// # The gate of С52 — task T-41-1
+///
+/// [`links::is_allowed`] is asked **here**, where `ShellExecuteW` is called, and not in the
+/// reading of the feed. A check in the parser would be a check one future caller can walk
+/// round; a check on the door is the door. The button of an address that fails it is not drawn
+/// either, and that is a second courtesy rather than the protection.
 fn open_link(hwnd: HWND, url: &str) {
     if url.is_empty() || links::is_placeholder(url) {
+        return;
+    }
+
+    if !links::is_allowed(url) {
+        note_link_refused();
         return;
     }
 
@@ -5348,6 +5435,23 @@ fn open_link(hwnd: HWND, url: &str) {
     if result.0 as usize <= 32 {
         crate::app::report_non_critical("ShellExecuteW", &WinError::from_thread());
     }
+}
+
+/// Writes down that an address was turned away by the gate of С52 — task T-41-1.
+///
+/// **Nothing of the address is kept** — not the host, not the scheme, not a character of it.
+/// SEC-07 says what may reach the journal is a name chosen at compile time, and «a link was
+/// refused» is that name; which link it was is exactly the text that must not travel.
+///
+/// It exists so that the refusal is not a silence. A button that is not drawn and a click that
+/// does nothing look, from where the person stands, like the program being broken; one line in
+/// the journal is the difference between «не работает» and «программа отказалась и сказала об
+/// этом».
+fn note_link_refused() {
+    crate::diag::record(
+        crate::diag::Operation::from_name("link refused"),
+        crate::diag::OsCode::NONE,
+    );
 }
 
 /// Raises a window that is already open — the answer to «open it again».
@@ -5654,6 +5758,19 @@ pub fn take_feed() {
         crate::diag::Operation::from_name("feed read ok"),
         crate::diag::OsCode::NONE,
     );
+
+    // Task T-41-1, finding С52. The entry is **kept** — news with an address this program will
+    // not open is still news — and the button that would open it is simply not drawn. One line
+    // per such entry, written here and not in `plan_for`: this runs once per read of the feed,
+    // where the planner runs every time a letter is built and is a pure function besides.
+    for _ in fresh
+        .news
+        .iter()
+        .chain(fresh.update.as_ref())
+        .filter(|item| !item.link.is_empty() && !links::is_allowed(&item.link))
+    {
+        note_link_refused();
+    }
 }
 
 /// **One tick of the schedule of FR-101** — the whole of what the letters do on their own.
