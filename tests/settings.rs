@@ -9088,6 +9088,74 @@ fn a_refused_tick_leaves_the_cycle_line_of_the_file_untouched() {
     );
 }
 
+/// **Task T-42-7, finding Н29** — the exclusion list says when it is full, and refuses a name
+/// that could never match a process.
+///
+/// # What the window did before
+///
+/// It took the thirty-third name and the name `C:\` alike, cleared the field, and showed the
+/// name in the list. `guard::publish_exclusions` then dropped both on «ОК» — counting them into
+/// `Counters::exclusions_refused`, which the dump prints and nobody reads at that moment — and
+/// the exclusion the person asked for was quietly not there. The counter counts **on
+/// publication**; the window has to answer **before** it.
+///
+/// # What it does now
+///
+/// The ceiling is shown rather than enforced after the fact: at `guard::MAX_EXCLUSIONS` names
+/// the field and «Добавить» go dark (вариант 1 «заглушить ввод на потолке»), and removing a name
+/// lights them again. A name whose fold is empty — `C:\`, `\`, `..\`, a run of spaces — is
+/// refused **aloud**, by the same door T-42-6 opened for the ninth tick.
+#[test]
+fn the_exclusion_list_shows_its_ceiling_and_refuses_a_name_that_folds_to_nothing() {
+    // 1. The ceiling, читаемый из `guard`, а не переписанный сюда числом.
+    for count in 0..lang_switcher::guard::MAX_EXCLUSIONS {
+        assert!(
+            !settings::exclusions_are_full(count),
+            "with {count} names the list still takes one more"
+        );
+    }
+
+    assert!(
+        settings::exclusions_are_full(lang_switcher::guard::MAX_EXCLUSIONS),
+        "at {} names the list is full and the field goes dark",
+        lang_switcher::guard::MAX_EXCLUSIONS
+    );
+
+    // 2. The verdict on one name.
+    let existing = vec!["game.exe".to_owned(), "Setup.EXE".to_owned()];
+
+    assert_eq!(
+        settings::exclusion_verdict("notepad.exe", &existing),
+        settings::ExclusionVerdict::Add,
+        "a new name goes in"
+    );
+
+    // The fold is the last component, lower-cased — so these three are the same exclusion as
+    // one already in the list, and none of them is a refusal: the list is already as asked.
+    for duplicate in [r"C:\Games\game.exe", "GAME.EXE", "  setup.exe  "] {
+        assert_eq!(
+            settings::exclusion_verdict(duplicate, &existing),
+            settings::ExclusionVerdict::Duplicate,
+            "«{duplicate}» folds onto a name the list already holds"
+        );
+    }
+
+    // ⛔ The empty fold — the case `guard` counted and the window swallowed. A path with no
+    // last component matches no process at all, and the program would have dropped it on «ОК».
+    for nothing in [r"C:\", "\\", r"..\", "   ", "/"] {
+        assert_eq!(
+            settings::exclusion_verdict(nothing, &existing),
+            settings::ExclusionVerdict::Refuse,
+            "«{nothing}» folds to nothing and can never match a process — refused aloud"
+        );
+
+        assert!(
+            lang_switcher::guard::fold_process_name(nothing).is_empty(),
+            "the premise of the refusal: «{nothing}» really does fold to nothing"
+        );
+    }
+}
+
 /// **The controls of task T-55-8: an edit of the ticks still reaches the cycle, a tick taken back
 /// is no edit, and «ОК» twice in a row without edits gives the same cycle twice** — the one the
 /// file had, on the very session that lengthened it before.

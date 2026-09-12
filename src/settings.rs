@@ -12014,6 +12014,10 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     }
     limit_text(hwnd, IDC_EXCLUSION_NAME, EXCLUSION_NAME_CHARS);
 
+    // Task T-42-7, finding Н29: a window opened on a full list shows it full — the field and
+    // «Добавить» are dark from the first paint, not from the first click.
+    show_exclusion_ceiling(hwnd);
+
     // Section «Диагностика» of FR-92 — SEC-07.
     set_check(hwnd, IDC_LOG_ENABLED, state.working.diagnostics.log_enabled);
 
@@ -12651,14 +12655,107 @@ fn add_exclusion(hwnd: HWND) {
 
     let existing = list_items(hwnd, IDC_EXCLUSIONS);
 
-    if !existing
-        .iter()
-        .any(|item| crate::guard::fold_process_name(item) == crate::guard::fold_process_name(&name))
-    {
-        list_add(hwnd, IDC_EXCLUSIONS, &name);
+    // Task T-42-7, finding Н29 — what the window does with this name, in one rule.
+    match exclusion_verdict(&name, &existing) {
+        ExclusionVerdict::Add => {
+            list_add(hwnd, IDC_EXCLUSIONS, &name);
+            set_text(hwnd, IDC_EXCLUSION_NAME, "");
+        }
+        ExclusionVerdict::Duplicate => {
+            // The name is already there under another spelling. Nothing is added and nothing is
+            // said: the person asked for a state the list is already in, and getting it is not
+            // a refusal. The field is cleared, as it always was.
+            set_text(hwnd, IDC_EXCLUSION_NAME, "");
+        }
+        ExclusionVerdict::Refuse => {
+            // ⛔ **The field is NOT cleared.** A refused name stays where the hand typed it —
+            // clearing it would take the person's text away and leave them guessing what
+            // happened. What is added is the dull knock of FR-100, the same door T-42-6 opened
+            // for the ninth tick: the refusal is heard as well as seen.
+            crate::app::sound_refusal();
+        }
     }
 
-    set_text(hwnd, IDC_EXCLUSION_NAME, "");
+    // The ceiling may have been reached by the addition above — the field and the button go
+    // dark the moment it is (finding Н29, вариант 1).
+    show_exclusion_ceiling(hwnd);
+}
+
+/// What the window does with a name typed into the exclusion field — [`add_exclusion`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExclusionVerdict {
+    /// The name goes into the list.
+    Add,
+    /// The list already holds it, under this spelling or another — nothing to do, nothing to
+    /// say.
+    Duplicate,
+    /// The name cannot be an exclusion at all, and the window says so aloud.
+    Refuse,
+}
+
+/// The rule of [`add_exclusion`], as a pure function — task T-42-7, finding Н29.
+///
+/// # Why a name can be refused at all
+///
+/// `guard::publish_exclusions` already counts three refusals — an empty fold, a name too long,
+/// and everything past `guard::MAX_EXCLUSIONS` — into `Counters::exclusions_refused`, and the
+/// dump prints it. But it counts them **on publication**, that is after «ОК», where nobody is
+/// looking: a person types `C:\` into the field, presses «Добавить», sees the name accepted,
+/// closes the window, and the exclusion is quietly not there. The window has to answer **before**
+/// the publication, which is what this rule is.
+///
+/// **The empty fold.** `guard::fold_process_name` takes the last component of a path and lower-
+/// cases it; `C:\`, `\` and `..\` fold to nothing at all, and a nothing matches no process. Such
+/// a name is refused here rather than stored to be dropped later.
+///
+/// ⚠ The ceiling of `MAX_EXCLUSIONS` is **not** an arm of this rule: it is shown before the hand
+/// gets this far — the field and the button are dark at the ceiling ([`show_exclusion_ceiling`]).
+/// A name typed while they were still lit and submitted at the ceiling cannot happen through the
+/// window at all.
+///
+/// Pure, and public so the test calls the very function the window calls.
+pub fn exclusion_verdict(name: &str, existing: &[String]) -> ExclusionVerdict {
+    let folded = crate::guard::fold_process_name(name);
+
+    if folded.is_empty() {
+        return ExclusionVerdict::Refuse;
+    }
+
+    if existing
+        .iter()
+        .any(|item| crate::guard::fold_process_name(item) == folded)
+    {
+        return ExclusionVerdict::Duplicate;
+    }
+
+    ExclusionVerdict::Add
+}
+
+/// Whether the exclusion list is full — `guard::MAX_EXCLUSIONS` names, finding Н29.
+///
+/// Pure, and reading the ceiling from `guard` rather than repeating the number: the list the
+/// window shows and the list the engine publishes are the same list, and one of them growing a
+/// ceiling of its own is the defect this pair of functions exists to prevent.
+pub fn exclusions_are_full(count: usize) -> bool {
+    count >= crate::guard::MAX_EXCLUSIONS
+}
+
+/// Lights or darkens the field and the «Добавить» button by the ceiling — task T-42-7.
+///
+/// The visible half of finding Н29 (вариант 1, «заглушить ввод на потолке»): at
+/// `guard::MAX_EXCLUSIONS` names there is nothing a thirty-third name could do but be dropped on
+/// publication, so the window stops taking one. Removing a name lights them again — the pair is
+/// called from both ends, and from the fill, so the state is right the moment the window opens
+/// on a full list.
+///
+/// ⚠ Both controls together, and that is the substance: a lit field over a dark button invites
+/// typing that leads nowhere.
+fn show_exclusion_ceiling(hwnd: HWND) {
+    let full = exclusions_are_full(list_items(hwnd, IDC_EXCLUSIONS).len());
+
+    for control in [IDC_EXCLUSION_NAME, IDC_EXCLUSION_ADD] {
+        enable(hwnd, control, !full);
+    }
 }
 
 /// Removes the selected name from the exclusion list.
@@ -12677,6 +12774,10 @@ fn remove_exclusion(hwnd: HWND) {
         usize::try_from(selected).unwrap_or(0),
         0,
     );
+
+    // The other end of the pair — task T-42-7: a name taken out lights the field and the button
+    // again, whatever the list stood at before.
+    show_exclusion_ceiling(hwnd);
 }
 
 /// Opens the journal folder in the shell — the button of the «Диагностика» section.
