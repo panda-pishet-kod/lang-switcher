@@ -2471,6 +2471,49 @@ fn probe_layout_after_absence() {
 /// Both Win32 results are examined. `UnhookWindowsHookEx` is examined twice over, in fact: its
 /// failure counter is read before and after, because a failure on a handle this program
 /// believed live is the only evidence of a silent removal that exists anywhere.
+/// Whether an installation must forget that the hotkey is held — **task T-36-3, finding Н39**.
+///
+/// # The two costs this stands between
+///
+/// Forgetting too little brings the program back from a stretch without a hook still believing a
+/// key is down, so the next real press reads as an auto-repeat, is suppressed by FR-95 and
+/// converts nothing — finding м2 of the mini-audit of 2026-09-01, repaired by task Т-22-1 by
+/// clearing the belief in `hook::install`. Forgetting too much is the cost that repair was paid
+/// with: FR-80 puts the hook back **every thirty seconds whether anything happened or not**, and
+/// a user who is holding the hotkey across one of those ticks has the hold forgotten under their
+/// finger — the next auto-repeat arrives as a first press and the word is converted twice,
+/// against FR-08.
+///
+/// # The rule
+///
+/// Forget when there really was an absence, keep when there was not:
+///
+/// * any reason **other than** [`Reason::Timer`] — a desktop switch, a session change, a resume
+///   from sleep, and the start-up ([`Reason::None`], where the state is fresh anyway and this is
+///   a no-op) — means something happened to the machine while this program was not watching;
+/// * `believed_installed == false` means the program already knew it had no hook;
+/// * `silently_removed == true` means the system took the hook away behind the program's back,
+///   which is the very case FR-80 exists for.
+///
+/// Only the planned tick that found its own hook standing keeps the belief, and that is the one
+/// case in which no stroke can have been missed: the hook was up throughout, every release
+/// reached the callback, and the gap is the microseconds between `uninstall` and `install` on
+/// this very thread.
+///
+/// A pure function of its three arguments, so the whole table — five reasons × two × two — is
+/// reachable from `tests\hook.rs` without a hook, a timer or a machine.
+pub const fn clears_hotkey_state(
+    reason: Reason,
+    believed_installed: bool,
+    silently_removed: bool,
+) -> crate::hook::HotkeyMemory {
+    if !matches!(reason, Reason::Timer) || !believed_installed || silently_removed {
+        crate::hook::HotkeyMemory::Forget
+    } else {
+        crate::hook::HotkeyMemory::Keep
+    }
+}
+
 pub fn reinstall_hook(notify: HWND, reason: Reason) -> bool {
     let instance = match module_instance() {
         Ok(instance) => instance,
@@ -2495,15 +2538,23 @@ pub fn reinstall_hook(notify: HWND, reason: Reason) -> bool {
 
     let (unhook_failures_after, _) = crate::hook::unhook_failures();
 
-    if believed_installed && unhook_failures_after != unhook_failures_before {
-        // The handle this program was holding is no longer a hook. Nothing else can produce
-        // that: `uninstall` takes the handle out of its atomic with a single swap, so a second
-        // caller cannot have unhooked it, and the handle came from a successful
-        // `SetWindowsHookExW`. This is a silent removal by the system, observed after the fact.
+    // The handle this program was holding is no longer a hook. Nothing else can produce that:
+    // `uninstall` takes the handle out of its atomic with a single swap, so a second caller
+    // cannot have unhooked it, and the handle came from a successful `SetWindowsHookExW`. This
+    // is a silent removal by the system, observed after the fact.
+    let silently_removed = believed_installed && unhook_failures_after != unhook_failures_before;
+
+    if silently_removed {
         SILENT_REMOVALS.fetch_add(1, Ordering::Relaxed);
     }
 
-    let outcome = crate::hook::install(notify, instance);
+    // Task T-36-3: the belief about a held hotkey is the caller's decision, and this caller is
+    // the one with the reason in its hand. See [`clears_hotkey_state`].
+    let outcome = crate::hook::install(
+        notify,
+        instance,
+        clears_hotkey_state(reason, believed_installed, silently_removed),
+    );
     let gap_us = u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX);
 
     REINSTALLING.store(false, Ordering::Release);

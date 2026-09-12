@@ -144,7 +144,11 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
 
         let typed = hook::classify(unpublished, &mut state, user_key(b'A'.into(), Edge::Down));
 
-        assert_eq!(typed, passed_on(), "an ordinary stroke is handed on untouched");
+        assert_eq!(
+            typed,
+            passed_on(),
+            "an ordinary stroke is handed on untouched"
+        );
         assert_eq!(
             buffer::len(),
             0,
@@ -1726,6 +1730,84 @@ fn the_exclusion_verdict_reaches_the_callback_through_this_modules_own_static() 
     assert!(!hook::current_mode().hotkey_yields);
 
     hook::set_hotkey_yields(restore);
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-36-3 — the belief about a held hotkey is cleared by the reason, not by the clock
+// (finding Н39, variant 1)
+// -------------------------------------------------------------------------------------
+
+/// **The whole table of `watchdog::clears_hotkey_state` — five reasons × two × two.**
+///
+/// FR-80 puts the hook back every thirty seconds whether anything happened or not (§10 п. 11, an
+/// accepted price), and until task T-36-3 every one of those ticks cleared the program's belief
+/// that the hotkey was held. That belief is what FR-08 answers "press or auto-repeat?" from, so a
+/// user holding the key across a tick had the hold forgotten under their finger: the next repeat
+/// arrived as a first press and the word was converted a second time. The opposite mistake is the
+/// one task Т-22-1 repaired (finding м2): coming back from a real absence still believing the key
+/// is down loses the next press entirely.
+///
+/// The rule is therefore "forget when there really was an absence". Only the planned tick that
+/// found its own hook standing keeps the belief — in that one case the hook was up throughout and
+/// every release reached the callback.
+///
+/// Written as a table rather than as four cases in prose so that the count is visible: twenty
+/// rows, and the single `Keep` among them is the one situation in which nothing can have been
+/// missed.
+#[test]
+fn clearing_the_held_hotkey_is_decided_by_the_reason_and_not_by_the_timer() {
+    use lang_switcher::hook::HotkeyMemory::{Forget, Keep};
+    use lang_switcher::watchdog::{Reason, clears_hotkey_state};
+
+    let table = [
+        // reason,              believed_installed, silently_removed, expected
+        (Reason::None, true, true, Forget),
+        (Reason::None, true, false, Forget),
+        (Reason::None, false, true, Forget),
+        (Reason::None, false, false, Forget),
+        // ⭐ The one row that keeps: the planned tick of FR-80 that found its own hook standing
+        // and took it off itself. Microseconds, on this very thread, with no stroke in between.
+        (Reason::Timer, true, false, Keep),
+        // The same planned tick, but the system had taken the hook away behind the program's
+        // back — the case FR-80 exists for, and a stretch in which a release could be missed.
+        (Reason::Timer, true, true, Forget),
+        // The program already knew it had no hook.
+        (Reason::Timer, false, true, Forget),
+        (Reason::Timer, false, false, Forget),
+        (Reason::DesktopSwitch, true, true, Forget),
+        (Reason::DesktopSwitch, true, false, Forget),
+        (Reason::DesktopSwitch, false, true, Forget),
+        (Reason::DesktopSwitch, false, false, Forget),
+        (Reason::SessionChange, true, true, Forget),
+        (Reason::SessionChange, true, false, Forget),
+        (Reason::SessionChange, false, true, Forget),
+        (Reason::SessionChange, false, false, Forget),
+        (Reason::PowerResume, true, true, Forget),
+        (Reason::PowerResume, true, false, Forget),
+        (Reason::PowerResume, false, true, Forget),
+        (Reason::PowerResume, false, false, Forget),
+    ];
+
+    assert_eq!(
+        table.len(),
+        20,
+        "five reasons, each with both flags both ways"
+    );
+
+    for (reason, believed, silently, expected) in table {
+        assert_eq!(
+            clears_hotkey_state(reason, believed, silently),
+            expected,
+            "Н39: reason {reason:?}, believed_installed {believed}, silently_removed {silently}"
+        );
+    }
+
+    assert_eq!(
+        table.iter().filter(|row| row.3 == Keep).count(),
+        1,
+        "exactly one situation keeps the belief — the planned tick whose hook was standing; \
+         any other count means the rule has drifted into forgetting too much or too little"
+    );
 }
 
 // -------------------------------------------------------------------------------------

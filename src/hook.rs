@@ -820,10 +820,32 @@ impl Drop for Installed {
     }
 }
 
+/// What an installation does with the program's belief about the hotkey — task T-36-3.
+///
+/// The belief is the thread-local [`HotkeyState`]: "the hotkey is held down", decided by FR-08
+/// on the press and cleared by the release the callback sees, plus the fate of that press
+/// (FR-84). A stretch without a hook is a stretch in which a release could have happened
+/// unseen, and coming back from one believing a key is still down costs a conversion — task
+/// Т-22-1, finding м2. A **planned** reinstallation is not such a stretch: the hook stood the
+/// whole time, this program took it off itself and put it back microseconds later, and forgetting
+/// there is what costs the other direction — the auto-repeat of a key held across the tick reads
+/// as a new press and the word is converted twice, against FR-08.
+///
+/// Which of the two it is, is knowledge the caller has and this function does not: only the
+/// caller knows why it is installing. See `watchdog::clears_hotkey_state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HotkeyMemory {
+    /// Forget the hold: there may have been a release nobody saw.
+    Forget,
+    /// Keep it: the hook was up the whole time and every release reached the callback.
+    Keep,
+}
+
 /// Installs the one `WH_KEYBOARD_LL` hook of FR-01 on the calling thread.
 ///
 /// `notify` is the window [`WM_APP_HOTKEY`] is posted to — the input thread's own
-/// message-only window, created by `app` immediately before this call.
+/// message-only window, created by `app` immediately before this call. `memory` says whether
+/// the belief about a held hotkey survives this installation — see [`HotkeyMemory`].
 ///
 /// # Why this takes no configuration
 ///
@@ -841,7 +863,7 @@ impl Drop for Installed {
 /// stroke seen twice — or if `SetWindowsHookExW` refuses. NFR-13: a null return is an error
 /// and not a success, and it is checked twice here, once by the binding and once in plain
 /// sight.
-pub fn install(notify: HWND, instance: HINSTANCE) -> WinResult<Installed> {
+pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory) -> WinResult<Installed> {
     if HOOK.load(Ordering::Acquire) != NO_HANDLE {
         return Err(WinError::from_hresult(
             windows::Win32::Foundation::E_UNEXPECTED,
@@ -915,7 +937,22 @@ pub fn install(notify: HWND, instance: HINSTANCE) -> WinResult<Installed> {
     // Placed after the hook is registered, not before: a failed installation leaves the program
     // with no hook at all, and clearing a belief about a keyboard nobody is watching would be a
     // guess rather than a fact.
-    HOTKEY_STATE.set(HotkeyState::default());
+    //
+    // **Task T-36-3, finding Н39 — by the reason, not by the clock.** Until this task the line
+    // ran unconditionally, and `install` is the single door of both the start-up and the
+    // reinstallation FR-80 orders every thirty seconds (§10 п. 11, an accepted price). So the
+    // repair above was paid for in the other direction: a user holding the hotkey across a tick
+    // had the hold forgotten under their finger, the next auto-repeat arrived as a first press,
+    // and the word was converted a second time against FR-08. The same goes for the second bit
+    // of the state — the fate of the press under FR-84 (task T-52-3): forgotten in an excluded
+    // process, the repeat reads as a new press just as surely.
+    //
+    // The decision is the caller's, because only the caller knows why it is here:
+    // `watchdog::clears_hotkey_state` computes it from the reason, from whether the hook was
+    // believed to be up, and from whether a silent removal was just counted.
+    if memory == HotkeyMemory::Forget {
+        HOTKEY_STATE.set(HotkeyState::default());
+    }
 
     Ok(Installed {
         _not_send: PhantomData,

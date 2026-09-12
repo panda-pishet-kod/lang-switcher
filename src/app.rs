@@ -1271,7 +1271,12 @@ fn serve_window(role: Role) -> WinResult<()> {
     // and not the other way round.
     let _hook = match role {
         Role::Input => {
-            let installed = crate::hook::install(_window.handle, instance)?;
+            // Task T-36-3: at start-up the belief about a held hotkey is fresh — this is the
+            // first `install` of the process — so `Forget` is a no-op said out loud. It is the
+            // same answer `watchdog::clears_hotkey_state` gives for `Reason::None`, and saying
+            // it here keeps the one door of installation from having a default.
+            let installed =
+                crate::hook::install(_window.handle, instance, crate::hook::HotkeyMemory::Forget)?;
 
             // NFR-08 is a deadline on exactly this instant, and it is measured here rather
             // than reasoned about: see the `acceptance` module for why the program has to be

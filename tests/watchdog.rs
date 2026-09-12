@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 
 use lang_switcher::buffer::{self, Recorder, ResetOutcome, Stroke};
 use lang_switcher::guard::{self, Field};
-use lang_switcher::hook::{Edge, KeyEvent};
+use lang_switcher::hook::{Edge, HotkeyMemory, KeyEvent};
 use lang_switcher::layouts;
 use lang_switcher::watchdog::{
     self, Cause, Counters, FLUSH_EVENTS, Rebuild, WIPING_SESSION_EVENTS, WM_APP_FLUSH,
@@ -66,6 +66,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WTS_SESSION_REMOTE_CONTROL, WTS_SESSION_TERMINATE, WTS_SESSION_UNLOCK,
 };
 use windows::core::{PCWSTR, w};
+
+/// What every `hook::install` of this file asks for — task T-36-3.
+///
+/// These installations stand in for the start-up one, where the belief about a held hotkey is
+/// fresh and clearing it is a no-op said out loud. Which of the two answers a *reinstallation*
+/// deserves is `watchdog::clears_hotkey_state`, and its whole table is measured in
+/// `tests\hook.rs`: a pure function needs no hook to drive it.
+const FORGET: HotkeyMemory = HotkeyMemory::Forget;
 
 // ---------------------------------------------------------------------------------------
 // Point 11 — FR-10, FR-13: a button is a flush, the cursor moving is not
@@ -1882,13 +1890,13 @@ fn the_gap_without_a_hook_is_microseconds() {
 
     let window = TestWindow::new();
 
-    let installed =
-        lang_switcher::hook::install(window.handle, instance).expect("the hook must install");
+    let installed = lang_switcher::hook::install(window.handle, instance, FORGET)
+        .expect("the hook must install");
 
     // **Criterion 14, at the level where FR-01 is enforced.** A second installation is refused
     // while one is registered, so no code path — this module's included — can hold two.
     assert!(
-        lang_switcher::hook::install(window.handle, instance).is_err(),
+        lang_switcher::hook::install(window.handle, instance, FORGET).is_err(),
         "FR-01: a second hook must be refused while one is registered"
     );
 
@@ -1900,7 +1908,7 @@ fn the_gap_without_a_hook_is_microseconds() {
         assert!(lang_switcher::hook::is_installed());
 
         // And still exactly one after the reinstallation, not two.
-        assert!(lang_switcher::hook::install(window.handle, instance).is_err());
+        assert!(lang_switcher::hook::install(window.handle, instance, FORGET).is_err());
 
         drain_the_queue();
     }
@@ -2084,8 +2092,8 @@ fn the_hotkey_state_of_fr08_does_not_survive_a_reinstallation() {
         "FR-99 must not have disarmed the program before this test"
     );
 
-    let installed =
-        lang_switcher::hook::install(window.handle, instance).expect("the hook must install");
+    let installed = lang_switcher::hook::install(window.handle, instance, FORGET)
+        .expect("the hook must install");
 
     let before = lang_switcher::hook::hotkey_handoffs();
 
