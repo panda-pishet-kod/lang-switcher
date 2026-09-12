@@ -5196,6 +5196,7 @@ fn the_help_rows_never_overlap_at_any_scale_or_locale() {
 
     let panel = bounds(1125);
     let mut worst = (i32::MAX, String::new());
+    let mut tallest = (0, String::new());
 
     for dpi in [96, 120, 144, 168, 192] {
         let sheet = Sheet::new(64);
@@ -5330,8 +5331,28 @@ fn the_help_rows_never_overlap_at_any_scale_or_locale() {
                      has grown with it",
                     dpi * 100 / 96
                 );
+
+                if grow > tallest.0 {
+                    tallest = (grow, format!("{}% {language:?} «{key}»", dpi * 100 / 96));
+                }
             }
         }
+
+        // ⚠ **How much the window really grows, scale by scale.** The fitting stand of the
+        // контур cannot answer this: it raises the window at the machine's own DPI — where
+        // `fit_about_help` has already laid the panel out for **that** DPI — and then scales the
+        // geometry arithmetically, so above 100 % it sees rows that the run-time would have made
+        // taller. The numbers below are what the window does at each real scale, and they are
+        // what the acceptance by eye at 125 % is held against (П3: a real 125 % needs the
+        // owner's hand on the display setting).
+        println!(
+            "{}%: the window grows by at most {} px — {}",
+            dpi * 100 / 96,
+            tallest.0.max(0),
+            tallest.1
+        );
+
+        tallest = (0, String::new());
     }
 
     println!(
