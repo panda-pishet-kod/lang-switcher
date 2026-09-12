@@ -94,13 +94,13 @@ use windows::Win32::UI::Controls::{
     ILC_MASK, INITCOMMONCONTROLSEX, ImageList_AddMasked, ImageList_Create, ImageList_Destroy,
     ImageList_SetBkColor, InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW,
     LVIF_STATE, LVIF_TEXT, LVIR_BOUNDS, LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW,
-    LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMRECT, LVM_GETITEMSTATE, LVM_GETNEXTITEM,
-    LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
+    LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMCOUNT, LVM_GETITEMRECT, LVM_GETITEMSTATE,
+    LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
     LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
     LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR,
-    NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED,
-    ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, WM_MOUSELEAVE,
+    NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT,
+    ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, WM_MOUSELEAVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
@@ -7100,6 +7100,110 @@ pub fn cycle_list_change_is_refused(mode: Option<LayoutMode>) -> bool {
     mode == Some(LayoutMode::Pair)
 }
 
+/// Whether the change `LVN_ITEMCHANGING` is announcing **puts a tick in** — task T-42-6.
+///
+/// The state image of a list view row lives in the top four bits of the state word, and the
+/// program's own tick is [`CHECKED_IMAGE`] there ([`read_cycle_checks`] reads it the same way).
+/// A change that moves those bits to the ticked image, from anything else, is a hand ticking a
+/// row; everything else — a selection, a focus, a tick coming **out** — is not.
+///
+/// Pure, so the rule can be read and tested without a list view.
+pub fn is_ticking_a_row(old_state: u32, new_state: u32) -> bool {
+    let image = |state: u32| state & LVIS_STATEIMAGEMASK.0;
+
+    image(new_state) == CHECKED_IMAGE && image(old_state) != CHECKED_IMAGE
+}
+
+/// Whether one more tick would be the **ninth** — finding Н112, решение 124.3.
+///
+/// `already` is how many rows carry a tick **apart from the one being ticked**. The engine
+/// takes the first [`crate::layouts::MAX_CYCLE`] of them and drops the rest silently
+/// (`layouts.rs`, the rule of §7), so a window that let the ninth tick go in would be showing
+/// a choice the program does not honour. Задача отвергает такое изменение — галочка просто не
+/// встаёт, — и это и есть видимый отказ: решение 124.3 сняло прежнее «приглушать строки», это
+/// была бы смена вида.
+///
+/// Pure, and public so the test calls the very function the window calls.
+pub fn ninth_tick_is_refused(already: usize) -> bool {
+    already >= crate::layouts::MAX_CYCLE
+}
+
+/// Why the cycle list refused a change — [`cycle_change_refusal`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CycleRefusal {
+    /// The pair mode: the list has no ticks to give and nobody asked the program for anything
+    /// — task T-11-7-2, FR-31.
+    Silent,
+    /// The ceiling of the cycle: the hand asked for a ninth layout and the program takes eight
+    /// — finding Н112. **Heard as well as seen** (FR-100, the third tone).
+    Aloud,
+}
+
+/// The whole rule of the `LVN_ITEMCHANGING` gate, as one pure function — tasks T-11-7-2 and
+/// T-42-6.
+///
+/// Answers `Some` when the change the list view is announcing must be refused, and **why** is
+/// the value: a refusal earned by the pair mode is silent, one earned by the ceiling of the
+/// cycle is [`CycleRefusal::Aloud`] and the window follows it with the dull knock of FR-100.
+///
+/// Everything the decision rests on is an argument, so the rule can be read in one place and
+/// tested without a list view — the form every other decision of this file takes. What the
+/// window adds is the *asking*: the mode out of the state, the three state fields out of the
+/// notification, and the count of ticks out of the control itself.
+pub fn cycle_change_refusal(
+    mode: Option<LayoutMode>,
+    state_changed: bool,
+    old_state: u32,
+    new_state: u32,
+    ticked_besides: usize,
+) -> Option<CycleRefusal> {
+    if cycle_list_change_is_refused(mode) {
+        return Some(CycleRefusal::Silent);
+    }
+
+    // ⚠ `mode.is_some()` is not a formality — it is the whole difference between a hand and the
+    // program. `None` is a state held borrowed by [`fill_cycle_list`] or [`move_cycle_row`]
+    // writing the list itself, and the **file** is allowed to name more layouts than
+    // [`crate::layouts::MAX_CYCLE`] (finding Н49: the engine drops the surplus silently, and §7
+    // of `SPEC.md` says so). A ceiling applied to the program's own fill would quietly erase
+    // the ninth line of somebody's file the moment the window opened on it. The ceiling belongs
+    // to the hand. ⭐ Caught by the test of this very task, not by the eye.
+    if mode.is_some()
+        && state_changed
+        && is_ticking_a_row(old_state, new_state)
+        && ninth_tick_is_refused(ticked_besides)
+    {
+        return Some(CycleRefusal::Aloud);
+    }
+
+    None
+}
+
+/// How many rows of the cycle list carry a tick, not counting row `except` — task T-42-6.
+///
+/// Asked of the **control**, row by row, exactly as [`read_cycle_checks`] asks it: the answer
+/// has to be what the list really shows at this instant, and `LVN_ITEMCHANGING` arrives before
+/// the change goes in, so the row being ticked still reads as unticked and is skipped by name
+/// rather than by trusting that.
+fn ticked_rows_besides(hwnd: HWND, except: i32) -> usize {
+    let count = send_to(hwnd, IDC_CYCLE_LIST, LVM_GETITEMCOUNT, 0, 0);
+
+    (0..count.max(0))
+        .filter(|row| *row != isize::try_from(except).unwrap_or(-1))
+        .filter(|row| {
+            let state = send_to(
+                hwnd,
+                IDC_CYCLE_LIST,
+                LVM_GETITEMSTATE,
+                usize::try_from(*row).unwrap_or(0),
+                isize::try_from(LVIS_STATEIMAGEMASK.0).unwrap_or(0),
+            );
+
+            u32::try_from(state).unwrap_or(0) == CHECKED_IMAGE
+        })
+        .count()
+}
+
 /// Answers the two notifications of the layout list — FR-92а: `NM_CUSTOMDRAW` (task T-11-7,
 /// the row paints of the palette; task T-11-7-2, the muted rows of the pair mode) and
 /// `LVN_ITEMCHANGING` (task T-11-7-2, the gate of FR-31 — in the pair mode a click changes
@@ -7111,8 +7215,20 @@ pub fn cycle_list_change_is_refused(mode: Option<LayoutMode>) -> bool {
 /// `hwndFrom`, `idFrom`, `code`. All three are then compared — `code` against
 /// `NM_CUSTOMDRAW` and `LVN_ITEMCHANGING`, `idFrom` against `IDC_CYCLE_LIST`, and `hwndFrom`
 /// against the dialog's own `GetDlgItem` answer for that identifier — and only a message
-/// that passes every one goes any further. `LVN_ITEMCHANGING` is then decided on the header
-/// alone: not a byte of its payload is read. Only `NM_CUSTOMDRAW` reads on, as the
+/// that passes every one goes any further.
+///
+/// ⚠ **`LVN_ITEMCHANGING` used to be decided on the header alone, and since task T-42-6 it is
+/// not.** The gate of FR-31 still is — the pair mode refuses every change and needs to know
+/// nothing else — but the gate of Н112 has to tell «ставят галочку» from «снимают», and the
+/// two are the same notification. So **four** fields of `NMLISTVIEW` are read after those
+/// gates: `uChanged`, `uOldState`, `uNewState` and `iItem`. Nothing else; no pointer of the
+/// message is followed; and the number of ticks the decision rests on is asked of the
+/// **control** ([`ticked_rows_besides`]), not taken from the message. A forged message
+/// therefore buys its sender one refused change of its own list — the same purchase the
+/// paragraph below describes. The sentence is corrected here rather than left standing: a doc
+/// that describes what the code no longer does is the defect Э49 paid for.
+///
+/// Only `NM_CUSTOMDRAW` reads on, as the
 /// `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
 /// Out of that structure exactly four fields are read — `dwDrawStage`, `dwItemSpec`,
 /// `uItemState`, `hdc` — and three written — `clrText`, `clrTextBk`, `uItemState` — the
@@ -7232,8 +7348,47 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
         // SAFETY: see the caller.
         let mode = unsafe { with_state(hwnd, |state| state.working.layouts.mode) };
 
-        if cycle_list_change_is_refused(mode) {
-            // TRUE — the change is refused; the list stays exactly as drawn.
+        // The pair mode refuses on the header alone and needs nothing else — task T-11-7-2.
+        // Everything below is task T-42-6 (finding Н112) and reads **four** fields of the
+        // payload, because «ставят галочку» and «снимают» are the same notification and differ
+        // only in the state words. No pointer of the message is followed, and the count of
+        // ticks the decision rests on is asked of the **control** ([`ticked_rows_besides`]),
+        // not taken from the message: a forged message buys its sender one refused change of
+        // its own list.
+        //
+        // SAFETY: the header just checked is the head of an `NMLISTVIEW` — that is what a list
+        // view sends with `LVN_ITEMCHANGING`, and the three gates above have established both
+        // the code and the sender.
+        let change = unsafe { &*(lparam.0 as *const NMLISTVIEW) };
+        let (item, changed, old_state, new_state) = (
+            change.iItem,
+            change.uChanged,
+            change.uOldState,
+            change.uNewState,
+        );
+
+        let refusal = cycle_change_refusal(
+            mode,
+            changed.0 & LVIF_STATE.0 != 0,
+            old_state,
+            new_state,
+            ticked_rows_besides(hwnd, item),
+        );
+
+        match refusal {
+            Some(CycleRefusal::Aloud) => {
+                // The refusal is **heard** as well as seen — FR-100, the third tone of Э49.
+                // ⛔ And heard only if the user kept `[feedback] sound` on: with the sound off
+                // this call is silent and the tick still does not go in, which is the
+                // invariant of решение 124.3.
+                crate::app::sound_refusal();
+            }
+            Some(CycleRefusal::Silent) | None => {}
+        }
+
+        if refusal.is_some() {
+            // TRUE — the change is refused; the list stays exactly as drawn, and a tick the
+            // ceiling would not honour simply does not appear.
             return answer_notify(hwnd, 1);
         }
 

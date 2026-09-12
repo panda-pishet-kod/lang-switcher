@@ -498,8 +498,15 @@ pub enum Press {
     /// a verdict that has not come back yet. **Not a refusal** — nothing was forbidden, there
     /// was simply nothing to do.
     Idle,
-    /// **This program would not act here** — FR-70 (a password field) and FR-84 (an excluded
-    /// process), and those two only.
+    /// **This program would not act here** — FR-70 (a password field), FR-84 (an excluded
+    /// process), and, since task T-42-6, a **window** that refused what the hand asked of it.
+    ///
+    /// ⚠ The wording used to say «those two only», and task T-42-6 (finding Н112) is what made
+    /// it untrue: the settings window refuses the ninth tick of the cycle list and says so with
+    /// this very tone, through [`sound_refusal`]. The doc is widened rather than a fourth value
+    /// invented — what the user hears is the same dull knock, and the rule behind it is the
+    /// same one: *this program would not act here*. The урок of Э49 is why the sentence is
+    /// corrected in the same commit as the code that made it untrue.
     ///
     /// ⚠ [`crate::guard::Field::Pending`] is deliberately **not** one of them, and the
     /// distinction is the whole point of the arm: «ответа ещё нет» is not knowing, not
@@ -662,6 +669,27 @@ pub fn answer_press<B: Beeper>(beeper: &mut B, press: Press, enabled: bool) {
 /// production [`Beeper`]. Reached from the UI thread's window procedure and from nowhere else.
 fn sound_press(press: Press) {
     answer_press(&mut SystemBeeper, press, sound_enabled());
+}
+
+/// The dull knock of FR-100 for a **window** that refused what the hand asked — task T-42-6,
+/// finding Н112.
+///
+/// The one door this module opens to `src\settings.rs`, and it is deliberately narrow: no
+/// argument, no choice of tone, nothing a caller could pass that would make a different sound.
+/// The settings window refuses the ninth tick of the cycle list ([`crate::layouts::MAX_CYCLE`]
+/// is eight) and calls this so that the refusal is **heard** as well as seen.
+///
+/// # ⛔ The sound is the addition, not the cure
+///
+/// [`tone_for`] answers `None` when `[feedback] sound` is off, so for a user who turned the
+/// sound off this call does nothing at all — and the ninth tick still does not go in. That is
+/// the invariant of the task: the refusal is **visible** at every setting, and this is what is
+/// laid on top of it. A cure that lived here would be no cure for half the users.
+///
+/// Runs on the UI thread, inside the modal call of the settings dialog — the thread
+/// [`answer_press`] documents as its own.
+pub fn sound_refusal() {
+    sound_press(Press::Refused);
 }
 
 /// Which outcome one of the three sound messages carries, or `None` for every other message.
@@ -3835,6 +3863,39 @@ mod tests {
             bench.tones.is_empty(),
             "with the setting off nothing is sounded at all: {:?}",
             bench.tones
+        );
+    }
+
+    /// **Task T-42-6, finding Н112** — a window that refuses is answered by the same third
+    /// tone, exactly once, and by silence when `[feedback] sound` is off.
+    ///
+    /// [`sound_refusal`] is the door `src\settings.rs` calls when the ninth tick is refused; it
+    /// is a wrapper over [`sound_press`], which is [`answer_press`] with the production beeper.
+    /// The production beeper would make a noise in a test, so what is measured here is the pair
+    /// underneath it — the outcome the door carries and the setting it obeys — through the
+    /// bench. ⛔ The invariant the task rests on is the second half: with the sound off the tone
+    /// is `None` **and the tick still does not go in** (`cycle_change_refusal` does not consult
+    /// the setting at all — see its test in `tests\settings.rs`).
+    #[test]
+    fn a_window_that_refuses_earns_one_dull_knock_and_obeys_the_setting() {
+        let mut bench = Bench::default();
+
+        answer_press(&mut bench, Press::Refused, true);
+
+        assert_eq!(
+            bench.tones,
+            vec![Tone::Refused],
+            "one refusal of a window, one knock — the very tone a refused press earns"
+        );
+
+        let mut silent = Bench::default();
+
+        answer_press(&mut silent, Press::Refused, false);
+
+        assert!(
+            silent.tones.is_empty(),
+            "with `[feedback] sound` off the refusal is silent — and still a refusal: {:?}",
+            silent.tones
         );
     }
 

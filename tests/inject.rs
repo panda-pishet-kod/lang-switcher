@@ -2783,11 +2783,19 @@ fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
 
     let callers = code_lines_with(product, "sound_press(");
 
+    // ⚠ **Three → four by task T-42-6.** The fourth is `sound_refusal`, the narrow door the
+    // settings window calls when it refuses the ninth tick of the cycle list (finding Н112): it
+    // takes no argument, chooses no tone, and runs on the **UI thread** — inside the modal call
+    // of the dialog, which is the thread the other two arms run on as well. The sentence this
+    // test holds is therefore unchanged in substance: nothing on the hook path and nothing on
+    // the input path makes a sound. The number moved because a window learned to speak, not
+    // because the rule moved.
     assert_eq!(
         callers.len(),
-        3,
-        "the production beeper is reached from its definition and from the two arms of the UI \
-         thread's window procedure, and from nowhere else: {callers:?}"
+        4,
+        "the production beeper is reached from its definition, from the two arms of the UI \
+         thread's window procedure and from the refusal door of the settings window, and from \
+         nowhere else: {callers:?}"
     );
 }
 

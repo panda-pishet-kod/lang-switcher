@@ -3507,6 +3507,148 @@ fn a_click_in_pair_mode_is_refused_before_any_action_of_fr_31() {
     );
 }
 
+/// **Task T-42-6, finding Н112, решение 124.3** — the ninth tick of the cycle list does not go
+/// in, and the refusal is heard as well as seen.
+///
+/// The window let a person tick as many layouts as the list has rows, and the engine takes the
+/// first `layouts::MAX_CYCLE` of them and drops the rest **silently** — so the ninth tick was a
+/// choice the program did not honour and did not say it would not honour. Решение 124.3: the
+/// ceiling of eight stays, the rows are **not** muted (that would be a change of a frozen look),
+/// and the ninth tick is refused through the very gate that already refuses every change of the
+/// pair mode.
+///
+/// The whole rule is `settings::cycle_change_refusal`, and this test is that rule; what the
+/// window adds is the asking — the mode out of its state, the state words out of the
+/// notification, the count of ticks out of the control itself.
+#[test]
+fn the_ninth_tick_of_the_cycle_list_is_refused_and_the_eight_stay() {
+    let ticking = (
+        settings::UNCHECKED_IMAGE | 0x0001,
+        settings::CHECKED_IMAGE | 0x0001,
+    );
+    let unticking = (settings::CHECKED_IMAGE, settings::UNCHECKED_IMAGE);
+    let selecting = (settings::CHECKED_IMAGE, settings::CHECKED_IMAGE | 0x0002);
+
+    // 1. What counts as putting a tick in: the state image, and only it.
+    assert!(
+        settings::is_ticking_a_row(ticking.0, ticking.1),
+        "the image going to CHECKED_IMAGE from anything else is a hand ticking a row"
+    );
+    assert!(
+        !settings::is_ticking_a_row(unticking.0, unticking.1),
+        "a tick coming out is not a tick going in — it is always allowed"
+    );
+    assert!(
+        !settings::is_ticking_a_row(selecting.0, selecting.1),
+        "a selection changing while the image stays is not a tick at all"
+    );
+
+    // 2. The ceiling itself, read from the engine's own constant rather than from an eight
+    //    written here: the number belongs to `layouts::MAX_CYCLE` (решение 124.3 — 8 stays).
+    for already in 0..layouts::MAX_CYCLE {
+        assert!(
+            !settings::ninth_tick_is_refused(already),
+            "with {already} ticked the next tick is number {} and goes in",
+            already + 1
+        );
+    }
+
+    assert!(
+        settings::ninth_tick_is_refused(layouts::MAX_CYCLE),
+        "with {} ticked the next tick would be the ninth and is refused",
+        layouts::MAX_CYCLE
+    );
+
+    // 3. The whole gate. Eight ticked: the ninth is refused **aloud** — FR-100, the third tone.
+    assert_eq!(
+        settings::cycle_change_refusal(
+            Some(LayoutMode::Cycle),
+            true,
+            ticking.0,
+            ticking.1,
+            layouts::MAX_CYCLE
+        ),
+        Some(settings::CycleRefusal::Aloud),
+        "the ninth tick is refused, and a person hears why"
+    );
+
+    // Seven ticked: the eighth goes in and nothing is said.
+    assert_eq!(
+        settings::cycle_change_refusal(
+            Some(LayoutMode::Cycle),
+            true,
+            ticking.0,
+            ticking.1,
+            layouts::MAX_CYCLE - 1
+        ),
+        None,
+        "the eighth tick is the last one the engine honours, and it goes in"
+    );
+
+    // Taking a tick **out** at the ceiling: always allowed — otherwise a full list could never
+    // be changed at all.
+    assert_eq!(
+        settings::cycle_change_refusal(
+            Some(LayoutMode::Cycle),
+            true,
+            unticking.0,
+            unticking.1,
+            layouts::MAX_CYCLE
+        ),
+        None,
+        "a tick can always come out, ceiling or no ceiling"
+    );
+
+    // Selecting a row at the ceiling is not a tick; three ticks in a list of twenty refuse
+    // nothing either (ТЗ приёмка T-42-6).
+    assert_eq!(
+        settings::cycle_change_refusal(
+            Some(LayoutMode::Cycle),
+            true,
+            selecting.0,
+            selecting.1,
+            layouts::MAX_CYCLE
+        ),
+        None,
+        "moving the selection is not ticking a row"
+    );
+    assert_eq!(
+        settings::cycle_change_refusal(Some(LayoutMode::Cycle), true, ticking.0, ticking.1, 3),
+        None,
+        "three ticks in a list of twenty: the fourth goes in"
+    );
+
+    // A notification that touches no state at all — `uChanged` without `LVIF_STATE`.
+    assert_eq!(
+        settings::cycle_change_refusal(
+            Some(LayoutMode::Cycle),
+            false,
+            ticking.0,
+            ticking.1,
+            layouts::MAX_CYCLE
+        ),
+        None,
+        "a change that touches no state is not a tick"
+    );
+
+    // 4. The pair mode still refuses everything, and **silently**: nobody asked the program for
+    //    anything there — FR-31, task T-11-7-2. The two refusals are told apart on purpose.
+    assert_eq!(
+        settings::cycle_change_refusal(Some(LayoutMode::Pair), true, ticking.0, ticking.1, 0),
+        Some(settings::CycleRefusal::Silent),
+        "the pair mode refuses every change and says nothing about it"
+    );
+
+    // 5. The programmatic fill — `None` as the mode — passes at any number of ticks: that is
+    //    the program writing its own list, and `fill_cycle_list` ticks more than eight rows
+    //    only if the file already holds them.
+    assert_eq!(
+        settings::cycle_change_refusal(None, true, ticking.0, ticking.1, layouts::MAX_CYCLE),
+        None,
+        "the program's own write under the held borrow is not a hand at the ceiling"
+    );
+}
+
 // =========================================================================================
 // FR-92 and FR-93 — the settings dialog and autostart. Task T-08-1.
 // =========================================================================================
@@ -8916,6 +9058,33 @@ fn an_entry_in_the_language_form_is_not_lengthened_by_an_ok_without_edits() {
     assert_eq!(
         written, file,
         "С55: one entry in, one entry out, in its own form"
+    );
+}
+
+/// **Task T-42-6, п. 5** — a tick the gate refused is **not an edit**: the cycle line of the
+/// file goes back byte for byte, which is exactly what T-55-8 bought.
+///
+/// The refusal of Н112 happens at `LVN_ITEMCHANGING`, before the change goes in, so the rows the
+/// dialog closes with are the rows it opened with and `cycle_after_dialog` keeps the file's own
+/// string. Said here as a measurement rather than as a sentence in a comment: a future gate that
+/// refused the tick *after* letting it into the rows would be caught right here.
+#[test]
+fn a_refused_tick_leaves_the_cycle_line_of_the_file_untouched() {
+    let session = [EN, RU];
+    let file = vec!["0x00000409".to_owned()];
+    let mut layouts = Config::default().layouts;
+    layouts.cycle = file.clone();
+
+    let at_open = settings::layout_rows(&layouts, &session);
+
+    // The rows after a refused tick are the rows at open — the tick never went in.
+    let written = settings::cycle_after_dialog(&file, &at_open, &at_open, &session);
+
+    println!("rows at open: {at_open:?}, written: {written:?}");
+
+    assert_eq!(
+        written, file,
+        "a refused tick is no edit: the file's own line stands byte for byte (T-55-8)"
     );
 }
 
