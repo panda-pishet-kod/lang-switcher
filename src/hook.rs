@@ -697,6 +697,78 @@ fn function_key_number(name: &str) -> Option<u8> {
 /// Value meaning "there is no hook" in [`HOOK`] and "there is no window" in the two targets.
 const NO_HANDLE: usize = 0;
 
+/// [`HOOK`] is being claimed: `SetWindowsHookExW` has been called or is about to be — **task
+/// T-36-7, finding Н35**.
+///
+/// Not a handle any hook can have: `HHOOK` is a pointer into the user-mode address space, and
+/// neither of the two marks below is a representable one.
+const INSTALLING: usize = usize::MAX;
+
+/// [`HOOK`] carried [`INSTALLING`] when [`uninstall`] was called: whoever is installing must undo
+/// it. See [`HookCell`].
+const CANCELLED: usize = usize::MAX - 1;
+
+/// What the one cell [`HOOK`] says — the four states of the protocol of task T-36-7.
+///
+/// # The window this closes
+///
+/// Installation used to be three steps: check that no hook is registered, register one, publish
+/// the handle. Between the second and the third the hook **exists in the system and the program
+/// does not know it**. Removal is one indivisible operation and is called from other threads —
+/// FR-96 from inside the callback, FR-98 from the panic hook, FR-97 from the timeout thread,
+/// FR-83 from the UI. A removal landing in that window answered "nothing to remove" and left the
+/// hook standing: the program believes it is no longer listening to the keyboard while it is. The
+/// other side of the same window is two hooks at once, which FR-01 forbids outright.
+///
+/// The window is microseconds wide and it is real. It is closed by giving the cell a **mark** for
+/// "being claimed" instead of leaving it at "free" during the call: the invariant "exactly one
+/// hook" is then held by the machine rather than by the order of three lines.
+///
+/// # The rules, as data
+///
+/// | cell | `install` claims | `uninstall` finds |
+/// |---|---|---|
+/// | [`Self::Free`] | takes it, leaves [`INSTALLING`] | nothing to do, answers `false` |
+/// | [`Self::Installing`] | refused — FR-01, one hook | leaves [`CANCELLED`], answers `false` |
+/// | [`Self::Installed`] | refused — FR-01 | takes the handle out, unhooks, answers `true` |
+/// | [`Self::Cancelled`] | refused — the claim is somebody else's to undo | nothing to do, `false` |
+///
+/// ⛔ **No blocking primitive and no waiting anywhere in this**, and the reason is the callers:
+/// `uninstall` runs inside the hook callback (FR-96) and inside the panic hook (FR-98), where
+/// NFR-04 and the impossibility of deadlock leave nothing else. Every transition is one
+/// `compare_exchange` over one `AtomicUsize`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookCell {
+    /// No hook, and nobody is installing one.
+    Free,
+    /// Somebody is between `SetWindowsHookExW` and the publication of its handle.
+    Installing,
+    /// A hook is registered and this is its handle.
+    Installed(usize),
+    /// A removal arrived while a claim was in flight; the installer has to undo it.
+    Cancelled,
+}
+
+/// Reads the raw word of [`HOOK`] as a [`HookCell`] — the one place the marks are interpreted.
+pub const fn cell_of(raw: usize) -> HookCell {
+    match raw {
+        NO_HANDLE => HookCell::Free,
+        INSTALLING => HookCell::Installing,
+        CANCELLED => HookCell::Cancelled,
+        handle => HookCell::Installed(handle),
+    }
+}
+
+/// Whether a hook is registered **as far as the cell says** — [`HookCell::Installed`] and nothing
+/// else.
+///
+/// ⚠ A claim in flight is deliberately **not** "installed": `is_installed` answers the watchdog's
+/// question «does this program believe it has a hook?», and a claim that is cancelled a moment
+/// later never becomes one.
+pub const fn cell_is_installed(raw: usize) -> bool {
+    matches!(cell_of(raw), HookCell::Installed(_))
+}
+
 /// The one hook of FR-01, as a raw pointer.
 ///
 /// `HHOOK` is a raw pointer and therefore neither `Sync` nor storable in an atomic; the
@@ -875,8 +947,21 @@ pub enum HotkeyMemory {
 /// stroke seen twice — or if `SetWindowsHookExW` refuses. NFR-13: a null return is an error
 /// and not a success, and it is checked twice here, once by the binding and once in plain
 /// sight.
+///
+/// **Since task T-36-7 it also fails when a removal arrived while this installation was in
+/// flight** ([`HookCell::Cancelled`]): the hook is taken back off immediately and the error is
+/// returned, because the caller that asked for the removal is entitled to have got one.
 pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory) -> WinResult<Installed> {
-    if HOOK.load(Ordering::Acquire) != NO_HANDLE {
+    // **Task T-36-7, finding Н35 — the claim.** The cell goes from `Free` to `INSTALLING` in one
+    // indivisible operation, so from this line on the invariant of FR-01 is held by the machine:
+    // a second `install` is refused, and a `uninstall` from any thread sees a claim in flight
+    // instead of an empty cell and marks it cancelled. The old code read the cell, called
+    // `SetWindowsHookExW` and published afterwards, leaving a window in which the hook existed
+    // and the cell still said "free".
+    if HOOK
+        .compare_exchange(NO_HANDLE, INSTALLING, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
         return Err(WinError::from_hresult(
             windows::Win32::Foundation::E_UNEXPECTED,
         ));
@@ -896,18 +981,60 @@ pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory) -> WinRe
     // hook is called back in the installing thread's context rather than injected into other
     // processes. The call registers the procedure and returns; it dereferences nothing of
     // ours.
-    let hook =
-        unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), Some(instance), 0) }?;
+    let hook = match unsafe {
+        SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), Some(instance), 0)
+    } {
+        Ok(hook) => hook,
+        Err(error) => {
+            // Task T-36-7: the claim has to be given back, or the cell would say "being
+            // installed" for ever and every later installation — the watchdog's included —
+            // would be refused. `store` and not a `compare_exchange`: a cancellation that
+            // arrived in the meantime is answered the same way, with a free cell and an error.
+            HOOK.store(NO_HANDLE, Ordering::Release);
+            return Err(error);
+        }
+    };
 
     // NFR-13, stated in the code rather than left to the binding: `SetWindowsHookExW` reports
     // failure with a null handle, and a null handle read as success would leave the program
     // convinced it has a hook it does not have — the exact failure FR-80 is about, arrived at
     // by a different road.
     if hook.is_invalid() {
+        HOOK.store(NO_HANDLE, Ordering::Release);
         return Err(WinError::from_thread());
     }
 
-    HOOK.store(hook.0 as usize, Ordering::Release);
+    // **Task T-36-7 — the publication, and the one case it can fail.** The claim becomes the
+    // handle in one indivisible operation. It fails only when the cell no longer carries the
+    // claim, and the single way that happens is [`CANCELLED`]: somebody called `uninstall` while
+    // `SetWindowsHookExW` was running. That caller was told there was nothing to remove, so the
+    // hook this call has just registered has to come off here — otherwise the program would end
+    // up holding a hook nobody asked for and the removal would have been a lie.
+    if HOOK
+        .compare_exchange(
+            INSTALLING,
+            hook.0 as usize,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_err()
+    {
+        // SAFETY: `hook` is the handle `SetWindowsHookExW` returned to this call and has not
+        // been published anywhere, so this thread holds the only copy of it and no other path
+        // can be unhooking it. Unhooking from the installing thread is what the ordinary exit
+        // does as well.
+        if let Err(error) = unsafe { UnhookWindowsHookEx(hook) } {
+            // NFR-13: examined and counted, exactly as the ordinary removal counts it.
+            UNHOOK_FAILURES.fetch_add(1, Ordering::Relaxed);
+            LAST_UNHOOK_ERROR.store(error.code().0 as u32, Ordering::Relaxed);
+        }
+
+        HOOK.store(NO_HANDLE, Ordering::Release);
+
+        return Err(WinError::from_hresult(
+            windows::Win32::Foundation::E_UNEXPECTED,
+        ));
+    }
 
     // SEC-04a, feature `testing`, absent from the Release configuration. Read here rather
     // than in the callback, where NFR-05 forbids touching the environment.
@@ -984,14 +1111,49 @@ pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory) -> WinRe
 /// because this function is on the FR-96 path, which runs inside the callback where NFR-05
 /// forbids journalling. See [`UNHOOK_FAILURES`].
 pub fn uninstall() -> bool {
-    let raw = HOOK.swap(NO_HANDLE, Ordering::AcqRel);
+    // **Task T-36-7, finding Н35.** The cell has four states now (see [`HookCell`]) and the answer
+    // differs for each, so this is a `compare_exchange` against what was read rather than an
+    // unconditional `swap`: a `swap` would take a claim in flight out of the cell and the
+    // installer would publish its handle into an empty one, which is the very window this task
+    // closes, seen from the other side.
+    //
+    // ⛔ **The loop is not a wait.** Nothing here blocks and nothing spins on another thread's
+    // value: an iteration is repeated only when the cell *changed* between the read and the
+    // exchange, which means some other thread made progress — the protocol is lock-free, which
+    // is the property FR-96 (from inside the callback) and FR-98 (from the panic hook) need.
+    let raw = loop {
+        let seen = HOOK.load(Ordering::Acquire);
 
-    if raw == NO_HANDLE {
-        return false;
-    }
+        match cell_of(seen) {
+            // Nothing to remove. A cancelled claim is somebody else's to clean up, and saying
+            // "removed" about it would be a lie.
+            HookCell::Free | HookCell::Cancelled => return false,
+
+            // A claim is in flight. Mark it cancelled and answer honestly that this call did not
+            // remove a hook: `install` will take the hook back off as soon as it has one.
+            HookCell::Installing => {
+                if HOOK
+                    .compare_exchange(INSTALLING, CANCELLED, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return false;
+                }
+            }
+
+            // The ordinary path, and the one every exit of the program takes.
+            HookCell::Installed(handle) => {
+                if HOOK
+                    .compare_exchange(handle, NO_HANDLE, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    break handle;
+                }
+            }
+        }
+    };
 
     // SAFETY: `raw` was published by `install` from the handle `SetWindowsHookExW` returned
-    // and is taken out of the atomic by the `swap` above, so this thread now holds the only
+    // and is taken out of the atomic by the exchange above, so this thread now holds the only
     // copy of it and no second `UnhookWindowsHookEx` can be issued for the same handle.
     // Unhooking from a thread other than the installing one is permitted for `WH_KEYBOARD_LL`
     // and is what FR-97 and FR-98 need — the whole point of the timeout is that the input
@@ -1013,8 +1175,13 @@ pub fn uninstall() -> bool {
 /// "As far as this program knows" is the whole caveat of FR-80: the system removes a
 /// low-level hook silently, and this flag would still say `true`. Proving the hook is alive
 /// is the watchdog's business, task T-06-2.
+///
+/// ⚠ **A claim in flight is not an installed hook** — task T-36-7. The cell carries [`INSTALLING`]
+/// for the length of one `SetWindowsHookExW` call, and during it this function still answers
+/// `false`: the claim may yet be cancelled, and the watchdog's question is what the program
+/// *has*, not what it is trying to get.
 pub fn is_installed() -> bool {
-    HOOK.load(Ordering::Acquire) != NO_HANDLE
+    cell_is_installed(HOOK.load(Ordering::Acquire))
 }
 
 // ---------------------------------------------------------------------------------------

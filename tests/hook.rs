@@ -1738,6 +1738,198 @@ fn the_exclusion_verdict_reaches_the_callback_through_this_modules_own_static() 
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-36-7 — installation is one indivisible claim (finding Н35)
+// -------------------------------------------------------------------------------------
+
+/// **The four states of the cell `HOOK`, and what each of them answers — task T-36-7.**
+///
+/// # Why the protocol is a value and not three lines
+///
+/// Installation used to be three steps — check that the cell is empty, call
+/// `SetWindowsHookExW`, publish the handle — and between the second and the third **the hook
+/// existed in the system and the program did not know it**. Removal is one operation and is
+/// called from other threads: FR-96 from inside the callback, FR-98 from the panic hook, FR-97
+/// from the timeout thread, FR-83 from the UI. A removal that landed in that window found an
+/// empty cell, answered "nothing to remove", and left the hook standing — the program believing
+/// it had let the keyboard go while it had not. The other side of the same window is two hooks at
+/// once, which FR-01 forbids.
+///
+/// The repair puts a **mark** in the cell for the length of the call, so the invariant is held by
+/// the machine. This test drives the interpretation of that cell — `hook::cell_of` — over every
+/// state, because the transitions themselves cannot be called from a test binary: they end in
+/// `SetWindowsHookExW`, and the header of this file says why no test here installs a hook.
+///
+/// The real transitions are checked by the sweep below
+/// (`the_installation_claims_the_cell_before_the_system_call`), which reads the two functions and
+/// shows that each state of this table is the one they act on.
+#[test]
+fn the_cell_of_the_hook_has_four_states_and_a_claim_is_not_an_installed_hook() {
+    use lang_switcher::hook::{HookCell, cell_is_installed, cell_of};
+
+    const NO_HANDLE: usize = 0;
+    const INSTALLING: usize = usize::MAX;
+    const CANCELLED: usize = usize::MAX - 1;
+    // Any value that is neither: this stands for the handle `SetWindowsHookExW` returns.
+    const HANDLE: usize = 0x0000_1234_5678_9ABC;
+
+    assert_eq!(cell_of(NO_HANDLE), HookCell::Free);
+    assert_eq!(cell_of(INSTALLING), HookCell::Installing);
+    assert_eq!(cell_of(CANCELLED), HookCell::Cancelled);
+    assert_eq!(cell_of(HANDLE), HookCell::Installed(HANDLE));
+
+    // ⭐ The property the watchdog rests on: a claim in flight is **not** a hook. `is_installed`
+    // answers «does this program have one?», and a claim that is cancelled a moment later never
+    // becomes one; a `true` here would make `watchdog::reinstall_hook` believe a hook it never
+    // got, and `ABSENT_AT_CHECK` would stop counting the absences it exists to count.
+    assert!(cell_is_installed(HANDLE), "a handle is an installed hook");
+    assert!(!cell_is_installed(NO_HANDLE), "an empty cell is not");
+    assert!(
+        !cell_is_installed(INSTALLING),
+        "Н35: a claim in flight is not an installed hook — it may still be cancelled"
+    );
+    assert!(
+        !cell_is_installed(CANCELLED),
+        "and neither is a claim somebody has already asked to undo"
+    );
+
+    // The marks are not handles. `HHOOK` is a pointer into the user-mode address space, so
+    // neither of these can ever be returned by the system — which is what makes them usable as
+    // marks in the same word.
+    assert_ne!(INSTALLING, CANCELLED);
+    for mark in [INSTALLING, CANCELLED] {
+        assert!(
+            mark > 0x0000_7FFF_FFFF_FFFF,
+            "a mark must be outside every address a hook handle can have: {mark:#x}"
+        );
+    }
+}
+
+/// **The two functions really act on that table — task T-36-7, the sweep.**
+///
+/// Honest red is out of reach here for the reason the task specification states: `install` cannot
+/// be called from a test binary at all (it would register a real `WH_KEYBOARD_LL` in a process
+/// that pumps no messages and freeze the machine's keyboard for `LowLevelHooksTimeout` on every
+/// stroke). So the shape is read, as `fr_96_is_decided_before_any_other_logic_of_the_callback`
+/// reads the ordering of the callback — and, as there, a reviewer checks the same thing.
+///
+/// What must hold, and each of these is a way the old three-step shape could come back:
+///
+/// * the claim is a `compare_exchange` from the free state to the mark, and it is the **first**
+///   thing `install` does — before `SetWindowsHookExW`;
+/// * the handle is published by a `compare_exchange` from the mark, not by a `store`: a `store`
+///   would overwrite a cancellation instead of seeing it;
+/// * every failing path of `install` puts the cell back to free, or a claim would be stuck for
+///   the life of the process and every later installation refused;
+/// * `uninstall` no longer takes the cell with an unconditional `swap`, and it answers the claim
+///   with the cancellation mark;
+/// * nothing on either path blocks or sleeps — FR-96 runs this inside the callback.
+#[test]
+fn the_installation_claims_the_cell_before_the_system_call() {
+    // ⚠ **Flattened before anything is matched.** `rustfmt` breaks a `compare_exchange` with four
+    // arguments across five lines as soon as the line grows, and a needle written as one line
+    // stops matching without anything having changed — the trap of stage Э32, met by the first
+    // draft of this very test. Collapsing every run of whitespace to a single space makes the
+    // needles say what they mean: these tokens, in this order.
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable")
+    .replace("\r\n", "\n")
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    // …and the brackets closed up again: `rustfmt` puts each argument of a long call on its own
+    // line, so a flattened call reads `compare_exchange( INSTALLING, …` with a space the source
+    // never had. These three replacements make the text read the way the call is written.
+    .replace("( ", "(")
+    .replace(" )", ")")
+    .replace(" ,", ",");
+
+    let install = source
+        .split_once("pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory)")
+        .expect("install must be in this file")
+        .1
+        .split_once(" pub fn ")
+        .expect("the next function follows it")
+        .0;
+
+    let uninstall = source
+        .split_once("pub fn uninstall() -> bool {")
+        .expect("uninstall must be in this file")
+        .1
+        .split_once(" pub fn ")
+        .expect("the next function follows it")
+        .0;
+
+    let at = |body: &str, needle: &str| -> usize {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("Н35: the protocol no longer contains {needle:?}"))
+    };
+
+    // The order inside `install`: the claim, then the system call, then the publication.
+    let claim = at(install, "compare_exchange(NO_HANDLE, INSTALLING");
+    let system_call = at(install, "SetWindowsHookExW(WH_KEYBOARD_LL");
+    let publish = at(install, "compare_exchange(INSTALLING, hook.0 as usize");
+
+    println!("install: claim at {claim}, SetWindowsHookExW at {system_call}, publish at {publish}");
+
+    assert!(
+        claim < system_call,
+        "Н35: the cell must be claimed BEFORE the hook exists — a claim after the call is the \
+         three-step shape this task removed, with the window still in it"
+    );
+    assert!(
+        system_call < publish,
+        "and the handle is published after the call that produced it"
+    );
+
+    // Every way out of `install` frees the cell again. Three: the call refused, the handle was
+    // null, the claim was cancelled under it.
+    assert_eq!(
+        install
+            .matches("HOOK.store(NO_HANDLE, Ordering::Release)")
+            .count(),
+        3,
+        "Н35: each failing path of the installation gives the claim back — a claim left behind \
+         would refuse every later installation, the watchdog's included"
+    );
+    assert!(
+        install.contains("UnhookWindowsHookEx(hook)"),
+        "Н35: a cancelled claim takes the hook it has just registered back off — the caller \
+         that asked for the removal was told there was nothing to remove"
+    );
+
+    // `uninstall`: no unconditional swap, and the claim is answered with the mark.
+    assert!(
+        !uninstall.contains("HOOK.swap("),
+        "Н35: an unconditional swap would take a claim in flight out of the cell, and the \
+         installer would then publish its handle into an empty one — the same window, from the \
+         other side"
+    );
+    assert!(
+        uninstall.contains("compare_exchange(INSTALLING, CANCELLED"),
+        "Н35: a removal that meets a claim in flight marks it cancelled"
+    );
+    assert!(
+        uninstall.contains("compare_exchange(handle, NO_HANDLE"),
+        "and an installed hook is taken out by its own handle"
+    );
+
+    // NFR-04, FR-96, FR-98: nothing on either path may block.
+    for forbidden in ["Mutex", "RwLock", "OnceLock", "sleep", "park", "yield_now"] {
+        for (what, body) in [("install", install), ("uninstall", uninstall)] {
+            assert!(
+                !body.contains(forbidden),
+                "{what} must not {forbidden}: it is called from inside the callback (FR-96) and \
+                 from the panic hook (FR-98)"
+            );
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------
 // Task T-36-4 — a press that reached nobody is answered with a sound (finding Н40)
 // -------------------------------------------------------------------------------------
 
