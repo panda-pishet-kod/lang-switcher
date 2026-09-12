@@ -2799,6 +2799,89 @@ fn the_sound_of_fr_100_is_made_on_neither_the_hook_nor_the_input_path() {
     );
 }
 
+/// **Task T-42-8, finding Н31** — the buffer the dialog template is handed to the system in
+/// **declares** its alignment, rather than borrowing it from the allocator's habits.
+///
+/// # Why this is a sweep and not only a measurement
+///
+/// The obvious test — «the address is a multiple of four» — **cannot fail** in practice: the
+/// system allocator hands out blocks aligned far past four for any size involved here, and a
+/// `Vec<u8>` would pass it every single time on every machine. A test that cannot fail is not a
+/// test (правило проекта), so the measurement below is kept for what it does prove — that the
+/// type really is four-aligned and that the copy is faithful — and the substance is this sweep:
+/// the buffer type is `Vec<u32>`, and the two calls into the dialog manager take their pointer
+/// from it.
+///
+/// ⚠ **The red before.** On the tree this task started from, `compiled_template` answered
+/// `Vec<u8>` and `show_modal_dialog` wrote `copy.as_ptr().cast()` — the sweep below finds
+/// neither `AlignedTemplate` nor a `Vec<u32>` and fails on its first assertion.
+#[test]
+fn the_dialog_template_is_copied_into_a_buffer_that_declares_its_alignment() {
+    let settings = source_of("settings.rs");
+
+    // The type exists, and it is words rather than bytes.
+    let declared = code_lines_with(&settings, "words: Vec<u32>");
+
+    assert_eq!(
+        declared.len(),
+        1,
+        "the template buffer must be declared as words, whose alignment is four by its element \
+         type: {declared:?}"
+    );
+
+    // And the old shape is gone: no `Vec<u8>` template and no cast of a byte pointer at either
+    // call into the dialog manager.
+    for gone in ["Option<Vec<u8>>", "copy.as_ptr().cast()"] {
+        let found = code_lines_with(&settings, gone);
+
+        assert!(
+            found.is_empty(),
+            "«{gone}» is the shape task T-42-8 replaced — the alignment would rest on the \
+             allocator again: {found:?}"
+        );
+    }
+
+    // Both calls take the pointer from the aligned buffer.
+    let handed = code_lines_with(&settings, "copy.as_ptr()");
+
+    assert_eq!(
+        handed.len(),
+        2,
+        "the modal and the modeless call both hand over the aligned pointer, and nobody else \
+         hands over one at all: {handed:?}"
+    );
+
+    // The measurement that cannot fail, kept for the two things it does prove: the buffer of a
+    // template-sized copy is four-aligned, and the bytes survive the round trip whole.
+    let bytes: Vec<u8> = (0..=250_u8).collect();
+    let words = bytes.len().div_ceil(4);
+    let mut buffer = vec![0_u32; words];
+
+    // SAFETY: the destination is `words * 4` bytes, which is `bytes.len()` rounded up.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            buffer.as_mut_ptr().cast::<u8>(),
+            bytes.len(),
+        );
+    }
+
+    assert_eq!(
+        buffer.as_ptr() as usize % align_of::<u32>(),
+        0,
+        "a Vec<u32> is aligned for a u32 — that is what the declaration buys"
+    );
+
+    // SAFETY: the buffer holds `words * 4` initialised bytes and `bytes.len()` is not greater.
+    let back = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), bytes.len()) };
+
+    assert_eq!(
+        back,
+        &bytes[..],
+        "the copy into the word buffer is faithful"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Task T-13-13 — the ceiling of `[replacement] inter_event_delay_ms`, measured on the packet
 // ---------------------------------------------------------------------------------------

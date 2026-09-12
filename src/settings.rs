@@ -115,21 +115,22 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CB_RESETCONTENT, CB_SETCURSEL,
     CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW, DLGC_STATIC, DLGC_WANTALLKEYS,
-    DLGPROC, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW,
-    DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE,
-    GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW,
-    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
-    IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL,
-    LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW,
-    MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON, SW_SHOWNORMAL,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP,
-    WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
-    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
-    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT,
-    WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDPROC, WS_EX_LAYOUTRTL,
+    DLGPROC, DLGTEMPLATE, DM_SETDEFID, DWLP_MSGRESULT, DefWindowProcW, DestroyIcon,
+    DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN, EC_RIGHTMARGIN, EndDialog, GW_CHILD,
+    GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA, GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem,
+    GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG,
+    ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LR_DEFAULTCOLOR, LR_DEFAULTSIZE,
+    LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, STM_SETICON,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendDlgItemMessageW, SetDlgItemTextW,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, UISF_HIDEFOCUS,
+    WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
+    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
+    WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCDESTROY,
+    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDPROC,
+    WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -4095,7 +4096,7 @@ unsafe fn show_modal_dialog(
     let mirrored = ui_language().is_rtl();
 
     if let Some(mut copy) = compiled_template(instance, template) {
-        if mirrored && mirror_template(&mut copy).is_none() {
+        if mirrored && mirror_template(copy.as_mut_bytes()).is_none() {
             // The template is not the extended form after all, so there is nothing safe to
             // patch. Run it unmirrored rather than corrupt a style (NFR-13).
             //
@@ -4113,16 +4114,12 @@ unsafe fn show_modal_dialog(
 
         // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template, and
         // the call is modal — it does not return until `EndDialog`, so the buffer outlives every
-        // use the dialog manager makes of it. The other three arguments are the caller's, under
-        // the contract above.
+        // use the dialog manager makes of it. Its address is aligned for the `u32` fields of a
+        // `DLGTEMPLATE` **by the type of the buffer** since task T-42-8, rather than by what the
+        // allocator happens to hand out. The other three arguments are the caller's, under the
+        // contract above.
         return unsafe {
-            DialogBoxIndirectParamW(
-                Some(instance),
-                copy.as_ptr().cast(),
-                Some(owner),
-                proc,
-                param,
-            )
+            DialogBoxIndirectParamW(Some(instance), copy.as_ptr(), Some(owner), proc, param)
         };
     }
 
@@ -4181,7 +4178,7 @@ pub(crate) unsafe fn show_modeless_dialog(
     let mirrored = ui_language().is_rtl();
 
     if let Some(mut copy) = compiled_template(instance, template)
-        && (!mirrored || mirror_template(&mut copy).is_some())
+        && (!mirrored || mirror_template(copy.as_mut_bytes()).is_some())
     {
         // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template. The
         // dialog manager reads it while it builds the window and keeps no pointer into it —
@@ -4189,13 +4186,7 @@ pub(crate) unsafe fn show_modeless_dialog(
         // enough here as well as in the modal call. The other three arguments are the
         // caller's, under the contract above.
         let created = unsafe {
-            CreateDialogIndirectParamW(
-                Some(instance),
-                copy.as_ptr().cast(),
-                Some(owner),
-                proc,
-                param,
-            )
+            CreateDialogIndirectParamW(Some(instance), copy.as_ptr(), Some(owner), proc, param)
         };
 
         if let Ok(window) = created {
@@ -4323,7 +4314,71 @@ pub(crate) fn unmirror_control(hwnd: HWND, control: i32) {
 ///
 /// `None` for every refusal and for a template that is not the extended form: the caller then
 /// runs the resource itself, unpatched (NFR-13).
-fn compiled_template(instance: HINSTANCE, template: u16) -> Option<Vec<u8>> {
+/// A copy of a compiled dialog template in a buffer whose alignment is **declared** — task
+/// T-42-8, finding Н31.
+///
+/// # Why a type of its own
+///
+/// `DialogBoxIndirectParamW` is handed a pointer to a `DLGTEMPLATE`, and the structure begins
+/// with `u32` fields: the documented contract is that the address is aligned for them. A
+/// `Vec<u8>` says nothing about its alignment — `align_of::<u8>()` is one — so the guarantee
+/// rested on what the system allocator happens to do, which for the sizes involved is an
+/// aligned block every time and is nowhere written down. One storey up, for the resource
+/// itself, the same guarantee **is** stated plainly: the loader aligns resources. This closes
+/// the gap between the two storeys.
+///
+/// The bytes live in a `Vec<u32>`, whose alignment is four by its element type, and the length
+/// in bytes is carried beside it: a template is not a whole number of words, and the tail of
+/// the last word is padding the dialog manager never reads (it goes by the template's own
+/// field lengths, not by the buffer's).
+///
+/// ⚠ Nothing else changes: the mirroring lever of Э30 patches the same offset in the same
+/// bytes (`mirror_template` takes a byte slice), and the length check of SEC-05 is the same
+/// check on the same number.
+struct AlignedTemplate {
+    /// The bytes, four to a word — the alignment this type exists to declare.
+    words: Vec<u32>,
+    /// How many of those bytes are the template. The rest of the last word is padding.
+    bytes: usize,
+}
+
+impl AlignedTemplate {
+    /// Copies `bytes` into a four-byte-aligned buffer, padding the last word with zeroes.
+    fn new(bytes: &[u8]) -> Self {
+        let mut words = vec![0_u32; bytes.len().div_ceil(size_of::<u32>())];
+
+        // SAFETY: the destination is `words.len() * 4` bytes long by construction, which is
+        // `bytes.len()` rounded **up**, so the copy fits; `u32` has no padding and no invalid
+        // bit pattern, so writing arbitrary bytes over it is defined.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                words.as_mut_ptr().cast::<u8>(),
+                bytes.len(),
+            );
+        }
+
+        Self {
+            words,
+            bytes: bytes.len(),
+        }
+    }
+
+    /// The template as bytes, for the mirroring lever.
+    fn as_mut_bytes(&mut self) -> &mut [u8] {
+        // SAFETY: the buffer holds `words.len() * 4` initialised bytes and `self.bytes` is not
+        // greater than that; `u8` has a weaker alignment than `u32`, so the cast is sound.
+        unsafe { std::slice::from_raw_parts_mut(self.words.as_mut_ptr().cast::<u8>(), self.bytes) }
+    }
+
+    /// The address `DialogBoxIndirectParamW` is handed — aligned for a `u32` by the type of the
+    /// buffer, not by the habits of the allocator.
+    fn as_ptr(&self) -> *const DLGTEMPLATE {
+        self.words.as_ptr().cast()
+    }
+}
+
+fn compiled_template(instance: HINSTANCE, template: u16) -> Option<AlignedTemplate> {
     // SAFETY: `instance` is this program's module, whose resources carry both templates; the
     // "name" is an integer identifier in the `MAKEINTRESOURCE` form, never dereferenced.
     let found = unsafe { FindResourceW(Some(instance.into()), resource_id(template), RT_DIALOG) };
@@ -4349,7 +4404,9 @@ fn compiled_template(instance: HINSTANCE, template: u16) -> Option<Vec<u8>> {
     // `SizeofResource` answered for this one resource, and the image outlives this frame.
     let bytes = unsafe { std::slice::from_raw_parts(raw.cast::<u8>(), size) };
 
-    Some(bytes.to_vec())
+    // Task T-42-8: into a buffer that **declares** the alignment `DialogBoxIndirectParamW`
+    // needs, instead of a `Vec<u8>` that happened to have it.
+    Some(AlignedTemplate::new(bytes))
 }
 
 // Control identifiers, mirrored from `app.rc`. Same rule as above.
