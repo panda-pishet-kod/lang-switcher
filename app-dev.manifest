@@ -3,7 +3,7 @@
   <assemblyIdentity
       type="win32"
       name="Panda_Pishet_Kod.LangSwitcher"
-      version="0.58.0.0"
+      version="0.59.0.0"
       processorArchitecture="amd64"/>
 
   <!-- Development manifest: asInvoker, with UI access explicitly not requested.
