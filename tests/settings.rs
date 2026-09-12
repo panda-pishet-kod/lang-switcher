@@ -2080,6 +2080,89 @@ fn the_syntax_recovery_takes_only_the_line_of_a_soft_key_in_its_own_section() {
 /// **The soft fields are five, by name, and no more** — task T-55-7. Swept over the source, because
 /// softness spreads by copying an attribute: a sixth `deserialize_with = "soft_…"` on a closed set
 /// would be the silent pass section 7 forbids, and no behavioural test of the five would notice.
+/// **Task T-36-6, finding Н116, решение 123.1 — the promise is struck out, and the field with
+/// it.**
+///
+/// The documentation of `CaptureSession` promised two effects of arming: the hotkey stops firing
+/// (true — the code is replaced by one no keyboard produces) and the strokes stop reaching the
+/// typing buffer (**false** — `app::window_proc` re-publishes `tray.enabled()` into
+/// `hook::set_active` after every message the UI thread sees, so hovering over the tray icon puts
+/// the flag back). The owner chose to strike the promise out rather than build the second effect,
+/// which would need a flag of the capture's own inside `hook`, read by the callback — a new branch
+/// on the path NFR-01…NFR-05 governs.
+///
+/// Three things are measured here, and the third is why this is a sweep and not a comment:
+///
+/// 1. the sentence is gone from the file;
+/// 2. the dead pair is gone with it — no field, no accessor, no restoration in `Drop`;
+/// 3. **the explanation stayed.** The sentence cost a measurement to disprove, and a repair that
+///    deleted the reason along with the claim would invite the next reader to make the promise
+///    again.
+#[test]
+fn the_capture_no_longer_promises_to_stop_the_typing_buffer() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable")
+    .replace("\r\n", "\n");
+
+    // Контроль прибора: он умеет найти то, что ищет. Без этой строки «ничего не нашлось» могло
+    // бы значить «искали не в том файле».
+    assert!(
+        source.contains("pub struct CaptureSession {"),
+        "the sweep is reading the wrong file — CaptureSession is not in it"
+    );
+
+    assert!(
+        !source.contains("additionally stops the stroke reaching the typing buffer"),
+        "Н116: the promise about the typing buffer is struck out — the program does not keep it"
+    );
+    assert!(
+        !source.contains("hook_was_active"),
+        "Н116: and the dead pair goes with it — a field nothing can restore correctly"
+    );
+
+    // The knowledge the sentence was bought with, in the words that say why the promise was
+    // impossible rather than merely absent.
+    //
+    // ⚠ Searched in a **flattened** copy: a doc comment wraps where `rustfmt` and the eye put it,
+    // and a needle of more than a few words crosses a line break and stops matching without
+    // anything having changed — the trap of stage Э32, met again by the first draft of this very
+    // test («after every message the UI thread sees» is split across two `///` lines).
+    let flat = source
+        .replace("///", " ")
+        .replace("//", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for kept in [
+        "re-publishes `tray.enabled()` into `hook::set_active`",
+        "after every message the UI thread sees",
+    ] {
+        assert!(
+            flat.contains(kept),
+            "the reason the promise could not be kept must stay in the file: {kept:?}"
+        );
+    }
+
+    // And the suspension itself is untouched: it rests on the hotkey code, which is what task
+    // T-36-6 was told not to change.
+    let arm = function_body(&source, "pub fn arm(previous_key: String) -> Self {");
+
+    assert!(
+        arm.contains("set_hotkey_vk(NO_HOTKEY_VK)"),
+        "arming still publishes a code no keyboard produces"
+    );
+    assert!(
+        arm.contains("set_active(false)"),
+        "and still clears the flag — removing that call would be a change of behaviour, which \
+         this task is not"
+    );
+}
+
 #[test]
 fn exactly_the_five_numbers_of_section_7_are_soft() {
     let source = fs::read_to_string(
@@ -13148,7 +13231,6 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
     {
         let session = settings::CaptureSession::arm("Pause".to_owned());
 
-        assert!(session.hook_was_active());
         assert_eq!(session.previous_key(), "Pause");
         assert_eq!(session.published_vk(), hook::DEFAULT_HOTKEY_VK);
         assert!(
@@ -13197,7 +13279,8 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
     }
 
     // Dropping the session — which is what cancelling, accepting and closing the dialog all do —
-    // publishes the previous state back.
+    // publishes the hotkey code back. ⚠ **And only it, since task T-36-6:** the active flag is
+    // whatever was published last, which here is the `true` set under the capture just above.
     assert!(hook::is_active(), "the conversion path comes back");
     assert_eq!(
         hook::hotkey_vk(),
@@ -13217,6 +13300,31 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
     hook::set_active(false);
     drop(settings::CaptureSession::arm("Pause".to_owned()));
     assert!(!hook::is_active(), "a suspended program stays suspended");
+
+    // ⭐ **Task T-36-6, finding Н116, решение 123.1 — a capture does not put back a stale flag.**
+    // The session used to remember `hook::is_active()` at arming and write it back in `Drop`. That
+    // copy went stale immediately: `app::window_proc` re-publishes `tray.enabled()` after every
+    // message the UI thread sees, so a user who suspended the program *during* a capture — through
+    // the tray menu of FR-91, which is what the UI thread is doing all the while — had the capture
+    // switch the program back on under them when it ended. Here the state moves the other way
+    // round while the session is alive, and what must survive the `Drop` is the **new** value.
+    hook::set_active(true);
+
+    let session = settings::CaptureSession::arm("Pause".to_owned());
+
+    hook::set_active(false);
+    drop(session);
+
+    assert!(
+        !hook::is_active(),
+        "Н116: the flag published while the capture was alive is the one that stands after it — \
+         the session gives back the hotkey code and nothing else"
+    );
+    assert_eq!(
+        hook::hotkey_vk(),
+        hook::DEFAULT_HOTKEY_VK,
+        "and the hotkey code is still given back, which is what the suspension really rests on"
+    );
 
     hook::set_active(true);
 }

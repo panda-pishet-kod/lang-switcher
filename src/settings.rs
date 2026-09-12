@@ -4006,13 +4006,24 @@ const NO_HOTKEY_VK: u16 = 0;
 /// keyboard produces, so nothing is converted and nothing is suppressed for as long as the
 /// capture is armed.
 ///
-/// `hook::set_active(false)` is published as well, which additionally stops the stroke reaching
-/// the typing buffer, and it is deliberately **not** what the suspension rests on. ⚠ Measured
-/// during this task: `app::window_proc` re-publishes `tray.enabled()` into
-/// `hook::set_active` **after every message the UI thread sees**, so the active flag can be set
-/// back to `true` under a capture by nothing more than the tray icon being hovered over. The
-/// hotkey code is published from `app::publish_configuration` alone, which runs on «Применить»
-/// and at start-up and not from any message, so it stays where a capture puts it.
+/// `hook::set_active(false)` is published as well, and it is deliberately **not** what the
+/// suspension rests on.
+///
+/// ⛔ **What it does not do — task T-36-6, finding Н116, решение 123.1.** This paragraph used to
+/// promise a second effect: that the flag «additionally stops the stroke reaching the typing
+/// buffer», so nothing typed while a hotkey is being chosen goes into the buffer of FR-10. **The
+/// program does not keep that promise, and the knowledge is worth more than the sentence was.**
+/// `app::window_proc` re-publishes `tray.enabled()` into `hook::set_active` **after every message
+/// the UI thread sees** (FR-90, FR-91 — a program the user has just suspended must stop swallowing
+/// the hotkey at once), so the flag is back to `true` within one message of being cleared: moving
+/// the mouse over the tray icon is enough. Nothing here can hold it down, and this task does not
+/// try — the repair would need a flag of the capture's own inside `hook`, read by the callback,
+/// which is a new branch on the path NFR-01…NFR-05 governs. The promise is therefore struck out
+/// rather than rewritten; the second effect is in `DEFERRED.md`.
+///
+/// The hotkey code, by contrast, is published from `app::publish_configuration` alone, which runs
+/// on «Применить» and at start-up and from no message, so it stays where a capture puts it. That
+/// is why the suspension rests on it.
 ///
 /// **FR-96 is not affected and cannot be.** The emergency combination is handled at the top of
 /// the callback, before either of these values is so much as read — see
@@ -4027,24 +4038,33 @@ pub struct CaptureSession {
     /// `[hotkey] key` as it stood when the capture was armed — what «отмена» puts back.
     previous_key: String,
     /// The code the callback was comparing against when the capture was armed.
+    ///
+    /// ⚠ The only value this session remembers since task T-36-6. There used to be a second —
+    /// `hook::is_active()` as it stood at arming — and it was put back in `Drop`; both halves went
+    /// out with the promise above. Remembering it was worse than not: `app::window_proc`
+    /// re-publishes `tray.enabled()` after every message, so the saved copy was stale within a
+    /// message of being taken, and putting it back at the end of a capture wrote a value older
+    /// than the one the program already had. What the flag must equal after a capture is
+    /// `tray.enabled()`, and that is published by the procedure itself.
     published_vk: u16,
-    /// `hook::is_active()` as it stood then.
-    hook_was_active: bool,
 }
 
 impl CaptureSession {
     /// Arms a capture and suspends the hotkey for its duration.
     pub fn arm(previous_key: String) -> Self {
         let published_vk = crate::hook::hotkey_vk();
-        let hook_was_active = crate::hook::is_active();
 
         crate::hook::set_hotkey_vk(NO_HOTKEY_VK);
+
+        // ⚠ Task T-36-6 left this call exactly where it was and took away only the belief about
+        // it: the flag is cleared, and `app::window_proc` publishes `tray.enabled()` back over it
+        // at the next message it sees. Removing the call would be a change of behaviour, and this
+        // task is the striking out of a promise, not a repair of one.
         crate::hook::set_active(false);
 
         Self {
             previous_key,
             published_vk,
-            hook_was_active,
         }
     }
 
@@ -4057,17 +4077,17 @@ impl CaptureSession {
     pub fn published_vk(&self) -> u16 {
         self.published_vk
     }
-
-    /// Whether the callback was doing its ordinary work when this capture was armed.
-    pub fn hook_was_active(&self) -> bool {
-        self.hook_was_active
-    }
 }
 
 impl Drop for CaptureSession {
+    /// Gives the hotkey code back — and **only** it, since task T-36-6.
+    ///
+    /// `hook::set_active` is not touched here: the value it must hold after a capture is
+    /// `tray.enabled()`, which `app::window_proc` publishes after every message the UI thread
+    /// sees, and writing back a copy taken at arming would put a staler value than the one the
+    /// program already has.
     fn drop(&mut self) {
         crate::hook::set_hotkey_vk(self.published_vk);
-        crate::hook::set_active(self.hook_was_active);
     }
 }
 
