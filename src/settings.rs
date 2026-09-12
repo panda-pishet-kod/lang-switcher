@@ -3045,6 +3045,12 @@ pub const IDS_STATE_FAILURES: u16 = 3226;
 /// write that succeeded; task T-39-11, решение 122.5. The live acceptance of `e56` found the
 /// button silent on success. 3227 continues the block of the state strings, as 3221 did.
 pub const IDS_LOG_SAVED: u16 = 3227;
+/// [`Refusal::Editing`] — «Эта клавиша нужна при наборе»; task T-36-5, finding Н9, решение 123.3.
+///
+/// 3228 continues the same block of the state strings (3216…3231), because that is where the free
+/// numbers are — it belongs to the capture dialog and not to «Состояние». Identifiers are never
+/// renumbered: one that moved would change what an installed build shows.
+pub const IDS_CAPTURE_TYPING: u16 = 3228;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3238,7 +3244,7 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 216] = [
+pub const INTERFACE_STRINGS: [u16; 217] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3279,6 +3285,9 @@ pub const INTERFACE_STRINGS: [u16; 216] = [
     IDS_CAPTURE_EMERGENCY,
     IDS_CAPTURE_NAMELESS,
     IDS_CAPTURE_RESERVED,
+    // Task T-36-5, finding Н9 — the seventh reason a capture refuses. The number lives in the
+    // state block (3228), the string belongs to the capture dialog.
+    IDS_CAPTURE_TYPING,
     IDS_STATE_WORKING,
     IDS_STATE_SUSPENDED,
     IDS_STATE_HOOK_ABSENT,
@@ -3695,6 +3704,26 @@ pub enum Refusal {
     Emergency,
     /// A key the system owns and an application never gets as a plain key.
     Reserved,
+    /// ⭐ **A key typing itself needs** — task T-36-5, finding Н9, решение 123.3.
+    ///
+    /// `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown` and the four arrows: row 3 of the
+    /// FR-10 table, the keys that move the caret or take text away. Two things went wrong when
+    /// one of them was accepted, and the second is the one a person pays for:
+    ///
+    /// * the row of FR-10 quietly stopped working — a press that is the hotkey never reaches the
+    ///   buffer, so the boundary it was supposed to be never happened;
+    /// * **the key was lost in every application.** FR-95 suppresses the hotkey whenever the
+    ///   program is active, so somebody who assigned `Delete` had no `Delete` anywhere, with no
+    ///   warning in the file and none in the dialog.
+    ///
+    /// ⛔ Not [`Self::Reserved`]: «the system owns this key» would be a lie about a key the
+    /// system does not own. The list is read from `buffer::is_editing_key` — the table of FR-10
+    /// lives there and is not copied here.
+    ///
+    /// ⚠ **The file is not touched by this.** `[hotkey] key = "Delete"` written by hand is still
+    /// read, published and acted on: refusing it there would silently return the hotkey to
+    /// `Pause`, which is substituting this program's choice for the person's own.
+    Editing,
     /// ⭐ **A key that types a character** — task Т-23-5, решение 82.6.
     ///
     /// Until that task a text key was **taken**: the capture ended, the file got `Q`, and the
@@ -3724,6 +3753,9 @@ impl Refusal {
             Self::Combination => IDS_CAPTURE_COMBINATION,
             Self::Emergency => IDS_CAPTURE_EMERGENCY,
             Self::Reserved => IDS_CAPTURE_RESERVED,
+            // Task T-36-5: a sentence of its own — the key is not the system's, it is the
+            // typing's, and what the person loses by taking it is different.
+            Self::Editing => IDS_CAPTURE_TYPING,
             // Task Т-23-5: the warning FR-92 already asks for, said at the moment of the
             // press instead of after it.
             Self::Text => IDS_NOTE_TEXT_KEY,
@@ -3878,6 +3910,19 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
     // is still a hotkey, and FR-95 still suppresses it.
     if is_text_key(vk) {
         return Capture::Refused(Refusal::Text);
+    }
+
+    // ⭐ Task T-36-5, finding Н9, решение 123.3 — the keys typing itself needs. `Delete` and
+    // `Home` were taken until this line, and taking one cost the person that key in every
+    // application (FR-95) with no warning anywhere. The list is the FR-10 table and is read from
+    // where that table lives; see [`Refusal::Editing`].
+    //
+    // Below `is_text_key` because the two never overlap and the order of the two answers does
+    // not matter — and above `key_name`, because six of these keys **do** have names and would
+    // otherwise be accepted, while the four arrows would be refused as nameless, which is true
+    // and useless.
+    if crate::buffer::is_editing_key(vk) {
+        return Capture::Refused(Refusal::Editing);
     }
 
     match key_name(vk) {

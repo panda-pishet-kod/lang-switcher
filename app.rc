@@ -1578,6 +1578,14 @@ END
 // write that succeeded: the live acceptance of e56 found the press silent. The number continues
 // the block of the state strings, 3216…3231, as IDS_MENU_RESUME_RESTART did.
 #define IDS_LOG_SAVED           3227
+// Task T-36-5, finding Н9, решение 123.3 — the seventh reason a capture refuses: keys the typing
+// itself needs. `Delete`, `Home`, `End`, `Insert`, `PageUp`, `PageDown` and the arrows are row 3
+// of the FR-10 table, and assigning one of them as the hotkey takes it away in every application
+// (FR-95 suppresses the hotkey whenever the program is active) with no warning anywhere. The
+// number continues the block of the state strings, 3216…3231, because that is where the free
+// numbers are; it has nothing to do with «Состояние» beyond that. ⛔ Not IDS_CAPTURE_RESERVED:
+// «the system owns this key» would be a lie about a key the system does not own.
+#define IDS_CAPTURE_TYPING      3228
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -1656,6 +1664,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварийный выход, эта комбинация не назначается."
     IDS_CAPTURE_NAMELESS    "У этой клавиши нет имени в файле настроек — выберите другую."
     IDS_CAPTURE_RESERVED    "Эту клавишу занимает система — выберите другую."
+    IDS_CAPTURE_TYPING      "Эта клавиша нужна при наборе — выберите другую."
     IDS_STATE_WORKING       "Работает"
     IDS_STATE_SUSPENDED     "Приостановлена"
     IDS_STATE_HOOK_ABSENT   "Перехват клавиатуры не установлен"
@@ -1881,6 +1890,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 is the emergency exit; it cannot be assigned."
     IDS_CAPTURE_NAMELESS    "This key has no name in the settings file — choose another one."
     IDS_CAPTURE_RESERVED    "The system owns this key — choose another one."
+    IDS_CAPTURE_TYPING      "Typing needs this key — choose another one."
     IDS_STATE_WORKING       "Working"
     IDS_STATE_SUSPENDED     "Suspended"
     IDS_STATE_HOOK_ABSENT   "The keyboard hook is not installed"
@@ -2119,6 +2129,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 — аварійний вихід, це сполучення не призначається."
     IDS_CAPTURE_NAMELESS    "У цієї клавіші немає імені у файлі налаштувань — виберіть іншу."
     IDS_CAPTURE_RESERVED    "Цю клавішу займає система — виберіть іншу."
+    IDS_CAPTURE_TYPING      "Ця клавіша потрібна під час набору — виберіть іншу."
     IDS_STATE_WORKING       "Працює"
     IDS_STATE_SUSPENDED     "Призупинено"
     IDS_STATE_HOOK_ABSENT   "Перехоплення клавіатури не встановлено"
@@ -2340,6 +2351,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 ist der Notausstieg und wird nicht vergeben."
     IDS_CAPTURE_NAMELESS    "Diese Taste hat keinen Namen in der Einstellungsdatei — wählen Sie eine andere."
     IDS_CAPTURE_RESERVED    "Diese Taste gehört dem System — wählen Sie eine andere."
+    IDS_CAPTURE_TYPING      "Diese Taste wird beim Tippen gebraucht — wählen Sie eine andere."
     IDS_STATE_WORKING       "Läuft"
     IDS_STATE_SUSPENDED     "Angehalten"
     IDS_STATE_HOOK_ABSENT   "Der Tastatur-Hook ist nicht installiert"
@@ -2563,6 +2575,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 est la sortie d'urgence ; elle ne s'attribue pas."
     IDS_CAPTURE_NAMELESS    "Cette touche n'a pas de nom dans le fichier de paramètres — choisissez-en une autre."
     IDS_CAPTURE_RESERVED    "Le système occupe cette touche — choisissez-en une autre."
+    IDS_CAPTURE_TYPING      "Cette touche sert à la saisie — choisissez-en une autre."
     IDS_STATE_WORKING       "En marche"
     IDS_STATE_SUSPENDED     "En pause"
     IDS_STATE_HOOK_ABSENT   "L'interception clavier n'est pas installée"
@@ -2783,6 +2796,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 es la salida de emergencia; no se asigna."
     IDS_CAPTURE_NAMELESS    "Esta tecla no tiene nombre en el archivo de configuración — elija otra."
     IDS_CAPTURE_RESERVED    "El sistema ocupa esta tecla — elija otra."
+    IDS_CAPTURE_TYPING      "Esta tecla hace falta al escribir — elija otra."
     IDS_STATE_WORKING       "En marcha"
     IDS_STATE_SUSPENDED     "En pausa"
     IDS_STATE_HOOK_ABSENT   "La interceptación de teclado no está instalada"
@@ -3001,6 +3015,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 é a saída de emergência; não se atribui."
     IDS_CAPTURE_NAMELESS    "Esta tecla não tem nome no arquivo de configurações — escolha outra."
     IDS_CAPTURE_RESERVED    "O sistema ocupa esta tecla — escolha outra."
+    IDS_CAPTURE_TYPING      "Esta tecla é necessária ao digitar — escolha outra."
     IDS_STATE_WORKING       "Em execução"
     IDS_STATE_SUSPENDED     "Em pausa"
     IDS_STATE_HOOK_ABSENT   "A interceptação do teclado não está instalada"
@@ -3224,6 +3239,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 è l'uscita di emergenza e non si assegna."
     IDS_CAPTURE_NAMELESS    "Questo tasto non ha un nome nel file delle impostazioni — scegline un altro."
     IDS_CAPTURE_RESERVED    "Il sistema occupa questo tasto — scegline un altro."
+    IDS_CAPTURE_TYPING      "Questo tasto serve a digitare — scegline un altro."
     IDS_STATE_WORKING       "In funzione"
     IDS_STATE_SUSPENDED     "In pausa"
     IDS_STATE_HOOK_ABSENT   "L'intercettazione della tastiera non è installata"
@@ -3447,6 +3463,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 to awaryjne wyjście — tej kombinacji nie przypisuje się."
     IDS_CAPTURE_NAMELESS    "Ten klawisz nie ma nazwy w pliku ustawień — wybierz inny."
     IDS_CAPTURE_RESERVED    "Ten klawisz zajmuje system — wybierz inny."
+    IDS_CAPTURE_TYPING      "Ten klawisz jest potrzebny przy pisaniu — wybierz inny."
     IDS_STATE_WORKING       "Działa"
     IDS_STATE_SUSPENDED     "Wstrzymany"
     IDS_STATE_HOOK_ABSENT   "Przechwytywanie klawiatury nie jest zainstalowane"
@@ -3666,6 +3683,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 je nouzové ukončení a nepřiřazuje se."
     IDS_CAPTURE_NAMELESS    "Tato klávesa nemá v souboru nastavení název — zvolte jinou."
     IDS_CAPTURE_RESERVED    "Tuto klávesu zabírá systém — zvolte jinou."
+    IDS_CAPTURE_TYPING      "Tuto klávesu potřebujete při psaní — zvolte jinou."
     IDS_STATE_WORKING       "Běží"
     IDS_STATE_SUSPENDED     "Pozastaveno"
     IDS_STATE_HOOK_ABSENT   "Zachytávání klávesnice není nainstalováno"
@@ -3888,6 +3906,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 acil çıkıştır, atanamaz."
     IDS_CAPTURE_NAMELESS    "Bu tuşun ayar dosyasında adı yok — başka bir tuş seçin."
     IDS_CAPTURE_RESERVED    "Bu tuşu sistem kullanıyor — başka bir tuş seçin."
+    IDS_CAPTURE_TYPING      "Bu tuş yazarken gerekli — başka bir tuş seçin."
     IDS_STATE_WORKING       "Çalışıyor"
     IDS_STATE_SUSPENDED     "Duraklatıldı"
     IDS_STATE_HOOK_ABSENT   "Klavye yakalama kurulu değil"
@@ -4114,6 +4133,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 είναι η έξοδος έκτακτης ανάγκης και δεν ανατίθεται."
     IDS_CAPTURE_NAMELESS    "Αυτό το πλήκτρο δεν έχει όνομα στο αρχείο ρυθμίσεων — επιλέξτε άλλο."
     IDS_CAPTURE_RESERVED    "Το σύστημα κρατά αυτό το πλήκτρο — επιλέξτε άλλο."
+    IDS_CAPTURE_TYPING      "Αυτό το πλήκτρο χρειάζεται στην πληκτρολόγηση — επιλέξτε άλλο."
     IDS_STATE_WORKING       "Λειτουργεί"
     IDS_STATE_SUSPENDED     "Σε παύση"
     IDS_STATE_HOOK_ABSENT   "Η παρακολούθηση πληκτρολογίου δεν είναι εγκατεστημένη"
@@ -4344,6 +4364,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 היא יציאת חירום, והצירוף הזה אינו ניתן להקצאה."
     IDS_CAPTURE_NAMELESS    "למקש הזה אין שם בקובץ ההגדרות — בחרו אחר."
     IDS_CAPTURE_RESERVED    "המערכת תופסת את המקש הזה — בחרו אחר."
+    IDS_CAPTURE_TYPING      "המקש הזה נחוץ בהקלדה — בחרו אחר."
     // Task T-34-5: the shouting «НЕ УСТАНОВЛЕН» of IDS_HOOK_DOWN is gone with the row, so the
     // remark of глоссарий Э30 §0-RTL.11 (no capitals in Hebrew — the word carries the weight)
     // no longer applies here; the four states are plain sentences.
@@ -4562,6 +4583,7 @@ BEGIN
     IDS_CAPTURE_EMERGENCY   "Ctrl+Alt+Shift+F12 هو مخرج الطوارئ، ولا يمكن تعيين هذه التركيبة."
     IDS_CAPTURE_NAMELESS    "هذا المفتاح بلا اسم في ملف الإعدادات — اختر غيره."
     IDS_CAPTURE_RESERVED    "النظام يحجز هذا المفتاح — اختر غيره."
+    IDS_CAPTURE_TYPING      "هذا المفتاح ضروري أثناء الكتابة — اختر غيره."
     // Task T-34-5: as in Hebrew above — the shouting row is gone, the states are sentences.
     IDS_STATE_WORKING       "يعمل"
     IDS_STATE_SUSPENDED     "متوقف مؤقتًا"

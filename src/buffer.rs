@@ -1270,6 +1270,22 @@ const EDITING_KEYS: [u16; 10] = [
     VK_INSERT.0,
 ];
 
+/// Whether `vk` is one of row 3 of the FR-10 table — **the keys typing itself needs**.
+///
+/// Asked from `settings::capture` since task T-36-5 (finding Н9): a hotkey is suppressed in every
+/// application while the program is active (FR-95), so assigning `Delete` or `Home` takes that key
+/// away everywhere, and the dialog has to say so instead of quietly accepting it.
+///
+/// ⭐ **Read from here rather than copied there.** The table of FR-10 is this list, and a second
+/// copy of it in `src\settings.rs` would be a second thing to keep right; `hook::NAMED_KEYS` is
+/// not that table either — it is the spelling of the names section 7 stores. Row 1
+/// ([`BOUNDARY_KEYS`]) is deliberately **not** included: `Escape` never reaches `capture` (it
+/// cancels the capture — FR-94), and `Tab` and `Enter` are already refused as keys section 7 has
+/// no name for.
+pub(crate) fn is_editing_key(vk: u16) -> bool {
+    EDITING_KEYS.contains(&vk)
+}
+
 /// Whether `vk` is one of the keys FR-10 flushes the whole buffer on.
 fn flushes(vk: u16) -> bool {
     BOUNDARY_KEYS.contains(&vk) || EDITING_KEYS.contains(&vk)

@@ -27,9 +27,9 @@ use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLEARTYPE_QUALITY,
     CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreateSolidBrush, DEFAULT_QUALITY,
-    DIB_RGB_COLORS, DeleteDC, DeleteObject, FONT_CHARSET, FONT_QUALITY, FW_BOLD, FillRect,
-    GetDeviceCaps, GetPixel, GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HDC, HFONT, LOGFONTW,
-    LOGPIXELSY, SelectObject, TEXTMETRICW,
+    DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DeleteDC, DeleteObject, FONT_CHARSET, FONT_QUALITY, FW_BOLD,
+    FillRect, GetDeviceCaps, GetPixel, GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HDC, HFONT,
+    LOGFONTW, LOGPIXELSY, SelectObject, TEXTMETRICW,
 };
 
 /// A directory under `%TEMP%` that removes itself, panic or no panic.
@@ -5013,6 +5013,122 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
     println!("the widest caption: {} px — {}", widest.0, widest.1);
 
     settings::set_ui_language(Language::Ru);
+}
+
+/// **Task T-36-5, finding Н9** — every reason a capture can give fits the note under the field,
+/// in all fourteen languages, **including the new one**.
+///
+/// The note is `IDC_HOTKEY_NOTE`: 196 units wide and **16 units high — two lines**, drawn with
+/// `DT_WORDBREAK` (task T-11-18), so the measure is not "does the sentence fit on one line" but
+/// "does it wrap into no more than two". ⚠ The first draft of this instrument measured the
+/// single-line width and called the *existing* Russian «Модификатор сам по себе горячей клавишей
+/// быть не может.» clipped at 373 px in a 343 px slot — it is not clipped, it wraps.
+///
+/// All seven reasons are checked, not just the new one: the six were never measured here before,
+/// and a sentence that grew anywhere in the family would be the same defect.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
+    const SLOT_UNITS: i32 = 196;
+    const SLOT_LINES: i32 = 2;
+
+    let _guard = with_product_strings();
+
+    let (font, sheet) = template_font_and_sheet();
+    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+
+    let letters = extent_of(
+        &sheet,
+        &face,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let base = (letters / 26 + 1) / 2;
+    let slot = (SLOT_UNITS * base + 2) / 4;
+    let line = extent_of(&sheet, &face, "Ag").cy;
+    let ceiling = line * SLOT_LINES;
+
+    // Контроль прибора: текст, которому двух строк заведомо мало, обязан быть увиден.
+    let overflowing = wrapped_height(&sheet, &face, &"слово ".repeat(40), slot);
+    println!(
+        "base unit {base}: note slot {slot} px wide, one line {line} px, ceiling {ceiling} px; \
+         a control text of forty words wraps to {overflowing} px"
+    );
+    assert!(
+        overflowing > ceiling,
+        "the instrument cannot see an overflow at all: {overflowing} px against {ceiling} px"
+    );
+
+    let mut tallest = (0, String::new());
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for refusal in [
+            settings::Refusal::Modifier,
+            settings::Refusal::Combination,
+            settings::Refusal::Emergency,
+            settings::Refusal::Reserved,
+            settings::Refusal::Editing,
+            settings::Refusal::Text,
+            settings::Refusal::Nameless,
+        ] {
+            let sentence = settings::text(refusal.string_id());
+
+            assert!(
+                !sentence.trim().is_empty(),
+                "{language:?}: {refusal:?} did not load — the instrument would measure nothing"
+            );
+
+            let height = wrapped_height(&sheet, &face, &sentence, slot);
+
+            if height > tallest.0 {
+                tallest = (height, format!("{language:?} {refusal:?} «{sentence}»"));
+            }
+
+            assert!(
+                height <= ceiling,
+                "{language:?}: {refusal:?} «{sentence}» wraps to {height} px and the note holds \
+                 {ceiling} px ({SLOT_LINES} lines of {line} px, {SLOT_UNITS} units wide at a \
+                 base unit of {base}) — the third line would be outside the control and the \
+                 tail of the sentence would be gone"
+            );
+        }
+    }
+
+    println!("the tallest refusal: {} px — {}", tallest.0, tallest.1);
+
+    settings::set_ui_language(Language::Ru);
+}
+
+/// How tall `text` becomes when it is wrapped into `width` — the measure of a two-line label.
+///
+/// `DT_CALCRECT | DT_WORDBREAK` over the same face the dialog manager builds, which is what
+/// `theme::paint_label` does at drawing time; nothing is painted.
+fn wrapped_height(sheet: &Sheet, face: &Face, text: &str, width: i32) -> i32 {
+    let mut wide: Vec<u16> = text.encode_utf16().collect();
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: 0,
+    };
+
+    // The two flags the drawing uses to lay a note out, as plain numbers: `DT_CALCRECT` measures
+    // instead of painting, `DT_WORDBREAK` is the wrap task T-11-18 put on these labels.
+    const CALCRECT_WORDBREAK: DRAW_TEXT_FORMAT = DRAW_TEXT_FORMAT(0x0000_0400 | 0x0000_0010);
+
+    // SAFETY: the slice and the rectangle are live locals of this frame; `DT_CALCRECT` measures
+    // and paints nothing, and the format carries no `DT_MODIFYSTRING`, so the call reads the
+    // text and writes only the rectangle. The previous face is put back.
+    unsafe {
+        let previous = SelectObject(sheet.dc, face.0.into());
+        DrawTextW(sheet.dc, &mut wide, &mut rect, CALCRECT_WORDBREAK);
+        SelectObject(sheet.dc, previous);
+    }
+
+    rect.bottom - rect.top
 }
 
 /// **Task T-36-4, finding Н40** — the health line fits its 402 units in all fourteen languages
@@ -11093,7 +11209,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 216] = [
+const FR_94_STRINGS: [(u16, &str, &str); 217] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -11221,6 +11337,14 @@ const FR_94_STRINGS: [(u16, &str, &str); 216] = [
         settings::IDS_CAPTURE_RESERVED,
         "Эту клавишу занимает система — выберите другую.",
         "The system owns this key — choose another one.",
+    ),
+    // ⭐ Task T-36-5, finding Н9, решение 123.3 — the seventh reason. 3228 by number, the capture
+    // dialog by meaning: the number continues the block of the state strings because that is
+    // where the free ones are.
+    (
+        settings::IDS_CAPTURE_TYPING,
+        "Эта клавиша нужна при наборе — выберите другую.",
+        "Typing needs this key — choose another one.",
     ),
     // Task T-34-5 (Н80, Н84, С1): the first line of «Состояние» speaks of the program. 3045…3047
     // — the developer's «Перехват клавиатуры: {0} · восстановлений хука: {1} · …» and its two
@@ -12563,6 +12687,20 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         (0x30, BARE, settings::Refusal::Text, "цифра 0"),
         (0x20, BARE, settings::Refusal::Text, "Space"),
         (0xBA, BARE, settings::Refusal::Text, "OEM 1"),
+        // ⭐ Task T-36-5, finding Н9, решение 123.3 — row 3 of the FR-10 table, the keys typing
+        // itself needs. Six of them were **taken** until this task: assigning `Delete` cost the
+        // person that key in every application, because FR-95 suppresses the hotkey whenever the
+        // program is active. The four arrows were refused as nameless, which was true and useless.
+        (0x2E, BARE, settings::Refusal::Editing, "Delete"),
+        (0x24, BARE, settings::Refusal::Editing, "Home"),
+        (0x23, BARE, settings::Refusal::Editing, "End"),
+        (0x2D, BARE, settings::Refusal::Editing, "Insert"),
+        (0x21, BARE, settings::Refusal::Editing, "PageUp"),
+        (0x22, BARE, settings::Refusal::Editing, "PageDown"),
+        (0x25, BARE, settings::Refusal::Editing, "Left"),
+        (0x26, BARE, settings::Refusal::Editing, "Up"),
+        (0x27, BARE, settings::Refusal::Editing, "Right"),
+        (0x28, BARE, settings::Refusal::Editing, "Down"),
     ];
 
     for (vk, modifiers, expected, what) in cases {
@@ -12586,6 +12724,7 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         settings::Refusal::Combination,
         settings::Refusal::Emergency,
         settings::Refusal::Reserved,
+        settings::Refusal::Editing,
         settings::Refusal::Text,
         settings::Refusal::Nameless,
     ] {
@@ -12694,6 +12833,20 @@ fn an_armed_capture_takes_a_key_and_stays_armed_through_a_refusal() {
             },
             settings::Refusal::Combination,
             "Ctrl+Pause",
+        ),
+        // ⭐ Task T-36-5, finding Н9, решение 123.3. `Delete` and `Home` were **taken** here
+        // until this task — the capture ended, the file got the name, and the person lost that
+        // key in every application (FR-95). Now they are refused like any other unsuitable key,
+        // and the refusal does not put the capture out (примечание к FR-94): the next press is
+        // still waited for.
+        (0x2E, NOTHING_HELD, settings::Refusal::Editing, "Delete"),
+        (0x24, NOTHING_HELD, settings::Refusal::Editing, "Home"),
+        (0x22, NOTHING_HELD, settings::Refusal::Editing, "PageDown"),
+        (
+            0x25,
+            NOTHING_HELD,
+            settings::Refusal::Editing,
+            "стрелка влево",
         ),
     ] {
         let step = settings::capture_step(true, settings::CaptureEvent::KeyDown(vk, held));
@@ -17451,8 +17604,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        216,
-        "two hundred and sixteen identifiers in use — the mandate of Э32 authorised the canon \
+        217,
+        "two hundred and seventeen identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
@@ -17463,7 +17616,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
          the program, the health of the hook, their joiner and the greyed «Возобновить» — and \
          the FIVE of task T-34-6: the acting pair, the acting cycle, no pair, no refusals and \
          the refusals counted — and the ONE of task T-39-11, решение 122.5: «Журнал сохранён» \
-         on the button after a write that succeeded"
+         on the button after a write that succeeded — and the ONE of task T-36-5, решение \
+         123.3: «Эта клавиша нужна при наборе», the seventh reason a capture refuses (Н9)"
     );
 
     let product = ProductImage::shared();
