@@ -5897,6 +5897,10 @@ fn the_health_line_of_the_state_panel_fits_in_all_fourteen_languages() {
 /// **Task T-42-2, finding С44, решение 124.4** — every sentence of the «Как пользоваться»
 /// panel fits the slot the template gives it, in all fourteen locales, at 100 %.
 ///
+/// ⚠ **One named exception since решение 128.4** (task T-43-7): the Greek third row with the
+/// widest key name needs one line more than its slot and takes it from the live fit — the case
+/// is named in the loop and held to exactly that size.
+///
 /// The form is the one of the test above (T-39-11): the template's own font, the manager's own
 /// arithmetic for the dialog unit, and the measurement made by the very code that draws. What
 /// differs is the instrument — a help row is not a button caption: it wraps, and it carries a
@@ -6006,6 +6010,30 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
                     )
                 }
                 .expect("the memory DC must answer the metrics of its own face");
+
+                // ⚠ **The one named exception — решение 128.4** (task T-43-7, finding Н83). With
+                // its caveat the Greek third row and the widest key name wrap into **four**
+                // lines, one more than the three its slot was grown to; the user chose «one line
+                // taller» for the window, and this case takes its fourth line from the live fit
+                // (`settings::fit_about_help`, in `WM_INITDIALOG`, before the window is shown).
+                // The exception is this case at this size and nothing else: a fifth line, the
+                // case fitting again, or any other language, row or key overflowing turn the
+                // test red — so it cannot grow into a hole.
+                if language == Language::El && row == 1133 && key == widest_key.as_str() {
+                    assert!(
+                        lines == 4 && needed > height,
+                        "El: the exception of решение 128.4 is row 1133 with «{key}» needing \
+                         exactly one line over its {units_h} units = {height} px; it wraps into \
+                         {lines} lines and wants {needed} px — the exception must be re-decided"
+                    );
+
+                    println!(
+                        "the named exception of решение 128.4: El row {row} key «{key}» — {lines} \
+                         lines, {needed} px against {height} px, the fourth line from the live fit"
+                    );
+
+                    continue;
+                }
 
                 if height - needed < tightest.0 {
                     tightest = (
@@ -9816,10 +9844,17 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // comment states: the number moved by a decision of the user, who named влезание текста as
     // the one thing allowed to move a frozen look. The width is still the 191 it has always
     // been.
+    //
+    // ⚠⚠ **263 → 271 by решение 128.4** (task T-43-7, finding Н83). The third row took the
+    // caveat of решение 128.1 — «(если это включено и работает Ctrl+C)» — and wraps into three
+    // lines in 27 of the 28 cases the fit test measures (fourteen languages × two keys): 57 px
+    // against the 40 of its 19 units, and no honest wording fits two. The question went to the
+    // user, as 128.1 required, and the answer was «one line taller»: the row is 27 units and
+    // the window grew by the same eight. The width is untouched.
     assert_eq!(
         template.size,
-        (191, 263),
-        "the about window of решения 82.5, 87 и 124.1 is 191 × 263 dialog units"
+        (191, 271),
+        "the about window of решения 82.5, 87, 124.1 и 128.4 is 191 × 271 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
@@ -12152,8 +12187,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 218] = [
     ),
     (
         settings::IDS_ABOUT_HELP_3,
-        "Выделите текст и нажмите {0} — конвертируется выделенное.",
-        "Select text and press {0} — the selection is converted.",
+        "Выделите текст и нажмите {0} — конвертируется выделенное (если это включено и работает Ctrl+C).",
+        "Select text and press {0} — the selection is converted (if enabled and Ctrl+C works).",
     ),
     (
         settings::IDS_ABOUT_HELP_4,
@@ -19543,6 +19578,147 @@ fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
         ),
         _ => letter.is_ascii_alphabetic() || matches!(letter, '\u{00C0}'..='\u{024F}'),
     }
+}
+
+/// **Task T-43-7, finding Н83, решение 128.1 — the third help line carries its caveat.**
+///
+/// «Выделите текст и нажмите {0} — конвертируется выделенное» promised a conversion that is a
+/// switch of its own («Конвертировать выделенный текст», `IDS_SELECTION_ENABLED`) and that does
+/// not happen where `Ctrl+C` copies nothing — the selection path takes its text with a real
+/// `Ctrl+C`, FR-61 step 2. Решение 128.1: the line is not greyed; the caveat is written into it,
+/// in all fourteen tables, by the procedure of Э28 (`scratchpad-E43\glossary.md` and the table of
+/// back-translations beside it).
+///
+/// Held against the **built** binary, locale by locale: the line is longer than the line of `e64`
+/// it replaced (the table below is that text byte for byte — the red «before» of this test); it
+/// keeps its one `{0}`; it names `Ctrl+C`, which no locale translates; and every letter it carries
+/// outside `Ctrl+C` belongs to the locale's own script, with more of them than before. A caveat
+/// that went to English in the Arabic table, or to question marks in any table, fails on the last
+/// two — the mojibake of Э28 is caught by reversibility elsewhere, not by a list of suspicious
+/// letters here.
+///
+/// ⚠ The caveat made the line one line of text longer than its slot, and решение 128.4 grew the
+/// window for it — that half is held by
+/// `every_help_sentence_fits_its_template_slot_in_all_fourteen_languages`.
+#[test]
+fn the_selection_help_line_carries_its_caveat_in_every_locale() {
+    const BEFORE: [(&str, &str); 14] = [
+        (
+            "ru",
+            "Выделите текст и нажмите {0} — конвертируется выделенное.",
+        ),
+        (
+            "en",
+            "Select text and press {0} — the selection is converted.",
+        ),
+        (
+            "uk",
+            "Виділіть текст і натисніть {0} — конвертується виділене.",
+        ),
+        (
+            "de",
+            "Text markieren und {0} drücken — die Markierung wird umgewandelt.",
+        ),
+        (
+            "fr",
+            "Sélectionnez du texte et appuyez sur {0} — la sélection est convertie.",
+        ),
+        (
+            "es",
+            "Seleccione texto y pulse {0} — se convierte lo seleccionado.",
+        ),
+        (
+            "pt",
+            "Selecione o texto e pressione {0} — a seleção é convertida.",
+        ),
+        (
+            "it",
+            "Seleziona il testo e premi {0} — la selezione viene convertita.",
+        ),
+        (
+            "pl",
+            "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane.",
+        ),
+        ("cs", "Vyberte text a stiskněte {0} — převede se výběr."),
+        ("tr", "Metni seçip {0} tuşuna basın — seçim dönüştürülür."),
+        (
+            "el",
+            "Επιλέξτε κείμενο και πατήστε {0} — μετατρέπεται η επιλογή.",
+        ),
+        ("he", "סמנו טקסט והקישו {0} — המסומן מומר."),
+        ("ar", "حدد نصًا واضغط {0} — يتحول المحدد."),
+    ];
+
+    let product = ProductImage::shared();
+    let mut defects: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let before = BEFORE
+            .iter()
+            .find(|(locale, _)| *locale == tag)
+            .map(|(_, line)| *line)
+            .expect("every locale has its line of e64 in the table");
+        let now = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_3);
+
+        let letters = |line: &str| {
+            let words = line.replace("Ctrl+C", "");
+            let own = words
+                .chars()
+                .filter(|letter| letter.is_alphabetic() && letter_of_the_script_of(tag, *letter))
+                .count();
+            let foreign: String = words
+                .chars()
+                .filter(|letter| letter.is_alphabetic() && !letter_of_the_script_of(tag, *letter))
+                .collect();
+
+            (own, foreign)
+        };
+
+        let (own_before, _) = letters(before);
+        let (own_now, foreign_now) = letters(&now);
+        let (units_before, units_now) = (before.encode_utf16().count(), now.encode_utf16().count());
+
+        println!(
+            "{tag}: UTF-16 {units_before} → {units_now}, letters of its script {own_before} → \
+             {own_now} — «{now}»"
+        );
+
+        if units_now <= units_before {
+            defects.push(format!(
+                "{tag}: the line is no longer than the line of e64 ({units_now} ≤ {units_before} \
+                 UTF-16 units) — «{now}»"
+            ));
+        }
+
+        if now.matches("{0}").count() != 1 {
+            defects.push(format!("{tag}: the key name must stand once — «{now}»"));
+        }
+
+        if !now.contains("Ctrl+C") {
+            defects.push(format!(
+                "{tag}: the caveat must name Ctrl+C, which no locale translates — «{now}»"
+            ));
+        }
+
+        if !foreign_now.is_empty() {
+            defects.push(format!(
+                "{tag}: letters outside the locale's script: «{foreign_now}» — «{now}»"
+            ));
+        }
+
+        if own_now <= own_before {
+            defects.push(format!(
+                "{tag}: the caveat added no letters of the locale's own script ({own_before} → \
+                 {own_now}) — «{now}»"
+            ));
+        }
+    }
+
+    assert!(
+        defects.is_empty(),
+        "the caveat of решение 128.1 must stand in all fourteen tables:\n{}",
+        defects.join("\n")
+    );
 }
 
 /// **Task T-43-9, finding Н23, решение 128.2 — «уже запущена» in the language of Windows.**

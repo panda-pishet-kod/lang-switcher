@@ -917,7 +917,7 @@ END
 // ⚠⚠ **256 → 263 задачей T-42-2** (находка С44, решение 124.4): панель справки выросла на семь
 // единиц под ЗАМЕРЕННУЮ высоту своей первой строки, и окно выросло ровно на них. Ширина 191 не
 // тронута — решения 82.5 и 87 говорят «окно растёт только вниз», и это по-прежнему так.
-IDD_ABOUT DIALOGEX 0, 0, 191, 263
+IDD_ABOUT DIALOGEX 0, 0, 191, 271
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -987,17 +987,26 @@ BEGIN
     // ⚠ Локаль, которой и этого мало — а при 125…200 % такие есть, — раздвигается **в живом
     // окне**: `settings::fit_about_help` мерит те же строки тем же близнецом и опускает панель,
     // обе кнопки и нижнюю границу. Числа здесь — стартовая раскладка, чтобы она не прыгала.
-    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 149
+    //
+    // ⚠⚠ **Третья строка 19 → 27 единиц, окно 263 → 271 — решение 128.4 (T-43-7, находка Н83).**
+    // Оговорка решения 128.1 «(если это включено и работает Ctrl+C)» переносит третью строку на
+    // три строки текста в 27 случаях из 28, которые мерит тест (14 языков × «PrintScreen» и
+    // «Pause»): 57 px против отведённых 40, и честной формулировки в две строки нет. Владелец
+    // выбрал «выше на строку»: строки 4 и 5, панель, обе кнопки и нижняя граница опущены на те же
+    // 8 единиц, воздух между строками — прежние 4, ширина 191 не тронута. Единственный случай
+    // сверх — `el` с «PrintScreen», четыре строки — берёт четвёртую у `fit_about_help`; тест
+    // шаблона называет его поимённо и держит ровно таким.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 157
     LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 97, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_HELP_1, 30, 97, 142, 36, SS_OWNERDRAW
     LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 137, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_HELP_2, 30, 137, 142, 19, SS_OWNERDRAW
     LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 160, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_3, 30, 160, 142, 19, SS_OWNERDRAW
-    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 183, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_4, 30, 183, 142, 19, SS_OWNERDRAW
-    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 206, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_5, 30, 206, 142, 19, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_3, 30, 160, 142, 27, SS_OWNERDRAW
+    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 191, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_4, 30, 191, 142, 19, SS_OWNERDRAW
+    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 214, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_5, 30, 214, 142, 19, SS_OWNERDRAW
 
     // FR-103, task Т-32-4: the way into «От автора». It stands to the left of «ОК» and the
     // window does not grow — решение 101 п. 7 — which is why it takes the air that was already
@@ -1006,8 +1015,10 @@ BEGIN
     // short of «ОК», so the two never meet however wide a locale writes it.
     // ⚠ 235 → **242**: обе кнопки опущены на те же семь единиц, на какие выросла панель справки
     // (T-42-2). Поле под ними осталось прежним — 263 − 256 = 7, как было 256 − 249.
-    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 242, 86, 14, BS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 144, 242, 39, 14, BS_OWNERDRAW
+    // ⚠ 242 → **250**: ещё на восемь — за третьей строкой справки (T-43-7, решение 128.4); поле
+    // под кнопками прежнее — 271 − 264 = 7.
+    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 250, 86, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 144, 250, 39, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -1704,7 +1715,7 @@ BEGIN
     IDS_ABOUT_HELP          "Как пользоваться"
     IDS_ABOUT_HELP_1        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится."
     IDS_ABOUT_HELP_2        "Повторное нажатие {0} возвращает исходный текст."
-    IDS_ABOUT_HELP_3        "Выделите текст и нажмите {0} — конвертируется выделенное."
+    IDS_ABOUT_HELP_3        "Выделите текст и нажмите {0} — конвертируется выделенное (если это включено и работает Ctrl+C)."
     IDS_ABOUT_HELP_4        "Приостановка, настройки и выход — в значке в трее."
     IDS_ABOUT_HELP_5        "Сменить клавишу: Настройки → Горячая клавиша."
     IDS_CAPTURE_HINT        "Esc или клик мимо — отмена"
@@ -1931,7 +1942,7 @@ BEGIN
     IDS_ABOUT_HELP          "How to use it"
     IDS_ABOUT_HELP_1        "You typed a word in the wrong layout — press {0}: the word is converted and the layout switches."
     IDS_ABOUT_HELP_2        "Pressing {0} again brings the original text back."
-    IDS_ABOUT_HELP_3        "Select text and press {0} — the selection is converted."
+    IDS_ABOUT_HELP_3        "Select text and press {0} — the selection is converted (if enabled and Ctrl+C works)."
     IDS_ABOUT_HELP_4        "Suspend, settings and exit are in the tray icon."
     IDS_ABOUT_HELP_5        "To change the key: Settings → Hotkey."
     IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
@@ -2171,7 +2182,7 @@ BEGIN
     IDS_ABOUT_HELP          "Як користуватися"
     IDS_ABOUT_HELP_1        "Набрали слово не в тій розкладці — натисніть {0}: слово перекодується, розкладка переключиться."
     IDS_ABOUT_HELP_2        "Повторне натискання {0} повертає початковий текст."
-    IDS_ABOUT_HELP_3        "Виділіть текст і натисніть {0} — конвертується виділене."
+    IDS_ABOUT_HELP_3        "Виділіть текст і натисніть {0} — конвертується виділене (якщо це увімкнено і працює Ctrl+C)."
     IDS_ABOUT_HELP_4        "Призупинення, налаштування та вихід — у значку в треї."
     IDS_ABOUT_HELP_5        "Змінити клавішу: Налаштування → Гаряча клавіша."
     IDS_CAPTURE_HINT        "Esc або клік повз — скасування"
@@ -2394,7 +2405,7 @@ BEGIN
     IDS_ABOUT_HELP          "So wird es benutzt"
     IDS_ABOUT_HELP_1        "Wort im falschen Layout getippt — {0} drücken: das Wort wird umgewandelt, das Layout wechselt."
     IDS_ABOUT_HELP_2        "Noch einmal {0} holt den ursprünglichen Text zurück."
-    IDS_ABOUT_HELP_3        "Text markieren und {0} drücken — die Markierung wird umgewandelt."
+    IDS_ABOUT_HELP_3        "Text markieren und {0} drücken — die Markierung wird umgewandelt (falls aktiviert und Ctrl+C funktioniert)."
     IDS_ABOUT_HELP_4        "Anhalten, Einstellungen und Beenden sind im Infobereichssymbol."
     IDS_ABOUT_HELP_5        "Taste ändern: Einstellungen → Tastenkürzel."
     IDS_CAPTURE_HINT        "Esc oder ein Klick daneben bricht ab"
@@ -2619,7 +2630,7 @@ BEGIN
     IDS_ABOUT_HELP          "Comment s'en servir"
     IDS_ABOUT_HELP_1        "Mot tapé dans la mauvaise disposition — appuyez sur {0} : le mot est converti, la disposition change."
     IDS_ABOUT_HELP_2        "Appuyer de nouveau sur {0} rend le texte d'origine."
-    IDS_ABOUT_HELP_3        "Sélectionnez du texte et appuyez sur {0} — la sélection est convertie."
+    IDS_ABOUT_HELP_3        "Sélectionnez du texte et appuyez sur {0} — la sélection est convertie (si c'est activé et que Ctrl+C fonctionne)."
     IDS_ABOUT_HELP_4        "Suspendre, paramètres et sortie sont dans l'icône de la zone de notification."
     IDS_ABOUT_HELP_5        "Changer de touche : Paramètres → Raccourci."
     IDS_CAPTURE_HINT        "Esc ou un clic à côté annule"
@@ -2841,7 +2852,7 @@ BEGIN
     IDS_ABOUT_HELP          "Cómo se usa"
     IDS_ABOUT_HELP_1        "Escribió una palabra en la distribución equivocada — pulse {0}: la palabra se convierte y la distribución cambia."
     IDS_ABOUT_HELP_2        "Pulsar {0} de nuevo devuelve el texto original."
-    IDS_ABOUT_HELP_3        "Seleccione texto y pulse {0} — se convierte lo seleccionado."
+    IDS_ABOUT_HELP_3        "Seleccione texto y pulse {0} — se convierte lo seleccionado (si la opción está activada y Ctrl+C funciona)."
     IDS_ABOUT_HELP_4        "Pausa, configuración y salida están en el icono del área de notificación."
     IDS_ABOUT_HELP_5        "Cambiar la tecla: Configuración → Atajo."
     IDS_CAPTURE_HINT        "Esc o un clic fuera cancela"
@@ -3061,7 +3072,7 @@ BEGIN
     IDS_ABOUT_HELP          "Como usar"
     IDS_ABOUT_HELP_1        "Digitou a palavra no layout errado — pressione {0}: a palavra é convertida e o layout muda."
     IDS_ABOUT_HELP_2        "Pressionar {0} de novo devolve o texto original."
-    IDS_ABOUT_HELP_3        "Selecione o texto e pressione {0} — a seleção é convertida."
+    IDS_ABOUT_HELP_3        "Selecione o texto e pressione {0} — a seleção é convertida (se ativado e o Ctrl+C funcionar)."
     IDS_ABOUT_HELP_4        "Pausa, configurações e saída ficam no ícone da área de notificação."
     IDS_ABOUT_HELP_5        "Trocar a tecla: Configurações → Atalho."
     IDS_CAPTURE_HINT        "Esc ou um clique fora cancela"
@@ -3286,7 +3297,7 @@ BEGIN
     IDS_ABOUT_HELP          "Come si usa"
     IDS_ABOUT_HELP_1        "Parola digitata nel layout sbagliato — premi {0}: la parola si converte e il layout cambia."
     IDS_ABOUT_HELP_2        "Premere {0} di nuovo riporta il testo originale."
-    IDS_ABOUT_HELP_3        "Seleziona il testo e premi {0} — la selezione viene convertita."
+    IDS_ABOUT_HELP_3        "Seleziona il testo e premi {0} — la selezione viene convertita (se l'opzione è attiva e Ctrl+C funziona)."
     IDS_ABOUT_HELP_4        "Sospensione, impostazioni e uscita sono nell'icona dell'area di notifica."
     IDS_ABOUT_HELP_5        "Cambiare tasto: Impostazioni → Scorciatoia."
     IDS_CAPTURE_HINT        "Esc o un clic fuori annulla"
@@ -3511,7 +3522,7 @@ BEGIN
     IDS_ABOUT_HELP          "Jak używać"
     IDS_ABOUT_HELP_1        "Słowo napisane w złym układzie — naciśnij {0}: słowo się przekonwertuje, układ się przełączy."
     IDS_ABOUT_HELP_2        "Ponowne naciśnięcie {0} przywraca pierwotny tekst."
-    IDS_ABOUT_HELP_3        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane."
+    IDS_ABOUT_HELP_3        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane (jeśli jest to włączone i Ctrl+C działa)."
     IDS_ABOUT_HELP_4        "Wstrzymanie, ustawienia i wyjście są w ikonie w zasobniku."
     IDS_ABOUT_HELP_5        "Zmiana klawisza: Ustawienia → Skrót klawiszowy."
     IDS_CAPTURE_HINT        "Esc albo kliknięcie obok anuluje"
@@ -3732,7 +3743,7 @@ BEGIN
     IDS_ABOUT_HELP          "Jak se používá"
     IDS_ABOUT_HELP_1        "Slovo napsané ve špatném rozložení — stiskněte {0}: slovo se převede a rozložení se přepne."
     IDS_ABOUT_HELP_2        "Další stisk {0} vrátí původní text."
-    IDS_ABOUT_HELP_3        "Vyberte text a stiskněte {0} — převede se výběr."
+    IDS_ABOUT_HELP_3        "Vyberte text a stiskněte {0} — převede se výběr (pokud je to zapnuto a Ctrl+C funguje)."
     IDS_ABOUT_HELP_4        "Pozastavení, nastavení a ukončení jsou v ikoně v oznamovací oblasti."
     IDS_ABOUT_HELP_5        "Změna klávesy: Nastavení → Klávesová zkratka."
     IDS_CAPTURE_HINT        "Esc nebo kliknutí vedle zruší"
@@ -3956,7 +3967,7 @@ BEGIN
     IDS_ABOUT_HELP          "Nasıl kullanılır"
     IDS_ABOUT_HELP_1        "Kelimeyi yanlış düzende yazdınız — {0} tuşuna basın: kelime dönüşür, düzen değişir."
     IDS_ABOUT_HELP_2        "{0} tuşuna yeniden basmak özgün metni geri getirir."
-    IDS_ABOUT_HELP_3        "Metni seçip {0} tuşuna basın — seçim dönüştürülür."
+    IDS_ABOUT_HELP_3        "Metni seçip {0} tuşuna basın — seçim dönüştürülür (özellik açıksa ve Ctrl+C çalışıyorsa)."
     IDS_ABOUT_HELP_4        "Duraklatma, ayarlar ve çıkış bildirim alanı simgesindedir."
     IDS_ABOUT_HELP_5        "Tuşu değiştirmek: Ayarlar → Kısayol tuşu."
     IDS_CAPTURE_HINT        "Esc ya da dışarı tıklamak iptal eder"
@@ -4184,7 +4195,7 @@ BEGIN
     IDS_ABOUT_HELP          "Πώς χρησιμοποιείται"
     IDS_ABOUT_HELP_1        "Γράψατε λέξη σε λάθος διάταξη — πατήστε {0}: η λέξη μετατρέπεται, η διάταξη αλλάζει."
     IDS_ABOUT_HELP_2        "Νέο πάτημα του {0} επαναφέρει το αρχικό κείμενο."
-    IDS_ABOUT_HELP_3        "Επιλέξτε κείμενο και πατήστε {0} — μετατρέπεται η επιλογή."
+    IDS_ABOUT_HELP_3        "Επιλέξτε κείμενο και πατήστε {0} — μετατρέπεται η επιλογή (αν είναι ενεργό και λειτουργεί το Ctrl+C)."
     IDS_ABOUT_HELP_4        "Παύση, ρυθμίσεις και έξοδος είναι στο εικονίδιο ειδοποιήσεων."
     IDS_ABOUT_HELP_5        "Αλλαγή πλήκτρου: Ρυθμίσεις → Συντόμευση."
     IDS_CAPTURE_HINT        "Esc ή κλικ αλλού ακυρώνει"
@@ -4419,7 +4430,7 @@ BEGIN
     IDS_ABOUT_HELP          "איך משתמשים"
     IDS_ABOUT_HELP_1        "הקלדתם מילה בפריסה שגויה — הקישו {0}: המילה מומרת והפריסה מתחלפת."
     IDS_ABOUT_HELP_2        "הקשה נוספת על {0} מחזירה את הטקסט המקורי."
-    IDS_ABOUT_HELP_3        "סמנו טקסט והקישו {0} — המסומן מומר."
+    IDS_ABOUT_HELP_3        "סמנו טקסט והקישו {0} — המסומן מומר (אם האפשרות מופעלת והצירוף Ctrl+C עובד)."
     IDS_ABOUT_HELP_4        "השהיה, הגדרות ויציאה נמצאים בסמל אזור ההודעות."
     IDS_ABOUT_HELP_5        "החלפת מקש: הגדרות ← מקש קיצור."
     IDS_CAPTURE_HINT        "Esc או קליק בחוץ מבטלים"
@@ -4639,7 +4650,7 @@ BEGIN
     IDS_ABOUT_HELP          "طريقة الاستخدام"
     IDS_ABOUT_HELP_1        "كتبت كلمة بتخطيط خاطئ — اضغط {0}: تتحول الكلمة ويتبدل التخطيط."
     IDS_ABOUT_HELP_2        "ضغطة أخرى على {0} تعيد النص الأصلي."
-    IDS_ABOUT_HELP_3        "حدد نصًا واضغط {0} — يتحول المحدد."
+    IDS_ABOUT_HELP_3        "حدد نصًا واضغط {0} — يتحول المحدد (إذا كان ذلك مفعّلًا وكان Ctrl+C يعمل)."
     IDS_ABOUT_HELP_4        "الإيقاف المؤقت والإعدادات والخروج في أيقونة منطقة الإشعارات."
     IDS_ABOUT_HELP_5        "تغيير المفتاح: الإعدادات ← مفتاح الاختصار."
     IDS_CAPTURE_HINT        "Esc أو نقرة خارجه تُلغي"
