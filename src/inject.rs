@@ -577,23 +577,38 @@ fn chars_in(units: &[u16]) -> usize {
 ///
 /// Quadratic in the length of the packet and deliberately so. It is compiled under the `testing`
 /// feature alone — every Release build is without it, by condition 1 of SEC-04a — and even there
-/// the run is a word, a few dozen units at the very most, on a path that already allocates two
-/// vectors. A set would allocate a third for no gain that could be measured.
+/// the run is a word, a few dozen units at the very most.
+///
+/// # ⭐ Counted over the packet itself, with no copy — task T-40-4, finding Н96
+///
+/// Until that task the character events were first collected into a `Vec<u16>` and counted
+/// there: a **third** copy of the text beside the two working buffers of [`replace_in_with`], and
+/// the one copy that went back to the allocator unzeroed — the vector even grew while it was being
+/// filled, handing back a partial copy on the way (`tests\inject_zeroing.rs` found both blocks).
+/// A copy counted here and zeroed afterwards would have been a repair; no copy at all is the
+/// smaller one: each keydown is compared with the keydowns before it in the packet, which is
+/// already a buffer this module zeroes. Nothing is allocated, so nothing is left behind.
 #[cfg(feature = "testing")]
 fn distinct_units(packet: &[INPUT]) -> usize {
-    let units: Vec<u16> = packet
-        .iter()
-        .filter_map(keyboard)
-        .filter(|key| {
-            key.dwFlags.0 & KEYEVENTF_UNICODE.0 != 0 && key.dwFlags.0 & KEYEVENTF_KEYUP.0 == 0
-        })
-        .map(|key| key.wScan)
-        .collect();
+    // The code unit of a character keydown — the edge T-10-4 counts — or `None` for every other
+    // event of the packet.
+    let unit_of = |event: &INPUT| {
+        keyboard(event)
+            .filter(|key| {
+                key.dwFlags.0 & KEYEVENTF_UNICODE.0 != 0 && key.dwFlags.0 & KEYEVENTF_KEYUP.0 == 0
+            })
+            .map(|key| key.wScan)
+    };
 
-    units
+    packet
         .iter()
         .enumerate()
-        .filter(|(index, unit)| !units[..*index].contains(unit))
+        .filter_map(|(index, event)| unit_of(event).map(|unit| (index, unit)))
+        .filter(|&(index, unit)| {
+            !packet[..index]
+                .iter()
+                .any(|earlier| unit_of(earlier) == Some(unit))
+        })
         .count()
 }
 
@@ -1933,9 +1948,15 @@ pub fn replace_in_with(
         );
     }
 
-    // The working buffers hold the user's text in plain form and are the only place outside
-    // module `buffer` that ever does. Whatever happens below, they are zeroed before this frame
-    // releases them — SEC-01, SEC-02.
+    // The working buffers hold the user's text in plain form, and in the shipped build they are
+    // the only heap blocks outside module `buffer` that ever do. Whatever happens below, they are
+    // zeroed before this frame releases them — SEC-01, SEC-02.
+    //
+    // ⚠ «In the shipped build» is the qualifier finding Н96 found missing: under the `testing`
+    // feature the publication above used to count distinct units over a third, unzeroed copy.
+    // Since task T-40-4 `distinct_units` makes no copy, and `tests\inject_zeroing.rs` watches every
+    // block this path frees for the text — so the sentence holds in a `testing` build as well, and
+    // it is that check, not this comment, that says so.
     let outcome = built.map(|len| run_steps(env, &events[..len], erased, typed, delay_ms));
 
     // The write is `crate::buffer::zero_slice` and not `fill`, because a `fill` immediately in
