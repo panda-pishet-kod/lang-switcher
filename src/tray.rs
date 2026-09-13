@@ -39,6 +39,10 @@
 //! section 6.3 does not allow. While the dialog is up the two entries that edit the
 //! configuration are greyed ([`Menu::build`]) **and** refused ([`dispatch_command`]) — one
 //! rule, [`dialog_locks_command`], read in both places.
+//! T-43-4 (done) closed finding С21 of the audit of 2026-09-04 on the same rule: while the
+//! settings dialog **or** the «О программе» window is up, «Настройки…» and «О программе» are
+//! greyed and refused as well, the double click on the icon goes through the same door, and
+//! `settings::show_about_dialog` turns round at its top — no modal window opens over another.
 //!
 //! # Where this lives — section 6.1
 //!
@@ -484,9 +488,10 @@ pub fn resume_is_refused(enabled: bool, fail_safe: bool) -> bool {
     fail_safe && !enabled
 }
 
-/// Whether the open settings dialog takes `command` away from the menu — task T-13-14.
+/// Whether an open modal window of this program takes `command` away from the menu — tasks
+/// T-13-14 and T-43-4.
 ///
-/// # The finding
+/// # The finding of task T-13-14
 ///
 /// The audit of 2026-08-24 found the tray fully alive while the modal dialog of FR-92 is on
 /// the screen: [`settings::show_dialog`] guards only against a *second copy of the window*, so
@@ -501,40 +506,63 @@ pub fn resume_is_refused(enabled: bool, fail_safe: bool) -> bool {
 /// this refuses. The answer is the simple and honest one the task asks for: while the dialog
 /// is up, the two entries that edit the configuration are not the user's to choose.
 ///
-/// # Which two, and why not the other three
+/// # The finding of task T-43-4 — the two doors
 ///
-/// [`CMD_TOGGLE`] and [`CMD_AUTOSTART`] and no others, because those are exactly the two menu
-/// commands that write into the configuration:
+/// The audit of 2026-09-04 (С21) found the other half of the same fact: the menu comes up from
+/// under **any** modal window of this program, because a modal loop keeps dispatching to the
+/// other windows of the thread. The settings dialog had a latch against a second copy of
+/// itself; the «О программе» window of FR-92а had none. So «О программе» opened over the
+/// settings dialog and over itself, and three things followed: the windows stacked, and closing
+/// the inner one emptied the record the system theme is delivered through, leaving the outer one
+/// on yesterday's palette; «ОК» and «Применить» of a settings dialog with «О программе» on top
+/// only raised a flag, because its loop lay under a foreign one; and «Применить» with a change of
+/// language left the help of the window above it in the old language.
 ///
-/// * [`CMD_SETTINGS`] leads into the dialog that is already open, and [`settings::show_dialog`]
-///   answers `Ok(())` to it without opening anything — behaviour that already exists and is
-///   deliberately left alone;
-/// * [`CMD_ABOUT`] shows a window and changes nothing;
-/// * [`CMD_EXIT`] must stay alive under every circumstance — a program that cannot be closed
-///   because a window is open is worse than the finding.
+/// The answer is the one the audit recommended — both doors shut: while either window is up,
+/// «Настройки…» and «О программе» are not the user's to choose, and [`settings::show_about_dialog`]
+/// turns round at its top as [`settings::show_dialog`] always has.
+///
+/// # Which commands, and by which window
+///
+/// * [`CMD_TOGGLE`] and [`CMD_AUTOSTART`] — by the **settings dialog** only, because those are
+///   exactly the two menu commands that write into the configuration it is editing. «О
+///   программе» edits nothing, and a suspension made while it is up is lost to nobody;
+/// * [`CMD_SETTINGS`] and [`CMD_ABOUT`] — by **either** window: each opens a modal window of
+///   its own, and a modal window opened over another is the whole of С21. Before task T-43-4
+///   «Настройки…» was left alive here on the ground that [`settings::show_dialog`] answers a
+///   second copy with nothing; that is still so, and the entry now says it by being grey;
+/// * [`CMD_EXIT`] and every other entry — by **neither**: a program that cannot be closed
+///   because a window is open is worse than either finding, and the letters of FR-101 open
+///   modeless windows, which run no loop of their own for another window to be caught under.
 ///
 /// # Two halves of one rule, and this is the rule
 ///
-/// [`Menu::build`] appends the two entries `MF_GRAYED | MF_DISABLED` — that is the half the
-/// user sees and the half that keeps `TrackPopupMenuEx` from returning either command at all.
+/// [`Menu::build`] appends the locked entries `MF_GRAYED | MF_DISABLED` — that is the half the
+/// user sees and the half that keeps `TrackPopupMenuEx` from returning a locked command at all.
 /// [`dispatch_command`] asks the same question again before it does anything — that is the
-/// half that decides. The greying is the *view* of this rule; the gate in the command handler
-/// is the rule. Both read this one function, so there is nothing for the two to disagree
-/// about.
+/// half that decides, and every road into a command goes through it: the menu, the double click
+/// on the icon (task T-43-4 — until then it called [`open_settings`] past the door) and the
+/// buttons of the letters. The greying is the *view* of this rule; the gate in the command
+/// handler is the rule. Both read this one function, so there is nothing for the two to
+/// disagree about.
 ///
-/// # Why an argument rather than a read inside
+/// # Why arguments rather than reads inside
 ///
 /// The same shape and the same reason as [`resume_is_refused`] one function up: the decision
-/// belongs to one place, the reading of the flag to the caller, and a rule that reached for a
+/// belongs to one place, the reading of the flags to the caller, and a rule that reached for a
 /// thread-local of its own would be a rule the menu tests could not drive — they build menus
 /// on a test thread that has no dialog and never will. [`show_menu`] and [`dispatch_command`]
-/// read [`settings::dialog_is_open`] and hand the answer in.
+/// read [`settings::dialog_is_open`] and [`settings::about_is_open`] and hand the answers in.
 ///
-/// **SEC-05.** The flag is a thread-local raised only by the guard of the open dialog; it is
-/// not derived from any message, and no `wParam`, `lParam` or pointer takes part in this
-/// decision (R-20). See [`settings::dialog_is_open`].
-pub fn dialog_locks_command(command: u32, dialog_open: bool) -> bool {
-    dialog_open && matches!(command, CMD_TOGGLE | CMD_AUTOSTART)
+/// **SEC-05.** Both flags are thread-locals written only by the guards of the two windows; they
+/// are not derived from any message, and no `wParam`, `lParam` or pointer takes part in this
+/// decision (R-20). See [`settings::dialog_is_open`] and [`settings::about_is_open`].
+pub fn dialog_locks_command(command: u32, dialog_open: bool, about_open: bool) -> bool {
+    match command {
+        CMD_TOGGLE | CMD_AUTOSTART => dialog_open,
+        CMD_SETTINGS | CMD_ABOUT => dialog_open || about_open,
+        _ => false,
+    }
 }
 
 /// The tray of one thread: the icon, its state, and the configuration behind it.
@@ -2102,9 +2130,14 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
             Some(LRESULT(0))
         }
         // Outside the borrow for the same reason: the dialog of FR-92 is modal.
+        //
+        // ⚠ Task T-43-4, finding С21: **through the door**, not past it. Until this task the arm
+        // called `open_settings` itself, so a double click on the icon opened the settings dialog
+        // over the «О программе» window the menu would have refused it over — the one road into
+        // a command that did not ask [`dialog_locks_command`].
         Reaction::ShowSettings => {
             let hwnd = with_tray(|tray| tray.hwnd)?;
-            open_settings(hwnd);
+            dispatch_command(hwnd, CMD_SETTINGS);
             Some(LRESULT(0))
         }
     }
@@ -2194,24 +2227,32 @@ impl Menu {
     /// # `dialog_open` — task T-13-14
     ///
     /// The fourth argument is [`settings::dialog_is_open`], handed in by [`show_menu`] for the
-    /// same reason the third one is. It greys **two** entries and only while the modal dialog
-    /// of FR-92 is on the screen: «Приостановить/Возобновить» and «Запускать при входе в
-    /// систему», the two commands of FR-91 that edit the configuration the dialog is editing.
-    /// The rule is [`dialog_locks_command`], where the finding and the reasoning live; this is
-    /// its visible half, and [`dispatch_command`] is the half that decides.
+    /// same reason the third one is. On its own account it greys **two** entries and only while
+    /// the modal dialog of FR-92 is on the screen: «Приостановить/Возобновить» and «Запускать
+    /// при входе в систему», the two commands of FR-91 that edit the configuration the dialog
+    /// is editing; with the fifth it greys the two doors as well (below). The rule is
+    /// [`dialog_locks_command`], where the findings and the reasoning live; this is its visible
+    /// half, and [`dispatch_command`] is the half that decides.
     ///
     /// The **composition** of FR-91 does not move here either: seven entries,
     /// [`MENU_ENTRY_COUNT`], the same five commands, the same two rules, the same labels.
-    /// «Настройки…» stays available and still leads into the window that is already up,
-    /// «О программе» and «Выход» stay available because they change no configuration.
     ///
     /// The two greyings compose rather than argue: the first entry is available only when
     /// neither FR-99 nor the open dialog takes it away, which is what the `&&` below says.
+    ///
+    /// # `about_open` — task T-43-4
+    ///
+    /// The fifth argument is [`settings::about_is_open`], handed in by [`show_menu`] beside the
+    /// fourth. Together they grey the two **doors** — «Настройки…» and «О программе» — while
+    /// either modal window is up, because a modal window opened over another is finding С21;
+    /// the rule and its reasons are [`dialog_locks_command`]. «Выход» and «Написать автору…» stay
+    /// available under both.
     pub fn build(
         enabled: bool,
         autostart: bool,
         fail_safe: bool,
         dialog_open: bool,
+        about_open: bool,
         pending: &Pending,
     ) -> WinResult<Self> {
         // SAFETY: takes no arguments and touches no memory of ours. The handle it returns is
@@ -2265,12 +2306,14 @@ impl Menu {
             settings::IDS_MENU_RESUME
         });
 
-        // Tasks T-13-9 and T-13-14: the two entries of FR-91 whose availability is not
+        // Tasks T-13-9, T-13-14 and T-43-4: the four entries of FR-91 whose availability is not
         // constant. The first is taken away by either of two rules and needs both to be
-        // silent; the second by one.
+        // silent; the other three by one — the same one, asked with both windows.
         let toggle_available = !resume_is_refused(enabled, fail_safe)
-            && !dialog_locks_command(CMD_TOGGLE, dialog_open);
-        let autostart_available = !dialog_locks_command(CMD_AUTOSTART, dialog_open);
+            && !dialog_locks_command(CMD_TOGGLE, dialog_open, about_open);
+        let settings_available = !dialog_locks_command(CMD_SETTINGS, dialog_open, about_open);
+        let autostart_available = !dialog_locks_command(CMD_AUTOSTART, dialog_open, about_open);
+        let about_available = !dialog_locks_command(CMD_ABOUT, dialog_open, about_open);
 
         menu.append_command(CMD_TOGGLE, &first, false, toggle_available)?;
         menu.append_separator()?;
@@ -2278,7 +2321,7 @@ impl Menu {
             CMD_SETTINGS,
             &settings::text(settings::IDS_MENU_SETTINGS),
             false,
-            true,
+            settings_available,
         )?;
         menu.append_command(
             CMD_AUTOSTART,
@@ -2299,7 +2342,7 @@ impl Menu {
             CMD_ABOUT,
             &settings::text(settings::IDS_MENU_ABOUT),
             false,
-            true,
+            about_available,
         )?;
         menu.append_command(
             CMD_EXIT,
@@ -3727,6 +3770,10 @@ fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {
         autostart,
         crate::hook::fail_safe(),
         settings::dialog_is_open(),
+        // Task T-43-4, finding С21: the «О программе» window runs a loop of its own too, and the
+        // menu comes up under it for the same reason — so its record is read here, beside the
+        // dialog's, and the two doors are grey while either window is up.
+        settings::about_is_open(),
         // FR-101: what the letters have to say right now, read once, here, and handed to the
         // builder — the direction the three states above travel and for the same reason.
         &pending_now(),
@@ -3901,18 +3948,23 @@ fn set_menu_background(menu: HMENU, brush: HBRUSH) {
 
 /// Carries out one menu command.
 ///
-/// Reached only from [`show_menu`], that is, only from a menu the user opened. Nothing here
-/// is reachable by sending this process a message — see SEC-05 in the module documentation.
+/// Reached from [`show_menu`], that is, from a menu the user opened; from the buttons of the
+/// letters (`letters::perform`, «Открыть настройки»); and — since task T-43-4 — from the double
+/// click on the icon, which until then opened the settings dialog past this door. Of the three,
+/// only the last two can be set off by a message another process forges, and both only ever ask
+/// for [`CMD_SETTINGS`] — the window the module documentation's SEC-05 already names as the one
+/// thing a forged double click achieves. No command number is ever taken out of a message.
 ///
-/// # The gate of task T-13-14 — and why it is here as well as in the menu
+/// # The gate of tasks T-13-14 and T-43-4 — and why it is here as well as in the menu
 ///
 /// While the modal dialog of FR-92 is on the screen, [`CMD_TOGGLE`] and [`CMD_AUTOSTART`] are
 /// refused and **nothing at all happens**: no change in memory, no icon, no file, no registry.
-/// [`Menu::build`] greys the same two entries, and that is not a duplicate of this line but its
-/// other half — greying is what the user sees and what keeps `TrackPopupMenuEx` from returning
-/// the command, and *this* is what decides. A menu is user interface; a command handler is the
-/// door, and the door is where a lock belongs. The two read one rule,
-/// [`dialog_locks_command`], so they cannot come apart.
+/// While it or the «О программе» window is up, [`CMD_SETTINGS`] and [`CMD_ABOUT`] are refused
+/// the same way — no second modal window over the first (finding С21). [`Menu::build`] greys the
+/// same entries, and that is not a duplicate of this line but its other half — greying is what
+/// the user sees and what keeps `TrackPopupMenuEx` from returning the command, and *this* is
+/// what decides. A menu is user interface; a command handler is the door, and the door is where
+/// a lock belongs. The two read one rule, [`dialog_locks_command`], so they cannot come apart.
 ///
 /// **Public for the tests of task T-13-14**, which measure the refusal the way its acceptance
 /// asks for — by the value in memory and by the bytes on the disk, not by an intention read out
@@ -3928,12 +3980,15 @@ fn set_menu_background(menu: HMENU, brush: HBRUSH) {
 /// event that says nothing. The refusal is also not an anomaly worth a dump — it is the
 /// ordinary answer to a click on an entry that is greyed on the screen at that very moment.
 pub fn dispatch_command(hwnd: HWND, command: u32) {
-    // Task T-13-14. One door in front of the whole table rather than a check inside two of
-    // the arms: a gate at the top cannot be walked round by an arm added later, and it is the
-    // shape that makes «which commands are locked» a property of the rule and of nothing else.
-    // The three commands the rule does not name — «Настройки…», «О программе», «Выход» — reach
-    // their arms exactly as before.
-    if dialog_locks_command(command, settings::dialog_is_open()) {
+    // Tasks T-13-14 and T-43-4. One door in front of the whole table rather than a check inside
+    // four of the arms: a gate at the top cannot be walked round by an arm added later, and it
+    // is the shape that makes «which commands are locked» a property of the rule and of nothing
+    // else. The commands the rule does not name — «Выход» and the letters' entries — reach their
+    // arms exactly as before.
+    let dialog_open = settings::dialog_is_open();
+    let about_open = settings::about_is_open();
+
+    if dialog_locks_command(command, dialog_open, about_open) {
         return;
     }
 

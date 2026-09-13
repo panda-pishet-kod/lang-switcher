@@ -83,8 +83,19 @@ const FAIL_SAFE: bool = true;
 /// three too many to tell apart by position.
 const NO_DIALOG: bool = false;
 
-/// The fifth argument of [`Menu::build`] in the ordinary state of the program — task Т-32-4,
-/// FR-101.
+/// The fifth argument of [`Menu::build`] in the ordinary state of the program — task T-43-4.
+///
+/// `settings::about_is_open()`, which the product hands in from `tray::show_menu` beside the
+/// fourth. False in every test but the ones about the «О программе» window of FR-92а, and a
+/// name for the reason its neighbours are names — five booleans in a row are unreadable by
+/// position.
+const NO_ABOUT: bool = false;
+
+/// The same argument while an «О программе» window is on the screen.
+const ABOUT_UP: bool = true;
+
+/// The sixth argument of [`Menu::build`] in the ordinary state of the program — task Т-32-4,
+/// FR-101 (the fifth until task T-43-4 put `about_open` in front of it).
 ///
 /// What the letters of the author have to say in the menu, which for a program with no feed
 /// read behind it is nothing at all: no unread news and no newer version. The menu then has
@@ -335,8 +346,15 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 8]) {
 #[test]
 fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91);
 }
@@ -347,14 +365,28 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
     // *is*, and the second must survive the first — same seven entries, same two rules,
     // same places.
     let _locale = product_strings(settings::Language::En);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu of FR-91 must be creatable");
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu of FR-91 must be creatable");
 
     assert_menu_is(&menu, &FR_91_ENGLISH);
 
     // The suspended state moves the same entry in this locale as in the other one.
-    let suspended = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let suspended = Menu::build(
+        false,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
     assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
@@ -363,10 +395,24 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
 #[test]
 fn the_first_entry_follows_the_state() {
     let _locale = product_strings(settings::Language::Ru);
-    let active = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
-    let suspended = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let active = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
+    let suspended = Menu::build(
+        false,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     assert_eq!(active.items()[0].label, "Приостановить");
     assert_eq!(suspended.items()[0].label, "Возобновить");
@@ -393,10 +439,24 @@ fn the_first_entry_follows_the_state() {
 fn the_greyed_resume_entry_says_why_it_is_grey() {
     let _locale = product_strings(settings::Language::Ru);
 
-    let plain = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
-    let refused = Menu::build(false, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let plain = Menu::build(
+        false,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
+    let refused = Menu::build(
+        false,
+        true,
+        FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     let plain_label = &plain.items()[0].label;
     let refused_label = &refused.items()[0].label;
@@ -612,8 +672,15 @@ fn the_guard_of_fr99_stands_at_the_top_of_the_method_that_moves_the_state() {
 #[test]
 fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(false, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let menu = Menu::build(
+        false,
+        true,
+        FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     println!(
         "entry 0: label={:?} enabled={} grayed={} disabled={}",
@@ -671,8 +738,15 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
     let _locale = product_strings(settings::Language::Ru);
 
     // The ordinary suspended program: «Возобновить» is the user's to choose.
-    let ordinary = Menu::build(false, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let ordinary = Menu::build(
+        false,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     assert_eq!(ordinary.items()[0].label, "Возобновить");
     assert!(ordinary.items()[0].enabled);
@@ -681,7 +755,7 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     // FR-99 has just disarmed an armed program. The move it is about to make is the
     // suspension, and that one must stay available or the icon never becomes honest.
-    let suspending = Menu::build(true, true, FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
+    let suspending = Menu::build(true, true, FAIL_SAFE, NO_DIALOG, NO_ABOUT, &NOTHING_PENDING)
         .expect("the menu must be creatable");
 
     assert_eq!(suspending.items()[0].label, "Приостановить");
@@ -713,15 +787,25 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 // allowed direction is checked on the entry and on the rule, never by firing it.
 // ---------------------------------------------------------------------------------------
 
-/// The menu positions of the two entries the open dialog takes away, and of the three it
-/// leaves alone — the FR-91 block read top to bottom, rules included.
+/// The menu positions of the two entries the open dialog takes away because they edit the
+/// configuration — the FR-91 block read top to bottom, rules included: «Приостановить»,
+/// «Запускать при входе в систему».
 const LOCKED_POSITIONS: [u32; 2] = [0, 3];
 
-/// «Настройки…», «О программе», «Выход».
-const LIVE_POSITIONS: [u32; 3] = [2, 5, 6];
+/// The two **doors** — «Настройки…» and «О программе» — which either modal window takes away
+/// since task T-43-4 (finding С21): a modal window opened over another is the finding.
+const DOOR_POSITIONS: [u32; 2] = [2, 6];
 
-/// **Criterion 6 of task T-13-14 — the view.** Built with the dialog up, the menu carries
-/// `MF_GRAYED` on exactly two entries and on no other.
+/// The two entries no window takes away: «Написать автору…» and «Выход».
+///
+/// ⚠ Until task T-43-4 this constant read `[2, 5, 6]` and its comment «Настройки…», «О
+/// программе», «Выход» — a comment left behind by task Т-32-4, which put «Написать автору…» at
+/// position 5 and pushed «Выход» to 7, where nothing looked at it.
+const LIVE_POSITIONS: [u32; 2] = [5, 7];
+
+/// **Criterion 6 of task T-13-14 — the view**, widened by task T-43-4. Built with the dialog up,
+/// the menu carries `MF_GRAYED` on the two entries that edit the configuration and on the two
+/// doors, and on no other.
 ///
 /// Read with `GetMenuState`, which is what Windows itself holds and what accessibility reads,
 /// rather than trusting the code that built the menu. The builder's own record is checked
@@ -730,8 +814,15 @@ const LIVE_POSITIONS: [u32; 3] = [2, 5, 6];
 #[test]
 fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, DIALOG_UP, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        DIALOG_UP,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     for position in LOCKED_POSITIONS {
         println!(
@@ -751,6 +842,20 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
         );
     }
 
+    for position in DOOR_POSITIONS {
+        println!(
+            "door {position}: grayed={} disabled={}",
+            is_grayed(menu.handle(), position),
+            is_disabled(menu.handle(), position)
+        );
+
+        assert!(
+            is_grayed(menu.handle(), position) && is_disabled(menu.handle(), position),
+            "entry {position} of FR-91 opens a modal window of its own, and one modal window \
+             over another is finding С21 — task T-43-4"
+        );
+    }
+
     for position in LIVE_POSITIONS {
         println!(
             "entry {position}: grayed={} disabled={}",
@@ -760,23 +865,22 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
 
         assert!(
             !is_grayed(menu.handle(), position) && !is_disabled(menu.handle(), position),
-            "entry {position} of FR-91 changes no configuration and must stay available — \
-             «Настройки…» leads into the window that is already open, and a program that \
-             could not be closed while a window is up would be worse than the finding"
+            "entry {position} of FR-91 changes no configuration and opens no modal window, so it \
+             must stay available — a program that could not be closed while a window is up \
+             would be worse than the finding"
         );
     }
 
     // The builder's record, which is what the drawing picks its ink by. The six commands in
     // menu order: toggle, settings, autostart, write, about, exit — «Написать автору…» arrived
-    // with task Т-32-4 and changes no configuration, so it stays available like the three
-    // after it.
+    // with task Т-32-4 and changes no configuration, so it stays available like «Выход».
     let record: Vec<bool> = menu.items().iter().map(|item| item.enabled).collect();
 
     println!("builder's record of availability: {record:?}");
 
     assert_eq!(
         record,
-        vec![false, true, false, true, true, true],
+        vec![false, false, false, true, false, true],
         "the record and Windows must say the same thing about every entry"
     );
 
@@ -794,10 +898,21 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
 fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
     let _locale = product_strings(settings::Language::Ru);
 
-    let ordinary = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let ordinary = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
-    for position in LOCKED_POSITIONS.iter().chain(LIVE_POSITIONS.iter()) {
+    for position in LOCKED_POSITIONS
+        .iter()
+        .chain(DOOR_POSITIONS.iter())
+        .chain(LIVE_POSITIONS.iter())
+    {
         assert!(
             !is_grayed(ordinary.handle(), *position) && !is_disabled(ordinary.handle(), *position),
             "with no dialog on the screen every entry of FR-91 is the user's to choose"
@@ -805,8 +920,15 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
     }
 
     // Both rules at once: FR-99 has disarmed a suspended program **and** the dialog is up.
-    let both = Menu::build(false, true, FAIL_SAFE, DIALOG_UP, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let both = Menu::build(
+        false,
+        true,
+        FAIL_SAFE,
+        DIALOG_UP,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     println!(
         "fail-safe and dialog together: entry 0 grayed={} entry 3 grayed={}",
@@ -821,25 +943,152 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
         );
     }
 
-    // The rule itself, driven directly on all four rows of its table.
-    for (command, dialog_open, expected) in [
-        (tray::CMD_TOGGLE, true, true),
-        (tray::CMD_AUTOSTART, true, true),
-        (tray::CMD_SETTINGS, true, false),
-        (tray::CMD_ABOUT, true, false),
-        (tray::CMD_EXIT, true, false),
-        (tray::CMD_TOGGLE, false, false),
-        (tray::CMD_AUTOSTART, false, false),
+    // The rule itself, driven directly on every row of its table — task T-43-4 gave it a third
+    // column, the «О программе» window, and two commands that either window locks.
+    for (command, dialog_open, about_open, expected) in [
+        (tray::CMD_TOGGLE, true, false, true),
+        (tray::CMD_AUTOSTART, true, false, true),
+        (tray::CMD_SETTINGS, true, false, true),
+        (tray::CMD_ABOUT, true, false, true),
+        (tray::CMD_WRITE, true, false, false),
+        (tray::CMD_EXIT, true, false, false),
+        (tray::CMD_TOGGLE, false, true, false),
+        (tray::CMD_AUTOSTART, false, true, false),
+        (tray::CMD_SETTINGS, false, true, true),
+        (tray::CMD_ABOUT, false, true, true),
+        (tray::CMD_WRITE, false, true, false),
+        (tray::CMD_EXIT, false, true, false),
+        (tray::CMD_SETTINGS, true, true, true),
+        (tray::CMD_ABOUT, true, true, true),
+        (tray::CMD_EXIT, true, true, false),
+        (tray::CMD_TOGGLE, false, false, false),
+        (tray::CMD_AUTOSTART, false, false, false),
+        (tray::CMD_SETTINGS, false, false, false),
+        (tray::CMD_ABOUT, false, false, false),
     ] {
-        let locked = tray::dialog_locks_command(command, dialog_open);
+        let locked = tray::dialog_locks_command(command, dialog_open, about_open);
 
-        println!("dialog_locks_command({command:#06x}, {dialog_open}) -> {locked}");
+        println!("dialog_locks_command({command:#06x}, {dialog_open}, {about_open}) -> {locked}");
 
         assert_eq!(
             locked, expected,
-            "dialog_locks_command({command:#06x}, {dialog_open})"
+            "dialog_locks_command({command:#06x}, {dialog_open}, {about_open})"
         );
     }
+}
+
+/// **Task T-43-4, finding С21 — the view from the other window.** Built with an «О программе»
+/// window up, the menu greys the two doors and nothing else.
+///
+/// The window had no latch against a second copy of itself, and the menu comes up under any
+/// modal loop of this thread: «О программе» opened over itself, and «Настройки…» opened over
+/// it. What is measured is the same pair of halves task T-13-14 measured for the dialog —
+/// `GetMenuState` out of Windows and the builder's record beside it — first on the argument,
+/// then on the very guard the product takes, so the flag the menu is built from is the flag the
+/// window really raises.
+///
+/// ⚠ **No door is fired here.** A refused `CMD_ABOUT` does nothing, but on a tree where the rule
+/// did not name it the same call would open a real modal window and block the test on the
+/// screen; the refusal is measured on the rule and on the entry, and the entry half of the lock
+/// is measured without a window in `tests\settings.rs`
+/// (`a_second_about_window_turns_round_at_the_door_before_anything_is_made`).
+#[test]
+fn an_open_about_window_greys_both_doors_and_nothing_else() {
+    let _locale = product_strings(settings::Language::Ru);
+
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        ABOUT_UP,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
+
+    for position in DOOR_POSITIONS {
+        println!(
+            "door {position} with «О программе» up: grayed={} disabled={}",
+            is_grayed(menu.handle(), position),
+            is_disabled(menu.handle(), position)
+        );
+
+        assert!(
+            is_grayed(menu.handle(), position) && is_disabled(menu.handle(), position),
+            "entry {position} opens a modal window, and with «О программе» already up that is \
+             one modal window over another — finding С21"
+        );
+    }
+
+    for position in LOCKED_POSITIONS.iter().chain(LIVE_POSITIONS.iter()) {
+        assert!(
+            !is_grayed(menu.handle(), *position) && !is_disabled(menu.handle(), *position),
+            "entry {position}: «О программе» edits no configuration, so it takes nothing away \
+             but the two doors"
+        );
+    }
+
+    let record: Vec<bool> = menu.items().iter().map(|item| item.enabled).collect();
+
+    println!("builder's record with «О программе» up: {record:?}");
+
+    assert_eq!(
+        record,
+        vec![true, false, true, true, false, true],
+        "the record and Windows must say the same thing about every entry"
+    );
+
+    assert_menu_is(&menu, &FR_91);
+
+    // The same, on the guard the product takes — and the doors come back with its drop.
+    {
+        let _open = settings::AboutSession::open();
+        settings::AboutSession::record(HWND(0x1357 as *mut core::ffi::c_void));
+
+        assert!(
+            settings::about_is_open(),
+            "the record is what the menu reads"
+        );
+
+        let while_up = Menu::build(
+            true,
+            true,
+            NOT_FAIL_SAFE,
+            settings::dialog_is_open(),
+            settings::about_is_open(),
+            &NOTHING_PENDING,
+        )
+        .expect("the menu must be creatable");
+
+        for position in DOOR_POSITIONS {
+            assert!(
+                is_grayed(while_up.handle(), position) && is_disabled(while_up.handle(), position),
+                "door {position} is grey while the guard of the window lives"
+            );
+        }
+    }
+
+    assert!(!settings::about_is_open(), "the guard clears the record");
+
+    let after = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        settings::dialog_is_open(),
+        settings::about_is_open(),
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
+
+    assert!(
+        after.items().iter().all(|item| item.enabled),
+        "and with the window gone every entry is the user's again: {:?}",
+        after
+            .items()
+            .iter()
+            .map(|item| item.enabled)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// **Criterion 5 of task T-13-14 — the ban.** With the flag up, the two commands change
@@ -974,13 +1223,14 @@ fn closing_the_dialog_gives_both_entries_back() {
         true,
         NOT_FAIL_SAFE,
         settings::dialog_is_open(),
+        settings::about_is_open(),
         &NOTHING_PENDING,
     )
     .expect("the menu must be creatable");
 
-    for position in LOCKED_POSITIONS {
+    for position in LOCKED_POSITIONS.iter().chain(DOOR_POSITIONS.iter()) {
         assert!(
-            is_grayed(while_up.handle(), position) && is_disabled(while_up.handle(), position),
+            is_grayed(while_up.handle(), *position) && is_disabled(while_up.handle(), *position),
             "entry {position} is greyed while the dialog is up"
         );
     }
@@ -1002,6 +1252,7 @@ fn closing_the_dialog_gives_both_entries_back() {
         true,
         NOT_FAIL_SAFE,
         settings::dialog_is_open(),
+        settings::about_is_open(),
         &NOTHING_PENDING,
     )
     .expect("the menu must be creatable");
@@ -1043,11 +1294,15 @@ fn closing_the_dialog_gives_both_entries_back() {
     );
 
     // The autostart half of the same door, checked on the rule and on the entry rather than
-    // by firing it — see the note above this test.
-    assert!(!tray::dialog_locks_command(
-        tray::CMD_AUTOSTART,
-        settings::dialog_is_open()
-    ));
+    // by firing it — see the note above this test. The two doors of task T-43-4 likewise: a
+    // settings dialog or an «О программе» window fired from a test would be a real modal window.
+    for command in [tray::CMD_AUTOSTART, tray::CMD_SETTINGS, tray::CMD_ABOUT] {
+        assert!(!tray::dialog_locks_command(
+            command,
+            settings::dialog_is_open(),
+            settings::about_is_open()
+        ));
+    }
 }
 
 /// **Criterion 8 of task T-13-14 — the scenario of the finding.** The same three steps, walked
@@ -1193,6 +1448,11 @@ fn the_lost_update_of_the_audit_is_not_reproducible_any_more() {
 /// `match` rather than by two checks inside two arms, which is what keeps an arm added later
 /// from walking round the lock.
 ///
+/// ⭐ Task T-43-4 (finding С21) added the two doors to the rule and found a road that walked
+/// round the door altogether: the double click on the icon called `open_settings` itself. The
+/// last two assertions are about that road — no arm opens the settings dialog but the one
+/// behind the gate.
+///
 /// Insensitive to line endings by construction — `.gitattributes` declares `* text=auto
 /// eol=crlf`, so a fresh worktree holds this file in CRLF while the index holds LF, and a
 /// needle written with `\n` has to be matched against a text normalised to `\n`.
@@ -1213,9 +1473,14 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
          to differ"
     );
     assert!(
-        source.contains("dialog_open && matches!(command, CMD_TOGGLE | CMD_AUTOSTART)"),
-        "and the rule names the two commands of FR-91 that edit the configuration, and only \
-         those two"
+        source.contains("CMD_TOGGLE | CMD_AUTOSTART => dialog_open,"),
+        "and the rule names the two commands of FR-91 that edit the configuration, and locks \
+         them by the settings dialog alone"
+    );
+    // Task T-43-4, finding С21: the two doors, locked by either window.
+    assert!(
+        source.contains("CMD_SETTINGS | CMD_ABOUT => dialog_open || about_open,"),
+        "and the two doors — «Настройки…» and «О программе» — by either modal window"
     );
 
     let at = source
@@ -1228,8 +1493,14 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
     println!("--- dispatch_command ---\n{body}");
 
     let gate = body
-        .find("dialog_locks_command(command, settings::dialog_is_open())")
-        .expect("the handler must consult the rule of task T-13-14");
+        .find("dialog_locks_command(command, dialog_open, about_open)")
+        .expect("the handler must consult the rule of tasks T-13-14 and T-43-4");
+
+    assert!(
+        body.contains("let dialog_open = settings::dialog_is_open();")
+            && body.contains("let about_open = settings::about_is_open();"),
+        "and hand it both windows, read from the two records and from nothing else"
+    );
     let table = body
         .find("match command {")
         .expect("the handler dispatches on the command");
@@ -1255,16 +1526,52 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
         .expect("a method closes with its brace");
     let build = &build[..end];
 
-    assert!(
-        build.contains("dialog_locks_command(CMD_TOGGLE, dialog_open)")
-            && build.contains("dialog_locks_command(CMD_AUTOSTART, dialog_open)"),
-        "the greying is the same rule asked for the same two entries"
-    );
+    for name in CMD_NAMES_OF_THE_RULE {
+        assert!(
+            build.contains(&format!(
+                "dialog_locks_command({name}, dialog_open, about_open)"
+            )),
+            "the greying is the same rule asked for the same four entries — {name} is not asked"
+        );
+    }
     assert!(
         build.contains("!resume_is_refused(enabled, fail_safe)"),
         "and it composes with task T-13-9's rule instead of replacing it"
     );
+
+    // Task T-43-4: every road into a command goes through the door. The double click on the
+    // icon opened the settings dialog past it — `open_settings` called from the arm itself —
+    // so a window the menu refused over «О программе» came up by the other road.
+    let end = source
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("src\\tray.rs must carry its unit tests at the end");
+    let product = &source[..end];
+    let at = product
+        .find("Reaction::ShowSettings => {")
+        .expect("handle_ui_message must answer the double click");
+    let arm = &product[at..];
+    let end = arm
+        .find("\n        }")
+        .expect("the arm closes with its brace");
+    let arm = &arm[..end];
+
+    println!("--- the double click ---\n{arm}");
+
+    assert!(
+        arm.contains("dispatch_command(hwnd, CMD_SETTINGS);") && !arm.contains("open_settings("),
+        "the double click must ask for the settings through dispatch_command, not open them itself"
+    );
+    assert_eq!(
+        product.matches("open_settings(hwnd)").count(),
+        1,
+        "and the settings dialog is opened from exactly one place — the arm behind the door"
+    );
 }
+
+/// The four commands [`tray::dialog_locks_command`] names, as they are spelt in `src\tray.rs`
+/// — the needles of the sweep above.
+const CMD_NAMES_OF_THE_RULE: [&str; 4] =
+    ["CMD_TOGGLE", "CMD_SETTINGS", "CMD_AUTOSTART", "CMD_ABOUT"];
 
 /// **The shape of the re-entry gate — task T-13-18.**
 ///
@@ -1418,10 +1725,24 @@ fn the_re_entry_gate_wraps_the_modal_call_and_lets_go_before_the_dialog() {
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
-    let on = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
-    let off = Menu::build(true, false, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let on = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
+    let off = Menu::build(
+        true,
+        false,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     assert!(
         is_checked(on.handle(), 3),
@@ -1451,8 +1772,15 @@ fn the_item_data_of_every_command_entry_is_its_command_number() {
     // Windows: the `itemData` of every command entry equals the command identifier of the
     // same entry, and both equal what the builder recorded.
     let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must be creatable");
 
     // The six command positions of the FR-91 block — everything but the two rules. Six since
     // task Т-32-4 put «Написать автору…» at position 5.
@@ -4960,8 +5288,15 @@ fn applying_a_configuration_publishes_its_language_into_the_running_process() {
         "«Применить» must publish the language of the configuration it accepted — решение 99"
     );
 
-    let menu = Menu::build(true, true, NOT_FAIL_SAFE, NO_DIALOG, &NOTHING_PENDING)
-        .expect("the menu must build");
+    let menu = Menu::build(
+        true,
+        true,
+        NOT_FAIL_SAFE,
+        NO_DIALOG,
+        NO_ABOUT,
+        &NOTHING_PENDING,
+    )
+    .expect("the menu must build");
     let labels: Vec<&str> = menu
         .items()
         .iter()

@@ -13706,6 +13706,87 @@ fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
     );
 }
 
+/// **Task T-43-4, finding С21 — the gate at the top of `show_about_dialog`.**
+///
+/// The window had no latch against a second copy of itself. The menu of FR-91 comes up under
+/// any modal loop of this thread, so «О программе» opened over the settings dialog and over
+/// itself. The tray now greys and refuses the entry (`tray::dialog_locks_command`); this is the
+/// entry half of the same lock — the one the settings dialog has always had at the top of
+/// `settings::show_dialog`.
+///
+/// ⚠ **Measured without a window, on purpose.** The call is made with the module of
+/// `kernel32.dll`, which carries no template of ours, and with an owner that names no window:
+/// a call that walks past the gate reaches the dialog manager and comes back `Err` without
+/// putting anything on the screen — so the red of the unrepaired tree is a failed assertion
+/// and not a modal window blocking the test. The positive control, with neither window up,
+/// shows that the very same call does get that far.
+#[test]
+fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
+    use lang_switcher::theme::ThemeSetting;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::core::w;
+
+    // SAFETY: a module every process has loaded; the handle is borrowed and never freed.
+    let module = unsafe { GetModuleHandleW(w!("kernel32.dll")) }
+        .expect("kernel32.dll is loaded in every process");
+    let instance = HINSTANCE(module.0);
+    let owner = a_handle_that_names_no_window();
+
+    assert!(
+        !settings::about_is_open() && !settings::dialog_is_open(),
+        "this thread has neither window"
+    );
+
+    // The positive control: nothing is up, the gate lets the call through, and the call goes on
+    // to the dialog manager — which has no template and no owner to give it, and says so.
+    let reached = settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+
+    println!("with neither window up: {reached:?}");
+
+    assert!(
+        reached.is_err(),
+        "with neither window up the call must reach the dialog manager, and a module with no \
+         template must make it refuse: {reached:?}"
+    );
+
+    // An «О программе» window is up.
+    {
+        let _open = AboutSession::open();
+        AboutSession::record(a_handle_that_names_no_window());
+
+        let second =
+            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+
+        println!("over an about window: {second:?}");
+
+        assert!(
+            matches!(second, Ok(false)),
+            "a second «О программе» over the first must turn round at the door — not reach the \
+             dialog manager, and not ask for the window of FR-103 either: {second:?}"
+        );
+    }
+
+    // The settings dialog is up.
+    {
+        let _dialog = settings::DialogSession::open();
+
+        let over = settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+
+        println!("over the settings dialog: {over:?}");
+
+        assert!(
+            matches!(over, Ok(false)),
+            "«О программе» over the settings dialog must turn round at the door as well: {over:?}"
+        );
+    }
+
+    assert!(
+        !settings::about_is_open() && !settings::dialog_is_open(),
+        "and both guards are gone again"
+    );
+}
+
 // =========================================================================================
 // FR-92а — своё сглаживание на чистом GDI и серое сглаживание нашего текста. Task T-11-17.
 // =========================================================================================

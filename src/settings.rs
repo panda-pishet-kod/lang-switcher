@@ -5197,11 +5197,17 @@ impl Drop for DialogSession {
 ///
 /// The settings dialog needs a flag *beside* its window record because [`dialog_is_open`]
 /// has to answer «да» before the window exists — it refuses a second copy of the dialog and
-/// locks two tray commands, and both decisions are taken while `DialogBoxParamW` is still
-/// on its way in. Nothing asks that of this window: the whole of what anybody wants to know
-/// about it is «есть ли кому отдать сообщение», and the record of the live window *is* that
-/// answer. A second flag would be a second answer to one question, and [`DialogSession`]
-/// says in as many words how two answers to one question start to differ.
+/// locks tray commands, and those decisions are taken while `DialogBoxParamW` is still on its
+/// way in. This window's record is enough for the same two jobs, and task T-43-4 gives it both
+/// — the gate at the top of [`show_about_dialog`] and the doors of `tray::dialog_locks_command`
+/// (finding С21). It is enough because the only stretch in which a window is being made and
+/// the record is still empty runs from [`AboutSession::open`] to `WM_INITDIALOG`, and no posted
+/// message is dispatched in it: the menu of FR-91 and the double click on the icon both arrive
+/// posted, and the dialog manager starts pumping only after the record is written. Beyond that,
+/// the whole of what anybody wants to know about this window is «есть ли кому отдать
+/// сообщение», and the record of the live window *is* that answer. A second flag would be a
+/// second answer to one question, and [`DialogSession`] says in as many words how two answers
+/// to one question start to differ.
 ///
 /// **SEC-05, R-20.** Nothing outside this process can move this: the record is a
 /// thread-local of the UI thread, written by the procedure of a window this program created
@@ -5232,8 +5238,13 @@ pub fn about_is_open() -> bool {
 /// that handle to somebody else's window by then — the very reason the dialog's own record
 /// is cleared on a guard rather than in a handler.
 ///
-/// ⚠ Not re-entrant, and does not have to be: the window is modal, and the tray command
-/// that opens it cannot run while the modal loop of this very window is up.
+/// ⚠ **Not re-entrant — and not because the window is modal.** Until task T-43-4 this line said
+/// the tray command that opens the window could not run while the modal loop of this very
+/// window was up, and that was false: a modal loop keeps dispatching to the other windows of
+/// the thread, the menu of FR-91 came up under it, and «О программе» opened a second time over
+/// itself and over the settings dialog (finding С21). What keeps a second copy out is the gate
+/// at the top of [`show_about_dialog`] and the doors of `tray::dialog_locks_command`, which grey
+/// and refuse the entry while this window or the settings dialog is up.
 pub struct AboutSession;
 
 impl AboutSession {
@@ -15531,6 +15542,16 @@ impl Drop for AboutLogo {
 ///
 /// SEC-05: the window changes nothing, exactly as the box it replaces — no configuration,
 /// no file, no registry; every command it answers ends it.
+///
+/// # One modal window at a time — task T-43-4, finding С21
+///
+/// While an «О программе» window or the settings dialog is up on this thread, the call turns
+/// round at once and answers `Ok(false)`: nothing is made, nothing is shown, and the window of
+/// FR-103 is not asked for. A modal loop keeps dispatching to the other windows of the thread,
+/// so without this the window opened over itself and over the settings dialog, and the stack
+/// that made broke three things at once — see `tray::dialog_locks_command`, which greys and
+/// refuses the menu entry for the same reason and is the rule; this is the entry half of it,
+/// the one [`show_dialog`] has always had.
 pub fn show_about_dialog(
     owner: HWND,
     instance: HINSTANCE,
@@ -15538,6 +15559,10 @@ pub fn show_about_dialog(
     version: Option<(u16, u16, u16, u16)>,
     hotkey: &str,
 ) -> windows::core::Result<bool> {
+    if about_is_open() || dialog_is_open() {
+        return Ok(false);
+    }
+
     // FR-92а, task T-13-17. Taken here and released however this function leaves, the `-1`
     // return below and a panic on the way through included — see [`AboutSession`]. The
     // window itself is recorded from `WM_INITDIALOG`, which is the first moment there is
