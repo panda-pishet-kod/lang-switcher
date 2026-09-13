@@ -809,6 +809,57 @@ pub const fn press_outcome(buffered: bool, refuses: bool, replaced: bool) -> Opt
     })
 }
 
+/// **What the input window answers to a press on the typing-buffer path** — the body of the
+/// hotkey branch of [`window_proc`], as a function of what it reads, task **T-40-5**.
+///
+/// `handed_back` is whether the press arrived as `selection::WM_APP_BUFFER_PATH` rather than as
+/// `hook::WM_APP_HOTKEY`; `buffered` is [`crate::buffer::is_installed`], `buffer_is_empty` is
+/// [`crate::buffer::is_empty`], `refuses` is [`crate::guard::refuses`], and `replace` is the
+/// replacement itself — `inject::on_hotkey` in the product — answering whether text changed. It
+/// is called at most once, and only when the rule below allows it.
+///
+/// `None` means no tone.
+///
+/// # ⭐ The handed-back press over a buffer that filled — finding С13 of the audit of 2026-09-04
+///
+/// A press reaches the selection path only over an **empty** typing buffer — Р-62 in
+/// `selection::wants_selection_path`: a non-empty one proves nothing was selected since the last
+/// stroke, and the press stays here. So a press that comes back as `WM_APP_BUFFER_PATH` was made
+/// over an empty buffer, and anything the buffer holds by the time it comes back was typed
+/// **after** the press — up to the timeout of step 3 of FR-61 later. Converting it converted a
+/// word the press was never about; and if the user pressed again inside that wait, press 2
+/// converted the word and press 1, arriving last, ran the replacement once more and put the word
+/// back as typed — «слово моргнуло». Decision of the stage (variant 1 of the finding): the
+/// handed-back press asks the replacement **only while the buffer is still empty**, which is the
+/// state it was made in; over a buffer that filled it does nothing and sounds nothing.
+///
+/// ⚠ **Zero tones, not two.** Decision 77 — one tone per press — is not reopened: the press whose
+/// selection path found nothing stays silent rather than clicking over a word it did not touch, and
+/// the press that did the work sounds as it always did. `press_outcome` is not asked on that arm at
+/// all, because asked with `replaced == false` over an installed buffer it would answer
+/// [`Press::Idle`] — a click. The call of `replace` is not removed either (variant 3 of the
+/// finding): over a buffer that is still empty it is FR-60's other half, exactly as before.
+///
+/// The emptiness read is [`crate::buffer::is_empty`], and it is honest on both sides of FR-71:
+/// [`park_buffer`] empties the ring through `buffer::reset` **before** it takes the recorder off the
+/// thread, and `is_empty` answers «empty» for a thread with no buffer at all. A generation stamp on
+/// the ring (variant 2 of the finding) is not needed for that and is not introduced.
+fn buffer_path_outcome(
+    handed_back: bool,
+    buffered: bool,
+    buffer_is_empty: bool,
+    refuses: bool,
+    replace: impl FnOnce() -> bool,
+) -> Option<Press> {
+    if handed_back && buffered && !buffer_is_empty {
+        return None;
+    }
+
+    let replaced = buffered && replace();
+
+    press_outcome(buffered, refuses, replaced)
+}
+
 /// Which tone an outcome earns, or `None` when `[feedback] sound` is off — the whole of FR-100.
 ///
 /// A pure function of an outcome and a setting, so the rule can be read in one line. The
@@ -3349,16 +3400,26 @@ unsafe extern "system" fn window_proc(
                 // `on_hotkey` is called **only** when the buffer is here: with the buffer parked
                 // there is nothing for it to convert, and asking it would be a system call made
                 // on a press this program has already decided not to answer with a replacement.
-                if is_input_window(hwnd) {
-                    let buffered = crate::buffer::is_installed();
-                    let replaced = buffered && crate::inject::on_hotkey().is_some();
-
-                    if let Some(press) = press_outcome(buffered, crate::guard::refuses(), replaced)
-                    {
-                        // Task T-37-1: dropped — a refused post costs one click of FR-100 that
-                        // is not heard, and nothing of the press itself, which is already done.
-                        let _ = post_to(Role::Ui, sound_message_for(press));
-                    }
+                //
+                // ⭐ **Task T-40-5, finding С13 — and, on a press handed back by the selection
+                // path, only while the buffer is still empty.** That press was made over an empty
+                // buffer (Р-62), so a word in the buffer now was typed after it; converting that
+                // word, or running the replacement a second time over a word press 2 has already
+                // converted, is what the finding measured. The rule, the silence on that arm and
+                // why the tone count stays at one are in `buffer_path_outcome`, which is this
+                // branch as a function of what it reads — the only shape a test can drive.
+                if is_input_window(hwnd)
+                    && let Some(press) = buffer_path_outcome(
+                        handed_back,
+                        crate::buffer::is_installed(),
+                        crate::buffer::is_empty(),
+                        crate::guard::refuses(),
+                        || crate::inject::on_hotkey().is_some(),
+                    )
+                {
+                    // Task T-37-1: dropped — a refused post costs one click of FR-100 that
+                    // is not heard, and nothing of the press itself, which is already done.
+                    let _ = post_to(Role::Ui, sound_message_for(press));
                 }
             }
 
@@ -4382,6 +4443,152 @@ mod tests {
         // move between the press and the message — the watcher thread publishes verdicts — so
         // the rule is written to prefer the fact over the flag: text the user can see changed.
         assert_eq!(press_outcome(true, true, true), Some(Press::Replaced));
+    }
+
+    /// ⭐ **Task T-40-5, finding С13 — a press handed back over a buffer that filled meanwhile
+    /// converts nothing and sounds nothing.**
+    ///
+    /// Staged on the real buffer of this thread and through the very readers the window procedure
+    /// hands [`buffer_path_outcome`]. `replace` stands in for `inject::on_hotkey`, which a test may not
+    /// call — it sends input to whatever window is in front — and writes down that it was asked.
+    #[test]
+    fn a_press_handed_back_over_a_buffer_that_filled_meanwhile_converts_nothing_and_is_silent() {
+        buffer::install_recorder(Recorder::with_capacity(16));
+
+        // The press: the buffer is empty, so the selection path takes it (Р-62) and the UI thread
+        // waits for the clipboard. Meanwhile the user types a word.
+        assert!(buffer::is_empty());
+        for _ in 0..6 {
+            press();
+        }
+        assert!(
+            !buffer::is_empty(),
+            "the premise: the word typed after the press is in the buffer"
+        );
+
+        // Step 3 of FR-61 found no selection, and the press comes back as `WM_APP_BUFFER_PATH`.
+        let asked = std::cell::Cell::new(0);
+        let answer = buffer_path_outcome(
+            true,
+            buffer::is_installed(),
+            buffer::is_empty(),
+            false,
+            || {
+                asked.set(asked.get() + 1);
+                true
+            },
+        );
+
+        buffer::uninstall();
+
+        assert_eq!(
+            asked.get(),
+            0,
+            "С13: the word typed after the press is not converted by it"
+        );
+        assert_eq!(
+            answer, None,
+            "and no tone: nothing the press asked for is left to answer"
+        );
+    }
+
+    /// **Task T-40-5, the second half of finding С13 — two presses within the wait of the selection
+    /// path do not make the word blink.**
+    ///
+    /// Press 1 goes to the selection path over an empty buffer; the user types a word and presses
+    /// again, and press 2 — a direct hotkey press over a non-empty buffer — converts it. Then press
+    /// 1 comes back from the selection path. Until this task it ran the replacement a second time
+    /// over the converted word: the counter of FR-32 went back to zero and the word back to what was
+    /// typed — «слово моргнуло». The stand-in for the replacement does to the buffer what one does:
+    /// moves the counter one step.
+    #[test]
+    fn two_presses_within_the_wait_of_the_selection_path_do_not_make_the_word_blink() {
+        const CYCLE: usize = 2;
+
+        buffer::install_recorder(Recorder::with_capacity(16));
+
+        for _ in 0..6 {
+            press();
+        }
+
+        let replace = || {
+            buffer::with(|recorder| {
+                recorder.advance_cycle(CYCLE);
+            })
+            .is_some()
+        };
+        let position = || buffer::with(|recorder| recorder.cycle_position());
+
+        // Press 2, direct.
+        let second = buffer_path_outcome(
+            false,
+            buffer::is_installed(),
+            buffer::is_empty(),
+            false,
+            replace,
+        );
+        let converted = position();
+
+        // Press 1, handed back.
+        let first = buffer_path_outcome(
+            true,
+            buffer::is_installed(),
+            buffer::is_empty(),
+            false,
+            replace,
+        );
+        let after = position();
+
+        buffer::uninstall();
+
+        assert_eq!(second, Some(Press::Replaced), "press 2 converts the word");
+        assert_eq!(converted, Some(1));
+        assert_eq!(
+            after, converted,
+            "С13: the word stays converted — it does not blink back"
+        );
+        assert_eq!(first, None, "press 1, handed back, answers nothing");
+    }
+
+    /// **The rule of [`buffer_path_outcome`] in full** — which presses ask the replacement, and what
+    /// they sound. Only one row moved in task T-40-5: handed back over a buffer that filled.
+    #[test]
+    fn a_handed_back_press_is_answered_by_the_buffer_that_is_there_now() {
+        let run =
+            |handed_back: bool, buffered: bool, empty: bool, refuses: bool, replaced: bool| {
+                let asked = std::cell::Cell::new(0);
+                let answer = buffer_path_outcome(handed_back, buffered, empty, refuses, || {
+                    asked.set(asked.get() + 1);
+                    replaced
+                });
+
+                (asked.get(), answer)
+            };
+
+        // Handed back over a buffer that is still empty: FR-60's other half runs as it always did —
+        // the replacement is asked, and with nothing to convert the press is the idle click.
+        assert_eq!(run(true, true, true, false, false), (1, Some(Press::Idle)));
+        // ⭐ Handed back over a buffer that filled meanwhile: not asked, and silent.
+        assert_eq!(run(true, true, false, false, true), (0, None));
+        // A direct press over a non-empty buffer is the ordinary press of the typing buffer.
+        assert_eq!(
+            run(false, true, false, false, true),
+            (1, Some(Press::Replaced))
+        );
+        assert_eq!(
+            run(false, true, false, false, false),
+            (1, Some(Press::Idle))
+        );
+        // The buffer parked by FR-70, handed back or not: nothing is asked, and a refusal speaks.
+        assert_eq!(
+            run(true, false, true, true, false),
+            (0, Some(Press::Refused))
+        );
+        assert_eq!(run(true, false, true, false, false), (0, None));
+        assert_eq!(
+            run(false, false, true, true, false),
+            (0, Some(Press::Refused))
+        );
     }
 
     /// Each of the three messages carries one outcome, and every other message carries none.
