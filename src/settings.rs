@@ -10322,6 +10322,23 @@ pub fn about_body_line_pitch(em: i32) -> i32 {
     (em.abs() * ABOUT_BODY_LINE_PERCENT) / 100
 }
 
+/// The pitch one sentence of the help panel is drawn at — task T-43-5, finding Н69.
+///
+/// `body_pitch` is [`about_body_line_pitch`] of the window's body face, or `None` when the faces
+/// of the window could not be made (NFR-13). Until this task that `None` became a pitch of
+/// **zero**, and every line of a wrapped sentence was drawn on one and the same row: the help
+/// panel turned into an unreadable smudge on exactly the path that is already degraded, while
+/// the fallback every other label of these windows takes — [`theme::LABEL_LINE_PITCH`] through
+/// [`scaled`], in `theme::paint_label_at_pitch` — stood unused one module away. The degraded
+/// row is now drawn in the DC's own face at the pitch of a settings label: coarser, and
+/// readable.
+///
+/// Pure, and public so that a test can hand it the refusal a live window cannot be made to
+/// produce.
+pub fn about_help_row_pitch(body_pitch: Option<i32>, dpi: i32) -> i32 {
+    body_pitch.unwrap_or_else(|| scaled(theme::LABEL_LINE_PITCH, dpi))
+}
+
 /// The `LOGFONTW` of the font the dialog manager gave one of the window's own controls.
 ///
 /// The font is asked of a control (`WM_GETFONT` through `SendDlgItemMessageW`, the one way
@@ -16548,7 +16565,9 @@ unsafe fn draw_about_help_row(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> 
                         fill: brushes.window_bg(),
                         ink: state.palette.text,
                     },
-                    pitch: fonts.map_or(0, DialogFonts::body_pitch),
+                    // Task T-43-5, finding Н69: a window whose faces were refused draws its
+                    // sentences at the pitch of a settings label, not on top of each other.
+                    pitch: about_help_row_pitch(fonts.map(DialogFonts::body_pitch), dc_dpi(dc)),
                     dpi: dc_dpi(dc),
                 },
                 state.hotkey.clone(),

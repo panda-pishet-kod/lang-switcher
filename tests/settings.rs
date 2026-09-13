@@ -14069,6 +14069,59 @@ fn the_body_line_pitch_is_a_share_of_the_face_and_larger_than_its_natural_line()
     );
 }
 
+/// **Task T-43-5, finding Н69 — the help panel of a window whose faces were refused.**
+///
+/// The pitch of a help sentence came out of the window's faces, and a window whose faces could
+/// not be made handed the pen a pitch of **zero**: every wrapped line of a sentence landed on
+/// the same row. The fallback asked for is the one every other label of these windows already
+/// takes when it is given no pitch — `theme::LABEL_LINE_PITCH` through `theme::scaled`, see
+/// `theme::paint_label_at_pitch` — so the expectation is computed from that constant and not
+/// written down as a number of its own.
+///
+/// The refusal cannot be ordered on a live window (`CreateFontIndirectW` does not fail on
+/// demand), so the choice is asked of the pure function the pen calls, with the `None` the pen
+/// would be handed; a sweep holds that the pen does call it.
+#[test]
+fn a_help_sentence_of_a_window_without_faces_keeps_the_pitch_of_a_label() {
+    for dpi in [96, 120, 144, 168, 192] {
+        let degraded = settings::about_help_row_pitch(None, dpi);
+        let label = theme::scaled(theme::LABEL_LINE_PITCH, dpi);
+
+        println!("dpi {dpi}: pitch without faces {degraded} px, a settings label {label} px");
+
+        assert_eq!(
+            degraded, label,
+            "dpi {dpi}: a window with no faces must draw its help sentences at the pitch of a \
+             label — a pitch of {degraded} puts the lines on top of one another"
+        );
+        assert!(degraded > 0, "and a pitch is never zero");
+    }
+
+    // The ordinary road is untouched: with the faces there, the body's own pitch wins.
+    let body = settings::about_body_line_pitch(13);
+
+    assert_eq!(settings::about_help_row_pitch(Some(body), 96), body);
+
+    // And the pen asks this function rather than a `map_or` of its own.
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable")
+    .replace("\r\n", "\n");
+    let pen = function_body(&source, "unsafe fn draw_about_help_row(");
+
+    assert!(
+        pen.contains("about_help_row_pitch(fonts.map(DialogFonts::body_pitch), dc_dpi(dc))"),
+        "draw_about_help_row must take its pitch from about_help_row_pitch"
+    );
+    assert!(
+        !source.contains("fonts.map_or(0, DialogFonts::body_pitch)"),
+        "and the pitch of zero is gone from the module"
+    );
+}
+
 /// **Criterion 10 of T-11-17, as task T-11-23 left it** — the supersampling factor is a
 /// constant, the reduction is an average of **ours**, and `HALFTONE` is gone from the module.
 ///
