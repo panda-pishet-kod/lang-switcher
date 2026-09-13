@@ -2625,6 +2625,25 @@ pub fn request_rehook(reason: Reason) {
     }
 }
 
+/// Whether a reinstallation for `reason` is a **return to the user's desktop**, after which the
+/// field is probed again — **task T-37-6, decision 126г**.
+///
+/// [`Reason::DesktopSwitch`] — a UAC prompt or `Ctrl+Alt+Del` answered — and
+/// [`Reason::SessionChange`] — a session unlocked. Both, because [`PENDING_REASON`] holds the last
+/// reason posted and a lock posts both, in an order nothing promises. Not [`Reason::Timer`], which
+/// is no return; not [`Reason::PowerResume`], after which the field is the one its verdict was
+/// determined for, and a wake-up that shows the lock screen comes back through the other two; and
+/// not [`Reason::None`], which is what a forged message finds.
+///
+/// Both directions of a switch reinstall the hook and both arrive here. The one **to** the secure
+/// desktop is told apart by `guard::request_probe_on_desktop_return`, which asks for nothing while
+/// no window is in front.
+///
+/// A pure function of its argument, so the whole table is reachable from `tests\watchdog.rs`.
+pub const fn probes_the_field_on_return(reason: Reason) -> bool {
+    matches!(reason, Reason::DesktopSwitch | Reason::SessionChange)
+}
+
 /// Asks the input thread to re-read the keyboard layout, because this program has just learnt
 /// that it was **away** — defect E, task **T-10-13**.
 ///
@@ -2958,7 +2977,7 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
 
         // The far end of [`request_rehook`], for the three mechanisms that observe the event on
         // another thread. SEC-05: the message carries nothing, and a forged one finds
-        // [`PENDING_REASON`] empty and returns without touching the hook.
+        // [`PENDING_REASON`] empty and returns without touching the hook or asking for a probe.
         WM_APP_REHOOK if is_input_window(window) => {
             let pending = PENDING_REASON.swap(Reason::None as u32, Ordering::AcqRel);
 
@@ -2966,6 +2985,16 @@ pub fn handle_watchdog_message(window: HWND, message: u32, wparam: WPARAM) -> Op
                 Reason::None => {}
                 reason => {
                     reinstall_hook(window, reason);
+
+                    // ⭐ **Task T-37-6, decision 126г: a return to the desktop probes the field.**
+                    // Here and not in `win_event_proc`, whose body names nothing of `guard` (task
+                    // T-06-1a), and after the hook is back, so that nothing asked of this thread waits
+                    // on a missing one. The answer is not needed: `false` is either nothing in front
+                    // — the switch to the secure desktop, where there is nothing to ask — or a
+                    // refused post, whose ticket `guard` has already taken back.
+                    if probes_the_field_on_return(reason) {
+                        let _ = crate::guard::request_probe_on_desktop_return();
+                    }
                 }
             }
 

@@ -1662,6 +1662,9 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         // Task T-37-3, finding С5: the fifteenth — a verdict refused because its control lost the
         // focus while the probe ran. Not `stale_verdicts`, which is the generation's refusal.
         mismatched_verdicts,
+        // Task T-37-6, decision 126г: the sixteenth — a probe asked for because the user's desktop
+        // came back.
+        desktop_return_probes,
     } = lang_switcher::guard::counters();
 
     let guard_rows = [
@@ -1680,6 +1683,7 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         ("guard.exclusions_refused", exclusions_refused),
         ("guard.exclusion_read_retries", exclusion_read_retries),
         ("guard.mismatched_verdicts", mismatched_verdicts),
+        ("guard.desktop_return_probes", desktop_return_probes),
     ];
 
     let lang_switcher::selection::Counters {

@@ -4332,3 +4332,94 @@ fn a_lost_flush_is_marked_claimed_once_and_taken_through_the_one_door() {
 
     buffer::uninstall();
 }
+
+/// ⭐ **Task T-37-6, decision 126г — which reinstallations ask for a probe of the field.**
+///
+/// A return to the user's desktop — a UAC prompt answered, a session unlocked — raises no event
+/// that reaches the probe: the desktop-switch arm of `win_event_proc` returns before the flush, and
+/// a focus event naming the control the focus had before is a repeat. A probe the secure desktop
+/// interrupted is refused by task T-37-3 and leaves «no answer yet», which is buffering off, until
+/// the next focus change. The input thread now asks for a probe after the reinstallation a return
+/// causes.
+///
+/// Both reasons of a return, because `PENDING_REASON` holds the **last** reason posted and a lock
+/// posts both. Not the liveness tick, which is no return; not a resume from sleep, after which the
+/// field is the one the verdict was determined for; and not `None`, which is a forged message.
+#[test]
+fn only_a_return_to_the_desktop_asks_for_a_probe_of_the_field() {
+    for (reason, asks) in [
+        (watchdog::Reason::None, false),
+        (watchdog::Reason::Timer, false),
+        (watchdog::Reason::DesktopSwitch, true),
+        (watchdog::Reason::SessionChange, true),
+        (watchdog::Reason::PowerResume, false),
+    ] {
+        assert_eq!(
+            watchdog::probes_the_field_on_return(reason),
+            asks,
+            "T-37-6: a reinstallation for {} must {}ask for a probe of the field",
+            reason.name(),
+            if asks { "" } else { "not " }
+        );
+    }
+}
+
+/// ⭐ **Task T-37-6 — the probe of a return is asked for by the arm that puts the hook back, on the
+/// input thread, after the reinstallation.**
+///
+/// Not by `win_event_proc`: the callback the system drives names nothing of module `guard` (task
+/// T-06-1a, `tests\guard.rs`), and a session change does not pass through it anyway — it arrives at
+/// the UI window. The arm of `WM_APP_REHOOK` is where both returns land with their reason in hand,
+/// and the hook goes back first, so that nothing asked of this thread waits on a missing hook.
+///
+/// ⚠ The control of the cut: the arm taken takes the pending reason and reinstalls the hook.
+#[test]
+fn the_rehook_arm_asks_for_the_probe_of_a_return_after_it_puts_the_hook_back() {
+    let source = source_of("watchdog.rs");
+
+    let at = source
+        .find("WM_APP_REHOOK if is_input_window(window) => {")
+        .expect("src\\watchdog.rs answers WM_APP_REHOOK on the input window");
+    let rest = &source[at..];
+    let arm = &rest[..rest
+        .find("Some(LRESULT(0))")
+        .expect("the arm answers the message")];
+
+    let position = |needle: &str| -> Option<usize> {
+        arm.lines()
+            .scan(0usize, |offset, line| {
+                let here = *offset;
+                *offset += line.len() + 1;
+                Some((here, line.trim()))
+            })
+            .filter(|(_, line)| !line.starts_with("//"))
+            .find(|(_, line)| line.contains(needle))
+            .map(|(here, _)| here)
+    };
+
+    let taken =
+        position("PENDING_REASON.swap(").expect("control: the arm taken takes the pending reason");
+    let reinstalled = position("reinstall_hook(window, reason);")
+        .expect("control: and puts the hook back for it");
+    assert!(taken < reinstalled, "control: in that order");
+
+    let decided = position("probes_the_field_on_return(reason)");
+    let asked = position("crate::guard::request_probe_on_desktop_return()");
+
+    assert!(
+        decided.is_some_and(|at| reinstalled < at),
+        "T-37-6: after the hook is back, the arm asks whether the reason is a return"
+    );
+    assert!(
+        asked.is_some_and(|at| decided.is_some_and(|decided| decided <= at)),
+        "T-37-6: and a return asks for a probe of the field"
+    );
+
+    let sites = code_lines_with(&source, "request_probe_on_desktop_return");
+
+    assert_eq!(
+        sites.len(),
+        1,
+        "the probe of a return is asked for from one place in src\\watchdog.rs: {sites:?}"
+    );
+}

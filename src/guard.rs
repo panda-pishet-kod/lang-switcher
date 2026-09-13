@@ -635,6 +635,9 @@ pub struct Counters {
     /// focus by the time they were ready — **finding С5, task T-37-3**. Not [`Self::stale_verdicts`],
     /// which is the generation's refusal; see [`MISMATCHED_VERDICTS`].
     pub mismatched_verdicts: u32,
+    /// Probes asked for because the user's desktop came back — a UAC prompt answered, a session
+    /// unlocked — **task T-37-6, decision 126г**. See [`request_probe_on_desktop_return`].
+    pub desktop_return_probes: u32,
 }
 
 /// What the probe has done so far.
@@ -655,6 +658,7 @@ pub fn counters() -> Counters {
         exclusions_refused: EXCLUSIONS_REFUSED.load(Ordering::Relaxed),
         exclusion_read_retries: EXCLUSION_READ_RETRIES.load(Ordering::Relaxed),
         mismatched_verdicts: MISMATCHED_VERDICTS.load(Ordering::Relaxed),
+        desktop_return_probes: DESKTOP_RETURN_PROBES.load(Ordering::Relaxed),
     }
 }
 
@@ -816,6 +820,10 @@ static STALE_VERDICTS: AtomicU32 = AtomicU32::new(0);
 /// the queue of **this** thread, which was busy running the probe — and it is read off the focus
 /// itself. A dump that summed the two would hide which of the two races a machine is losing.
 static MISMATCHED_VERDICTS: AtomicU32 = AtomicU32::new(0);
+
+/// Probes asked for because the user's desktop came back — task T-37-6, decision 126г. See
+/// [`request_probe_on_desktop_return`].
+static DESKTOP_RETURN_PROBES: AtomicU32 = AtomicU32::new(0);
 
 /// Verdicts of [`Field::Password`].
 static PASSWORD_VERDICTS: AtomicU32 = AtomicU32::new(0);
@@ -1009,14 +1017,15 @@ fn enter_pending() -> u32 {
 ///
 /// The callers ask for the same thing for different reasons — [`note_focus_moved`] and its FR-14
 /// twin because the focus moved, [`publish_exclusions`] because the list the last probe compared
-/// against has been replaced, and [`request_startup_probe`] because nothing has been probed yet
-/// (task T-37-1) — and all of them need the same care on failure, which is why the request is one
+/// against has been replaced, [`request_startup_probe`] because nothing has been probed yet
+/// (task T-37-1), and [`request_probe_on_desktop_return`] because the user's desktop came back
+/// (task T-37-6) — and all of them need the same care on failure, which is why the request is one
 /// function and not several copies of four lines.
 ///
-/// ⚠ **A failed request takes back its own step and nothing else** — task **Т-22-2**. The two
-/// callers run on different threads (section 6.1 puts the configuration on the UI thread and the
-/// focus on the input thread), so one of them finding no watcher window must not cancel a probe
-/// the other has already asked for and had accepted. SEC-05 is why the step is taken back at all
+/// ⚠ **A failed request takes back its own step and nothing else** — task **Т-22-2**. The callers
+/// run on different threads (section 6.1 puts the configuration on the UI thread and the focus on
+/// the input thread), so one of them finding no watcher window must not cancel a probe another has
+/// already asked for and had accepted. SEC-05 is why the step is taken back at all
 /// rather than simply left standing: [`WM_APP_PROBE`] carries nothing, and a request left waiting
 /// for nobody is a request a forged message could spend.
 ///
@@ -1056,6 +1065,12 @@ fn enter_pending() -> u32 {
 /// undo loses its exchange, and even then the wrap lands on nought — "no probe wanted", the same
 /// safe state a refused request ends in today.
 fn request_probe() -> bool {
+    // SEC-04a, feature `testing`, absent from the Release configuration: every request is counted,
+    // the refused ones too — a test process has no watcher window, so a refused post whose ticket
+    // was taken back is the only kind of request a test can make, and it leaves no other trace.
+    #[cfg(feature = "testing")]
+    stage::note_probe_request();
+
     let ticket = PROBE_PENDING
         .fetch_add(1, Ordering::Relaxed)
         .wrapping_add(1);
@@ -1102,6 +1117,55 @@ pub fn request_startup_probe() -> bool {
     request_probe()
 }
 
+/// Asks the watcher thread for a probe because **the user's desktop has come back** — a UAC prompt
+/// answered, a session unlocked — **task T-37-6, decision 126г**. Answers whether a request was
+/// made and reached a window.
+///
+/// Called on the input thread by `watchdog::handle_watchdog_message`, after the reinstallation of
+/// FR-80 that a return causes (`watchdog::probes_the_field_on_return`). A return raises no event
+/// that reaches a probe: the desktop-switch arm of `watchdog::win_event_proc` returns before the
+/// flush, and a focus event naming the control the focus had before is a repeat that
+/// `watchdog::focus_repeated` turns away. So a probe the secure desktop interrupted — refused by
+/// task T-37-3, because nothing was in front when its verdict was ready — used to leave «no answer
+/// yet», which is buffering off, until the next focus change.
+///
+/// # Only with a window in front
+///
+/// The same reinstallation runs for the switch **to** the secure desktop, and there nothing is in
+/// front. A probe then would answer FR-73's `Undetermined` — buffering on — for a field nobody is
+/// in, over the verdict of the field the user left, and nothing would put it right if the return
+/// were missed. So nothing is asked and nothing is touched.
+///
+/// # The rest is the start-up probe's
+///
+/// [`request_probe`] and its protocol, and nothing about [`FIELD`]: no generation is opened and no
+/// `Pending` is published, because no focus has moved — the state stands until the verdict lands in
+/// the generation that is current when the probe runs, as it does for [`request_startup_probe`].
+/// Counted in [`DESKTOP_RETURN_PROBES`] once asked, whatever becomes of the post: that row of the
+/// dump is what the live acceptance reads (decision 126г.3).
+pub fn request_probe_on_desktop_return() -> bool {
+    if !a_window_is_in_front() {
+        return false;
+    }
+
+    DESKTOP_RETURN_PROBES.fetch_add(1, Ordering::Relaxed);
+
+    request_probe()
+}
+
+/// Whether a window is in front at all — the user's desktop, as opposed to the secure one or a
+/// desktop still switching. One `GetForegroundWindow`.
+fn a_window_is_in_front() -> bool {
+    // SEC-04a, feature `testing`, absent from the Release configuration: one staged reading, because
+    // a test cannot bring the secure desktop up. See [`stage`].
+    #[cfg(feature = "testing")]
+    if let Some(staged) = stage::window_in_front() {
+        return staged;
+    }
+
+    foreground_window().is_some()
+}
+
 /// **SEC-04a, feature `testing`, absent from the Release configuration.** What `tests\guard.rs`
 /// needs to raise the interleaving of task Т-22-2 on purpose, instead of running two threads and
 /// hoping to lose a race that is two instructions wide.
@@ -1112,10 +1176,25 @@ pub fn request_startup_probe() -> bool {
 #[cfg(feature = "testing")]
 pub mod stage {
     use super::{Ordering, PROBE_PENDING};
-    use core::sync::atomic::AtomicBool;
+    use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32};
 
     /// Whether the next refused request must find another one accepted underneath it.
     static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// Requests made through `request_probe` since the last [`clear_probe_requests`], accepted
+    /// and refused alike — task T-37-6.
+    static REQUESTS_MADE: AtomicU32 = AtomicU32::new(0);
+
+    /// What the next return to the desktop finds in front — task T-37-6: [`NOT_STAGED`], or
+    /// [`A_WINDOW`] or [`NOTHING_IN_FRONT`] for one reading.
+    static IN_FRONT: AtomicU8 = AtomicU8::new(NOT_STAGED);
+
+    /// [`IN_FRONT`]: the real foreground window is read.
+    const NOT_STAGED: u8 = 0;
+    /// [`IN_FRONT`]: a window is in front — the user's desktop is back.
+    const A_WINDOW: u8 = 1;
+    /// [`IN_FRONT`]: nothing is in front — the secure desktop, or a desktop still switching.
+    const NOTHING_IN_FRONT: u8 = 2;
 
     /// Whether the focus must be found moved once the levels of the next probe have run — task
     /// T-37-3, finding С5.
@@ -1150,11 +1229,43 @@ pub mod stage {
         PROBE_PENDING.load(Ordering::Relaxed)
     }
 
+    /// Called by `request_probe` before anything else, whatever becomes of the post.
+    pub(super) fn note_probe_request() {
+        REQUESTS_MADE.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many requests for a probe have been made since the last [`clear_probe_requests`] —
+    /// the ones whose post was refused and whose ticket was taken back included. Task T-37-6.
+    pub fn probe_requests_made() -> u32 {
+        REQUESTS_MADE.load(Ordering::Relaxed)
+    }
+
+    /// Stages what the next return to the desktop finds in front: a window, or none. Task T-37-6 —
+    /// the foreground of a test process is whatever the person running it has in front, and a
+    /// test cannot ask the secure desktop to come up.
+    pub fn arm_window_in_front_at_the_next_return(in_front: bool) {
+        IN_FRONT.store(
+            if in_front { A_WINDOW } else { NOTHING_IN_FRONT },
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Called by `a_window_is_in_front`: the staged reading, once, or `None` for the real one.
+    pub(super) fn window_in_front() -> Option<bool> {
+        match IN_FRONT.swap(NOT_STAGED, Ordering::Relaxed) {
+            A_WINDOW => Some(true),
+            NOTHING_IN_FRONT => Some(false),
+            _ => None,
+        }
+    }
+
     /// Back to "nobody is waiting", so that one test cannot bias the next.
     pub fn clear_probe_requests() {
         PROBE_PENDING.store(0, Ordering::Relaxed);
         ARMED.store(false, Ordering::Relaxed);
         FOCUS_MOVES.store(false, Ordering::Relaxed);
+        REQUESTS_MADE.store(0, Ordering::Relaxed);
+        IN_FRONT.store(NOT_STAGED, Ordering::Relaxed);
     }
 
     /// Called by [`super::request_probe`] between a refused post and the undoing of its own step —
@@ -1229,8 +1340,13 @@ pub fn run_pending_probe() -> bool {
     if focus_moved_since(target) {
         // The refusal is the safe direction for the same reason the generation's is: the state
         // stays what it was — `Pending` after a focus change, which is buffering off — and the
-        // focus change that moved the control has its own event in this thread's queue, and with
-        // it its own probe. Counted apart from `STALE_VERDICTS`: see `MISMATCHED_VERDICTS`.
+        // focus change that moved the control has, as a rule, its own event in this thread's
+        // queue, and with it its own probe. Two moves have none. A window of this program raises
+        // nothing this process is told of (`WINEVENT_SKIPOWNPROCESS`), and leaving it for another
+        // program's window raises the event of that program — not measured. The secure desktop
+        // raises no focus event either way, and its return is probed by
+        // `request_probe_on_desktop_return` (task T-37-6, decision 126г). Counted apart from
+        // `STALE_VERDICTS`: see `MISMATCHED_VERDICTS`.
         MISMATCHED_VERDICTS.fetch_add(1, Ordering::Relaxed);
         return true;
     }
@@ -1490,9 +1606,14 @@ fn focus_target() -> Option<FocusTarget> {
 /// `Some` included: a desktop that switched while the probe ran is not the desktop it was
 /// determined on.
 ///
-/// ⚠ **What moves it is exactly what raises an event**: a new foreground window is
+/// ⚠ **What moves it raises an event, with two exceptions**: a new foreground window is
 /// `EVENT_SYSTEM_FOREGROUND` and a new focus window is `EVENT_OBJECT_FOCUS`, and either of them puts
-/// a probe of its own behind this one. A move inside one window between two fields of a page —
+/// a probe of its own behind this one. A window of this program raises nothing this process is told
+/// of (`WINEVENT_SKIPOWNPROCESS`); the secure desktop raises no focus event, and its return is
+/// probed by [`request_probe_on_desktop_return`] instead (task T-37-6, decision 126г — this sentence
+/// used to say "exactly", and the refusal it justified could leave «no answer yet» standing after a
+/// UAC prompt). A
+/// move inside one window between two fields of a page —
 /// Chromium draws every field of a page into one window — moves no handle and is left to the
 /// generation, which the `idChild` of that event raises (task Т-13-1). The two checks cover each
 /// other's blind spot; neither covers both.

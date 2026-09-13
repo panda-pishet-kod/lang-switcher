@@ -1604,9 +1604,9 @@ fn render_counters(out: &mut String) {
     // Task T-34-4, finding Н95: the fourteen counters of the password-field guard of FR-70…FR-73
     // and the fifteen of the clipboard path of FR-60…FR-65, through the public readers both
     // modules already publish; tasks T-38-7 and T-38-8 added a sixteenth and a seventeenth of the
-    // clipboard path, and task T-37-3 a fifteenth of the guard. Counts and nothing else — SEC-07
-    // allows a number and forbids a name of what
-    // was observed, and none of these carries one. `tests\diag.rs` builds this list a second time
+    // clipboard path, and tasks T-37-3 and T-37-6 a fifteenth and a sixteenth of the guard. Counts
+    // and nothing else — SEC-07 allows a number and forbids a name of what was observed, and none
+    // of these carries one. `tests\diag.rs` builds this list a second time
     // by taking the two structures apart field by field, so a counter added there and not here is
     // a compile error rather than a silent hole.
     let guard = crate::guard::counters();
@@ -1636,6 +1636,13 @@ fn render_counters(out: &mut String) {
     // the focus while the probe ran. Apart from `guard.stale_verdicts`, which is the refusal by
     // generation — a dump that summed the two would hide which race a machine is losing.
     row_u32(out, "guard.mismatched_verdicts", guard.mismatched_verdicts);
+    // Task T-37-6, decision 126г: probes asked for because the user's desktop came back. One UAC
+    // prompt answered without a focus change is one here; nought after one is the gap still open.
+    row_u32(
+        out,
+        "guard.desktop_return_probes",
+        guard.desktop_return_probes,
+    );
 
     let clipboard = crate::selection::counters();
     row_u32(out, "selection.opens", clipboard.opens);

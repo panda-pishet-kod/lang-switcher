@@ -1816,3 +1816,108 @@ fn a_verdict_is_not_published_for_a_control_the_focus_left_while_the_probe_ran()
 
     stage::clear_probe_requests();
 }
+
+/// ⭐ **Task T-37-6, decision 126г, staged — a return to the desktop asks for a probe of the field
+/// when a window is in front, and touches nothing else.**
+///
+/// The refusal of task T-37-3 leaves «no answer yet» when the secure desktop comes up while a probe
+/// runs, and the return raises no event that reaches a probe. `request_probe_on_desktop_return`,
+/// called by the input thread after the reinstallation a return causes, asks for one.
+///
+/// # What is staged, and why
+///
+/// Whether a window is in front: a test process sees whatever the person running it has in front,
+/// and cannot bring the secure desktop up. `guard::stage` — feature `testing`, absent from the
+/// Release configuration — gives one reading of each. The request is read off
+/// `stage::probe_requests_made`: this process has no watcher window, so the post is refused and the
+/// ticket taken back (task Т-22-2), and the count is the one trace the request leaves.
+///
+/// # The two halves
+///
+/// * **Nothing in front** — the direction to the secure desktop, or a desktop still switching.
+///   Nothing is asked: a probe now would answer FR-73's `Undetermined`, buffering on, for a field
+///   nobody is in, over the verdict of the field the user left.
+/// * **A window in front** — the user's desktop is back. One probe is asked for and counted, and
+///   no focus change is invented: the state stands until the verdict lands, as it does for the
+///   probe at start-up (task T-37-1).
+///
+/// ⚠ Its red is not a compile error: the function was added first with the old logic — asking for
+/// nothing — and the red run is `scratchpad-E37\t37-6-red.log`.
+#[cfg(feature = "testing")]
+#[test]
+fn a_return_to_the_desktop_asks_for_a_probe_only_when_a_window_is_in_front() {
+    use lang_switcher::guard::stage;
+
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    stage::clear_probe_requests();
+
+    let field_before = guard::field();
+
+    // --- Nothing in front: nothing is asked.
+    stage::arm_window_in_front_at_the_next_return(false);
+    let before = guard::counters();
+
+    assert!(
+        !guard::request_probe_on_desktop_return(),
+        "control: with nothing in front no request is made"
+    );
+
+    let after = guard::counters();
+
+    assert_eq!(
+        stage::probe_requests_made(),
+        0,
+        "control: with nothing in front no probe is asked for"
+    );
+    assert_eq!(
+        after.desktop_return_probes, before.desktop_return_probes,
+        "control: and none is counted"
+    );
+
+    // --- A window in front: one probe is asked for, and nothing else moves.
+    stage::arm_window_in_front_at_the_next_return(true);
+    let before = guard::counters();
+
+    // The answer is `false` here whatever the logic: the post has no watcher window to reach.
+    let _ = guard::request_probe_on_desktop_return();
+
+    let after = guard::counters();
+
+    println!(
+        "staged: requests made {}, desktop_return_probes {} -> {}, focus_changes {} -> {}, left waiting {}",
+        stage::probe_requests_made(),
+        before.desktop_return_probes,
+        after.desktop_return_probes,
+        before.focus_changes,
+        after.focus_changes,
+        stage::probe_requests()
+    );
+
+    assert_eq!(
+        stage::probe_requests_made(),
+        1,
+        "T-37-6: a return to the desktop with a window in front must ask for a probe of the field"
+    );
+    assert_eq!(
+        after.desktop_return_probes,
+        before.desktop_return_probes + 1,
+        "T-37-6: and the dump must count it"
+    );
+    assert_eq!(
+        after.focus_changes, before.focus_changes,
+        "no focus change is invented — no generation is opened"
+    );
+    assert_eq!(
+        guard::field(),
+        field_before,
+        "and no `Pending` is published: the state stands until the verdict lands"
+    );
+    assert_eq!(
+        stage::probe_requests(),
+        0,
+        "a request nobody can hear is taken back rather than left for a forged message"
+    );
+
+    stage::clear_probe_requests();
+}
