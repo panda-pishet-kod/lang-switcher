@@ -1641,3 +1641,178 @@ fn level_three_holds_no_borrow_of_its_cell_while_a_call_leaves_the_thread() {
         );
     }
 }
+
+/// ⭐ **Task T-37-3, finding С5 — a verdict is published for the control it was determined for,
+/// and the order of the check is swept.**
+///
+/// The probe and the events that say the focus moved share the watcher thread. While a probe runs
+/// the thread does not take its queue, so the generation that would turn the verdict away has not
+/// been raised yet, and a verdict determined for a field the person has already left is published
+/// as current — the typical `Tab` from a login to a password. The repair reads **which window and
+/// which control** have the focus before `determine()` and again after it, and refuses to publish
+/// when they differ; the generation check of task T-13-12 stays where it is, inside `publish`.
+///
+/// Swept here: the target is taken **before** the levels run, compared **after** them, the refusal
+/// is counted in `MISMATCHED_VERDICTS`, and all of it happens **before** `publish(`. The staged half
+/// — a probe whose focus moves while it runs — is
+/// `a_verdict_is_not_published_for_a_control_the_focus_left_while_the_probe_ran` below.
+///
+/// ⚠ The control of the cut: `determine()` and `publish(` are found in the body taken.
+#[test]
+fn the_probe_compares_the_focus_before_and_after_it_runs_and_before_it_publishes() {
+    let source = source_of("guard.rs");
+    let product = source
+        .split_once("\n#[cfg(test)]\nmod tests {")
+        .expect("src\\guard.rs ends in its own test module")
+        .0;
+
+    let at = product
+        .find("pub fn run_pending_probe() -> bool {")
+        .expect("src\\guard.rs must contain `run_pending_probe`");
+    let rest = &product[at..];
+    let body = &rest[..rest
+        .find("\n}\n")
+        .expect("the item closes with a brace in column 0")];
+
+    let position = |needle: &str| -> Option<usize> {
+        body.lines()
+            .scan(0usize, |offset, line| {
+                let here = *offset;
+                *offset += line.len() + 1;
+                Some((here, line.trim()))
+            })
+            .filter(|(_, line)| !line.starts_with("//"))
+            .find(|(_, line)| line.contains(needle))
+            .map(|(here, _)| here)
+    };
+
+    let determine =
+        position("let verdict = determine();").expect("control: the levels run in the body taken");
+    let publish = position("publish(verdict, generation);")
+        .expect("control: the verdict is published in the body taken");
+
+    let before = position("let target = focus_target();");
+    let after = position("if focus_moved_since(target) {");
+    let counted = position("MISMATCHED_VERDICTS.fetch_add(1");
+
+    assert!(
+        before.is_some_and(|at| at < determine),
+        "С5: which window and which control have the focus must be read BEFORE the levels run"
+    );
+    assert!(
+        after.is_some_and(|at| determine < at && at < publish),
+        "С5: and read again AFTER them, before the verdict is published"
+    );
+    assert!(
+        counted.is_some_and(|at| after.is_some_and(|after| after < at) && at < publish),
+        "С5: a verdict refused for another control is counted on its own, before the publication"
+    );
+}
+
+/// ⭐ **Task T-37-3, finding С5, staged — a verdict is not published for a control the focus left
+/// while the probe ran.**
+///
+/// # Why this is staged and not raced
+///
+/// The window is two hops between two threads, and one of them is the watcher thread of a product
+/// this process is not. The interleaving is raised on purpose instead, through `guard::stage` —
+/// feature `testing`, absent from the Release configuration — at exactly the instruction it can
+/// happen at: after the levels have run and before the verdict is compared.
+///
+/// # What runs, and why it is safe to run here
+///
+/// `run_pending_probe` for real: the levels of FR-72 against whatever window is in front. This test
+/// thread has no COM apartment, so level 3 cannot create its client and answers «no answer» at once
+/// — no call into another process is made by it — and levels 1 and 2 read a process name and send
+/// one bounded `EM_GETPASSWORDCHAR`. What the verdict **says** is not asserted; whether it was
+/// **published** is, and that is read off the counters the publication moves.
+///
+/// # The positive control
+///
+/// The same probe with the focus left alone publishes its verdict and refuses nothing — so a flat
+/// line in the staged run is a refusal and not a probe that publishes nothing anywhere.
+///
+/// ⚠ Its red is not a compile error: on the base the seam did not exist. It is shown by mutation —
+/// the refusal removed from `run_pending_probe` — in `scratchpad-E37\t37-3-red-staged.log`.
+#[cfg(feature = "testing")]
+#[test]
+fn a_verdict_is_not_published_for_a_control_the_focus_left_while_the_probe_ran() {
+    use lang_switcher::guard::stage;
+
+    fn published(counters: guard::Counters) -> u32 {
+        counters.password_verdicts + counters.ordinary_verdicts + counters.undetermined_verdicts
+    }
+
+    let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    stage::clear_probe_requests();
+
+    // --- The positive control: the focus stays put, the verdict lands.
+    stage::ask_for_a_probe();
+    let before = guard::counters();
+
+    assert!(
+        guard::run_pending_probe(),
+        "control: the probe that was asked for runs"
+    );
+
+    let after = guard::counters();
+
+    assert_eq!(after.probes, before.probes + 1);
+    assert_eq!(
+        published(after),
+        published(before) + 1,
+        "control: a probe whose focus stayed where it was publishes its verdict"
+    );
+    assert_eq!(
+        after.mismatched_verdicts, before.mismatched_verdicts,
+        "control: and refuses nothing"
+    );
+
+    // --- The finding: the focus moves while the levels run.
+    let field_before = guard::field();
+
+    stage::ask_for_a_probe();
+    stage::arm_focus_move_during_the_next_probe();
+
+    let before = guard::counters();
+
+    assert!(guard::run_pending_probe(), "the probe runs");
+
+    let after = guard::counters();
+
+    println!(
+        "staged: probes {} -> {}, published {} -> {}, mismatched {} -> {}, stale {} -> {}",
+        before.probes,
+        after.probes,
+        published(before),
+        published(after),
+        before.mismatched_verdicts,
+        after.mismatched_verdicts,
+        before.stale_verdicts,
+        after.stale_verdicts
+    );
+
+    assert_eq!(after.probes, before.probes + 1, "the levels ran");
+    assert_eq!(
+        published(after),
+        published(before),
+        "С5: a verdict determined for a control the focus has left must not be published"
+    );
+    assert_eq!(
+        after.mismatched_verdicts,
+        before.mismatched_verdicts + 1,
+        "С5: the refusal is counted on its own"
+    );
+    assert_eq!(
+        after.stale_verdicts, before.stale_verdicts,
+        "and it is not the generation's refusal — the generation did not move"
+    );
+    assert_eq!(
+        guard::field(),
+        field_before,
+        "the state the refused verdict would have replaced stands"
+    );
+
+    stage::clear_probe_requests();
+}

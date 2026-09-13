@@ -631,6 +631,10 @@ pub struct Counters {
     /// Searches that gave up because the table moved under every attempt — see
     /// [`EXCLUSIONS_GENERATION`]. Expected to stay at zero for the life of a process.
     pub exclusion_read_retries: u32,
+    /// Verdicts dropped because the window or the control they were determined for had lost the
+    /// focus by the time they were ready — **finding С5, task T-37-3**. Not [`Self::stale_verdicts`],
+    /// which is the generation's refusal; see [`MISMATCHED_VERDICTS`].
+    pub mismatched_verdicts: u32,
 }
 
 /// What the probe has done so far.
@@ -650,6 +654,7 @@ pub fn counters() -> Counters {
         exclusions: EXCLUSIONS_PUBLISHED.load(Ordering::Relaxed),
         exclusions_refused: EXCLUSIONS_REFUSED.load(Ordering::Relaxed),
         exclusion_read_retries: EXCLUSION_READ_RETRIES.load(Ordering::Relaxed),
+        mismatched_verdicts: MISMATCHED_VERDICTS.load(Ordering::Relaxed),
     }
 }
 
@@ -801,6 +806,16 @@ static PROBES: AtomicU32 = AtomicU32::new(0);
 
 /// Verdicts dropped because the focus moved again while the probe ran.
 static STALE_VERDICTS: AtomicU32 = AtomicU32::new(0);
+
+/// Verdicts dropped because the window or the control that had the focus when the probe started
+/// had lost it by the time the verdict was ready — **finding С5, task T-37-3**.
+///
+/// ⚠ **Not the same refusal as [`STALE_VERDICTS`]**, and kept apart on purpose. That one is the
+/// generation of task T-13-12: the input thread has already taken the news of a focus change and
+/// raised the generation. This one is the case the generation cannot see — the news is still in
+/// the queue of **this** thread, which was busy running the probe — and it is read off the focus
+/// itself. A dump that summed the two would hide which of the two races a machine is losing.
+static MISMATCHED_VERDICTS: AtomicU32 = AtomicU32::new(0);
 
 /// Verdicts of [`Field::Password`].
 static PASSWORD_VERDICTS: AtomicU32 = AtomicU32::new(0);
@@ -1102,6 +1117,28 @@ pub mod stage {
     /// Whether the next refused request must find another one accepted underneath it.
     static ARMED: AtomicBool = AtomicBool::new(false);
 
+    /// Whether the focus must be found moved once the levels of the next probe have run — task
+    /// T-37-3, finding С5.
+    static FOCUS_MOVES: AtomicBool = AtomicBool::new(false);
+
+    /// Leaves one probe wanted, exactly as a request whose post was accepted leaves it — so that
+    /// `run_pending_probe` runs without a watcher window. Task T-37-3.
+    pub fn ask_for_a_probe() {
+        PROBE_PENDING.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Arms one interleaving of finding С5: the next probe finds the focus moved once its levels
+    /// have run — the `Tab` from a login to a password made while the verdict was being determined.
+    pub fn arm_focus_move_during_the_next_probe() {
+        FOCUS_MOVES.store(true, Ordering::Relaxed);
+    }
+
+    /// Called by [`super::focus_moved_since`], after the levels and before the comparison — the one
+    /// point where the interleaving matters. Fires at most once per arming.
+    pub(super) fn the_focus_moves() -> bool {
+        FOCUS_MOVES.swap(false, Ordering::Relaxed)
+    }
+
     /// Arms one interleaving: the next post that `request_probe` finds refused will see a request
     /// accepted by "the other thread" between the refusal and its own undo.
     pub fn arm_one_accepted_request_under_the_next_refusal() {
@@ -1117,6 +1154,7 @@ pub mod stage {
     pub fn clear_probe_requests() {
         PROBE_PENDING.store(0, Ordering::Relaxed);
         ARMED.store(false, Ordering::Relaxed);
+        FOCUS_MOVES.store(false, Ordering::Relaxed);
     }
 
     /// Called by [`super::request_probe`] between a refused post and the undoing of its own step —
@@ -1177,7 +1215,25 @@ pub fn run_pending_probe() -> bool {
     // two instructions between them were the window a stale `Ordinary` came through.
     let generation = generation_of(FIELD.load(Ordering::Relaxed));
 
+    // ⭐ **Finding С5, task T-37-3 — the verdict belongs to the control it was determined for.**
+    // The generation above sees a focus change only once the **input** thread has taken its news,
+    // and that news reaches this thread's queue first — which this thread does not read while the
+    // levels run. So a `Tab` from a login to a password during the probe leaves the generation
+    // where it was, and the verdict for the login field used to be published as the verdict for
+    // the password field. Which window and which control have the focus is therefore read here and
+    // again once the verdict is ready, and a verdict whose control has lost the focus is refused.
+    let target = focus_target();
+
     let verdict = determine();
+
+    if focus_moved_since(target) {
+        // The refusal is the safe direction for the same reason the generation's is: the state
+        // stays what it was — `Pending` after a focus change, which is buffering off — and the
+        // focus change that moved the control has its own event in this thread's queue, and with
+        // it its own probe. Counted apart from `STALE_VERDICTS`: see `MISMATCHED_VERDICTS`.
+        MISMATCHED_VERDICTS.fetch_add(1, Ordering::Relaxed);
+        return true;
+    }
 
     // The answer is `false` when the focus moved while this ran: the verdict describes a field
     // the user has left, the probe that belongs to the new one is already queued, and the state
@@ -1203,6 +1259,16 @@ pub fn run_pending_probe() -> bool {
 /// The predicate is the generation and **only** the generation, deliberately. It is not "the state
 /// is still `Pending`": [`publish_exclusions`] asks for a probe without a focus change, so a
 /// second verdict for a generation that already has one is an ordinary event and must land.
+///
+/// ⚠ **It is not the only refusal a verdict meets on its way here — task T-37-3, finding С5.** The
+/// generation is raised by the input thread, and the news of a focus change reaches the queue of
+/// the watcher thread — which was busy running the probe — before it reaches the input thread; so
+/// a verdict can arrive here under a generation that is still current for a control that has
+/// already lost the focus. [`run_pending_probe`] turns such a verdict away **before** calling this
+/// function, by comparing which window and which control had the focus before the levels ran
+/// with which have it now, and counts it in [`MISMATCHED_VERDICTS`]. That check is an addition
+/// in front of this one and not a replacement for it: the swap below is still the only store, and
+/// its predicate is still the generation alone.
 ///
 /// # ABA
 ///
@@ -1380,6 +1446,65 @@ fn determine() -> Probe {
         field,
         excluded: false,
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Whose verdict it is — finding С5, task T-37-3
+// ---------------------------------------------------------------------------------------
+
+/// Which window and which control have the keyboard focus — **the identity a verdict belongs to**,
+/// finding С5, task T-37-3.
+///
+/// Two handles and nothing else, kept **as values**: they are compared and never dereferenced, and
+/// they are not stored beyond the one probe that reads them. SEC-01, SEC-07 — a window handle is
+/// not a character, not a key and not a name of anything.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FocusTarget {
+    /// The foreground window, as a raw value.
+    window: usize,
+    /// The control with the focus inside it — [`focused_control`] — as a raw value.
+    control: usize,
+}
+
+/// Which window and which control have the focus right now, or `None` when no window is in front —
+/// the desktop is switching, or it is the secure one.
+///
+/// The control is asked through [`focused_control`], which is `GetGUIThreadInfo` and **not**
+/// `GetFocus`: the watcher thread never has the focus, and `GetFocus` answers about the queue of
+/// the thread that calls it (the reason is written out at that function, and it stays true here).
+/// A control that cannot be read is the window itself — the answer `focused_control` already gives
+/// for a thread with no focus window — so the identity still moves when the window does.
+fn focus_target() -> Option<FocusTarget> {
+    let window = foreground_window()?;
+    let control = focused_control(window).unwrap_or(window);
+
+    Some(FocusTarget {
+        window: window.0 as usize,
+        control: control.0 as usize,
+    })
+}
+
+/// Whether the focus has left `target` — the window, the control, or both — while a probe ran.
+///
+/// A plain comparison of two readings, and a verdict is refused on any difference, `None` against
+/// `Some` included: a desktop that switched while the probe ran is not the desktop it was
+/// determined on.
+///
+/// ⚠ **What moves it is exactly what raises an event**: a new foreground window is
+/// `EVENT_SYSTEM_FOREGROUND` and a new focus window is `EVENT_OBJECT_FOCUS`, and either of them puts
+/// a probe of its own behind this one. A move inside one window between two fields of a page —
+/// Chromium draws every field of a page into one window — moves no handle and is left to the
+/// generation, which the `idChild` of that event raises (task Т-13-1). The two checks cover each
+/// other's blind spot; neither covers both.
+fn focus_moved_since(target: Option<FocusTarget>) -> bool {
+    // SEC-04a, feature `testing`, absent from the Release configuration: the focus moving while the
+    // levels run, raised on purpose instead of waited for. See [`stage`].
+    #[cfg(feature = "testing")]
+    if stage::the_focus_moves() {
+        return true;
+    }
+
+    focus_target() != target
 }
 
 // ---------------------------------------------------------------------------------------
