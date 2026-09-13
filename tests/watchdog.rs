@@ -2214,6 +2214,15 @@ fn the_hotkey_state_of_fr08_survives_a_planned_tick_and_not_a_real_absence() {
 ///
 /// The gate itself — `Some` against `None`, with no hook anywhere near it — is
 /// `a_parked_buffer_no_longer_shuts_the_gates_of_fr80` above.
+///
+/// ⚠ **Feature `testing` since task T-37-1 (finding Н3), and why this is a canon moved rather than a
+/// test weakened.** The rehook request below used to be `watchdog::request_rehook`, and in a test
+/// process — which has no input window — its post is always refused. The test passed because a
+/// refused post **left the reason armed**, which is precisely the defect Н3 names; since the repair
+/// a refused request takes its reason back, and the request never reaches the arm this test is
+/// about. What the arm needs is the state an **accepted** post leaves, and `watchdog::stage::
+/// arm_rehook` is the one place that state can be put without a window of the product.
+#[cfg(feature = "testing")]
 #[test]
 #[ignore = "installs a live global WH_KEYBOARD_LL hook; run deliberately with --ignored --test-threads=1"]
 fn the_parked_buffer_still_gets_its_liveness_tick_and_its_rehook() {
@@ -2269,8 +2278,9 @@ fn the_parked_buffer_still_gets_its_liveness_tick_and_its_rehook() {
     );
 
     // **FR-80, the far end of the other three mechanisms.** A request raised while the buffer is
-    // parked is answered while the buffer is parked.
-    watchdog::request_rehook(watchdog::Reason::PowerResume);
+    // parked is answered while the buffer is parked. Staged as the post the product's resume makes
+    // **and has accepted** — see the note above the test on task T-37-1.
+    watchdog::stage::arm_rehook(watchdog::Reason::PowerResume);
     assert!(!buffer::is_installed(), "still parked");
 
     assert_eq!(
@@ -2340,6 +2350,13 @@ fn the_parked_buffer_still_gets_its_liveness_tick_and_its_rehook() {
 ///
 /// ⚠ `#[ignore]`d, and named to sort after `the_gap_without_a_hook_is_microseconds`, for the
 /// reasons the test above states.
+///
+/// ⚠ **Feature `testing` since task T-37-1 (finding Н3)** — the canon moved for the reason the test
+/// above gives. Step 1 below is still the real arm of the UI window, and in this process its post is
+/// refused, so since the repair it takes the reason back and counts the loss — which is asserted
+/// here, because it is true. The race of steps 2 and 3 is about a post the **product** has had
+/// accepted, and that state is staged with `watchdog::stage::arm_rehook`.
+#[cfg(feature = "testing")]
 #[test]
 #[ignore = "installs a live global WH_KEYBOARD_LL hook; run deliberately with --ignored --test-threads=1"]
 fn the_unlock_race_parks_the_buffer_and_the_rehook_survives_it() {
@@ -2380,6 +2397,23 @@ fn the_unlock_race_parks_the_buffer_and_the_rehook_survives_it() {
         after_unlock.recoveries, before.recoveries,
         "the UI thread never reinstalls the hook itself"
     );
+
+    // Task T-37-1, Н3: this process has no input window for the post to reach, so the arm's
+    // request was refused, taken back and counted.
+    assert_eq!(
+        after_unlock.rehook_posts_lost,
+        before.rehook_posts_lost + 1,
+        "Н3: the refused post of the arm is counted"
+    );
+    assert_eq!(
+        watchdog::stage::pending_rehook(),
+        watchdog::Reason::None,
+        "Н3: and its reason is not left armed"
+    );
+
+    // What the product's UI thread leaves behind when the post **is** accepted — the state the
+    // race below is about.
+    watchdog::stage::arm_rehook(watchdog::Reason::SessionChange);
 
     // **2. The flush is answered first** — the losing order. `guard` parks the buffer for the
     // duration of `Field::Pending`.
@@ -3929,4 +3963,372 @@ fn the_sec05_analysis_accounts_for_a_stream_and_not_only_for_one_message() {
         "Н2: a rate limit would drop the user's OWN focus changes, and that refusal is part of \
          the analysis"
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-37-1 — a lost post does not cancel the work it carried (С23, Н3)
+// -------------------------------------------------------------------------------------
+
+/// Every `.rs` file under `src\`, read as text with line endings normalised — name and text.
+fn every_source() -> Vec<(String, String)> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    let mut sources: Vec<(String, String)> = fs::read_dir(&directory)
+        .expect("src must be readable")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .map(|path| {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()))
+                .replace("\r\n", "\n");
+            (name, text)
+        })
+        .collect();
+
+    sources.sort();
+    sources
+}
+
+/// ⭐ **Task T-37-1, item 1 — the post to the input thread answers, as its two neighbours do.**
+///
+/// The finding (С23, Н3) begins here: `app::post_to_input_thread` returned nothing, so the two
+/// callers whose work depends on the message arriving — the flush of a focus change and the
+/// request to put the hook back — could not tell a delivered post from a refused one. The
+/// documentation of both neighbours said so as a virtue: «The answer matters, which is why this
+/// returns something and [`post_to_input_thread`] does not».
+///
+/// Two sweeps. The signature answers `bool`, and **no call site throws the answer away without
+/// saying so**: a bare statement `crate::app::post_to_input_thread(…);` is refused, while
+/// `let _ =` (with the reason beside it) and a call inside an `if` are accepted.
+///
+/// ⚠ **The instrument's controls.** The two neighbours' signatures are found — the sweep reads the
+/// file it means to read — and the call sites are counted, so a sweep that found no calls at all
+/// cannot pass as a sweep that found no bare ones.
+#[test]
+fn the_post_to_the_input_thread_answers_and_no_caller_drops_the_answer_silently() {
+    let app = source_of("app.rs");
+
+    for neighbour in [
+        "pub(crate) fn post_to_watcher_thread(message: u32) -> bool",
+        "pub(crate) fn post_to_ui_thread(message: u32) -> bool",
+    ] {
+        assert!(
+            app.contains(neighbour),
+            "control: the sweep must find the neighbour {neighbour:?}"
+        );
+    }
+
+    let mut calls = 0usize;
+    let mut bare: Vec<String> = Vec::new();
+
+    for (name, text) in every_source() {
+        for (line_number, line) in code_lines_with(&text, "post_to_input_thread(") {
+            if line.starts_with("///") || line.contains("fn post_to_input_thread(") {
+                continue;
+            }
+
+            calls += 1;
+
+            if line.starts_with("crate::app::post_to_input_thread(")
+                || line.starts_with("post_to_input_thread(")
+            {
+                bare.push(format!("src\\{name}:{line_number}: {line}"));
+            }
+        }
+    }
+
+    println!(
+        "calls of post_to_input_thread: {calls}, dropped silently: {}",
+        bare.len()
+    );
+
+    assert!(
+        calls >= 7,
+        "control: the sweep must see the seven call sites of the base, it saw {calls}"
+    );
+    assert!(
+        app.contains("pub(crate) fn post_to_input_thread(message: u32) -> bool"),
+        "С23: the post to the input thread must answer whether the message reached a window"
+    );
+    assert!(
+        bare.is_empty(),
+        "С23/Н3: these calls drop the answer of the post without a word: {bare:#?}"
+    );
+    assert!(
+        !app.contains("which is why this returns something and [`post_to_input_thread`] does not"),
+        "the documentation of both neighbours still calls the asymmetry a virtue"
+    );
+}
+
+/// ⭐ **Task T-37-1, item 2 — the work of a focus change is bound to the cell, not to the message
+/// (finding С23, idea И-21).**
+///
+/// The window procedure answers a lost flush on the next message of the input window, **before**
+/// anything else reads the buffer — ahead of the fork of FR-14 and of the hotkey branch, both of
+/// which a later placement would let through with the previous field's strokes still in the ring.
+/// The replay is gated on the input window and is not made for `WM_APP_FLUSH` itself, whose own
+/// branch is left exactly as it was (SEC-05, decision П-2).
+///
+/// And it replays **the same** decision, not a third one: FR-14's rule is
+/// `take_typing_induced_flush`, the flush of FR-12 is `apply_flush`, and the two consequences are
+/// the ones the message branch has — `note_focus_moved_keeping_buffer` for the exempt kind,
+/// `note_focus_moved` and `park_buffer` for every other.
+///
+/// ⚠ The negative control of the cut: the fork of FR-14 is found in the body taken, so an absent
+/// replay is an absent replay and not a body that was cut in the wrong place.
+#[test]
+fn a_lost_flush_is_replayed_by_the_next_message_of_the_input_window() {
+    let app = source_of("app.rs");
+    let procedure = body_of(&app, "unsafe extern \"system\" fn window_proc(");
+
+    let fork = procedure
+        .find("crate::watchdog::take_typing_induced_flush(message)")
+        .expect("control: the fork of FR-14 must be in the body of the window procedure");
+    let hotkey = procedure
+        .find("crate::inject::on_hotkey()")
+        .expect("control: the hotkey branch must be in the body of the window procedure");
+
+    let replay = procedure.find("crate::watchdog::claim_lost_flush()");
+
+    assert!(
+        replay.is_some(),
+        "С23: the window procedure does not look at the cell at all — a WM_APP_FLUSH that was \
+         refused cancels the flush of FR-10, the wipe of SEC-02 and the probe of FR-70"
+    );
+
+    let replay = replay.unwrap_or_default();
+
+    assert!(
+        replay < fork && replay < hotkey,
+        "С23: the replay must come before the fork of FR-14 and before the hotkey branch"
+    );
+
+    let gate = &procedure[..replay];
+    let gate = &gate[gate.rfind("if ").unwrap_or(0)..];
+
+    assert!(
+        gate.contains("is_input_window(hwnd)")
+            && gate.contains("message != crate::watchdog::WM_APP_FLUSH"),
+        "С23: the replay must be gated on the input window and left out for WM_APP_FLUSH itself: \
+         {gate:?}"
+    );
+
+    let replayed = body_of(&app, "fn replay_lost_flush()");
+
+    for step in [
+        "crate::watchdog::take_typing_induced_flush(crate::watchdog::WM_APP_FLUSH)",
+        "crate::guard::note_focus_moved_keeping_buffer();",
+        "crate::watchdog::apply_flush(crate::watchdog::WM_APP_FLUSH, LPARAM(0));",
+        "crate::guard::note_focus_moved();",
+        "park_buffer();",
+    ] {
+        assert!(
+            replayed.contains(step),
+            "С23: the replay must make the decisions of the message branch, and {step:?} is not \
+             in it"
+        );
+    }
+}
+
+/// ⭐ **Task T-37-1, item 4 — a rehook request whose post was refused is not left armed, and the
+/// loss is a number (finding Н3).**
+///
+/// A test process has no input window, so every post it makes to the input thread is refused:
+/// `request_rehook` here is exactly the lost request of the finding, with nothing staged. Before
+/// the repair the reason stayed armed with nobody to deliver it, and the next message that
+/// happened to arrive — or the liveness tick thirty seconds later — acted on it under a reason
+/// that could be half an hour old; and no number anywhere said a post had been lost.
+///
+/// `watchdog::stage` (feature `testing`, absent from the Release configuration) is the reader of
+/// the cell and the arm the two `#[ignore]`d rehook tests of this file stage an **accepted** post
+/// with.
+///
+/// ⚠ The positive control of the reader: a reason armed through the stage is read back as armed,
+/// so `None` below is an answer and not a reader that sees nothing.
+#[cfg(feature = "testing")]
+#[test]
+fn a_refused_rehook_post_disarms_its_reason_and_is_counted() {
+    use lang_switcher::watchdog::{Reason, stage};
+
+    let _turn = notice_turn();
+
+    stage::arm_rehook(Reason::PowerResume);
+    assert_eq!(
+        stage::pending_rehook(),
+        Reason::PowerResume,
+        "control: the reader sees an armed reason"
+    );
+    stage::arm_rehook(Reason::None);
+
+    let before = watchdog::health();
+
+    watchdog::request_rehook(Reason::DesktopSwitch);
+
+    let after = watchdog::health();
+
+    println!(
+        "rehook: pending {} -> {}, posts lost {} -> {}",
+        Reason::DesktopSwitch.name(),
+        stage::pending_rehook().name(),
+        before.rehook_posts_lost,
+        after.rehook_posts_lost
+    );
+
+    assert_eq!(
+        stage::pending_rehook(),
+        Reason::None,
+        "Н3: a request whose post reached no window must not stay armed without an addressee"
+    );
+    assert_eq!(
+        after.rehook_posts_lost,
+        before.rehook_posts_lost + 1,
+        "Н3: and the loss must be visible as a number"
+    );
+    assert_eq!(
+        after.recoveries, before.recoveries,
+        "nothing was reinstalled — the request never reached a thread that could"
+    );
+}
+
+/// ⭐ **Task T-37-1, item 3 — a lost flush is marked by the side that posted, claimed once by the
+/// side that plays it, and taken through the one door the cell has.**
+///
+/// The half of finding С23 that lives in this module, driven the way the window procedure drives
+/// it: `request_flush` and a post, `note_flush_post_refused` when the post is refused,
+/// `claim_lost_flush` on the next message of the input window, then the two functions every
+/// `WM_APP_FLUSH` goes through. What is shown, in order:
+///
+/// 1. **the honest path marks nothing** — a request whose post was accepted is left to its own
+///    message, so nothing the replay does can take it from under that message;
+/// 2. **a refused post marks the request, and the mark is claimed exactly once**;
+/// 3. **coalescing clears the mark** — the newer event is followed by a post of its own;
+/// 4. **an empty cell is not marked**, though the refusal is counted;
+/// 5. **FR-14 decides a replayed focus request as it decides its message** — the buffer it keeps is
+///    kept, which is what the replay must never undo;
+/// 6. **one focus change, one take** — `window_flushes_taken` moves once per request and
+///    `flushes_without_request` (task T-41-13: «must not move on the honest path») does not move.
+///
+/// ⚠ Its red is not a compile error: on the base the two functions did not exist. The instrument's
+/// ability to fail is shown by mutation instead — journal `scratchpad-E37\t37-1-mutation.log`.
+#[test]
+fn a_lost_flush_is_marked_claimed_once_and_taken_through_the_one_door() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    // Whatever a neighbour left in the cell is taken now, before anything is counted.
+    let _ = watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0));
+
+    let before = watchdog::counters();
+    let health_before = watchdog::health();
+
+    // --- 1. The honest path.
+    press_at(10_000);
+    watchdog::request_flush(10_010, Cause::WindowChange);
+
+    assert!(
+        !watchdog::flush_post_lost(),
+        "a request whose post was accepted is not marked"
+    );
+    assert!(
+        !watchdog::claim_lost_flush(),
+        "and a message that is not its own finds nothing to claim"
+    );
+    assert!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)).is_some(),
+        "its own message takes it"
+    );
+
+    // --- 2. A refused post.
+    press_at(11_000);
+    watchdog::request_flush(11_010, Cause::WindowChange);
+    watchdog::note_flush_post_refused();
+
+    assert!(
+        watchdog::flush_post_lost(),
+        "С23: the refused request is marked"
+    );
+    assert!(
+        watchdog::claim_lost_flush(),
+        "С23: the next message of the input window claims it"
+    );
+    assert!(!watchdog::flush_post_lost(), "the claim takes the mark off");
+    assert!(
+        !watchdog::claim_lost_flush(),
+        "a second message finds nothing to claim — the request is played once"
+    );
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        Some(ResetOutcome::Cleared { removed: 1 }),
+        "and the replay takes it through the door every flush takes"
+    );
+
+    // --- 3. Coalescing clears the mark.
+    watchdog::request_flush(12_010, Cause::WindowChange);
+    watchdog::note_flush_post_refused();
+    assert!(watchdog::flush_post_lost());
+
+    watchdog::request_flush(12_020, Cause::WindowChange);
+    assert!(
+        !watchdog::flush_post_lost(),
+        "a newer event coalesced into the request is followed by a post of its own"
+    );
+    let _ = watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0));
+
+    // --- 4. An empty cell is not marked.
+    watchdog::note_flush_post_refused();
+    assert!(
+        !watchdog::flush_post_lost(),
+        "a refusal that finds the cell empty — its request already taken — marks nothing"
+    );
+
+    // --- 5. FR-14 on the replay.
+    for offset in 0..3 {
+        press_at(20_000 + offset);
+    }
+    watchdog::request_flush(20_010, Cause::FocusChange);
+    watchdog::note_flush_post_refused();
+
+    assert!(watchdog::claim_lost_flush());
+    assert!(
+        watchdog::take_typing_induced_flush(WM_APP_FLUSH),
+        "FR-14: a focus event the typing caused is exempt when it is replayed, as it is when its \
+         message arrives"
+    );
+    assert_eq!(
+        buffer::len(),
+        3,
+        "FR-14: the buffer the rule keeps is kept by the replay"
+    );
+
+    // --- 6. The arithmetic.
+    let counted = delta(before, watchdog::counters());
+    let health_after = watchdog::health();
+
+    assert_eq!(counted.window_flushes, 5, "five requests were raised");
+    assert_eq!(
+        counted.window_flushes_taken, 4,
+        "four requests left the cell, one per focus change — the coalesced pair is one"
+    );
+    assert_eq!(
+        counted.focus_after_typing, 1,
+        "the exempt one is counted as such"
+    );
+    assert_eq!(
+        health_after.flushes_without_request, health_before.flushes_without_request,
+        "T-41-13: no flush found the cell empty on this path"
+    );
+    assert_eq!(
+        health_after.flush_posts_lost,
+        health_before.flush_posts_lost + 4,
+        "four refusals, the one that found the cell empty included"
+    );
+
+    buffer::uninstall();
 }

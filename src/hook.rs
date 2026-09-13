@@ -1243,7 +1243,11 @@ pub fn set_active(active: bool) {
     let was_active = ACTIVE.swap(active, Ordering::Relaxed);
 
     if active && !was_active {
-        crate::app::post_to_input_thread(WM_APP_SEED_CAPS);
+        // Task T-37-1: the answer is dropped, for the reason the last sentence above gives and one
+        // more — a queue that refuses the post belongs to an input thread that has stopped taking
+        // messages, and the buffer re-reads the machine's `CapsLock` again on its way back from a
+        // park (`app::restore_buffer`) and on every return from an absence (`WM_APP_LAYOUT`).
+        let _ = crate::app::post_to_input_thread(WM_APP_SEED_CAPS);
     }
 }
 

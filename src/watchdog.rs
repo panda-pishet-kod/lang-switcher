@@ -684,6 +684,35 @@ const PENDING_MARK: u64 = 1 << 32;
 /// while every event that went into the cell was a focus event.
 const PENDING_FOCUS: u64 = 1 << 33;
 
+/// Bit that says **nobody is coming for the pending request by message**: the [`WM_APP_FLUSH`]
+/// posted for it was refused — finding **С23**, task **T-37-1**.
+///
+/// # Why the work is bound to the cell and not to the message
+///
+/// A focus change carries three things, and until this task all three hung on the message
+/// arriving: the flush of FR-10, the wipe of SEC-02 and the new probe of FR-70. A refused post —
+/// no input window yet, or one being destroyed, or a queue of ten thousand messages — cancelled
+/// all three in silence, and a password field entered that way was taken for the ordinary field
+/// before it. [`win_event_proc`] now answers a refused post with [`note_flush_post_refused`], and
+/// `app::window_proc` plays the request on the **next message of the input window**, whatever
+/// that message is — see [`claim_lost_flush`].
+///
+/// # Why a mark, and not simply "the cell is not empty"
+///
+/// Because the cell is not empty on the honest path too: between [`request_flush`] and the
+/// dispatch of its own message, every message already queued ahead of it would find the request
+/// there. Playing it from those would take the request away from the message that is on its way,
+/// and that message — whose branch is unconditional by decision **П-2** — would then park the
+/// buffer a second time, ask for a second probe, count a flush without a request (task T-41-13
+/// promises that number stands still on the honest path) and, for a focus event FR-14 had just
+/// exempted, **park the very buffer FR-14 decided to keep**. Only a request whose message will
+/// never come may be played without one, and only the thread that posted knows which that is.
+///
+/// ⚠ **Coalescing clears it and never sets it**, like [`PENDING_FOCUS`]: a new event is followed
+/// by a post of its own, and a request that is about to have a message coming for it must not be
+/// taken from under that message. [`coalesced`] builds the cell it answers without this bit.
+const PENDING_LOST: u64 = 1 << 34;
+
 /// **Δ of FR-14** — how long after an edit a focus event of the foreground window is still taken
 /// for the application's answer to that edit rather than for the user leaving the field.
 ///
@@ -912,6 +941,14 @@ static WINDOW_FLUSHES_TAKEN: AtomicU32 = AtomicU32::new(0);
 /// the thing the finding asks for: the flood stops being **invisible**. A machine being pestered
 /// shows a number climbing where a quiet one shows it still.
 static FLUSHES_WITHOUT_REQUEST: AtomicU32 = AtomicU32::new(0);
+
+/// [`WM_APP_FLUSH`] posts the input thread's window refused — finding **С23**, task **T-37-1**.
+///
+/// Every one of them is a request marked [`PENDING_LOST`] and played by the next message of the
+/// input window instead of by its own, so this is not a count of focus changes lost: it is a count
+/// of focus changes that came **late**, which on a healthy machine is nought and on a machine whose
+/// input thread stopped answering is the first number to say so.
+static FLUSH_POSTS_LOST: AtomicU32 = AtomicU32::new(0);
 
 /// Flushes that emptied the whole buffer — [`ResetOutcome::Cleared`].
 static FULL_CLEARS: AtomicU32 = AtomicU32::new(0);
@@ -1721,6 +1758,92 @@ fn take_pending_flush() -> Option<u32> {
     Some(taken)
 }
 
+/// Records that the [`WM_APP_FLUSH`] posted for the pending request was **refused** — the half of
+/// finding **С23** the `WinEvent` callback owns, task **T-37-1**.
+///
+/// Marks the request [`PENDING_LOST`], so that the next message of the input window plays it (see
+/// [`claim_lost_flush`]), and counts the refusal in [`FLUSH_POSTS_LOST`]. A cell found empty is
+/// left empty — a message queued before this refusal has already taken the request, and there is
+/// nothing left to play — but the refusal is counted all the same, because it happened.
+///
+/// # NFR-01 to NFR-05
+///
+/// The shape of [`request_flush`] next door and for the reason given there: a compare-and-swap loop
+/// that in practice never turns twice, and one relaxed increment. Called from a callback the system
+/// drives, and only on the path where a post has just been refused, which on a healthy machine is
+/// no path at all.
+pub fn note_flush_post_refused() {
+    let mut cell = PENDING_FLUSH.load(Ordering::Acquire);
+
+    while pending_time(cell).is_some() && cell & PENDING_LOST == 0 {
+        match PENDING_FLUSH.compare_exchange_weak(
+            cell,
+            cell | PENDING_LOST,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(seen) => cell = seen,
+        }
+    }
+
+    FLUSH_POSTS_LOST.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Whether the pending request is one nobody is coming for by message — [`PENDING_LOST`].
+///
+/// **One atomic load**, and that is the whole cost `app::window_proc` pays for task T-37-1 on
+/// every message of every window while nothing was lost — the price `app::apply_configured_capacity`
+/// already pays for the same idea. The window is asked only when this answers `true`.
+pub fn flush_post_lost() -> bool {
+    PENDING_FLUSH.load(Ordering::Acquire) & PENDING_LOST != 0
+}
+
+/// Takes the [`PENDING_LOST`] mark off the pending request and answers whether this call was the
+/// one that took it — the input thread's half of finding **С23**, task **T-37-1**.
+///
+/// `true` hands the caller a request in exactly the state a [`WM_APP_FLUSH`] arriving now would
+/// find it in: still pending, still carrying its time and its kind, no longer marked. The caller
+/// then makes the decisions the message branch makes, through the same two functions —
+/// [`take_typing_induced_flush`] and [`apply_flush`] — so FR-14 is decided in the one place it is
+/// decided and the request is taken through the one door it has ([`take_pending_flush`]). A
+/// buffer that FR-70 has parked takes nothing, as it takes nothing from the message itself; the
+/// request then waits for the next flush exactly as it would have after its own message, and the
+/// mark is not put back — so a parked buffer is played once, never on every message after.
+///
+/// Called on the input window only, and not for [`WM_APP_FLUSH`], whose own branch takes the whole
+/// cell, mark and all.
+///
+/// # When a message is on its way after all, and what that costs
+///
+/// The cell coalesces, so a marked request can still have a message coming for part of it: an
+/// event whose post was accepted and a later one whose post was refused are one request, and the
+/// mark covers both; or, between this exchange and the take, a newer event is coalesced in and its
+/// post is accepted. Whoever comes first takes the whole request — the replay or that message — and
+/// the other finds the cell empty. When the replay came first, the message then parks the buffer
+/// again, asks for one more probe and counts a flush without a request: exactly what one forged
+/// `WM_APP_FLUSH` costs (see the SEC-05 block of this module). It takes an accepted post and a
+/// refused one inside one backlog of the input thread's queue — a thread whose queue is refusing
+/// posts, that is, a thread already in trouble — and it never happens on the honest path, where
+/// nothing is marked at all.
+pub fn claim_lost_flush() -> bool {
+    let mut cell = PENDING_FLUSH.load(Ordering::Acquire);
+
+    while cell & PENDING_LOST != 0 {
+        match PENDING_FLUSH.compare_exchange_weak(
+            cell,
+            cell & !PENDING_LOST,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return true,
+            Err(seen) => cell = seen,
+        }
+    }
+
+    false
+}
+
 // ---------------------------------------------------------------------------------------
 // The wipe path — FR-10 rows 8 and 9, task Т-13-7
 // ---------------------------------------------------------------------------------------
@@ -1775,7 +1898,17 @@ pub fn session_event_wipes(code: u32) -> bool {
 /// documentation.
 pub fn request_wipe() {
     WIPE_REQUESTS.fetch_add(1, Ordering::Relaxed);
-    crate::app::post_to_input_thread(WM_APP_WIPE);
+
+    // Task T-37-1: the answer is dropped, and what a refusal means is written down rather than
+    // assumed. A post to the input window is refused in two ways. **No window** — the program is
+    // starting or leaving: before the window there is no ring (the buffer is installed after it),
+    // and after it the ring has gone with its thread, zeroed as it went (SEC-02); nothing is left
+    // to wipe. **A full queue** — ten thousand messages the input thread has not taken: a thread
+    // that has stopped answering, from which the system takes the hook (FR-80), so nothing new is
+    // typed into the ring while it stands. That second case does leave what was already typed in
+    // memory until the thread recovers; it is not a case a focus change or a wipe can reach at all,
+    // and task T-37-1, whose findings are the flush and the rehook, does not bind this one to a cell.
+    let _ = crate::app::post_to_input_thread(WM_APP_WIPE);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2189,7 +2322,13 @@ unsafe extern "system" fn win_event_proc(
     };
 
     request_flush(event_time, cause);
-    crate::app::post_to_input_thread(WM_APP_FLUSH);
+
+    // ⭐ **Finding С23, task T-37-1: the answer of the post is used.** A refused post used to
+    // cancel the flush of FR-10, the wipe of SEC-02 and the probe of FR-70 in silence. It now marks
+    // the request, so that the next message of the input window plays it — see [`PENDING_LOST`].
+    if !crate::app::post_to_input_thread(WM_APP_FLUSH) {
+        note_flush_post_refused();
+    }
 
     // FR-21 delivery. The layout is a property of the thread that owns the window the user is
     // typing into, so a new foreground window — or a new focus inside one — is the moment to ask
@@ -2201,7 +2340,14 @@ unsafe extern "system" fn win_event_proc(
     // ⚠ FR-11: this is a layout *question*, never a flush. The flush above is the window change
     // itself, which the FR-10 table lists in its own right and which would happen with or
     // without this line.
-    crate::app::post_to_input_thread(WM_APP_LAYOUT);
+    //
+    // The answer is dropped, and task T-37-1 says why the loss does no harm to what the user sees:
+    // the direction of a conversion is not taken from the stamp this refreshes but read at the
+    // point of use — `buffer::Recorder::restamp` asks FR-52 on the first stroke of every word (task
+    // T-10-14, see [`probe_layout_after_absence`]). What waits is the rebuild of the cache for a
+    // layout added to the session, which the next focus change, modifier release or return from
+    // an absence asks for again.
+    let _ = crate::app::post_to_input_thread(WM_APP_LAYOUT);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2296,6 +2442,16 @@ static LAST_REASON: AtomicU32 = AtomicU32::new(0);
 /// cell empty and the handler returns without touching the hook.
 static PENDING_REASON: AtomicU32 = AtomicU32::new(0);
 
+/// [`WM_APP_REHOOK`] posts the input thread's window refused — finding **Н3**, task **T-37-1**.
+///
+/// A refusal means the input window is not there — the program is starting or leaving — or its
+/// queue is full, which is a thread that has stopped answering and exactly FR-80's own case. The
+/// liveness timer puts the hook back within thirty seconds either way, so nothing is lost for
+/// ever; what used to be lost is the **evidence**: the reason stayed armed in [`PENDING_REASON`],
+/// the next message that happened by acted on it under a cause that could be half an hour old, and
+/// no number said a post had failed. [`request_rehook`] now takes its reason back and counts here.
+static REHOOK_POSTS_LOST: AtomicU32 = AtomicU32::new(0);
+
 /// Ticks of the liveness timer that reached the handler — NFR-10 measured rather than asserted.
 static LIVENESS_TICKS: AtomicU32 = AtomicU32::new(0);
 
@@ -2350,8 +2506,9 @@ static REINSTALLING: AtomicBool = AtomicBool::new(false);
 
 /// What the watchdog of FR-80 has done — counts, durations and a reason code.
 ///
-/// **SEC-01, SEC-07.** Nine numbers and one of five named words. No key code, no scan code, no
-/// character, and nothing derived from one.
+/// **SEC-01, SEC-07.** Thirteen numbers and one of five named words — the count said «nine» until
+/// task T-37-1 added the last two and counted them all. No key code, no scan code, no character,
+/// and nothing derived from one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Health {
     /// Completed reinstallations of the hook — [`RECOVERIES`].
@@ -2382,6 +2539,12 @@ pub struct Health {
     /// [`FLUSHES_WITHOUT_REQUEST`] for why the number is worth keeping anyway and what it may not
     /// be read as.
     pub flushes_without_request: u32,
+    /// [`WM_APP_REHOOK`] posts that reached no window — finding Н3, task T-37-1; see
+    /// [`REHOOK_POSTS_LOST`].
+    pub rehook_posts_lost: u32,
+    /// [`WM_APP_FLUSH`] posts that reached no window, each of them played later by the next
+    /// message of the input window — finding С23, task T-37-1; see [`FLUSH_POSTS_LOST`].
+    pub flush_posts_lost: u32,
 }
 
 /// What the watchdog of FR-80 has done so far.
@@ -2399,6 +2562,8 @@ pub fn health() -> Health {
         session_changes: SESSION_CHANGES.load(Ordering::Relaxed),
         power_resumes: POWER_RESUMES.load(Ordering::Relaxed),
         flushes_without_request: FLUSHES_WITHOUT_REQUEST.load(Ordering::Relaxed),
+        rehook_posts_lost: REHOOK_POSTS_LOST.load(Ordering::Relaxed),
+        flush_posts_lost: FLUSH_POSTS_LOST.load(Ordering::Relaxed),
     }
 }
 
@@ -2428,9 +2593,36 @@ pub fn hook_down() -> bool {
 /// Two requests that arrive before the input thread gets round to either collapse into one, and
 /// that is lossless: the reinstallation the second would have caused is the same operation as
 /// the first, and the reason the input thread ends up acting on is the later of the two.
+///
+/// # ⭐ A refused post takes its reason back and is counted — finding Н3, task T-37-1
+///
+/// Until this task the answer of the post was not looked at, and a refused one left the reason
+/// armed with nobody to deliver it: the next message that happened by, or the liveness tick up to
+/// thirty seconds later, acted on it under a cause that could by then be half an hour old, and no
+/// number said a post had been lost. Nothing was lost for ever — the timer puts the hook back
+/// regardless — and nothing is now either; what changed is that the cell says only what is really
+/// on its way, and [`REHOOK_POSTS_LOST`] says what was not.
+///
+/// The take-back is a **compare-and-exchange from this caller's own reason**, never a plain store
+/// of `None`: a request another caller armed and had delivered in between must not be undone by a
+/// refusal that is not its own. The one case that exchange cannot tell apart — the other caller
+/// armed the **same** reason — costs that request to the next tick of the timer, and it takes two
+/// callers inside one refused post; both of them are counted.
 pub fn request_rehook(reason: Reason) {
     PENDING_REASON.store(reason as u32, Ordering::Release);
-    crate::app::post_to_input_thread(WM_APP_REHOOK);
+
+    if !crate::app::post_to_input_thread(WM_APP_REHOOK) {
+        // An `Err` says the cell no longer holds this caller's reason — somebody else's request
+        // stands there, and it is left exactly where they put it.
+        let _ = PENDING_REASON.compare_exchange(
+            reason as u32,
+            Reason::None as u32,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+
+        REHOOK_POSTS_LOST.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// Asks the input thread to re-read the keyboard layout, because this program has just learnt
@@ -2502,7 +2694,13 @@ pub fn request_rehook(reason: Reason) {
 /// FR-10 table.
 fn probe_layout_after_absence() {
     RECOVERY_PROBES.fetch_add(1, Ordering::Relaxed);
-    crate::app::post_to_input_thread(WM_APP_LAYOUT);
+
+    // Task T-37-1: the answer is dropped, for the reason given above under «What it no longer is»
+    // — the first word typed after the absence reads FR-52 at the point of use, so a refused post
+    // converts nothing in the wrong direction. What waits is the cache half, for the next focus
+    // change or modifier release to ask again; the rehook posted beside this one is what counts a
+    // lost post, and it does.
+    let _ = crate::app::post_to_input_thread(WM_APP_LAYOUT);
 }
 
 /// Takes the hook off and puts it back — the single recovery path of FR-80, and the only place
@@ -3087,6 +3285,31 @@ mod fault {
     pub fn drop_the_hook(window: HWND) {
         disarm(window);
         crate::hook::uninstall();
+    }
+}
+
+/// **SEC-04a, feature `testing`, absent from the Release configuration.** The reader of the rehook
+/// cell and the arm an **accepted** post leaves behind — task **T-37-1**, finding Н3.
+///
+/// A test process has no input window, so every post it makes to the input thread is refused, and
+/// since task T-37-1 a refused [`super::request_rehook`] takes its reason back. The two
+/// `#[ignore]`d tests of `tests\watchdog.rs` that stage the far end of a rehook — the parked
+/// buffer and the unlock race — need the state a **delivered** post leaves, and this is the one
+/// place it can be put without a window of the product. The same shape, and the same reason, as
+/// `guard::stage`; acceptance criterion 8 of section 13 checks that the shipped binary carries no
+/// trace of it.
+#[cfg(feature = "testing")]
+pub mod stage {
+    use super::{Ordering, PENDING_REASON, Reason};
+
+    /// Leaves `reason` in the cell exactly as an accepted [`super::request_rehook`] leaves it.
+    pub fn arm_rehook(reason: Reason) {
+        PENDING_REASON.store(reason as u32, Ordering::Release);
+    }
+
+    /// The reason waiting for the input thread right now; [`Reason::None`] is "nothing".
+    pub fn pending_rehook() -> Reason {
+        Reason::from_code(PENDING_REASON.load(Ordering::Acquire))
     }
 }
 

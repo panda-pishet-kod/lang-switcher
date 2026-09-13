@@ -1550,6 +1550,13 @@ fn render_counters(out: &mut String) {
     );
     row_u32(out, "watchdog.session_changes", health.session_changes);
     row_u32(out, "watchdog.power_resumes", health.power_resumes);
+    // Task T-37-1, finding Н3: requests to put the hook back whose post reached no window. The
+    // reason is taken back rather than left armed, and this is where the loss shows.
+    row_u32(out, "watchdog.rehook_posts_lost", health.rehook_posts_lost);
+    // Task T-37-1, finding С23: focus changes whose `WM_APP_FLUSH` reached no window. Each of them
+    // was played by the next message of the input window instead, so the number is of focus
+    // changes that came late, never of focus changes lost.
+    row_u32(out, "watchdog.flush_posts_lost", health.flush_posts_lost);
 
     row_u32(
         out,

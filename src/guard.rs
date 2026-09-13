@@ -992,10 +992,11 @@ fn enter_pending() -> u32 {
 
 /// Asks the watcher thread to run a probe. Answers whether the request reached a window.
 ///
-/// The two callers ask for the same thing for different reasons — [`note_focus_moved`] because the
-/// focus moved, [`publish_exclusions`] because the list the last probe compared against has been
-/// replaced — and both need the same care on failure, which is why the request is one function and
-/// not two copies of four lines.
+/// The callers ask for the same thing for different reasons — [`note_focus_moved`] and its FR-14
+/// twin because the focus moved, [`publish_exclusions`] because the list the last probe compared
+/// against has been replaced, and [`request_startup_probe`] because nothing has been probed yet
+/// (task T-37-1) — and all of them need the same care on failure, which is why the request is one
+/// function and not several copies of four lines.
 ///
 /// ⚠ **A failed request takes back its own step and nothing else** — task **Т-22-2**. The two
 /// callers run on different threads (section 6.1 puts the configuration on the UI thread and the
@@ -1065,6 +1066,25 @@ fn request_probe() -> bool {
     );
 
     false
+}
+
+/// Asks the watcher thread for the first probe of the session, **without a focus change** —
+/// finding **Н38**, task **T-37-1**. Answers whether the request reached a window.
+///
+/// Called once, by `app::Window::create` on whichever thread publishes the last of the three
+/// windows: that is the first instant at which the watcher thread can hear the request and the
+/// input thread can hear the verdict. Until task T-37-1 the only start-up request was the one
+/// [`publish_exclusions`] makes, and the UI thread made it while the watcher window could still be
+/// missing — the post was refused, the ticket taken back, and the field the program starts in was
+/// never probed.
+///
+/// [`request_probe`] and its protocol unchanged: the ticket, the undo of task Т-22-2 and SEC-05's
+/// empty message are the same for this caller as for the others. Nothing about [`FIELD`] is
+/// touched — no generation is opened and no `Pending` is published, because no focus has moved;
+/// the verdict lands in the generation that is current when the probe runs, exactly as the verdict
+/// of a replaced exclusion list does.
+pub fn request_startup_probe() -> bool {
+    request_probe()
 }
 
 /// **SEC-04a, feature `testing`, absent from the Release configuration.** What `tests\guard.rs`
@@ -1237,7 +1257,15 @@ fn publish(verdict: Probe, generation: u32) -> bool {
 
     // The buffer is a thread-local of the input thread (section 6.3), so the thread that owns it
     // has to be the one that switches it. One `PostMessageW`, which queues and returns.
-    crate::app::post_to_input_thread(WM_APP_FIELD);
+    //
+    // Task T-37-1: the answer is dropped because the message carries nothing that could be lost.
+    // The verdict is already in `FIELD` — the swap above published it — and `app::window_proc`
+    // re-reads that word through `app::apply_buffering_gate` on every message of the input window,
+    // so this post is only a nudge, the standing `WM_APP_CONFIGURED` has for `[buffer] capacity`.
+    // A refusal moves the gate to the next message that thread takes, and a thread that refuses
+    // posts has no window yet — it installs no buffer before it has one — or is going, or is ten
+    // thousand messages behind, which is the input thread FR-80 takes the hook from.
+    let _ = crate::app::post_to_input_thread(WM_APP_FIELD);
 
     true
 }

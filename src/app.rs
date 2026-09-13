@@ -2114,18 +2114,26 @@ fn foreground_layout() -> LayoutId {
     crate::switch::current()
 }
 
-/// Posts `message` to the window of `role`, if that thread has one right now.
+/// Posts `message` to the window of `role`, if that thread has one right now, and answers whether
+/// the message was queued.
 ///
 /// The same shape as the wake-up loop of [`request_shutdown`] and for the same reason:
 /// `PostMessageW` queues and returns, so one thread can nudge another without either of them
 /// blocking, which is what section 6.3 and NFR-04 require of everything near the hook path.
-fn post_to(role: Role, message: u32) {
+///
+/// ⭐ **The answer — task T-37-1, findings С23 and Н3.** `false` is the two ways a post can fail:
+/// the thread has no window (it has not created one yet, or has already destroyed it), or
+/// `PostMessageW` refused — a window that went between the load and the call, or a queue that
+/// is full. The caller whose work hangs on the message arriving is the one that can do something
+/// about it, so the answer goes back to it; a caller for whom a lost message is harmless says so
+/// where it drops the answer.
+fn post_to(role: Role, message: u32) -> bool {
     let raw = WAKE_TARGETS[role.index()].load(Ordering::Acquire);
 
     if raw == NO_WINDOW {
-        // That thread has not created its window yet, or has already destroyed it. The first
-        // case is covered by the target re-reading what was published once it has one.
-        return;
+        // That thread has not created its window yet, or has already destroyed it. What the
+        // first case costs is the caller's to say — the answer below tells it.
+        return false;
     }
 
     // SAFETY: `raw` was published by `Window::create` from the handle CreateWindowExW returned
@@ -2142,14 +2150,19 @@ fn post_to(role: Role, message: u32) {
         )
     };
 
-    if let Err(error) = posted {
-        // NFR-13: examined, not discarded. A failure here means the target destroyed its window
-        // between the load above and this call, that is, it is already leaving.
-        report_non_critical("PostMessageW", &error);
+    match posted {
+        Ok(()) => true,
+        Err(error) => {
+            // NFR-13: examined, not discarded. A failure here means the target destroyed its
+            // window between the load above and this call — it is already leaving — or that its
+            // queue is full, which is a thread that has stopped taking messages.
+            report_non_critical("PostMessageW", &error);
+            false
+        }
     }
 }
 
-/// Posts `message` to the input thread's window, if that thread has one right now.
+/// Posts `message` to the input thread's window, and answers whether it was queued.
 ///
 /// The one thing module `watchdog` needs from this module and the only way it gets it. Its
 /// `WinEvent` callback runs on the watcher thread and the buffer it has news for is a
@@ -2160,8 +2173,15 @@ fn post_to(role: Role, message: u32) {
 /// Callable from a callback the system drives, which is the property that matters: it is
 /// [`post_to`] and therefore one atomic load and one `PostMessageW`, and `PostMessageW` queues
 /// and returns without blocking (NFR-04).
-pub(crate) fn post_to_input_thread(message: u32) {
-    post_to(Role::Input, message);
+///
+/// ⭐ **It answers since task T-37-1, and the answer is what that task is about** (findings С23
+/// and Н3). It used to return nothing, and its two neighbours below called the difference a
+/// virtue. But the two posts that most need to know — the flush of a focus change, whose three
+/// consequences hung on the message arriving, and the request to put the hook back, whose reason
+/// stayed armed with nobody to deliver it — are posts **to this thread**. Every caller now either
+/// uses the answer or drops it with `let _ =` and a sentence saying why a loss does no harm there.
+pub(crate) fn post_to_input_thread(message: u32) -> bool {
+    post_to(Role::Input, message)
 }
 
 /// Posts `message` to the watcher thread's window, and answers whether that thread had one.
@@ -2173,16 +2193,14 @@ pub(crate) fn post_to_input_thread(message: u32) {
 /// posts this, which is one atomic load and one `PostMessageW` — it queues and returns, so the
 /// thread that holds the hook does not block on COM (NFR-04, FR-80).
 ///
-/// The answer matters, which is why this returns something and [`post_to_input_thread`] does not:
-/// with no watcher window there is no method 3, and module `switch` has to take its pending
-/// target back rather than leave it for a later message to act on.
+/// The answer matters: with no watcher window there is nobody to do the work, and the caller has
+/// to take its pending request back rather than leave it for a later message to act on — which is
+/// what `guard::request_probe` does with its ticket. [`post_to_input_thread`] answers the same
+/// question in the same words since task T-37-1; until then this paragraph said it did not, and
+/// called that a virtue. Since the same task a refused `PostMessageW` is a `false` here as well,
+/// where it used to be answered `true`: a message that was not queued does not arrive either.
 pub(crate) fn post_to_watcher_thread(message: u32) -> bool {
-    if WAKE_TARGETS[Role::Watcher.index()].load(Ordering::Acquire) == NO_WINDOW {
-        return false;
-    }
-
-    post_to(Role::Watcher, message);
-    true
+    post_to(Role::Watcher, message)
 }
 
 /// Posts `message` to the UI thread's window, and answers whether that thread had one.
@@ -2196,16 +2214,13 @@ pub(crate) fn post_to_watcher_thread(message: u32) -> bool {
 /// which section 6.1 already gives the process's slow, deadline-free work and which is the thread
 /// `selection::listen` published as the one allowed to block.
 ///
-/// The answer matters, which is why this returns something and [`post_to_input_thread`] does not:
-/// with no UI window there is no selection path, and module `selection` has to take its pending
-/// plan back and let the press go down the typing-buffer path of FR-60 instead.
+/// The answer matters: with no UI window there is no selection path, and module `selection` has
+/// to take its pending plan back and let the press go down the typing-buffer path of FR-60
+/// instead. [`post_to_input_thread`] answers the same question in the same words since task
+/// T-37-1, and a refused `PostMessageW` is a `false` here too since then — see
+/// [`post_to_watcher_thread`].
 pub(crate) fn post_to_ui_thread(message: u32) -> bool {
-    if WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire) == NO_WINDOW {
-        return false;
-    }
-
-    post_to(Role::Ui, message);
-    true
+    post_to(Role::Ui, message)
 }
 
 /// Whether `hwnd` is the watcher thread's own window.
@@ -2328,6 +2343,46 @@ thread_local! {
     /// ring with a cache beside it.
     static PARKED_BUFFER: std::cell::RefCell<Option<crate::buffer::Recorder>> =
         const { std::cell::RefCell::new(None) };
+}
+
+/// Plays a focus change whose `WM_APP_FLUSH` was refused — what that message's branch of
+/// [`window_proc`] does, made at the moment the next message of the input window finds the request
+/// marked. **Finding С23, task T-37-1.**
+///
+/// # The same decisions, through the same doors
+///
+/// Nothing here decides anything anew, because deciding twice is deciding differently (the note
+/// above the fork of FR-14 in [`window_proc`] says so of that very fork):
+///
+/// * **FR-14** is `watchdog::take_typing_induced_flush`, asked about `WM_APP_FLUSH` — the message
+///   the request stands for — and its `true` gets what the exempt half of the branch gives:
+///   `guard::note_focus_moved_keeping_buffer`, the probe of FR-72 with the buffer left alone;
+/// * everything else gets the ordinary half: the flush of FR-10 resolved by FR-12
+///   (`watchdog::apply_flush`), then `guard::note_focus_moved` and [`park_buffer`] — the probe, and
+///   the unconditional wipe decision **П-2** puts on a focus change (SPEC §10, record 10).
+///
+/// Then the gate, as the branch has it. The two are idempotent, so the gate that runs again at the
+/// tail of the procedure for most messages decides nothing twice; for the messages that return
+/// before the tail — the hotkey, the liveness tick, the rehook, the wipe — this is the only gate
+/// there is, and it is the reason the replay is not left to the tail.
+///
+/// # Counted once
+///
+/// The request leaves the cell through the one door it has, the swap of
+/// `watchdog::take_pending_flush`, whichever of the two functions opens it: `window_flushes_taken`
+/// moves once, `flushes_without_request` does not move, and `focus_after_typing` moves for the
+/// exempt kind as it would have for the message. A buffer that FR-70 has parked takes nothing out —
+/// exactly as it takes nothing out of the message itself — and the request waits for the next flush.
+fn replay_lost_flush() {
+    if crate::watchdog::take_typing_induced_flush(crate::watchdog::WM_APP_FLUSH) {
+        crate::guard::note_focus_moved_keeping_buffer();
+    } else {
+        crate::watchdog::apply_flush(crate::watchdog::WM_APP_FLUSH, LPARAM(0));
+        crate::guard::note_focus_moved();
+        park_buffer();
+    }
+
+    apply_buffering_gate();
 }
 
 /// Applies what module `guard` has published to the typing buffer of this thread — **FR-70,
@@ -2718,7 +2773,10 @@ fn publish_buffer_section(buffer: &settings::Buffer) {
         Ordering::Release,
     );
 
-    post_to(Role::Input, WM_APP_CONFIGURED);
+    // Task T-37-1: the answer is dropped for the reason the paragraph above gives — the message
+    // is a wake-up, the values are in the atomics, and the input thread reads them after every
+    // message it takes and once more at the end of its start-up.
+    let _ = post_to(Role::Input, WM_APP_CONFIGURED);
 }
 
 /// The message loop. Returns when [`PostQuitMessage`] has been reached, that is, when this
@@ -2896,7 +2954,59 @@ impl Window {
         // store per thread per process, so the ordering costs nothing that could be measured.
         WAKE_TARGETS[role.index()].store(handle.0 as usize, Ordering::SeqCst);
 
+        // ⭐ **Finding Н38, task T-37-1** — the start-up probe of FR-70 is asked for by whichever
+        // thread publishes the last of the three windows. See the function.
+        request_startup_probe_once_every_window_exists();
+
         Ok(Self { handle, role })
+    }
+}
+
+/// Whether the start-up probe of FR-70 has been asked for — [`request_startup_probe_once_every_window_exists`].
+static STARTUP_PROBE_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Asks the watcher thread for the first probe of the password field, once, as soon as all three
+/// windows are published — **finding Н38, task T-37-1, variant 1 «заказывать проверку позже»**.
+///
+/// # What was lost
+///
+/// The one probe that no focus change asks for is the one `guard::publish_exclusions` asks for,
+/// and at start-up it is asked for by the UI thread while the three threads race to publish their
+/// windows. A watcher window that is not there yet refuses the post, the ticket is taken back —
+/// correctly, that is task Т-22-2 and it is not undone here — and nothing asks again: the field the
+/// person starts in is never probed, the verdict stays at the default of FR-73, «буферизовать», and
+/// a password typed there before the first focus change goes into the ring (SEC-06).
+///
+/// # Why here, and why all three
+///
+/// The register of windows is where "every thread can hear a message" is known, and
+/// [`Window::create`] is where it becomes true — so the thread that publishes the **last** window
+/// is the one that asks. All three and not only the watcher's: the probe is run on the watcher
+/// thread, but its verdict is delivered to the **input** thread (`guard::WM_APP_FIELD`), and a
+/// verdict nudging a window that does not exist would wait for whatever message reached that
+/// window next.
+///
+/// A configuration that is published after this — the UI window came last — asks for its own
+/// probe through `guard::publish_exclusions`, which then finds the watcher window and is accepted;
+/// the start-up probe may therefore run without the exclusion list of FR-84 and be followed by one
+/// that has it. Two probes at start-up and never none.
+///
+/// # The ordering
+///
+/// `SeqCst`, and for the reason [`request_shutdown`] writes out: the three stores in
+/// [`Window::create`] are `SeqCst`, so the three loads here put all six operations in one total
+/// order, and the thread whose store comes last in it sees the other two. The swap makes "once"
+/// hold when two threads see all three at once.
+fn request_startup_probe_once_every_window_exists() {
+    let every_window_exists = WAKE_TARGETS
+        .iter()
+        .all(|target| target.load(Ordering::SeqCst) != NO_WINDOW);
+
+    if every_window_exists && !STARTUP_PROBE_ASKED.swap(true, Ordering::SeqCst) {
+        // The answer is `false` when the watcher window went away between the load above and the
+        // post — the process is leaving, and a probe for a program that is leaving is not owed —
+        // or when its queue is already full, in which case the first focus change asks again.
+        let _ = crate::guard::request_startup_probe();
     }
 }
 
@@ -3018,6 +3128,36 @@ unsafe extern "system" fn window_proc(
             // watcher window is refused by the register of our own windows exactly as it was
             // refused by the missing buffer, and one at the input window buys what it always did.
             answer_device_change(message, is_input_window(hwnd));
+
+            // ⭐ **Finding С23, task T-37-1 (idea И-21) — the work of a focus change is bound to
+            // the cell, not to the message.** A `WM_APP_FLUSH` whose post was refused used to take
+            // three things with it in silence: the flush of FR-10, the wipe of SEC-02 and the new
+            // probe of FR-70 — a password field entered that way was taken for the field before
+            // it. The watcher thread now marks such a request (`watchdog::PENDING_LOST`), and the
+            // first message of the input window that finds the mark plays it, whatever message
+            // that is.
+            //
+            // **Here, and not in the tail beside the gate**, because the tail is not reached by
+            // every message: `handle_watchdog_message` returns early for the liveness tick, the
+            // rehook and the wipe, and `hook::handle_input_message` for the hotkey — and the hotkey
+            // is exactly the message that must not find the previous field's strokes still in the
+            // ring. And **before** this message's own flush, because the lost event is the older
+            // of the two.
+            //
+            // ⚠ **An addition, not a replacement** (SEC-05, decision П-2): `WM_APP_FLUSH` is left
+            // out and its own branch below is untouched, unconditional park and all. And only a
+            // **marked** request is played — see `watchdog::PENDING_LOST` for why a request whose
+            // message is still on its way must be left to that message, FR-14 above all.
+            //
+            // NFR-01: one atomic load while nothing is marked, on every message of every window —
+            // the price `apply_configured_capacity` below already pays for the same idea.
+            if crate::watchdog::flush_post_lost()
+                && message != crate::watchdog::WM_APP_FLUSH
+                && is_input_window(hwnd)
+                && crate::watchdog::claim_lost_flush()
+            {
+                replay_lost_flush();
+            }
 
             // FR-10, FR-12, FR-13 — task T-03-3. The two asynchronous flush sources of the
             // FR-10 table arrive here: a mouse button as the `WM_INPUT` of Raw Input, and the
@@ -3184,7 +3324,9 @@ unsafe extern "system" fn window_proc(
 
                     if let Some(press) = press_outcome(buffered, crate::guard::refuses(), replaced)
                     {
-                        post_to(Role::Ui, sound_message_for(press));
+                        // Task T-37-1: dropped — a refused post costs one click of FR-100 that
+                        // is not heard, and nothing of the press itself, which is already done.
+                        let _ = post_to(Role::Ui, sound_message_for(press));
                     }
                 }
             }
@@ -3304,7 +3446,11 @@ unsafe extern "system" fn window_proc(
             // out of three and two counts, never a character.
             if let Some(outcome) = crate::selection::handle_selection_message(hwnd, message) {
                 if outcome.falls_back() {
-                    post_to(Role::Input, crate::selection::WM_APP_BUFFER_PATH);
+                    // Task T-37-1: dropped, and not because nothing is lost — the press is then
+                    // answered by no path at all. A post to the input window is refused only when
+                    // that window is not there or its queue is full, and an input thread in either
+                    // state converts nothing from its buffer anyway; the person presses again.
+                    let _ = post_to(Role::Input, crate::selection::WM_APP_BUFFER_PATH);
                 } else {
                     // **FR-100, task Т-21-5.** A conversion of the selection path is the one
                     // outcome that does *not* travel on to the typing-buffer path, so it is the
@@ -4953,5 +5099,99 @@ mod tests {
         }
 
         shutdown_requested()
+    }
+
+    /// ⭐ **Task T-37-1, finding Н38 — the probe of FR-70 is asked for once every window exists,
+    /// and not only when a focus change asks for one.**
+    ///
+    /// # What was lost
+    ///
+    /// The one probe that is not tied to a focus change is the one `guard::publish_exclusions`
+    /// asks for, and at start-up it is asked for by the UI thread while the three threads race to
+    /// publish their windows. When the watcher window is not published yet the post is refused,
+    /// the ticket is taken back (task Т-22-2, correctly), and nothing asks again: the field the
+    /// person starts in is never probed, and the verdict stays the default of FR-73 — «буферизовать»
+    /// — until the first focus change. A password typed there goes into the ring (SEC-06).
+    ///
+    /// # What is staged, and why it is the start-up of the finding
+    ///
+    /// The three windows are created by the product's own `Window::create`, under the product's
+    /// own class, in the order the finding is about — the watcher window **last** — and nothing
+    /// else asks for a probe while they come up: exactly the state a start-up is in after the UI
+    /// thread's request was refused. The assertion is the one thing the watcher thread needs in
+    /// order to run the probe on its first turn of the loop: a `WM_APP_PROBE` in its queue.
+    ///
+    /// ⚠ **The message is peeked and never dispatched**, so no probe runs here: running one is
+    /// entering the three levels of FR-72 against whatever window the machine has in front, which
+    /// is a state of the room and not of the code (the header of `tests\guard.rs` says so). That
+    /// the probe itself then runs without a single focus change is the live acceptance of this
+    /// task — the dump's `guard.probes` above zero after a restart with the focus left alone.
+    ///
+    /// # The instrument's control
+    ///
+    /// A request posted while the watcher window exists **is** seen by the peek, and a second peek
+    /// finds the queue drained — otherwise a red below could be an instrument that sees nothing.
+    #[test]
+    fn the_first_probe_is_asked_for_once_every_window_exists() {
+        use windows::Win32::UI::WindowsAndMessaging::{PM_REMOVE, PeekMessageW};
+
+        fn probe_is_queued(window: HWND) -> bool {
+            let mut message = MSG::default();
+
+            // SAFETY: `message` is a live local of exactly the type the call fills, and `window`
+            // is a window this very thread created and has not destroyed — `PeekMessageW` filters
+            // on the calling thread's queue and dereferences nothing else of ours. `PM_REMOVE`
+            // takes the message out without dispatching it, so no window procedure runs.
+            unsafe {
+                PeekMessageW(
+                    &raw mut message,
+                    Some(window),
+                    crate::guard::WM_APP_PROBE,
+                    crate::guard::WM_APP_PROBE,
+                    PM_REMOVE,
+                )
+            }
+            .as_bool()
+        }
+
+        let instance = module_instance().expect("the module handle");
+        let _class = WindowClass::register(instance).expect("the window class of the process");
+
+        {
+            let watcher = Window::create(Role::Watcher, instance).expect("a watcher window");
+
+            assert!(
+                post_to_watcher_thread(crate::guard::WM_APP_PROBE),
+                "control: the watcher window is published, so the post is accepted"
+            );
+            assert!(
+                probe_is_queued(watcher.handle),
+                "control: the instrument sees a request that was posted"
+            );
+            assert!(
+                !probe_is_queued(watcher.handle),
+                "control: and a second look finds the queue drained"
+            );
+        }
+
+        let input = Window::create(Role::Input, instance).expect("an input window");
+        let ui = Window::create(Role::Ui, instance).expect("a UI window");
+        let watcher = Window::create(Role::Watcher, instance).expect("a watcher window");
+
+        let asked = probe_is_queued(watcher.handle);
+        let asked_again = probe_is_queued(watcher.handle);
+
+        // Unpublished before the verdict, so that a failure here leaves no window of this class
+        // standing in the register for another test of this binary to post to.
+        drop(watcher);
+        drop(ui);
+        drop(input);
+
+        assert!(
+            asked,
+            "Н38: all three windows are published and no probe was asked for — the field the \
+             program starts in stays at the default of FR-73 until the first focus change"
+        );
+        assert!(!asked_again, "one start-up probe, and not one per window");
     }
 }

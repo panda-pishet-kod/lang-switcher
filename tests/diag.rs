@@ -1745,3 +1745,70 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         "the dump carries a `guard.` or `selection.` row the structures do not have"
     );
 }
+
+/// **Task T-37-1, findings С23 and Н3 — every field of `watchdog::Health` is a row of the dump.**
+///
+/// The instrument of task T-34-4 above, built for the one structure it did not take apart. Task
+/// T-37-1 adds two fields to `Health` — the posts to the input thread that reached no window, one
+/// for the flush of a focus change and one for the request to put the hook back — and SPEC gives a
+/// counter that is not in the dump no reader at all. The structure is taken apart **field by field,
+/// without `..`**, so a fifteenth field refuses to compile this test until it is named here, and
+/// the assertion that runs then asks the dump for its row.
+///
+/// `last_reason` is a word and not a number, so it is carried as the word the dump prints. The
+/// other direction is not asserted by counting `watchdog.` rows: the dump prints none that `Health`
+/// does not have, but the prefix is not reserved to it the way `guard.` is to `guard::Counters`.
+#[test]
+fn every_field_of_the_health_of_the_watchdog_is_a_row_of_the_dump() {
+    let lang_switcher::watchdog::Health {
+        recoveries,
+        silent_removals,
+        absent_at_check,
+        install_failures,
+        last_reason,
+        last_gap_us,
+        max_gap_us,
+        liveness_ticks,
+        desktop_switches,
+        session_changes,
+        power_resumes,
+        flushes_without_request,
+        rehook_posts_lost,
+        flush_posts_lost,
+    } = lang_switcher::watchdog::health();
+
+    let rows = [
+        ("watchdog.recoveries", recoveries.to_string()),
+        ("watchdog.silent_removals", silent_removals.to_string()),
+        ("watchdog.absent_at_check", absent_at_check.to_string()),
+        ("watchdog.install_failures", install_failures.to_string()),
+        ("watchdog.last_reason", last_reason.name().to_owned()),
+        ("watchdog.last_gap_us", last_gap_us.to_string()),
+        ("watchdog.max_gap_us", max_gap_us.to_string()),
+        ("watchdog.liveness_ticks", liveness_ticks.to_string()),
+        ("watchdog.desktop_switches", desktop_switches.to_string()),
+        ("watchdog.session_changes", session_changes.to_string()),
+        ("watchdog.power_resumes", power_resumes.to_string()),
+        (
+            "watchdog.flushes_without_request",
+            flushes_without_request.to_string(),
+        ),
+        ("watchdog.rehook_posts_lost", rehook_posts_lost.to_string()),
+        ("watchdog.flush_posts_lost", flush_posts_lost.to_string()),
+    ];
+
+    let text = diag::render();
+    let mut missing: Vec<&str> = Vec::new();
+
+    for (name, value) in &rows {
+        match row_named(&text, name) {
+            Some(row) => println!("{row}   (the reader answered {value})"),
+            None => missing.push(name),
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "rows of watchdog::Health missing from the dump: {missing:?}"
+    );
+}
