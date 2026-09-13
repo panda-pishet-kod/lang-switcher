@@ -1975,11 +1975,16 @@ thread_local! {
     /// and initialises `UIAutomationCore.dll` the first time, and paying that on every focus
     /// change would put a measurable cost on `Alt+Tab` for nothing.
     ///
-    /// ⚠ **Released explicitly**, by [`release_automation`], which
-    /// [`crate::app::thread_body`] calls while the apartment is still entered. A thread-local
-    /// holding a COM interface would otherwise be dropped by the thread-local destructor, which
-    /// runs **after** the `CoUninitialize` of that apartment — releasing an interface into an
-    /// apartment that no longer exists.
+    /// ⚠ **Released by a guard**, [`ProbeClientRelease`], which `app::watcher_body` declares right
+    /// after the apartment and which therefore drops **before** it on every way out of the thread,
+    /// the unwinding of a panic included (task T-37-2, finding Н36). A thread-local holding a COM
+    /// interface would otherwise be dropped by the thread-local destructor, which runs **after**
+    /// the `CoUninitialize` of that apartment — releasing an interface into an apartment that no
+    /// longer exists. Until that task the release was a line after the message loop, and a panic
+    /// unwound past it.
+    ///
+    /// ⚠ **Borrowed only to hand out a copy of the pointer** — task T-37-2, finding С24; see
+    /// [`automation_client`].
     static AUTOMATION: RefCell<Option<IUIAutomation>> = const { RefCell::new(None) };
 }
 
@@ -1996,9 +2001,62 @@ thread_local! {
 /// FR-72 asks — `IsPasswordProperty` — of whatever has the focus, browsers, Electron and Qt
 /// included. There is nothing after it to defer to, so its `false` is the verdict `Ordinary` and
 /// its silence is the verdict `Undetermined`.
+///
+/// # ⭐ No borrow of the cell while a call leaves the thread — task T-37-2, finding С24
+///
+/// Both calls below go into another process, and the watcher thread is an STA: while it waits,
+/// Windows delivers **sent** messages to its windows. Measured before the repair (premise П1 of
+/// stage E37): a `WM_APP_PROBE` sent — not posted — to the waiting thread is entered **inside** the
+/// first probe 33 times out of 42, and this function used to hold `cell.borrow_mut()` across both
+/// calls, so the second entry met a borrowed cell — which a `RefCell` answers with a panic, not a
+/// refusal. Any process at this integrity level can send that message (SEC-05), and a probe is
+/// pending whenever the focus moved while the first one waited: a program that another process
+/// cannot terminate could be brought down by one message.
+///
+/// So the cell is borrowed for exactly as long as [`automation_client`] needs to hand out a copy
+/// of the pointer, and both calls are made on that copy, with nothing borrowed. A probe entered
+/// inside this one finds the cell free, takes its own copy and asks its own questions; its verdict
+/// and this one's are two publications, and [`publish`] sorts them out as it sorts any two.
 fn is_password_element() -> Option<bool> {
+    let client = automation_client()?;
+
+    // SAFETY: `client` is a copy of the interface `CoCreateInstance` returned into this thread's
+    // slot — `Clone` on a COM interface is an `AddRef`, taken by `automation_client` on this very
+    // thread — and it is used, and released when this function returns, on the thread that created
+    // it and inside the apartment it was created in, which is the whole obligation an STA
+    // interface pointer carries. The call takes no arguments of ours and returns a new reference
+    // the `Result` owns. NFR-13: the result is examined — no focused element is an ordinary
+    // outcome on a desktop that is switching windows, and a provider that ran out of
+    // `UIA_TIMEOUT_MS` reports a failing `HRESULT` here, which is exactly the FR-73 case.
+    let element = unsafe { client.GetFocusedElement() }.ok()?;
+
+    // SAFETY: `element` is the interface the call above returned, used on the same thread and in
+    // the same apartment. The property read takes no arguments of ours. NFR-13: examined — a
+    // provider that does not implement the property, or that stopped answering, is a failing
+    // `HRESULT` and therefore `None`, which FR-73 turns into buffering on.
+    let is_password = unsafe { element.CurrentIsPassword() }.ok()?;
+
+    Some(is_password.as_bool())
+}
+
+/// The client of level 3 for the calling thread, created on first use — **a copy of the pointer,
+/// with the borrow of the cell already given back**. Task T-37-2, finding С24.
+///
+/// The borrow lives only across the creation and the `Clone` (an `AddRef`), neither of which
+/// leaves this process: `CoCreateInstance` of an in-process server registered `ThreadingModel =
+/// Both` — measured on the machine of stage E37, so it is created in this STA itself, with no
+/// proxy and no call to another apartment — and two setters on it. What
+/// crosses into another process — `GetFocusedElement` and `CurrentIsPassword` — is made by
+/// [`is_password_element`] on the copy, outside.
+///
+/// `try_borrow_mut` and not `borrow_mut`, **on top of** that and not instead of it (variant 2 of
+/// the finding, allowed beside variant 1): should a probe ever be entered inside the creation
+/// itself, it is answered «no answer» — FR-73, buffering on — rather than with a panic.
+fn automation_client() -> Option<IUIAutomation> {
     AUTOMATION.with(|cell| {
-        let mut slot = cell.borrow_mut();
+        let Ok(mut slot) = cell.try_borrow_mut() else {
+            return None;
+        };
 
         if slot.is_none() {
             match automation() {
@@ -2016,24 +2074,7 @@ fn is_password_element() -> Option<bool> {
             }
         }
 
-        let client = slot.as_ref()?;
-
-        // SAFETY: `client` is the interface `CoCreateInstance` returned into this thread's slot,
-        // and this runs on the thread that created it, inside the apartment it was created in —
-        // which is the whole obligation an STA interface pointer carries. The call takes no
-        // arguments of ours and returns a new reference the `Result` owns. NFR-13: the result is
-        // examined — no focused element is an ordinary outcome on a desktop that is switching
-        // windows, and a provider that ran out of `UIA_TIMEOUT_MS` reports a failing `HRESULT`
-        // here, which is exactly the FR-73 case.
-        let element = unsafe { client.GetFocusedElement() }.ok()?;
-
-        // SAFETY: `element` is the interface the call above returned, used on the same thread and
-        // in the same apartment. The property read takes no arguments of ours. NFR-13: examined
-        // — a provider that does not implement the property, or that stopped answering, is a
-        // failing `HRESULT` and therefore `None`, which FR-73 turns into buffering on.
-        let is_password = unsafe { element.CurrentIsPassword() }.ok()?;
-
-        Some(is_password.as_bool())
+        slot.clone()
     })
 }
 
@@ -2083,17 +2124,67 @@ fn automation() -> WinResult<IUIAutomation> {
     Ok(client)
 }
 
-/// Releases the UI Automation client of the calling thread.
+/// The watcher thread's hold on the client of level 3 — **released when this value is dropped**.
+/// Task T-37-2, finding Н36.
 ///
-/// Called by [`crate::app::thread_body`] on the watcher thread after its message loop has ended
-/// and **before** the COM apartment is left. See [`AUTOMATION`] for why the thread-local
-/// destructor is too late.
+/// # Why a guard and not a line
 ///
-/// Idempotent, and a no-op on every thread that never created a client — which is every thread
-/// but one.
-pub fn release_automation() {
-    AUTOMATION.with(|cell| {
-        cell.replace(None);
+/// The client must be released inside the apartment it was created in (see [`AUTOMATION`]). Until
+/// this task that was a line in `app::thread_body` after the message loop, and the apartment was a
+/// guard: a panic on the watcher thread unwound past the line, the apartment's `Drop` ran
+/// `CoUninitialize`, and the client was released afterwards by the thread-local destructor into an
+/// apartment that no longer existed — undefined behaviour wherever a panic unwinds (a debug build
+/// and every test binary; the Release profile of section 3.2 aborts instead). Declared **after**
+/// the apartment, this value is dropped **before** it, and the language guarantees that order on
+/// every way out — a return, a `?` and an unwinding alike — which the position of a line never did.
+///
+/// # Opaque on purpose
+///
+/// It lives here and reaches `app` as a name that spells nothing of UI Automation:
+/// `tests\guard.rs::no_ui_automation_name_occurs_anywhere_near_the_hook` keeps every such name in
+/// this file. The explicit call the thread used to make is gone; [`release_automation`] is private
+/// and has exactly one caller, the `Drop` below.
+///
+/// `!Send` through the marker: the value must be dropped on the thread whose thread-local it
+/// empties, which is the thread that created it.
+#[must_use = "dropped at once, it releases nothing at the end of the thread"]
+pub struct ProbeClientRelease {
+    _this_thread_only: core::marker::PhantomData<*const ()>,
+}
+
+impl ProbeClientRelease {
+    /// The hold of the calling thread. Declare it right after the COM apartment is entered.
+    pub fn on_this_thread() -> Self {
+        Self {
+            _this_thread_only: core::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for ProbeClientRelease {
+    fn drop(&mut self) {
+        release_automation();
+    }
+}
+
+/// Releases the client of level 3 of the calling thread.
+///
+/// Called by the `Drop` of [`ProbeClientRelease`] and by nothing else. Idempotent, and a no-op on
+/// every thread that never created a client — which is every thread but one.
+///
+/// It runs inside a `Drop`, possibly while a panic unwinds, where a second panic aborts the
+/// process: so the thread-local is asked with `try_with` and the cell with `try_borrow_mut`, and a
+/// cell that cannot be had is left to the thread-local destructor rather than turned into an abort.
+/// Neither refusal is reachable from this program — the guard drops in the frame of the thread body,
+/// before any thread-local is destroyed, and no borrow of the cell outlives [`automation_client`].
+fn release_automation() {
+    #[cfg(test)]
+    crate::app::note_teardown("client");
+
+    let _ = AUTOMATION.try_with(|cell| {
+        if let Ok(mut slot) = cell.try_borrow_mut() {
+            slot.take();
+        }
     });
 }
 

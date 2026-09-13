@@ -1377,28 +1377,59 @@ fn join_all(threads: Vec<JoinHandle<WinResult<()>>>) -> bool {
     clean
 }
 
+/// The body of the watcher thread, with what it serves passed in — `serve_window(Role::Watcher)`
+/// in the program, and a body that panics in the test of task T-37-2.
+///
+/// # ⭐ Two guards, in the order that releases the probe's client inside its apartment
+///
+/// The watcher thread is the only COM apartment in the process, and it is an STA: section 6.1 puts
+/// the level-3 probe of FR-72 here, and that probe requires a single-threaded apartment. Its client
+/// lives in a thread-local of this thread (module `guard`), and a COM interface must be released
+/// inside the apartment it was created in; a thread-local destructor runs at thread exit, **after**
+/// the `CoUninitialize` in `ComApartment::drop`.
+///
+/// Until task T-37-2 (finding Н36) the release was a line after `serve_window`, and a panic on this
+/// thread unwound past it: the apartment was left first and the client was released into an
+/// apartment that no longer existed — undefined behaviour wherever a panic unwinds. The release is
+/// now `guard::ProbeClientRelease`, declared **after** the apartment and therefore dropped
+/// **before** it — an order the language guarantees on a return, on a `?` and on an unwinding
+/// alike, which the position of a line never did. The explicit call is gone, not kept beside the
+/// guard.
+///
+/// Split out of [`thread_body`] so that a test can make `serve` panic and read the order the two
+/// guards ran in — `ComApartment::drop` and the guard's release each write it down, in tests only.
+fn watcher_body(serve: impl FnOnce() -> WinResult<()>) -> WinResult<()> {
+    let _apartment = ComApartment::enter_sta()?;
+    let _probe_client = crate::guard::ProbeClientRelease::on_this_thread();
+
+    serve()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The steps of a thread's teardown, in the order they ran — tests of this crate only, task
+    /// T-37-2. Per thread, so that two tests reading it cannot read each other.
+    static TEARDOWN: std::cell::RefCell<Vec<&'static str>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Writes one step of the teardown of the calling thread into its journal — tests only.
+///
+/// `try_with`: it is called from a `Drop` that may be running while a panic unwinds, and a journal
+/// that is already gone must not become a second panic.
+#[cfg(test)]
+pub(crate) fn note_teardown(step: &'static str) {
+    let _ = TEARDOWN.try_with(|journal| journal.borrow_mut().push(step));
+}
+
 /// The body of every one of the three threads.
 fn thread_body(role: Role) -> WinResult<()> {
     match role {
         // The watcher thread is the only COM apartment in the process, and it is an STA:
         // section 6.1 puts UI Automation here, and UI Automation requires a single-threaded
-        // apartment. Task T-06-1 may move this initialisation next to the code that needs
-        // it; until then it belongs to whoever creates the thread.
-        Role::Watcher => {
-            let _apartment = ComApartment::enter_sta()?;
-
-            let served = serve_window(role);
-
-            // Task **T-06-1**. The UI Automation client of level 3 of FR-72 lives in a
-            // thread-local of this thread, and a COM interface must be released inside the
-            // apartment it was created in. A thread-local destructor runs at thread exit, which
-            // is **after** the `CoUninitialize` in `ComApartment::drop` — that is, after the
-            // apartment it belongs to has gone. This line is the release, at the one instant
-            // that is both after the last probe and before the apartment is left.
-            crate::guard::release_automation();
-
-            served
-        }
+        // apartment. The apartment and the release of the probe's client are two guards of
+        // [`watcher_body`] since task T-37-2 — see there for why their order is the point.
+        Role::Watcher => watcher_body(|| serve_window(role)),
         // Second of the three edits of task T-06-4. Section 6.1 gives file input-output to
         // the UI thread and forbids it to the input thread, so the one place the journal may
         // reach a file is here, on this thread, once, after `serve_window` has returned.
@@ -3604,10 +3635,16 @@ impl ComApartment {
 
 impl Drop for ComApartment {
     fn drop(&mut self) {
+        // Task T-37-2: the order the teardown ran in, for the test of `watcher_body`.
+        #[cfg(test)]
+        note_teardown("apartment");
+
         // SAFETY: balances exactly one successful CoInitializeEx on this same thread — the
-        // value is created and dropped inside `thread_body` and never leaves it — and it
-        // runs after the message loop has returned, so no COM object of this apartment is
-        // still in use. The call returns nothing, so NFR-13 has no result to check.
+        // value is created and dropped inside `watcher_body` and never leaves it — and it
+        // runs after the message loop has returned or unwound, and after the guard declared
+        // below it there has released the one COM object of this apartment that outlives a
+        // probe (task T-37-2), so none is still in use. The call returns nothing, so NFR-13 has
+        // no result to check.
         unsafe { CoUninitialize() };
     }
 }
@@ -5193,5 +5230,62 @@ mod tests {
              program starts in stays at the default of FR-73 until the first focus change"
         );
         assert!(!asked_again, "one start-up probe, and not one per window");
+    }
+
+    /// ⭐ **Task T-37-2, finding Н36 — the watcher thread releases the client of level 3 inside
+    /// its apartment on every way out, the panicking one included.**
+    ///
+    /// # What was wrong
+    ///
+    /// The apartment was a guard and the release was a line after `serve_window`. A panic on the
+    /// watcher thread unwinds past that line: the apartment's `Drop` runs `CoUninitialize`, and the
+    /// client left in its thread-local is released later by the thread-local destructor, into an
+    /// apartment that no longer exists — undefined behaviour, reachable wherever a panic unwinds
+    /// (a debug build and every test binary; the Release profile aborts instead).
+    ///
+    /// # How it is seen
+    ///
+    /// The two steps write themselves into a journal of the thread as they run — `ComApartment::drop`
+    /// writes «apartment», `guard::release_automation` writes «client» — and the body of the
+    /// watcher thread is driven twice on threads of its own: once returning normally, which is the
+    /// **positive control** (the journal sees the release when it happens), and once with the
+    /// thing it serves panicking. The order is the verdict: «client» before «apartment».
+    #[test]
+    fn the_watcher_thread_releases_the_client_before_it_leaves_the_apartment_even_in_a_panic() {
+        fn journal_of(body: fn() -> WinResult<()>) -> (bool, Vec<&'static str>) {
+            thread::spawn(move || {
+                let unwound = std::panic::catch_unwind(|| {
+                    let _ = watcher_body(body);
+                })
+                .is_err();
+
+                let journal = TEARDOWN.with(|journal| journal.borrow().clone());
+
+                (unwound, journal)
+            })
+            .join()
+            .expect("the thread hands its journal back")
+        }
+
+        let (unwound, normal) = journal_of(|| Ok(()));
+
+        assert!(!unwound, "control: the normal body does not panic");
+        assert_eq!(
+            normal,
+            ["client", "apartment"],
+            "control: on the normal way out the journal sees the release, and before the apartment"
+        );
+
+        let (unwound, panicking) = journal_of(|| panic!("staged: a panic on the watcher thread"));
+
+        assert!(
+            unwound,
+            "control: the staged panic unwound through the body"
+        );
+        assert_eq!(
+            panicking,
+            ["client", "apartment"],
+            "Н36: a panic on the watcher thread must release the client before the apartment is left"
+        );
     }
 }

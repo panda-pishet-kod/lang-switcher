@@ -1567,3 +1567,77 @@ fn both_early_exits_of_the_program_write_the_journal_to_the_file() {
         "there is exactly one place in this program that overrides the journal switch"
     );
 }
+
+/// ⭐ **Task T-37-2, finding С24 — level 3 holds no borrow of its cell while a call leaves the
+/// thread.**
+///
+/// # What was measured before the repair
+///
+/// The watcher thread is an STA. While it waits inside a UI Automation client call, Windows does
+/// not deliver **posted** messages to its windows — and does deliver **sent** ones: premise П1 of
+/// stage E37, `scratchpad-E37\posylki-p1-reentry*.log`, 0 re-entries out of 42 for a posted
+/// `WM_APP+1` and 33 out of 42 for one sent with `SendNotifyMessageW`, against a provider that was
+/// slow either on `WM_GETOBJECT` or on `IsPassword`. Any process at this integrity level can send
+/// `WM_APP_PROBE` to the watcher window (SEC-05), so a probe that is pending while the first one
+/// waits is entered a second time **inside** the first — and `is_password_element` held
+/// `cell.borrow_mut()` across both of its calls, which on a second entry is not a refusal but a
+/// panic. The same probe in the shape this test asks for: 33 re-entries, 0 conflicts.
+///
+/// # What is swept
+///
+/// The body of `is_password_element` names no borrow of the cell at all, and still makes both
+/// calls; the borrow that remains is in `automation_client`, which makes neither. The cut is the
+/// **product half** of the file, so the needles below cannot be found in the unit tests of the
+/// module, and it is bounded at the item's closing brace, so it cannot run on into the next one.
+///
+/// ⚠ The control of the cut: both calls are found in the body taken.
+#[test]
+fn level_three_holds_no_borrow_of_its_cell_while_a_call_leaves_the_thread() {
+    let source = source_of("guard.rs");
+    let product = source
+        .split_once("\n#[cfg(test)]\nmod tests {")
+        .expect("src\\guard.rs ends in its own test module")
+        .0;
+
+    let body_of = |signature: &str| -> &str {
+        let at = product
+            .find(signature)
+            .unwrap_or_else(|| panic!("src\\guard.rs must contain {signature:?}"));
+        let rest = &product[at..];
+        let end = rest
+            .find("\n}\n")
+            .expect("the item closes with a brace in column 0");
+        &rest[..end]
+    };
+
+    let probe = body_of("fn is_password_element() -> Option<bool> {");
+
+    assert!(
+        !code_lines_with(probe, "GetFocusedElement()").is_empty()
+            && !code_lines_with(probe, "CurrentIsPassword()").is_empty(),
+        "control: both calls into another process must be in the body taken"
+    );
+
+    for borrow in ["AUTOMATION", "borrow_mut", "borrow()"] {
+        let hits = code_lines_with(probe, borrow);
+
+        assert!(
+            hits.is_empty(),
+            "С24: `is_password_element` holds its cell while its calls leave the thread — a \
+             second probe entered inside the first panics on the borrow: {hits:?}"
+        );
+    }
+
+    let client = body_of("fn automation_client() -> Option<IUIAutomation> {");
+
+    assert!(
+        !code_lines_with(client, "AUTOMATION.with").is_empty(),
+        "the borrow lives in `automation_client`"
+    );
+    for call in ["GetFocusedElement", "CurrentIsPassword"] {
+        assert!(
+            code_lines_with(client, call).is_empty(),
+            "С24: and nothing in `automation_client` calls another process ({call})"
+        );
+    }
+}
