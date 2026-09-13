@@ -88,9 +88,29 @@ embed-resource = "3.0.11"
 testing = []
 
 # Carried over verbatim from SPEC section 3.2.
+#
+# ⭐ Task T-41-12, finding Н134, решение 125.2 added `debug-assertions`. This section turns off
+# two mechanisms of the program, and until that task only ONE of the two keys said so:
+#
+#   panic = "abort"          turns off the panic guard of FR-99 (src\hook.rs, #[cfg(panic =
+#                            "unwind")]) -- and it was written down
+#   debug-assertions = false turns off the self-termination of FR-97 (src\app.rs,
+#                            #[cfg(debug_assertions)] over `mod debug_timeout`) -- and it was
+#                            NOT, standing instead on cargo's default for this profile
+#
+# The asymmetry was the whole of the finding. Somebody turning debug assertions on in the
+# release profile to chase a bug, and forgetting to turn them off, would ship a resident
+# program that quietly exits after ten minutes -- and no instrument would have noticed, because
+# the acceptance read the mechanism out of the SOURCE and not out of the built file. Criterion 8
+# of section 13 now looks for `LANGSW_DEBUG_TIMEOUT_SEC` in the binary itself.
+#
+# ⚠ The list of `[features]` and the list of crates are closed (SEC-03); this section is not one
+# of them -- it is carried over from SPEC section 3.2 word for word, and решение 125.2 authorises
+# exactly this one line.
 [profile.release]
-opt-level     = 3
-lto           = "fat"
-codegen-units = 1
-panic         = "abort"
-strip         = true
+opt-level        = 3
+lto              = "fat"
+codegen-units    = 1
+panic            = "abort"
+strip            = true
+debug-assertions = false

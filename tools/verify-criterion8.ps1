@@ -17,11 +17,18 @@
        "release without testing" measurement found the channel name, because what lay on disk
        was the build WITH the feature. Fact 8 of section 9 of STATE.md.
 
-    2. It runs a POSITIVE CONTROL over every one of the five strings. Absence on its own
+    2. It runs a POSITIVE CONTROL over every one of the six strings. Absence on its own
        proves nothing at all: the Release profile has `strip = true`, and a single typo in a
        search pattern gives the same answer as a string that is genuinely not there. Each
-       string must be FOUND in the build with the feature and MISSING from the build without
-       it. Decision R-25, question 29.
+       string must be MISSING from the shipping build and FOUND in the build that is supposed
+       to carry it. Decision R-25, question 29.
+
+       There are TWO such builds, because the six strings are switched off by two different
+       mechanisms. Five are behind the `testing` feature and are controlled by measurement B.
+       The sixth, LANGSW_DEBUG_TIMEOUT_SEC, is behind `#[cfg(debug_assertions)]` and is
+       controlled by measurement B2 -- a release built with debug assertions forced on. Giving
+       it the feature's control would have been a control that cannot fail: the string is
+       rightly absent from the `testing` build too.
 
     3. It searches in UTF-8 AND in UTF-16LE. Rust puts string literals in the binary as UTF-8,
        but a literal that went into a Win32 call through PCWSTR can be sitting there wide. A
@@ -37,16 +44,26 @@
        is the signature, and signing the wrong file is not an error anything downstream would
        catch.
 
-    THE LIST OF FIVE STRINGS IS CLOSED by decisions R-28 and R-53. Do not shorten it and do not
-    extend it: if a sixth appears, that is a decision for the controller, not for this file.
+    THE LIST OF STRINGS IS CLOSED by decisions R-28 and R-53. Do not shorten it and do not
+    extend it: a new entry is a decision for the owner, not for this file.
+
+    The SIXTH entry was added by task T-41-12 under decision 125.2 -- finding H134 of the audit
+    of 2026-09-04. The Release profile turns off two mechanisms of the program and used to write
+    down only one of them: `panic = "abort"` for the panic guard of FR-99 was there, and
+    `debug-assertions = false` for the self-termination of FR-97 was not, standing on cargo's
+    default instead. Turn debug assertions on in the release profile to chase a bug, forget to
+    turn them off, and a resident program ships that quietly exits after ten minutes -- and no
+    instrument would have noticed, because the acceptance read the mechanism out of the SOURCE
+    rather than out of the built file. It is read out of the built file now.
 
     Written without a single Cyrillic character on purpose. The tooling that writes files here
     puts them in UTF-8 with NO byte order mark, Windows PowerShell 5.1 then reads such a .ps1
     in the system ANSI code page, and the parse dies on the first Russian word. Decision R-05.
     Windows PowerShell 5.1, not 7.x: no `&&`, no `??`, no ternary operator, no -AsHashtable.
 
-    Exit code: 0 only if all five strings are absent without the feature, all five are present
-    with it, and the dependency sets agree. Otherwise non-zero, with the reasons listed.
+    Exit code: 0 only if all six strings are absent from the shipping build, the five of the
+    `testing` feature are present in the build with it, the sixth is present in the build with
+    debug assertions on, and the dependency sets agree. Otherwise non-zero, reasons listed.
 
     Example:
       .\verify-criterion8.ps1
@@ -84,12 +101,23 @@ $ReleaseExe = Join-Path $env:CARGO_TARGET_DIR 'release\LangSwitcher.exe'
 # which declares it as a raw literal r"\\.\pipe\Lang_Switcher.control." -- the backslashes are
 # part of the value. A single-quoted PowerShell string keeps them as they are; a
 # double-quoted one would too, but single quotes make that impossible to get wrong later.
+#
+# --- The sixth string, and why its control is a different one ----------------------------
+# Added by task T-41-12 (finding H134, decision 125.2). LANGSW_DEBUG_TIMEOUT_SEC is the
+# environment variable of the self-termination of FR-97, and it is NOT behind the `testing`
+# feature at all: it is behind `#[cfg(debug_assertions)]`. So the positive control of
+# measurement B cannot speak for it -- a release build with the feature still has debug
+# assertions off, and the string is rightly missing there too. Its control is measurement B2
+# instead: a release built with debug assertions forced ON, where it MUST be present.
+#
+# The `Control` field says which of the two halves proves the absence measured in A.
 $Strings = @(
-    @{ Name = 'SEC-04a channel name';        Value = '\\.\pipe\Lang_Switcher.control.'; Source = 'src\control.rs, PIPE_NAME_PREFIX' },
-    @{ Name = 'LANGSW_TESTING_REPORT';           Value = 'LANGSW_TESTING_REPORT';           Source = 'src\app.rs' },
-    @{ Name = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Value = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Source = 'src\hook.rs' },
-    @{ Name = 'LANGSW_TESTING_PANIC_ON_VK';      Value = 'LANGSW_TESTING_PANIC_ON_VK';      Source = 'src\hook.rs' },
-    @{ Name = 'LANGSW_TESTING_DROP_HOOK_MS';     Value = 'LANGSW_TESTING_DROP_HOOK_MS';     Source = 'src\watchdog.rs' }
+    @{ Name = 'SEC-04a channel name';        Value = '\\.\pipe\Lang_Switcher.control.'; Source = 'src\control.rs, PIPE_NAME_PREFIX'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_REPORT';           Value = 'LANGSW_TESTING_REPORT';           Source = 'src\app.rs';      Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Value = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Source = 'src\hook.rs';     Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_PANIC_ON_VK';      Value = 'LANGSW_TESTING_PANIC_ON_VK';      Source = 'src\hook.rs';     Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_DROP_HOOK_MS';     Value = 'LANGSW_TESTING_DROP_HOOK_MS';     Source = 'src\watchdog.rs'; Control = 'testing' },
+    @{ Name = 'LANGSW_DEBUG_TIMEOUT_SEC';        Value = 'LANGSW_DEBUG_TIMEOUT_SEC';        Source = 'src\app.rs, mod debug_timeout'; Control = 'debug-assertions' }
 )
 
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -195,8 +223,12 @@ $testingBytes = [System.IO.File]::ReadAllBytes($ReleaseExe)
 $testing = ConvertTo-ByteString $testingBytes
 
 Write-Host ''
-Write-Host 'Expected: FOUND in at least one encoding.'
+Write-Host 'Expected: FOUND in at least one encoding. Only the strings whose control this is.'
 foreach ($s in $Strings) {
+    if ($s.Control -ne 'testing') {
+        Write-Host ("  {0,-8} {1,-38} control is B2, not this one" -f 'SKIPPED', $s.Name)
+        continue
+    }
     $u8 = Test-BinaryHasString -Haystack $testing -Value $s.Value -Encoding 'UTF-8'
     $u16 = Test-BinaryHasString -Haystack $testing -Value $s.Value -Encoding 'UTF-16LE'
     $found = ($u8 -or $u16)
@@ -214,6 +246,62 @@ foreach ($s in $Strings) {
 
 if ($hashShipping -eq $hashTesting) {
     $Failures.Add('the two builds hashed identically, which means the second build did not replace the first on disk')
+}
+
+# ==========================================================================================
+# Measurement B2 -- the positive control of the sixth string. Task T-41-12, finding H134.
+#
+# The self-termination of FR-97 is behind `#[cfg(debug_assertions)]`, and the Release profile
+# now says `debug-assertions = false` out loud. A mechanism switched off by a default nobody
+# wrote down was the finding; a mechanism switched off by a line in the profile is a decision.
+#
+# This measurement is what makes the absence in A mean something: built with debug assertions
+# forced ON through RUSTFLAGS, which overrides the profile key (measured: the string appears),
+# the binary MUST carry the variable. Without this half, a typo in the needle would read exactly
+# like a mechanism that is not there.
+# ==========================================================================================
+$debugControlled = @($Strings | Where-Object { $_.Control -eq 'debug-assertions' })
+if ($debugControlled.Count -gt 0) {
+    Write-Host ''
+    Write-Host '--- B2. Release with debug assertions forced ON -- POSITIVE CONTROL ----'
+    Write-Host 'RUSTFLAGS overrides the profile key, so this is the build a person chasing a bug'
+    Write-Host 'would have made -- and the one that used to pass this criterion in silence.'
+    $savedFlags = $env:RUSTFLAGS
+    try {
+        $env:RUSTFLAGS = '-C debug-assertions=on'
+        Invoke-Cargo -CargoArgs @('build', '--release') -What 'cargo build --release (debug assertions on)'
+    } finally {
+        if ($null -eq $savedFlags) {
+            Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
+        } else {
+            $env:RUSTFLAGS = $savedFlags
+        }
+    }
+    $hashAsserted = Measure-Binary -Path $ReleaseExe -Label 'Release, debug assertions on:'
+    $assertedBytes = [System.IO.File]::ReadAllBytes($ReleaseExe)
+    $asserted = ConvertTo-ByteString $assertedBytes
+
+    Write-Host ''
+    Write-Host 'Expected: FOUND in at least one encoding.'
+    foreach ($s in $debugControlled) {
+        $u8 = Test-BinaryHasString -Haystack $asserted -Value $s.Value -Encoding 'UTF-8'
+        $u16 = Test-BinaryHasString -Haystack $asserted -Value $s.Value -Encoding 'UTF-16LE'
+        $found = ($u8 -or $u16)
+        $where = 'none'
+        if ($u8 -and $u16) { $where = 'UTF-8 + UTF-16LE' }
+        elseif ($u8)       { $where = 'UTF-8' }
+        elseif ($u16)      { $where = 'UTF-16LE' }
+        $verdict = 'PRESENT'
+        if (-not $found) { $verdict = 'MISSING' }
+        Write-Host ("  {0,-8} {1,-38} found in: {2}" -f $verdict, $s.Name, $where)
+        if (-not $found) {
+            $Failures.Add(("the positive control failed for `"{0}`": the build with debug assertions ON does not carry it either, so the absence measured in A means nothing" -f $s.Name))
+        }
+    }
+
+    if ($hashAsserted -eq $hashShipping) {
+        $Failures.Add('the build with debug assertions on hashed the same as the shipping one, which means it did not replace it on disk')
+    }
 }
 
 # ==========================================================================================
@@ -282,7 +370,7 @@ if ($SkipFinalRebuild) {
     } else {
         Write-Host ''
         Write-Host '  Same SHA-256 as measurement A: the shipping binary is byte for byte the one'
-        Write-Host '  the five strings were measured against.'
+        Write-Host '  the six strings were measured against.'
     }
     if ($hashFinal -eq $hashTesting) {
         $Failures.Add('after the final rebuild the binary on disk is still the one with the `testing` feature')
@@ -294,8 +382,9 @@ Write-Host ''
 Write-Host '======================================================================'
 if ($Failures.Count -eq 0) {
     Write-Host ' RESULT: PASS'
-    Write-Host ' All five strings are absent from the shipping build, all five are present in'
-    Write-Host ' the build with the feature, and the dependency sets agree.'
+    Write-Host ' All six strings are absent from the shipping build; the five of the `testing`'
+    Write-Host ' feature are present in the build with it, the sixth is present in the build with'
+    Write-Host ' debug assertions on, and the dependency sets agree.'
     Write-Host '======================================================================'
     exit 0
 }
