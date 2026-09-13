@@ -14548,7 +14548,30 @@ fn selected_row(hwnd: HWND) -> Option<usize> {
 }
 
 /// Copies the ticks out of the control and into the rows.
-fn read_cycle_checks(hwnd: HWND, rows: &mut [LayoutRow]) {
+///
+/// ⚠ **Only when the control answers for every row — task T-43-13, finding Н113.** A message to
+/// a list that is not there answers zero, and zero is also the state of an unticked row: until
+/// that task a list that never answered read as a list with nothing ticked, and «ОК» then wrote
+/// the file honestly with an empty cycle — a setting the person never touched, taken away by a
+/// message that did not arrive. So the list is asked how many rows it has first, and a list that
+/// does not answer for exactly the rows the dialog holds leaves them as they were: the dialog
+/// keeps what it last knew, which is the answer «не знаю» should get where «нет» would destroy
+/// something.
+///
+/// No counter of the refusal: task T-43-13 invents none (the counters of Э34 do not reach this
+/// place), and the rows left alone are the whole of the lever. A list that answers for its rows
+/// and still fails one `LVM_GETITEMSTATE` is not told apart — that is variant 2 of the finding,
+/// not taken.
+///
+/// Public so that `tests\settings.rs` can drive the very function «ОК» calls, over a window of
+/// its own — the precedent of [`enable_by_mode`].
+pub fn read_cycle_checks(hwnd: HWND, rows: &mut [LayoutRow]) {
+    let count = send_to(hwnd, IDC_CYCLE_LIST, LVM_GETITEMCOUNT, 0, 0);
+
+    if usize::try_from(count).ok() != Some(rows.len()) {
+        return;
+    }
+
     for (index, row) in rows.iter_mut().enumerate() {
         let state = send_to(
             hwnd,

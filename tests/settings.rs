@@ -3777,6 +3777,219 @@ fn the_cycle_list_is_no_tab_stop_in_the_pair_mode_and_is_one_in_the_cycle_mode()
     );
 }
 
+/// **Task T-43-13, finding Н113 — «the message did not arrive» is not «the tick is off».**
+///
+/// «ОК» asks the layout list which rows are ticked, and the answer was read so that a list that
+/// never answered and a list whose rows are all unticked came to the same thing: every row
+/// unticked. The file was then rewritten honestly with an empty cycle — a setting the person never
+/// touched, taken away by a message that did not arrive. The repair asks the list how many rows it
+/// has first, and a list that does not answer for exactly the rows the dialog holds leaves them as
+/// they were.
+///
+/// Three windows of the test's own, the precedent of task T-39-11 — [`settings::read_cycle_checks`]
+/// finds the list by its identifier, `IDC_CYCLE_LIST` = 1024:
+/// 1. **no list at all** — every message to it answers zero; the ticks must survive;
+/// 2. **a list of one row** for two rows of the dialog — the counts part company; the ticks must
+///    survive;
+/// 3. **the positive control**: a real `SysListView32` of two rows ticked «on, off» — the reading
+///    is not switched off by the repair, and «on, on» comes back as «on, off».
+#[test]
+fn a_cycle_list_that_does_not_answer_for_its_rows_leaves_the_ticks_as_they_were() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Controls::{
+        ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx,
+        LIST_VIEW_ITEM_STATE_FLAGS, LVIF_STATE, LVIS_STATEIMAGEMASK, LVITEMW, LVM_INSERTITEMW,
+        LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMSTATE, LVS_EX_CHECKBOXES, LVS_REPORT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, HMENU, SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WS_CHILD, WS_POPUP,
+    };
+    use windows::core::w;
+
+    /// A popup of the test's own, destroyed on the way out with its children.
+    struct Popup(HWND);
+
+    impl Drop for Popup {
+        fn drop(&mut self) {
+            // SAFETY: the window was created on this thread by this test and is destroyed once.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    fn popup() -> Popup {
+        // SAFETY: a system class, no parent and no creation data; the handle is owned by `Popup`.
+        Popup(
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    None,
+                    WS_POPUP,
+                    0,
+                    0,
+                    240,
+                    120,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .expect("a hidden popup must be creatable"),
+        )
+    }
+
+    /// A report list view under `IDC_CYCLE_LIST` with one row per entry of `ticks`.
+    fn list_with(parent: &Popup, ticks: &[bool]) -> HWND {
+        let request = INITCOMMONCONTROLSEX {
+            dwSize: u32::try_from(size_of::<INITCOMMONCONTROLSEX>()).unwrap_or(0),
+            dwICC: ICC_LISTVIEW_CLASSES,
+        };
+
+        // SAFETY: a fully initialised structure of this frame whose `dwSize` describes it.
+        assert!(
+            unsafe { InitCommonControlsEx(&request) }.as_bool(),
+            "the list view class must register"
+        );
+
+        // SAFETY: a registered class, the popup as parent and the identifier in the menu slot.
+        let list = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("SysListView32"),
+                None,
+                WS_CHILD | WINDOW_STYLE(LVS_REPORT),
+                0,
+                0,
+                200,
+                100,
+                Some(parent.0),
+                Some(HMENU(std::ptr::without_provenance_mut(1024))),
+                None,
+                None,
+            )
+        }
+        .expect("the list view must be creatable");
+
+        // SAFETY: plain numbers in, the answer (the previous style) dropped.
+        unsafe {
+            SendMessageW(
+                list,
+                LVM_SETEXTENDEDLISTVIEWSTYLE,
+                Some(windows::Win32::Foundation::WPARAM(
+                    LVS_EX_CHECKBOXES as usize,
+                )),
+                Some(windows::Win32::Foundation::LPARAM(
+                    LVS_EX_CHECKBOXES as isize,
+                )),
+            )
+        };
+
+        for (index, tick) in ticks.iter().enumerate() {
+            let item = LVITEMW {
+                iItem: i32::try_from(index).expect("a small index"),
+                ..Default::default()
+            };
+
+            // SAFETY: `item` lives on this frame for the call, which copies it.
+            unsafe {
+                SendMessageW(
+                    list,
+                    LVM_INSERTITEMW,
+                    None,
+                    Some(windows::Win32::Foundation::LPARAM(
+                        std::ptr::from_ref(&item) as isize,
+                    )),
+                )
+            };
+
+            let state = LVITEMW {
+                mask: LVIF_STATE,
+                state: LIST_VIEW_ITEM_STATE_FLAGS(if *tick {
+                    settings::CHECKED_IMAGE
+                } else {
+                    settings::UNCHECKED_IMAGE
+                }),
+                stateMask: LVIS_STATEIMAGEMASK,
+                ..Default::default()
+            };
+
+            // SAFETY: as above.
+            unsafe {
+                SendMessageW(
+                    list,
+                    LVM_SETITEMSTATE,
+                    Some(windows::Win32::Foundation::WPARAM(index)),
+                    Some(windows::Win32::Foundation::LPARAM(
+                        std::ptr::from_ref(&state) as isize,
+                    )),
+                )
+            };
+        }
+
+        list
+    }
+
+    let ticked_both = || {
+        vec![
+            LayoutRow {
+                layout: RU,
+                checked: true,
+            },
+            LayoutRow {
+                layout: EN,
+                checked: true,
+            },
+        ]
+    };
+
+    // 1. No list at all.
+    let bare = popup();
+    let mut rows = ticked_both();
+
+    settings::read_cycle_checks(bare.0, &mut rows);
+
+    println!("no list: {rows:?}");
+
+    assert_eq!(
+        rows,
+        ticked_both(),
+        "a list that never answered must not read as a list with nothing ticked — the cycle \
+         would be written empty"
+    );
+
+    // 2. A list of one row for the two rows of the dialog.
+    let short = popup();
+    let _ = list_with(&short, &[false]);
+    let mut rows = ticked_both();
+
+    settings::read_cycle_checks(short.0, &mut rows);
+
+    println!("one row for two: {rows:?}");
+
+    assert_eq!(
+        rows,
+        ticked_both(),
+        "a list that does not answer for every row of the dialog is not read at all"
+    );
+
+    // 3. The positive control: the list answers for both rows, and its ticks are taken.
+    let whole = popup();
+    let _ = list_with(&whole, &[true, false]);
+    let mut rows = ticked_both();
+
+    settings::read_cycle_checks(whole.0, &mut rows);
+
+    println!("two rows for two: {rows:?}");
+
+    assert_eq!(
+        rows.iter().map(|row| row.checked).collect::<Vec<_>>(),
+        vec![true, false],
+        "a list that answers for every row is read, tick for tick"
+    );
+}
+
 /// **Task T-42-6, finding Н112, решение 124.3** — the ninth tick of the cycle list does not go
 /// in, and the refusal is heard as well as seen.
 ///
