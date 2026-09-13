@@ -3990,6 +3990,208 @@ fn a_cycle_list_that_does_not_answer_for_its_rows_leaves_the_ticks_as_they_were(
     );
 }
 
+/// **Task T-43-14, finding Н111 — a state image list nobody took is not left nobody's.**
+///
+/// The dialog builds the two-cell image list of the layout list and hands it over with
+/// `LVM_SETIMAGELIST`; from then on the control owns it. A message that did not arrive — no list,
+/// not the window it should be — left the set with no owner at all: the program no longer held it
+/// and the control never got it, and its bitmaps lived until the process ended. The repair is an
+/// owner from the first instant (`settings::ImageList`, the shape of `theme::HotBrush`) that lets
+/// go only when the control is **seen** to hold the list.
+///
+/// Counted, because a leaked GDI object gives neither an error nor a red test: a hidden popup with
+/// **no** list in it is handed [`settings::install_check_images`] 256 times, and the GDI objects
+/// of the process must end where they started. ⚠ The count is the whole process's, and the other
+/// tests of this binary run beside this one. Measured on the unrepaired tree: **four** objects per
+/// lost list, 11 → 267 for 64 rounds, alone (`--test-threads=1`, per the mandate) and in the
+/// parallel run alike. Measured on the repaired tree: 1 → 1 alone, and 37 → 63 in the parallel run
+/// — twenty-six objects of the neighbours' own, which a first slack of sixteen could not hold.
+/// Hence 256 rounds and a slack of 128: an eighth of the smallest leak the rounds could show.
+#[test]
+fn a_state_image_list_the_control_never_took_is_freed_and_not_lost() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_POPUP,
+    };
+    use windows::core::w;
+
+    /// The popup, destroyed on the way out — panic or no panic.
+    struct Popup(HWND);
+
+    impl Drop for Popup {
+        fn drop(&mut self) {
+            // SAFETY: the window was created on this thread by this test and is destroyed once.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    const ROUNDS: u32 = 256;
+
+    // SAFETY: a system class, no parent and no creation data; the handle is owned by `Popup`.
+    let bare = Popup(
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                240,
+                120,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden popup must be creatable"),
+    );
+
+    let count = || {
+        // SAFETY: a pseudo-handle that needs no closing; the call reads a counter of this process.
+        unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+    };
+
+    // One round first, so that whatever GDI and comctl32 allocate once for this process are
+    // already allocated when the baseline is taken — the приём of the counting test of
+    // `tests\theme.rs`.
+    settings::install_check_images(bare.0);
+
+    let before = count();
+
+    for _ in 0..ROUNDS {
+        settings::install_check_images(bare.0);
+    }
+
+    let after = count();
+
+    println!(
+        "GDI objects of this process: {before} before, {after} after {ROUNDS} image lists handed \
+         to a window with no list in it"
+    );
+
+    assert!(
+        after <= before + 128,
+        "an image list the control never took must be freed by its owner: {before} objects \
+         before, {after} after {ROUNDS} rounds"
+    );
+
+    // The other road, and the reason the owner lets go at all: a real list view that takes the
+    // list must be **left holding it** — a list freed under a control that still draws with it
+    // would be the opposite defect. The control is asked what it holds, and what it holds must be
+    // a list of this program's cells (the size of a freshly built one; the pair
+    // `LVS_EX_CHECKBOXES` makes is the system's own size).
+    {
+        use windows::Win32::UI::Controls::{
+            ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, ImageList_GetIconSize,
+            ImageList_GetImageCount, InitCommonControlsEx, LVM_GETIMAGELIST,
+            LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES, LVS_REPORT, LVSIL_STATE,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            HMENU, SendMessageW, WINDOW_STYLE, WS_CHILD,
+        };
+
+        let request = INITCOMMONCONTROLSEX {
+            dwSize: u32::try_from(size_of::<INITCOMMONCONTROLSEX>()).unwrap_or(0),
+            dwICC: ICC_LISTVIEW_CLASSES,
+        };
+
+        // SAFETY: a fully initialised structure of this frame whose `dwSize` describes it.
+        assert!(unsafe { InitCommonControlsEx(&request) }.as_bool());
+
+        // SAFETY: a registered class, the popup as parent and the identifier in the menu slot.
+        let list = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("SysListView32"),
+                None,
+                WS_CHILD | WINDOW_STYLE(LVS_REPORT),
+                0,
+                0,
+                200,
+                100,
+                Some(bare.0),
+                Some(HMENU(std::ptr::without_provenance_mut(1024))),
+                None,
+                None,
+            )
+        }
+        .expect("the list view must be creatable");
+
+        // SAFETY: plain numbers in; the answer (the previous style) dropped.
+        unsafe {
+            SendMessageW(
+                list,
+                LVM_SETEXTENDEDLISTVIEWSTYLE,
+                Some(windows::Win32::Foundation::WPARAM(
+                    LVS_EX_CHECKBOXES as usize,
+                )),
+                Some(windows::Win32::Foundation::LPARAM(
+                    LVS_EX_CHECKBOXES as isize,
+                )),
+            )
+        };
+
+        settings::install_check_images(bare.0);
+
+        // SAFETY: plain numbers in; the answer is the handle the control holds for its state
+        // images, borrowed and not freed here.
+        let held = unsafe {
+            SendMessageW(
+                list,
+                LVM_GETIMAGELIST,
+                Some(windows::Win32::Foundation::WPARAM(
+                    usize::try_from(LVSIL_STATE).unwrap_or(0),
+                )),
+                None,
+            )
+        }
+        .0;
+
+        assert_ne!(held, 0, "the control must hold a state image list");
+
+        let size_of_list = |list: windows::Win32::UI::Controls::HIMAGELIST| {
+            let (mut cx, mut cy) = (0i32, 0i32);
+
+            // SAFETY: `list` is live — held by the control or owned below — and both pointers are
+            // to live locals the call fills.
+            let asked = unsafe {
+                ImageList_GetIconSize(
+                    list,
+                    Some(std::ptr::from_mut(&mut cx)),
+                    Some(std::ptr::from_mut(&mut cy)),
+                )
+            };
+
+            assert!(asked.as_bool(), "a live image list answers its cell size");
+
+            (cx, cy)
+        };
+
+        let held = windows::Win32::UI::Controls::HIMAGELIST(held);
+        // A window that is not a dialog maps no dialog units, so the cell the popup was given is
+        // the one built for a row height of zero — built here the same way, and freed by its owner.
+        let fresh = settings::build_check_image_list(0).expect("the state image list must build");
+
+        println!(
+            "the control holds a list of {:?} cells, {} of them; a fresh list of this program is \
+             {:?}",
+            size_of_list(held),
+            // SAFETY: `held` is the list the control holds and still draws with.
+            unsafe { ImageList_GetImageCount(held) },
+            size_of_list(fresh.handle())
+        );
+
+        assert_eq!(
+            size_of_list(held),
+            size_of_list(fresh.handle()),
+            "the list the control holds must be this program's own — handed over and left alive"
+        );
+    }
+}
+
 /// **Task T-42-6, finding Н112, решение 124.3** — the ninth tick of the cycle list does not go
 /// in, and the refusal is heard as well as seen.
 ///
@@ -7740,9 +7942,7 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
 /// ground of their own and must leave every pixel of it exactly as it was.
 #[test]
 fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
-    use windows::Win32::UI::Controls::{
-        ILD_NORMAL, ImageList_Destroy, ImageList_Draw, ImageList_GetImageCount,
-    };
+    use windows::Win32::UI::Controls::{ILD_NORMAL, ImageList_Draw, ImageList_GetImageCount};
 
     let source = settings_module_source();
 
@@ -7760,13 +7960,16 @@ fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
          of one exact colour and the square could not be smoothed"
     );
     assert!(
-        source.contains("ImageList_AddMasked(list, bitmap, CHECK_CELL_KEY)"),
+        // ⚠ `list.handle()` since task T-43-14: the list is an owner (`settings::ImageList`) now.
+        source.contains("ImageList_AddMasked(list.handle(), bitmap, CHECK_CELL_KEY)"),
         "the hole must still come from the documented masked add"
     );
 
     // The row height of the layout list at 96 DPI, near enough: what the cell is measured
-    // for is the row, and the test only needs a cell big enough to see.
-    let list = settings::build_check_image_list(19).expect("the state image list must build");
+    // for is the row, and the test only needs a cell big enough to see. The owner frees the list
+    // when it goes out of scope (task T-43-14).
+    let owned = settings::build_check_image_list(19).expect("the state image list must build");
+    let list = owned.handle();
 
     // SAFETY: `list` is the live list just built and owned by this frame.
     assert_eq!(
@@ -7806,8 +8009,8 @@ fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
         96 * 96
     );
 
-    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
-    let _ = unsafe { ImageList_Destroy(Some(list)) };
+    // The list was built by us and handed to no control: its owner frees it, exactly once.
+    drop(owned);
 
     assert!(
         touched.is_empty(),
@@ -7865,22 +8068,22 @@ fn the_state_image_cell_gives_back_the_indent_the_list_view_adds_after_it() {
 
     // И лист, который модуль действительно строит, — той же ширины: это то, что видит контрол.
     let cell_height = 22;
-    let list =
+    let owned =
         settings::build_check_image_list(cell_height).expect("the state image list must build");
     let (mut cx, mut cy) = (0i32, 0i32);
 
-    // SAFETY: `list` is the live list just built and owned by this frame; both pointers are to
-    // live locals the call fills.
+    // SAFETY: the list is live and owned by this frame; both pointers are to live locals the call
+    // fills.
     let asked = unsafe {
         windows::Win32::UI::Controls::ImageList_GetIconSize(
-            list,
+            owned.handle(),
             Some(std::ptr::from_mut(&mut cx)),
             Some(std::ptr::from_mut(&mut cy)),
         )
     };
 
-    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
-    let _ = unsafe { windows::Win32::UI::Controls::ImageList_Destroy(Some(list)) };
+    // The list was built by us and handed to no control: its owner frees it (task T-43-14).
+    drop(owned);
 
     assert!(asked.as_bool(), "the list must answer its own cell size");
     assert_eq!(
@@ -17140,10 +17343,12 @@ fn the_row_painter_takes_its_rectangle_from_the_control_and_not_from_the_message
 #[test]
 fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
     use windows::Win32::UI::Controls::{
-        CLR_NONE, ILD_NORMAL, ImageList_Destroy, ImageList_Draw, ImageList_SetBkColor,
+        CLR_NONE, ILD_NORMAL, ImageList_Draw, ImageList_SetBkColor,
     };
 
-    let list = settings::build_check_image_list(19).expect("the state image list must build");
+    // The owner frees the list when it goes out of scope (task T-43-14).
+    let owned = settings::build_check_image_list(19).expect("the state image list must build");
+    let list = owned.handle();
     let ground = COLORREF(0x0040_3020);
 
     let mut counts = Vec::new();
@@ -17178,8 +17383,8 @@ fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
         counts.push(touched);
     }
 
-    // SAFETY: the list was built by us, handed to no control, and is freed exactly once.
-    let _ = unsafe { ImageList_Destroy(Some(list)) };
+    // The list was built by us and handed to no control: its owner frees it, exactly once.
+    drop(owned);
 
     assert!(
         counts[0] > 0,

@@ -13976,7 +13976,10 @@ fn clear_state_image_ground(hwnd: HWND) {
 /// [`set_row_check`]/[`read_cycle_checks`] keep speaking `LVIS_STATEIMAGEMASK` — the
 /// participation mechanism of FR-31 is the same mechanism, and it now picks a picture for
 /// [`draw_cycle_row`] to paint instead of a picture for the control to blit.
-fn install_check_images(hwnd: HWND) {
+///
+/// Public so that `tests\settings.rs` can hand it a window with no list in it and count what is
+/// left behind — the precedent of [`read_cycle_checks`].
+pub fn install_check_images(hwnd: HWND) {
     // The height of a row of the layout list — [`LAYOUT_ROW_HEIGHT_DLU`] dialog units of this
     // window (task T-11-16). It travels down the build because the **cell** of the state image
     // list is what a report list view takes its row height from; a refused `MapDialogRect`
@@ -14008,26 +14011,109 @@ fn install_check_images(hwnd: HWND) {
         IDC_CYCLE_LIST,
         LVM_SETIMAGELIST,
         usize::try_from(LVSIL_STATE).unwrap_or(0),
-        list.0,
+        list.handle().0,
     );
 
-    // The first swap answers the pair `LVS_EX_CHECKBOXES` created, and it is ours to free
-    // once the control has let go. The list *currently* installed is deliberately never
-    // destroyed here: the
-    // control destroys the image lists it holds when it is itself destroyed — the template
-    // carries no `LVS_SHAREIMAGELISTS`, which is the one style that would keep it from
-    // doing so.
-    // The control has just painted its own ground into the cells: `LVM_SETIMAGELIST` hands the
-    // list the colour the control erases with. Taken straight back out — see
-    // [`clear_state_image_ground`], and the measurement in its doc comment.
-    clear_state_image_ground(hwnd);
-
     if previous != 0 {
+        // The first swap answers the pair `LVS_EX_CHECKBOXES` created, and it is ours to free
+        // once the control has let go.
+        //
         // SAFETY: `previous` is the handle the control just answered and no longer holds;
         // it is freed exactly once, here. The `BOOL` is examined in words and dropped —
         // a refusal would mean the handle was not a live image list of this process, which
         // the swap above makes unreachable (NFR-13).
         let _ = unsafe { ImageList_Destroy(Some(HIMAGELIST(previous))) };
+    }
+
+    // ⭐ Task T-43-14, finding Н111: **the list leaves this program's hands only when the control
+    // is seen to hold it.** A message that did not arrive — no list, not the window — answers
+    // zero, and zero is also «there was no previous list», so the answer above cannot tell a
+    // handover from a loss. The control is asked instead. Holding it: ownership is released,
+    // because the control destroys the image lists it holds when it is itself destroyed — the
+    // template carries no `LVS_SHAREIMAGELISTS`, the one style that would keep it from doing so —
+    // and a second destruction here would free a list the control is still drawing with. Not
+    // holding it: `list` goes out of scope and its `Drop` frees it. Until this task that second
+    // road did not exist, and the set was nobody's until the process ended.
+    let held = send_to(
+        hwnd,
+        IDC_CYCLE_LIST,
+        LVM_GETIMAGELIST,
+        usize::try_from(LVSIL_STATE).unwrap_or(0),
+        0,
+    );
+
+    if held != list.handle().0 {
+        return;
+    }
+
+    let _ = list.release();
+
+    // The control has just painted its own ground into the cells: `LVM_SETIMAGELIST` hands the
+    // list the colour the control erases with. Taken straight back out — see
+    // [`clear_state_image_ground`], and the measurement in its doc comment.
+    clear_state_image_ground(hwnd);
+}
+
+/// An image list of comctl32 this program made and still owns — task T-43-14, finding Н111; the
+/// shape of `theme::HotBrush`.
+///
+/// `ImageList_Create` answers a handle with nobody's name on it, and until that task every road
+/// that let one go had to remember to call `ImageList_Destroy` — the two refusals inside
+/// [`build_check_image_list`] did, and the one road that ended at a control did not ask whether
+/// the control had taken it: a message that did not arrive left the set nobody's for the rest of
+/// the process. This value is the owner from the first instant to the last. [`Drop`] frees the
+/// list on every road — an early `return`, a refusal on the way, a control that never answered —
+/// and the one way out of ownership, [`ImageList::release`], is taken only where a control has
+/// been seen to hold the handle ([`install_check_images`]). The class of error is gone rather than
+/// one instance of it.
+#[derive(Debug)]
+pub struct ImageList(HIMAGELIST);
+
+impl ImageList {
+    /// `ImageList_Create`, owned from the first instant — `None` when comctl32 refused (NFR-13;
+    /// the callers word the degradation).
+    fn create(
+        width: i32,
+        height: i32,
+        flags: windows::Win32::UI::Controls::IMAGELIST_CREATION_FLAGS,
+        initial: i32,
+    ) -> Option<Self> {
+        // SAFETY: plain numbers in, a handle out, which becomes the property of this value and is
+        // freed exactly once — in `Drop`, or by the control it is released to.
+        let list = unsafe { ImageList_Create(width, height, flags, initial, 0) };
+
+        if list.is_invalid() {
+            return None;
+        }
+
+        Some(Self(list))
+    }
+
+    /// The handle, borrowed — this value frees it, nobody else.
+    pub fn handle(&self) -> HIMAGELIST {
+        self.0
+    }
+
+    /// Gives the list away to a control that has been **seen** to hold it, and destroys nothing —
+    /// the control frees what it holds when it is itself destroyed.
+    ///
+    /// Private on purpose: the only caller is the one place that has asked the control first.
+    fn release(self) -> HIMAGELIST {
+        let handle = self.0;
+
+        std::mem::forget(self);
+
+        handle
+    }
+}
+
+impl Drop for ImageList {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` came from the successful `ImageList_Create` of `create` and was never
+        // released — `release` forgets the value, so this runs only for a list nobody else holds.
+        // The `BOOL` is dropped: a refusal would mean the handle was not a live image list of this
+        // process, which ownership makes unreachable (NFR-13).
+        let _ = unsafe { ImageList_Destroy(Some(self.0)) };
     }
 }
 
@@ -14039,9 +14125,10 @@ fn install_check_images(hwnd: HWND) {
 /// both cells over a ground of its own in a memory bitmap and reads the pixels back, which is
 /// how «весь кадр — дыра» is held closed without a window and without starting the product.
 ///
-/// ⚠ The answer is owned by the caller: it is either handed to a control with `LVM_SETIMAGELIST`
-/// — which takes it over, see [`install_check_images`] — or destroyed with `ImageList_Destroy`.
-pub fn build_check_image_list(row_height: i32) -> Option<HIMAGELIST> {
+/// The answer is an [`ImageList`] since task T-43-14: the caller owns it, and it frees itself
+/// unless it is released to a control that has been seen to hold it (see
+/// [`install_check_images`]). A test that only draws the cells lets it go out of scope.
+pub fn build_check_image_list(row_height: i32) -> Option<ImageList> {
     // SAFETY: the screen DC of this process; released below, on every path.
     let screen = unsafe { GetDC(None) };
 
@@ -14062,7 +14149,7 @@ pub fn build_check_image_list(row_height: i32) -> Option<HIMAGELIST> {
 /// through. ⚠ The bitmaps are compatible with the **screen**, not with this DC: a memory DC
 /// is born with a monochrome bitmap selected, and a bitmap compatible with *it* would carry
 /// one bit per pixel — the classic trap the task's «в память» route walks past.
-fn build_check_frames(screen: HDC, row_height: i32) -> Option<HIMAGELIST> {
+fn build_check_frames(screen: HDC, row_height: i32) -> Option<ImageList> {
     // SAFETY: a memory DC over the live screen DC; deleted below, on every path.
     let dc = unsafe { CreateCompatibleDC(Some(screen)) };
 
@@ -14098,32 +14185,29 @@ fn build_check_frames(screen: HDC, row_height: i32) -> Option<HIMAGELIST> {
 const CHECK_CELL_KEY: COLORREF = COLORREF(0x00FF_00FF);
 
 /// The inner layer of [`build_check_image_list`]: the image list itself and the two cells,
-/// one per entry of [`CHECK_FRAME_ORDER`]. Any refusal destroys the half-built list and
-/// answers `None` — a one-cell list would silently shift the meaning of state image 2.
+/// one per entry of [`CHECK_FRAME_ORDER`]. Any refusal answers `None` and the half-built list
+/// frees itself — [`ImageList`] since task T-43-14 — because a one-cell list would silently shift
+/// the meaning of state image 2.
 ///
 /// The two cells are identical and empty; the order constant is still what counts them, because
 /// what it says — one cell per state image index, «снята» first — is exactly what has to stay
 /// true for the participation bits of FR-31 to keep landing on a cell that exists.
-fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGELIST> {
+fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<ImageList> {
     // The whole cell, in the pixels of the screen it is made for — the DPI of the
     // screen DC this whole build hangs from (NFR-13: a DC that will not say is answered as 96
     // by `dc_dpi`, which is the 100 % cell).
     let dpi = dc_dpi(screen);
     let cell = check_cell(dpi, row_height);
 
-    // SAFETY: plain numbers in, a handle out, owned by this frame until it is either handed
-    // to the caller or destroyed below. `ILC_MASK` beside `ILC_COLOR32` — every pixel of the
-    // cell is a hole, which is what [`CHECK_CELL_KEY`] is for.
+    // Owned by this frame until it is handed to the caller, and freed by its own `Drop` on every
+    // refusal below. `ILC_MASK` beside `ILC_COLOR32` — every pixel of the cell is a hole, which
+    // is what [`CHECK_CELL_KEY`] is for.
     //
     // `image_width` and not `width`: the control adds [`LVIEW_LABEL_INDENT`] of its own after
     // the cell before it starts the label, task T-12-7.
-    let list =
-        unsafe { ImageList_Create(cell.image_width, cell.height, ILC_COLOR32 | ILC_MASK, 2, 0) };
-
-    if list.is_invalid() {
-        // NFR-13: examined — as in the callers.
-        return None;
-    }
+    //
+    // NFR-13: a refusal is examined by the `?` — as in the callers.
+    let list = ImageList::create(cell.image_width, cell.height, ILC_COLOR32 | ILC_MASK, 2)?;
 
     for _ in CHECK_FRAME_ORDER {
         // SAFETY: compatible with the *screen* DC — see the caller's ⚠ — and owned by this
@@ -14131,8 +14215,7 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGE
         let bitmap = unsafe { CreateCompatibleBitmap(screen, cell.image_width, cell.height) };
 
         if bitmap.is_invalid() {
-            // SAFETY: the half-built list is ours until handed out; freed exactly once.
-            let _ = unsafe { ImageList_Destroy(Some(list)) };
+            // The half-built list frees itself on the way out.
             return None;
         }
 
@@ -14148,17 +14231,15 @@ fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<HIMAGE
 
         // SAFETY: `list` and `bitmap` are live and ours; the call copies the bits, builds the
         // mask from [`CHECK_CELL_KEY`] and keeps no handle.
-        let added = unsafe { ImageList_AddMasked(list, bitmap, CHECK_CELL_KEY) };
+        let added = unsafe { ImageList_AddMasked(list.handle(), bitmap, CHECK_CELL_KEY) };
 
         // SAFETY: deselected above, copied into the list, freed exactly once. The `BOOL`
         // is dropped for the reason `draw_check_mark` gives for its pen.
         let _ = unsafe { DeleteObject(bitmap.into()) };
 
         if added < 0 {
-            // NFR-13: examined — `ImageList_AddMasked` answers the index or -1.
-            //
-            // SAFETY: as for the refused bitmap above.
-            let _ = unsafe { ImageList_Destroy(Some(list)) };
+            // NFR-13: examined — `ImageList_AddMasked` answers the index or -1. The half-built
+            // list frees itself on the way out, as above.
             return None;
         }
     }
