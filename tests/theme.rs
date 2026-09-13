@@ -713,11 +713,32 @@ fn a_buffer_carries_over_the_face_the_dc_it_stands_in_for_was_wearing() {
     );
 }
 
+/// The turn a test takes to make GDI objects **by the dozen** while the counting test below runs —
+/// task T-43-3.
+///
+/// `buffers_made_and_dropped_leave_no_gdi_object_behind` counts the GDI objects of the whole
+/// process before and after its loop, with a slack of eight; the tests of this binary run on
+/// parallel threads, and one that holds two faces, a brush and a sheet of its own while the count
+/// is taken moves the number past the slack. Measured when the pixel test of task T-43-3 arrived:
+/// the whole binary went red **6 times in 100** with that test in it and **0 in 100** with it
+/// skipped (the count read «14 before, 27 after»). The two take this turn; the rest of the binary
+/// did not disturb the count before and is left alone.
+static GDI_COUNT_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Takes [`GDI_COUNT_TURN`]. A test that panicked while holding it has already said what was
+/// wrong, so the turn is taken past the poison.
+fn gdi_count_turn() -> std::sync::MutexGuard<'static, ()> {
+    GDI_COUNT_TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// **§5.6 of the task — a leaked GDI object gives neither an error nor a red test.** So it is
 /// counted: two objects per buffer, two hundred buffers made and dropped, and the process must
 /// end holding no more of them than it started with.
 #[test]
 fn buffers_made_and_dropped_leave_no_gdi_object_behind() {
+    let _turn = gdi_count_turn();
     let surface = Surface::new(40, 30);
 
     // One buffer first, so that whatever GDI allocates once for this process is already
@@ -920,6 +941,9 @@ fn an_empty_key_name_draws_the_whole_sentence_and_not_its_first_half() {
         paint_chip_row,
     };
     use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, LOGFONTW};
+
+    // Two faces, a brush and a sheet at a time — see [`GDI_COUNT_TURN`].
+    let _turn = gdi_count_turn();
 
     let mut logical = LOGFONTW {
         lfHeight: -14,
