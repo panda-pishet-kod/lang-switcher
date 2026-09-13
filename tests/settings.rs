@@ -11739,7 +11739,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 217] = [
     ),
     (
         settings::IDS_ABOUT_HELP_4,
-        "Пауза, настройки и выход — в значке в трее.",
+        // Task T-43-8, finding Н86: the help names the menu entry by the menu's own word —
+        // «Приостановка» for «Приостановить», not «Пауза».
+        "Приостановка, настройки и выход — в значке в трее.",
         "Suspend, settings and exit are in the tray icon.",
     ),
     (
@@ -18885,6 +18887,111 @@ fn the_help_arrow_follows_the_direction_of_the_script() {
             "locale `{tag}` points the wrong way with `{unwanted}`: «{line}»"
         );
     }
+}
+
+/// **Task T-43-8, finding Н86 — the help names the menu entry by the menu's own word.**
+///
+/// The fourth line of «Как пользоваться» lists what lives under the tray icon, and in five
+/// locales its first word was not the word of the entry it points at: «Пауза» against
+/// «Приостановить», and so on. In French it was worse twice over — «Pause» is also the **name of a
+/// key**, the very name the same panel puts in a chip two lines above. The words are the ones the
+/// mandate gives, the noun of the menu's verb (French keeps the verb itself).
+///
+/// Held on the **built** binary: the five lines open with their new word and a comma, the French
+/// one no longer opens with the key name, each new word shares its stem with the menu entry of
+/// the same locale — and the nine other locales, which the mandate leaves alone, carry the line of
+/// `e64` byte for byte.
+#[test]
+fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
+    const OPENING: [(&str, &str, &str); 5] = [
+        ("ru", "Приостановка", "Приостанов"),
+        ("uk", "Призупинення", "Призупин"),
+        ("fr", "Suspendre", "Suspend"),
+        ("it", "Sospensione", "Sospen"),
+        ("pl", "Wstrzymanie", "Wstrzyma"),
+    ];
+
+    const UNTOUCHED: [(&str, &str); 9] = [
+        ("en", "Suspend, settings and exit are in the tray icon."),
+        (
+            "de",
+            "Anhalten, Einstellungen und Beenden sind im Infobereichssymbol.",
+        ),
+        (
+            "es",
+            "Pausa, configuración y salida están en el icono del área de notificación.",
+        ),
+        (
+            "pt",
+            "Pausa, configurações e saída ficam no ícone da área de notificação.",
+        ),
+        (
+            "cs",
+            "Pozastavení, nastavení a ukončení jsou v ikoně v oznamovací oblasti.",
+        ),
+        (
+            "tr",
+            "Duraklatma, ayarlar ve çıkış bildirim alanı simgesindedir.",
+        ),
+        (
+            "el",
+            "Παύση, ρυθμίσεις και έξοδος είναι στο εικονίδιο ειδοποιήσεων.",
+        ),
+        ("he", "השהיה, הגדרות ויציאה נמצאים בסמל אזור ההודעות."),
+        (
+            "ar",
+            "الإيقاف المؤقت والإعدادات والخروج في أيقونة منطقة الإشعارات.",
+        ),
+    ];
+
+    let product = ProductImage::shared();
+    let mut defects: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let line = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_4);
+        let menu = product.string_of_langid(langid, settings::IDS_MENU_SUSPEND);
+
+        println!("{tag}: menu «{menu}» — help «{line}»");
+
+        if let Some((_, word, stem)) = OPENING.iter().find(|(locale, ..)| *locale == tag) {
+            if !line.starts_with(&format!("{word},")) {
+                defects.push(format!(
+                    "{tag}: the line must open with «{word},» — «{line}»"
+                ));
+            }
+
+            if !menu.starts_with(stem) || !word.starts_with(stem) {
+                defects.push(format!(
+                    "{tag}: «{word}» and the menu entry «{menu}» must share the stem «{stem}»"
+                ));
+            }
+        } else if let Some((_, before)) = UNTOUCHED.iter().find(|(locale, _)| *locale == tag) {
+            if line != *before {
+                defects.push(format!(
+                    "{tag}: the mandate leaves this locale alone — «{line}» is not the line of \
+                     e64 «{before}»"
+                ));
+            }
+        } else {
+            defects.push(format!(
+                "{tag}: the locale is in neither table of this test"
+            ));
+        }
+    }
+
+    let french = product.string_of_langid(0x040C, settings::IDS_ABOUT_HELP_4);
+
+    if french.starts_with("Pause") {
+        defects.push(format!(
+            "fr: the line still opens with «Pause», the name of a key — «{french}»"
+        ));
+    }
+
+    assert!(
+        defects.is_empty(),
+        "the fourth line of the help must name the menu entry by its own word:\n{}",
+        defects.join("\n")
+    );
 }
 
 /// **Т-29-2, сторож: the item the user picked in the language combo is the value that lands in
