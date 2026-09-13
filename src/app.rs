@@ -228,7 +228,18 @@ pub fn run() -> ExitCode {
             // only answer that keeps the requirement true.
             report_non_critical("CreateMutexW", &error);
 
-            flush_the_journal_of_an_early_exit();
+            // ⭐⭐ **Решение 125а, вариант 2 — this is the one path the journal writes on even
+            // when it is switched off.** And it is the path finding Н24 is named for: a name
+            // held by an object of **another type** — an event, say — makes `CreateMutexW`
+            // *fail* rather than succeed, so the worst case of the finding comes out here and
+            // not through the arm above. The program cannot start, there is no window and no
+            // second copy to point at, and with `[diagnostics] log_enabled` off — which is the
+            // default of section 7 — it used to leave nothing at all. The person saw «программа
+            // не запускается», with no cause on the screen and none on the disk.
+            //
+            // So this one exit writes the ring regardless. It is the single named exception to
+            // the promise «выключено — не пишется ничего», and the owner named it himself.
+            leave_the_cause_of_a_refused_start_on_the_disk();
 
             ExitCode::FAILURE
         }
@@ -321,17 +332,15 @@ fn a_window_of_ours_is_up() -> bool {
 /// the refusal of `CreateMutexW` was recorded and never written, which is the half of finding
 /// Н24 the repair of the verdict above does not by itself answer.
 ///
-/// # ⚠ And why it is still not the whole answer
+/// # What it obeys
 ///
-/// The dump is written only when `[diagnostics] log_enabled` is on, and section 7 has it **off
-/// by default**. On this path nothing has read the configuration yet — the publication that
-/// normally tells `diag` about it happens after the threads are up — so it is read here, once,
-/// for this one question.
+/// The person's own `[diagnostics] log_enabled`. On this path nothing has read the configuration
+/// yet — the publication that normally tells `diag` about it happens after the threads are up —
+/// so it is read here, once, for this one question. With the journal off nothing is written,
+/// which is the promise of `diag::dump_on_shutdown` and is kept here.
 ///
-/// With the journal off there is still nothing on the disk, and what to do about *that* is not
-/// the executor's to decide: it is the owner's, вопрос 125 п. 5, and it is asked as дополнение
-/// **125а**. This function is part (а) — «довести запись до файла», — and it does exactly that
-/// and no more.
+/// The one exit that does **not** obey it is the refusal of `CreateMutexW`: see
+/// [`leave_the_cause_of_a_refused_start_on_the_disk`] and решение 125а.
 fn flush_the_journal_of_an_early_exit() {
     let Some(path) = settings::default_config_path() else {
         return;
@@ -344,6 +353,33 @@ fn flush_the_journal_of_an_early_exit() {
     };
 
     crate::diag::set_log_enabled(config.diagnostics.log_enabled);
+    crate::diag::dump_on_shutdown();
+}
+
+/// Writes the ring to the file **whatever the setting says** — решение 125а, вариант 2, part (б)
+/// of finding Н24.
+///
+/// # The one named exception, and why it is this path and no other
+///
+/// `diag::dump_on_shutdown` promises that a journal switched off creates nothing: «no folder, no
+/// file, not an empty one». That promise is kept everywhere except here.
+///
+/// Here the program **cannot start at all**. `CreateMutexW` refused the name of FR-82 — which is
+/// what happens when the name is held by an object of another type, or by one whose rights shut
+/// us out, and that is the worst case of finding Н24 — and so there is no window, no second copy
+/// to point at and nothing for the person to read. Before this task the whole event died in
+/// memory; with the journal off it would die in memory still, and «программа не запускается»
+/// would stay a sentence with no cause behind it.
+///
+/// The owner chose this exception by name over the two alternatives (nothing at all, or a window
+/// and a new exit code); the cost he accepted is that a file may appear for somebody who switched
+/// the journal off, in a case that should never happen at all.
+///
+/// ⚠ **The setting is published as `true` and not bypassed**, so the dump takes the one road
+/// every other dump takes and there is no second writer to keep in step. Nothing is restored
+/// afterwards: the process is three lines from its own end.
+fn leave_the_cause_of_a_refused_start_on_the_disk() {
+    crate::diag::set_log_enabled(true);
     crate::diag::dump_on_shutdown();
 }
 

@@ -1506,29 +1506,64 @@ fn both_early_exits_of_the_program_write_the_journal_to_the_file() {
         "and before this process has built a window of its own, so a hit is never itself"
     );
 
-    // Both early exits flush. Two calls: the `SecondCopy` arm and the `Err` arm of `acquire`.
+    // Both early exits write, and they write by **different** rules — решение 125а. The second
+    // copy of FR-82 obeys the person's own setting; the refusal of `CreateMutexW` does not,
+    // because on that path there is no window, no second copy and nothing else for the person
+    // to read at all.
     assert_eq!(
         body.matches("flush_the_journal_of_an_early_exit();")
             .count(),
-        2,
-        "both paths that leave `run` without spawning a thread must write the ring to the file"
+        1,
+        "the second copy of FR-82 writes the ring on its way out, obeying the setting"
+    );
+    assert_eq!(
+        body.matches("leave_the_cause_of_a_refused_start_on_the_disk();")
+            .count(),
+        1,
+        "and a refused name writes it whatever the setting says — решение 125а, вариант 2"
     );
 
-    // And the flush really is a write and not a record: it publishes the setting the dump asks
-    // about and then calls the dump.
-    let flush_at = app
-        .find("fn flush_the_journal_of_an_early_exit() {")
-        .expect("the flush must be in app.rs");
-    let flush = &app[flush_at..];
-    let flush_end = flush
-        .find("\n}")
-        .expect("the flush closes with a brace of its own");
-    let flush = &flush[..flush_end];
+    // The ordinary flush obeys the person: it publishes what the file holds, then dumps.
+    let body_of = |name: &str| {
+        let at = app
+            .find(name)
+            .unwrap_or_else(|| panic!("{name} must be in app.rs"));
+        let rest = &app[at..];
+        let end = rest
+            .find("\n}")
+            .expect("a function closes with a brace of its own");
+
+        rest[..end].to_owned()
+    };
+
+    let obedient = body_of("fn flush_the_journal_of_an_early_exit() {");
 
     assert!(
-        flush.contains("crate::diag::set_log_enabled(")
-            && flush.contains("crate::diag::dump_on_shutdown()"),
-        "the configuration has not been read on this path, so the setting is published here \
-         before the dump is asked for — otherwise the dump would always see the default, off"
+        obedient.contains("settings::read_from(&path)")
+            && obedient.contains("crate::diag::set_log_enabled(config.diagnostics.log_enabled)")
+            && obedient.contains("crate::diag::dump_on_shutdown()"),
+        "the configuration has not been read on this path, so the person's own setting is read \
+         and published here before the dump — otherwise the dump would always see the default, \
+         off"
+    );
+
+    // And the exception publishes `true` instead of asking — one named exception, in one place.
+    let exception = body_of("fn leave_the_cause_of_a_refused_start_on_the_disk() {");
+
+    println!("--- the one exception ---\n{exception}");
+
+    assert!(
+        exception.contains("crate::diag::set_log_enabled(true)")
+            && exception.contains("crate::diag::dump_on_shutdown()"),
+        "решение 125а: a refused start leaves its cause on the disk whatever the setting says"
+    );
+    assert!(
+        !exception.contains("read_from"),
+        "and it does not ask the file anything — the point of it is that the answer is known"
+    );
+    assert_eq!(
+        app.matches("crate::diag::set_log_enabled(true)").count(),
+        1,
+        "there is exactly one place in this program that overrides the journal switch"
     );
 }
