@@ -250,10 +250,6 @@ impl SelectionPath for Tape {
 
     fn switch(&mut self, _target: LayoutId) {}
 
-    fn restore_modifiers(&mut self) -> Modifiers {
-        Modifiers::NONE
-    }
-
     fn restore_clipboard(&mut self, _snapshot: &Snapshot, _answer: ProbeAnswer) {}
 
     fn reclaim_clipboard(&mut self, _snapshot: &Snapshot) {}

@@ -28,9 +28,10 @@
 //! only place that counts calls and examines return values.
 //!
 //! FR-40 is not a property of an array but an **order**, and an order performed by a function
-//! that calls Win32 directly is invisible from outside it. So the four things steps 3 to 6 need
+//! that calls Win32 directly is invisible from outside it. So the four things steps 3 to 5 need
 //! from the world — the modifier query, `SendInput`, the pause and the layout switch of step 5
-//! — are the four members of [`Environment`], of which [`System`] is the real one.
+//! — are the four members of [`Environment`], of which [`System`] is the real one. Step 6 is not
+//! performed: see [`run_steps`] (task T-40-3, finding С12, §10 of SPEC).
 //!
 //! The consequence is that FR-03, FR-40, FR-41, FR-43, FR-44 and FR-45 can all be driven from
 //! `tests\inject.rs` without a keyboard, without a foreground window and without sending a
@@ -164,8 +165,8 @@ pub enum InjectError {
     /// "everything was taken": the idle press used to sound the tone of a replacement, switch the
     /// layout of the foreground window and move the position counter of FR-32.
     ///
-    /// Refused **before** steps 3 to 6 run, so an idle press releases no modifier, switches no
-    /// layout and restores nothing. Carries nothing at all — there is no count to report.
+    /// Refused **before** steps 3 to 5 run, so an idle press releases no modifier and switches no
+    /// layout. Carries nothing at all — there is no count to report.
     EmptyPacket,
 }
 
@@ -187,13 +188,13 @@ impl fmt::Display for InjectError {
 impl std::error::Error for InjectError {}
 
 // ---------------------------------------------------------------------------------------
-// FR-40 steps 3 and 6 — the modifiers
+// FR-40 step 3 — the modifiers (step 6 is not performed: task T-40-3, finding С12)
 // ---------------------------------------------------------------------------------------
 
-/// The modifier keys FR-40 steps 3 and 6 take down and put back.
+/// The modifier keys FR-40 step 3 takes down.
 ///
-/// One bit per **physical** key rather than one per role: `Shift` is two keys, and a user
-/// holding the right one must get the right one back. FR-40 names `Shift`, `Ctrl`, `Alt` and
+/// One bit per **physical** key rather than one per role: `Shift` is two keys, and the release
+/// has to name the one the user is actually holding. FR-40 names `Shift`, `Ctrl`, `Alt` and
 /// `Win`, which is these eight keys and no others — `CapsLock` is a lock and not a held
 /// modifier, and releasing it would change the state of the machine rather than restore it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -244,19 +245,19 @@ impl Modifiers {
         self.0 == 0
     }
 
-    /// How many keys the mask names — the number of events either step will build.
+    /// How many keys the mask names — the number of events a modifier packet will build.
     pub const fn count(self) -> usize {
         self.0.count_ones() as usize
     }
 }
 
-/// How many `INPUT` structures either of the two modifier steps can ever need.
+/// How many `INPUT` structures a modifier packet can ever need.
 pub const MODIFIER_COUNT: usize = 8;
 
 /// One row of the modifier table: the bit, the key, and whether the key is an extended one.
 type ModifierRow = (Modifiers, VIRTUAL_KEY, bool);
 
-/// The eight keys of FR-40 steps 3 and 6, in the order they are released and restored.
+/// The eight keys of FR-40 step 3, in the order they are released.
 ///
 /// The third column is the `E0` prefix of the physical key. `RightCtrl`, `RightAlt` and both
 /// `Win` keys are extended and the rest are not; the flag is replayed on injection so that the
@@ -280,10 +281,18 @@ const MODIFIER_KEYS: [ModifierRow; MODIFIER_COUNT] = [
 ///
 /// * FR-40 names `Win`, and `crate::buffer::StrokeMods` has no bit for it — it is a mask of
 ///   what changes which character a key produces, and `Win` changes nothing;
-/// * FR-40 step 6 says "модификаторы, которые пользователь удерживает **физически**", and the
-///   whole point of asking again at step 6 is that the answer may differ from step 3's. A
-///   tracker fed by hook events cannot answer better than the desktop's own key state, and it
+/// * a tracker fed by hook events cannot answer better than the desktop's own key state, and it
 ///   cannot answer at all for a key that went down before the hook was installed.
+///
+/// # ⛔ Why it cannot answer step 6 — task T-40-3, finding С12, decision 127.2
+///
+/// Step 6 of FR-40 asks for the modifiers the user holds **physically** after the replacement.
+/// This call cannot say: the asynchronous state follows the program's own injected events as
+/// readily as the user's, so once step 3 has sent the release, it reports the user's `Shift` as
+/// up however firmly it is held — and `crate::hook::physical_modifiers` reads the very same
+/// state. A step 6 built on it restored the user's keys never, and pressed again only what
+/// nobody was holding: a `Shift` of our own left down by a packet. So the main path asks this
+/// once, at step 3, and step 6 is not performed; §10 of SPEC names the limitation.
 ///
 /// `GetAsyncKeyState` is also the right *kind* of call here for the same reason
 /// [`crate::hook`] uses it for FR-96: it reads the asynchronous state of the desktop, which is
@@ -331,12 +340,15 @@ pub fn build_release(mods: Modifiers, out: &mut [INPUT]) -> Result<usize, Inject
     build_modifier_events(mods, out, true)
 }
 
-/// **FR-40 step 6.** Writes a press for every key of `mods`.
+/// Writes a press for every key of `mods` — the inverse of [`build_release`].
 ///
-/// `mods` must be what the user is holding **now** — [`held_modifiers`] called at step 6 and
-/// not the value step 3 released. The requirement is explicit about it, and the case is
-/// ordinary: the user lets go of `Shift` while the replacement is on its way, and putting it
-/// back would leave the application holding a key nobody is pressing.
+/// ⚠ **No path of the program calls it since task T-40-3** (finding С12, decision 127.2): it was
+/// the builder of FR-40 step 6, and step 6 is not performed — [`held_modifiers`] explains why it
+/// could not be. It stays the one place a modifier *press* with the signature of FR-03 is built,
+/// and that is what the benches of `tests\inject.rs` use it for: the packet that leaves a `Shift`
+/// down (the trap of FR-42 the modelled keyboard has to be able to see) and the behavioural
+/// checks that hold `Shift` for real. A second, hand-made press in the tests would be a second
+/// table of modifier keys to keep in step with [`MODIFIER_KEYS`].
 pub fn build_restore(mods: Modifiers, out: &mut [INPUT]) -> Result<usize, InjectError> {
     build_modifier_events(mods, out, false)
 }
@@ -793,10 +805,10 @@ pub const fn selection_events(erase: usize, units: usize) -> usize {
 ///   turn the insertion into capitals.
 /// * **Ours** goes down inside this packet and comes back up inside it, before the first
 ///   character. That is what makes the insertion an insertion and not a further selection, and
-///   it is also what keeps FR-40 step 6 honest: step 6 restores what
-///   [`Environment::held`] reports at that moment, and a `Shift` of ours left down would be
-///   reported as the user's and pressed again — a `Shift` stuck down for good, on a machine
-///   whose owner is holding nothing.
+///   it is also what leaves the keyboard as it was found: a `Shift` of ours left down would stay
+///   down for good, on a machine whose owner is holding nothing. (Until task T-40-3 FR-40 step 6
+///   would even have pressed it again, reading it as the user's; step 6 is not performed now —
+///   finding С12 — and the balance of this packet is what the hygiene rests on.)
 ///
 /// So the packet is balanced by construction: the only `Shift` events in it are one down and one
 /// up, in that order, and both are behind the last arrow and in front of the first character.
@@ -1111,7 +1123,8 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 /// * `tests\inject.rs::every_input_of_the_compatibility_mode_carries_the_injected_signature_of_fr03`
 ///   — the same for the `Shift+Left` path, arrows and `Shift` included;
 /// * `tests\inject.rs::the_signature_is_on_every_modifier_event_of_both_directions` — the
-///   release and restore packets, including modifiers a plain replacement never produces;
+///   release packet and the modifier press of [`build_restore`], including modifiers a plain
+///   replacement never produces;
 /// * `tests\selection.rs::the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject`
 ///   — every field of every event of the third builder, on both chords.
 ///
@@ -1315,20 +1328,21 @@ impl Dispatched {
     }
 }
 
-/// Everything steps 3 to 6 of FR-40 need from outside this program.
+/// Everything steps 3 to 5 of FR-40 need from outside this program.
 ///
 /// Four members, and each of them is a requirement rather than a convenience: the modifier
-/// query of steps 3 and 6, the `SendInput` of FR-41, the pause of FR-44 and the layout switch
-/// of step 5. [`System`] is the real one and is what the program runs on.
+/// query of step 3, the `SendInput` of FR-41, the pause of FR-44 and the layout switch of step 5.
+/// [`System`] is the real one and is what the program runs on. Step 6 is not performed (task
+/// T-40-3, finding С12) and asks this trait for nothing.
 ///
 /// # Why it is a trait and not four direct calls
 ///
 /// FR-40 is an **order**, and an order is not observable from outside a function that performs
 /// it. With the outside world behind this trait, `tests\inject.rs` can watch the sequence steps
-/// 3 to 6 really produce — that the modifiers come off before the first character is replaced,
-/// that the replacement is complete before the layout switch is reached, that only what is held
-/// at step 6 is put back — without a keyboard, without a foreground window and without sending
-/// one event into the machine. There is no other honest way to check an order.
+/// 3 to 5 really produce — that the modifiers come off before the first character is replaced,
+/// that the replacement is complete before the layout switch is reached, that nothing is pressed
+/// again after it — without a keyboard, without a foreground window and without sending one event
+/// into the machine. There is no other honest way to check an order.
 ///
 /// It is also the seam the neighbouring tasks attach to: **T-05-1** fills in [`switch_layout`],
 /// and the compatibility mode of FR-42 (task T-04-2) is a different packet handed to these very
@@ -1336,10 +1350,11 @@ impl Dispatched {
 ///
 /// [`switch_layout`]: Environment::switch_layout
 pub trait Environment {
-    /// The modifier keys held **at this instant** — FR-40 steps 3 and 6.
+    /// The modifier keys held **at this instant** — FR-40 step 3.
     ///
-    /// Asked twice per replacement and expected to answer differently: step 6 restores what the
-    /// user is holding then, not what step 3 found.
+    /// Asked **once** per replacement since task T-40-3. It used to be asked a second time for
+    /// step 6, and on the real machine the second answer could never name the user's keys: the
+    /// asynchronous state had already followed step 3's own release — see [`held_modifiers`].
     fn held(&mut self) -> Modifiers;
 
     /// Hands one portion to the system and answers how many events it accepted — FR-41, FR-45.
@@ -1350,10 +1365,11 @@ pub trait Environment {
 
     /// **FR-40 step 5 — the layout switch. The connection point of task T-05-1.**
     ///
-    /// Called after the replacement has been sent and before the modifiers are restored, which
-    /// is the position **FR-43** fixes: "Замена выполняется до переключения раскладки". The
-    /// default does nothing, so a bench observes the *position* of the switch without performing
-    /// one; [`System`] overrides it with the chain of §4.6 (FR-50 to FR-52), module `switch`.
+    /// Called after the replacement has been sent — and only when it was taken whole, task
+    /// T-40-2 — which is the position **FR-43** fixes: "Замена выполняется до переключения
+    /// раскладки". The default does nothing, so a bench observes the *position* of the switch
+    /// without performing one; [`System`] overrides it with the chain of §4.6 (FR-50 to FR-52),
+    /// module `switch`.
     ///
     /// It is a member of this trait rather than a comment in the body so that the position of
     /// the switch is something a test can *see*: FR-43 is a statement about order, and an order
@@ -1674,14 +1690,15 @@ pub struct Replaced {
     pub typed: usize,
     /// Modifiers taken down by step 3.
     pub released: Modifiers,
-    /// Modifiers put back by step 6 — only those held physically at that moment.
-    pub restored: Modifiers,
     /// What step 3 did.
     pub release: Dispatched,
     /// What step 4 did — the replacement itself, FR-41.
     pub replacement: Dispatched,
-    /// What step 6 did.
-    pub restore: Dispatched,
+    // ⛔ **No `restored` and no `restore` — task T-40-3, finding С12, decision 127.2.** They were
+    // what step 6 of FR-40 put back and how, and step 6 is not performed any more: the only thing
+    // it could ever read was the asynchronous state after step 3's own release (see
+    // `held_modifiers`). A field that is always `Modifiers::NONE` would be the silent change of
+    // meaning the task forbids, so the two fields are gone and every reader was changed with them.
 }
 
 impl Replaced {
@@ -1689,10 +1706,10 @@ impl Replaced {
     /// counter of FR-32 and the conversion session of FR-10 are allowed to move on, and since task
     /// T-40-2 (finding Н12) the condition step 5 of FR-40 switches the layout on.
     ///
-    /// Step 4 and step 4 only. Steps 3 and 6 are modifier hygiene: a `Shift` that failed to come
-    /// down or to go back up is a defect of its own, counted where every `SendInput` discrepancy
-    /// is counted ([`send_mismatches`]), but it says nothing about whether the *text* on the
-    /// screen changed — and what FR-32 counts is positions of the text.
+    /// Step 4 and step 4 only. Step 3 is modifier hygiene: a `Shift` that failed to come down is a
+    /// defect of its own, counted where every `SendInput` discrepancy is counted
+    /// ([`send_mismatches`]), but it says nothing about whether the *text* on the screen changed —
+    /// and what FR-32 counts is positions of the text.
     ///
     /// # Why anything less than whole counts as nothing
     ///
@@ -1738,7 +1755,7 @@ impl Replaced {
     }
 }
 
-/// **FR-40, steps 3 to 6, for one recognised hotkey press.**
+/// **FR-40, steps 3 to 5, for one recognised hotkey press.**
 ///
 /// `strokes` is what the typing buffer recorded, `target` is the layout to convert into — task
 /// T-05-2 chooses it and it arrives here as a parameter — and `delay_ms` is FR-44.
@@ -1752,7 +1769,10 @@ impl Replaced {
 /// 4. **step 4** — the replacement, one packet, FR-41;
 /// 5. **step 5** — the layout switch of §4.6, marked below and performed by module `switch` —
 ///    and only when step 4 was taken whole ([`Replaced::reached_the_screen`], task T-40-2);
-/// 6. **step 6** — the modifiers held *at that moment* are pressed again.
+/// 6. **step 6 is not performed** — task T-40-3, finding С12, decision 127.2: the modifiers the
+///    user holds physically cannot be read back after step 3 has released them (see
+///    [`held_modifiers`]); FR-40 makes the step «по возможности» and §10 of SPEC names the
+///    limitation.
 ///
 /// **FR-43** is the position of step 5 and nothing else: the replacement is formed and sent
 /// before the layout is switched. `KEYEVENTF_UNICODE` carries a character literally, past the
@@ -1766,7 +1786,7 @@ impl Replaced {
 /// a panic on this path would take a resident program down over a full buffer.
 ///
 /// And [`InjectError::EmptyPacket`], which **is** reachable and is the ordinary answer to a press
-/// over a run of mute keys — task T-40-1: nothing is sent and steps 3 to 6 do not run.
+/// over a run of mute keys — task T-40-1: nothing is sent and steps 3 to 5 do not run.
 pub fn replace(
     strokes: &[Keystroke],
     target: &LayoutMap,
@@ -1783,7 +1803,7 @@ pub fn replace(
     )
 }
 
-/// **FR-40, steps 3 to 6**, against any [`Environment`] — see [`replace`] for the requirement.
+/// **FR-40, steps 3 to 5**, against any [`Environment`] — see [`replace`] for the requirement.
 ///
 /// The `backspace` mode of FR-41, unconditionally — the seam task T-04-1 left, kept as it was
 /// when `backspace` was the default of section 7 (the default is `auto` since FR-42а).
@@ -1804,7 +1824,7 @@ pub fn replace_in(
     )
 }
 
-/// **FR-40, steps 3 to 6, in the mode of `method`** — the `backspace` packet of FR-41 or the
+/// **FR-40, steps 3 to 5, in the mode of `method`** — the `backspace` packet of FR-41 or the
 /// compatibility packet of FR-42.
 ///
 /// This is the function the order lives in, and the order is the requirement, so this is what
@@ -1812,7 +1832,7 @@ pub fn replace_in(
 /// for the same reason `delay_ms` is: what the configuration says is decided once, by
 /// [`on_hotkey`], and everything below it is then a pure function of its arguments.
 ///
-/// Only the *packet* depends on the mode. Steps 3, 5 and 6, the pause of FR-44, the single call
+/// Only the *packet* depends on the mode. Steps 3 and 5, the pause of FR-44, the single call
 /// of FR-41, the signature of FR-03 and the position FR-43 fixes are shared, and deliberately:
 /// a mode that could quietly do without the modifier hygiene of FR-40 would be a second
 /// requirement, not a second packet.
@@ -1864,13 +1884,13 @@ pub fn replace_in_with(
     let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
     let built = build_packet(method, erased, &text[..typed], &mut events);
 
-    // ⭐ **Task T-40-1, finding Н18 — an empty packet is refused here, before steps 3 to 6.**
+    // ⭐ **Task T-40-1, finding Н18 — an empty packet is refused here, before steps 3 to 5.**
     //
     // Nothing to erase and nothing to type: the run is a ring of mute keys, which FR-10 records
     // like any other key. Sent, the packet would be zero events that `SendInput` "took whole", and
-    // the idle press would release and restore the user's modifiers, switch the layout of the
-    // foreground window (step 5) and let `note_press` move the counter of FR-32 over a screen that
-    // did not change. Refused, `on_hotkey` answers `None` and `app::press_outcome` sounds the idle
+    // the idle press would release the user's modifiers, switch the layout of the foreground
+    // window (step 5) and let `note_press` move the counter of FR-32 over a screen that did not
+    // change. Refused, `on_hotkey` answers `None` and `app::press_outcome` sounds the idle
     // click — the path of every other press that had nothing to do. The early return of
     // [`dispatch_in`] on an empty array stays exactly as it is: that is a dispatch declining to
     // make a call, and this is the press declining to happen.
@@ -1928,7 +1948,8 @@ pub fn replace_in_with(
     outcome
 }
 
-/// Steps 3 to 6 of FR-40 around a packet that is already built.
+/// Steps 3 to 5 of FR-40 around a packet that is already built — step 6 is not performed (task
+/// T-40-3, see the end of the body).
 fn run_steps(
     env: &mut impl Environment,
     packet: &[INPUT],
@@ -1957,8 +1978,8 @@ fn run_steps(
     // what this line owns is the *position*, which is the whole reason it is a trait member.
     //
     // ⚠ **FR-43: the call goes here and nowhere earlier.** Everything above has already been
-    // sent; everything below only puts back what step 3 took away. A switch moved in front of
-    // step 4 would be the race FR-43 was written to rule out.
+    // sent, and the switch is the last thing a press does. A switch moved in front of step 4
+    // would be the race FR-43 was written to rule out.
     //
     // ⭐ **Task T-40-2, finding Н12, decision 127.3 — and only when the replacement reached the
     // screen.** A blocked injection (`BlockInput`, a window of higher integrity, another
@@ -1978,26 +1999,25 @@ fn run_steps(
         env.switch_layout();
     }
 
-    // ---- step 6 -----------------------------------------------------------------------
+    // ---- step 6 — not performed: task T-40-3, finding С12, decision 127.2 --------------
     //
-    // Asked again, and this is the requirement: "модификаторы, которые пользователь удерживает
-    // физически" — at *this* moment, not at step 3's. The user may have let go while the
-    // replacement was on its way, and pressing a key nobody is holding would be worse than
-    // leaving it alone.
-    let restored = env.held();
-    let restore = match build_restore(restored, &mut modifier_events) {
-        Err(_) => Dispatched::default(),
-        Ok(len) => dispatch_in(env, &modifier_events[..len], delay_ms),
-    };
-
+    // Step 6 of FR-40 asks for the modifiers the user holds «физически» and presses them again.
+    // There was a step 6 here, and it could never do that: the only question available is the
+    // asynchronous key state (`held_modifiers`, and `hook::physical_modifiers` is the same state),
+    // which follows the program's own events too — step 3 has just sent the release, so the user's
+    // `Shift` reads as up however firmly it is held. The branch that restored the user's keys ran
+    // never; the one that could run pressed again a key nobody held — a `Shift` of our own left
+    // down by a packet. Decision 127.2 made the step «по возможности» in FR-40 and named the
+    // limitation in §10; a user who held a modifier over the hotkey presses it again after the
+    // replacement. What is kept is the hygiene of our own events: every packet this module builds
+    // is balanced — the compatibility packet's own `Shift` goes down and up inside it — so nothing
+    // of ours is left down to need a step 6 in the first place.
     Replaced {
         erased,
         typed,
         released,
-        restored,
         release,
         replacement,
-        restore,
     }
 }
 
@@ -2009,7 +2029,7 @@ fn run_steps(
 ///
 /// This is the whole of what `app::window_proc` does with [`crate::hook::WM_APP_HOTKEY`]: the
 /// callback recognised the press, suppressed it (step 1) and posted the message (step 2), and
-/// this runs steps 3 to 6 on the input thread, outside the callback, where section 6.1 puts
+/// this runs steps 3 to 5 on the input thread, outside the callback, where section 6.1 puts
 /// `SendInput`.
 ///
 /// `None` when there is nothing to do: no typing buffer on this thread — which is every thread

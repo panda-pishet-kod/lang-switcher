@@ -2623,9 +2623,11 @@ fn key_event(vk: VIRTUAL_KEY, up: bool) -> INPUT {
 ///
 /// Four events in the order a person makes them: the modifier goes down, the key goes down and
 /// up, the modifier comes up. The chord is **balanced inside the packet** — the only `Ctrl`
-/// events in it are one down and one up, in that order — which is what keeps step 6 of FR-40
-/// honest: a `Ctrl` of ours left down would be reported by `GetAsyncKeyState` as the user's and
-/// pressed again, leaving a modifier stuck down on a machine whose owner is holding nothing.
+/// events in it are one down and one up, in that order — which is what leaves the keyboard as it
+/// was found: a `Ctrl` of ours left down would stay down on a machine whose owner is holding
+/// nothing. (Until task T-40-3 step 6 of FR-40 would even have read it as the user's and pressed
+/// it again; step 6 is not performed now — finding С12 — and this balance is the whole of the
+/// hygiene.)
 ///
 /// `VK_CONTROL` and not `VK_LCONTROL`: the aggregate is what an application testing
 /// `GetKeyState(VK_CONTROL)` for its own accelerator sees, and the two `Ctrl` keys of the
@@ -3209,10 +3211,15 @@ fn plan_for_press() -> Option<Plan> {
 /// eight steps really produce, and can make any one of them fail and see what the rest do —
 /// which is the only honest way to check that **step 8 runs when steps 4 to 7 did not**.
 ///
-/// The two members that are not numbered steps are steps 3 and 6 of **FR-40**: the modifiers the
-/// user is holding come off before anything is injected and go back on afterwards. Without them
-/// a `Shift` held over the hotkey would turn the `Ctrl+C` of step 2 into `Ctrl+Shift+C`, which is
-/// a different command in half the applications on the machine.
+/// The member that is not a numbered step is step 3 of **FR-40**: the modifiers the user is
+/// holding come off before anything is injected. Without it a `Shift` held over the hotkey would
+/// turn the `Ctrl+C` of step 2 into `Ctrl+Shift+C`, which is a different command in half the
+/// applications on the machine.
+///
+/// ⛔ **There is no member for step 6 of FR-40 since task T-40-3** (finding С12, decision 127.2).
+/// It was `restore_modifiers`, «press again whatever the user is holding now», and on the real
+/// machine it could only ask the asynchronous key state — which had followed step 3's own release
+/// and reported the user's keys as up. §10 of SPEC names the limitation.
 pub trait Path {
     /// **Step 1** — the snapshot of FR-64.
     fn snapshot(&mut self) -> Result<Snapshot, ClipboardError>;
@@ -3257,9 +3264,6 @@ pub trait Path {
 
     /// **Step 7** — switch the layout of the foreground window, §4.6.
     fn switch(&mut self, target: LayoutId);
-
-    /// **FR-40 step 6** — press again whatever the user is holding *now*.
-    fn restore_modifiers(&mut self) -> Modifiers;
 
     /// **Step 8** — put the user's clipboard back, after the delay of section 7.
     ///
@@ -3337,7 +3341,7 @@ impl Outcome {
     }
 }
 
-/// The eight steps in progress — **and the guarantee that steps 6 of FR-40 and 8 of FR-61 run.**
+/// The eight steps in progress — **and the guarantee that step 8 of FR-61 runs.**
 ///
 /// # What this type is for, and why it is a type
 ///
@@ -3365,9 +3369,10 @@ impl Outcome {
 /// | a panic, Debug build | `Drop`, run by the unwind |
 /// | a panic, Release build (`panic = "abort"`) | nothing here; the system frees the clipboard with the owning thread, measured in T-07-1 |
 ///
-/// `tests\selection.rs` checks that mechanically: `restore_clipboard(`, `reclaim_clipboard(` and
-/// `restore_modifiers(` each appear **once** in the module outside the trait and the bench, and
-/// that once is inside `impl Drop for Session`.
+/// `tests\selection.rs` checks that mechanically: `restore_clipboard(` and `reclaim_clipboard(`
+/// each appear **once** in the module outside the trait and the bench, and that once is inside
+/// `impl Drop for Session`. (A third row, `restore_modifiers(` — step 6 of FR-40 — left with the
+/// step itself in task T-40-3.)
 ///
 /// ⚠ **The table above is a promise about the door, and until task Т-18-1 it was read as a
 /// promise about the outcome.** It was not one: the door opened on every one of those rows and
@@ -3393,8 +3398,8 @@ struct Session<'a, P: Path> {
     snapshot: Snapshot,
     /// Which restore the clipboard is owed, if any.
     owed: Owed,
-    /// Whether FR-40 step 3 has taken the user's modifiers down.
-    hygiene: bool,
+    // ⛔ No `hygiene` flag since task T-40-3: it said «step 3 has taken the user's modifiers down,
+    // so step 6 owes them back», and step 6 of FR-40 is not performed any more (finding С12).
 }
 
 /// What [`Session`] owes the user's clipboard when it goes out of scope.
@@ -3428,12 +3433,11 @@ enum Owed {
 
 impl<P: Path> Drop for Session<'_, P> {
     fn drop(&mut self) {
-        // FR-40 step 6 first: it is one `SendInput` and the user is waiting for their `Shift`
-        // back, while step 8 begins by sleeping for the delay of section 7.
-        if self.hygiene {
-            self.path.restore_modifiers();
-        }
-
+        // ⛔ **FR-40 step 6 used to come first here — task T-40-3, finding С12, decision 127.2.**
+        // It pressed again «whatever the user is holding now», read from the asynchronous key
+        // state, and on this path that state had followed step 3's own release half a second
+        // earlier: the user's keys read as up and were never restored, and the only key the step
+        // could press was one nobody held. What the guard owes is the clipboard, and only that.
         match self.owed {
             Owed::Nothing => {}
             Owed::StepEight { answer } => self.path.restore_clipboard(&self.snapshot, answer),
@@ -3463,8 +3467,9 @@ impl<P: Path> Session<'_, P> {
 /// **FR-61, all eight steps, in the order the requirement writes them.**
 ///
 /// The order is the requirement, so this function is the requirement: every step is one call
-/// through [`Path`], they are in the order 1, 2, 3, 4, 5, 6, 7, 8, and the two of FR-40 bracket
-/// them. Nothing else in this module performs a step.
+/// through [`Path`], they are in the order 1, 2, 3, 4, 5, 6, 7, 8, and step 3 of FR-40 comes
+/// before the first injection (step 6 of FR-40 is not performed — task T-40-3). Nothing else in
+/// this module performs a step.
 pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
     // ---- step 1 — save the clipboard, FR-64 ---------------------------------------------
     //
@@ -3482,12 +3487,10 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
         path,
         snapshot,
         owed: Owed::Nothing,
-        hygiene: false,
     };
 
     // ---- FR-40 step 3 — the user's modifiers come off -----------------------------------
     session.path.release_modifiers();
-    session.hygiene = true;
 
     // ---- step 2 — Ctrl+C ----------------------------------------------------------------
     //
@@ -3625,7 +3628,7 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
         carried: recoded.carried(),
     }
 
-    // ---- FR-40 step 6 and step 8 happen here, in `Session::drop` ------------------------
+    // ---- step 8 happens here, in `Session::drop` (FR-40 step 6 is not performed, T-40-3) ---
 }
 
 /// The second half of step 5 for the source layout `index` of `plan` — **the decision over the
@@ -3716,21 +3719,6 @@ impl Path for Machine {
         // every refused method itself, and there is nothing the selection path could do about a
         // layout that would not change. SEC-01, SEC-07 — a layout handle, never a character.
         let _ = crate::switch::to(target);
-    }
-
-    fn restore_modifiers(&mut self) -> Modifiers {
-        // Asked again rather than remembered — FR-40 step 6: «модификаторы, которые пользователь
-        // удерживает **физически**» at *this* moment. The selection path is the longest gap this
-        // program has between the two questions, so the answer differing is the ordinary case
-        // here rather than the exception.
-        let held = crate::inject::held_modifiers();
-        let mut events = [INPUT::default(); crate::inject::MODIFIER_COUNT];
-
-        if let Ok(len) = crate::inject::build_restore(held, &mut events) {
-            let _ = crate::inject::dispatch(&events[..len], self.delay_ms);
-        }
-
-        held
     }
 
     fn restore_clipboard(&mut self, snapshot: &Snapshot, answer: ProbeAnswer) {

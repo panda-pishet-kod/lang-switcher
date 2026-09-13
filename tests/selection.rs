@@ -2121,8 +2121,8 @@ enum Step {
     Paste,
     /// Step 7 of FR-61 — the layout switch.
     Switch,
-    /// Step 6 of FR-40 — the user's modifiers go back.
-    RestoreModifiers,
+    // ⛔ No `RestoreModifiers`: step 6 of FR-40 is not performed since task T-40-3 (finding С12,
+    // decision 127.2), and the trait `selection::Path` has no member for it any more.
     /// **Step 8 of FR-61** — the user's clipboard goes back.
     RestoreClipboard,
     /// **Not a step of FR-61** — the user's clipboard goes back at once, because the `Ctrl+C` of
@@ -2344,12 +2344,6 @@ impl SelectionPath for Bench {
         self.switched = Some(target);
     }
 
-    fn restore_modifiers(&mut self) -> Modifiers {
-        self.note(Step::RestoreModifiers);
-
-        Modifiers::NONE
-    }
-
     fn restore_clipboard(&mut self, _snapshot: &Snapshot, answer: ProbeAnswer) {
         self.note(Step::RestoreClipboard);
         self.restore_answer = Some(answer);
@@ -2407,7 +2401,6 @@ fn the_eight_steps_of_fr61_run_in_the_order_the_requirement_writes_them() {
             Step::Write,            // 6a — the recoded text
             Step::Paste,            // 6b — Ctrl+V
             Step::Switch,           // 7 — the layout
-            Step::RestoreModifiers, // FR-40 step 6
             Step::RestoreClipboard, // 8 — the user's clipboard, with its delay
         ],
         "the order of FR-61 is the requirement"
@@ -2445,10 +2438,6 @@ fn step_eight_runs_however_steps_four_to_seven_end() {
             bench.ran(Step::RestoreClipboard),
             "step 8 must run when step {failing:?} failed: {:?}",
             bench.steps
-        );
-        assert!(
-            bench.ran(Step::RestoreModifiers),
-            "FR-40 step 6 must run when step {failing:?} failed"
         );
         assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
         assert!(outcome.falls_back());
@@ -2692,12 +2681,7 @@ fn a_copy_the_system_did_not_take_is_refused_before_the_wait_and_owes_nothing_un
     assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
     assert_eq!(
         quiet.steps,
-        vec![
-            Step::Snapshot,
-            Step::Release,
-            Step::Copy,
-            Step::RestoreModifiers,
-        ],
+        vec![Step::Snapshot, Step::Release, Step::Copy],
         "no wait, no read, and no restore of a clipboard nobody touched"
     );
 
@@ -2712,13 +2696,7 @@ fn a_copy_the_system_did_not_take_is_refused_before_the_wait_and_owes_nothing_un
     assert_eq!(outcome, Outcome::Refused(Refusal::Clipboard));
     assert_eq!(
         late.steps,
-        vec![
-            Step::Snapshot,
-            Step::Release,
-            Step::Copy,
-            Step::RestoreModifiers,
-            Step::Reclaim,
-        ],
+        vec![Step::Snapshot, Step::Release, Step::Copy, Step::Reclaim],
         "a clipboard that moved gets the user's snapshot back through the late door"
     );
     assert_eq!(
@@ -2839,9 +2817,11 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
     let source = source_of("selection.rs");
     let product = cut_at(&source, "mod tests {", "the product half of the module");
 
+    // ⛔ Until task T-40-3 there was a row for `path.restore_modifiers(` — FR-40 step 6, owned by
+    // the same guard. Step 6 is not performed any more (finding С12, decision 127.2), and the
+    // absence is checked below, over the whole product half, rather than left unsaid.
     for (call, owner) in [
         ("path.restore_clipboard(", "impl<P: Path> Drop for Session"),
-        ("path.restore_modifiers(", "impl<P: Path> Drop for Session"),
         // Task T-13-11 added a second way back to the user's clipboard — the late `Ctrl+C` of
         // step 3's timeout. It is a **second reason**, not a second mechanism: the guard still
         // owns every put-back, and this row is what keeps it that way.
@@ -2871,11 +2851,26 @@ fn step_eight_is_reached_from_a_destructor_and_from_nowhere_else() {
     );
 
     assert!(
-        !run_body.contains("restore_clipboard(")
-            && !run_body.contains("restore_modifiers(")
-            && !run_body.contains("reclaim_clipboard("),
+        !run_body.contains("restore_clipboard(") && !run_body.contains("reclaim_clipboard("),
         "the eight steps must not restore by hand — the guard does it"
     );
+
+    // ⭐ Task T-40-3: step 6 of FR-40 is gone from the path, and not only from `run` — no code line
+    // of the product half presses the user's modifiers again, and nothing builds that press.
+    // Control first: the same search does find the calls that are still there.
+    assert_eq!(
+        code_lines_with(product, "path.release_modifiers(").len(),
+        1,
+        "the search finds a call that exists"
+    );
+    for gone in ["restore_modifiers(", "build_restore("] {
+        let hits = code_lines_with(product, gone);
+
+        assert!(
+            hits.is_empty(),
+            "FR-40 step 6 is not performed on the selection path (С12): {gone} at {hits:?}"
+        );
+    }
 }
 
 /// **The note to step 8 of §4.7 — decision П-5, and the order FR-80 needs.**
@@ -3276,13 +3271,7 @@ fn no_change_within_the_timeout_means_no_selection_and_falls_back() {
 
     assert_eq!(
         bench.steps,
-        vec![
-            Step::Snapshot,
-            Step::Release,
-            Step::Copy,
-            Step::Wait,
-            Step::RestoreModifiers,
-        ],
+        vec![Step::Snapshot, Step::Release, Step::Copy, Step::Wait],
         "steps 4 to 8 do not run when there is no selection"
     );
 
@@ -3314,13 +3303,7 @@ fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_
     assert_eq!(outcome, Outcome::NoSelection);
     assert_eq!(
         quiet.steps,
-        vec![
-            Step::Snapshot,
-            Step::Release,
-            Step::Copy,
-            Step::Wait,
-            Step::RestoreModifiers,
-        ],
+        vec![Step::Snapshot, Step::Release, Step::Copy, Step::Wait],
         "a clipboard nobody touched is not written to"
     );
     assert!(!quiet.ran(Step::Reclaim), "there is nothing to put back");
@@ -3351,10 +3334,9 @@ fn a_clipboard_that_moved_after_the_timeout_is_put_back_and_one_that_did_not_is_
             Step::Release,
             Step::Copy,
             Step::Wait,
-            Step::RestoreModifiers, // FR-40 step 6 first — the user is waiting for their Shift
-            Step::Reclaim,          // and then the clipboard they had before the probe
+            Step::Reclaim, // the clipboard they had before the probe
         ],
-        "the snapshot goes back, and after the modifiers"
+        "the snapshot goes back"
     );
 
     // ⚠ It is **not** step 8: no delay to wait out, and no refusal to make.
@@ -3412,10 +3394,9 @@ fn a_refused_wait_insures_the_snapshot_exactly_as_a_timed_out_one_does() {
             Step::Release,
             Step::Copy,
             Step::Wait,
-            Step::RestoreModifiers,
             Step::Reclaim,
         ],
-        "Ctrl+C went out and the clipboard moved: the snapshot goes back, after the modifiers"
+        "Ctrl+C went out and the clipboard moved: the snapshot goes back"
     );
     assert!(
         !refused.ran(Step::RestoreClipboard),
@@ -3548,8 +3529,8 @@ fn the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject() {
             );
         }
 
-        // Modifier down, key down, key up, modifier up — and the modifier is balanced, so
-        // FR-40 step 6 cannot mistake ours for the user's.
+        // Modifier down, key down, key up, modifier up — and the modifier is balanced, so no
+        // `Ctrl` of ours is left down on the user's keyboard.
         let control = windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL.0;
         assert_eq!(keyboard[0].wVk.0, control);
         assert_eq!(keyboard[1].wVk.0, key);
@@ -3571,10 +3552,12 @@ fn the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject() {
     let source = source_of("selection.rs");
     let product = cut_at(&source, "mod tests {", "the product half of the module");
 
+    // Three since task T-40-3: the restore of FR-40 step 6 was a fourth, and step 6 is not
+    // performed any more (finding С12).
     assert_eq!(
         code_lines_with(product, "crate::inject::dispatch(").len(),
-        4,
-        "four dispatches: the modifier release, the two chords and the modifier restore"
+        3,
+        "three dispatches: the modifier release and the two chords"
     );
 }
 

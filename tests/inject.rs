@@ -71,9 +71,9 @@ const LOW_SURROGATE: u16 = 0xDE00;
 
 /// The eight modifier keys of FR-40 as this file's own `(virtual key, bit)` table — task T-04-2.
 ///
-/// A second copy of the table module `inject` releases and restores by, written out here on
-/// purpose: a test that borrowed the module's own table could not catch the module putting the
-/// wrong bit on the wrong key. It is what [`Bench::machine`] follows the keyboard with.
+/// A second copy of the table module `inject` releases by, written out here on purpose: a test
+/// that borrowed the module's own table could not catch the module putting the wrong bit on the
+/// wrong key. It is what [`Bench::machine`] follows the keyboard with.
 const MODIFIER_TABLE: [(VIRTUAL_KEY, Modifiers); MODIFIER_COUNT] = [
     (VK_LSHIFT, Modifiers::LEFT_SHIFT),
     (VK_RSHIFT, Modifiers::RIGHT_SHIFT),
@@ -185,8 +185,9 @@ struct Bench {
     /// is sent change nothing. `Some` is a bench that behaves as the desktop does — the
     /// asynchronous key state follows *injected* modifier events as readily as physical ones —
     /// and it is the only way the trap of FR-42 becomes observable, because a `Shift` the
-    /// replacement pressed and failed to release is then a `Shift` step 6 finds and presses
-    /// again.
+    /// replacement pressed and failed to release is then a `Shift` left down on the modelled
+    /// keyboard. (Until task T-40-3 it was also a `Shift` step 6 found and pressed again; and it is
+    /// the same property that made step 6 unable to see the user's own keys — finding С12.)
     keyboard: Option<Modifiers>,
 }
 
@@ -436,16 +437,17 @@ fn every_input_sent_carries_the_injected_signature_of_fr03() {
     let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0)
         .expect("the packet is sized from the lengths it is built with");
 
-    // Three packets really did go out: the release of step 3, the replacement, the restore of
-    // step 6. A test that found nothing would pass the loop below vacuously.
-    assert_eq!(bench.sent().len(), 3);
+    // Two packets really did go out: the release of step 3 and the replacement. (A third, the
+    // restore of step 6, went out too until task T-40-3.) A test that found nothing would pass the
+    // loop below vacuously.
+    assert_eq!(bench.sent().len(), 2);
     assert_eq!(outcome.erased, 6);
     assert_eq!(outcome.typed, 6);
 
     let stream = bench.stream();
 
-    // 6 backspaces down + 6 up + 6 characters down + 6 up + 2 released + 1 restored.
-    assert_eq!(stream.len(), 6 * 2 + 6 * 2 + 2 + 1);
+    // 6 backspaces down + 6 up + 6 characters down + 6 up + 2 released.
+    assert_eq!(stream.len(), 6 * 2 + 6 * 2 + 2);
 
     for event in stream {
         assert_eq!(
@@ -1187,59 +1189,69 @@ fn holding_nothing_releases_nothing_and_restores_nothing() {
     let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
 
     assert_eq!(outcome.released, Modifiers::NONE);
-    assert_eq!(outcome.restored, Modifiers::NONE);
     assert_eq!(outcome.release, Dispatched::default());
-    assert_eq!(outcome.restore, Dispatched::default());
 
     // The replacement, and nothing else, was sent.
     assert_eq!(bench.sent().len(), 1);
 }
 
 // ---------------------------------------------------------------------------------------
-// Point 14 — FR-40 step 6: only what is held *now* comes back
+// Point 14 — FR-40 step 6: not performed (task T-40-3, finding С12, decision 127.2)
 // ---------------------------------------------------------------------------------------
+//
+// ⛔ Until task T-40-3 this block was `only_the_modifiers_held_at_the_moment_of_restoration_come_back`:
+// a scripted bench answered «LeftShift and LeftAlt» at step 3 and «RightCtrl» at step 6, and the
+// check read the second answer pressed back. The script was the only place that could answer
+// differently: on the machine the asynchronous state step 6 asked had already followed step 3's own
+// release, so the branch that restored the user's keys ran never — premise П2 of the stage, and the
+// comment of the FR-42 check below said as much while calling it the behaviour. Step 6 was taken off
+// the main path of both replacements; §10 of SPEC names what that costs the user.
 
-/// **FR-40 step 6.** The restore puts back what the user is holding **at that moment**, not
-/// what step 3 released.
+/// ⭐ **A held modifier is not pressed again after the replacement — and that is the recorded
+/// behaviour** (FR-40 step 6 «по возможности», §10 of SPEC, finding С12).
 ///
-/// The requirement is explicit — "модификаторы, которые пользователь удерживает физически" —
-/// and the case is ordinary: the user lets go of `Shift` while the replacement is on its way,
-/// and pressing it again would leave the application holding a key nobody is pressing.
+/// Two benches. The scripted one answers «Shift is held» to every question — the one state in which
+/// a step 6 that asked again would press it again, and the check that was red on the base: two
+/// questions, one press. The modelled keyboard is the machine as it really behaves: the user's
+/// `Shift` comes off at step 3 and stays off until the user presses it again.
 #[test]
-fn only_the_modifiers_held_at_the_moment_of_restoration_come_back() {
-    // Step 3 finds `LeftShift` and `LeftAlt`; by step 6 the user has let go of both and is
-    // holding `RightCtrl` instead.
-    let at_release = Modifiers::LEFT_SHIFT.with(Modifiers::LEFT_ALT);
-    let at_restore = Modifiers::RIGHT_CTRL;
+fn a_held_modifier_is_not_pressed_again_after_the_replacement() {
+    let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT, Modifiers::LEFT_SHIFT]);
+    let outcome = press_ghbdtn(&mut bench);
 
-    let mut bench = Bench::holding(&[at_release, at_restore]);
+    assert_eq!(
+        outcome.released,
+        Modifiers::LEFT_SHIFT,
+        "step 3 still takes the user's Shift down"
+    );
 
-    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
+    assert_eq!(
+        bench.asked, 1,
+        "the modifiers are asked for once, at step 3"
+    );
 
-    assert_eq!(outcome.released, at_release);
-    assert_eq!(outcome.restored, at_restore);
+    let presses: Vec<Event> = bench
+        .stream()
+        .into_iter()
+        .filter(|event| {
+            MODIFIER_TABLE.iter().any(|(key, _)| key.0 == event.vk)
+                && event.flags & KEYEVENTF_KEYUP.0 == 0
+        })
+        .collect();
+    assert!(
+        presses.is_empty(),
+        "no modifier is pressed by the program after the replacement: {presses:?}"
+    );
+    assert!(
+        matches!(bench.log.last(), Some(Step::Switch)),
+        "the press ends at step 5: {:?}",
+        bench.log
+    );
 
-    // The state was asked for twice, which is the whole mechanism: one answer could not have
-    // differed from itself.
-    assert_eq!(bench.asked, 2);
-
-    let packets = bench.sent();
-    let restore = &packets[2];
-
-    // One key comes back, it is a press, and it is the one held now.
-    assert_eq!(restore.len(), 1);
-    assert_eq!(restore[0].flags & KEYEVENTF_KEYUP.0, 0);
-
-    let mut expected = [INPUT::default(); MODIFIER_COUNT];
-    let len = inject::build_restore(at_restore, &mut expected).expect("one key fits");
-    assert_eq!(restore, &reduce(&expected[..len]));
-
-    // And what step 3 released is not among what step 6 pressed.
-    let mut released = [INPUT::default(); MODIFIER_COUNT];
-    let len = inject::build_release(at_release, &mut released).expect("two keys fit");
-    for event in reduce(&released[..len]) {
-        assert_ne!(restore[0].vk, event.vk);
-    }
+    // The machine as it really behaves: the user's `Shift` comes off at step 3 and stays off.
+    let mut bench = Bench::machine(Modifiers::LEFT_SHIFT);
+    press_ghbdtn(&mut bench);
+    assert_eq!(bench.keyboard(), Modifiers::NONE);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1267,13 +1279,14 @@ fn a_zero_delay_sends_the_whole_array_in_exactly_one_call() {
     assert_eq!(bench.sent()[0].len(), 24);
     assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
 
-    // And through the whole of FR-40: three packets, one call each.
+    // And through the whole of FR-40: two packets, one call each — step 3 and step 4. There was a
+    // third, the restore of step 6, until task T-40-3.
     let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT, Modifiers::LEFT_SHIFT]);
     let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
 
     assert_eq!(outcome.replacement.calls, 1);
     assert_eq!(outcome.release.calls, 1);
-    assert_eq!(outcome.restore.calls, 1);
+    assert_eq!(bench.sent().len(), 2);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1433,7 +1446,7 @@ fn a_short_return_from_sendinput_reaches_the_counter_of_fr45() {
 // ---------------------------------------------------------------------------------------
 
 /// **FR-43.** The replacement is complete — formed *and* sent — before the layout switch of
-/// FR-40 step 5 is reached, and the modifiers are restored only after it.
+/// FR-40 step 5 is reached, and the switch is the last thing the press does.
 ///
 /// The switch itself is task T-05-1 and does nothing yet; what T-04-1 owes is its **position**,
 /// and a position is only checkable if it is observable, which is why it is a member of
@@ -1448,14 +1461,14 @@ fn the_replacement_is_formed_and_sent_before_the_layout_switch_point() {
         .position(|step| matches!(step, Step::Switch))
         .expect("FR-40 step 5 is reached exactly once");
 
-    // The log, in full, is the requirement: ask, release, replace, switch, ask, restore.
+    // The log, in full, is the requirement: ask, release, replace, switch. Until task T-40-3 two
+    // more entries followed — step 6 asking again and restoring — and step 6 is not performed now
+    // (finding С12).
     assert!(matches!(bench.log[0], Step::Held(_)));
     assert!(matches!(bench.log[1], Step::Send(_)));
     assert!(matches!(bench.log[2], Step::Send(_)));
     assert_eq!(switch, 3);
-    assert!(matches!(bench.log[4], Step::Held(_)));
-    assert!(matches!(bench.log[5], Step::Send(_)));
-    assert_eq!(bench.log.len(), 6);
+    assert_eq!(bench.log.len(), 4);
 
     // Everything the replacement consists of went out before the switch was reached, and the
     // whole of it: `accepted` is the system's own count.
@@ -2253,31 +2266,22 @@ fn the_users_shift_is_released_before_the_selection_and_ours_before_the_insertio
     assert_eq!(stream.iter().filter(|e| e.is_shift(true)).count(), 2);
 }
 
-/// **FR-40 step 6, against FR-42.** The `Shift` the selection pressed itself is never mistaken
-/// for one the user is holding, and is therefore never pressed again.
+/// **The hygiene of our own events, against FR-42.** The `Shift` the selection pressed itself goes
+/// down and up inside the packet and is never left down.
 ///
-/// This is the failure the requirement's step 6 makes possible and the mode has to rule out: the
-/// restore puts back "модификаторы, которые пользователь удерживает физически", it learns them
-/// from the desktop's asynchronous key state, and that state follows injected events too. A
-/// `Shift` left down by the packet would be reported as the user's and pressed a second time —
-/// a `Shift` stuck down for good on a machine whose owner is holding nothing.
+/// Until task T-40-3 this check was named after FR-40 step 6 — «step six does not restore the
+/// Shift the selection pressed itself» — because the restore learnt what to press from the
+/// desktop's asynchronous key state, that state follows injected events too, and a `Shift` left
+/// down by the packet would have been reported as the user's and pressed a second time. Step 6 is
+/// not performed now (finding С12, decision 127.2); what the check guards is what always mattered:
+/// a packet of ours leaves the keyboard as it found it.
 #[test]
-fn step_six_does_not_restore_the_shift_the_selection_pressed_itself() {
+fn the_shift_the_selection_pressed_itself_is_never_left_down() {
     // The user is holding nothing at all, so every `Shift` in this run is the packet's own.
     let mut bench = Bench::machine(Modifiers::NONE);
     let outcome = selection_run(&mut bench);
 
     assert_eq!(outcome.released, Modifiers::NONE, "nothing was held");
-    assert_eq!(
-        outcome.restored,
-        Modifiers::NONE,
-        "FR-40 step 6: and nothing is what comes back"
-    );
-    assert_eq!(
-        outcome.restore,
-        Dispatched::default(),
-        "not one event was sent to press a key nobody is pressing"
-    );
 
     // The keyboard is left exactly as it was found.
     assert_eq!(bench.keyboard(), Modifiers::NONE);
@@ -2292,14 +2296,15 @@ fn step_six_does_not_restore_the_shift_the_selection_pressed_itself() {
         1
     );
 
-    // The same with the user holding one, which is the case step 6 could get wrong in the other
-    // direction: what step 3 released is not put back by step 6 either, because by then the
-    // asynchronous state says it is up — and that is the behaviour of task T-04-1's mode too.
+    // The same with the user holding one. Step 3 takes the user's `Shift` down, and it does not
+    // come back: FR-40 step 6 was found unperformable — §10 of SPEC, finding С12, decision 127.2.
+    // The asynchronous state a restore could ask reads «up» once step 3's own release has gone
+    // out, however firmly the key is held, so the user presses `Shift` again after the
+    // replacement. That is the recorded behaviour of both modes, not an accident of this bench.
     let mut bench = Bench::machine(Modifiers::LEFT_SHIFT);
     let outcome = selection_run(&mut bench);
 
     assert_eq!(outcome.released, Modifiers::LEFT_SHIFT);
-    assert_eq!(outcome.restored, Modifiers::NONE);
     assert_eq!(bench.keyboard(), Modifiers::NONE, "no Shift is left down");
 
     // And the check is not vacuous: a packet that *did* leave its own `Shift` down would be
@@ -2331,15 +2336,16 @@ fn every_input_of_the_compatibility_mode_carries_the_injected_signature_of_fr03(
 
     let outcome = selection_run(&mut bench);
 
-    // Three packets really did go out — a test that found none would pass the loop vacuously.
-    assert_eq!(bench.sent().len(), 3);
+    // Two packets really did go out — a test that found none would pass the loop vacuously. There
+    // were three, with the restore of FR-40 step 6, until task T-40-3.
+    assert_eq!(bench.sent().len(), 2);
     assert_eq!(outcome.erased, 6);
     assert_eq!(outcome.typed, 6);
 
     let stream = bench.stream();
 
-    // 2 released + (Shift + 12 arrows + Shift + 6 characters down and up) + 1 restored.
-    assert_eq!(stream.len(), 2 + (1 + 12 + 1 + 12) + 1);
+    // 2 released + (Shift + 12 arrows + Shift + 6 characters down and up).
+    assert_eq!(stream.len(), 2 + (1 + 12 + 1 + 12));
 
     for event in stream {
         assert_eq!(
@@ -2373,13 +2379,14 @@ fn a_zero_delay_sends_the_compatibility_packet_in_exactly_one_call() {
     assert_eq!(bench.sent()[0].len(), 26);
     assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
 
-    // And through the whole of FR-40 in this mode: three packets, one call each.
+    // And through the whole of FR-40 in this mode: two packets, one call each — step 3 and step 4
+    // (the restore of step 6 was a third, until task T-40-3).
     let mut bench = Bench::holding(&[Modifiers::LEFT_ALT, Modifiers::LEFT_ALT]);
     let outcome = selection_run(&mut bench);
 
     assert_eq!(outcome.release.calls, 1);
     assert_eq!(outcome.replacement.calls, 1);
-    assert_eq!(outcome.restore.calls, 1);
+    assert_eq!(bench.sent().len(), 2);
 }
 
 // ---------------------------------------------------------------------------------------
