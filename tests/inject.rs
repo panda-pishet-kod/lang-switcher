@@ -1736,6 +1736,154 @@ fn neither_the_pause_of_fr44_nor_a_surrogate_pair_makes_a_taken_packet_incomplet
     buffer::uninstall();
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-40-1 — finding Н18 of the audit of 2026-09-04: an empty replacement is not a replacement
+// ---------------------------------------------------------------------------------------
+//
+// A ring of mute keys — the function row, the volume keys, all recorded by FR-10 like any other
+// key — renders into an **empty** packet: nothing to erase, nothing to type. `is_complete` compares
+// `accepted` with `requested`, and over zero events that comparison says "everything was taken".
+// So the idle press sounded the tone of a replacement, switched the layout of the foreground
+// window and moved the position counter of FR-32 — premise П3 of the stage measured all three on
+// `9571ff5` (`scratchpad-E40\premises-probe.log`). Decision 127.4: variants 1 and 2 of the finding,
+// both here; variant 3 (not recording the mute keys at all) is not this task.
+
+/// The mute keys of the finding: `F5`, `F6` and the extended `E0 30`, which is `Volume Up`.
+fn mute_keys() -> Vec<Keystroke> {
+    let source = us();
+
+    [(0x3F, false), (0x40, false), (0x30, true)]
+        .iter()
+        .map(|&(scan, extended)| Keystroke::recorded_in(&source, scan, extended, Mods::NONE))
+        .collect()
+}
+
+/// **Variant 1, the predicate.** A replacement of zero events has not reached the screen, however
+/// "complete" zero out of zero is.
+///
+/// `Dispatched::is_complete` is deliberately left as it is — it answers a question about a dispatch
+/// and zero of zero *is* complete — and the one predicate the press decides by asks the other half.
+#[test]
+fn an_empty_replacement_has_not_reached_the_screen() {
+    let empty = Replaced::default();
+
+    assert_eq!(empty.replacement.requested, 0);
+    assert!(
+        empty.replacement.is_complete(),
+        "is_complete is untouched: zero of zero is a complete dispatch"
+    );
+    assert!(
+        !empty.reached_the_screen(),
+        "Н18: but a replacement of nothing did not reach the screen"
+    );
+
+    // Control: the whole packet of `ghbdtn`, taken whole, did.
+    let whole = Replaced {
+        replacement: Dispatched {
+            calls: 1,
+            requested: WHOLE_PACKET,
+            accepted: WHOLE_PACKET,
+        },
+        ..Replaced::default()
+    };
+    assert!(whole.reached_the_screen());
+}
+
+/// **Variant 2, the refusal.** A press of mute keys is refused before steps 3 to 6: no modifier is
+/// asked for, released or restored, the layout is not switched, `on_hotkey` answers `None`, the
+/// counter of FR-32 stays put and the tone is the idle click — without a line of `app.rs` changed.
+#[test]
+fn a_press_of_mute_keys_is_refused_before_steps_three_to_six() {
+    let mute = mute_keys();
+    assert_eq!(
+        inject::typed_chars(&mute),
+        0,
+        "the premise: these keys put nothing on the screen"
+    );
+
+    let (before_cycle, before_session) = a_buffer_one_step_along_the_cycle();
+
+    // The user is holding `Shift`, so a step 3 that ran would show up in the log as a question and
+    // a release.
+    let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT, Modifiers::LEFT_SHIFT]);
+    let result = inject::replace_in(&mut bench, &mute, &russian(), 0);
+
+    assert_eq!(
+        result,
+        Err(InjectError::EmptyPacket),
+        "Н18: an empty packet is refused, not run"
+    );
+    assert!(
+        !bench.log.iter().any(|step| matches!(step, Step::Switch)),
+        "FR-40 step 5: the layout is not switched by an idle press"
+    );
+    assert!(
+        bench.log.is_empty(),
+        "steps 3 and 6 do not run either: nothing asked, nothing sent — {:?}",
+        bench.log
+    );
+
+    // What `on_hotkey` does with the answer, line for line: `.ok()`, then `note_press`.
+    let outcome = result.ok();
+    inject::note_press(outcome.as_ref(), CYCLE_LEN);
+    assert_eq!(
+        cycle_and_session(),
+        (before_cycle, before_session),
+        "FR-32 and FR-10: an idle press moves neither the counter nor the session"
+    );
+
+    // And the tone, as `app::window_proc` decides it: `press_outcome(buffered, refuses,
+    // on_hotkey().is_some())`. The buffer is here and nothing is refused.
+    assert_eq!(
+        lang_switcher::app::press_outcome(true, false, outcome.is_some()),
+        Some(lang_switcher::app::Press::Idle),
+        "FR-100: the idle click, not the tone of a replacement"
+    );
+
+    // Control — a press with text does both: the layout is switched and the counter moves.
+    let mut bench = Bench::new();
+    let replaced = press_ghbdtn(&mut bench);
+    assert!(bench.log.iter().any(|step| matches!(step, Step::Switch)));
+    inject::note_press(Some(&replaced), CYCLE_LEN);
+    assert_eq!(cycle_and_session(), (before_cycle + 1, true));
+    assert_eq!(
+        lang_switcher::app::press_outcome(true, false, true),
+        Some(lang_switcher::app::Press::Replaced)
+    );
+
+    buffer::uninstall();
+}
+
+/// **The risk the task names.** Something erased and nothing typed is **not** an empty packet: the
+/// backspaces are events, and the press that brings a run back to a layout in which its keys
+/// produce nothing is a real replacement of what the previous press injected.
+#[test]
+fn erasing_without_typing_is_not_an_empty_packet() {
+    // A key the origin layout has no character for, which the previous press rendered into `п`.
+    let origin = layout_with(LayoutId::from_raw(0x0409_0409), 0x22, KeyMapping::EMPTY);
+    let strokes = [Keystroke::recorded_in(&origin, 0x22, false, Mods::NONE)];
+
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &origin,
+        inject::OnScreen::as_injected(&strokes, &russian()),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("one backspace is a packet");
+
+    assert_eq!(outcome.erased, 1, "the previous press put one character up");
+    assert_eq!(outcome.typed, 0, "and this one types nothing back");
+    assert_eq!(
+        outcome.replacement.requested,
+        inject::replacement_events(1, 0)
+    );
+    assert!(outcome.reached_the_screen());
+    assert!(bench.log.iter().any(|step| matches!(step, Step::Switch)));
+}
+
 /// The pause of FR-44 defaults to the zero of section 7 and survives a round trip.
 #[test]
 fn the_pause_of_fr44_defaults_to_zero_and_can_be_published() {
@@ -1932,6 +2080,13 @@ fn n_counts_characters_in_the_compatibility_mode_so_a_ligature_is_selected_whole
 }
 
 /// A key that put nothing on the screen selects nothing, exactly as it erases nothing.
+///
+/// ⚠ **Task T-40-1 moved the answer, not the claim.** No selection means no `Shift` and no arrow,
+/// and the FR-23 pass-through of the stroke's own (absent) characters means nothing is inserted
+/// either — so the packet is empty. Until finding Н18 that empty packet was answered `Ok` and steps
+/// 3 to 6 ran around it; it is now refused whole as [`InjectError::EmptyPacket`] before any of them,
+/// in this mode as in the `backspace` one. What this check always said — nothing is sent at all —
+/// holds more strictly now: nothing is even asked.
 #[test]
 fn a_stroke_that_produced_no_character_selects_nothing() {
     let nothing = Keystroke::new(
@@ -1943,21 +2098,21 @@ fn a_stroke_that_produced_no_character_selects_nothing() {
     );
 
     let mut bench = Bench::new();
-    let outcome = inject::replace_in_with(
+    let result = inject::replace_in_with(
         &mut bench,
         &nothing_but(&nothing),
         &russian(),
         inject::OnScreen::as_typed(&nothing_but(&nothing)),
         0,
         ReplacementMethod::Selection,
-    )
-    .expect("sized");
+    );
 
-    assert_eq!(outcome.erased, 0);
-
-    // No selection means no `Shift` and no arrow — and the FR-23 pass-through of the stroke's
-    // own (absent) characters means nothing is inserted either, so nothing is sent at all.
+    assert_eq!(result, Err(InjectError::EmptyPacket));
     assert!(bench.sent().iter().flatten().next().is_none());
+    assert!(
+        bench.log.is_empty(),
+        "not even the modifiers were asked for"
+    );
 }
 
 /// One stroke as a slice — a name for the `[stroke]` above, so the assertion above reads.

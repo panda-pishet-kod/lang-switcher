@@ -155,6 +155,18 @@ pub enum InjectError {
         /// Length of the whole conversion, in UTF-16 code units.
         needed: usize,
     },
+
+    /// ⭐ **The packet is empty — finding Н18 of the audit of 2026-09-04, task T-40-1.**
+    ///
+    /// The strokes put nothing on the screen and convert into nothing — a ring of mute keys (the
+    /// function row, the volume keys), which FR-10 records like any other key. There is nothing to
+    /// erase and nothing to type, and "accepted = requested" over zero events would read as
+    /// "everything was taken": the idle press used to sound the tone of a replacement, switch the
+    /// layout of the foreground window and move the position counter of FR-32.
+    ///
+    /// Refused **before** steps 3 to 6 run, so an idle press releases no modifier, switches no
+    /// layout and restores nothing. Carries nothing at all — there is no count to report.
+    EmptyPacket,
 }
 
 impl fmt::Display for InjectError {
@@ -167,6 +179,7 @@ impl fmt::Display for InjectError {
             Self::TextTooLong { needed } => {
                 write!(f, "the replacement needs {needed} UTF-16 code units")
             }
+            Self::EmptyPacket => write!(f, "the replacement packet is empty"),
         }
     }
 }
@@ -1708,8 +1721,19 @@ impl Replaced {
     /// The FR-45 side is untouched: the discrepancy is still counted in [`send_mismatches`] by
     /// [`record_discrepancy`], and the packet is still not re-sent, for the reason
     /// [`dispatch_in`] gives — re-sending the tail would duplicate whatever did get through.
+    ///
+    /// # ⭐ And a replacement of nothing did not reach the screen — task T-40-1, finding Н18
+    ///
+    /// `is_complete` over **zero** events answers `true` — zero of zero is a complete dispatch, and
+    /// that method is left saying so. But zero events changed nothing on the screen, and the press
+    /// that sent them must move nothing either: the ring of mute keys (the function row, the
+    /// volume keys) used to render into an empty packet and advance the counter of FR-32 all the
+    /// same. So the one predicate the press decides by asks the other half too. [`replace_in_with`]
+    /// refuses an empty packet before it is sent, which makes this `requested > 0` a second line
+    /// rather than the only one: a `Replaced` built anywhere else still cannot pass an empty
+    /// replacement off as a real one.
     pub const fn reached_the_screen(self) -> bool {
-        self.replacement.is_complete()
+        self.replacement.requested > 0 && self.replacement.is_complete()
     }
 }
 
@@ -1735,9 +1759,12 @@ impl Replaced {
 ///
 /// # Errors
 ///
-/// Only sizing failures, and neither is reachable from [`on_hotkey`], which sizes both working
+/// Sizing failures, and neither is reachable from [`on_hotkey`], which sizes both working
 /// buffers from the lengths it is about to use. They are returned rather than asserted because
 /// a panic on this path would take a resident program down over a full buffer.
+///
+/// And [`InjectError::EmptyPacket`], which **is** reachable and is the ordinary answer to a press
+/// over a run of mute keys — task T-40-1: nothing is sent and steps 3 to 6 do not run.
 pub fn replace(
     strokes: &[Keystroke],
     target: &LayoutMap,
@@ -1834,6 +1861,21 @@ pub fn replace_in_with(
 
     let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
     let built = build_packet(method, erased, &text[..typed], &mut events);
+
+    // ⭐ **Task T-40-1, finding Н18 — an empty packet is refused here, before steps 3 to 6.**
+    //
+    // Nothing to erase and nothing to type: the run is a ring of mute keys, which FR-10 records
+    // like any other key. Sent, the packet would be zero events that `SendInput` "took whole", and
+    // the idle press would release and restore the user's modifiers, switch the layout of the
+    // foreground window (step 5) and let `note_press` move the counter of FR-32 over a screen that
+    // did not change. Refused, `on_hotkey` answers `None` and `app::press_outcome` sounds the idle
+    // click — the path of every other press that had nothing to do. The early return of
+    // [`dispatch_in`] on an empty array stays exactly as it is: that is a dispatch declining to
+    // make a call, and this is the press declining to happen.
+    let built = match built {
+        Ok(0) => Err(InjectError::EmptyPacket),
+        other => other,
+    };
 
     // ⚠ **The shape of the packet, published before it is sent — task T-10-6, SEC-04a.**
     //
