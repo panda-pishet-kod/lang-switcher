@@ -1266,7 +1266,9 @@ impl Tray {
             ..Default::default()
         };
 
-        write_tip(&mut data.szTip, &icon_tip(self.enabled()));
+        // Task T-41-8: the tooltip goes through the same writer as the two balloon fields. It
+        // used to have a copy of its own, and a copy is where the two would have drifted apart.
+        write_field(&mut data.szTip, &icon_tip(self.enabled()));
 
         data
     }
@@ -4738,30 +4740,30 @@ pub fn icon_tip(enabled: bool) -> String {
     format!("{APP_NAME} — {state}")
 }
 
-/// Copies `text` into the fixed tooltip field, always leaving it NUL-terminated.
+/// Copies `text` into one of the fixed fields of the notification area, always NUL-terminated
+/// and **never cut through a surrogate pair** — tasks Т-32-4 and T-41-8.
 ///
-/// The field holds 128 UTF-16 units including the terminator, and what goes into it is a name
-/// and a state word, so the truncating branch is unreachable in practice. It exists so that
-/// no future edit can make the field overrun.
-fn write_tip(field: &mut [u16; 128], text: &str) {
-    let limit = field.len() - 1;
-    let mut written = 0;
-
-    for unit in text.encode_utf16().take(limit) {
-        field[written] = unit;
-        written += 1;
-    }
-
-    field[written] = 0;
-}
-
-/// [`write_tip`] for a field of any length — the two balloon fields of FR-101, task Т-32-4.
-///
-/// `szInfo` is 256 units and `szInfoTitle` 64, and neither is the 128 of `szTip`; a generic
-/// body is one place the truncation can be wrong instead of three. The rule is the same:
+/// The three fields are `szTip` (128 units), `szInfo` (256) and `szInfoTitle` (64), and one
+/// generic body is one place the truncation can be wrong instead of three. The rule is
 /// **cut, never refuse** — a sentence of a locale nobody measured must not be able to stop a
-/// letter being announced (NFR-13), and it is cut at a UTF-16 unit, which is where the field
-/// itself ends.
+/// letter being announced (NFR-13).
+///
+/// # Finding Т11 — where the cut may not fall
+///
+/// These fields are arrays of UTF-16 **units**, not of characters. Everything outside the Basic
+/// Multilingual Plane — an emoji, a rare ideograph — is written as a **surrogate pair**, two
+/// units that mean one character only together, and a cut that falls between them would hand the
+/// shell the leading half alone: not a character, and not valid UTF-16 either. So when the last
+/// unit written is a leading half (`0xD800..=0xDBFF`) the terminator goes one place earlier and
+/// that half is given back.
+///
+/// ⚠ **Only the leading half.** A *trailing* half as the last unit means the pair fitted whole,
+/// and stepping back there would throw away a character that was perfectly well placed — which
+/// is what the second control of the acceptance is for.
+///
+/// For `szTip` the branch is insurance: «Lang Switcher — активна» is short in all fourteen
+/// locales. For the two balloon fields it is not — they carry the text of a letter, of whatever
+/// length its author wrote.
 fn write_field<const N: usize>(field: &mut [u16; N], text: &str) {
     let limit = field.len().saturating_sub(1);
     let mut written = 0;
@@ -4769,6 +4771,12 @@ fn write_field<const N: usize>(field: &mut [u16; N], text: &str) {
     for unit in text.encode_utf16().take(limit) {
         field[written] = unit;
         written += 1;
+    }
+
+    // Task T-41-8, finding Т11. Three lines, and the whole of the repair: the pair is either
+    // whole or not here at all.
+    if written > 0 && (0xD800..=0xDBFF).contains(&field[written - 1]) {
+        written -= 1;
     }
 
     field[written] = 0;
@@ -4957,7 +4965,7 @@ mod tests {
     #[test]
     fn a_tooltip_is_always_terminated() {
         let mut field = [0xFFFFu16; 128];
-        write_tip(&mut field, "Lang Switcher — активна");
+        write_field(&mut field, "Lang Switcher — активна");
 
         let end = field.iter().position(|unit| *unit == 0).unwrap();
         assert_eq!(
@@ -4970,12 +4978,107 @@ mod tests {
     fn an_over_long_tooltip_is_truncated_rather_than_overrunning() {
         let mut field = [0xFFFFu16; 128];
         let long = "я".repeat(500);
-        write_tip(&mut field, &long);
+        write_field(&mut field, &long);
 
         assert_eq!(field[127], 0, "the last unit must be the terminator");
         assert!(
             field[..127].iter().all(|unit| *unit == 0x044F),
             "the field must be filled with the text and nothing left over"
+        );
+    }
+
+    /// **Finding Т11, task T-41-8 — a fixed field is never cut through a surrogate pair.**
+    ///
+    /// The three fields of the notification area are arrays of UTF-16 **units**, and what goes
+    /// into them is cut to fit. A character outside the Basic Multilingual Plane — an emoji, a
+    /// rare ideograph — is two units, and a cut that falls between them leaves the shell the
+    /// leading half alone: not a character, and not valid UTF-16 either.
+    ///
+    /// ⚠ **Driven on all three fields, because only one of the three is unreachable.** `szTip`
+    /// carries «Lang Switcher — активна», short in all fourteen locales, so for the tooltip this
+    /// is insurance. `szInfo` and `szInfoTitle` carry the **text of a letter**, of whatever length
+    /// its author wrote, and for them the branch fires on real data.
+    ///
+    /// The boundary is odd in all three (127, 255, 63) and an emoji is two units, so a string of
+    /// nothing but emoji lands the cut between the halves by construction — no arithmetic to get
+    /// wrong.
+    #[test]
+    fn a_fixed_field_is_never_cut_through_a_surrogate_pair() {
+        /// One emoji — U+1F600, two UTF-16 units: `0xD83D` then `0xDE00`.
+        const FACE: &str = "😀";
+
+        fn check<const N: usize>(name: &str) {
+            let mut field = [0xFFFFu16; N];
+            let limit = N - 1;
+            let text = FACE.repeat(N);
+
+            write_field(&mut field, &text);
+
+            let end = field
+                .iter()
+                .position(|unit| *unit == 0)
+                .expect("the field must carry a terminator");
+
+            let decoded = String::from_utf16(&field[..end]);
+
+            println!(
+                "{name}: field {N}, limit {limit}, written {end}, last unit {:#06X}, decoded {:?}",
+                if end == 0 { 0 } else { field[end - 1] },
+                decoded.as_ref().map(|text| text.chars().count())
+            );
+
+            assert!(
+                decoded.is_ok(),
+                "{name}: what the shell is handed must be valid UTF-16 — the cut fell between \
+                 the halves of a pair and left the leading one behind"
+            );
+
+            let decoded = decoded.unwrap_or_default();
+
+            assert!(
+                !decoded.contains('\u{FFFD}'),
+                "{name}: and it must carry no replacement character either"
+            );
+            assert_eq!(
+                decoded.chars().count(),
+                limit / 2,
+                "{name}: as many whole emoji as fit, and the odd unit dropped"
+            );
+            assert_eq!(
+                end,
+                limit - 1,
+                "{name}: exactly one unit short of the limit — the leading half stepped back"
+            );
+        }
+
+        check::<128>("szTip");
+        check::<256>("szInfo");
+        check::<64>("szInfoTitle");
+
+        // The control: a boundary that does **not** fall on a pair is cut exactly as before,
+        // unit for unit. Without this half the repair could have been «шагать назад всегда».
+        let mut field = [0xFFFFu16; 128];
+        write_field(&mut field, &"я".repeat(500));
+
+        assert_eq!(
+            field[127], 0,
+            "the terminator is in the last unit as before"
+        );
+        assert!(
+            field[..127].iter().all(|unit| *unit == 0x044F),
+            "and all 127 units before it are the text — nothing was given back"
+        );
+
+        // And the other control: a pair that fits **whole** is not touched. The last written
+        // unit is then a trailing half, and stepping back there would throw away a character
+        // that was perfectly well placed.
+        let mut field = [0xFFFFu16; 5];
+        write_field(&mut field, FACE);
+
+        assert_eq!(
+            (field[0], field[1], field[2]),
+            (0xD83D, 0xDE00, 0),
+            "a whole pair with room to spare is written whole"
         );
     }
 
