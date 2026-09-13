@@ -14494,20 +14494,6 @@ fn read_cycle_checks(hwnd: HWND, rows: &mut [LayoutRow]) {
     }
 }
 
-/// Enables the half of the layouts section the mode of FR-30 and FR-31 is about.
-///
-/// FR-92 says the list is «активен в режиме „Несколько"», and the pair is the other way round:
-/// a control that cannot affect anything is disabled rather than left to be clicked.
-///
-/// **Except the list itself — task T-11-7-2.** A `SysListView32` under `EnableWindow(FALSE)`
-/// ignores its own `LVM_SET*COLOR` colours and paints the system wash — the defect the final
-/// sweep found: a light body in both palettes, an unreadable second row in the dark one. So
-/// the list stays enabled at the window level always, and its pair-mode «выключенность» is
-/// logical instead: every change the control would make is refused before any action by the
-/// gate of [`on_notify`] ([`cycle_list_change_is_refused`]), and the rows wear the muted
-/// paints of [`cycle_row_paint`]. The two arrow buttons keep the honest disable — owner
-/// drawing paints a disabled button grey with the palette's own colours, so the defect never
-/// touched them.
 /// A window that had to be shortened, and how far its contents are scrolled — task T-42-12,
 /// finding 124б.1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14901,7 +14887,36 @@ unsafe fn on_mouse_wheel(hwnd: HWND, wparam: WPARAM) {
     unsafe { scroll_contents_to(hwnd, view.offset + delta) };
 }
 
-fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
+/// Enables the half of the layouts section the mode of FR-30 and FR-31 is about.
+///
+/// FR-92 says the list is «активен в режиме „Несколько"», and the pair is the other way round:
+/// a control that cannot affect anything is disabled rather than left to be clicked.
+///
+/// **Except the list itself — task T-11-7-2.** A `SysListView32` under `EnableWindow(FALSE)`
+/// ignores its own `LVM_SET*COLOR` colours and paints the system wash — the defect the final
+/// sweep found: a light body in both palettes, an unreadable second row in the dark one. So
+/// the list stays enabled at the window level always, and its pair-mode «выключенность» is
+/// logical instead: every change the control would make is refused before any action by the
+/// gate of [`on_notify`] ([`cycle_list_change_is_refused`]), and the rows wear the muted
+/// paints of [`cycle_row_paint`]. The two arrow buttons keep the honest disable — owner
+/// drawing paints a disabled button grey with the palette's own colours, so the defect never
+/// touched them.
+///
+/// **And the tab stop goes with the mode — task T-43-6, finding Н115.** A list that stays
+/// enabled stays in the tab order, so in «Пара» Tab walked into it and stopped on an element
+/// where no key does anything. What the pair mode takes away from the list now is its
+/// `WS_TABSTOP`, which the dialog manager reads afresh on every walk, and what «Несколько» gives
+/// back is the same bit. The window-level «включённость» is untouched, for the reason above —
+/// the lever is the stop, never `EnableWindow`.
+///
+/// ⚠ This comment stood detached, above `ScrollView`, from task T-42-12 until task T-43-6
+/// put it back: the function it explains had no documentation at all, and a reader who took
+/// that for permission to disable the list would have brought the defect above straight back.
+///
+/// Public so that `tests\settings.rs` can drive the very function the window calls, over child
+/// windows of its own under the identifiers of `app.rc` — the precedent of
+/// [`show_journal_saved`].
+pub fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
     let cycle = matches!(mode, LayoutMode::Cycle);
 
     for control in [IDC_PAIR_SOURCE, IDC_PAIR_TARGET] {
@@ -14911,6 +14926,46 @@ fn enable_by_mode(hwnd: HWND, mode: LayoutMode) {
     for control in [IDC_CYCLE_UP, IDC_CYCLE_DOWN] {
         enable(hwnd, control, cycle);
     }
+
+    set_tab_stop(hwnd, IDC_CYCLE_LIST, cycle);
+}
+
+/// Gives one control the tab stop of the dialog manager, or takes it away — task T-43-6.
+///
+/// The first writer of `WS_TABSTOP` in this module: until that task the bit lived only in the
+/// template, and the two places here that name it do so to say why it is **not** written.
+/// Nothing is repainted — a tab stop changes the walk of Tab and not a pixel of the control.
+///
+/// NFR-13: a control that cannot be found is journaled the way [`enable`] journals it, and a
+/// style that cannot be read is left alone — a stop too many is a blemish of the keyboard walk,
+/// and a window that refused to change modes over it would be a fault.
+fn set_tab_stop(hwnd: HWND, control: i32, stop: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WS_TABSTOP};
+
+    // SAFETY: `hwnd` is the live dialog and `control` names a control of its template; the
+    // crate turns a missing control into an error, which is the `Ok` guard below.
+    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `window` is the live control just found; the call reads one of its fields.
+    let style = unsafe { GetWindowLongPtrW(window, GWL_STYLE) };
+
+    if style == 0 {
+        return;
+    }
+
+    let bit = isize::try_from(WS_TABSTOP.0).unwrap_or(0);
+    let wanted = if stop { style | bit } else { style & !bit };
+
+    if wanted == style {
+        return;
+    }
+
+    // SAFETY: `window` is the live control and the value is its own style with one documented
+    // bit set or cleared; nothing else is written.
+    unsafe { SetWindowLongPtrW(window, GWL_STYLE, wanted) };
 }
 
 // -----------------------------------------------------------------------------------------

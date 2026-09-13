@@ -3590,6 +3590,193 @@ fn a_click_in_pair_mode_is_refused_before_any_action_of_fr_31() {
     );
 }
 
+/// **Task T-43-6, finding Н115** — Tab does not stop in the list the pair mode has no use for.
+///
+/// In «Пара» the layout list is dead to the person — its rows are muted and every change it
+/// would make is refused — but it stays **enabled** at the window level on purpose (a
+/// `SysListView32` under `EnableWindow(FALSE)` paints the system wash over the palette, task
+/// T-11-7-2). So Tab kept walking into it and stopping on an element where no key does
+/// anything. The lever the audit recommended: the tab stop goes with the mode, and the list is
+/// not disabled.
+///
+/// A hidden popup of the test's own stands in for the dialog, with the five controls of the
+/// layouts section under the identifiers `app.rc` gives them — the precedent of task T-39-11:
+/// [`settings::enable_by_mode`] finds its controls by identifier, so that is the whole of what it
+/// needs. Measured twice over: on the style bit, and on the walk the dialog manager itself makes
+/// (`GetNextDlgTabItem`), because the walk is what a person meets.
+#[test]
+fn the_cycle_list_is_no_tab_stop_in_the_pair_mode_and_is_one_in_the_cycle_mode() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GWL_STYLE, GetDlgCtrlID, GetDlgItem, GetNextDlgTabItem,
+        GetWindowLongPtrW, HMENU, WINDOW_EX_STYLE, WS_CHILD, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
+    };
+    use windows::core::w;
+
+    /// The popup, destroyed on the way out with its children — panic or no panic.
+    struct Popup(HWND);
+
+    impl Drop for Popup {
+        fn drop(&mut self) {
+            // SAFETY: the window was created on this thread by this test and is destroyed once.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    // `app.rc`: the pair's two combo boxes, the list, the two arrows — in template order.
+    const IDC_PAIR_SOURCE: i32 = 1022;
+    const IDC_PAIR_TARGET: i32 = 1023;
+    const IDC_CYCLE_LIST: i32 = 1024;
+    const IDC_CYCLE_UP: i32 = 1025;
+    const IDC_CYCLE_DOWN: i32 = 1026;
+
+    // SAFETY: a system class, no parent and no creation data; the handle is owned by `Popup`.
+    let popup = Popup(
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                240,
+                120,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden popup must be creatable"),
+    );
+
+    // Every one of them a tab stop, as the template declares them. `WS_VISIBLE` on a child of a
+    // hidden popup is a style bit only — nothing reaches the screen — and it is the bit the
+    // dialog manager reads when it walks the tab order.
+    for control in [
+        IDC_PAIR_SOURCE,
+        IDC_PAIR_TARGET,
+        IDC_CYCLE_LIST,
+        IDC_CYCLE_UP,
+        IDC_CYCLE_DOWN,
+    ] {
+        // SAFETY: as above; a child's identifier travels in the menu slot, and the popup stays
+        // its parent for the whole of the test.
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("BUTTON"),
+                None,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                0,
+                0,
+                40,
+                20,
+                Some(popup.0),
+                Some(HMENU(std::ptr::without_provenance_mut(
+                    usize::try_from(control).expect("an identifier of app.rc is positive"),
+                ))),
+                None,
+                None,
+            )
+        }
+        .expect("the control must be creatable");
+    }
+
+    // SAFETY: the popup is alive and the identifier names a child created above.
+    let list = unsafe { GetDlgItem(Some(popup.0), IDC_CYCLE_LIST) }.expect("the list is there");
+
+    let is_tab_stop = |window: HWND| {
+        // SAFETY: `window` is a live child of the popup.
+        let style = unsafe { GetWindowLongPtrW(window, GWL_STYLE) };
+
+        style & isize::try_from(WS_TABSTOP.0).unwrap_or(0) != 0
+    };
+
+    // The walk of the dialog manager from the first tab stop, as identifiers, once round.
+    let walk = || {
+        let mut order = Vec::new();
+
+        // SAFETY: the popup is alive; `None` asks for the first control of the walk.
+        let Ok(first) = (unsafe { GetNextDlgTabItem(popup.0, None, false) }) else {
+            return order;
+        };
+
+        let mut current = first;
+
+        for _ in 0..8 {
+            // SAFETY: `current` is a live child of the popup.
+            order.push(unsafe { GetDlgCtrlID(current) });
+
+            // SAFETY: as above.
+            match unsafe { GetNextDlgTabItem(popup.0, Some(current), false) } {
+                Ok(next) if next != first => current = next,
+                _ => break,
+            }
+        }
+
+        order.sort_unstable();
+        order
+    };
+
+    settings::enable_by_mode(popup.0, LayoutMode::Pair);
+
+    let pair_walk = walk();
+
+    println!(
+        "pair: list tab stop {}, list enabled {}, walk {pair_walk:?}",
+        is_tab_stop(list),
+        // SAFETY: `list` is a live child of the popup.
+        unsafe { IsWindowEnabled(list) }.as_bool()
+    );
+
+    assert!(
+        !is_tab_stop(list),
+        "in «Пара» the list the mode has no use for must not be a tab stop"
+    );
+    assert!(
+        // SAFETY: as above.
+        unsafe { IsWindowEnabled(list) }.as_bool(),
+        "⛔ and it must stay ENABLED — a disabled SysListView32 paints the system wash over the \
+         palette (task T-11-7-2); the tab stop is the whole of the lever"
+    );
+    assert_eq!(
+        pair_walk,
+        vec![IDC_PAIR_SOURCE, IDC_PAIR_TARGET],
+        "Tab walks the two combo boxes of the pair and nothing else of this section: the arrows \
+         are disabled and the list is no stop"
+    );
+
+    settings::enable_by_mode(popup.0, LayoutMode::Cycle);
+
+    let cycle_walk = walk();
+
+    println!(
+        "cycle: list tab stop {}, walk {cycle_walk:?}",
+        is_tab_stop(list)
+    );
+
+    assert!(
+        is_tab_stop(list),
+        "in «Несколько» the list is the section's working control and Tab must reach it"
+    );
+    assert_eq!(
+        cycle_walk,
+        vec![IDC_CYCLE_LIST, IDC_CYCLE_UP, IDC_CYCLE_DOWN],
+        "Tab walks the list and its two arrows, and the pair is disabled"
+    );
+
+    // And back again: the lever is a switch, not a one-way trip.
+    settings::enable_by_mode(popup.0, LayoutMode::Pair);
+
+    assert!(
+        !is_tab_stop(list),
+        "the pair mode takes the stop away again"
+    );
+}
+
 /// **Task T-42-6, finding Н112, решение 124.3** — the ninth tick of the cycle list does not go
 /// in, and the refusal is heard as well as seen.
 ///
