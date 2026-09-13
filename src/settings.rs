@@ -4516,19 +4516,34 @@ impl AlignedTemplate {
     }
 }
 
+/// The compiled bytes of one dialog template of `instance`, copied into an aligned buffer so that
+/// the mirror of task Т-30-2 can patch them — `None` when the copy cannot be made, and the dialog
+/// then opens from the template in the image, unmirrored.
+///
+/// ⚠ **Task T-43-15, finding Н68: the two refusals that carry a code of Windows are journaled.**
+/// `FindResourceW` and `LoadResource` used to answer `None` and nothing else, so a Hebrew or an
+/// Arabic interface that opened laid out left to right left no trace of why. The other two ways
+/// out — a null lock and a template shorter than its own header — are a reading of bytes, carry
+/// no code, and are not NFR-13's business; they stay silent on purpose.
 fn compiled_template(instance: HINSTANCE, template: u16) -> Option<AlignedTemplate> {
     // SAFETY: `instance` is this program's module, whose resources carry both templates; the
     // "name" is an integer identifier in the `MAKEINTRESOURCE` form, never dereferenced.
     let found = unsafe { FindResourceW(Some(instance.into()), resource_id(template), RT_DIALOG) };
 
     if found.is_invalid() {
+        // Read before any other call of this thread can overwrite the last error.
+        crate::app::report_non_critical("FindResourceW", &WinError::from_thread());
         return None;
     }
 
     // SAFETY: `found` is a resource of `instance`, just answered by `FindResourceW`.
     let size = unsafe { SizeofResource(Some(instance.into()), found) } as usize;
-    // SAFETY: as above. A resource handle is not freed — the loader owns the image.
-    let loaded = unsafe { LoadResource(Some(instance.into()), found) }.ok()?;
+    // SAFETY: as above. A resource handle is not freed — the loader owns the image. NFR-13: the
+    // crate turns a failure into an error, which is journaled before the `?` gives up — the shape
+    // `string_from` has had for the same call since task T-06-4.
+    let loaded = unsafe { LoadResource(Some(instance.into()), found) }
+        .inspect_err(|error| crate::app::report_non_critical("LoadResource", error))
+        .ok()?;
     // SAFETY: `loaded` was just answered for a resource of this image.
     let raw = unsafe { LockResource(loaded) };
 

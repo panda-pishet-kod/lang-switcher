@@ -380,6 +380,10 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("RegSetValueExW", Kind::Process),
     ("RegCloseKey", Kind::Process),
     ("FindResourceExW", Kind::Process),
+    // Task T-43-15, finding Н68: the copy of a dialog template the mirror of right-to-left
+    // languages patches (`settings::compiled_template`) is found by the call without `Ex`, and
+    // its refusal reached the ring unnamed. Beside its sibling and of its kind.
+    ("FindResourceW", Kind::Process),
     ("LoadResource", Kind::Process),
     // Task Т-29-3, вопрос 95: the interface language of the user's Windows, asked once and only
     // when there is no configuration file yet. `Kind::Process` for the same reason the two

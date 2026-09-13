@@ -14401,6 +14401,103 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
     );
 }
 
+/// **Task T-43-15, finding Н68 — a template the mirror could not take is not a silence.**
+///
+/// For a right-to-left language the dialog is made from a copy of its compiled template, patched
+/// to open mirrored (`compiled_template`, task Т-30-2). A step that fails answers «nothing» and the
+/// window opens unmirrored — a Hebrew interface laid out left to right — and until this task not a
+/// line of the journal said why. Of the four ways the copy can fail, two carry a real error code
+/// of Windows: `FindResourceW` and `LoadResource`. Those two are journaled now; the other two are a
+/// reading of bytes, with no code to report (NFR-13 does not reach them).
+///
+/// The refusal of `FindResourceW` is ordered without a window: the about box is asked for with the
+/// module of `kernel32.dll`, which carries no template of ours, and an owner that names no window —
+/// the call walks through `show_modal_dialog` to the dialog manager and back with `Err`, and on its
+/// way the copy of the template is refused. The journal is read back by name among the entries
+/// recorded after the mark, with the code Windows gave. ⚠ The name needs a row of its own in the
+/// vocabulary of `src\diag.rs`: until this task the table had `FindResourceExW` and not
+/// `FindResourceW`, and a report under a name that is not a row reaches the ring unnamed.
+#[test]
+fn a_template_the_mirror_could_not_find_is_journaled_under_its_own_name() {
+    use lang_switcher::diag;
+    use lang_switcher::theme::ThemeSetting;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::core::w;
+
+    // SAFETY: a module every process has loaded; the handle is borrowed and never freed.
+    let module = unsafe { GetModuleHandleW(w!("kernel32.dll")) }
+        .expect("kernel32.dll is loaded in every process");
+    let instance = HINSTANCE(module.0);
+
+    assert!(
+        !settings::about_is_open() && !settings::dialog_is_open(),
+        "this thread has neither window, so the call goes all the way to the template"
+    );
+
+    let mark = diag::recorded();
+    let answered = settings::show_about_dialog(
+        a_handle_that_names_no_window(),
+        instance,
+        ThemeSetting::Dark,
+        None,
+        "Pause",
+    );
+
+    let entries: Vec<_> = diag::snapshot()
+        .into_iter()
+        .filter(|event| event.ordinal >= mark)
+        .collect();
+
+    println!(
+        "the call answered {answered:?}; journal since the mark: {:?}",
+        entries
+            .iter()
+            .map(|event| format!("{} {:#010X}", event.operation.name(), event.code.raw()))
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        answered.is_err(),
+        "a module with no template must make the dialog manager refuse"
+    );
+
+    let refusal = entries
+        .iter()
+        .find(|event| event.operation.name() == "FindResourceW")
+        .unwrap_or_else(|| {
+            panic!(
+                "the refused copy of the template must reach the journal as FindResourceW — the \
+                 entries since the mark: {:?}",
+                entries
+                    .iter()
+                    .map(|event| event.operation.name())
+                    .collect::<Vec<_>>()
+            )
+        });
+
+    assert_ne!(
+        refusal.code,
+        diag::OsCode::NONE,
+        "and with the code Windows gave, not with none"
+    );
+
+    // The shape, for the second point of the finding: `LoadResource` has no refusal a test can
+    // order, so the sweep holds that it is journaled rather than swallowed by `.ok()?`.
+    let source = settings_module_source();
+    let copy = function_body(&source, "fn compiled_template(");
+
+    for needle in [
+        "report_non_critical(\"FindResourceW\"",
+        "report_non_critical(\"LoadResource\"",
+    ] {
+        assert!(
+            copy.contains(needle),
+            "compiled_template must journal its refusal — `{needle}` is not there"
+        );
+    }
+}
+
 // =========================================================================================
 // FR-92а — своё сглаживание на чистом GDI и серое сглаживание нашего текста. Task T-11-17.
 // =========================================================================================
