@@ -872,14 +872,182 @@ fn a_help_row_splits_at_the_placeholder_and_nowhere_else() {
     assert_eq!(split.prefix, plain);
     assert_eq!(split.suffix, "");
 
-    // An empty key name: the row keeps its words and loses only the figure.
+    // An empty key name: the row keeps its words and loses only the figure — task T-43-3,
+    // finding Н138. ⚠ Until that task this block asserted an **empty suffix**, which is the very
+    // defect: the branch kept the first half of the sentence and dropped the second, and the
+    // test of the split held the loss in place, so it could not fail.
     let split = chip_row(row, "");
 
     assert_eq!(split.key, None, "a box round an empty name is not a chip");
+    assert_eq!(split.prefix, "Набрали слово не в той раскладке — нажмите ");
     assert_eq!(
-        split.suffix, "",
-        "with no chip there is nothing to split at"
+        split.suffix, ": слово перекодируется.",
+        "an empty name takes the figure away and nothing else — the tail stays in the row"
     );
+    assert_eq!(
+        format!("{}{KEY_PLACEHOLDER}{}", split.prefix, split.suffix),
+        row,
+        "the split of an empty name must be reversible too"
+    );
+
+    // The example of the mandate, word for word. The two halves carry their own spacing — the
+    // rule of the split above — so the tail begins with the space that stood after `{0}`.
+    let split = chip_row("до {0} после", "");
+
+    assert_eq!(split.prefix, "до ");
+    assert_eq!(split.key, None);
+    assert_eq!(split.suffix, " после");
+}
+
+/// **Task T-43-3, finding Н138** — an empty key name draws the **whole** sentence, not its first
+/// half.
+///
+/// `theme::chip_row` promised it in so many words — «the two halves are drawn as one sentence» —
+/// and did the opposite, and the test above held the opposite in place. The value was not the
+/// whole of it, and that was measured before the repair (`scratchpad-E43\premises-p4.log`): the
+/// one place a row becomes words, `push_row_atoms`, took **only** `row.prefix` for a row with no
+/// key, so mending the split alone would have changed a value and not one pixel.
+///
+/// So the pen is asked, not the value. A row whose key name is empty is drawn; the same sentence
+/// with the placeholder cut out is drawn on a second sheet as a row that never had one (rows 4
+/// and 5 of the help); and the two sheets must be the same pixel for pixel, with the measuring
+/// twin answering the same lines and the same height for both. ⚠ Not against a literal — the
+/// приём of Э33: two ways of asking one question.
+#[test]
+fn an_empty_key_name_draws_the_whole_sentence_and_not_its_first_half() {
+    use lang_switcher::theme::{
+        ChipColors, ChipRowMetrics, ChipRowStyle, KEY_PLACEHOLDER, chip_row, measure_chip_row,
+        paint_chip_row,
+    };
+    use windows::Win32::Graphics::Gdi::{CreateFontIndirectW, LOGFONTW};
+
+    let mut logical = LOGFONTW {
+        lfHeight: -14,
+        lfWeight: 400,
+        ..Default::default()
+    };
+
+    for (slot, unit) in logical.lfFaceName.iter_mut().zip("Segoe UI".encode_utf16()) {
+        *slot = unit;
+    }
+
+    let mut chip_logical = logical;
+    chip_logical.lfHeight = -12;
+
+    // SAFETY: both structures are live locals of this frame; the handles are freed at the end.
+    let (body, chip) = unsafe {
+        (
+            CreateFontIndirectW(&raw const logical),
+            CreateFontIndirectW(&raw const chip_logical),
+        )
+    };
+
+    // SAFETY: a plain colour in, a handle out, freed at the end.
+    let ground = unsafe { CreateSolidBrush(COLORREF(0x00FF_FFFF)) };
+
+    let pitch = 20;
+
+    let metrics = ChipRowMetrics {
+        body: Some(body),
+        chip_face: Some((chip, chip_logical.lfHeight)),
+        pitch,
+        dpi: 96,
+    };
+
+    let style = ChipRowStyle {
+        ground,
+        ink: COLORREF(0),
+        body: Some(body),
+        chip_face: Some((chip, chip_logical.lfHeight)),
+        chip: ChipColors {
+            outline: COLORREF(0),
+            fill: ground,
+            ink: COLORREF(0),
+        },
+        pitch,
+        dpi: 96,
+    };
+
+    // A tail that wraps, a tail that does not, a colon glued to the placeholder, and a
+    // placeholder that opens the sentence — the four places a half can stand.
+    let sentences = [
+        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится.",
+        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane.",
+        "Повторное нажатие {0} возвращает всё назад.",
+        "{0} — клавиша, которой переключается раскладка.",
+    ];
+
+    for width in [140, 260] {
+        for sentence in sentences {
+            let (prefix, suffix) = sentence
+                .split_once(KEY_PLACEHOLDER)
+                .expect("every sentence of this test carries the placeholder");
+            let joined = format!("{prefix}{suffix}");
+
+            let keyless = chip_row(sentence, "");
+            let plain = chip_row(&joined, "Pause");
+
+            assert_eq!(
+                plain.key, None,
+                "the joined sentence has no placeholder left"
+            );
+
+            // SAFETY: a memory DC of the test's own and two faces alive for the whole test.
+            let measured = unsafe {
+                let sheet = Sheet::new(8, false);
+
+                (
+                    measure_chip_row(sheet.dc, width, keyless, metrics),
+                    measure_chip_row(sheet.dc, width, plain, metrics),
+                )
+            };
+
+            println!("width {width}: {measured:?} — «{sentence}»");
+
+            assert_eq!(
+                measured.0, measured.1,
+                "width {width}: the twin measured the empty-name row as {:?} and the sentence \
+                 it stands for as {:?} — the tail is not being measured. «{sentence}»",
+                measured.0, measured.1
+            );
+
+            let drawn = |row| {
+                let sheet = Sheet::new(320, false);
+                let area = RECT {
+                    left: 4,
+                    top: 4,
+                    right: 4 + width,
+                    bottom: sheet.side,
+                };
+
+                // SAFETY: own DC, own rectangle, live brush and faces.
+                unsafe { paint_chip_row(sheet.dc, area, row, style) };
+
+                (sheet.inked(), sheet.pixels())
+            };
+
+            let (keyless_ink, keyless_pixels) = drawn(keyless);
+            let (plain_ink, plain_pixels) = drawn(plain);
+
+            assert!(
+                plain_ink > 0,
+                "width {width}: the sentence must leave ink at all"
+            );
+            assert!(
+                keyless_pixels == plain_pixels,
+                "width {width}: the empty-name row left {keyless_ink} inked pixels and the \
+                 sentence it stands for {plain_ink} — the pen is not drawing the tail. \
+                 «{sentence}»"
+            );
+        }
+    }
+
+    // SAFETY: every handle was made here, handed to nobody, and is freed exactly once.
+    unsafe {
+        let _ = DeleteObject(body.into());
+        let _ = DeleteObject(chip.into());
+        let _ = DeleteObject(ground.into());
+    }
 }
 
 /// **Task T-42-2, finding С44** — the measuring twin and the pen put a help row on the same

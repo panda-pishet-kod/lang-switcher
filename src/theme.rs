@@ -3234,7 +3234,8 @@ pub struct ChipColors {
 pub struct ChipRow<'a> {
     /// Everything before [`KEY_PLACEHOLDER`].
     pub prefix: &'a str,
-    /// The key name, or `None` for a row with no placeholder — rows 4 and 5 of the help.
+    /// The key name, or `None` for a row with no placeholder — rows 4 and 5 of the help — and
+    /// for a key name that is empty.
     pub key: Option<&'a str>,
     /// Everything after the placeholder; empty when there is none.
     pub suffix: &'a str,
@@ -3243,8 +3244,13 @@ pub struct ChipRow<'a> {
 /// Splits one help row at its placeholder — pure, and the whole of «где стоит чип».
 ///
 /// A template with no [`KEY_PLACEHOLDER`] is all prefix and no key, which is rows 4 and 5 of
-/// the help word for word. An **empty** key name is treated the same way and the two halves
-/// are drawn as one sentence: an empty chip would be a box around nothing.
+/// the help word for word. An **empty** key name has no chip either — an empty chip would be a
+/// box around nothing — and keeps **both** halves, which [`push_row_atoms`] draws as one
+/// sentence.
+///
+/// ⚠ Task T-43-3, finding Н138: until then the branch of the empty name kept the first half and
+/// put an empty string where the second stood, while this comment promised the whole sentence
+/// and the test of the split held the loss in place — the instrument could not fail.
 pub fn chip_row<'a>(template: &'a str, key: &'a str) -> ChipRow<'a> {
     match template.split_once(KEY_PLACEHOLDER) {
         Some((prefix, suffix)) if !key.is_empty() => ChipRow {
@@ -3252,10 +3258,10 @@ pub fn chip_row<'a>(template: &'a str, key: &'a str) -> ChipRow<'a> {
             key: Some(key),
             suffix,
         },
-        Some((prefix, _)) => ChipRow {
+        Some((prefix, suffix)) => ChipRow {
             prefix,
             key: None,
-            suffix: "",
+            suffix,
         },
         None => ChipRow {
             prefix: template,
@@ -3465,6 +3471,12 @@ unsafe fn lay_chip_row(dc: HDC, rect: RECT, row: ChipRow<'_>, style: ChipRowStyl
 /// `folded` is the sentence with the key name written back into it, for a row whose chip could
 /// not be made; `chip` is the measured figure, `None` when there is none.
 ///
+/// A row with **no key** is laid as its two halves in a row — rows 4 and 5 of the help have no
+/// placeholder and an empty second half, and a template whose key name is empty keeps both
+/// (task T-43-3, finding Н138). Until that task this arm pushed `row.prefix` alone, so the
+/// sentence of an empty key name ended where the key would have stood — in the pen and in the
+/// measurement alike, which is why no comparison of the two could see it.
+///
 /// # Safety
 ///
 /// `dc` is live and carries the **body** face — every width is measured in the face the word
@@ -3492,12 +3504,24 @@ unsafe fn push_row_atoms<'a>(
             // SAFETY: as above — the chip's face is put back by the caller before this.
             unsafe { push_words(dc, atoms, row.suffix, space_after) };
         }
-        _ => {
-            let plain = folded.unwrap_or(row.prefix);
+        _ => match folded {
+            Some(sentence) => {
+                // SAFETY: as above.
+                unsafe { push_words(dc, atoms, sentence, false) };
+            }
+            None => {
+                // SAFETY: as above.
+                unsafe { push_words(dc, atoms, row.prefix, false) };
 
-            // SAFETY: as above.
-            unsafe { push_words(dc, atoms, plain, false) };
-        }
+                // The two halves are one sentence: a space between them exactly where the
+                // template put one, on either side of the placeholder that is no longer there.
+                let space_between = row.prefix.ends_with(char::is_whitespace)
+                    || row.suffix.starts_with(char::is_whitespace);
+
+                // SAFETY: as above.
+                unsafe { push_words(dc, atoms, row.suffix, space_between) };
+            }
+        },
     }
 }
 
