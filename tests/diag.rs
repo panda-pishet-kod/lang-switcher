@@ -590,6 +590,13 @@ fn nothing_that_could_have_been_typed_reaches_the_dump() {
         // methods 2 and 3 of FR-50 were struck out of the requirement; this is the row that
         // replaced them — the addendum of FR-52, a switch sent where no verdict can be taken.
         "switch.sent_unconfirmed",
+        // ⭐ Task T-41-13, finding Н2: `WM_APP_FLUSH` messages that arrived with nothing waiting.
+        // The finding is that a **stream** of forged ones keeps the typing buffer empty and left
+        // no trace whatever; premise П7 measured that the two counters already kept
+        // (`window_flushes` / `window_flushes_taken`) cannot show it, because a forgery moves
+        // neither. ⚠ The number is not a count of forgeries — coalesced messages land in it too —
+        // and `src\watchdog.rs` says so where it is declared.
+        "watchdog.flushes_without_request",
     ] {
         assert!(text.contains(expected), "the dump is missing {expected}");
     }

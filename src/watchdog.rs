@@ -285,7 +285,33 @@
 //!   performs — and one reading of the system's own answer about the window that already has the
 //!   focus. Not one action is privileged, not one result is a state the sender can observe, and
 //!   the conclusion of SEC-05 stands exactly as it did; only the argument for it was false. The
-//!   price is the same one the user's own focus change pays;
+//!   price is the same one the user's own focus change pays.
+//!
+//!   ⚠⚠ **And the reasoning above is about ONE message. Task T-41-13 (finding Н2) says what
+//!   happens when they come in a stream, because that was the half missing from it.** The price of
+//!   one is multiplied by the frequency: a sender who posts these in a loop keeps our typing
+//!   buffer **permanently empty**, and from where the person sits the hotkey simply stops finding
+//!   the word they have just typed. Nothing privileged has happened, nothing has leaked, and the
+//!   utility has stopped doing the one thing it is for.
+//!
+//!   Three things are said about it and all three are measured rather than hoped for.
+//!   **First**, the conclusion of SEC-05 is unchanged: repetition of an unprivileged action is
+//!   still unprivileged, and a process at this integrity level that wanted to pester the person
+//!   could equally well take the foreground or swallow their keystrokes outright. **Second**,
+//!   task T-36-4 narrowed the door: `WM_APP_FLUSH` is answered only behind
+//!   `if is_input_window(hwnd)` in `app::window_proc`, so a copy aimed at the UI window or at the
+//!   watcher window is dropped, and only one of this program's three windows can be used this way
+//!   at all. **Third**, the flood is no longer **invisible**:
+//!   [`FLUSHES_WITHOUT_REQUEST`] counts the messages that arrive with nothing waiting and the dump
+//!   prints it as `watchdog.flushes_without_request`. ⚠ That number is not a count of forgeries —
+//!   honestly coalesced messages land in it too — and it is not offered as one; what it gives is a
+//!   number that climbs on a machine being pestered and stands still on a quiet one.
+//!
+//!   **No threshold and no discarding were added, deliberately.** A rule that began dropping
+//!   `WM_APP_FLUSH` above some rate would be dropping the user's **own** focus changes on a busy
+//!   machine, which is the defect this would be trading for — and the user's own flushes are the
+//!   requirement (FR-10), while the forgery is a nuisance. The limitation is recognised instead,
+//!   here and in §10 of SPEC;
 //! * a forged [`WM_APP_LAYOUT`], `WM_DEVICECHANGE` or `WM_INPUT_DEVICE_CHANGE` buys the sender a
 //!   re-read of the system's own layout list into memory of ours, which is idempotent, and is the
 //!   same standing the wake-up message of [`crate::app`] has. The device notification of
@@ -860,6 +886,32 @@ static FOCUS_REPEATS: AtomicU32 = AtomicU32::new(0);
 /// Lower than [`WINDOW_FLUSHES`] whenever two events coalesced, which is exactly what the
 /// difference between the two numbers means.
 static WINDOW_FLUSHES_TAKEN: AtomicU32 = AtomicU32::new(0);
+
+/// [`WM_APP_FLUSH`] messages that arrived with [`PENDING_FLUSH`] **empty** — finding Н2, task
+/// T-41-13.
+///
+/// # Why a new number and not a difference of two old ones
+///
+/// Measured before it was written (premise П7 of stage Э41): the pair
+/// [`WINDOW_FLUSHES`]/[`WINDOW_FLUSHES_TAKEN`] cannot answer this. The first grows only inside
+/// [`win_event_proc`] — from **our own** `WinEvent` callback — and the second only when the cell
+/// was not empty. A forged message moves **neither**: it never touches the callback, and it finds
+/// the cell empty. So a forgery used to be invisible in every number this module keeps.
+///
+/// # ⚠ What it counts, said plainly, because the name is shorter than the truth
+///
+/// Exactly what it says: a `WM_APP_FLUSH` that found nothing waiting. **Two different things land
+/// here**, and the number does not separate them:
+///
+/// * a **forged** message — nobody posted a request, and this is what finding Н2 is about;
+/// * an honest **coalesced** one — two `WinEvent`s arrived close together, the first take emptied
+///   the cell, and the second message finds it empty. That is the same coalescing the difference
+///   between the two counters above documents.
+///
+/// So a non-zero value here is not proof of a forgery, and it is not meant to be. What it gives is
+/// the thing the finding asks for: the flood stops being **invisible**. A machine being pestered
+/// shows a number climbing where a quiet one shows it still.
+static FLUSHES_WITHOUT_REQUEST: AtomicU32 = AtomicU32::new(0);
 
 /// Flushes that emptied the whole buffer — [`ResetOutcome::Cleared`].
 static FULL_CLEARS: AtomicU32 = AtomicU32::new(0);
@@ -1659,7 +1711,10 @@ pub fn take_typing_induced_flush(message: u32) -> bool {
 
 /// Takes the pending flush request, leaving the cell empty.
 fn take_pending_flush() -> Option<u32> {
-    let taken = pending_time(PENDING_FLUSH.swap(0, Ordering::AcqRel))?;
+    let Some(taken) = pending_time(PENDING_FLUSH.swap(0, Ordering::AcqRel)) else {
+        FLUSHES_WITHOUT_REQUEST.fetch_add(1, Ordering::Relaxed);
+        return None;
+    };
 
     WINDOW_FLUSHES_TAKEN.fetch_add(1, Ordering::Relaxed);
 
@@ -2321,6 +2376,12 @@ pub struct Health {
     pub session_changes: u32,
     /// `PBT_APMRESUMEAUTOMATIC` broadcasts seen.
     pub power_resumes: u32,
+    /// [`WM_APP_FLUSH`] messages that arrived with nothing waiting — finding Н2, task T-41-13.
+    ///
+    /// ⚠ Forgeries **and** honestly coalesced messages both land here; see
+    /// [`FLUSHES_WITHOUT_REQUEST`] for why the number is worth keeping anyway and what it may not
+    /// be read as.
+    pub flushes_without_request: u32,
 }
 
 /// What the watchdog of FR-80 has done so far.
@@ -2337,6 +2398,7 @@ pub fn health() -> Health {
         desktop_switches: DESKTOP_SWITCHES.load(Ordering::Relaxed),
         session_changes: SESSION_CHANGES.load(Ordering::Relaxed),
         power_resumes: POWER_RESUMES.load(Ordering::Relaxed),
+        flushes_without_request: FLUSHES_WITHOUT_REQUEST.load(Ordering::Relaxed),
     }
 }
 

@@ -1540,6 +1540,14 @@ fn render_counters(out: &mut String) {
     row_u32(out, "watchdog.max_gap_us", health.max_gap_us);
     row_u32(out, "watchdog.liveness_ticks", health.liveness_ticks);
     row_u32(out, "watchdog.desktop_switches", health.desktop_switches);
+    // Task T-41-13, finding Н2: `WM_APP_FLUSH` messages that found nothing waiting. ⚠ Forged ones
+    // and honestly coalesced ones both land here and the number does not separate them — see
+    // `watchdog::FLUSHES_WITHOUT_REQUEST`. What it buys is that a flood stops being invisible.
+    row_u32(
+        out,
+        "watchdog.flushes_without_request",
+        health.flushes_without_request,
+    );
     row_u32(out, "watchdog.session_changes", health.session_changes);
     row_u32(out, "watchdog.power_resumes", health.power_resumes);
 

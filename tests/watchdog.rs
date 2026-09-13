@@ -3784,3 +3784,149 @@ fn fr15_rides_on_the_liveness_tick_and_adds_no_timer() {
         "FR-15 не должен появляться на пути callback"
     );
 }
+
+// -------------------------------------------------------------------------------------
+// SEC-05 and repetition — finding Н2, task T-41-13
+// -------------------------------------------------------------------------------------
+
+/// **Finding Н2, task T-41-13 — a flush that found nothing waiting is counted.**
+///
+/// The finding is about a **stream**: a process at this integrity level can post `WM_APP_FLUSH`
+/// in a loop, each one asks for our typing buffer to be thrown away, and from where the person
+/// sits the hotkey simply stops finding the word they have just typed. Nothing privileged happens
+/// and nothing leaks — and the utility stops doing the one thing it is for.
+///
+/// ⚠ **Premise П7 of this stage measured that the two counters already kept cannot show it.**
+/// `window_flushes` grows only inside `win_event_proc`, from our own `WinEvent` callback, and
+/// `window_flushes_taken` only when the cell was not empty. A forgery moves **neither**. So this
+/// is a new number rather than a difference of old ones, and the test below is the reason to
+/// believe it is the right one.
+///
+/// ⚠ And what it is **not**: a count of forgeries. An honestly coalesced message — two
+/// `WinEvent`s close together, the first take emptying the cell — lands here too. The first half
+/// of this test is the honest path and shows the number standing still; the second is a forgery
+/// and shows it moving.
+#[test]
+fn a_flush_that_found_nothing_waiting_is_counted() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    let before = watchdog::health().flushes_without_request;
+
+    // --- The honest path: a request raised by our own side, then taken by the input thread.
+    press_at(900);
+    watchdog::request_flush(1_000, Cause::WindowChange);
+
+    assert!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)).is_some(),
+        "a raised request is taken and does its work"
+    );
+    assert_eq!(
+        watchdog::health().flushes_without_request,
+        before,
+        "the honest path must not move this number — otherwise it would climb on every focus \
+         change the user makes themselves"
+    );
+
+    // --- The forgery: nobody posted a request, and the cell is empty.
+    assert_eq!(
+        watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)),
+        None,
+        "a message with nothing waiting does nothing at all — SEC-05 stands"
+    );
+    assert_eq!(
+        watchdog::health().flushes_without_request,
+        before + 1,
+        "but it is no longer invisible, which is what finding Н2 asks for"
+    );
+
+    // --- The stream. The number climbs with the flood; that is the whole of its value.
+    for _ in 0..9 {
+        assert_eq!(watchdog::apply_flush(WM_APP_FLUSH, LPARAM(0)), None);
+    }
+
+    assert_eq!(
+        watchdog::health().flushes_without_request,
+        before + 10,
+        "ten forged messages, ten counted — a machine being pestered shows a number climbing \
+         where a quiet one shows it still"
+    );
+}
+
+/// **Finding Н2, task T-41-13 — the SEC-05 analysis of this module says what a STREAM buys.**
+///
+/// The paragraph about a forged `WM_APP_FLUSH` was rewritten once already, by task Т-22-10: the
+/// code was right and the reasoning was wrong, and the reasoning was repaired. What it still
+/// reasoned about was **one** message. The audit of 2026-09-04 asked for the other half, and this
+/// sweep is what keeps it written down.
+///
+/// ⚠ **The negative control is the assertion itself.** On the base commit of this stage the greps
+/// `repeat`, `stream` and `flood` over the SEC-05 block were **empty** — the paragraph said
+/// nothing about repetition at all. Measured, not assumed: journal
+/// `scratchpad-E41\red-T-41-13-header.log`.
+#[test]
+fn the_sec05_analysis_accounts_for_a_stream_and_not_only_for_one_message() {
+    let source = source_of("watchdog.rs");
+
+    // ⚠ The sections of this header are separated by a bare `//!` line and **not** by a blank
+    // one, so the cut is «the next `//! # ` heading» and nothing else. The first draft of this
+    // sweep looked for `"\n\n//! #"`, found nothing, fell back to the rest of the file and was
+    // reading 158 521 characters instead of the block — and would have answered «ЕСТЬ» to every
+    // needle from anywhere in `watchdog.rs`. The length assertion below is what caught it and is
+    // what keeps it caught.
+    let at = source
+        .find("//! # SEC-05")
+        .expect("the SEC-05 block must be in the module header");
+    let block = &source[at..];
+    let end = block[1..]
+        .find("\n//! # ")
+        .map_or(block.len(), |offset| offset + 1);
+    let block = &block[..end];
+
+    println!("the SEC-05 block is {} characters", block.len());
+
+    // The instrument's controls: it is reading the block it means to read, and it is reading
+    // **only** that block.
+    assert!(
+        block.contains("WM_APP_FLUSH"),
+        "the sweep is reading the wrong part of the header"
+    );
+    assert!(
+        block.len() < 12_000,
+        "the cut ran away: {} characters is the file and not the section",
+        block.len()
+    );
+    assert!(
+        !block.contains("pub fn apply_flush"),
+        "and it must stop at the end of the header, not run into the code"
+    );
+
+    // The three things the repaired paragraph has to say.
+    assert!(
+        block.contains("stream") || block.contains("in a loop"),
+        "Н2: the analysis must reason about a stream and not only about one message"
+    );
+    assert!(
+        block.contains("is_input_window"),
+        "Н2: and it must say that task T-36-4 narrowed the door to one of the three windows"
+    );
+    assert!(
+        block.contains("FLUSHES_WITHOUT_REQUEST") || block.contains("flushes_without_request"),
+        "Н2: and that the flood is no longer invisible — the counter is named"
+    );
+
+    // The conclusion of SEC-05 is unchanged, and the paragraph has to keep saying so: the repair
+    // was to the reasoning, not to the verdict.
+    assert!(
+        block.contains("unprivileged"),
+        "Н2: repetition of an unprivileged action is still unprivileged, and SEC-05 stands"
+    );
+
+    // And the decision not to add a threshold is written down rather than left to be guessed at.
+    assert!(
+        block.contains("No threshold"),
+        "Н2: a rate limit would drop the user's OWN focus changes, and that refusal is part of \
+         the analysis"
+    );
+}
