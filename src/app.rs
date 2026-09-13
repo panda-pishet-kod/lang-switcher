@@ -2595,7 +2595,19 @@ fn restore_buffer() {
 /// ⚠ **FR-70 is not weakened.** What reaches a parked recorder through this helper is the
 /// layout of FR-04 and the cache of FR-20 — recording stays off, the ring stays empty and
 /// zeroed (SEC-02), and no stroke can be added to a recorder that is not installed.
-fn with_recorder_wherever_it_is<R>(f: impl FnOnce(&mut crate::buffer::Recorder) -> R) -> Option<R> {
+///
+/// # ⭐ The second caller — task T-40-6, finding С56
+///
+/// `crate::selection::plan_for_press` builds the plan of the selection path out of the cache of
+/// FR-20 through this helper, because a press made during the interval of FR-71 found the
+/// recorder parked and the plan unbuilt — the trap above, a second time. Crate-visible for that
+/// caller and for no other reason: the parked slot stays a private thread-local of this module,
+/// and one helper is what keeps the two callers from ever disagreeing about where the recorder
+/// is. What that caller reads is the cache and nothing else; its analysis of SEC-05 and SEC-06
+/// is written at its definition.
+pub(crate) fn with_recorder_wherever_it_is<R>(
+    f: impl FnOnce(&mut crate::buffer::Recorder) -> R,
+) -> Option<R> {
     if crate::buffer::is_installed() {
         return crate::buffer::with(f);
     }
@@ -5081,9 +5093,62 @@ mod tests {
         buffer::uninstall();
     }
 
-    /// The counterpart rule of the test above: what reaches a parked recorder is the layout
-    /// of FR-04 and the cache of FR-20 and nothing else — FR-70 is not weakened. The ring
-    /// comes back exactly as [`park_buffer`] left it: empty and zeroed (SEC-02).
+    /// ⭐ **Task T-40-6, finding С56 — a press in the interval of FR-71 still builds the plan of
+    /// the selection path.** The second application of the remedy of task T-10-0f above.
+    ///
+    /// After a focus change the recorder is parked until the verdict of FR-72 comes back — up to
+    /// `guard::PROBE_BUDGET_MS` — and the plan of the selection path was built through
+    /// `buffer::with` alone, so a press in that interval built nothing and did nothing: exactly
+    /// when the user has just clicked into another window, selected text and pressed the hotkey.
+    /// The control first — the plan is built with the recorder on the thread — so that «not built
+    /// while parked» cannot be a cache or a cycle this test forgot.
+    #[test]
+    fn a_press_in_the_interval_of_fr71_still_builds_the_plan_of_the_selection_path() {
+        // One line of module `selection` in this file, counted by the census of its border
+        // (`tests\selection.rs`), however many times the check calls it.
+        let build = crate::selection::plan_for_press;
+
+        buffer::install_recorder(Recorder::with_capacity(8));
+        publish_cache(crate::convert::fallback_cache());
+
+        let installed = build().is_some();
+
+        // The interval of FR-71: the focus moved, no verdict yet, the recorder is parked.
+        park_buffer();
+        assert!(!buffer::is_installed());
+        let parked = build().is_some();
+
+        // FR-70 is not weakened by the plan: the ring the parked recorder holds is still empty.
+        restore_buffer();
+        let strokes = buffer::len();
+
+        buffer::uninstall();
+
+        assert!(
+            installed,
+            "control: with the recorder on the thread the plan is built"
+        );
+        assert!(
+            parked,
+            "С56: with the recorder parked by FR-71 the plan of the selection path is still built"
+        );
+        assert_eq!(strokes, 0, "building a plan records no stroke");
+
+        // And a thread that never had a recorder — the UI and watcher threads, where a forged
+        // `WM_APP_HOTKEY` lands (SEC-05) — builds no plan, installed or parked.
+        let elsewhere = std::thread::spawn(move || build().is_some())
+            .join()
+            .expect("the thread runs to the end");
+        assert!(
+            !elsewhere,
+            "SEC-05: a thread with no recorder, installed or parked, has no plan to build"
+        );
+    }
+
+    /// The counterpart rule of `the_layout_probe_publication_reaches_a_parked_recorder`: what
+    /// reaches a parked recorder is the layout of FR-04 and the cache of FR-20 and nothing else —
+    /// FR-70 is not weakened. The ring comes back exactly as [`park_buffer`] left it: empty and
+    /// zeroed (SEC-02).
     #[test]
     fn a_publication_into_a_parked_recorder_stores_no_strokes() {
         buffer::install_recorder(Recorder::with_capacity(8));

@@ -3159,14 +3159,53 @@ fn take_pending() -> Option<Plan> {
 /// Builds the plan out of the live cache — the input thread's half of the hand-over.
 ///
 /// `None` when there is nothing to hand over, and then FR-60 has nothing to decide: no typing
-/// buffer on this thread (which is every thread but the input one), no mapping cache yet, or a
-/// refusal from module `layouts` — an IME among the participants (FR-35), fewer than two
-/// layouts, or a foreground layout that is not a participant (FR-30). Every one of those is
-/// counted where it is decided.
-fn plan_for_press() -> Option<Plan> {
+/// buffer on this thread, installed or parked (which is every thread but the input one), no
+/// mapping cache yet, or a refusal from module `layouts` — an IME among the participants (FR-35),
+/// fewer than two layouts, or a foreground layout that is not a participant (FR-30). Every one of
+/// those is counted where it is decided.
+///
+/// Crate-visible rather than private for one reason: the check of task T-40-6 lives beside the
+/// gate of FR-70 in `app.rs`, which is the only place a recorder can be parked from.
+///
+/// # ⭐ Task T-40-6, finding С56 — the recorder is reached wherever FR-70 keeps it
+///
+/// The plan needs the cache of FR-20 and nothing else from the recorder, and after every focus
+/// change the recorder is **parked** — `app::park_buffer` takes it off the thread until the verdict
+/// of FR-72 comes back, for up to `guard::PROBE_BUDGET_MS`. Asked through [`crate::buffer::with`]
+/// alone, the plan was not built in that interval, and a press in it did nothing: exactly when the
+/// user has just clicked into another window, selected text and pressed the hotkey. The same trap
+/// was found for the layout probe of FR-21 and repaired in task T-10-0f by
+/// `app::with_recorder_wherever_it_is`; this is its second caller, and there is still one copy of
+/// the helper. The gate half of the finding — `buffer::is_installed` in the condition of the hotkey
+/// branch — had already moved in task Т-49-2.
+///
+/// # SEC-05, SEC-06 and FR-70 — the analysis repeated for this caller
+///
+/// * **FR-70 is not weakened.** What is read off a parked recorder is its cache and nothing else:
+///   the ring was emptied and zeroed by `park_buffer` before the recorder left the thread
+///   (SEC-02), nothing here records, and a recorder that is not installed cannot be recorded into.
+/// * **SEC-05 — a forged `WM_APP_HOTKEY`.** Since task Т-49-2 this function is reached on every one
+///   of the three windows such a message can land on. On the UI and watcher threads nothing was
+///   ever installed or parked — `PARKED_BUFFER` is a thread-local of `app`, and only the input
+///   thread's gate writes into it — so the answer there is `None`, exactly as it was. On the input
+///   window a forged press now buys, during the interval of FR-71, what a forged press buys outside
+///   it and what the user's own press buys: the selection path of FR-61 over the window in front.
+///   Repetition changes nothing about that — the argument of SEC-05 for `WM_APP_FLUSH` (task
+///   T-41-13).
+/// * **SEC-06 — the `Ctrl+C` of step 2 into a field with no verdict yet.** In the interval the field
+///   is `guard::Field::Pending`, and `guard::password_field` answers `false` for it, so nothing
+///   upstream stops the probe going into a password field whose verdict is still on its way. Before
+///   this task the one thing that did was this function answering `None` — which is why the
+///   stage measured, before touching this line, whether `Ctrl+C` puts the contents of a password
+///   field on the clipboard at all: premise П5, the `ES_PASSWORD` edit of a stand, a
+///   `type="password"` field in Chrome and the password field of an installed application —
+///   **not in one of them** (decision 127а). A probe that copies nothing is answered by step 3 as
+///   «no selection», the press is handed back, and the parked buffer answers it as it answers
+///   every press in a password field. FR-71 and the budget of the probe are untouched.
+pub(crate) fn plan_for_press() -> Option<Plan> {
     let foreground = crate::switch::current();
 
-    crate::buffer::with(|recorder| {
+    crate::app::with_recorder_wherever_it_is(|recorder| {
         let cache = recorder.cache()?;
 
         let mut available = [LayoutId::default(); crate::layouts::MAX_CYCLE];
@@ -3877,11 +3916,14 @@ pub fn path_counters() -> PathCounters {
 /// FR-60's rule "no selection → convert the typing buffer" is settled *without* the probe. The
 /// press then runs `inject::on_hotkey` exactly as it did before the selection path existed.
 ///
-/// The read is [`crate::buffer::is_empty`], a thread-local read of the input thread's own
-/// buffer (section 6.3): this function is only ever reached on the input thread, because
-/// `app::window_proc` guards the call with `buffer::is_installed`. No atomic, no system call,
-/// no counter — a non-empty buffer is the ordinary "convert what I typed" case, not a refusal,
-/// so it is answered as quietly as FR-65 is. When the buffer is empty — the only state a real
+/// The read is [`crate::buffer::is_empty`], a thread-local read of the calling thread's own
+/// buffer (section 6.3). ⚠ **The sentence that stood here said this function is only ever
+/// reached on the input thread, because `app::window_proc` guarded the call with
+/// `buffer::is_installed` — that gate left in task Т-49-2**, and the call is now reached on any of
+/// the three windows a `WM_APP_HOTKEY` lands on (task T-40-6 wrote the consequence down in
+/// [`plan_for_press`]: on a thread with no recorder, installed or parked, there is no plan to
+/// build). No atomic, no system call, no counter — a non-empty buffer is the ordinary "convert
+/// what I typed" case, not a refusal, so it is answered as quietly as FR-65 is. When the buffer is empty — the only state a real
 /// selection can coexist with — the function proceeds unchanged, which is why the selection
 /// path of position 15 is untouched.
 ///

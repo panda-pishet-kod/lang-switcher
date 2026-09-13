@@ -2075,6 +2075,10 @@ fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
         // T-13-13: the two ceilings, read where the publication clamps.
         ("selection::MAX_CLIPBOARD_TIMEOUT_MS", 1),
         ("selection::MAX_CLIPBOARD_RESTORE_DELAY_MS", 1),
+        // T-40-6 (finding С56): the check that a press in the interval of FR-71 still builds the
+        // plan — it lives in the test module of `app.rs`, beside the gate of FR-70 that parks the
+        // recorder, because that gate is private there. A line of the tests, not of the product.
+        ("selection::plan_for_press", 1),
     ] {
         let hits = code_lines_with(&source, needle);
 
@@ -2085,11 +2089,11 @@ fn the_wiring_in_app_is_the_registration_the_messages_and_the_branch() {
         );
     }
 
-    // And nothing else of module `selection` reaches `app.rs`: nine lines, all named above.
+    // And nothing else of module `selection` reaches `app.rs`: ten lines, all named above.
     let everything = code_lines_with(&source, "selection::");
     assert_eq!(
         everything.len(),
-        9,
+        10,
         "nothing else of module selection reaches app.rs: {everything:?}"
     );
 }
