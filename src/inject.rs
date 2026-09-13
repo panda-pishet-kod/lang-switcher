@@ -1686,7 +1686,8 @@ pub struct Replaced {
 
 impl Replaced {
     /// **Whether the replacement itself reached the system whole** — the condition the position
-    /// counter of FR-32 and the conversion session of FR-10 are allowed to move on.
+    /// counter of FR-32 and the conversion session of FR-10 are allowed to move on, and since task
+    /// T-40-2 (finding Н12) the condition step 5 of FR-40 switches the layout on.
     ///
     /// Step 4 and step 4 only. Steps 3 and 6 are modifier hygiene: a `Shift` that failed to come
     /// down or to go back up is a defect of its own, counted where every `SendInput` discrepancy
@@ -1749,7 +1750,8 @@ impl Replaced {
 /// 3. **step 3** — the modifiers the user is holding are released explicitly, so that the
 ///    injected `Backspace` is a `Backspace` and not `Shift+Backspace`;
 /// 4. **step 4** — the replacement, one packet, FR-41;
-/// 5. **step 5** — the layout switch of §4.6, marked below and performed by module `switch`;
+/// 5. **step 5** — the layout switch of §4.6, marked below and performed by module `switch` —
+///    and only when step 4 was taken whole ([`Replaced::reached_the_screen`], task T-40-2);
 /// 6. **step 6** — the modifiers held *at that moment* are pressed again.
 ///
 /// **FR-43** is the position of step 5 and nothing else: the replacement is formed and sent
@@ -1957,7 +1959,24 @@ fn run_steps(
     // ⚠ **FR-43: the call goes here and nowhere earlier.** Everything above has already been
     // sent; everything below only puts back what step 3 took away. A switch moved in front of
     // step 4 would be the race FR-43 was written to rule out.
-    env.switch_layout();
+    //
+    // ⭐ **Task T-40-2, finding Н12, decision 127.3 — and only when the replacement reached the
+    // screen.** A blocked injection (`BlockInput`, a window of higher integrity, another
+    // program's injection in progress) is taken as zero events, or as a packet cut short: the text
+    // on the screen is still what the user typed, and switching the layout under it would make
+    // the next word come out in the other language. The question is the one the counter of FR-32
+    // is moved by — [`Replaced::reached_the_screen`], asked of the replacement as it stands after
+    // step 4, and asked **there** rather than restated here, so that the press and the switch can
+    // never disagree about what "reached the screen" means.
+    let reached = Replaced {
+        replacement,
+        ..Replaced::default()
+    }
+    .reached_the_screen();
+
+    if reached {
+        env.switch_layout();
+    }
 
     // ---- step 6 -----------------------------------------------------------------------
     //

@@ -1854,6 +1854,57 @@ fn a_press_of_mute_keys_is_refused_before_steps_three_to_six() {
     buffer::uninstall();
 }
 
+// ---------------------------------------------------------------------------------------
+// Task T-40-2 — finding Н12 of the audit of 2026-09-04: step 5 asks the same question
+// ---------------------------------------------------------------------------------------
+
+/// **FR-40 step 5 is subject to FR-45** — decision 127.3. A replacement the system did not take
+/// whole leaves the layout of the foreground window where it was.
+///
+/// A blocked injection (another program's `BlockInput`, a window of higher integrity, somebody
+/// else's injection in progress) is taken as zero events: the counter of FR-32 saw it since task
+/// T-13-25, and step 5 asked nothing — the text on the screen stayed as typed and the layout moved
+/// under it, so the next word came out in the other language. Three benches, one question each:
+/// nothing taken, one event short, everything taken.
+#[test]
+fn step_five_switches_the_layout_only_after_a_replacement_taken_whole() {
+    let _short_sends = short_sends_are_mine();
+
+    for (refuse, label) in [
+        (WHOLE_PACKET, "the system took none of the packet"),
+        (1, "the system took all but one event"),
+    ] {
+        let mut bench = Bench::refusing(refuse);
+        let outcome = press_ghbdtn(&mut bench);
+
+        assert!(
+            !outcome.reached_the_screen(),
+            "the premise: {label}, so the replacement did not reach the screen"
+        );
+        assert!(
+            !bench.log.iter().any(|step| matches!(step, Step::Switch)),
+            "Н12: {label}, and step 5 must not switch the layout — {:?}",
+            bench.log
+        );
+    }
+
+    // Control: the whole packet taken, and step 5 is where FR-43 puts it — after the replacement.
+    let mut bench = Bench::refusing(0);
+    let outcome = press_ghbdtn(&mut bench);
+
+    assert!(outcome.reached_the_screen());
+    let switch = bench
+        .position(|step| matches!(step, Step::Switch))
+        .expect("FR-40 step 5 is reached when the replacement is taken whole");
+    let replacement = bench
+        .position(|step| matches!(step, Step::Send(events) if events.len() == WHOLE_PACKET))
+        .expect("the replacement was sent");
+    assert!(
+        replacement < switch,
+        "FR-43: the replacement, then the switch"
+    );
+}
+
 /// **The risk the task names.** Something erased and nothing typed is **not** an empty packet: the
 /// backspaces are events, and the press that brings a run back to a layout in which its keys
 /// produce nothing is a real replacement of what the previous press injected.
