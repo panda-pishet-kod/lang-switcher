@@ -463,8 +463,46 @@ impl Language {
 /// `tray`: the size comes back from a system call, and a read whose length is somebody else's
 /// number is a read with no length at all (SEC-05).
 ///
+/// Public since task T-43-10, so that a test can name the cap instead of copying the number.
+///
 /// [`SETTING_NAME_CAP`]: crate::tray
-const PREFERRED_LANGUAGES_CAP: u32 = 1024;
+pub const PREFERRED_LANGUAGES_CAP: u32 = 1024;
+
+/// Whether the size the sizing call of [`preferred_ui_languages`] answered is one this program
+/// reads — and the journal entry of the one refusal that is this program's own; task T-43-10,
+/// finding Н71.
+///
+/// Two answers end the read, and until that task they ended it the same silent way:
+///
+/// * **zero units** — Windows named nothing. The ordinary empty answer, silent as before: an
+///   empty list is the road to `en` that вопрос 95 prescribes, and there is nothing to explain;
+/// * **more than [`PREFERRED_LANGUAGES_CAP`]** — Windows answered, and this program refused to
+///   read so long a list. The person then sees an English program on the first run with no
+///   reason anywhere, so this one is journaled — under the row the two calls of
+///   [`preferred_ui_languages`] already journal under, `GetUserPreferredUILanguages` (the
+///   vocabulary is not widened), with the code Windows itself gives a buffer too small for the
+///   answer, `ERROR_INSUFFICIENT_BUFFER`: it is what happened, and it keeps the entry apart from
+///   a refusal of the call itself.
+///
+/// **SEC-01, SEC-07.** The fact and that number, and nothing else: not the count of units, not a
+/// tag — the multi-string is never read on this road at all.
+///
+/// Pure in its answer, and public so that a test can hand it the two sizes a live machine does
+/// not give on demand.
+pub fn preferred_languages_size_is_readable(units: u32) -> bool {
+    if units > PREFERRED_LANGUAGES_CAP {
+        crate::app::report_non_critical(
+            "GetUserPreferredUILanguages",
+            &WinError::from_hresult(
+                windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER.to_hresult(),
+            ),
+        );
+
+        return false;
+    }
+
+    units != 0
+}
 
 /// The primary subtag of a BCP-47 language tag — `de` of `de-AT`, `uk` of `uk-Cyrl-UA`.
 ///
@@ -579,7 +617,9 @@ pub fn preferred_ui_languages() -> Vec<String> {
         return Vec::new();
     }
 
-    if units == 0 || units > PREFERRED_LANGUAGES_CAP {
+    // Task T-43-10, finding Н71: «Windows named nothing» stays silent, «longer than the cap» is
+    // journaled — both inside the one function the test drives.
+    if !preferred_languages_size_is_readable(units) {
         return Vec::new();
     }
 

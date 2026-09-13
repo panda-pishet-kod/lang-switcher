@@ -19378,6 +19378,80 @@ fn the_first_preference_this_build_has_wins_and_english_is_the_end_of_the_list()
     }
 }
 
+/// **Task T-43-10, finding Н71 — a list of languages longer than the cap leaves a trace, and an
+/// empty one does not.**
+///
+/// The sizing call of `preferred_ui_languages` can end the read two ways: Windows named nothing,
+/// or Windows named more than `PREFERRED_LANGUAGES_CAP` units and this program refused to read so
+/// much. Both used to be the same silent `return Vec::new()`, and the second one turns a first run
+/// English with nothing in the journal to say why. A live machine gives neither size on demand, so
+/// the size is handed to the one function the read goes through, and the journal is read back:
+/// the entry is counted **by name** among the entries recorded after the mark, the way
+/// `tests\diag.rs` reads its own.
+#[test]
+fn a_language_list_longer_than_the_cap_is_journaled_and_an_empty_one_is_not() {
+    use lang_switcher::diag;
+    use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+
+    let entries_since = |mark: u64| {
+        diag::snapshot()
+            .into_iter()
+            .filter(|event| {
+                event.ordinal >= mark && event.operation.name() == "GetUserPreferredUILanguages"
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let cap = settings::PREFERRED_LANGUAGES_CAP;
+
+    // Windows named nothing: nothing to read, nothing to say.
+    let mark = diag::recorded();
+    assert!(!settings::preferred_languages_size_is_readable(0));
+    let after_empty = entries_since(mark);
+
+    // A list this program reads, up to the cap itself: read, and silent.
+    let mark = diag::recorded();
+    assert!(settings::preferred_languages_size_is_readable(1));
+    assert!(settings::preferred_languages_size_is_readable(cap));
+    let after_readable = entries_since(mark);
+
+    // One unit past the cap: refused, and journaled.
+    let mark = diag::recorded();
+    assert!(!settings::preferred_languages_size_is_readable(cap + 1));
+    let after_too_long = entries_since(mark);
+
+    println!(
+        "entries: empty list {}, readable {}, longer than {cap} units {} — codes {:?}",
+        after_empty.len(),
+        after_readable.len(),
+        after_too_long.len(),
+        after_too_long
+            .iter()
+            .map(|event| format!("{:#010X}", event.code.raw()))
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        after_empty.is_empty(),
+        "an empty answer is the ordinary road to English and must stay silent"
+    );
+    assert!(
+        after_readable.is_empty(),
+        "a list that is read is not a refusal"
+    );
+    assert_eq!(
+        after_too_long.len(),
+        1,
+        "a list longer than the cap must leave exactly one entry under GetUserPreferredUILanguages"
+    );
+    assert_eq!(
+        after_too_long[0].code.raw(),
+        ERROR_INSUFFICIENT_BUFFER.to_hresult().0,
+        "and carry the code Windows gives a buffer too small for the answer — the fact and that \
+         number, nothing of the list (SEC-01, SEC-07)"
+    );
+}
+
 /// **The rule reaches the configuration only where there is no file — вопрос 95.**
 ///
 /// Two halves, and the second is the ⚠ of the order: *«существующий конфиг не трогается
