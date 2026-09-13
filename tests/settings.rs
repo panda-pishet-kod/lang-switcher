@@ -11479,7 +11479,9 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **Seventy-three since task Т-31-4** — решение 99.4 authorised the canon of «seventy-two»
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
-const FR_94_STRINGS: [(u16, &str, &str); 217] = [
+/// The count has followed `settings::INTERFACE_STRINGS` since, row for row; **218 since task
+/// T-43-9** (решение 128.2), whose notification of FR-82 is the last row.
+const FR_94_STRINGS: [(u16, &str, &str); 218] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -12424,6 +12426,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 217] = [
         "I read every appeal myself. Ideas go into the plan and the best of them get made, and \
          what matters to everybody I tell about in a letter in the program or in the channel. \
          It is good that you found the time 🖤",
+    ),
+    // FR-82, task T-43-9, finding Н23 — what a second copy says before it exits. The English row
+    // is the literal `src\app.rs` carried until that task, word for word.
+    (
+        settings::IDS_ALREADY_RUNNING,
+        "Lang Switcher уже работает в этом сеансе.",
+        "Lang Switcher is already running in this session.",
     ),
 ];
 
@@ -18035,8 +18044,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        217,
-        "two hundred and seventeen identifiers in use — the mandate of Э32 authorised the canon \
+        218,
+        "two hundred and eighteen identifiers in use — the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
@@ -18048,7 +18057,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
          the FIVE of task T-34-6: the acting pair, the acting cycle, no pair, no refusals and \
          the refusals counted — and the ONE of task T-39-11, решение 122.5: «Журнал сохранён» \
          on the button after a write that succeeded — and the ONE of task T-36-5, решение \
-         123.3: «Эта клавиша нужна при наборе», the seventh reason a capture refuses (Н9)"
+         123.3: «Эта клавиша нужна при наборе», the seventh reason a capture refuses (Н9) — \
+         and the ONE of task T-43-9, решение 128.2: «Lang Switcher уже работает в этом \
+         сеансе», the notification of FR-82 that was an English literal in app.rs until then \
+         and is now read in the language of Windows (Н23)"
     );
 
     let product = ProductImage::shared();
@@ -18990,6 +19002,165 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
     assert!(
         defects.is_empty(),
         "the fourth line of the help must name the menu entry by its own word:\n{}",
+        defects.join("\n")
+    );
+}
+
+/// Whether `letter` belongs to the script the string table of `tag` is written in.
+///
+/// Four scripts besides Latin, by their Unicode blocks: Cyrillic for `ru` and `uk`, Greek (with
+/// its extended block of tonos forms) for `el`, Hebrew (with its presentation forms) for `he`,
+/// Arabic (with its supplement, extended block and presentation forms, where the harakat of `ًا`
+/// live) for `ar`. Every other locale of the program writes in Latin — ASCII letters and the
+/// Latin-1 supplement and Extended-A/B blocks that carry `ü`, `ç`, `ł`, `ř`, `ş`, `ı`.
+fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
+    match tag {
+        "ru" | "uk" => matches!(letter, '\u{0400}'..='\u{04FF}'),
+        "el" => matches!(letter, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}'),
+        "he" => matches!(letter, '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}'),
+        "ar" => matches!(
+            letter,
+            '\u{0600}'..='\u{06FF}'
+                | '\u{0750}'..='\u{077F}'
+                | '\u{08A0}'..='\u{08FF}'
+                | '\u{FB50}'..='\u{FDFF}'
+                | '\u{FE70}'..='\u{FEFF}'
+        ),
+        _ => letter.is_ascii_alphabetic() || matches!(letter, '\u{00C0}'..='\u{024F}'),
+    }
+}
+
+/// **Task T-43-9, finding Н23, решение 128.2 — «уже запущена» in the language of Windows.**
+///
+/// A second copy of the program showed «Lang Switcher is already running in this session.» — an
+/// English literal of `src\app.rs`, the one English phrase of the program in every locale, left
+/// there because the task that wrote FR-82 came before FR-94. The sentence is a row of all
+/// fourteen tables now (`settings::IDS_ALREADY_RUNNING`), read through `settings::text` in the
+/// language Windows prefers — the second copy exits before any configuration is read.
+///
+/// Four things are held, and none of them puts a box on the screen:
+/// 1. every table carries the sentence, and it keeps the product's name untranslated (решение 7)
+///    and says the rest in the letters of its own script — the UTF-16 lengths go to the log,
+///    because the box is the system's and there is no clip to measure;
+/// 2. the English row is the old literal word for word, so the twelve locales that are not
+///    Russian lose nothing they had;
+/// 3. the style of the box is a table: the two right-to-left languages read right to left
+///    (`MB_RTLREADING | MB_RIGHT`), the other twelve keep the style the box always had;
+/// 4. the shape — the literal is gone from `src\app.rs`, and `notify_already_running` asks the
+///    string table, in the language of Windows, with that style.
+#[test]
+fn the_second_copy_says_it_is_already_running_in_the_language_of_windows() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MB_ICONINFORMATION, MB_OK, MB_RIGHT, MB_RTLREADING, MB_SETFOREGROUND,
+    };
+
+    const OLD_LITERAL: &str = "Lang Switcher is already running in this session.";
+
+    let product = ProductImage::shared();
+    let mut defects: Vec<String> = Vec::new();
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let sentence = product.string_of_langid(langid, settings::IDS_ALREADY_RUNNING);
+        let rest = sentence.replace("Lang Switcher", "");
+        let own = rest
+            .chars()
+            .filter(|letter| letter.is_alphabetic() && letter_of_the_script_of(tag, *letter))
+            .count();
+        let foreign: String = rest
+            .chars()
+            .filter(|letter| letter.is_alphabetic() && !letter_of_the_script_of(tag, *letter))
+            .collect();
+
+        println!(
+            "{tag}: UTF-16 {} — «{sentence}»",
+            sentence.encode_utf16().count()
+        );
+
+        if !sentence.contains("Lang Switcher") {
+            defects.push(format!(
+                "{tag}: the name of the product is not translated (решение 7) — «{sentence}»"
+            ));
+        }
+
+        if own == 0 || !foreign.is_empty() {
+            defects.push(format!(
+                "{tag}: the sentence must speak in its own script ({own} letters of it, foreign \
+                 «{foreign}») — «{sentence}»"
+            ));
+        }
+
+        if tag == "en" && sentence != OLD_LITERAL {
+            defects.push(format!(
+                "en: the English row must be the literal it replaced — «{sentence}»"
+            ));
+        }
+    }
+
+    let ordinary = MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND;
+
+    for language in Language::ALL {
+        let style = lang_switcher::app::already_running_style(language);
+        let reads_right_to_left = style.0 & MB_RTLREADING.0 != 0 && style.0 & MB_RIGHT.0 != 0;
+
+        if style.0 & ordinary.0 != ordinary.0 {
+            defects.push(format!(
+                "{language:?}: the box lost its ordinary style — {:#x}",
+                style.0
+            ));
+        }
+
+        if reads_right_to_left != language.is_rtl() {
+            defects.push(format!(
+                "{language:?}: MB_RTLREADING | MB_RIGHT is {reads_right_to_left}, the language \
+                 reads right to left: {}",
+                language.is_rtl()
+            ));
+        }
+    }
+
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("app.rs"),
+    )
+    .expect("src\\app.rs must be readable")
+    .replace("\r\n", "\n");
+    let product_half = source
+        .split("\n#[cfg(test)]\nmod tests {")
+        .next()
+        .expect("a split always has a first part");
+
+    if product_half.contains(OLD_LITERAL) {
+        defects.push("src\\app.rs still carries the English literal".to_owned());
+    }
+
+    let notify = function_body(product_half, "fn notify_already_running() {");
+
+    for needle in [
+        "settings::system_language_for_a_first_run()",
+        "settings::text_in(language, settings::IDS_ALREADY_RUNNING)",
+        "already_running_style(language)",
+    ] {
+        if !notify.contains(needle) {
+            defects.push(format!("notify_already_running does not ask `{needle}`"));
+        }
+    }
+
+    // ⚠ And it publishes no locale on its way out: решение 99 gives the process one publication
+    // of «на каком языке программа» (`tray::adopt_ui_language`), and the first draft of this
+    // task broke that with two calls of `set_ui_language` here.
+    if notify.contains("set_ui_language(") {
+        defects.push(
+            "notify_already_running publishes a locale — a second answer to «на каком языке \
+             программа» (решение 99)"
+                .to_owned(),
+        );
+    }
+
+    assert!(
+        defects.is_empty(),
+        "the notification of FR-82 must come out of the string tables, in the language of \
+         Windows:\n{}",
         defects.join("\n")
     );
 }

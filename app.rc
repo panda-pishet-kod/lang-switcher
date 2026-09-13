@@ -1586,6 +1586,12 @@ END
 // numbers are; it has nothing to do with «Состояние» beyond that. ⛔ Not IDS_CAPTURE_RESERVED:
 // «the system owns this key» would be a lie about a key the system does not own.
 #define IDS_CAPTURE_TYPING      3228
+// Task T-43-9, finding Н23, решение 128.2 — the notification of FR-82 a second copy shows before it
+// exits. Until this task it was an English literal in `src\app.rs`, the one English sentence of the
+// program in every locale. The number continues the block of the state strings, 3216…3231, for the
+// reason 3228 does; the language it is read in is the one Windows prefers, because the second copy
+// exits before it reads any configuration.
+#define IDS_ALREADY_RUNNING     3229
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -1665,6 +1671,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "У этой клавиши нет имени в файле настроек — выберите другую."
     IDS_CAPTURE_RESERVED    "Эту клавишу занимает система — выберите другую."
     IDS_CAPTURE_TYPING      "Эта клавиша нужна при наборе — выберите другую."
+    IDS_ALREADY_RUNNING     "Lang Switcher уже работает в этом сеансе."
     IDS_STATE_WORKING       "Работает"
     IDS_STATE_SUSPENDED     "Приостановлена"
     IDS_STATE_HOOK_ABSENT   "Перехват клавиатуры не установлен"
@@ -1891,6 +1898,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "This key has no name in the settings file — choose another one."
     IDS_CAPTURE_RESERVED    "The system owns this key — choose another one."
     IDS_CAPTURE_TYPING      "Typing needs this key — choose another one."
+    IDS_ALREADY_RUNNING     "Lang Switcher is already running in this session."
     IDS_STATE_WORKING       "Working"
     IDS_STATE_SUSPENDED     "Suspended"
     IDS_STATE_HOOK_ABSENT   "The keyboard hook is not installed"
@@ -2130,6 +2138,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "У цієї клавіші немає імені у файлі налаштувань — виберіть іншу."
     IDS_CAPTURE_RESERVED    "Цю клавішу займає система — виберіть іншу."
     IDS_CAPTURE_TYPING      "Ця клавіша потрібна під час набору — виберіть іншу."
+    IDS_ALREADY_RUNNING     "Lang Switcher уже працює в цьому сеансі."
     IDS_STATE_WORKING       "Працює"
     IDS_STATE_SUSPENDED     "Призупинено"
     IDS_STATE_HOOK_ABSENT   "Перехоплення клавіатури не встановлено"
@@ -2352,6 +2361,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Diese Taste hat keinen Namen in der Einstellungsdatei — wählen Sie eine andere."
     IDS_CAPTURE_RESERVED    "Diese Taste gehört dem System — wählen Sie eine andere."
     IDS_CAPTURE_TYPING      "Diese Taste wird beim Tippen gebraucht — wählen Sie eine andere."
+    IDS_ALREADY_RUNNING     "Lang Switcher läuft bereits in dieser Sitzung."
     IDS_STATE_WORKING       "Läuft"
     IDS_STATE_SUSPENDED     "Angehalten"
     IDS_STATE_HOOK_ABSENT   "Der Tastatur-Hook ist nicht installiert"
@@ -2576,6 +2586,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Cette touche n'a pas de nom dans le fichier de paramètres — choisissez-en une autre."
     IDS_CAPTURE_RESERVED    "Le système occupe cette touche — choisissez-en une autre."
     IDS_CAPTURE_TYPING      "Cette touche sert à la saisie — choisissez-en une autre."
+    IDS_ALREADY_RUNNING     "Lang Switcher est déjà en cours d'exécution dans cette session."
     IDS_STATE_WORKING       "En marche"
     IDS_STATE_SUSPENDED     "En pause"
     IDS_STATE_HOOK_ABSENT   "L'interception clavier n'est pas installée"
@@ -2797,6 +2808,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Esta tecla no tiene nombre en el archivo de configuración — elija otra."
     IDS_CAPTURE_RESERVED    "El sistema ocupa esta tecla — elija otra."
     IDS_CAPTURE_TYPING      "Esta tecla hace falta al escribir — elija otra."
+    IDS_ALREADY_RUNNING     "Lang Switcher ya se está ejecutando en esta sesión."
     IDS_STATE_WORKING       "En marcha"
     IDS_STATE_SUSPENDED     "En pausa"
     IDS_STATE_HOOK_ABSENT   "La interceptación de teclado no está instalada"
@@ -3016,6 +3028,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Esta tecla não tem nome no arquivo de configurações — escolha outra."
     IDS_CAPTURE_RESERVED    "O sistema ocupa esta tecla — escolha outra."
     IDS_CAPTURE_TYPING      "Esta tecla é necessária ao digitar — escolha outra."
+    IDS_ALREADY_RUNNING     "O Lang Switcher já está em execução nesta sessão."
     IDS_STATE_WORKING       "Em execução"
     IDS_STATE_SUSPENDED     "Em pausa"
     IDS_STATE_HOOK_ABSENT   "A interceptação do teclado não está instalada"
@@ -3240,6 +3253,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Questo tasto non ha un nome nel file delle impostazioni — scegline un altro."
     IDS_CAPTURE_RESERVED    "Il sistema occupa questo tasto — scegline un altro."
     IDS_CAPTURE_TYPING      "Questo tasto serve a digitare — scegline un altro."
+    IDS_ALREADY_RUNNING     "Lang Switcher è già in esecuzione in questa sessione."
     IDS_STATE_WORKING       "In funzione"
     IDS_STATE_SUSPENDED     "In pausa"
     IDS_STATE_HOOK_ABSENT   "L'intercettazione della tastiera non è installata"
@@ -3464,6 +3478,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Ten klawisz nie ma nazwy w pliku ustawień — wybierz inny."
     IDS_CAPTURE_RESERVED    "Ten klawisz zajmuje system — wybierz inny."
     IDS_CAPTURE_TYPING      "Ten klawisz jest potrzebny przy pisaniu — wybierz inny."
+    IDS_ALREADY_RUNNING     "Lang Switcher jest już uruchomiony w tej sesji."
     IDS_STATE_WORKING       "Działa"
     IDS_STATE_SUSPENDED     "Wstrzymany"
     IDS_STATE_HOOK_ABSENT   "Przechwytywanie klawiatury nie jest zainstalowane"
@@ -3684,6 +3699,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Tato klávesa nemá v souboru nastavení název — zvolte jinou."
     IDS_CAPTURE_RESERVED    "Tuto klávesu zabírá systém — zvolte jinou."
     IDS_CAPTURE_TYPING      "Tuto klávesu potřebujete při psaní — zvolte jinou."
+    IDS_ALREADY_RUNNING     "Lang Switcher už v této relaci běží."
     IDS_STATE_WORKING       "Běží"
     IDS_STATE_SUSPENDED     "Pozastaveno"
     IDS_STATE_HOOK_ABSENT   "Zachytávání klávesnice není nainstalováno"
@@ -3907,6 +3923,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Bu tuşun ayar dosyasında adı yok — başka bir tuş seçin."
     IDS_CAPTURE_RESERVED    "Bu tuşu sistem kullanıyor — başka bir tuş seçin."
     IDS_CAPTURE_TYPING      "Bu tuş yazarken gerekli — başka bir tuş seçin."
+    IDS_ALREADY_RUNNING     "Lang Switcher bu oturumda zaten çalışıyor."
     IDS_STATE_WORKING       "Çalışıyor"
     IDS_STATE_SUSPENDED     "Duraklatıldı"
     IDS_STATE_HOOK_ABSENT   "Klavye yakalama kurulu değil"
@@ -4134,6 +4151,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "Αυτό το πλήκτρο δεν έχει όνομα στο αρχείο ρυθμίσεων — επιλέξτε άλλο."
     IDS_CAPTURE_RESERVED    "Το σύστημα κρατά αυτό το πλήκτρο — επιλέξτε άλλο."
     IDS_CAPTURE_TYPING      "Αυτό το πλήκτρο χρειάζεται στην πληκτρολόγηση — επιλέξτε άλλο."
+    IDS_ALREADY_RUNNING     "Το Lang Switcher εκτελείται ήδη σε αυτή την περίοδο λειτουργίας."
     IDS_STATE_WORKING       "Λειτουργεί"
     IDS_STATE_SUSPENDED     "Σε παύση"
     IDS_STATE_HOOK_ABSENT   "Η παρακολούθηση πληκτρολογίου δεν είναι εγκατεστημένη"
@@ -4365,6 +4383,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "למקש הזה אין שם בקובץ ההגדרות — בחרו אחר."
     IDS_CAPTURE_RESERVED    "המערכת תופסת את המקש הזה — בחרו אחר."
     IDS_CAPTURE_TYPING      "המקש הזה נחוץ בהקלדה — בחרו אחר."
+    IDS_ALREADY_RUNNING     "Lang Switcher כבר פועל בהפעלה זו."
     // Task T-34-5: the shouting «НЕ УСТАНОВЛЕН» of IDS_HOOK_DOWN is gone with the row, so the
     // remark of глоссарий Э30 §0-RTL.11 (no capitals in Hebrew — the word carries the weight)
     // no longer applies here; the four states are plain sentences.
@@ -4584,6 +4603,7 @@ BEGIN
     IDS_CAPTURE_NAMELESS    "هذا المفتاح بلا اسم في ملف الإعدادات — اختر غيره."
     IDS_CAPTURE_RESERVED    "النظام يحجز هذا المفتاح — اختر غيره."
     IDS_CAPTURE_TYPING      "هذا المفتاح ضروري أثناء الكتابة — اختر غيره."
+    IDS_ALREADY_RUNNING     "Lang Switcher قيد التشغيل بالفعل في هذه الجلسة."
     // Task T-34-5: as in Hebrew above — the shouting row is gone, the states are sentences.
     IDS_STATE_WORKING       "يعمل"
     IDS_STATE_SUSPENDED     "متوقف مؤقتًا"

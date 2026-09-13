@@ -132,9 +132,10 @@ use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 // is what let four repairs of defect E go past both. See [`foreground_layout`].
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MSG, MessageBoxW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
-    WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    MB_ICONINFORMATION, MB_OK, MB_RIGHT, MB_RTLREADING, MB_SETFOREGROUND, MESSAGEBOX_STYLE, MSG,
+    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW, UnregisterClassW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 // FR-100, task Т-21-5 and the tuning after the acceptance by ear. `PlaySoundW` is exported by
 // `winmm.dll`; the `windows` crate puts it under `Win32::Media::Audio` — hence the import
@@ -1048,12 +1049,26 @@ impl Role {
 /// the display name.
 const MUTEX_NAME: PCWSTR = w!(r"Local\Lang_Switcher.SingleInstance");
 
-/// Text of the FR-82 notification.
+/// The style of the FR-82 notification when its words are in `language` — task T-43-9.
 ///
-/// English, and hard-wired rather than taken from a resource, because FR-94 (interface
-/// strings in RU and EN resources) is implemented against `app.rc`, which this task may not
-/// touch. Moving this string into the resources belongs with the rest of FR-94.
-const ALREADY_RUNNING_TEXT: PCWSTR = w!("Lang Switcher is already running in this session.");
+/// Since that task the words are a row of the string tables (`settings::IDS_ALREADY_RUNNING`),
+/// read in the language Windows prefers, and two of the fourteen read right to left.
+/// `MessageBoxW` does not take the direction from the text: without `MB_RTLREADING` the Hebrew
+/// sentence, which opens with the Latin name of the program, is laid out left to right — the
+/// name lands at the end of the reading and the full stop at its beginning. `MB_RIGHT` puts the
+/// line against the edge the reading starts from. The other twelve keep exactly the style the
+/// box always had.
+///
+/// Pure, and public so that a test can hold the table without putting a box on the screen.
+pub fn already_running_style(language: settings::Language) -> MESSAGEBOX_STYLE {
+    let ordinary = MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND;
+
+    if language.is_rtl() {
+        ordinary | MB_RTLREADING | MB_RIGHT
+    } else {
+        ordinary
+    }
+}
 
 /// Outcome of trying to become the one instance of the program.
 enum Acquisition {
@@ -1185,6 +1200,18 @@ fn already_running_is_silent() -> bool {
 /// can only be a window. Decision R-20 point 1: it stays a modal `MessageBoxW` and the
 /// process exits after the user closes it. Blocking is a property of the requirement, not a
 /// defect, and self-closing substitutes would not notify anybody.
+///
+/// # The words — task T-43-9, finding Н23, решение 128.2
+///
+/// Until that task the sentence was an English literal of this file, the one English phrase
+/// of the program in every locale, left behind because the task that wrote FR-82 came before
+/// FR-94 and could not touch `app.rc`. It is a row of the string tables now, read by the reader
+/// every other word of the interface goes through (`settings::text_in`, the body of
+/// `settings::text`) — and read in the language **Windows** prefers
+/// (`settings::system_language_for_a_first_run`, the same rule a first run starts in), not in
+/// `[general] language`: this is the one road of the program that leaves before any
+/// configuration is read, and reading the file here only to say goodbye in it would be a
+/// second way to start and a second place to fail.
 fn notify_already_running() {
     // The caption is `APP_NAME` itself (decision 7), converted here rather than written out
     // as a second wide literal so that the two can never drift apart. Allocating is fine:
@@ -1195,18 +1222,33 @@ fn notify_already_running() {
         .chain(std::iter::once(0))
         .collect();
 
-    // SAFETY: both string arguments are NUL-terminated UTF-16 buffers that outlive the
-    // call — `caption` is owned by this frame and is not moved or dropped until after the
-    // call returns, `ALREADY_RUNNING_TEXT` is a `'static` literal — and MessageBoxW only
-    // reads through them. `None` for the owner window is the documented way to ask for an
-    // unowned box, which is all a process that owns no window yet can do. The call blocks
-    // until the user closes the box; that is the point.
+    // ⚠ Read with `settings::text_in` and not published with `settings::set_ui_language` first:
+    // решение 99 gives the process one publication of its locale, `tray::adopt_ui_language`,
+    // and a second copy on its way out is not the place for a second one.
+    let mut language = settings::system_language_for_a_first_run();
+    let mut words = settings::text_in(language, settings::IDS_ALREADY_RUNNING);
+
+    // NFR-13: a row that would not load has already been journaled by the reader. The English
+    // table is asked next, and not a literal of this file — the literal is exactly what this
+    // task took out.
+    if words.is_empty() {
+        language = settings::Language::En;
+        words = settings::text_in(language, settings::IDS_ALREADY_RUNNING);
+    }
+
+    let text: Vec<u16> = words.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // SAFETY: both string arguments are NUL-terminated UTF-16 buffers owned by this frame and
+    // not moved or dropped until after the call returns, and MessageBoxW only reads through
+    // them. `None` for the owner window is the documented way to ask for an unowned box, which
+    // is all a process that owns no window yet can do. The call blocks until the user closes
+    // the box; that is the point.
     let result = unsafe {
         MessageBoxW(
             None,
-            ALREADY_RUNNING_TEXT,
+            PCWSTR(text.as_ptr()),
             PCWSTR(caption.as_ptr()),
-            MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
+            already_running_style(language),
         )
     };
 

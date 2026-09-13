@@ -3051,6 +3051,15 @@ pub const IDS_LOG_SAVED: u16 = 3227;
 /// numbers are — it belongs to the capture dialog and not to «Состояние». Identifiers are never
 /// renumbered: one that moved would change what an installed build shows.
 pub const IDS_CAPTURE_TYPING: u16 = 3228;
+/// «Lang Switcher уже работает в этом сеансе» — the notification of FR-82 a second copy shows
+/// before it exits; task T-43-9, finding Н23, решение 128.2.
+///
+/// Until that task the sentence was an English literal in `app` — the one English phrase of the
+/// program in every locale — left there by the task that wrote FR-82 before FR-94 existed. 3229
+/// continues the block of the state strings (3216…3231) for the reason 3228 does: that is where
+/// the free numbers are. The language it is read in is **Windows'**, not the configuration's —
+/// the second copy exits before it reads any file (`app::notify_already_running`).
+pub const IDS_ALREADY_RUNNING: u16 = 3229;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3244,7 +3253,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// seventy-two before решение 99.4 retired `IDS_LANGUAGE_RESTART` with the sentence it carried
 /// and brought the two words of the tray tooltip. The list is of *identifiers in use*, not of
 /// numbers in the range — 3004 is a hole and holes are not walked.
-pub const INTERFACE_STRINGS: [u16; 217] = [
+///
+/// ⚠ **Two hundred and eighteen since task T-43-9** (решение 128.2 authorised 217 → 218): the
+/// notification of FR-82 left its English literal in `app` for [`IDS_ALREADY_RUNNING`], the
+/// last row.
+pub const INTERFACE_STRINGS: [u16; 218] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3464,6 +3477,8 @@ pub const INTERFACE_STRINGS: [u16; 217] = [
     IDS_THANKYOU_IDEA_TITLE,
     IDS_THANKYOU_BUG_TEXT,
     IDS_THANKYOU_IDEA_TEXT,
+    // Task T-43-9, finding Н23 — the notification of FR-82, in the language of Windows.
+    IDS_ALREADY_RUNNING,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -3538,7 +3553,20 @@ fn resource_module() -> HMODULE {
 /// An empty string when the resource cannot be read, which is the one answer that cannot make
 /// things worse: a label that came out blank is visible, and the refusal is in the journal.
 pub fn text(id: u16) -> String {
-    string_from(resource_module(), ui_language(), id).unwrap_or_default()
+    text_in(ui_language(), id)
+}
+
+/// One interface string in `language`, whatever locale is in force — task T-43-9.
+///
+/// [`text`] is this function asked in the locale in force, and the two share one body. The one
+/// reader that needs another language is the notification of FR-82: a second copy of the program
+/// exits before it reads any configuration, so its sentence is read in the language Windows
+/// prefers. Publishing that language through [`set_ui_language`] first would be a second
+/// publication of «на каком языке программа», and решение 99 gives the process exactly one —
+/// `tray::adopt_ui_language` (sweep `the_language_of_the_running_process_is_published_from_exactly_one_place`,
+/// which the first draft of this task turned red).
+pub fn text_in(language: Language, id: u16) -> String {
+    string_from(resource_module(), language, id).unwrap_or_default()
 }
 
 /// [`text`] with `{0}`, `{1}`… replaced by `arguments`, in order.
