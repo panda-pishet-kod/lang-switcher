@@ -597,6 +597,25 @@ pub struct Tray {
     /// How many times `NIM_ADD` has been issued. Acceptance point 12 reads this to see that
     /// `TaskbarCreated` really does add the icon a second time.
     add_calls: u32,
+    /// How many times `NIM_MODIFY` has been issued by [`Tray::refresh_icon`] — task T-41-6.
+    modify_calls: u32,
+    /// ⭐ **How many of those the shell refused — the counter finding Н22 asks for, task
+    /// T-41-6.**
+    ///
+    /// Before this task a refused update **cleared [`Tray::icon_present`]**, and updates go out
+    /// on pause, on resume, on «Применить» and on every change of language: one refusal and the
+    /// icon froze with yesterday's tooltip for the rest of the session. Worse, the same flag
+    /// gates [`Tray::announce`], so one refusal also silenced **every letter of FR-101**.
+    ///
+    /// So the refusal is counted instead of believed. The flag goes on meaning the one thing it
+    /// can honestly mean — «удалось ли добавить значок» — and this number is what a refused
+    /// update leaves behind, beside its line in the journal.
+    modify_failures: u32,
+    /// How many times `NIM_DELETE` has been issued — task T-41-6, and what shows that the
+    /// delete of FR-83 really goes out even when the flag says there is nothing to delete.
+    delete_calls: u32,
+    /// How many balloons of FR-101 have been handed to the shell — task T-41-6.
+    announce_calls: u32,
     /// Whether [`Tray::shut_down`] has already run. The cleanup of FR-83 is reached from two
     /// directions and has to do its work exactly once.
     finished: bool,
@@ -712,6 +731,10 @@ impl Tray {
             taskbar_created,
             icon_present: false,
             add_calls: 0,
+            modify_calls: 0,
+            modify_failures: 0,
+            delete_calls: 0,
+            announce_calls: 0,
             finished: false,
         };
 
@@ -772,6 +795,34 @@ impl Tray {
     /// and "the message was swallowed" is that the icon gets added again.
     pub fn add_calls(&self) -> u32 {
         self.add_calls
+    }
+
+    /// How many `NIM_MODIFY` updates [`Tray::refresh_icon`] has issued — task T-41-6.
+    ///
+    /// The number the acceptance of finding Н22 reads: a refused update must not stop the
+    /// **next** one going out, and the only observable difference between «обновления идут» and
+    /// «значок замер» is this count moving.
+    pub fn modify_calls(&self) -> u32 {
+        self.modify_calls
+    }
+
+    /// How many of those the shell refused — see [`Tray::modify_failures`], task T-41-6.
+    pub fn modify_failures(&self) -> u32 {
+        self.modify_failures
+    }
+
+    /// How many `NIM_DELETE` removals have been issued — task T-41-6.
+    ///
+    /// FR-83 says the icon comes off at exit. Before this task the removal was skipped whenever
+    /// the flag said the icon was not there — and the flag could say so while the shell still
+    /// held an icon, which is how a dead icon was left behind in the notification area.
+    pub fn delete_calls(&self) -> u32 {
+        self.delete_calls
+    }
+
+    /// How many balloons of FR-101 have been handed to the shell — task T-41-6.
+    pub fn announce_calls(&self) -> u32 {
+        self.announce_calls
     }
 
     /// The message the shell posts on behalf of the icon.
@@ -1295,11 +1346,19 @@ impl Tray {
     /// Малый значок трея не меняется: `NIF_ICON` и `hIcon` остаются прежними, и в области
     /// уведомлений стоит ровно то, что стояло.
     fn announce(&mut self, title: &str, body: &str) {
+        // ⚠ **Task T-41-6, finding Н22 — the early return stays, and what changed is the flag.**
+        // No icon means no balloon: a balloon belongs to an icon and the shell has nowhere to
+        // put one. What used to make this line a defect is that a refused *update* cleared the
+        // flag — so one refusal silenced every letter of FR-101 for the rest of the session.
+        // The refusal is counted now ([`Tray::modify_failures`]) and the flag is left alone, so
+        // this return means what it says again.
         if !self.icon_present {
             return;
         }
 
         let mut data = self.notify_data();
+
+        self.announce_calls += 1;
 
         data.uFlags |= NIF_INFO;
 
@@ -1346,23 +1405,43 @@ impl Tray {
 
         let data = self.notify_data();
 
+        self.modify_calls += 1;
+
         // SAFETY: identical to the `NIM_ADD` above — the same locally owned descriptor, the
         // same live window, the same icon handles owned by `self`.
         let modified = unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
 
         if !modified.as_bool() {
-            self.icon_present = false;
+            // ⭐ **Task T-41-6, finding Н22: the flag is NOT cleared here.** It used to be, and
+            // that single line was three defects. Updates go out on pause, on resume, on
+            // «Применить» and on every change of language, so one refusal froze the icon with
+            // yesterday's tooltip for the rest of the session; the same flag gates
+            // [`Tray::remove_icon`], so the icon was then left behind at exit; and since
+            // task Т-32-4 it gates [`Tray::announce`] too, so one refusal also silenced **every
+            // letter of FR-101**.
+            //
+            // The flag answers one question — «удалось ли добавить значок» — and a refused
+            // *update* is not an answer to it. What a refusal leaves behind is this count and
+            // the line below.
+            self.modify_failures += 1;
             app::report_non_critical("Shell_NotifyIconW(NIM_MODIFY)", &WinError::from_thread());
         }
     }
 
     /// Removes the icon — `NIM_DELETE`.
+    ///
+    /// ⭐ **Task T-41-6, finding Н22: unconditional, and the flag is not asked.** FR-83 says the
+    /// icon comes off when the program ends. The early return that used to stand here asked
+    /// [`Tray::icon_present`] — and the flag could say «нет» while the shell still held an icon,
+    /// which is exactly how a dead icon was left in the notification area after «Выход».
+    ///
+    /// A `NIM_DELETE` for an icon that is genuinely not there fails, and a failure here is
+    /// NFR-13: one line in the journal, no crash, nothing else. That is a far cheaper thing to
+    /// be wrong about than a ghost the person has to log out to get rid of.
     fn remove_icon(&mut self) {
-        if !self.icon_present {
-            return;
-        }
-
         let data = self.notify_data();
+
+        self.delete_calls += 1;
 
         // SAFETY: as above. `NIM_DELETE` reads only `cbSize`, `hWnd` and `uID`, all of which
         // are the ones the icon was added under, and the window is still alive: the

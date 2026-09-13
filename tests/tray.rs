@@ -2761,6 +2761,178 @@ fn taskbar_created_adds_the_icon_a_second_time() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// FR-83, FR-90, FR-101 — a refused update must not silence the icon. Finding Н22, task T-41-6
+// ---------------------------------------------------------------------------------------
+
+/// **Finding Н22, task T-41-6 (б) — the removal of FR-83 goes out whatever the flag says.**
+///
+/// `remove_icon` used to ask `icon_present` and leave if it said no. The flag can say no while
+/// the shell still holds an icon — a refused `NIM_MODIFY` used to clear it, and a refused
+/// `NIM_ADD` clears it still — and then the icon stayed in the notification area as a dead
+/// thing the person could only get rid of by logging out.
+///
+/// The road here is the product's own and takes no mutation at all: FR-83 removes the icon and
+/// clears the flag, and then FR-81's `TaskbarCreated` asks for the icon to be put back, which
+/// goes through `readd_icon` → `remove_icon` → `add_icon`. With the flag down, that middle step
+/// is exactly the one that used to be skipped.
+///
+/// ⚠ The red of this test was shown by **mutation**, because the counter it reads is new: the
+/// early return was put back into `remove_icon` for one run, which gave `delete_calls` 1 where
+/// 2 is asserted. Journal `scratchpad-E41\red-T-41-6-delete.log`; the mutation was removed
+/// again.
+#[test]
+fn the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove() {
+    let window = TestWindow::new();
+    let home = TestDir::new("icon_delete_unconditional");
+    let mut tray = install(&window, &home);
+
+    assert!(
+        tray.icon_present(),
+        "the shell is up, so the icon went in — this test is about what happens after"
+    );
+    assert_eq!(tray.delete_calls(), 0, "and nothing has been removed yet");
+
+    // FR-83: the cleanup. One removal, and the flag goes down with it.
+    tray.shut_down();
+
+    assert_eq!(tray.delete_calls(), 1, "FR-83 takes the icon off");
+    assert!(!tray.icon_present(), "and the flag says it is gone");
+
+    // FR-81: the shell says it has restarted. The flag is down, and the removal must go out
+    // all the same — on the base commit this is where the dead icon was left behind.
+    let message = tray.taskbar_created_message();
+    assert_ne!(message, 0, "RegisterWindowMessageW must have succeeded");
+
+    let reaction = tray.handle_message(message, WPARAM(0), LPARAM(0));
+
+    println!(
+        "TaskbarCreated with the flag down -> {reaction:?}; NIM_DELETE {} NIM_ADD {}",
+        tray.delete_calls(),
+        tray.add_calls()
+    );
+
+    assert_eq!(reaction, Reaction::Handled(LRESULT(0)));
+    assert_eq!(
+        tray.delete_calls(),
+        2,
+        "the removal goes out whatever the flag says — finding Н22"
+    );
+
+    // And the other half of the risk the task was given: an unconditional `NIM_DELETE` must not
+    // break the re-add of FR-81. A delete of an icon that is not there fails, and a failure
+    // there is NFR-13 and nothing more.
+    assert_eq!(tray.add_calls(), 2, "FR-81 still puts the icon back");
+    assert!(
+        tray.icon_present(),
+        "and it is really back — the extra delete cost nothing"
+    );
+}
+
+/// **Finding Н22, task T-41-6 (а) and (в) — a refused update does not clear the flag, and the
+/// letters of FR-101 do not go silent with it.**
+///
+/// Swept over the source, because the shell cannot be made to refuse a `NIM_MODIFY` on a
+/// machine where it is running, and a test that cannot reach the branch cannot speak for it.
+/// What the sweep asserts is the shape of the three functions the finding names, and the shape
+/// is the whole of the repair.
+///
+/// ⚠ **The positive control is measured, not assumed.** The same three claims over `7455732` —
+/// the commit this stage began at — all three fail: the failure branch of `refresh_icon` carries
+/// `self.icon_present = false`, and `remove_icon` opens with the early return. Journal
+/// `scratchpad-E41\red-T-41-6-sweep.log`.
+///
+/// ⚠ A **behavioural** run behind a mutation is in the report as well: with the `NIM_MODIFY` of
+/// `refresh_icon` forced to fail, the next `refresh_state_icon` still issues one and `announce`
+/// still hands the shell a balloon — `scratchpad-E41\red-T-41-6-mutation.log`.
+#[test]
+fn a_refused_update_leaves_the_icon_and_the_letters_alone() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let end = source
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("src\\tray.rs must carry its unit tests at the end");
+    let product = &source[..end];
+
+    let body_of = |signature: &str| {
+        let at = product
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} must be in src\\tray.rs"));
+        let rest = &product[at..];
+        let stop = rest
+            .find("\n    }")
+            .expect("a method closes with a brace of its own");
+
+        rest[..stop].to_owned()
+    };
+
+    // (а) The failure branch of the update counts and reports, and leaves the flag alone.
+    let refresh = body_of("fn refresh_icon(&mut self) {");
+
+    println!("--- refresh_icon ---\n{refresh}");
+
+    assert!(
+        refresh.contains("Shell_NotifyIconW(NIM_MODIFY"),
+        "the sweep is reading the wrong function"
+    );
+    assert!(
+        !refresh.contains("self.icon_present = false"),
+        "a refused update must not clear the flag — that one line was three defects at once"
+    );
+    assert!(
+        refresh.contains("self.modify_failures += 1"),
+        "it is counted instead, which is what finding Н22 asks for"
+    );
+    assert!(
+        refresh.contains("report_non_critical(\"Shell_NotifyIconW(NIM_MODIFY)\""),
+        "and the line in the journal stays — NFR-13"
+    );
+
+    // (б) The removal asks nothing before it acts.
+    let remove = body_of("fn remove_icon(&mut self) {");
+
+    println!("--- remove_icon ---\n{remove}");
+
+    assert!(
+        remove.contains("Shell_NotifyIconW(NIM_DELETE"),
+        "the sweep is reading the wrong function"
+    );
+    assert!(
+        !remove.contains("if !self.icon_present"),
+        "FR-83 removes the icon unconditionally — the flag is not evidence about the shell"
+    );
+
+    // (в) The balloon of FR-101 still guards on the flag, and that is right — what changed is
+    // that a refused update no longer moves the flag.
+    let announce = body_of("fn announce(&mut self, title: &str, body: &str) {");
+
+    assert!(
+        announce.contains("if !self.icon_present"),
+        "no icon, no balloon: the shell has nowhere to put one"
+    );
+    assert!(
+        announce.contains("self.announce_calls += 1"),
+        "and the attempt is counted, so that «письма молчат» is a number and not an impression"
+    );
+
+    // The flag is written in exactly two places now, and both of them are about **adding**.
+    let writes = product.matches("self.icon_present = ").count();
+
+    println!("places that write icon_present: {writes}");
+
+    assert_eq!(
+        writes, 3,
+        "two in `add_icon` — the refusal and the success — and one in `remove_icon`, which is \
+         the only honest answer the flag has left: «удалось ли добавить значок»"
+    );
+}
+
 #[test]
 fn switching_the_state_reaches_the_icon_and_the_file() {
     // Task Т-13-7: `toggle_state` moves a process-wide counter now. See [`TOGGLE`].
