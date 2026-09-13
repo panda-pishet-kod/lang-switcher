@@ -2289,3 +2289,103 @@ pub const KEYS: [&str; 46] = [
 /// pair of assertions is vacuous and costs nothing; the day a key is reserved again it is one
 /// entry here and no new test.
 pub const RESERVED_KEYS: [&str; 0] = [];
+
+// ---------------------------------------------------------------------------------------
+// Where every value comes from — condition 2 of SEC-04a, finding С66, task T-41-10
+// ---------------------------------------------------------------------------------------
+
+/// What kind of thing the value behind one key of [`KEYS`] is — finding С66, task T-41-10.
+///
+/// Condition 2 of SEC-04a says the channel may carry **state and nothing else**, and it names
+/// examples: the length of the buffer, the «password field» verdict, the position in the cycle,
+/// counts of refusals. Examples are not a list, and the finding is about exactly that gap: two of
+/// the values that go out are computed **from the typed word**, the letter of condition 2 names
+/// no such category, and the test that guards the channel looks for «как бы набранный» text and
+/// sees no derived number at all.
+///
+/// So every key is given its origin by name. The acceptance refuses a key whose origin is
+/// [`Origin::DerivedFromText`] unless that key is in a short list written out in the test — which
+/// is what «закрытый список» means here: not that nothing derived may go out, but that nothing
+/// derived may go out **quietly**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// A count of this program's own events: presses, refusals, retries, recoveries. Says how
+    /// often something happened and nothing about what it was.
+    Count,
+    /// A duration or a quantile this program measured of itself — microseconds, nanoseconds.
+    Measurement,
+    /// A configuration value this program published at start-up or on «Применить». It came from
+    /// the person's own file and goes back out unchanged.
+    Setting,
+    /// A state read at the instant of the snapshot: a flag, a layout handle, a position, a word
+    /// from a closed vocabulary. Not a count and not a setting, and nothing of the text.
+    State,
+    /// ⚠⚠ **Computed from the typed word**, and permitted only by being named here.
+    ///
+    /// Two keys carry such a value, both about the shape of a replacement packet and neither
+    /// about its content: how many of the units in it were **distinct** (inside
+    /// `last_replacement`), and whether the text typed back **equalled** the text erased
+    /// (`last_replacement_changed`). Решение 125.1 kept both — a stand that reads them cannot
+    /// recover a character, a code unit or a scan code from either, and the value of the finding
+    /// is the instrument rather than the removal.
+    DerivedFromText,
+}
+
+/// Every key of [`KEYS`] with the origin of its value — finding С66, task T-41-10.
+///
+/// **In the order of [`KEYS`], name for name**, because the acceptance walks the two side by side:
+/// a key that appeared in one and not the other is a key nobody reviewed, and the silent growth
+/// 45 → 46 the finding was written about is exactly that. The count is written out as a literal
+/// rather than taken from `KEYS.len()` on purpose — a table whose length follows the thing it
+/// checks cannot disagree with it.
+pub const ORIGINS: [(&str, Origin); 46] = [
+    ("buffer_len", Origin::Count),
+    ("hook_installed", Origin::State),
+    ("hook_ready_us", Origin::Measurement),
+    ("cache_ready_us", Origin::Measurement),
+    ("cache_builds", Origin::Count),
+    ("layout_cache_failures", Origin::Count),
+    ("hotkey_handoffs", Origin::Count),
+    ("post_failures", Origin::Count),
+    ("send_mismatches", Origin::Count),
+    ("events_lost", Origin::Count),
+    ("inter_event_delay_ms", Origin::Setting),
+    ("replacement_method", Origin::Setting),
+    ("cycle_position", Origin::State),
+    ("watchdog_recoveries", Origin::Count),
+    ("watchdog_last_reason", Origin::State),
+    ("password_field", Origin::State),
+    ("focus_changes", Origin::Count),
+    ("password_probes", Origin::Count),
+    ("fail_safe", Origin::State),
+    ("consecutive_panics", Origin::Count),
+    ("device_changes", Origin::Count),
+    ("background_skips", Origin::Count),
+    ("focus_repeats", Origin::Count),
+    ("layout_probes", Origin::Count),
+    ("callback_samples", Origin::Count),
+    ("callback_p50_ns", Origin::Measurement),
+    ("callback_p99_ns", Origin::Measurement),
+    ("callback_max_ns", Origin::Measurement),
+    ("active_layout", Origin::State),
+    // ⚠ The first of the two. `erase` and `units` are counts; `distinct` is computed from the
+    // word — see [`LAST_REPLACEMENT`] for why task T-10-6 needed it.
+    ("last_replacement", Origin::DerivedFromText),
+    ("last_replacement_method", Origin::State),
+    ("window_flushes", Origin::Count),
+    ("full_clears", Origin::Count),
+    ("strokes_removed", Origin::Count),
+    ("field_state", Origin::State),
+    ("clipboard_refusals", Origin::Count),
+    ("clipboard_close_failures", Origin::Count),
+    ("clipboard_retries", Origin::Count),
+    ("restamp_skips", Origin::Count),
+    ("restamp_no_probe", Origin::Count),
+    ("restamp_unchanged", Origin::Count),
+    ("restamp_uncached", Origin::Count),
+    ("restamp_accepted", Origin::Count),
+    // ⚠ The second. One bit: whether the text typed back equalled the text erased.
+    ("last_replacement_changed", Origin::DerivedFromText),
+    ("last_replacement_direction", Origin::State),
+    ("focus_after_typing", Origin::Count),
+];

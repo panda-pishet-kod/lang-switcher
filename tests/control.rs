@@ -2726,6 +2726,97 @@ fn the_two_replacement_outcome_keys_of_t_10_17_close_the_channel() {
 }
 
 // -------------------------------------------------------------------------------------
+// Finding С66 — nothing leaves the channel without its origin named. Task T-41-10
+// -------------------------------------------------------------------------------------
+
+/// **Finding С66, task T-41-10 — every key of the channel has its origin named, and nothing
+/// derived from the typed word leaves it quietly.**
+///
+/// Condition 2 of SEC-04a allows **state and nothing else**, and names examples: the length of the
+/// buffer, the «password field» verdict, the position in the cycle, counts of refusals. Two of the
+/// values that actually go out are computed **from the word that was typed** — how many of the
+/// units in a replacement packet were distinct, and whether the text typed back equalled the text
+/// erased — and the letter of condition 2 names no such category. Решение 125.1 kept both and
+/// asked for this instrument instead: the value of the finding is that the list stops growing
+/// unnoticed.
+///
+/// ⚠⚠ **The number 46 is asserted on purpose, and it is the whole point.** The channel grew
+/// 45 → 46 between the audit's snapshot and this stage — the key was `focus_after_typing`, added
+/// by task Т-48-2 — and **no instrument went red**. A test written «over the list, whatever it
+/// holds» would have stayed green through that too. So a new key is now three deliberate edits:
+/// `KEYS`, [`control::ORIGINS`], and the two literals below.
+///
+/// ⚠ The allowance below is a **list of names**, not a count. A key that is derived and not in it
+/// fails this test even if the number of derived keys happens to match.
+#[test]
+fn every_key_of_the_channel_carries_the_origin_of_its_value() {
+    use lang_switcher::control::Origin;
+
+    /// The keys condition 2 of SEC-04a admits **despite** being computed from the word —
+    /// решение 125.1, by name and nothing beyond it.
+    const ALLOWED_DERIVED: [&str; 2] = ["last_replacement", "last_replacement_changed"];
+
+    // The canon the finding is about. Not `KEYS.len()`, which would agree with itself.
+    assert_eq!(
+        control::KEYS.len(),
+        46,
+        "the channel publishes 46 keys; growing it is a decision, not a side effect — finding С66"
+    );
+    assert_eq!(
+        control::ORIGINS.len(),
+        46,
+        "and the origin table is the same length, written out rather than derived"
+    );
+
+    // Name for name, in order: a key in one list and not the other is a key nobody reviewed.
+    for (index, (key, origin)) in control::ORIGINS.iter().enumerate() {
+        assert_eq!(
+            *key,
+            control::KEYS[index],
+            "position {index}: the two lists must walk together"
+        );
+
+        if *origin == Origin::DerivedFromText {
+            assert!(
+                ALLOWED_DERIVED.contains(key),
+                "{key} is computed from the typed word and is not in the list решение 125.1 \
+                 allows — condition 2 of SEC-04a admits state, and a derived value may go out \
+                 only by being named"
+            );
+        }
+    }
+
+    // And the far side of the same sentence: every allowed name is really in the table and really
+    // marked derived. Without this half the allowance could go stale and nobody would know.
+    for allowed in ALLOWED_DERIVED {
+        let row = control::ORIGINS
+            .iter()
+            .find(|(key, _)| *key == allowed)
+            .unwrap_or_else(|| panic!("{allowed} must be a key of the channel"));
+
+        assert_eq!(
+            row.1,
+            Origin::DerivedFromText,
+            "{allowed} is allowed as a derived value, so the table must call it one"
+        );
+    }
+
+    let derived: Vec<&str> = control::ORIGINS
+        .iter()
+        .filter(|(_, origin)| *origin == Origin::DerivedFromText)
+        .map(|(key, _)| *key)
+        .collect();
+
+    println!("derived from the typed word: {derived:?}");
+
+    assert_eq!(
+        derived,
+        ALLOWED_DERIVED.to_vec(),
+        "exactly these, in this order — решение 125.1"
+    );
+}
+
+// -------------------------------------------------------------------------------------
 // Finding Н42 and finding Т13 — whose server, and whose rights. Task T-41-9
 // -------------------------------------------------------------------------------------
 
