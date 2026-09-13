@@ -102,7 +102,6 @@ fn the_names_the_program_really_reports_are_recognised() {
         ("SetWindowsHookExW (watchdog)", Kind::Hook),
         ("ActivateKeyboardLayout", Kind::Layout),
         ("Shell_NotifyIconW(NIM_ADD)", Kind::Tray),
-        ("ConnectNamedPipe", Kind::Channel),
     ];
 
     for (name, kind) in cases {
@@ -112,6 +111,32 @@ fn the_names_the_program_really_reports_are_recognised() {
         assert_eq!(operation.name(), name);
         assert_eq!(operation.kind(), kind, "{name} landed in the wrong group");
     }
+
+    // ⭐ **Task T-41-11, finding Н43: the channel's group is a `testing`-only group now**, so the
+    // row that used to stand in the table above travels under the same gate as the thing it
+    // names. Asserted rather than dropped: in a build that *has* the channel, its names must
+    // still resolve — the repair was about the shipped file, not about the diagnostic.
+    #[cfg(feature = "testing")]
+    {
+        let operation = Operation::from_name("ConnectNamedPipe");
+
+        assert_ne!(
+            operation,
+            Operation::UNLISTED,
+            "with the channel compiled in, its own names must still be recognised"
+        );
+        assert_eq!(operation.name(), "ConnectNamedPipe");
+        assert_eq!(operation.kind(), Kind::Channel);
+    }
+
+    // And the far side, which is the finding itself: without the feature the name is not in the
+    // vocabulary at all, so it narrows to `UNLISTED` and nothing of it is kept.
+    #[cfg(not(feature = "testing"))]
+    assert_eq!(
+        Operation::from_name("ConnectNamedPipe"),
+        Operation::UNLISTED,
+        "the shipped vocabulary has no row for the channel — finding Н43"
+    );
 }
 
 /// Every name the program reports, taken out of the sources rather than out of a list.
@@ -725,6 +750,60 @@ fn nothing_reaches_the_journal_unnamed_any_more() {
 
     assert!(checked > 40, "the scan found suspiciously few call sites");
 
+    // ⭐⭐ **Task T-41-11, finding Н43 — the one class of name that is *meant* to be unnamed here,
+    // and only in this configuration.**
+    //
+    // This scan reads **source text**, and source text knows nothing of `#[cfg]`. The seven calls
+    // of the debug channel are in `src\control.rs` and in one `testing`-only block of `src\app.rs`
+    // — code that is **not compiled** into the shipped program at all — so in a build without the
+    // feature their names are rightly absent from the vocabulary and rightly narrow to
+    // `UNLISTED`. That is the repair, not a hole: the finding was that these seven strings were in
+    // the shipped binary, and taking them out is what makes the scan see them here.
+    //
+    // They are listed **by name**, so a new unnamed report cannot hide behind the exception, and
+    // the far side is asserted too: with the feature compiled in, not one of them may be unnamed.
+    #[cfg(not(feature = "testing"))]
+    {
+        const CHANNEL_NAMES: [&str; 7] = [
+            "control::start",
+            "CloseHandle(token)",
+            "ConnectNamedPipe",
+            "DisconnectNamedPipe",
+            "write(control channel)",
+            "FlushFileBuffers",
+            "CloseHandle(pipe)",
+        ];
+
+        let unexpected: Vec<&String> = unnamed
+            .iter()
+            .filter(|entry| {
+                !CHANNEL_NAMES
+                    .iter()
+                    .any(|name| entry.ends_with(&format!(": {name}")))
+            })
+            .collect();
+
+        println!("unnamed that are not the channel's: {unexpected:?}");
+
+        assert!(
+            unexpected.is_empty(),
+            "these reach the journal as a code with no name: {unexpected:?} — until task T-34-4 \
+             three names of the password-field probe stood here on purpose (acceptance point 9 of \
+             FR-71); решение 117.3 gave them neutral names, and a new one is a hole, not a policy"
+        );
+
+        // The exception must not be vacuous either: without the feature every one of the seven is
+        // expected to be unnamed, and if one of them turned up named the repair would be undone.
+        for name in CHANNEL_NAMES {
+            assert_eq!(
+                Operation::from_name(name),
+                Operation::UNLISTED,
+                "{name} must not be in the shipped vocabulary — finding Н43"
+            );
+        }
+    }
+
+    #[cfg(feature = "testing")]
     assert!(
         unnamed.is_empty(),
         "these reach the journal as a code with no name: {unnamed:?} — until task T-34-4 three \

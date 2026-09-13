@@ -226,7 +226,13 @@ pub enum Kind {
     Layout = 4,
     /// The tray icon and its menu.
     Tray = 5,
-    /// The debug control channel of SEC-04a, `testing` builds only.
+    /// The debug control channel of SEC-04a — **`testing` builds only, and since task T-41-11
+    /// that is true of the variant itself and not only of what it describes** (finding Н43).
+    ///
+    /// ⭐ The discriminants of this enum are **explicit**, which is the one thing this repair got
+    /// for nothing: taking the variant away does not move `Unlisted` from 7 or `Selection` from 8,
+    /// so nothing else in the vocabulary is disturbed.
+    #[cfg(feature = "testing")]
     Channel = 6,
     /// An operation name that is not in [`OPERATIONS`]. **Nothing of the name is kept.**
     #[default]
@@ -245,6 +251,10 @@ impl Kind {
             Self::Hook => "hook",
             Self::Layout => "layout",
             Self::Tray => "tray",
+            // Task T-41-11, finding Н43: the category goes with the seven rows it named. The
+            // word «channel» is a trace of the channel too, and a trace in the shipped file was
+            // the whole of the finding.
+            #[cfg(feature = "testing")]
             Self::Channel => "channel",
             Self::Unlisted => "unlisted",
             Self::Selection => "selection",
@@ -324,14 +334,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // значка потому, что и последствие у отказа своё — уведомление уходит со старым, малым
     // значком, а не пропадает (NFR-13); журнал обязан различать эти два случая.
     ("LoadImageW(SM_CXICON)", Kind::Tray),
-    // `control` — SEC-04a, `testing` builds only.
-    ("control::start", Kind::Channel),
-    ("CloseHandle(token)", Kind::Channel),
-    ("ConnectNamedPipe", Kind::Channel),
-    ("DisconnectNamedPipe", Kind::Channel),
-    ("write(control channel)", Kind::Channel),
-    ("FlushFileBuffers", Kind::Channel),
-    ("CloseHandle(pipe)", Kind::Channel),
+    // ⛔ **The seven rows of the channel stood here until task T-41-11 (finding Н43).** They are
+    // now in [`CHANNEL_OPERATIONS`], at the end of the vocabulary and under the same feature as
+    // the channel itself — `#[cfg]` cannot be put on an element of an array literal, which is
+    // why they moved rather than merely got a gate.
+    //
     // `selection` — the clipboard and the selection path of §4.7.
     ("clipboard snapshot truncated", Kind::Selection),
     // `settings` and `tray` — the dialog of FR-92, autostart FR-93 and the string tables of
@@ -725,7 +732,82 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("clipboard snapshot saved nothing", Kind::Selection),
 ];
 
-/// What happened, as an index into [`OPERATIONS`].
+/// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
+///
+/// # Why these seven names live apart from the rest
+///
+/// The channel itself is behind `#[cfg(feature = "testing")]` and is absent from the shipped
+/// program (SEC-04a condition 1, acceptance criterion 8 of section 13). Its seven **operation
+/// names** were not: they stood in the middle of [`OPERATIONS`], which has no gate, and so they
+/// went into the shipped binary as plain text. Nothing could use them there — there is no code
+/// to report them — but anybody who ran a text search over the file would find the traces of a
+/// mechanism the program says it does not have, and «следов канала не остаётся» would be an
+/// inaccurate promise. **In an open release that is a conversation about trust**, which is the
+/// whole of what finding Н43 is about.
+///
+/// Measured before the repair and not assumed: all seven were in
+/// `target\release\LangSwitcher.exe` in UTF-8, seven of seven — journal
+/// `scratchpad-E41\premise-P3-strings.log`.
+///
+/// # Why at the end, and what that costs
+///
+/// `#[cfg]` cannot be written on an element of an array literal, so a gate in place was not
+/// available: the rows had to become a second array. They go **at the end** of the vocabulary
+/// rather than the beginning because [`Operation`] is an **index** into it — a row inserted
+/// above another moves that other one's number.
+///
+/// The cost is that in a build **with** the feature these seven numbers are now the highest ones
+/// rather than numbers 5 to 11, and every row that used to sit below them moved down by seven.
+/// That is harmless by construction: an index never leaves the process. It is produced by
+/// [`Operation::from_name`], kept in the ring, and turned back into a name by
+/// [`Operation::name`] at the moment the dump is written — and the dump is text. Nothing on disk,
+/// in the configuration or in any protocol carries one.
+///
+/// The four published constants of [`Operation`] are numbers 0 to 3 and stand **above** the
+/// removal, so they did not move at all.
+#[cfg(feature = "testing")]
+static CHANNEL_OPERATIONS: &[(&str, Kind)] = &[
+    ("control::start", Kind::Channel),
+    ("CloseHandle(token)", Kind::Channel),
+    ("ConnectNamedPipe", Kind::Channel),
+    ("DisconnectNamedPipe", Kind::Channel),
+    ("write(control channel)", Kind::Channel),
+    ("FlushFileBuffers", Kind::Channel),
+    ("CloseHandle(pipe)", Kind::Channel),
+];
+
+/// Empty in the shipped program — see the documentation of the other half.
+///
+/// ⚠ **Empty and not absent.** The two halves are read through one pair of helpers
+/// ([`row_at`] and [`row_count`]), so the code that walks the vocabulary is the same code in
+/// both configurations and there is no second path to keep in step.
+#[cfg(not(feature = "testing"))]
+static CHANNEL_OPERATIONS: &[(&str, Kind)] = &[];
+
+/// The row of the vocabulary at `index` — the core table first, the channel's rows after it.
+///
+/// One reader for both halves, so that [`Operation::name`], [`Operation::kind`] and
+/// [`Operation::from_index`] cannot disagree about where the vocabulary ends.
+fn row_at(index: usize) -> Option<&'static (&'static str, Kind)> {
+    OPERATIONS
+        .get(index)
+        .or_else(|| CHANNEL_OPERATIONS.get(index.wrapping_sub(OPERATIONS.len())))
+}
+
+/// How many rows the vocabulary has **in this configuration** — task T-41-11.
+///
+/// Differs by seven between the two builds, which is the point of the task and is why the bound
+/// check of [`Operation::from_index`] asks this rather than `OPERATIONS.len()`.
+fn row_count() -> usize {
+    OPERATIONS.len() + CHANNEL_OPERATIONS.len()
+}
+
+/// Every row of the vocabulary, in the order the indices run.
+fn rows() -> impl Iterator<Item = &'static (&'static str, Kind)> {
+    OPERATIONS.iter().chain(CHANNEL_OPERATIONS)
+}
+
+/// What happened, as an index into the vocabulary.
 ///
 /// **SEC-01, SEC-07 — this is the type the whole requirement rests on.** The field is private
 /// and there is no constructor that takes an integer, so a value of this type is always one of
@@ -756,8 +838,7 @@ impl Operation {
     /// **The narrowing step of SEC-07.** Every string in the universe maps onto this finite
     /// table; everything outside it maps onto one value that carries no text.
     pub fn from_name(name: &str) -> Self {
-        OPERATIONS
-            .iter()
+        rows()
             .enumerate()
             .skip(1)
             .find(|(_, row)| row.0 == name)
@@ -767,16 +848,12 @@ impl Operation {
 
     /// The name of this operation, for the dump.
     pub fn name(self) -> &'static str {
-        OPERATIONS
-            .get(usize::from(self.0))
-            .map_or(OPERATIONS[0].0, |row| row.0)
+        row_at(usize::from(self.0)).map_or(OPERATIONS[0].0, |row| row.0)
     }
 
     /// The group this operation belongs to.
     pub fn kind(self) -> Kind {
-        OPERATIONS
-            .get(usize::from(self.0))
-            .map_or(Kind::Unlisted, |row| row.1)
+        row_at(usize::from(self.0)).map_or(Kind::Unlisted, |row| row.1)
     }
 
     /// The index stored in a slot.
@@ -785,10 +862,14 @@ impl Operation {
     }
 
     /// The value a slot decoded to, or [`Operation::UNLISTED`] if it names no row.
+    /// ⚠ The bound is [`row_count`] and **not** `OPERATIONS.len()`: since task T-41-11 the
+    /// vocabulary is seven rows longer in a build with the channel, and a check against the core
+    /// table alone would decode every one of the channel's own entries as «unlisted» in the very
+    /// build the channel exists in.
     fn from_index(index: u32) -> Self {
         u16::try_from(index)
             .ok()
-            .filter(|&index| usize::from(index) < OPERATIONS.len())
+            .filter(|&index| usize::from(index) < row_count())
             .map_or(Self::UNLISTED, Self)
     }
 }

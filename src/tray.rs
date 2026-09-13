@@ -2029,13 +2029,9 @@ fn note_theme_handoff(name: Option<&str>) {
     THEME_HANDOFF.with(|last| *last.borrow_mut() = Some(name.map(str::to_owned)));
 }
 
-/// Nothing at all in the product — see the test-only twin above.
+/// Nothing at all in the product — see the test-only twin above. An empty body the compiler
+/// removes outright; no `#[inline]` is asked for, because there is nothing here to inline.
 #[cfg(not(test))]
-#[expect(
-    clippy::inline_always,
-    reason = "an empty function on the message path, and the point of it is to leave no code"
-)]
-#[inline(always)]
 fn note_theme_handoff(_name: Option<&str>) {}
 
 #[cfg(test)]
