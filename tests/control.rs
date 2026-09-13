@@ -841,10 +841,19 @@ fn the_channel_serves_the_owner_of_this_process_and_stops_when_asked() {
 
     // Condition 4 of SEC-04a in the creation flags: the instance is outbound only and has no
     // inbound buffer, so there is nothing for a client to send through and nothing to read.
+    // ⭐ **Task T-41-9, finding Н42 moved this canon, and the move is the repair.** Until this
+    // task the open mode was `PIPE_ACCESS_OUTBOUND` alone; it now carries
+    // `FILE_FLAG_FIRST_PIPE_INSTANCE` beside it, so a name somebody else raised first is an
+    // outright refusal instead of a second instance sharing the name. Both bits are named here
+    // rather than the sum, so that a future edit has to say which of the two it is changing.
     assert_eq!(
         control::PIPE_OPEN_MODE,
-        windows::Win32::Storage::FileSystem::PIPE_ACCESS_OUTBOUND,
-        "SEC-04a condition 4: the server writes, the client reads, and there is no other way"
+        windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(
+            windows::Win32::Storage::FileSystem::PIPE_ACCESS_OUTBOUND.0
+                | windows::Win32::Storage::FileSystem::FILE_FLAG_FIRST_PIPE_INSTANCE.0
+        ),
+        "SEC-04a condition 4: the server writes, the client reads, and there is no other way — \
+         plus finding Н42: this instance must be the first one of its name"
     );
 
     // The buffer this test will make the channel report on. Installed before the server so
@@ -2713,5 +2722,184 @@ fn the_two_replacement_outcome_keys_of_t_10_17_close_the_channel() {
     assert_eq!(
         &control::KEYS[43..45],
         &["last_replacement_changed", "last_replacement_direction"]
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Finding Н42 and finding Т13 — whose server, and whose rights. Task T-41-9
+// -------------------------------------------------------------------------------------
+
+/// **Finding Н42 (а), task T-41-9 — a name already taken is a refusal, and by two mechanisms.**
+///
+/// ⚠⚠ **This test is honest about what the repair did and did not change, because the difference
+/// was measured.** The refusal below happens **on the base commit too**, and with the same
+/// `ERROR_ACCESS_DENIED`: [`control::PIPE_INSTANCES`] is 1, `nMaxInstances` is enforced on the
+/// name kernel-wide, and the limit is reached after the first instance. So the first half of
+/// finding Н42's reasoning — a stranger adding an instance *beside* ours — never held. Both
+/// configurations were built and run: `scratchpad-E41\red-T-41-9-second-server.log`.
+///
+/// What task T-41-9 added is `FILE_FLAG_FIRST_PIPE_INSTANCE`, which states the requirement where
+/// a reader looks for it and survives a future edit of the instance limit. The assertion on the
+/// open mode lives in
+/// `the_channel_serves_the_owner_of_this_process_and_stops_when_asked`; this test is the
+/// behaviour, and it asserts the refusal **and names both reasons for it**, so that a task which
+/// removed either one would have to come here and say which.
+///
+/// ⭐ The substance of the finding is in the other half — a server raised **before** ours — and
+/// that is `the_client_is_told_in_words_when_the_server_is_not_the_one_expected`.
+#[test]
+fn a_second_server_on_the_same_name_is_refused() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let first = control::start().expect("the first server comes up");
+
+    // The client proves the first one is really serving, so that the refusal below cannot be
+    // «оба отказали» read as a success.
+    let answer = read_channel();
+    assert!(
+        answer.contains("buffer_len="),
+        "the first server is the one answering: {answer:?}"
+    );
+
+    let second = control::start();
+    let refused = second.as_ref().err().map(ToString::to_string);
+
+    println!("the second server on the same name -> {refused:?}");
+
+    assert!(
+        second.is_err(),
+        "a name this process already holds must be refused, not joined — finding Н42"
+    );
+
+    // Both reasons, named. Either alone is enough for the refusal above, and a task that
+    // removed one has to decide here whether the other still carries it.
+    assert_eq!(
+        control::PIPE_INSTANCES,
+        1,
+        "nMaxInstances = 1: the limit on the name is reached after the first instance"
+    );
+    assert_ne!(
+        control::PIPE_OPEN_MODE.0
+            & windows::Win32::Storage::FileSystem::FILE_FLAG_FIRST_PIPE_INSTANCE.0,
+        0,
+        "and the open mode says out loud that this instance must be the first of its name"
+    );
+
+    // ⚠ `stop()` and not `drop`: [`control::Channel`] has no `Drop`, so dropping it detaches the
+    // thread — which goes on holding the pipe handle, and the name with it, for the life of the
+    // test binary. The next test to raise a server would then be refused for the wrong reason,
+    // and this very repair is what would make that refusal look right.
+    assert!(first.stop(), "the first server ends when it is asked to");
+}
+
+/// **Finding Н42 (б), task T-41-9 — the client asks whose server it reached, and the refusal is
+/// a sentence, not a shrug.**
+///
+/// This is the larger half of the repair. The flag above stops a second server joining *our*
+/// name; it cannot help when the other server was raised **first**, before the product existed.
+/// The client then connects by name, is answered, and cannot tell a real snapshot from one a
+/// stranger composed.
+///
+/// ⚠ **This test process is the stranger**, which is what makes the case reachable without a
+/// second program: the server it raises is its own, so the process the kernel names as the owner
+/// of the far end is this very test — and a bench that expected the product would be told so, in
+/// words, with both numbers in them.
+///
+/// ⚠ Red on the base commit, where neither `server_process_id` nor `wrong_server` existed and the
+/// run was simply green — journal `scratchpad-E41\red-T-41-9-second-server.log`.
+#[test]
+fn the_client_is_told_in_words_when_the_server_is_not_the_one_expected() {
+    use std::os::windows::io::AsRawHandle;
+
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let channel = control::start().expect("the server comes up");
+    let client = connect().expect("a client of the current user connects");
+
+    let handle = windows::Win32::Foundation::HANDLE(client.as_raw_handle().cast());
+    let actual = control::server_process_id(handle).expect("the kernel knows whose server it is");
+    let mine = std::process::id();
+
+    println!("server PID {actual}, this process {mine}");
+
+    assert_eq!(
+        actual, mine,
+        "the server of this channel was raised by this very process, and the kernel says so"
+    );
+
+    // The bench's own question, with the two answers it can get. A run that expected the
+    // product would be reading a channel raised by somebody else entirely.
+    let pretended_product = mine.wrapping_add(1);
+    let complaint = control::wrong_server(pretended_product, actual);
+
+    println!("{complaint}");
+
+    assert!(
+        complaint.contains(&pretended_product.to_string())
+            && complaint.contains(&actual.to_string()),
+        "both numbers must be in the sentence — «красный без внятной причины» is the defect"
+    );
+    assert!(
+        complaint.contains("SEC-04a"),
+        "and it must say which channel it is about"
+    );
+
+    drop(client);
+
+    // See the note in the test above: `stop()`, never `drop`.
+    assert!(channel.stop(), "the server ends when it is asked to");
+}
+
+/// **Finding Т13, task T-41-9 — the header says what the code does, in two halves.**
+///
+/// The module used to promise «только владельца текущего сеанса» in one breath, while the code
+/// decides **access** by the owner of the token and keeps **sessions** apart by the name of the
+/// channel. The behaviour was right and the sentence was not.
+///
+/// Swept over the source, with a negative control: the sweep looks for the two halves **and**
+/// refuses the old one-breath phrase, so putting the old wording back fails this test.
+#[test]
+fn the_header_of_the_channel_says_owner_for_rights_and_name_for_session() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("control.rs"),
+    )
+    .expect("src\\control.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let header: String = source
+        .lines()
+        .take_while(|line| line.starts_with("//!"))
+        .map(|line| line.trim_start_matches("//!").trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    println!("--- the header of src\\control.rs ---\n{header}");
+
+    // The instrument's positive control: it is reading the header it means to read.
+    assert!(
+        header.contains("SEC-04a debug control channel"),
+        "the sweep is reading the wrong lines"
+    );
+
+    // The two halves, named apart.
+    assert!(
+        header.contains("owner of this process's token"),
+        "Т13: the rights are decided by the owner of the token, and the header must say so"
+    );
+    assert!(
+        header.contains("session") && header.contains("name of the channel"),
+        "Т13: and the session is kept apart by the name, which is a different mechanism"
+    );
+
+    // The negative control, which is the whole point: the phrase that conflated them is gone.
+    assert!(
+        !header.contains("restricted to the owner of the current session"),
+        "Т13: the one-breath phrase put two mechanisms under one word — it must not come back"
+    );
+    assert!(
+        !header.contains("3. **Owner of the current session only.**"),
+        "and neither must the heading of condition 3 that said it a second time"
     );
 }

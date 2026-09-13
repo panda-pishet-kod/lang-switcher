@@ -5,8 +5,9 @@
 //! reachable from outside by the design of Windows.
 //!
 //! Compiled only under the `testing` feature, which is absent from the Release
-//! configuration. Metadata only, read only, and restricted to the owner of the current
-//! session.
+//! configuration. Metadata only, read only, and reachable by **the owner of this process's
+//! token**; the **session** is kept apart by the name of the channel, not by the rights on it
+//! (finding Т13, task T-41-9 — see condition 3 below).
 //!
 //! Requirements this module covers: SEC-04a, for the acceptance bench of section 11.5 and
 //! acceptance criterion 8 of section 13 of SPEC — tasks **T-03-4** and **T-03-4-2**.
@@ -33,10 +34,24 @@
 //!    the content is not even expressible here by mistake. `buffer_len` is a number, and so is
 //!    `cycle_position` — a step along the cycle of section 4.4, not a layout and not a
 //!    character — which is what condition 2 of SEC-04a names as the one thing allowed out.
-//! 3. **Owner of the current session only.** [`OwnerOnly`] builds an explicit security
-//!    descriptor whose DACL holds exactly one allow entry, on the SID taken from this
-//!    process's own token. A `NULL` DACL means "everyone" and is the opposite of the
-//!    condition; there is none here, and [`OwnerOnly::dacl_facts`] is the assertion of it.
+//! 3. **The owner of the token, and the session by the name.** ⭐ **Finding Т13, task T-41-9:
+//!    this condition used to read «owner of the current session only», and that phrase put two
+//!    different mechanisms under one word.** The behaviour was right and the sentence was not,
+//!    so the sentence is written out in two halves:
+//!
+//!    * **access** is decided by the **owner**: [`OwnerOnly`] builds an explicit security
+//!      descriptor whose DACL holds exactly one allow entry, on the SID taken from this
+//!      process's own token. A `NULL` DACL means "everyone" and is the opposite of the
+//!      condition; there is none here, and [`OwnerOnly::dacl_facts`] is the assertion of it.
+//!      Nothing in the descriptor mentions a session, and nothing in it could.
+//!    * **the session** is kept apart by the **name**: [`pipe_name`] carries the identifier
+//!      `ProcessIdToSessionId` gives for this process, because the named-pipe namespace is
+//!      machine-wide while the program is per session. Two sessions of one user therefore never
+//!      meet on this channel even though the rights of both would admit either.
+//!
+//!    Task T-41-9 deliberately did **not** add a session term to the descriptor (variant 2 of
+//!    the finding): hours of code for a build that does not ship, to say in a second place what
+//!    the name already says.
 //! 4. **Read only.** Nothing in this module reads from a pipe handle, and the access mask of
 //!    the one allow entry is [`CHANNEL_RIGHTS`] — `GENERIC_READ` and nothing else, so a
 //!    client cannot obtain a writable handle in the first place.
@@ -98,11 +113,12 @@ use windows::Win32::Security::{
     SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAGS_AND_ATTRIBUTES, FlushFileBuffers, PIPE_ACCESS_OUTBOUND,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, FlushFileBuffers,
+    PIPE_ACCESS_OUTBOUND,
 };
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, NAMED_PIPE_MODE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeServerProcessId,
+    NAMED_PIPE_MODE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcessToken};
@@ -156,6 +172,52 @@ fn session_id() -> u32 {
         Ok(()) => session,
         Err(_error) => 0,
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Whose server is on the other end — finding Н42, task T-41-9
+// ---------------------------------------------------------------------------------------
+
+/// The process that created the server end of a connected channel — finding Н42, task T-41-9.
+///
+/// # Why the bench has to ask
+///
+/// ⭐ **This is the larger half of the repair, and [`PIPE_OPEN_MODE`] is the smaller one.** The
+/// flag there stops a second server joining **our** name; it cannot help when the other server
+/// was raised **first**, before this process existed. The client then connects by name, is
+/// answered, and has no way of telling a real snapshot from one a stranger composed: a green run
+/// would be a conversation with a substitute, and a red one would be unexplainable.
+///
+/// Asking costs one call and closes it. The kernel knows which process owns the server end, and
+/// a name proves nothing the kernel cannot be asked about directly.
+///
+/// `handle` must be a handle to the **client** end of a connected named pipe — what
+/// `File::open` on the name hands back. NFR-13: a refusal is returned and not swallowed, because
+/// «не удалось спросить» is not «ответил правильный».
+pub fn server_process_id(handle: HANDLE) -> WinResult<u32> {
+    let mut pid = 0u32;
+
+    // SAFETY: `handle` is the caller's live pipe handle, and `pid` is a live local of this frame
+    // the call writes one `u32` into. Nothing else of ours is touched.
+    unsafe { GetNamedPipeServerProcessId(handle, &raw mut pid) }?;
+
+    Ok(pid)
+}
+
+/// The sentence a mismatched server is reported with — finding Н42, task T-41-9.
+///
+/// Pure, and in this module rather than in the bench, so that the run and the tests say the same
+/// thing in the same words. **Both numbers are named**: «красный без внятной причины» is the
+/// failure mode the finding is about, and a run that merely said «канал ответил не то» would
+/// leave whoever reads it to guess.
+///
+/// Process identifiers are not secrets and carry nothing of what was typed — SEC-01 and SEC-07
+/// are untouched by this sentence.
+pub fn wrong_server(expected: u32, actual: u32) -> String {
+    format!(
+        "канал SEC-04a отвечает не тот процесс: ожидался PID {expected}, на другом конце трубы \
+         PID {actual}. Имя канала занял посторонний сервер — замеру этого прогона верить нельзя."
+    )
 }
 
 // ---------------------------------------------------------------------------------------
@@ -500,7 +562,35 @@ impl Drop for OwnedToken {
 /// requires the payload to be written through `std::fs::File`, so the handle has to be a
 /// synchronous one, and the way this thread is unblocked follows from that — see
 /// [`Channel::stop`].
-pub const PIPE_OPEN_MODE: FILE_FLAGS_AND_ATTRIBUTES = PIPE_ACCESS_OUTBOUND;
+///
+/// # `FILE_FLAG_FIRST_PIPE_INSTANCE` — finding Н42, task T-41-9
+///
+/// The flag says out loud what this server requires: that it be the **first** instance of its
+/// name. A name already taken is then an outright refusal of `CreateNamedPipeW` —
+/// `ERROR_ACCESS_DENIED`, reported through [`start`] and journalled (`Kind::Channel`) — rather
+/// than an instance quietly added beside somebody else's.
+///
+/// ⚠⚠ **And it changes nothing observable today, which was measured rather than assumed.**
+/// [`PIPE_INSTANCES`] is **1**, and `nMaxInstances` is enforced on the name kernel-wide: the
+/// limit is reached after the first instance, so a second `CreateNamedPipeW` on this name is
+/// refused **with the same `ERROR_ACCESS_DENIED`, with the flag or without it**. Both
+/// configurations were built and run — journal
+/// `scratchpad-E41\red-T-41-9-second-server.log`.
+///
+/// So the first half of finding Н42's reasoning — «программа того же пользователя поднимет
+/// сервер с тем же именем» *beside* ours — does not hold: joining this name was never possible.
+/// The flag is kept all the same, because it states the requirement where a reader looks for it
+/// and it survives a future edit of `PIPE_INSTANCES`; it is belt beside braces, and the report
+/// says so instead of claiming a repair it did not make.
+///
+/// ⭐ **The substance of the finding is entirely in the other half, and that one is real.** A
+/// stranger who raises a server on this name **before** this process exists takes the name: our
+/// `CreateNamedPipeW` then fails, the product runs on (NFR-13, a channel is a diagnostic), and
+/// the bench connects to **the stranger's** server and believes it. Nothing about the open mode
+/// can help there — the client has to ask *whose* server answered. See [`server_process_id`] and
+/// [`wrong_server`].
+pub const PIPE_OPEN_MODE: FILE_FLAGS_AND_ATTRIBUTES =
+    FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_OUTBOUND.0 | FILE_FLAG_FIRST_PIPE_INSTANCE.0);
 
 /// `dwPipeMode` of the pipe: a byte stream, blocking, and **local clients only**.
 ///
@@ -521,7 +611,14 @@ pub const PIPE_MODE: NAMED_PIPE_MODE =
 /// one is the truth. It is also the tighter statement: `PIPE_UNLIMITED_INSTANCES` would
 /// declare that further instances of this name may exist, and nothing about this channel wants
 /// a second server behind the same name.
-const PIPE_INSTANCES: u32 = 1;
+///
+/// ⭐ **Task T-41-9 measured that this number, and not the open mode, is what actually refuses a
+/// second server.** `nMaxInstances` is enforced on the name kernel-wide, so the limit is reached
+/// after the first instance and every later `CreateNamedPipeW` on this name fails with
+/// `ERROR_ACCESS_DENIED` — with [`FILE_FLAG_FIRST_PIPE_INSTANCE`] in [`PIPE_OPEN_MODE`] or
+/// without it. Published so that the test of that refusal can name **both** reasons for it: a
+/// task that moves either one has to come and say which.
+pub const PIPE_INSTANCES: u32 = 1;
 
 /// Outbound buffer of the pipe, in bytes.
 ///

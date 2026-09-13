@@ -26,7 +26,11 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
+use std::os::windows::io::AsRawHandle;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+
+use windows::Win32::Foundation::HANDLE;
 
 use crate::wait;
 
@@ -95,14 +99,55 @@ const ERROR_BROKEN_PIPE: i32 = 109;
 /// T-06-1 against the same channel.
 const ERROR_PIPE_NOT_CONNECTED: i32 = 233;
 
+/// The process the channel is required to belong to — finding Н42, task T-41-9. Zero until the
+/// bench has a product to name.
+static EXPECTED_SERVER: AtomicU32 = AtomicU32::new(0);
+
+/// Declares whose channel every later [`read`] must have reached — finding Н42, task T-41-9.
+///
+/// Called by the bench the moment it has started the product and knows its identifier. Until
+/// then the check is off: the first reads of a run happen while the product is still coming up,
+/// and there is nothing to compare against yet.
+pub fn expect_server(pid: u32) {
+    EXPECTED_SERVER.store(pid, Ordering::Relaxed);
+}
+
 /// Reads one snapshot from the channel.
 ///
 /// A connection is one snapshot: the server writes, flushes and disconnects.
+///
+/// # ⭐ Whose server answered — finding Н42, task T-41-9
+///
+/// The client used to connect **by name** and read whatever came back. A name is not proof: a
+/// program of this user that raises a server on this name **before** the product exists takes the
+/// name for itself — the product's own `CreateNamedPipeW` then fails, the product runs on (a
+/// channel is a diagnostic, NFR-13), and this function would read a snapshot a stranger composed.
+/// A green run would be a conversation with a substitute, and a red one would be unexplainable.
+///
+/// So the kernel is asked who owns the far end, and the answer is compared with the product the
+/// bench started. The check lives **here**, inside the one reader, rather than at the call sites:
+/// a check a caller can forget is a check that will be forgotten.
 pub fn read() -> std::io::Result<Snapshot> {
     let name = lang_switcher::control::pipe_name();
 
     // Read-only, which is all the server's `PIPE_ACCESS_OUTBOUND` end permits.
     let mut pipe = File::open(&name)?;
+
+    // Finding Н42. Zero means the bench has not named a product yet — see [`expect_server`].
+    let expected = EXPECTED_SERVER.load(Ordering::Relaxed);
+
+    if expected != 0 {
+        let handle = HANDLE(pipe.as_raw_handle().cast());
+        let actual = lang_switcher::control::server_process_id(handle).map_err(|error| {
+            std::io::Error::other(format!("GetNamedPipeServerProcessId: {error}"))
+        })?;
+
+        if actual != expected {
+            return Err(std::io::Error::other(lang_switcher::control::wrong_server(
+                expected, actual,
+            )));
+        }
+    }
 
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 512];

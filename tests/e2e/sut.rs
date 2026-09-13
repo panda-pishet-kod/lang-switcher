@@ -279,6 +279,13 @@ impl Sut {
             }
         }
 
+        // ⭐ **Finding Н42, task T-41-9.** From here on every reading of the SEC-04a channel is
+        // checked against this identifier: a server on that name raised by somebody else —
+        // before this product existed, so its own `CreateNamedPipeW` failed and it ran on — would
+        // otherwise answer the bench and be believed. The check is inside `channel::read`, so no
+        // call site can forget it.
+        channel::expect_server(pid);
+
         Ok(Self { child, pid })
     }
 
