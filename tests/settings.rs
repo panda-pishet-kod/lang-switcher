@@ -5700,6 +5700,301 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Task T-71-1, finding Э70-Б-1 — the gate of the about window paints both of its buttons.**
+///
+/// «От автора…» came with task Т-32-4 as the one way into FR-103 from the screen, was subclassed
+/// and answered the cursor from that day — and was never painted: the button branch of
+/// `on_about_draw_item` let «ОК» through and nothing else, so the button stood blank on every
+/// machine. Found on the live 0.70.0 by listing the child windows of the dialog (решение 131а); no
+/// acceptance by eye saw it, and the fitting stands measure strings, not pixels.
+///
+/// The gate asks [`settings::about_button_is_painted`] now. Its colours need nothing new: the
+/// table answers the accent for «ОК» alone and the ordinary roles for every other number — asserted
+/// here state by state for the number of the button, against a button of the settings dialog.
+#[test]
+fn the_about_window_paints_both_of_its_buttons() {
+    // `OK_COMMAND` is the dialog manager's `IDOK`; `IDC_ABOUT_AUTHOR` is not exported, and 1136 is
+    // its number in `app.rc`.
+    const OK: i32 = 1;
+    const FROM_THE_AUTHOR: i32 = 1136;
+
+    assert!(
+        settings::about_button_is_painted(OK),
+        "«ОК» (1) must stay painted"
+    );
+    assert!(
+        settings::about_button_is_painted(FROM_THE_AUTHOR),
+        "Э70-Б-1: «От автора…» (1136) is not painted — the button stands blank"
+    );
+
+    for label in settings::OWNER_DRAWN_ABOUT_LABELS {
+        assert!(
+            !settings::about_button_is_painted(label),
+            "label {label} is not a button — the button gate must not take it"
+        );
+    }
+
+    assert!(
+        !settings::about_button_is_painted(1012),
+        "a button of the settings dialog (1012) is not a button of this window"
+    );
+
+    // The colours: the ordinary roles in every state, and not the accent of «ОК» — the control
+    // that the comparison can tell the two apart at all.
+    assert_ne!(
+        settings::about_button_colors(FROM_THE_AUTHOR, false, false, false),
+        settings::about_button_colors(OK, false, false, false),
+        "«От автора…» must not wear the accent of «ОК»"
+    );
+
+    for hot in [false, true] {
+        for pressed in [false, true] {
+            for disabled in [false, true] {
+                assert_eq!(
+                    settings::about_button_colors(FROM_THE_AUTHOR, hot, pressed, disabled),
+                    settings::about_button_colors(1012, hot, pressed, disabled),
+                    "«От автора…» wears the ordinary roles (hot = {hot}, pressed = {pressed}, \
+                     disabled = {disabled})"
+                );
+            }
+        }
+    }
+}
+
+/// **Task T-71-1 — every visible owner-drawn button of the about template is painted.**
+///
+/// The sentry of the next button. The built template is read by hand, every `Button` of it whose
+/// type is `BS_OWNERDRAW` and which is visible is taken, and the set has to be
+/// [`settings::ABOUT_BUTTONS`] with each of them answered by the predicate of the gate. A button
+/// put into `app.rc` without a painter is the blank of Э70-Б-1 again: the system stops drawing it,
+/// and nobody draws it instead.
+///
+/// ⚠ **Visible**, and the reason is in the template: the «Как пользоваться» panel (1125) is a
+/// `Button` with `BS_OWNERDRAW` too, carried `NOT WS_VISIBLE` — no `WM_DRAWITEM` reaches it, the
+/// background draws the panel out of its rectangle. The reading has to find it and leave it out,
+/// or the filter is one that cannot matter.
+#[test]
+fn every_visible_owner_drawn_button_of_the_about_template_is_painted() {
+    /// The ordinal of the predefined `Button` class in a dialog template.
+    const BUTTON_CLASS: u16 = 0x0080;
+    /// The type of a button is the low nibble of its style.
+    const BS_OWNERDRAW: u32 = 0x0B;
+    /// The «Как пользоваться» panel.
+    const HELP_PANEL: u32 = 1125;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    let owner_drawn: Vec<(u32, u32)> = template
+        .classes
+        .iter()
+        .filter(|(_, class)| *class == Some(BUTTON_CLASS))
+        .map(|(id, _)| (*id, template.style_of(*id, "О программе: кнопка")))
+        .filter(|(_, style)| style & 0x0F == BS_OWNERDRAW)
+        .collect();
+
+    for (id, style) in &owner_drawn {
+        println!("IDD_ABOUT: Button {id}, BS_OWNERDRAW, style {style:#010x}");
+    }
+
+    assert!(
+        owner_drawn
+            .iter()
+            .any(|(id, style)| *id == HELP_PANEL && style & WS_VISIBLE == 0),
+        "the reading must find the hidden panel {HELP_PANEL} among the owner-drawn buttons — \
+         without it the visibility filter below proves nothing"
+    );
+
+    let mut in_template: Vec<i32> = owner_drawn
+        .iter()
+        .filter(|(_, style)| style & WS_VISIBLE != 0)
+        .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
+        .collect();
+    let mut gate = settings::ABOUT_BUTTONS.to_vec();
+
+    in_template.sort_unstable();
+    gate.sort_unstable();
+
+    println!("about template: {in_template:?}");
+    println!("about buttons:  {gate:?}");
+
+    assert_eq!(
+        gate, in_template,
+        "settings::ABOUT_BUTTONS and the visible BS_OWNERDRAW buttons of the about template must \
+         name the same controls"
+    );
+
+    for id in in_template {
+        assert!(
+            settings::about_button_is_painted(id),
+            "Э70-Б-1: button {id} of the about template is BS_OWNERDRAW and nobody paints it — it \
+             goes blank"
+        );
+    }
+}
+
+/// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
+/// with the comment lines dropped and the whitespace squeezed, so that `cargo fmt` breaking the
+/// condition does not break the needle and a sentence of prose is not taken for the gate.
+fn about_gate_asks_the_predicate(body: &str) -> bool {
+    let code = body
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    code.contains("if ctl_type != ODT_BUTTON || !about_button_is_painted(control) {")
+        && !code.contains("control != OK_COMMAND")
+}
+
+/// **Task T-71-1 — the button gate of `on_about_draw_item` asks the predicate.**
+///
+/// A predicate is only a promise until the drawing asks it: the body of the function is read, the
+/// `ODT_BUTTON` branch has to go through `about_button_is_painted`, and the comparison with
+/// `OK_COMMAND` that left «От автора…» blank has to be gone.
+///
+/// ⚠ Controls: the gate of `e70` — the same body with the comparison put back — is caught, and so
+/// is a gate that asks the predicate and keeps the comparison beside it.
+#[test]
+fn the_button_gate_of_the_about_window_asks_the_predicate() {
+    let source = settings_module_source();
+    let body = function_body(&source, "unsafe fn on_about_draw_item(");
+    let gate: Vec<&str> = body
+        .lines()
+        .filter(|line| line.contains("ODT_BUTTON"))
+        .collect();
+
+    assert!(
+        about_gate_asks_the_predicate(body),
+        "Э70-Б-1: the button gate of on_about_draw_item does not ask about_button_is_painted: \
+         {gate:?}"
+    );
+
+    let predicate = "!about_button_is_painted(control)";
+
+    let of_e70 = body.replace(predicate, "control != OK_COMMAND");
+    assert_ne!(
+        of_e70, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !about_gate_asks_the_predicate(&of_e70),
+        "the sweep does not see the gate of e70 — it cannot fail"
+    );
+
+    let both = body.replace(
+        predicate,
+        "!about_button_is_painted(control) || control != OK_COMMAND",
+    );
+    assert!(
+        !about_gate_asks_the_predicate(&both),
+        "the sweep does not see the comparison kept beside the predicate"
+    );
+}
+
+/// **Task T-71-1, premise П6 — the caption of «От автора…» fits its 86 units in all fourteen
+/// languages.**
+///
+/// The comment of the template above `IDC_ABOUT_AUTHOR` in `app.rc` says the longest of the
+/// fourteen captions was measured by the fitting stand with room to spare (task Т-32-4). No such
+/// measurement lives in the tree, and nobody has ever seen the button — so the claim is measured
+/// here with the instrument of «Сохранить журнал»: the about template's own face, at the horizontal
+/// base unit the dialog manager maps that template by. `paint_push_button` draws the caption on one
+/// line, centred in the whole rectangle of the button.
+///
+/// A clip here is not for a hand to repair: the width of the button and of the window is frozen by
+/// решение 101 п. 7, and the choice between the width and the caption is the owner's (развилка C3
+/// of stage Э71). So every language is measured before anything is asserted, and a clip names all
+/// the languages it happened in.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
+    const SLOT_UNITS: i32 = 86;
+    const SLOT_BEFORE_117B: i32 = 72;
+
+    let _guard = with_product_strings();
+
+    let product = ProductImage::open();
+    let font = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT))
+        .font
+        .expect("the about template declares DS_SETFONT");
+    let sheet = Sheet::new(64);
+    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+
+    let letters = extent_of(
+        &sheet,
+        &face,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let base = (letters / 26 + 1) / 2;
+    let slot = (SLOT_UNITS * base + 2) / 4;
+
+    println!(
+        "about template font: {:?} {} pt, weight {}; base unit {base}: slot {slot} px",
+        font.face, font.points, font.weight
+    );
+
+    // Контроль прибора, первый: находка 117б стенда Э34 обязана воспроизводиться — «Enregistrer le
+    // journal…» не влезала в 72 единицы. Прибор, который её не видит, мерит не то.
+    let old_slot = (SLOT_BEFORE_117B * base + 2) / 4;
+    let clipped = extent_of(&sheet, &face, "Enregistrer le journal…").cx;
+    assert!(
+        clipped > old_slot,
+        "the instrument does not see the clip of решение 117б: {clipped} px in {old_slot} px"
+    );
+
+    // Контроль прибора, второй: на этом самом слоте прибор обязан увидеть клип — подпись втрое
+    // длиннее не влезает.
+    let tripled = extent_of(&sheet, &face, &"От автора…".repeat(3)).cx;
+    println!(
+        "controls: «Enregistrer le journal…» {clipped} px in {old_slot} px; tripled caption \
+         {tripled} px in {slot} px"
+    );
+    assert!(
+        tripled > slot,
+        "the instrument cannot see a clip in this slot at all: {tripled} px in {slot} px"
+    );
+
+    let mut widest = (0, String::new());
+    let mut clips = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let caption = settings::text(settings::IDS_ABOUT_AUTHOR);
+
+        assert!(
+            !caption.trim().is_empty(),
+            "{language:?}: the caption did not load — the instrument would measure nothing"
+        );
+
+        let width = extent_of(&sheet, &face, &caption).cx;
+
+        println!("{language:?}: «{caption}» {width} px of {slot}");
+
+        if width > widest.0 {
+            widest = (width, format!("{language:?} «{caption}»"));
+        }
+
+        if width > slot {
+            clips.push(format!("{language:?} «{caption}» {width} px"));
+        }
+    }
+
+    println!("the widest caption: {} px — {}", widest.0, widest.1);
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3: the button is {slot} px ({SLOT_UNITS} units at a base unit of {base}) and \
+         the caption is clipped in {clips:?} — the width or the caption is the owner's to choose"
+    );
+}
+
 /// **Task T-36-5, finding Н9** — every reason a capture can give fits the note under the field,
 /// in all fourteen languages, **including the new one**.
 ///

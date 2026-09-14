@@ -11557,9 +11557,15 @@ const PUSH_BUTTONS: [i32; 11] = [
     IDC_APPLY,
 ];
 
-/// The one owner-drawn push button of the about window — task T-12-8.
+/// The owner-drawn push buttons of the about window — «ОК» since task T-12-8, «От автора…» since
+/// task Т-32-4.
 ///
-/// It is «ОК», and [`button_color_roles`] answers the accent for it at rest and
+/// ⭐ **Task T-71-1, finding Э70-Б-1: the list is the gate of the drawing too.** «От автора…» was
+/// subclassed from the day it came, but [`on_about_draw_item`] let only «ОК» through, and the
+/// button answered the cursor with nobody to paint it — blank on every machine. The gate asks
+/// [`about_button_is_painted`] now, which is this list: a button subclassed here is painted.
+///
+/// «ОК» is the accented one: [`button_color_roles`] answers the accent for it at rest and
 /// [`Palette::sel_fg`] under the cursor — **task T-15-2 gave the accented button its response**,
 /// and the day it did, the flag this subclass keeps stopped being a spare and became load
 /// bearing. ⚠ Until that task the doc here said the opposite, and said it for a good reason:
@@ -11569,7 +11575,20 @@ const PUSH_BUTTONS: [i32; 11] = [
 /// The repaint the flag asks for costs nothing visible — a push button has drawn itself
 /// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
 /// that were there.
-const ABOUT_BUTTONS: [i32; 2] = [OK_COMMAND, IDC_ABOUT_AUTHOR];
+pub const ABOUT_BUTTONS: [i32; 2] = [OK_COMMAND, IDC_ABOUT_AUTHOR];
+
+/// Whether the `WM_DRAWITEM` of the about window paints the button `control` — task T-71-1,
+/// finding Э70-Б-1.
+///
+/// Pure and exported, so that a test can hold the gate of [`on_about_draw_item`] against the
+/// template — the precedent of [`OWNER_DRAWN_ABOUT_LABELS`] for the labels of the same window. It
+/// answers [`ABOUT_BUTTONS`] and nothing else, and both buttons go the one way:
+/// [`paint_push_button`] with [`about_button_colors`], which gives the accent to «ОК» alone. Until
+/// this task the gate compared the identifier with `OK_COMMAND`, and «От автора…» stood blank from
+/// its birth.
+pub fn about_button_is_painted(control: i32) -> bool {
+    ABOUT_BUTTONS.contains(&control)
+}
 
 /// The identifier of the button subclass — one number for all ten windows, because the key of
 /// the subclass API is the (window, procedure, identifier) triple and the window is what varies.
@@ -16886,8 +16905,10 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
         return unsafe { draw_about_label(hwnd, control, dc, rect) };
     }
 
-    // The only owner-drawn *button* of this window is its «ОК».
-    if ctl_type != ODT_BUTTON || control != OK_COMMAND {
+    // Both owner-drawn *buttons* of this window go this one way — «ОК», and since task T-71-1
+    // (finding Э70-Б-1) «От автора…»: the gate used to compare the identifier with «ОК» alone,
+    // and the second button of the list had nobody to paint it.
+    if ctl_type != ODT_BUTTON || !about_button_is_painted(control) {
         return 0;
     }
 
