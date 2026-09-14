@@ -4065,13 +4065,12 @@ unsafe extern "system" fn letter_proc(
 
                 update_state(|state| state.feed = wanted);
 
-                settings::send_to(
-                    hwnd,
-                    IDC_NEWS_SWITCH,
-                    windows::Win32::UI::WindowsAndMessaging::BM_SETCHECK,
-                    usize::from(wanted),
-                    0,
-                );
+                // ⛔ **Задача T-69-5: отметку кнопке здесь не ставят.** Выключатель объявлен
+                // `BS_OWNERDRAW`, а такая кнопка бита отметки не держит: после `BM_SETCHECK(1)`
+                // `BM_GETCHECK` отвечает 0 (у `BS_AUTOCHECKBOX` — 1; замер Э43,
+                // `scratchpad-E43\t43-11-ownerdraw-check-probe.log`). Состояние живёт в
+                // `Letters::feed`, записанном строкой выше, а рисует выключатель `draw_switch` по
+                // `WindowState::author.switch` — копии, которую строит `author_view`.
                 widgets::repaint::control(hwnd, IDC_NEWS_SWITCH);
 
                 return 0;
@@ -4952,7 +4951,10 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
             place(hwnd, IDC_NEWS_ABOUT, inner_x, y, inner_width, height);
             y += height + tight;
         }
-        Some(checked) => {
+        // The state of the switch is not handed to the control: an owner-drawn button keeps no
+        // check bit (task T-69-5), and `draw_switch` reads it out of `state.author.switch` — the
+        // `view` of this function — itself.
+        Some(_) => {
             hide(hwnd, IDC_NEWS_ABOUT);
 
             place(
@@ -4962,13 +4964,6 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
                 y,
                 inner_width,
                 metrics.y(10),
-            );
-            settings::send_to(
-                hwnd,
-                IDC_NEWS_SWITCH,
-                windows::Win32::UI::WindowsAndMessaging::BM_SETCHECK,
-                usize::from(checked),
-                0,
             );
             y += metrics.y(11);
 
