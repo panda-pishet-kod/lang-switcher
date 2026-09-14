@@ -2866,6 +2866,276 @@ fn the_position_counter_walks_the_cycle_and_stays_inside_it() {
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-69-3 (Э39-Б-1) — the position counter has one writer, and that writer publishes
+// -------------------------------------------------------------------------------------
+
+/// One place `src\buffer.rs` writes the field `cycle`.
+#[derive(Debug)]
+struct CycleWrite {
+    /// Byte offset of the write, in the text with its line endings normalised.
+    offset: usize,
+    /// One-based line number, for a message a person can follow.
+    line: usize,
+    /// `true` for the field named in a struct literal (or declared), `false` for an assignment
+    /// or a mutable borrow through `.cycle`.
+    literal: bool,
+}
+
+/// Every write of the field `cycle` in `source` — recognised by what the code does, not by how
+/// one call site happens to be spelled today.
+///
+/// A guard of "one writer" has to see a write wherever and however it is made: a guard on the
+/// literal text of a line goes blind the day a neighbour is moved or the line is reformatted (the
+/// lesson of Э50). So a write is:
+///
+/// * `.cycle` followed by an assignment operator — `=` and every compound one, but not `==`;
+/// * `.cycle` borrowed mutably — `&mut self.cycle`, `&mut recorder.cycle`;
+/// * the field named with a colon at the start of a line — a struct literal, or the declaration
+///   inside `pub struct Recorder`, which has the same shape and which the caller tells apart by
+///   where it stands.
+///
+/// `.cycle_position` and every other longer name are not the field. Comment lines are skipped:
+/// the module explains its rules at length, and a sentence about a write is not a write.
+fn writes_of_the_cycle_field(source: &str) -> Vec<CycleWrite> {
+    const COMPOUND: [&str; 10] = ["+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="];
+
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut writes = Vec::new();
+    let mut next_line_start = 0;
+
+    for (index, piece) in source.split_inclusive('\n').enumerate() {
+        let line_start = next_line_start;
+        next_line_start += piece.len();
+
+        let line = piece.trim_end_matches('\n');
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("//") {
+            continue;
+        }
+
+        if let Some(after) = trimmed.strip_prefix("cycle") {
+            let after = after.trim_start();
+
+            if after.starts_with(':') && !after.starts_with("::") {
+                writes.push(CycleWrite {
+                    offset: line_start + (line.len() - trimmed.len()),
+                    line: index + 1,
+                    literal: true,
+                });
+            }
+        }
+
+        for (at, _) in line.match_indices(".cycle") {
+            let rest = &line[at + ".cycle".len()..];
+
+            if rest.starts_with(is_name) {
+                continue;
+            }
+
+            let operator = rest.trim_start();
+            let assigned = (operator.starts_with('=') && !operator.starts_with("=="))
+                || COMPOUND
+                    .iter()
+                    .any(|compound| operator.starts_with(compound));
+            let borrowed = line[..at].trim_end_matches(is_name).ends_with("&mut ");
+
+            if assigned || borrowed {
+                writes.push(CycleWrite {
+                    offset: line_start + at + 1,
+                    line: index + 1,
+                    literal: false,
+                });
+            }
+        }
+    }
+
+    writes
+}
+
+/// The byte range of the item whose text starts with the first `signature` at or after `from`,
+/// up to its closing brace indented by `indent` — four spaces for a method of an `impl` block,
+/// none for an item of the module. `None` when either end is missing.
+fn item_range(
+    source: &str,
+    from: usize,
+    signature: &str,
+    indent: &str,
+) -> Option<std::ops::Range<usize>> {
+    let start = from + source[from..].find(signature)?;
+    let closing = format!("\n{indent}}}\n");
+    let end = start + source[start..].find(&closing)? + closing.len();
+
+    Some(start..end)
+}
+
+/// The setter of `Recorder::cycle`, if `source` has one inside `impl Recorder`, and the lines
+/// that write the field through `.cycle` anywhere outside it.
+fn cycle_writes_outside_the_setter(source: &str) -> (Option<std::ops::Range<usize>>, Vec<usize>) {
+    let recorder_impl = item_range(source, 0, "impl Recorder {", "")
+        .expect("src\\buffer.rs: `impl Recorder {` and its closing brace in column 0");
+    let setter = item_range(source, recorder_impl.start, "fn set_cycle(", "    ")
+        .filter(|body| body.end <= recorder_impl.end);
+
+    let stray = writes_of_the_cycle_field(source)
+        .iter()
+        .filter(|write| !write.literal)
+        .filter(|write| {
+            setter
+                .as_ref()
+                .is_none_or(|body| !body.contains(&write.offset))
+        })
+        .map(|write| write.line)
+        .collect();
+
+    (setter, stray)
+}
+
+/// **Task T-69-3 (Э39-Б-1): the position counter of FR-32 is written in one place, and that
+/// place publishes the mirror of SEC-04a.**
+///
+/// Until this task the counter was written in three places, and each of them wrote its
+/// publication out by hand — `#[cfg(feature = "testing")] note_cycle_position(…)`. A fourth that
+/// forgot would have made the mirror a liar without a sound, and the acceptance bench of section
+/// 11.5 takes that mirror for the truth. The field is now written only through
+/// `Recorder::set_cycle`, which is the shape `Ring::set_len` has always had for the length.
+///
+/// The guard reads the source rather than a run, because what it guards is the absence of a
+/// write that no run would take. It reads the whole of `src\buffer.rs` — a write from any impl,
+/// free function or unit test of the module is a write — and bounds the setter and the
+/// constructor by their own bodies, never by the tail of the module (task T-13-30).
+///
+/// ⚠ **One write is allowed outside the setter, and it is named:** the field in the struct
+/// literal of `Recorder::with_capacity`. There is no value to call a setter on until that
+/// literal is built, and the literal is **not** routed back through the setter afterwards, the
+/// way `Ring::with_capacity` routes its `len`: that would add a publication, and every new
+/// recorder would then zero a mirror that describes the process rather than the value being
+/// built. Task T-69-3 changes how the counter is written and never how often the mirror moves. A
+/// recorder is born at zero, the mirror is born at zero with the process, and every write after
+/// birth passes the setter.
+///
+/// The controls are part of the test. The sweep has to find the setter, and exactly one write
+/// and one publication inside it, or it is measuring nothing; and the same sweep run over the
+/// source with a write planted in `clear_ring` — in three spellings — has to name the planted
+/// line, or it cannot fail.
+#[test]
+fn the_position_counter_has_one_writer_and_that_writer_publishes() {
+    let source = source_of("buffer.rs");
+
+    let (setter, stray) = cycle_writes_outside_the_setter(&source);
+
+    assert!(
+        stray.is_empty(),
+        "Recorder::cycle is written outside `set_cycle` on lines {stray:?} of src\\buffer.rs — a \
+         write that does not pass the setter is a write the mirror of SEC-04a may not follow"
+    );
+
+    let setter = setter.expect(
+        "src\\buffer.rs: `fn set_cycle(` inside `impl Recorder` — the one writer of the field",
+    );
+
+    let mut publications = Vec::new();
+    let mut next_line_start = 0;
+
+    for (index, piece) in source.split_inclusive('\n').enumerate() {
+        let line_start = next_line_start;
+        next_line_start += piece.len();
+
+        if piece.trim_start().starts_with("//") {
+            continue;
+        }
+
+        if let Some(at) = piece.find("note_cycle_position(") {
+            publications.push((line_start + at, index + 1));
+        }
+    }
+
+    let published_elsewhere: Vec<usize> = publications
+        .iter()
+        .filter(|(offset, _)| !setter.contains(offset))
+        .map(|(_, line)| *line)
+        .collect();
+
+    assert!(
+        published_elsewhere.is_empty(),
+        "the mirror is published outside `set_cycle` on lines {published_elsewhere:?}"
+    );
+    assert_eq!(
+        publications.len(),
+        1,
+        "one publication in the whole module, and it is the setter's"
+    );
+
+    let writes = writes_of_the_cycle_field(&source);
+
+    assert_eq!(
+        writes
+            .iter()
+            .filter(|write| !write.literal && setter.contains(&write.offset))
+            .count(),
+        1,
+        "the setter writes the field once — a sweep that found no write at all is measuring nothing"
+    );
+    assert!(
+        source[setter.clone()].contains("#[cfg(feature = \"testing\")]"),
+        "the publication stays behind the feature: SEC-04a condition 1, criterion 8 of section 13"
+    );
+
+    // The one literal, and where it stands.
+    let declaration = item_range(&source, 0, "pub struct Recorder {", "")
+        .expect("src\\buffer.rs: `pub struct Recorder {` and its closing brace in column 0");
+    let recorder_impl =
+        item_range(&source, 0, "impl Recorder {", "").expect("found once above already");
+    let constructor = item_range(
+        &source,
+        recorder_impl.start,
+        "pub fn with_capacity(",
+        "    ",
+    )
+    .filter(|body| body.end <= recorder_impl.end)
+    .expect("src\\buffer.rs: `Recorder::with_capacity` inside `impl Recorder`");
+
+    let literals: Vec<&CycleWrite> = writes
+        .iter()
+        .filter(|write| write.literal && !declaration.contains(&write.offset))
+        .collect();
+
+    assert_eq!(
+        literals.len(),
+        1,
+        "one struct literal names the field: {literals:?}"
+    );
+    assert!(
+        constructor.contains(&literals[0].offset),
+        "and it is the literal of Recorder::with_capacity, not line {}",
+        literals[0].line
+    );
+
+    // The negative control: the same sweep over the source with a write planted where it may
+    // not stand has to name the planted line, in every spelling a write can take.
+    let anchor = "    fn clear_ring(&mut self) {\n";
+    let anchor_at = source
+        .find(anchor)
+        .expect("the negative control lost its anchor, `fn clear_ring`, in src\\buffer.rs");
+    let planted_line = source[..anchor_at].lines().count() + 2;
+
+    for planted in [
+        "self.cycle = 0;",
+        "self.cycle += 1;",
+        "let _ = core::mem::take(&mut self.cycle);",
+    ] {
+        let mutant = source.replacen(anchor, &format!("{anchor}        {planted}\n"), 1);
+        let (_, caught) = cycle_writes_outside_the_setter(&mutant);
+
+        assert_eq!(
+            caught,
+            vec![planted_line],
+            "the sweep did not name `{planted}` planted on line {planted_line} — it cannot fail"
+        );
+    }
+}
+
+// -------------------------------------------------------------------------------------
 // Point 16 — FR-34: every rule of FR-10 zeroes the counter with the buffer
 // -------------------------------------------------------------------------------------
 

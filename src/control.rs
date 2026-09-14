@@ -1018,8 +1018,9 @@ static BUFFER_LEN: AtomicUsize = AtomicUsize::new(0);
 ///
 /// The same construction as [`BUFFER_LEN`] and for the same reason: `Recorder::cycle` is a
 /// field of a thread-local of the input thread (section 6.3), so a reader outside that thread
-/// needs the value published rather than fetched. Module `buffer` writes this from the places
-/// its counter is written, under the `testing` feature and nowhere else.
+/// needs the value published rather than fetched. Module `buffer` writes this from the one place
+/// its counter is written — `Recorder::set_cycle`, since task T-69-3 — under the `testing`
+/// feature and nowhere else.
 ///
 /// **SEC-01, SEC-07.** A step along the cycle — a number in `0..len` — and nothing else.
 /// Which layout that step names is not here, and neither is a scan code, a character or a
@@ -1320,14 +1321,15 @@ pub fn note_buffer_len(len: usize) {
     BUFFER_LEN.store(len, Ordering::Relaxed);
 }
 
-/// Publishes the position in the cycle of section 4.4 — called by module `buffer` from the
-/// places its counter changes, and by nothing else.
+/// Publishes the position in the cycle of section 4.4 — called by module `buffer` from the one
+/// place its counter changes, `Recorder::set_cycle` (task T-69-3), and by nothing else.
 ///
 /// # NFR-01 to NFR-05
 ///
-/// Both callers sit on the input thread: one on the hotkey path (`Recorder::advance_cycle`),
-/// one on the flush path every rule of FR-10 arrives at (`Recorder::clear_ring`, which is
-/// reached from inside the hook callback). So this is one relaxed atomic store and nothing
+/// The caller sits on the input thread and is reached from two paths: the hotkey path
+/// (`Recorder::advance_cycle`) and the flush path every rule of FR-10 arrives at
+/// (`Recorder::clear_ring` and the partial arm of `Recorder::reset_up_to`, both reached from
+/// inside the hook callback). So this is one relaxed atomic store and nothing
 /// else — no allocation (NFR-03), no lock and no mutex (NFR-04), no I/O and nothing formatted
 /// (NFR-05), a constant handful of instructions (NFR-01, NFR-02). `Relaxed` for the reason
 /// [`note_buffer_len`] gives: there is no other datum whose visibility has to be ordered

@@ -37,6 +37,9 @@
 //! [`crate::control`] under the `testing` feature, so that `cycle_position` on the channel of
 //! SEC-04a says where the cycle really is. The counter, the cycle and the choice of the target
 //! layout are untouched — the task made the existing behaviour observable, not different.
+//! Task **T-69-3** finished that treatment: the counter is written only through
+//! `Recorder::set_cycle`, which is the one place it is published from — the construction
+//! [`Ring::set_len`] has always had for the length.
 //! Implemented by backlog tasks: T-03-2 (done), T-03-2a (done), T-03-3 (done), T-03-4 (done),
 //! T-05-2a (done).
 //! Task T-03-2a took the physical half of the stroke out of a thread-local of its own and put
@@ -1461,6 +1464,9 @@ pub struct Recorder {
     /// as well — so it cannot be left behind by a flush; and by the partial arm of
     /// [`Recorder::reset_up_to`], which takes strokes out without emptying the ring (finding Н6,
     /// task T-39-1).
+    ///
+    /// Written **only** by [`Recorder::set_cycle`] — see there for why that matters — with the
+    /// one named exception of the struct literal that builds a recorder (task T-69-3).
     cycle: usize,
     /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
     /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
@@ -1728,17 +1734,47 @@ impl Recorder {
     /// One addition, one remainder, one store. No allocation, no lock, no I/O: NFR-01 to NFR-05
     /// hold here as they do everywhere else in this module.
     ///
-    /// Under the `testing` feature the new position is published into [`crate::control`] —
-    /// see [`Recorder::clear_ring`] for why the publication is written out at each of the two
-    /// places rather than hidden in a setter, and what task T-05-2a left for the controller to
-    /// decide about a third.
+    /// Under the `testing` feature the new position is published into [`crate::control`] by
+    /// [`Recorder::set_cycle`], the one writer of the counter (task T-69-3).
     pub fn advance_cycle(&mut self, len: usize) -> usize {
-        self.cycle = if len == 0 { 0 } else { (self.cycle + 1) % len };
-
-        #[cfg(feature = "testing")]
-        crate::control::note_cycle_position(self.cycle);
+        self.set_cycle(if len == 0 { 0 } else { (self.cycle + 1) % len });
 
         self.cycle
+    }
+
+    /// The one place the position counter is written — and, under the `testing` feature, the one
+    /// place its mirror of SEC-04a is published from. Task **T-69-3**, backlog line Э39-Б-1.
+    ///
+    /// # Why every write goes through here
+    ///
+    /// For the reason [`Ring::set_len`] gives for the length, and it is the same problem: the
+    /// channel of SEC-04a reports `cycle_position`, the acceptance bench of section 11.5 takes
+    /// that number for the truth, and a stale number is worse than an absent one. Until this task
+    /// the counter was written in three places — [`Recorder::advance_cycle`],
+    /// [`Recorder::clear_ring`] and the partial arm of [`Recorder::reset_up_to`] — and each of
+    /// them wrote its publication out by hand, so a fourth write that forgot would have made the
+    /// mirror a liar without a sound. Now the field cannot be written without the publication,
+    /// and `tests\buffer.rs`, `the_position_counter_has_one_writer_and_that_writer_publishes`,
+    /// sweeps the module for a write that goes around it.
+    ///
+    /// ⚠ **The struct literal of [`Recorder::with_capacity`] is the one write that does not pass
+    /// here, and on purpose.** Routed back through this setter the way `Ring::with_capacity`
+    /// routes its `len`, it would add a publication: every new recorder would zero a mirror that
+    /// describes the process rather than the value being built. The setter changed how the
+    /// counter is written and not how often the mirror moves — it moves in exactly the cases it
+    /// moved before.
+    ///
+    /// # NFR-01 to NFR-05
+    ///
+    /// Reached from the hotkey path and from inside the hook callback, through the flush of
+    /// FR-10. What the feature adds to either path is one relaxed atomic store — no allocation
+    /// (NFR-03), no lock (NFR-04), no I/O (NFR-05); in a build without the feature — every
+    /// Release build, by SEC-04a condition 1 — this is a plain field assignment.
+    fn set_cycle(&mut self, position: usize) {
+        self.cycle = position;
+
+        #[cfg(feature = "testing")]
+        crate::control::note_cycle_position(position);
     }
 
     /// Publishes the layout strokes are recorded under — the `hkl` of FR-04.
@@ -2459,32 +2495,29 @@ impl Recorder {
     /// # The mirror of SEC-04a — task T-05-2a
     ///
     /// Under the `testing` feature, and only under it, the zero goes to [`crate::control`] as
-    /// well. This is the publication that keeps the mirror from lagging **after a flush**,
-    /// which is the case that matters: an absent number is noticed, a stale one is believed,
-    /// and a channel still reporting position 2 over a buffer FR-34 has just emptied would tell
-    /// the acceptance bench of section 11.5 the opposite of the truth.
+    /// well — through [`Recorder::set_cycle`]. This is the publication that keeps the mirror from
+    /// lagging **after a flush**, which is the case that matters: an absent number is noticed, a
+    /// stale one is believed, and a channel still reporting position 2 over a buffer FR-34 has
+    /// just emptied would tell the acceptance bench of section 11.5 the opposite of the truth.
     ///
-    /// # Why the publication is repeated instead of routed through one writer
+    /// # One writer — task T-69-3
     ///
-    /// [`Ring::set_len`] does it the other way — `len` is private to a single setter, so the
-    /// length cannot be changed without publishing — and that is the stronger construction.
-    /// Task T-05-2a was permitted to add the publication at `advance_cycle` and here, and
-    /// **not** to change how the counter is written, so it did not build the setter; the third
-    /// assignment to `self.cycle`, in [`Recorder::set_capacity`], was left unpublished and put to
-    /// the controller as a choice. Task T-04-3-3 was given the one line and took the narrower
-    /// half of it: **all three places now publish**, and how the counter is written is still
-    /// untouched. Making it single-writer like `len` remains open and belongs to whoever is
-    /// allowed to change the shape of this type. Task T-39-1 (finding Н6) added the partial arm of
-    /// [`Recorder::reset_up_to`] as a write that publishes, and task T-39-2 (finding Т3) took the
-    /// one in `set_capacity` out again — a resize now flushes through [`Recorder::reset`] — so
-    /// the counter is written in three places, and all three publish.
+    /// [`Ring::set_len`] has always had the stronger construction — `len` is private to a single
+    /// setter, so the length cannot be changed without publishing — and until task T-69-3 the
+    /// counter did not. Task T-05-2a was permitted to add the publication at `advance_cycle` and
+    /// here, and **not** to change how the counter is written; tasks T-04-3-3, T-39-1 and T-39-2
+    /// moved the other writes around, and each write kept its own copy of the publication. Task
+    /// T-69-3 was the one allowed to change the shape of this type, and it built the setter: all
+    /// three writes — `advance_cycle`, this function and the partial arm of
+    /// [`Recorder::reset_up_to`] — now go through [`Recorder::set_cycle`], and the publication is
+    /// written once, there.
     ///
     /// NFR-01 to NFR-05: this function is reached from inside the hook callback, and what the
     /// feature adds to that path is one relaxed atomic store. In a build without it — every
     /// Release build, by SEC-04a condition 1 — the call is not compiled at all.
     fn clear_ring(&mut self) {
         self.ring.clear();
-        self.cycle = 0;
+        self.set_cycle(0);
 
         // **FR-14** — task Т-48-2, and it is here for the reason the counter of FR-34 is: every
         // rule of the FR-10 table that empties the ring arrives at this one function, so there
@@ -2492,9 +2525,6 @@ impl Recorder {
         // and an exemption resting on a memory the flush left standing would be an exemption
         // for typing the user has already had thrown away.
         self.last_edit = None;
-
-        #[cfg(feature = "testing")]
-        crate::control::note_cycle_position(0);
     }
 
     /// Flushes the buffer of everything typed at or before `event_time` — **FR-12**.
@@ -2566,11 +2596,9 @@ impl Recorder {
         // Here and not before the branches, where the rule of FR-14 stands: the `Kept` arm
         // removes nothing and must leave the position where it is, and the full-clearance arm
         // reaches `clear_ring`, which zeroes the counter already.
-        self.cycle = 0;
-
-        // The mirror of SEC-04a sees this write as it sees the others — see `clear_ring`.
-        #[cfg(feature = "testing")]
-        crate::control::note_cycle_position(0);
+        //
+        // Through the one writer, which publishes the mirror of SEC-04a (task T-69-3).
+        self.set_cycle(0);
 
         ResetOutcome::Partial {
             removed: live - kept,
