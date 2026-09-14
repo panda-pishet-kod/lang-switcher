@@ -305,6 +305,88 @@ fn the_clamped_configuration_field_reports_under_its_own_name() {
     assert!(dump.contains(name), "the dump does not print {name}");
 }
 
+/// **Task T-71-3, backlog line Э36-Б-3 — a refused hotkey capture reports under its own name.**
+///
+/// Task T-36-5 (finding Н9, решение 123.3) built the seventh reason a capture of FR-94 refuses a
+/// key with, and wrote down what it had no mandate for: a refusal was seen only by the person under
+/// the field and reached neither the journal nor the dump. The row «hotkey capture refused» is that
+/// door opened (decision 132.2).
+///
+/// ⚠ **Not a test that «is covered anyway».** The scan of the sources above finds the literal calls
+/// of `report_non_critical("…")` and nothing else, while the refusal is recorded through
+/// `Operation::from_name`: a name missing from the table would narrow to «(unlisted)» with no test
+/// going red.
+///
+/// A fact and no value: `Kind::Window`, the kind of «link refused» — no new `Kind` — and there is
+/// no argument through which the key or the reason could travel. The dump is checked too: a row
+/// that exists in the table but prints as «(unlisted)» would be the same defect one step further
+/// along.
+#[test]
+fn a_refused_hotkey_capture_reports_under_its_own_name() {
+    let name = "hotkey capture refused";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "Э36-Б-3: «{name}» has no row in the table — the refusal would reach the ring nameless"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Window,
+        "a refusal of the hotkey capture is the business of a dialog of this program"
+    );
+
+    let _guard = ring();
+
+    diag::record(operation, OsCode::NONE);
+
+    let dump = diag::render();
+
+    assert!(dump.contains(name), "the dump does not print {name}");
+}
+
+/// **Task T-71-3 — a refusal is counted and journaled by the one helper the dialog calls.**
+///
+/// `settings::note_capture_refused` is what the `Refuse` branch of `run_capture_step` carries out
+/// before it shows the reason. A dialog cannot be built here, so the helper is called directly, and
+/// `tests\settings.rs` sweeps the branch for the call.
+///
+/// ⚠ The ring and the counter are process-wide. The counter has no other writer in this binary, so
+/// its step is exact. The ring is taken first, but a test that does not take it may still record,
+/// so the journal is asked for «at least one more» and for **our** entry — the name, the code, and
+/// an ordinal no older than the ticket counter before the call — and not for «exactly one» or «the
+/// last».
+#[test]
+fn a_refused_hotkey_capture_is_counted_and_journaled() {
+    let _guard = ring();
+
+    let refusals = settings::capture_refusals();
+    let recorded = diag::recorded();
+
+    settings::note_capture_refused();
+
+    assert_eq!(
+        settings::capture_refusals(),
+        refusals + 1,
+        "Э36-Б-3: the refusal was not counted"
+    );
+    assert!(
+        diag::recorded() > recorded,
+        "Э36-Б-3: the refusal did not reach the journal"
+    );
+
+    let ours = diag::snapshot().into_iter().find(|event| {
+        event.ordinal >= recorded && event.operation.name() == "hotkey capture refused"
+    });
+
+    assert!(
+        ours.is_some_and(|event| event.code == OsCode::NONE && event.kind() == Kind::Window),
+        "the journal holds no entry «hotkey capture refused» with no code from this call: {ours:?}"
+    );
+}
+
 /// The names the settings dialog, autostart and the string tables report under — the rows task
 /// T-08-2 added, each in the group it belongs to.
 #[test]
@@ -597,6 +679,9 @@ fn nothing_that_could_have_been_typed_reaches_the_dump() {
         // neither. ⚠ The number is not a count of forgeries — coalesced messages land in it too —
         // and `src\watchdog.rs` says so where it is declared.
         "watchdog.flushes_without_request",
+        // ⭐ Task T-71-3, backlog line Э36-Б-3: presses a hotkey capture refused — a number and
+        // nothing of the key or of the reason.
+        "settings.capture_refusals",
     ] {
         assert!(text.contains(expected), "the dump is missing {expected}");
     }

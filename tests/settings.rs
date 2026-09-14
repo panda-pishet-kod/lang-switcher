@@ -13888,6 +13888,87 @@ fn an_armed_capture_takes_a_key_and_stays_armed_through_a_refusal() {
     }
 }
 
+/// Whether the `Refuse` arm of a body counts and journals the refusal before it shows the reason —
+/// its code with the comment lines dropped and the whitespace squeezed.
+fn the_refusal_is_noted_before_it_is_shown(body: &str) -> bool {
+    let code = body
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let Some((_, arm)) = code.split_once("CaptureStep::Refuse(refusal) =>") else {
+        return false;
+    };
+
+    let Some((before_the_note, _)) = arm.split_once("show_capture_note(dialog, Some(refusal))")
+    else {
+        return false;
+    };
+
+    before_the_note.contains("note_capture_refused();")
+}
+
+/// **Task T-71-3, backlog line Э36-Б-3 — the dialog notes a refusal where it carries it out.**
+///
+/// The `Refuse` arm of `run_capture_step` is the one place a refusal of the capture is carried out,
+/// and it has to count and journal it (`settings::note_capture_refused`) before it shows the
+/// reason. `capture_step`, which only decides, must not: the test above calls it for every kind of
+/// press, and none of those calls is a refusal a person met.
+///
+/// ⚠ Controls: the arm of `e70`, the body without the call, and the call put after the note are
+/// caught.
+#[test]
+fn the_dialog_notes_a_refused_capture_where_it_carries_the_refusal_out() {
+    let source = settings_module_source();
+    let body = function_body(&source, "unsafe fn run_capture_step(");
+    let arm: Vec<&str> = body
+        .lines()
+        .filter(|line| line.contains("Refuse") || line.contains("capture_note"))
+        .collect();
+
+    assert!(
+        the_refusal_is_noted_before_it_is_shown(body),
+        "Э36-Б-3: the Refuse arm of run_capture_step shows the reason and leaves no trace: {arm:?}"
+    );
+
+    assert!(
+        !function_body(&source, "pub fn capture_step(").contains("note_capture_refused"),
+        "capture_step only decides — a refusal is noted where it is carried out"
+    );
+
+    let of_e70 =
+        "            CaptureStep::Refuse(refusal) => show_capture_note(dialog, Some(refusal)),";
+    assert!(
+        !the_refusal_is_noted_before_it_is_shown(of_e70),
+        "the sweep does not see the arm of e70 — it cannot fail"
+    );
+
+    let without = body
+        .lines()
+        .filter(|line| !line.contains("note_capture_refused()"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_ne!(
+        without, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !the_refusal_is_noted_before_it_is_shown(&without),
+        "the sweep does not see a body without the call"
+    );
+
+    let after = body.replacen("note_capture_refused();", "", 1).replace(
+        "show_capture_note(dialog, Some(refusal));",
+        "show_capture_note(dialog, Some(refusal)); note_capture_refused();",
+    );
+    assert!(
+        !the_refusal_is_noted_before_it_is_shown(&after),
+        "the sweep does not see the call put after the note"
+    );
+}
+
 #[test]
 fn an_armed_capture_is_cancelled_by_escape_by_a_click_beside_and_by_a_lost_focus() {
     // Escape — the way out, and therefore the one key a capture cannot assign. It stays

@@ -767,6 +767,17 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not how many formats there were, not which, not
     // why none was kept. `Kind::Selection` and **no new `Kind`**, the rule every note above follows.
     ("clipboard snapshot saved nothing", Kind::Selection),
+    // ⭐ **Task T-71-3, backlog line Э36-Б-3 (finding Н9 of stage Э36), decision 132.2** — a press
+    // the hotkey capture of FR-94 refused. The reason stood under the field and nothing of it
+    // reached a dump; task T-36-5 saw this door and had no mandate to open it. Recorded by
+    // `settings::note_capture_refused`, where the refusal is carried out, beside the counter
+    // `settings.capture_refusals`. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the key, not the modifiers, not which reason
+    // it was: an entry has no field for any of them, and the person has read the reason on the
+    // screen. `Kind::Window` — a refusal is the business of a dialog, like «link refused» — and
+    // **no new `Kind`**, the rule every note above follows.
+    ("hotkey capture refused", Kind::Window),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
@@ -1487,7 +1498,10 @@ fn local_time() -> Option<String> {
 /// password-field guard (`guard.*`) and the fifteen of the clipboard path (`selection.*`),
 /// through the readers those two modules publish; task T-38-7 (finding Н16) added a sixteenth,
 /// `selection.format_list_truncations`, and task T-38-8 (finding С11) a seventeenth,
-/// `selection.snapshots_saved_nothing`.
+/// `selection.snapshots_saved_nothing`. Task T-71-3 (backlog line Э36-Б-3) added
+/// `settings.capture_refusals` — presses a hotkey capture refused: a deliberate act in one field of
+/// one dialog and not typing, which is why it is not the kind of number the paragraph below keeps
+/// out.
 ///
 /// `watchdog::counters` and `hook::hotkey_handoffs` are **left out on purpose**. They are
 /// honest counts of program events and SEC-07 would permit them, but they are proportional to
@@ -1564,6 +1578,14 @@ fn render_counters(out: &mut String) {
         out,
         "hook.emergency_terminate_failed",
         crate::hook::emergency_terminate_failed(),
+    );
+    // Task T-71-3, backlog line Э36-Б-3: presses the hotkey capture of the settings dialog refused.
+    // Next to the hook's rows and not among them — the second number here that means something to
+    // a person, after `hook.lost_hotkeys`, and one that belongs to the dialog.
+    row_u32(
+        out,
+        "settings.capture_refusals",
+        crate::settings::capture_refusals(),
     );
 
     let health = crate::watchdog::health();

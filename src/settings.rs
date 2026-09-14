@@ -13688,6 +13688,43 @@ fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, name: String) {
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
+/// Presses a hotkey capture refused — task T-71-3, backlog line Э36-Б-3 (finding Н9 of stage Э36).
+///
+/// Each one is a key a person pressed to make it the hotkey and the program did not take. The
+/// reason stood under the field (FR-94), and before this task nothing of it reached a dump. The
+/// number means something to a person the way `hook::lost_hotkeys` does: non-zero says a capture
+/// was tried and turned a key away. It counts the same presses as the journal entries «hotkey
+/// capture refused», which a ring of [`crate::diag::CAPACITY`] entries may already have evicted.
+///
+/// Counted where the refusal is **carried out** — [`run_capture_step`] — and never where it is
+/// decided: [`capture_step`] is pure, and the tests call it thousands of times without refusing
+/// anybody. A count of a deliberate act in one field of one dialog, not of typing, and nothing of
+/// the key or of the reason (SEC-01, SEC-07).
+static CAPTURE_REFUSALS: AtomicU32 = AtomicU32::new(0);
+
+/// Presses a hotkey capture refused since the start — task T-71-3; see [`CAPTURE_REFUSALS`].
+pub fn capture_refusals() -> u32 {
+    CAPTURE_REFUSALS.load(Ordering::Relaxed)
+}
+
+/// Writes down that a hotkey capture refused a press — task T-71-3, decision 132.2.
+///
+/// One count and one entry of the journal, «hotkey capture refused» with `OsCode::NONE`. **Nothing
+/// of the press is kept** — not the key, not the modifiers, not which reason of [`Refusal`] it was:
+/// an entry of the journal has no field for any of them (SEC-07), and the person has already read
+/// the reason under the field. The shape of `letters::note_link_refused`.
+///
+/// Public so that `tests\diag.rs` calls the very function the dialog calls. It takes no lock and
+/// allocates nothing: `diag::record` is callable from every thread.
+pub fn note_capture_refused() {
+    CAPTURE_REFUSALS.fetch_add(1, Ordering::Relaxed);
+
+    crate::diag::record(
+        crate::diag::Operation::from_name("hotkey capture refused"),
+        crate::diag::OsCode::NONE,
+    );
+}
+
 /// Carries out what [`capture_step`] decides about one event — task Т-23-5.
 ///
 /// The decision is taken **before** the borrow and the borrow only performs it: the machine is
@@ -13715,8 +13752,13 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
             CaptureStep::Take(name) => accept_capture(dialog, state, name),
 
             // The capture stays armed: a refusal is a "not that one", not an end to the
-            // question. The note says which of the five reasons it was, in place of the hint.
-            CaptureStep::Refuse(refusal) => show_capture_note(dialog, Some(refusal)),
+            // question. The note says which reason it was, in place of the hint — and first,
+            // since task T-71-3 (Э36-Б-3), the refusal is counted and journaled: here, where it is
+            // carried out, and not in `capture_step`, which only decides.
+            CaptureStep::Refuse(refusal) => {
+                note_capture_refused();
+                show_capture_note(dialog, Some(refusal));
+            }
         })
     };
 
