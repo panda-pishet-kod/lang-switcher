@@ -477,8 +477,8 @@ IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
 
 // Values fixed by decision 8 of DECISIONS.md.
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,68,0,0
-  PRODUCTVERSION  0,68,0,0
+  FILEVERSION     0,69,0,0
+  PRODUCTVERSION  0,69,0,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L
@@ -491,12 +491,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Panda_Pishet_Kod"
             VALUE "FileDescription",  "Lang Switcher"
-            VALUE "FileVersion",      "0.68.0.0"
+            VALUE "FileVersion",      "0.69.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
             VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
-            VALUE "ProductVersion",   "0.68.0.0"
+            VALUE "ProductVersion",   "0.69.0.0"
         END
     END
     BLOCK "VarFileInfo"
