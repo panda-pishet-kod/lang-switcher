@@ -225,7 +225,9 @@
 //! to act on a ring that lives on the **input** thread (section 6.3). So they travel exactly the
 //! way the rehook does: [`request_wipe`] posts [`WM_APP_WIPE`], and the [`WM_APP_WIPE`] arm of
 //! [`handle_watchdog_message`] calls [`crate::buffer::reset`] on the far side. Nothing of it is
-//! on the hook callback's path — see the budget below.
+//! on the hook callback's path — see the budget below. Since task **T-69-1** a post that is
+//! refused leaves the wipe owed ([`PENDING_WIPE`]), and the next message of the input window
+//! plays it, the way task T-37-1 bound the flush to its cell.
 //!
 //! # NFR-01 to NFR-05, NFR-10 — what the callbacks are allowed to do
 //!
@@ -473,6 +475,11 @@ pub const WM_APP_REHOOK: u32 = WM_APP + 9;
 /// performs. The gate is therefore the role of the window alone — [`is_input_window`] — and a copy
 /// aimed at the UI or the watcher window falls through to `DefWindowProcW` and does nothing at
 /// all.
+///
+/// Task T-69-1 put a cell beside it — [`PENDING_WIPE`], a wipe whose post was refused — and left
+/// the message as it was: it still consumes no cell. The debt is set by the UI thread's own refused
+/// post and by nothing a sender can reach, and it is played by whichever message of the input
+/// window comes next; a forged message there can at most bring that one reset forward.
 ///
 /// ⚠ **The contrast this paragraph used to draw with [`WM_APP_FLUSH`] was false, and task Т-22-10
 /// struck it out** (finding м1). A forged `WM_APP_FLUSH` finds its cell empty and still parks the
@@ -829,6 +836,15 @@ impl Cause {
 /// that can block. One compare-and-swap loop that in practice never spins twice.
 static PENDING_FLUSH: AtomicU64 = AtomicU64::new(0);
 
+/// A wipe of rows 8 and 9 of the FR-10 table whose [`WM_APP_WIPE`] post was **refused** — task
+/// **T-69-1**, backlog line Э37-Б-1, the shape finding С23 gave the flush (task T-37-1).
+///
+/// A flag and not a cell of data: a wipe carries no timestamp, no reason and no kind, so the one
+/// thing there is to keep is that a wipe is owed. Set by [`request_wipe`] when its post is
+/// refused; taken, exactly once, by [`claim_lost_wipe`] on the next message of the input window,
+/// which plays the wipe through the one door there is, `buffer::reset`.
+static PENDING_WIPE: AtomicBool = AtomicBool::new(false);
+
 /// `WM_INPUT` packets from a mouse that the input thread looked at.
 ///
 /// Mostly cursor movement. Published so that "перемещение курсора сбросом не является" can be
@@ -989,6 +1005,17 @@ static STROKES_REMOVED: AtomicU32 = AtomicU32::new(0);
 /// [`note_flush_outcome`] owns (task Т-13-23). SEC-07: a count of events, and there is nothing
 /// else it could ever hold.
 static WIPE_REQUESTS: AtomicU32 = AtomicU32::new(0);
+
+/// [`WM_APP_WIPE`] posts the input thread's window refused — task **T-69-1**, backlog line
+/// Э37-Б-1.
+///
+/// Every one of them marks [`PENDING_WIPE`], and the next message of the input window plays the
+/// wipe instead of the message that never came, so this is not a count of wipes lost: it is a
+/// count of wipes that came **late**, the way [`FLUSH_POSTS_LOST`] counts focus changes. On a
+/// healthy machine it is nought; on one whose input thread stopped taking messages it is the
+/// number that says a lock or a pause found the ring out of reach. Both kinds of refusal land
+/// here — see [`request_wipe`].
+static WIPE_POSTS_LOST: AtomicU32 = AtomicU32::new(0);
 
 /// Device changes the input thread answered — the `WM_DEVICECHANGE` half of the FR-21 delivery.
 ///
@@ -1865,8 +1892,9 @@ pub fn session_event_wipes(code: u32) -> bool {
 /// rows 8 and 9 of the FR-10 table, task **Т-13-7**.
 ///
 /// **The whole of what the UI thread is allowed to do about them**: one relaxed increment and
-/// one `PostMessageW`, which queues and returns. No allocation (NFR-03), no lock (NFR-04), no
-/// I/O (NFR-05), and nothing that can panic — the same shape and the same reasons as
+/// one `PostMessageW`, which queues and returns — and, when the post is refused, one relaxed store
+/// and one more increment (task T-69-1). No allocation (NFR-03), no lock (NFR-04), no I/O
+/// (NFR-05), and nothing that can panic — the same shape and the same reasons as
 /// [`request_rehook`], which is the FR-80 message this one is modelled on (decision R-20).
 ///
 /// # The two callers, and why neither of them can do the work itself
@@ -1884,11 +1912,39 @@ pub fn session_event_wipes(code: u32) -> bool {
 ///
 /// # What is deliberately not here
 ///
-/// No coalescing cell and no pending reason, unlike [`request_flush`] and [`request_rehook`].
-/// Two wipes in flight at once are two resets of an already empty ring, which is the cheapest
-/// idempotent operation this program has; a cell to collapse them into would be state to get
-/// wrong for no gain. That is also why [`WM_APP_WIPE`] needs no emptiness for a forged copy to
-/// find — see the constant.
+/// No coalescing cell for a post that **was** accepted, and no pending reason, unlike
+/// [`request_flush`] and [`request_rehook`]. Two wipes in flight at once are two resets of an
+/// already empty ring, which is the cheapest idempotent operation this program has; a cell to
+/// collapse them into would be state to get wrong for no gain. The one cell there is —
+/// [`PENDING_WIPE`], since task T-69-1 — holds a wipe whose message will **never** come, and
+/// nothing else: the message itself still carries nothing and consumes nothing, which is why
+/// [`WM_APP_WIPE`] needs no emptiness for a forged copy to find — see the constant.
+///
+/// # A refused post — task T-69-1, backlog line Э37-Б-1
+///
+/// Until this task the answer of the post was dropped, with the reason written beside it — and the
+/// reason admitted that one kind of refusal left what had been typed in memory. A post to the
+/// input window is refused in two ways, and **both** now mark the wipe owed ([`PENDING_WIPE`]) and
+/// count in [`WIPE_POSTS_LOST`]:
+///
+/// * **A full queue** — ten thousand messages the input thread has not taken: a thread that has
+///   stopped answering, from which the system takes the hook (FR-80), so nothing new is typed into
+///   the ring while it stands. But what was typed **before** the lock stays in memory until the
+///   thread recovers, which is what SEC-02 forbids. The first message the recovered thread
+///   dispatches — whatever it is — passes `app::window_proc`, which claims the debt and plays the
+///   wipe ahead of that message's own work. A stroke the thread recorded in between, typed after
+///   the lock, goes with it: a wipe that comes late costs typing made after it, never the word
+///   made before it.
+/// * **No window** — the program is starting or leaving. Leaving, there is nothing to wipe: the
+///   ring has gone with its thread, zeroed as it went (SEC-02), and nobody claims the debt.
+///   Starting, the ring is installed after the window, and what the first message of the new
+///   window plays is a reset of an empty ring, or of none.
+///
+/// `app::post_to_input_thread` answers one `bool` for both kinds, and telling them apart would take
+/// a second question to the register of windows for a case whose replay costs nothing — so both
+/// are marked, and the dump's `watchdog.wipe_posts_lost` counts both. This is the shape finding
+/// С23 gave the flush (task T-37-1), with the one difference a wipe calls for: a flag, not a mark
+/// in a cell of data, because a wipe has no timestamp and no kind to keep.
 ///
 /// # NFR-01, NFR-02
 ///
@@ -1899,16 +1955,44 @@ pub fn session_event_wipes(code: u32) -> bool {
 pub fn request_wipe() {
     WIPE_REQUESTS.fetch_add(1, Ordering::Relaxed);
 
-    // Task T-37-1: the answer is dropped, and what a refusal means is written down rather than
-    // assumed. A post to the input window is refused in two ways. **No window** — the program is
-    // starting or leaving: before the window there is no ring (the buffer is installed after it),
-    // and after it the ring has gone with its thread, zeroed as it went (SEC-02); nothing is left
-    // to wipe. **A full queue** — ten thousand messages the input thread has not taken: a thread
-    // that has stopped answering, from which the system takes the hook (FR-80), so nothing new is
-    // typed into the ring while it stands. That second case does leave what was already typed in
-    // memory until the thread recovers; it is not a case a focus change or a wipe can reach at all,
-    // and task T-37-1, whose findings are the flush and the rehook, does not bind this one to a cell.
-    let _ = crate::app::post_to_input_thread(WM_APP_WIPE);
+    // Task T-69-1: the answer is looked at, and a refusal is written down as a debt — see "A
+    // refused post" above for the two kinds and why both are marked.
+    if !crate::app::post_to_input_thread(WM_APP_WIPE) {
+        note_wipe_post_refused();
+    }
+}
+
+/// Records that the [`WM_APP_WIPE`] posted by [`request_wipe`] was **refused** — task **T-69-1**.
+///
+/// Marks the wipe owed ([`PENDING_WIPE`]) and counts the refusal ([`WIPE_POSTS_LOST`]): one relaxed
+/// store and one relaxed increment, on the path where a post has just been refused, which on a
+/// healthy machine is no path at all. A debt already owed stays owed — two owed resets of an
+/// idempotent operation are one — and the refusal is counted all the same, because it happened.
+fn note_wipe_post_refused() {
+    PENDING_WIPE.store(true, Ordering::Release);
+    WIPE_POSTS_LOST.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Whether a wipe whose post was refused is still owed — [`PENDING_WIPE`], task **T-69-1**.
+///
+/// **One atomic load**, and that is what `app::window_proc` pays for this task on every message of
+/// every window while nothing was lost — the price [`flush_post_lost`] already pays beside it. The
+/// window is asked only when this answers `true`.
+pub fn wipe_post_lost() -> bool {
+    PENDING_WIPE.load(Ordering::Acquire)
+}
+
+/// Takes the owed wipe and answers whether this call was the one that took it — the input
+/// thread's half of task **T-69-1**.
+///
+/// A compare-and-exchange from `true`, so two messages that both saw the flag play one wipe
+/// between them, never two. The caller then resets the ring through `buffer::reset`, the door
+/// the [`WM_APP_WIPE`] arm uses; a buffer that FR-70 has parked answers that call with `false` and
+/// needs nothing — `app::park_buffer` zeroed it before it took it off the thread.
+pub fn claim_lost_wipe() -> bool {
+    PENDING_WIPE
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2506,9 +2590,9 @@ static REINSTALLING: AtomicBool = AtomicBool::new(false);
 
 /// What the watchdog of FR-80 has done — counts, durations and a reason code.
 ///
-/// **SEC-01, SEC-07.** Thirteen numbers and one of five named words — the count said «nine» until
-/// task T-37-1 added the last two and counted them all. No key code, no scan code, no character,
-/// and nothing derived from one.
+/// **SEC-01, SEC-07.** Fourteen numbers and one of five named words — the count said «nine» until
+/// task T-37-1 added two and counted them all, and task T-69-1 added the fourteenth. No key code,
+/// no scan code, no character, and nothing derived from one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Health {
     /// Completed reinstallations of the hook — [`RECOVERIES`].
@@ -2545,6 +2629,9 @@ pub struct Health {
     /// [`WM_APP_FLUSH`] posts that reached no window, each of them played later by the next
     /// message of the input window — finding С23, task T-37-1; see [`FLUSH_POSTS_LOST`].
     pub flush_posts_lost: u32,
+    /// [`WM_APP_WIPE`] posts that reached no window, each of them played later by the next
+    /// message of the input window — task T-69-1, backlog line Э37-Б-1; see [`WIPE_POSTS_LOST`].
+    pub wipe_posts_lost: u32,
 }
 
 /// What the watchdog of FR-80 has done so far.
@@ -2564,6 +2651,7 @@ pub fn health() -> Health {
         flushes_without_request: FLUSHES_WITHOUT_REQUEST.load(Ordering::Relaxed),
         rehook_posts_lost: REHOOK_POSTS_LOST.load(Ordering::Relaxed),
         flush_posts_lost: FLUSH_POSTS_LOST.load(Ordering::Relaxed),
+        wipe_posts_lost: WIPE_POSTS_LOST.load(Ordering::Relaxed),
     }
 }
 

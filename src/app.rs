@@ -2509,6 +2509,22 @@ fn replay_lost_flush() {
     apply_buffering_gate();
 }
 
+/// Plays a wipe of rows 8 and 9 of FR-10 whose `WM_APP_WIPE` post was refused — **task T-69-1**,
+/// backlog line Э37-Б-1.
+///
+/// Called from [`window_proc`] on the input window by the message that claimed the debt
+/// (`watchdog::claim_lost_wipe`), whatever that message is. The work is the `WM_APP_WIPE` arm's own,
+/// through its door: `buffer::reset`, the one function that overwrites the ring with zeroes
+/// (SEC-02). The answer is dropped for the arm's reason — `false` is a thread with no buffer to
+/// reset: not installed yet, or parked by FR-70, which `park_buffer` zeroed before it took it off
+/// the thread.
+///
+/// No gate after it, unlike [`replay_lost_flush`]: a wipe decides nothing about FR-70 and parks
+/// nothing, exactly as the arm it stands in for does not.
+fn replay_lost_wipe() {
+    let _ = crate::buffer::reset();
+}
+
 /// Applies what module `guard` has published to the typing buffer of this thread — **FR-70,
 /// FR-71, FR-73**, task T-06-1.
 ///
@@ -3295,6 +3311,30 @@ unsafe extern "system" fn window_proc(
                 replay_lost_flush();
             }
 
+            // ⭐ **Task T-69-1, backlog line Э37-Б-1 — the wipe of rows 8 and 9 of FR-10 is bound to
+            // a cell as well.** A session lock or a pause from the tray whose `WM_APP_WIPE` post was
+            // refused used to leave what had been typed before it in the ring (SEC-02) until
+            // something else flushed it. The UI thread now marks such a wipe owed
+            // (`watchdog::PENDING_WIPE`), and the first message of the input window that finds the
+            // debt plays it — here, beside the flush's replay and for the same reasons: the arms of
+            // `handle_watchdog_message` return early, and the hotkey must not find the word typed
+            // before the lock.
+            //
+            // ⚠ **An addition, not a replacement**: the `WM_APP_WIPE` arm is untouched. And unlike
+            // the gate above, the message itself is not left out: `WM_APP_FLUSH`'s branch takes its
+            // cell whole, mark and all, while `WM_APP_WIPE` consumes no cell — a debt played ahead
+            // of it is a reset of a ring its own arm then finds empty, and both resets are the same
+            // idempotent operation.
+            //
+            // NFR-01: a second atomic load on every message of every window while nothing is owed,
+            // beside the first above.
+            if crate::watchdog::wipe_post_lost()
+                && is_input_window(hwnd)
+                && crate::watchdog::claim_lost_wipe()
+            {
+                replay_lost_wipe();
+            }
+
             // FR-10, FR-12, FR-13 — task T-03-3. The two asynchronous flush sources of the
             // FR-10 table arrive here: a mouse button as the `WM_INPUT` of Raw Input, and the
             // `EVENT_SYSTEM_FOREGROUND` and `EVENT_OBJECT_FOCUS` subscriptions as the private
@@ -3544,6 +3584,11 @@ unsafe extern "system" fn window_proc(
             // window exactly as the other four bind themselves. The buffer it resets is the
             // thread-local of this very thread (section 6.3), which is why the arm can do the
             // work rather than pass it on again.
+            //
+            // ⚠ **Since task T-69-1 the route has a second end.** When the `PostMessageW` above is
+            // refused, `request_wipe` marks the wipe owed instead, and the replay near the top of
+            // this procedure plays it through the same `buffer::reset` on the next message of the
+            // input window — see `replay_lost_wipe`.
             //
             // SEC-05: a process at the same integrity level can post any of the five. What the
             // first four buy is one reinstallation of this program's own hook — an operation it

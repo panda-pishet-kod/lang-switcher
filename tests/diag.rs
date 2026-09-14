@@ -1760,8 +1760,9 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
 /// T-37-1 adds two fields to `Health` — the posts to the input thread that reached no window, one
 /// for the flush of a focus change and one for the request to put the hook back — and SPEC gives a
 /// counter that is not in the dump no reader at all. The structure is taken apart **field by field,
-/// without `..`**, so a fifteenth field refuses to compile this test until it is named here, and
-/// the assertion that runs then asks the dump for its row.
+/// without `..`**, so a new field refuses to compile this test until it is named here, and the
+/// assertion that runs then asks the dump for its row. Task T-69-1 named the fifteenth,
+/// `wipe_posts_lost` — the wipe of rows 8 and 9 of FR-10 whose post reached no window.
 ///
 /// `last_reason` is a word and not a number, so it is carried as the word the dump prints. The
 /// other direction is not asserted by counting `watchdog.` rows: the dump prints none that `Health`
@@ -1783,6 +1784,7 @@ fn every_field_of_the_health_of_the_watchdog_is_a_row_of_the_dump() {
         flushes_without_request,
         rehook_posts_lost,
         flush_posts_lost,
+        wipe_posts_lost,
     } = lang_switcher::watchdog::health();
 
     let rows = [
@@ -1803,6 +1805,7 @@ fn every_field_of_the_health_of_the_watchdog_is_a_row_of_the_dump() {
         ),
         ("watchdog.rehook_posts_lost", rehook_posts_lost.to_string()),
         ("watchdog.flush_posts_lost", flush_posts_lost.to_string()),
+        ("watchdog.wipe_posts_lost", wipe_posts_lost.to_string()),
     ];
 
     let text = diag::render();

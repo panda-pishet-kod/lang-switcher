@@ -4333,6 +4333,180 @@ fn a_lost_flush_is_marked_claimed_once_and_taken_through_the_one_door() {
     buffer::uninstall();
 }
 
+/// ⭐ **Task T-69-1, backlog line Э37-Б-1 — a wipe of rows 8 and 9 whose post was refused is owed,
+/// and the debt is claimed exactly once.**
+///
+/// A test process has no input window in the register `app::serve_window` fills, so every post it
+/// makes to the input thread is refused: `request_wipe` here is exactly the lost wipe of the backlog
+/// line — the lock or the pause whose `WM_APP_WIPE` met a queue that took nothing — with nothing
+/// staged. Until this task the answer was dropped with `let _ =`, and what had been typed before
+/// the lock stayed in the ring until something else flushed it (SEC-02).
+///
+/// What is shown, in order:
+///
+/// 1. **the refused post empties nothing and owes the wipe** — the UI thread cannot reach the ring,
+///    so the work is still to be done, and now that is written down: the flag, and a count;
+/// 2. **the debt is claimed exactly once** — a second claim finds nothing, one lock is one wipe;
+/// 3. **the claim is the caller's cue, and the reset is the one door** — played here by hand with
+///    `buffer::reset`, which is what `app::window_proc` calls (the sweep below reads that);
+/// 4. **two refusals before a claim are one debt, and two numbers** — the reset is idempotent, so
+///    the flag does not need to count, and the dump does.
+///
+/// ⚠ Its red is a failed assertion, not a compile error: the reader and the claim were added first
+/// with the old logic inside — `request_wipe` still dropping the answer — and that run is the
+/// journal `scratchpad-E69\t69-1-red.log`.
+#[test]
+fn a_refused_wipe_is_owed_and_the_debt_is_claimed_once() {
+    let _turn = notice_turn();
+
+    buffer::install_recorder(Recorder::with_capacity(16));
+
+    // Whatever a neighbour left owed is taken now, before anything is counted.
+    let _ = watchdog::claim_lost_wipe();
+
+    for time in [30_000, 30_001, 30_002] {
+        press_at(time);
+    }
+
+    let before = watchdog::counters();
+    let health_before = watchdog::health();
+
+    // --- 1. A refused post.
+    watchdog::request_wipe();
+
+    assert_eq!(
+        delta(before, watchdog::counters()).wipe_requests,
+        1,
+        "the wipe was asked for"
+    );
+    assert!(
+        watchdog::wipe_post_lost(),
+        "Э37-Б-1: a wipe whose post reached no window must be owed, or the ring keeps what was \
+         typed before the lock"
+    );
+    assert_eq!(
+        watchdog::health().wipe_posts_lost,
+        health_before.wipe_posts_lost + 1,
+        "and the refusal is a number the dump prints"
+    );
+    assert_eq!(
+        buffer::len(),
+        3,
+        "the refusal itself emptied nothing — the ring belongs to the input thread"
+    );
+
+    // --- 2. Claimed once.
+    assert!(
+        watchdog::claim_lost_wipe(),
+        "the next message of the input window claims the debt"
+    );
+    assert!(!watchdog::wipe_post_lost(), "the claim takes the debt off");
+    assert!(
+        !watchdog::claim_lost_wipe(),
+        "a second message finds nothing to claim — one lock, one wipe"
+    );
+
+    // --- 3. The caller's half, by hand.
+    assert!(buffer::reset(), "the replay resets the ring of this thread");
+    assert_eq!(buffer::len(), 0, "FR-10: полный сброс");
+    assert_eq!(
+        non_zero_slots(),
+        Some(0),
+        "SEC-02: обнуление памяти — the backing array itself"
+    );
+
+    // --- 4. Two refusals, one debt.
+    watchdog::request_wipe();
+    watchdog::request_wipe();
+
+    assert!(watchdog::claim_lost_wipe());
+    assert!(
+        !watchdog::claim_lost_wipe(),
+        "two refused wipes of an idempotent reset are one wipe owed"
+    );
+    assert_eq!(
+        watchdog::health().wipe_posts_lost,
+        health_before.wipe_posts_lost + 3,
+        "and three refusals are three in the dump"
+    );
+
+    buffer::uninstall();
+}
+
+/// ⭐ **Task T-69-1 — the owed wipe is played by the window procedure, on the input window, before
+/// anything reads the buffer.**
+///
+/// The shape of the flush's replay above, and for its reasons: the claim stands in `window_proc`
+/// ahead of the hotkey branch — a press there must not find the word typed before the lock — and
+/// ahead of `handle_watchdog_message`, whose arms return early; it is gated on the input window,
+/// the one window whose thread owns the ring; and what it plays is `buffer::reset`, the door of
+/// the `WM_APP_WIPE` arm. The arm itself stays as it was — the replay is an addition, not a
+/// replacement — and `request_wipe` reads the answer of its post instead of dropping it.
+///
+/// ⚠ Controls: the hotkey branch, the dispatch to module `watchdog` and the arm of `WM_APP_WIPE`
+/// are found in the bodies taken, so an absent replay is an absent replay and not a cut made in
+/// the wrong place.
+#[test]
+fn a_lost_wipe_is_played_by_the_next_message_of_the_input_window() {
+    let app = source_of("app.rs");
+    let procedure = body_of(&app, "unsafe extern \"system\" fn window_proc(");
+
+    let hotkey = procedure
+        .find("crate::inject::on_hotkey()")
+        .expect("control: the hotkey branch must be in the body of the window procedure");
+    let dispatch = procedure
+        .find("crate::watchdog::handle_watchdog_message(hwnd, message, wparam)")
+        .expect(
+            "control: the dispatch to module watchdog must be in the body of the window procedure",
+        );
+
+    let replay = procedure.find("crate::watchdog::claim_lost_wipe()");
+
+    assert!(
+        replay.is_some(),
+        "Э37-Б-1: the window procedure does not look for an owed wipe — a lock whose WM_APP_WIPE \
+         was refused leaves the word typed before it in the ring (SEC-02)"
+    );
+
+    let replay = replay.unwrap_or_default();
+
+    assert!(
+        replay < hotkey && replay < dispatch,
+        "the replay must come before the hotkey branch and before the arms of module watchdog"
+    );
+
+    let gate = &procedure[..replay];
+    let gate = &gate[gate.rfind("if ").unwrap_or(0)..];
+
+    assert!(
+        gate.contains("crate::watchdog::wipe_post_lost()")
+            && gate.contains("is_input_window(hwnd)"),
+        "the replay must be gated on the debt and on the input window: {gate:?}"
+    );
+
+    let replayed = body_of(&app, "fn replay_lost_wipe()");
+
+    assert!(
+        replayed.contains("crate::buffer::reset()"),
+        "the replay must reset the ring through the door the WM_APP_WIPE arm uses"
+    );
+
+    let watchdog_source = source_of("watchdog.rs");
+    let handler = body_of(&watchdog_source, "pub fn handle_watchdog_message(");
+
+    assert!(
+        handler.contains("WM_APP_WIPE if is_input_window(window) =>"),
+        "control: the arm of WM_APP_WIPE is where it was"
+    );
+
+    let asking = body_of(&watchdog_source, "pub fn request_wipe()");
+
+    assert!(
+        asking.contains("post_to_input_thread(WM_APP_WIPE)") && !asking.contains("let _ ="),
+        "Э37-Б-1: request_wipe must look at the answer of its post rather than drop it: {asking:?}"
+    );
+}
+
 /// ⭐ **Task T-37-6, decision 126г — which reinstallations ask for a probe of the field.**
 ///
 /// A return to the user's desktop — a UAC prompt answered, a session unlocked — raises no event

@@ -1561,6 +1561,10 @@ fn render_counters(out: &mut String) {
     // was played by the next message of the input window instead, so the number is of focus
     // changes that came late, never of focus changes lost.
     row_u32(out, "watchdog.flush_posts_lost", health.flush_posts_lost);
+    // Task T-69-1, backlog line Э37-Б-1: wipes of rows 8 and 9 of FR-10 — a session lock, a pause
+    // from the tray — whose `WM_APP_WIPE` reached no window. Each was played by the next message of
+    // the input window instead, so the number is of wipes that came late, never of wipes lost.
+    row_u32(out, "watchdog.wipe_posts_lost", health.wipe_posts_lost);
 
     row_u32(
         out,
