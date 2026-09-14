@@ -1521,7 +1521,7 @@ fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
 
     assert!(
         branch.contains("update_state(|state| state.feed = wanted)")
-            && branch.contains("widgets::repaint::control(hwnd, IDC_NEWS_SWITCH)"),
+            && branch.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)"),
         "the branch found is not the one that writes the feed and repaints the switch:\n{branch}"
     );
 
@@ -1558,6 +1558,153 @@ fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
     assert!(
         !follows_what_was_written(&format!("{call}\n{}", without(".follow_feed("))),
         "the sweep does not see a call put before the write"
+    );
+}
+
+/// The text of one function of `src\letters.rs`, from its signature to the brace that closes it in
+/// the first column — or `None` if the module no longer declares it.
+fn letters_function_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    let (_, after) = source.split_once(signature)?;
+
+    after.split_once("\n}\n").map(|(body, _)| body)
+}
+
+/// The code of a stretch of source with its comment lines dropped and its whitespace squeezed —
+/// task T-71-2. A needle then says «these tokens in this order», whatever `cargo fmt` does to the
+/// lines of a call, and a sentence of prose that names a call is not taken for the call.
+fn squeezed_code(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("( ", "(")
+        .replace(" )", ")")
+}
+
+/// Whether a branch repaints the switch through the door without the erase, and not through the
+/// one with it.
+fn repaints_without_an_erase(branch: &str) -> bool {
+    let code = squeezed_code(branch);
+
+    code.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)")
+        && !code.contains("repaint::control(hwnd, IDC_NEWS_SWITCH)")
+}
+
+/// The calls that put pixels into a DC — the four `draw_switch` makes, and the GDI calls a later
+/// hand could put in front of them.
+const PAINT_CALLS: [&str; 8] = [
+    "FillRect(",
+    "paint_rounded(",
+    "draw_check_mark(",
+    "paint_label(",
+    "DrawTextW(",
+    "RoundRect(",
+    "Polyline(",
+    "BitBlt(",
+];
+
+/// Whether the first thing a body paints is its whole rectangle in the colour of the panel — the
+/// condition on which the door of task Т-45-3 may be taken.
+fn paints_its_whole_rectangle_first(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    let Some(fill) = code.find("FillRect(dc, &rect, brushes.panel_bg())") else {
+        return false;
+    };
+
+    PAINT_CALLS
+        .iter()
+        .filter_map(|call| code.find(call))
+        .all(|at| at >= fill)
+}
+
+/// **Task T-71-2, finding Э70-Б-2 — the switch is repainted without an erase frame.**
+///
+/// The owner's word of 2026-09-14: «при снятии и проставлении галки строка моргает». The branch of
+/// `IDC_NEWS_SWITCH` asked for the repaint **with** the erase: `WM_ERASEBKGND` fills the switch
+/// with the brush `on_ctl_color` answers `WM_CTLCOLORBTN` with — the brush of the **window** — and
+/// only the next frame brings `WM_DRAWITEM`, where `draw_switch` paints the rectangle in the colour
+/// of the **panel** the switch lies on. The frame between the two is the blink, and it is the very
+/// frame the door `widgets::repaint::control_no_erase` of task Т-45-3 was made to take away.
+///
+/// Two halves, because a letters window cannot be built here (see the test above): the branch goes
+/// through the door, and the condition of the door holds — `draw_switch` paints its whole rectangle
+/// before anything else, so the erase is needed for nothing.
+///
+/// ⚠ Controls: the same branch with the call of `e70` is caught, and so are a branch that repaints
+/// nothing and a branch that keeps the erase beside the door; a body whose fill comes after the
+/// figure and a body that fills the glyph cell instead of the rectangle are caught too.
+#[test]
+fn the_switch_is_repainted_without_an_erase_frame() {
+    let source = letters_module_source();
+    let branch = switch_branch(&source).expect(
+        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
+    );
+    let body = letters_function_body(&source, "unsafe fn draw_switch(")
+        .expect("src\\letters.rs must still declare `draw_switch`");
+
+    assert!(
+        paints_its_whole_rectangle_first(body),
+        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and \
+         `draw_switch` no longer fills its rectangle before anything else:\n{body}"
+    );
+
+    assert!(
+        repaints_without_an_erase(branch),
+        "Э70-Б-2: the click repaints the switch with the erase — a frame of the window's brush \
+         over a switch that stands on a panel:\n{branch}"
+    );
+
+    let door = "widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)";
+    let erase = "widgets::repaint::control(hwnd, IDC_NEWS_SWITCH)";
+
+    let of_e70 = branch.replace(door, erase);
+    assert_ne!(
+        of_e70, branch,
+        "the control must change the branch it is made of"
+    );
+    assert!(
+        !repaints_without_an_erase(&of_e70),
+        "the sweep does not see the call of e70 — it cannot fail"
+    );
+
+    let without_repaint = branch
+        .lines()
+        .filter(|line| !line.contains(door))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !repaints_without_an_erase(&without_repaint),
+        "the sweep does not see a branch that repaints nothing"
+    );
+
+    assert!(
+        !repaints_without_an_erase(&format!("{branch}\n{erase};")),
+        "the sweep does not see the erase kept beside the door"
+    );
+
+    let fill = "FillRect(dc, &rect, brushes.panel_bg())";
+
+    let moved = body
+        .lines()
+        .filter(|line| !line.contains(fill))
+        .chain([fill])
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !paints_its_whole_rectangle_first(&moved),
+        "the sweep does not see the fill put after the figure"
+    );
+
+    let of_the_cell = body.replace(fill, "FillRect(dc, &cell, brushes.panel_bg())");
+    assert_ne!(
+        of_the_cell, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !paints_its_whole_rectangle_first(&of_the_cell),
+        "the sweep does not see a fill of the glyph cell instead of the rectangle"
     );
 }
 
