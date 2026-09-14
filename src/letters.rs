@@ -3460,17 +3460,17 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
     }
 }
 
-/// Draws the feed switch of FR-102 — the one check box of these three windows.
+/// Draws the feed switch of FR-102 — the one check box of «От автора».
 ///
-/// **Assembled from `theme`'s own primitives, not copied from the settings dialog**: the roles
-/// come from `theme::glyph_color_roles` (the 2×2×2 table of FR-92а), the figure from
-/// `theme::paint_rounded`, the tick from `theme::draw_check_mark` with the settings dialog's own
-/// `GLYPH_CHECK_MARK`, and the caption from `theme::paint_label`. What is in this function is
-/// **which** element is being drawn — which is exactly the line §6.2 draws between a window's
-/// owner and the drawing library.
-///
-/// ⚠ The tick is drawn through `check_mark_points(…, mirrored)` — a polyline is turned round by
-/// a mirrored window and `LAYOUT_BITMAPORIENTATIONPRESERVED` does not fix it (ИТОГ-Э30 §9.5).
+/// ⭐ **Решение 132.3, задача T-71-5: тем же телом, что галки мастера — [`draw_glyph`].** До этой
+/// задачи здесь стояла третья копия тела глифа: те же шаги, что у [`draw_wizard_glyph`], но прямо
+/// в DC сообщения, вызов за вызовом, без `theme::PaintBuffer`. Щелчок приносит не меньше четырёх
+/// `WM_DRAWITEM` — нажатие, фокус, отпускание и перерисовку ветки щелчка, — DWM снимал окно между
+/// заливкой и подписью, и строка на кадр вставала пустой: «выключатель всё ещё моргает», слово
+/// владельца на живой 0.71.0 уже после двери Т-45-3 (задача T-71-2). Радиокнопки мастера моргали
+/// ровно так же, пока задача Т-33-5 не завела им буфер. Владелец: взять готовое решение галок
+/// мастера, а не копировать починку, — и теперь выключатель отличается от них ровно тем, чем
+/// отличается: «отмечено» читается из [`AuthorView::switch`], а лежит он на панели.
 ///
 /// # Safety
 ///
@@ -3482,84 +3482,15 @@ unsafe fn draw_switch(
     disabled: bool,
     label: &str,
 ) -> isize {
-    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
-        return 0;
+    let glyph = Glyph {
+        kind: theme::GlyphKind::CheckBox,
+        checked: state.author.switch.unwrap_or(false),
+        disabled,
+        ground: Ground::Panel,
     };
 
-    let palette = state.palette;
-    let dpi = theme::dc_dpi(dc);
-    let checked = state.author.switch.unwrap_or(false);
-    let colors = theme::glyph_color_roles(theme::GlyphKind::CheckBox, checked, disabled);
-
-    // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
-    unsafe { FillRect(dc, &rect, brushes.panel_bg()) };
-
-    // ⚠ Задача Т-45-2: та же клетка, что у окна настроек, и теперь одним телом
-    // (`widgets::glyph::cell`). Всё остальное здесь у двух окон различается — см. доктекст
-    // `widgets::glyph`.
-    let cell = widgets::glyph::cell(rect, dpi);
-
-    let fill = match colors.fill {
-        theme::GlyphFillRole::FieldBg => brushes.field_bg(),
-        theme::GlyphFillRole::AccentBg => brushes.accent_bg(),
-    };
-
-    let outline = match colors.frame {
-        Some(theme::GlyphFrameRole::BoxBorder) => palette.box_border,
-        // The one cell the accent fill covers whole is outlined in its own fill, so that
-        // `RoundRect` — which draws frame and fill in one figure — shows no line at all.
-        None => match colors.fill {
-            theme::GlyphFillRole::FieldBg => palette.field_bg,
-            theme::GlyphFillRole::AccentBg => palette.accent_bg,
-        },
-    };
-
-    theme::paint_rounded(
-        dc,
-        &cell,
-        theme::scaled(settings::GLYPH_CORNER_RADIUS, dpi),
-        outline,
-        fill,
-        dpi,
-    );
-
-    if let Some(mark) = colors.mark {
-        let ink = match mark {
-            theme::GlyphMarkRole::AccentFg => palette.accent_fg,
-            theme::GlyphMarkRole::AccentBg => palette.accent_bg,
-            theme::GlyphMarkRole::BoxBorder => palette.box_border,
-        };
-
-        theme::draw_check_mark(dc, &cell, ink, settings::GLYPH_CHECK_MARK, dpi);
-    }
-
-    let text = RECT {
-        left: cell.right + theme::scaled(settings::LIST_CHECK_TEXT_GAP, dpi),
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-    };
-
-    let mut caption: Vec<u16> = label.encode_utf16().collect();
-
-    // SAFETY: `dc` and `text` are live; the face belongs to this window's state.
-    unsafe {
-        theme::paint_label(
-            dc,
-            text,
-            &mut caption,
-            theme::LabelStyle {
-                ground: brushes.panel_bg(),
-                ink: match colors.text {
-                    theme::GlyphTextRole::Text => palette.text,
-                    theme::GlyphTextRole::TextMuted => palette.text_muted,
-                },
-                face: Some(faces.text),
-                pitch: None,
-                reading: theme::Reading::Native,
-            },
-        )
-    }
+    // SAFETY: see the caller — the values of the message, handed on unchanged.
+    unsafe { draw_glyph(dc, rect, state, glyph, label) }
 }
 
 /// The `WM_DRAWITEM` of these windows: the owner-drawn statics and the owner-drawn buttons.
@@ -8154,9 +8085,9 @@ unsafe fn draw_card(
 
 /// Draws one radio or one check box of the wizard — the glyph and the words beside it.
 ///
-/// The twin of [`draw_switch`], and it is a second body rather than a parameter of the first
-/// for one reason: the switch reads its state out of [`AuthorView`] and this reads it out of
-/// the wizard's draft. Everything below the answer to «checked?» is the same table.
+/// Since decision 132.3 (task T-71-5) a door into [`draw_glyph`], the body the feed switch of «От
+/// автора» goes through as well: this one reads «checked?» out of the wizard's draft and lays the
+/// element on the ground of the window.
 ///
 /// # Safety
 ///
@@ -8170,24 +8101,83 @@ unsafe fn draw_wizard_glyph(
     disabled: bool,
     label: &str,
 ) -> isize {
-    let (Some(brushes), Some(faces), Some(wizard)) = (
-        state.brushes.as_ref(),
-        state.fonts.as_ref(),
-        state.wizard.as_deref(),
-    ) else {
+    let Some(wizard) = state.wizard.as_deref() else {
+        return 0;
+    };
+
+    let glyph = Glyph {
+        kind,
+        checked: wizard_is_checked(wizard, control),
+        disabled,
+        ground: Ground::Window,
+    };
+
+    // SAFETY: see the caller — the values of the message, handed on unchanged.
+    unsafe { draw_glyph(dc, rect, state, glyph, label) }
+}
+
+/// One glyph element of these windows — the four answers the two doors of [`draw_glyph`] differ
+/// by (decision 132.3).
+#[derive(Clone, Copy)]
+struct Glyph {
+    /// A check box or a radio button.
+    kind: theme::GlyphKind,
+    /// The answer to «checked?», read by the door out of its own record.
+    checked: bool,
+    /// `ODS_DISABLED` of the message.
+    disabled: bool,
+    /// What the element lies on.
+    ground: Ground,
+}
+
+/// What a glyph element lies on — the brush its whole rectangle is grounded with.
+#[derive(Clone, Copy)]
+enum Ground {
+    /// The window itself — the radios and the check boxes of the wizard.
+    Window,
+    /// A panel — the feed switch, on «Новости и обновления».
+    Panel,
+}
+
+/// Draws one glyph element — the glyph and the words beside it, **in one frame**.
+///
+/// ⭐ **The one body of the glyphs of these windows since decision 132.3 (task T-71-5)**: the
+/// wizard's radios and check boxes ([`draw_wizard_glyph`]) and the feed switch of «От автора»
+/// ([`draw_switch`]). Everything below the four answers of [`Glyph`] was the same table
+/// (`theme::glyph_color_roles`), the same cell (`widgets::glyph::cell`) and the same caption in
+/// both copies; what the switch's copy lacked was the buffer below, and the owner saw that as a
+/// blink.
+///
+/// ⚠ Not the body of the settings window (`settings::draw_glyph_element`): that one differs by the
+/// rule of the ground, the caption, the focus frame and the pen of the circle, and merging them
+/// would move pixels of an accepted window — decision 107.2, the documentation of
+/// `widgets::glyph`.
+///
+/// # Safety
+///
+/// As [`draw_progress`].
+unsafe fn draw_glyph(dc: HDC, rect: RECT, state: &WindowState, glyph: Glyph, label: &str) -> isize {
+    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
         return 0;
     };
 
     let palette = state.palette;
     let dpi = theme::dc_dpi(dc);
-    let checked = wizard_is_checked(wizard, control);
-    let colors = theme::glyph_color_roles(kind, checked, disabled);
+    let colors = theme::glyph_color_roles(glyph.kind, glyph.checked, glyph.disabled);
+
+    // The ground of the whole rectangle. It is also what grounds the buffer below: the corners of
+    // the rounded cell are smoothed into what the buffer holds under them.
+    let ground = match glyph.ground {
+        Ground::Window => brushes.window_bg(),
+        Ground::Panel => brushes.panel_bg(),
+    };
 
     // ⚠ **Один кадр вместо череды — задача Т-33-5.** То же, что у [`draw_card`], и по той же
     // измеренной причине: заливка, глиф и подпись писались прямо в DC сообщения, и радиокнопка
     // **моргала** под указателем — чернила 738 → **0** → 738 в 13 кадрах из 120 и 474 → **0** →
     // 474 в 25 из 120 (`scratchpad-Э33\моргание-до.log`). Кнопки этого окна не моргали никогда
     // именно потому, что `settings::paint_push_button` носит эту поверхность с задачи T-15-1.
+    // ⚠ Задача T-71-5: выключатель ленты этой поверхности не носил и моргал по той же причине.
     //
     // SAFETY: как в [`draw_card`].
     let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
@@ -8195,7 +8185,7 @@ unsafe fn draw_wizard_glyph(
 
     // SAFETY: `target` is the buffer of this frame or the DC of the message, and the brush
     // belongs to this window's state.
-    unsafe { FillRect(target, &rect, brushes.window_bg()) };
+    unsafe { FillRect(target, &rect, ground) };
 
     // ⚠ Задача Т-45-2: та же клетка, что у окна настроек, и теперь одним телом
     // (`widgets::glyph::cell`). Всё остальное здесь у двух окон различается — см. доктекст
@@ -8209,13 +8199,15 @@ unsafe fn draw_wizard_glyph(
 
     let outline = match colors.frame {
         Some(theme::GlyphFrameRole::BoxBorder) => palette.box_border,
+        // The one cell the accent fill covers whole is outlined in its own fill, so that
+        // `RoundRect` — which draws frame and fill in one figure — shows no line at all.
         None => match colors.fill {
             theme::GlyphFillRole::FieldBg => palette.field_bg,
             theme::GlyphFillRole::AccentBg => palette.accent_bg,
         },
     };
 
-    match kind {
+    match glyph.kind {
         theme::GlyphKind::CheckBox => {
             theme::paint_rounded(
                 target,
@@ -8269,7 +8261,7 @@ unsafe fn draw_wizard_glyph(
             text,
             &mut caption,
             theme::LabelStyle {
-                ground: brushes.window_bg(),
+                ground,
                 ink: match colors.text {
                     theme::GlyphTextRole::Text => palette.text,
                     theme::GlyphTextRole::TextMuted => palette.text_muted,

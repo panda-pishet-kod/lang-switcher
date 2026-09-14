@@ -1591,11 +1591,12 @@ fn repaints_without_an_erase(branch: &str) -> bool {
         && !code.contains("repaint::control(hwnd, IDC_NEWS_SWITCH)")
 }
 
-/// The calls that put pixels into a DC — the four `draw_switch` makes, and the GDI calls a later
+/// The calls that put pixels into a DC — the ones a glyph body makes, and the GDI calls a later
 /// hand could put in front of them.
-const PAINT_CALLS: [&str; 8] = [
+const PAINT_CALLS: [&str; 9] = [
     "FillRect(",
     "paint_rounded(",
+    "paint_ellipse(",
     "draw_check_mark(",
     "paint_label(",
     "DrawTextW(",
@@ -1604,12 +1605,16 @@ const PAINT_CALLS: [&str; 8] = [
     "BitBlt(",
 ];
 
-/// Whether the first thing a body paints is its whole rectangle in the colour of the panel — the
-/// condition on which the door of task Т-45-3 may be taken.
+/// Whether the first thing a body paints is its whole rectangle in the colour of the ground the
+/// element lies on — the condition on which the door of task Т-45-3 may be taken.
+///
+/// ⚠ Since task T-71-5 the fill stands in the one glyph body `draw_glyph`, drawn into its buffer
+/// with the ground the door names (the switch names the panel — the sentry of that task asserts
+/// it); until then it stood in `draw_switch` as `FillRect(dc, &rect, brushes.panel_bg())`.
 fn paints_its_whole_rectangle_first(body: &str) -> bool {
     let code = squeezed_code(body);
 
-    let Some(fill) = code.find("FillRect(dc, &rect, brushes.panel_bg())") else {
+    let Some(fill) = code.find("FillRect(target, &rect, ground)") else {
         return false;
     };
 
@@ -1629,8 +1634,9 @@ fn paints_its_whole_rectangle_first(body: &str) -> bool {
 /// frame the door `widgets::repaint::control_no_erase` of task Т-45-3 was made to take away.
 ///
 /// Two halves, because a letters window cannot be built here (see the test above): the branch goes
-/// through the door, and the condition of the door holds — `draw_switch` paints its whole rectangle
-/// before anything else, so the erase is needed for nothing.
+/// through the door, and the condition of the door holds — the body the switch is drawn by paints
+/// its whole rectangle before anything else, so the erase is needed for nothing. Since task T-71-5
+/// that body is `draw_glyph`, the one the wizard's glyphs share.
 ///
 /// ⚠ Controls: the same branch with the call of `e70` is caught, and so are a branch that repaints
 /// nothing and a branch that keeps the erase beside the door; a body whose fill comes after the
@@ -1641,13 +1647,14 @@ fn the_switch_is_repainted_without_an_erase_frame() {
     let branch = switch_branch(&source).expect(
         "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
     );
-    let body = letters_function_body(&source, "unsafe fn draw_switch(")
-        .expect("src\\letters.rs must still declare `draw_switch`");
+    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
+        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
 
     assert!(
         paints_its_whole_rectangle_first(body),
-        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and \
-         `draw_switch` no longer fills its rectangle before anything else:\n{body}"
+        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and the \
+         glyph body the switch is drawn by no longer fills its rectangle before anything else:\n\
+         {body}"
     );
 
     assert!(
@@ -1684,7 +1691,7 @@ fn the_switch_is_repainted_without_an_erase_frame() {
         "the sweep does not see the erase kept beside the door"
     );
 
-    let fill = "FillRect(dc, &rect, brushes.panel_bg())";
+    let fill = "FillRect(target, &rect, ground)";
 
     let moved = body
         .lines()
@@ -1697,7 +1704,7 @@ fn the_switch_is_repainted_without_an_erase_frame() {
         "the sweep does not see the fill put after the figure"
     );
 
-    let of_the_cell = body.replace(fill, "FillRect(dc, &cell, brushes.panel_bg())");
+    let of_the_cell = body.replace(fill, "FillRect(target, &cell, ground)");
     assert_ne!(
         of_the_cell, body,
         "the control must change the body it is made of"
@@ -1705,6 +1712,112 @@ fn the_switch_is_repainted_without_an_erase_frame() {
     assert!(
         !paints_its_whole_rectangle_first(&of_the_cell),
         "the sweep does not see a fill of the glyph cell instead of the rectangle"
+    );
+}
+
+/// Whether a body paints nothing itself and hands its element to the one glyph body.
+fn hands_its_glyph_to_the_one_body(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    code.contains("draw_glyph(dc, rect, state, glyph, label)")
+        && PAINT_CALLS.iter().all(|call| !code.contains(call))
+}
+
+/// Whether a glyph body draws in one frame: into the buffer of `theme::PaintBuffer`, every paint
+/// call aimed at the buffer and none at the DC of the message, and one blit at the end.
+fn draws_in_one_frame(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    let buffered = code
+        .contains("let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };")
+        && code.contains("let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);")
+        && code.contains("buffer.blit(dc)");
+
+    let aimed_at_the_message = PAINT_CALLS
+        .iter()
+        .filter(|call| **call != "BitBlt(")
+        .any(|call| code.contains(&format!("{call}dc,")));
+
+    buffered && !aimed_at_the_message
+}
+
+/// **Task T-71-5, decision 132.3 — the switch is drawn by the one glyph body, in one frame.**
+///
+/// After task T-71-2 the owner still saw the switch blink on the live 0.71.0. The erase was gone;
+/// what was left was the body: `draw_switch` laid its fill, its figure, its tick and its caption
+/// **straight into the DC of the message**, call by call, and a click brings at least four
+/// `WM_DRAWITEM` (the press, the focus, the release, the repaint of the branch) — DWM sampled the
+/// window between the calls and the row stood blank for a frame. Its twin in the wizard blinked the
+/// same way until task Т-33-5 gave it `theme::PaintBuffer`. The owner's word: the ready solution
+/// the wizard's check boxes already have, not a copy of the repair — so both elements go through
+/// one body, and what tells them apart is what does: where «checked» is read and what they lie on.
+///
+/// ⚠ Controls: a door that paints something itself, a body whose paint goes to the DC of the
+/// message, and a body without the buffer are caught.
+#[test]
+fn the_switch_is_drawn_by_the_one_glyph_body_in_one_frame() {
+    let source = letters_module_source();
+    let switch = letters_function_body(&source, "unsafe fn draw_switch(")
+        .expect("src\\letters.rs must still declare `draw_switch`");
+
+    assert!(
+        hands_its_glyph_to_the_one_body(switch),
+        "решение 132.3: draw_switch paints on its own instead of going through the one glyph body \
+         the wizard's check boxes are drawn by:\n{switch}"
+    );
+
+    let wizard = letters_function_body(&source, "unsafe fn draw_wizard_glyph(")
+        .expect("src\\letters.rs must still declare `draw_wizard_glyph`");
+
+    assert!(
+        hands_its_glyph_to_the_one_body(wizard),
+        "the wizard's glyphs must go through the same body:\n{wizard}"
+    );
+
+    assert!(
+        squeezed_code(switch).contains("ground: Ground::Panel")
+            && squeezed_code(wizard).contains("ground: Ground::Window"),
+        "the switch lies on a panel and the wizard's glyphs on the window"
+    );
+
+    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
+        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
+
+    assert!(
+        draws_in_one_frame(body),
+        "the one glyph body must draw into theme::PaintBuffer and blit once:\n{body}"
+    );
+
+    // Controls of the doors.
+    assert!(
+        !hands_its_glyph_to_the_one_body(&format!(
+            "{switch}\n    unsafe {{ FillRect(dc, &rect, brushes.panel_bg()) }};"
+        )),
+        "the sweep does not see a door that paints something itself"
+    );
+
+    // Controls of the body.
+    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
+    assert_ne!(
+        at_the_message, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !draws_in_one_frame(&at_the_message),
+        "the sweep does not see a paint call aimed at the DC of the message"
+    );
+
+    let unbuffered = body.replace(
+        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
+        "let target = dc;",
+    );
+    assert_ne!(
+        unbuffered, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !draws_in_one_frame(&unbuffered),
+        "the sweep does not see a body that draws past the buffer"
     );
 }
 
