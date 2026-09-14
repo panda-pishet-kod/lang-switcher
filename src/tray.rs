@@ -166,7 +166,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_DRAWITEM, WM_ENDSESSION, WM_LBUTTONDBLCLK, WM_MEASUREITEM, WM_NCCREATE, WM_NULL,
     WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WM_TIMER, WM_USER,
 };
-use windows::core::{Error as WinError, HRESULT, PCWSTR, Result as WinResult, w};
+use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
 use crate::settings::{self, Config, Quarantined, SavePolicy};
 use crate::{APP_NAME, app, diag, theme};
@@ -1697,48 +1697,25 @@ fn note_configuration(operation: &'static str) {
 ///
 /// **SEC-01, SEC-07.** The name is one of the literals above and is narrowed by
 /// [`diag::Operation::from_name`] exactly as there. What is added is the code, and the code is the
-/// number the operating system gave and nothing else: [`os_code_of`] takes it from
-/// [`io::Error::raw_os_error`] and drops the error's text — which is the same line
-/// `diag::dump_on_shutdown` draws for the `io::Error` of a refused dump, and the same one
-/// [`crate::app::report_non_critical`] draws for a `windows::core::Error`.
+/// number the operating system gave and nothing else: [`diag::OsCode::of_config`] takes it out of
+/// the error and drops the error's text — the same road `diag::dump_on_shutdown` takes for the
+/// `io::Error` of a refused dump, and the same line [`crate::app::report_non_critical`] draws for a
+/// `windows::core::Error`.
+///
+/// ⭐ **Task T-69-6, backlog line Э34-Б-3 — one bridge, not two.** Until this task this module
+/// read the Win32 number itself, in a function of its own (`os_code_of`, task Т-22-9), the same
+/// five-step chain `diag::OsCode::of_io` repeats for the journal's file. The chain now lives in
+/// `diag` alone, and the configuration reaches it with an error object — decision 129.3: a
+/// constructor of `OsCode` out of a number is what SEC-07 forbids.
 ///
 /// A path never reaches here, in any form. Neither does the line and column of a parser, which is
 /// the one thing a [`settings::ConfigError`] carries that was derived from the file's contents —
-/// see [`os_code_of`], where that variant is answered with no number at all.
+/// see [`diag::OsCode::of_config`], where that variant is answered with no number at all.
 fn note_configuration_failure(operation: &'static str, error: &settings::ConfigError) {
-    diag::record(diag::Operation::from_name(operation), os_code_of(error));
-}
-
-/// The system's own code for a failed configuration write — task **Т-22-9**.
-///
-/// [`diag::OsCode`] has no constructor that takes an integer by design (SEC-07), so the number
-/// travels the one road there is: an `io::Error` that came from a system call carries the Win32
-/// code, `HRESULT::from_win32` turns it into the same `HRESULT` every other failure in this
-/// program is journalled under, and [`diag::OsCode::of`] narrows that.
-///
-/// The two variants that are not system failures answer [`diag::OsCode::NONE`]:
-///
-/// * [`settings::ConfigError::Serialize`] — this program's own value refusing to become TOML.
-///   No call failed, and a number invented for it would be a claim about one that did;
-/// * [`settings::ConfigError::Malformed`] — cannot arrive from a write at all, and it is the one
-///   variant carrying something derived from the file's contents (the line and column a parser
-///   stopped at). It is answered with no number for both reasons, and the second is the one that
-///   would matter if the first ever stopped being true.
-///
-/// An `io::Error` with no `raw_os_error` — one this program's own code built — answers `NONE` for
-/// the same reason: there is no system number to report.
-fn os_code_of(error: &settings::ConfigError) -> diag::OsCode {
-    match error {
-        settings::ConfigError::Io(io) => io
-            .raw_os_error()
-            .and_then(|code| u32::try_from(code).ok())
-            .map_or(diag::OsCode::NONE, |code| {
-                diag::OsCode::of(&WinError::from_hresult(HRESULT::from_win32(code)))
-            }),
-        settings::ConfigError::Malformed { .. } | settings::ConfigError::Serialize => {
-            diag::OsCode::NONE
-        }
-    }
+    diag::record(
+        diag::Operation::from_name(operation),
+        diag::OsCode::of_config(error),
+    );
 }
 
 impl Drop for Tray {
@@ -4881,6 +4858,9 @@ mod tests {
     /// system gave and is what the journal is for, and one carries the line and column a parser
     /// stopped at — a value derived from the **contents** of somebody's file, which may not reach
     /// the ring in any form.
+    ///
+    /// Since task T-69-6 the mapping is `diag::OsCode::of_config`, the one bridge; the test stays
+    /// here, in the module that journals a configuration failure, and drives it unchanged.
     #[test]
     fn a_refused_write_reports_the_system_code_and_a_parser_position_reports_nothing() {
         /// `ERROR_ACCESS_DENIED`, and the `HRESULT` Win32 codes are journalled under.
@@ -4890,7 +4870,7 @@ mod tests {
         let refused = settings::ConfigError::Io(std::io::Error::from_raw_os_error(ACCESS_DENIED));
 
         assert_eq!(
-            os_code_of(&refused).raw(),
+            diag::OsCode::of_config(&refused).raw(),
             AS_HRESULT,
             "the number the operating system gave, in the form every other failure is recorded in"
         );
@@ -4898,7 +4878,10 @@ mod tests {
         // An `io::Error` this program built itself carries no system number, and none is invented.
         let ours = settings::ConfigError::Io(std::io::Error::other("no system call failed here"));
 
-        assert_eq!(os_code_of(&ours).raw(), diag::OsCode::NONE.raw());
+        assert_eq!(
+            diag::OsCode::of_config(&ours).raw(),
+            diag::OsCode::NONE.raw()
+        );
 
         // SEC-01, SEC-07: the position a parser stopped at is a fact about the file's contents.
         for error in [
@@ -4907,7 +4890,7 @@ mod tests {
             settings::ConfigError::Serialize,
         ] {
             assert_eq!(
-                os_code_of(&error).raw(),
+                diag::OsCode::of_config(&error).raw(),
                 diag::OsCode::NONE.raw(),
                 "{error:?} is not a system failure and must contribute no number"
             );

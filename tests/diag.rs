@@ -1419,6 +1419,167 @@ fn an_io_error_reaches_the_journal_by_its_number_only_and_only_from_module_diag(
 }
 
 // -------------------------------------------------------------------------------------
+// Task T-69-6 (backlog line Э34-Б-3) — one bridge from an error object into `OsCode`
+// -------------------------------------------------------------------------------------
+
+/// Every `.rs` file directly under `src\` — name and text, line endings normalised.
+fn product_sources() -> Vec<(String, String)> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sources = Vec::new();
+
+    for entry in std::fs::read_dir(&directory).expect("the source directory must be readable") {
+        let path = entry.expect("a directory entry must be readable").path();
+
+        if path.extension().is_none_or(|kind| kind != "rs") {
+            continue;
+        }
+
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let text = std::fs::read_to_string(&path)
+            .expect("a source file must be readable")
+            .replace("\r\n", "\n");
+
+        sources.push((name, text));
+    }
+
+    sources.sort();
+    sources
+}
+
+/// `file:line` of every line of `sources` that is code — not a comment — and contains `needle`,
+/// leaving out the lines `is_definition` names.
+fn code_sites(
+    sources: &[(String, String)],
+    needle: &str,
+    is_definition: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut sites = Vec::new();
+
+    for (file, text) in sources {
+        for (index, line) in text.lines().enumerate() {
+            let line = line.trim_start();
+
+            if line.starts_with("//") || !line.contains(needle) || is_definition(line) {
+                continue;
+            }
+
+            sites.push(format!("{file}:{}", index + 1));
+        }
+    }
+
+    sites
+}
+
+/// **Task T-69-6, backlog line Э34-Б-3 — the Win32 number of an `io::Error` is read in one place
+/// of the program, the body of `OsCode::of_io`.**
+///
+/// Until this task the chain `raw_os_error → u32::try_from → HRESULT::from_win32 →
+/// WinError::from_hresult → OsCode::of` was written twice: in `OsCode::of_io` for the journal's own
+/// file and in `tray::os_code_of` for the configuration's (task Т-22-9). Two copies of the one
+/// narrowing SEC-07 rests on are two places to keep narrow. The task gave the configuration a
+/// bridge **of an error object** — `OsCode::of_config`, decision 129.3 — rather than a constructor
+/// of a number, which the header of this file and of `src\diag.rs` refuse.
+///
+/// The sweep reads `.raw_os_error()` as code across `src\`. ⚠ Its controls: it has to find the
+/// one reading, or it measures nothing; the reading has to stand inside the body of `of_io`; and
+/// the same sweep over the sources with a second chain planted beside them has to count it.
+#[test]
+fn the_win32_number_of_an_io_error_is_read_in_one_place_only() {
+    let sources = product_sources();
+    let sites = code_sites(&sources, ".raw_os_error()", |_| false);
+
+    println!("readings of raw_os_error in src: {sites:?}");
+
+    assert!(
+        !sites.is_empty(),
+        "the sweep found no reading of a Win32 number at all — it is measuring nothing"
+    );
+    assert_eq!(
+        sites.len(),
+        1,
+        "Э34-Б-3: the chain from an io::Error to an OsCode is written in {} places: {sites:?}",
+        sites.len()
+    );
+
+    let diag_text = &sources
+        .iter()
+        .find(|(file, _)| file == "diag.rs")
+        .expect("src\\diag.rs is among the sources")
+        .1;
+    let start = diag_text
+        .find("pub fn of_io(")
+        .expect("control: OsCode::of_io is in src\\diag.rs");
+    let end = start
+        + diag_text[start..]
+            .find("\n    }\n")
+            .expect("control: the body of OsCode::of_io ends at a brace of its impl");
+    let first = diag_text[..start].lines().count() + 1;
+    let last = diag_text[..end].lines().count() + 1;
+
+    assert!(
+        (first..=last).any(|line| sites[0] == format!("diag.rs:{line}")),
+        "the one reading must be the body of OsCode::of_io (diag.rs:{first}..={last}), not {sites:?}"
+    );
+
+    let mut planted = sources.clone();
+    planted.push((
+        "planted.rs".to_owned(),
+        "fn number(error: &std::io::Error) -> Option<i32> {\n    error.raw_os_error()\n}\n"
+            .to_owned(),
+    ));
+
+    assert_eq!(
+        code_sites(&planted, ".raw_os_error()", |_| false).len(),
+        sites.len() + 1,
+        "the sweep does not count a second chain planted beside the sources — it cannot fail"
+    );
+}
+
+/// **Task T-69-6 — the bridge of a configuration error is called from module `tray` only.**
+///
+/// `OsCode::of_config` takes a `settings::ConfigError`, and its `Io` variant carries an `io::Error`
+/// that any code could build out of any number — which is why the calls of `OsCode::of_io` are
+/// kept inside `src\diag.rs` by the sweep above, and why the calls of this second door are kept
+/// inside the one module that journals a configuration failure. The sweep of `of_io` is not
+/// touched: this one stands beside it, for the new name.
+///
+/// ⚠ Controls: at least one call is found, and a call planted in another file is caught.
+#[test]
+fn the_bridge_of_a_configuration_error_is_called_from_module_tray_only() {
+    let sources = product_sources();
+    let is_definition = |line: &str| line.contains("fn of_config(");
+    let sites = code_sites(&sources, "of_config(", is_definition);
+
+    println!("call sites of OsCode::of_config: {sites:?}");
+
+    assert!(
+        !sites.is_empty(),
+        "the sweep found no call of OsCode::of_config at all — it is measuring nothing"
+    );
+    assert!(
+        sites.iter().all(|site| site.starts_with("tray.rs:")),
+        "OsCode::of_config is called outside module tray: {sites:?}"
+    );
+
+    let mut planted = sources.clone();
+    planted.push((
+        "planted.rs".to_owned(),
+        "fn code() -> OsCode {\n    OsCode::of_config(&error)\n}\n".to_owned(),
+    ));
+
+    assert!(
+        code_sites(&planted, "of_config(", is_definition)
+            .iter()
+            .any(|site| site.starts_with("planted.rs:")),
+        "the sweep does not see a call planted outside module tray — it cannot fail"
+    );
+}
+
+// -------------------------------------------------------------------------------------
 // Task T-34-2 — the journal listens to the session, not to the file on the disk
 // -------------------------------------------------------------------------------------
 

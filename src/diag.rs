@@ -31,7 +31,7 @@
 //! | `ordinal` | `u64` | [`record`] itself, from the internal counter |
 //! | `at_ms` | `u32` | [`record`] itself, from the internal clock |
 //! | `operation` | [`Operation`] | an index into the closed table [`OPERATIONS`] |
-//! | `code` | [`OsCode`] | an `HRESULT`, only ever from a [`windows::core::Error`] or from the Win32 number of an `io::Error` of this module's own file write |
+//! | `code` | [`OsCode`] | an `HRESULT`, only ever from a [`windows::core::Error`] or from the Win32 number of an `io::Error` — of this module's own file write, or of the configuration file's inside a [`crate::settings::ConfigError`] |
 //!
 //! There is no `String`, no `&str`, no `char`, no `[u8]` and no caller-chosen integer. The
 //! first two fields are produced inside [`record`], so a caller cannot put anything into them
@@ -46,11 +46,13 @@
 //!   value "unlisted".
 //! - [`OsCode`] wraps a private `i32` with no constructor that takes an integer. The only ways
 //!   to obtain one are [`OsCode::of`] from a real OS error, [`OsCode::of_io`] from the Win32
-//!   number an `io::Error` of this module's own file write carries (task T-34-1), or
-//!   [`OsCode::NONE`]. Both constructors take an error object the operating system produced
-//!   and keep its number only; a scan code cannot be turned into an `OsCode`, because there is
-//!   no function that takes an integer, and `tests\diag.rs` keeps the second road inside this
-//!   module.
+//!   number an `io::Error` of this module's own file write carries (task T-34-1),
+//!   [`OsCode::of_config`] from the error of a configuration file operation, which hands its
+//!   `io::Error` to `of_io` (task T-69-6), or [`OsCode::NONE`]. All three constructors take an
+//!   error object and keep the number the operating system put into it and nothing else; a
+//!   scan code cannot be turned into an `OsCode`, because there is no function that takes an
+//!   integer, and `tests\diag.rs` keeps the second road inside this module and the third inside
+//!   module `tray`, the one module that journals a configuration failure.
 //!
 //! So the sentence "we do not put characters into the journal" is not a rule anybody has to
 //! remember. `diag::record(Operation, OsCode)` is the only door into the ring, and neither
@@ -161,9 +163,12 @@ pub const fn footprint_bytes() -> usize {
 /// **SEC-07.** The private field has no public constructor that takes a number. [`OsCode::of`]
 /// demands a [`windows::core::Error`], which this program only ever produces from a Win32 call
 /// that failed; [`OsCode::of_io`] (task T-34-1) demands an `io::Error` and keeps the Win32
-/// number it carries and nothing else — the road a refused write of the journal file takes. A
-/// scan code, a virtual key or a character cannot be made into an `OsCode`: there is no
-/// function with that signature, and adding one would be the change a reviewer is looking for.
+/// number it carries and nothing else — the road a refused write of the journal file takes;
+/// [`OsCode::of_config`] (task T-69-6) demands a [`crate::settings::ConfigError`] and sends its
+/// `io::Error` down that same road. A scan code, a virtual key or a character cannot be made into
+/// an `OsCode`: there is no function with that signature, and adding one would be the change a
+/// reviewer is looking for — which is why task T-69-6 bridged the configuration's errors with an
+/// error object and not with a number (decision 129.3).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OsCode(i32);
 
@@ -186,9 +191,11 @@ impl OsCode {
     /// no system number and answers [`OsCode::NONE`]: there is no number to report and none is
     /// invented.
     ///
-    /// The idiom `tray::os_code_of` has drawn for a refused configuration write since task
-    /// Т-22-9, brought to the one `io::Error` this module produces. `tests\diag.rs` sweeps the
-    /// sources and keeps every call of this function inside this file.
+    /// **The one place the program reads the Win32 number of an `io::Error`** — task T-69-6,
+    /// backlog line Э34-Б-3. The idiom was drawn first for a refused configuration write (task
+    /// Т-22-9, in module `tray`) and then here (task T-34-1); since task T-69-6 the configuration
+    /// comes here through [`OsCode::of_config`], and `tests\diag.rs` sweeps the sources for a
+    /// second reading of that number. It also keeps every call of this function inside this file.
     pub fn of_io(error: &io::Error) -> Self {
         error
             .raw_os_error()
@@ -196,6 +203,32 @@ impl OsCode {
             .map_or(Self::NONE, |code| {
                 Self::of(&WinError::from_hresult(HRESULT::from_win32(code)))
             })
+    }
+
+    /// The `HRESULT` of a failed operation on **the configuration file** — task T-69-6, backlog
+    /// line Э34-Б-3, decision 129.3; the road task Т-22-9 drew in module `tray` as `os_code_of`.
+    ///
+    /// The third road into an `OsCode`, and as narrow as the other two: it takes an error object
+    /// and never a number. [`crate::settings::ConfigError::Io`] carries the `io::Error` of a system
+    /// call on the file, and its number goes the one way every such number goes in this program —
+    /// [`OsCode::of_io`]. The two variants that are not system failures answer [`OsCode::NONE`]:
+    ///
+    /// * [`crate::settings::ConfigError::Serialize`] — this program's own value refusing to become
+    ///   TOML. No call failed, and a number invented for it would be a claim about one that did;
+    /// * [`crate::settings::ConfigError::Malformed`] — cannot arrive from a write at all, and it is
+    ///   the one variant carrying something derived from the file's contents (the line and column a
+    ///   parser stopped at). It is answered with no number for both reasons, and the second is the
+    ///   one that would matter if the first ever stopped being true.
+    ///
+    /// ⚠ The `io::Error` inside the `Io` variant is a value any code could build out of any number,
+    /// so `tests\diag.rs` keeps the calls of this function inside module `tray`, the one module
+    /// that journals a configuration failure — as it keeps the calls of `of_io` inside this file.
+    pub fn of_config(error: &crate::settings::ConfigError) -> Self {
+        match error {
+            crate::settings::ConfigError::Io(io) => Self::of_io(io),
+            crate::settings::ConfigError::Malformed { .. }
+            | crate::settings::ConfigError::Serialize => Self::NONE,
+        }
     }
 
     /// The code as the number the operating system gave, for a formatter.
