@@ -1400,6 +1400,167 @@ fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
     );
 }
 
+/// **Task T-70-1, finding Э69-Б-1 — the switch follows the setting a click has written.**
+///
+/// `draw_switch` paints the tick out of `AuthorView::switch`, a copy [`letters::author_view`]
+/// makes when «От автора» opens. Before the task a click wrote `Letters::feed` and repainted
+/// that very copy: the file said the feed was off while the tick still said it was on. After a
+/// click the copy has to be the one the window would build afresh on the setting now in force.
+#[test]
+fn the_switch_follows_the_setting_a_click_has_written() {
+    with_product_strings();
+
+    let today = day(2027, 1, 1);
+    let mut state = settled("0.39.0");
+    state.first_feed_letter = Some(day(2026, 9, 10));
+
+    let opened = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+    assert_eq!(
+        opened.switch,
+        Some(true),
+        "the window opens on a feed that is on"
+    );
+
+    // The click writes the setting, and the window's copy follows it.
+    let mut view = opened.clone();
+    state.feed = false;
+    view.follow_feed(&state);
+
+    assert_eq!(
+        view.switch,
+        Some(false),
+        "the tick goes off with the setting"
+    );
+    assert_eq!(
+        view,
+        letters::author_view(&state, today, "0.39.0", FeedView::EMPTY),
+        "and the copy is the one the window would build on the setting now in force"
+    );
+
+    // The second click puts both back together.
+    state.feed = true;
+    view.follow_feed(&state);
+
+    assert_eq!(
+        view, opened,
+        "the second click brings the tick back with the setting"
+    );
+
+    // A switch FR-102 keeps away stays away, whatever the setting says.
+    let mut early = settled("0.39.0");
+    let mut hidden = letters::author_view(&early, today, "0.39.0", FeedView::EMPTY);
+    assert!(
+        hidden.switch.is_none(),
+        "no letter from the feed yet — no switch"
+    );
+
+    early.feed = false;
+    hidden.follow_feed(&early);
+
+    assert!(
+        hidden.switch.is_none(),
+        "and a changed setting does not make one appear"
+    );
+}
+
+/// The source of `src\letters.rs`, line endings normalised — the sweep below matches on it.
+fn letters_module_source() -> String {
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n")
+}
+
+/// The branch of the window procedure that answers the feed switch — from the test of the
+/// control to the `return 0;` that ends it — or `None` unless there is exactly one.
+fn switch_branch(source: &str) -> Option<&str> {
+    let mut heads = source.match_indices("if control == IDC_NEWS_SWITCH\n");
+    let (start, _) = heads.next()?;
+
+    if heads.next().is_some() {
+        return None;
+    }
+
+    let length = source[start..].find("return 0;")?;
+
+    Some(&source[start..start + length])
+}
+
+/// Whether a branch writes the setting, reads the configuration again, and only then hands what
+/// it read to the copy the switch is drawn from.
+fn follows_what_was_written(branch: &str) -> bool {
+    let (Some(write), Some(follow)) = (branch.find("update_state("), branch.find(".follow_feed("))
+    else {
+        return false;
+    };
+
+    write < follow && branch[write..follow].contains("state_now()")
+}
+
+/// **Task T-70-1, finding Э69-Б-1 — the click moves the copy the switch is drawn from.**
+///
+/// The half of the repair a pure function cannot show: that the window procedure calls it. A
+/// letters window cannot be built in a test — `open_window` takes its template out of the
+/// running executable, and `embed-resource` links `app.rc` into the product and not into the
+/// test binaries. So the branch of `IDC_NEWS_SWITCH` is read instead: it has to write the setting
+/// (FR-102), read the configuration again, hand what it read to `AuthorView::follow_feed` and
+/// repaint the switch.
+///
+/// ⚠ Controls: the branch is found exactly once and is the one that writes the file and repaints;
+/// the same branch without the call — the shape of `e69` — is caught, and so are a call fed with
+/// the reading made before the write and a call put before the write.
+#[test]
+fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
+    let source = letters_module_source();
+    let branch = switch_branch(&source).expect(
+        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
+    );
+
+    assert!(
+        branch.contains("update_state(|state| state.feed = wanted)")
+            && branch.contains("widgets::repaint::control(hwnd, IDC_NEWS_SWITCH)"),
+        "the branch found is not the one that writes the feed and repaints the switch:\n{branch}"
+    );
+
+    assert!(
+        follows_what_was_written(branch),
+        "Э69-Б-1: the click writes the setting but does not move the copy `draw_switch` paints \
+         from:\n{branch}"
+    );
+
+    let lines: Vec<&str> = branch.lines().collect();
+    let without = |needle: &str| {
+        lines
+            .iter()
+            .filter(|line| !line.contains(needle))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    assert!(
+        !follows_what_was_written(&without(".follow_feed(")),
+        "the sweep does not see a branch without the call — it cannot fail"
+    );
+    assert!(
+        !follows_what_was_written(&without("state_now()")),
+        "the sweep does not see a call fed with the reading made before the write"
+    );
+
+    let call = lines
+        .iter()
+        .find(|line| line.contains(".follow_feed("))
+        .expect("the call was found above");
+
+    assert!(
+        !follows_what_was_written(&format!("{call}\n{}", without(".follow_feed("))),
+        "the sweep does not see a call put before the write"
+    );
+}
+
 /// The version line of «От автора» says what is installed, and what is available when the feed
 /// names something newer.
 #[test]

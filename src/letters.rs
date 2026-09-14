@@ -4065,12 +4065,24 @@ unsafe extern "system" fn letter_proc(
 
                 update_state(|state| state.feed = wanted);
 
+                // ⭐ **Задача T-70-1 (находка Э69-Б-1): галка идёт за записанным.** Выключатель
+                // рисует `draw_switch` по копии `WindowState::author.switch`, которую
+                // `author_view` строит при открытии окна и при смене языка. До этой задачи
+                // щелчок писал файл и просил перерисовку, а перерисовка брала копию открытия:
+                // в файле лента выключена, а галка стоит, и второй щелчок включал ленту обратно
+                // под неподвижной галкой. Копия следует за тем, что конфигурация держит
+                // **после** записи, — поэтому конфигурация читается ещё раз, и до заёма
+                // состояния окна, как в каждой отрисовке этого файла.
+                let stored = state_now();
+
+                // SAFETY: as above.
+                unsafe { with_state(hwnd, |state| state.author.follow_feed(&stored)) };
+
                 // ⛔ **Задача T-69-5: отметку кнопке здесь не ставят.** Выключатель объявлен
                 // `BS_OWNERDRAW`, а такая кнопка бита отметки не держит: после `BM_SETCHECK(1)`
                 // `BM_GETCHECK` отвечает 0 (у `BS_AUTOCHECKBOX` — 1; замер Э43,
                 // `scratchpad-E43\t43-11-ownerdraw-check-probe.log`). Состояние живёт в
-                // `Letters::feed`, записанном строкой выше, а рисует выключатель `draw_switch` по
-                // `WindowState::author.switch` — копии, которую строит `author_view`.
+                // `Letters::feed`, а на экран его несёт копия, подтянутая строкой выше.
                 widgets::repaint::control(hwnd, IDC_NEWS_SWITCH);
 
                 return 0;
@@ -4297,7 +4309,9 @@ pub struct AuthorView {
     pub version_state: String,
     /// The quiet line about the settings file — empty once the switch is shown.
     pub file_only: String,
-    /// The switch and its state, or `None` while FR-102 keeps it away.
+    /// The switch and its state, or `None` while FR-102 keeps it away. The state is the setting's
+    /// when the window was built, and after a click the setting's as written —
+    /// [`AuthorView::follow_feed`].
     pub switch: Option<bool>,
     /// The sentence under the switch.
     pub switch_note: String,
@@ -4307,6 +4321,26 @@ pub struct AuthorView {
     pub letters: bool,
     /// The paragraph of the «Обратная связь» panel.
     pub feedback_text: String,
+}
+
+impl AuthorView {
+    /// **The switch follows the setting a click has written — FR-102, task T-70-1.**
+    ///
+    /// `draw_switch` paints the tick out of [`AuthorView::switch`], and [`author_view`] fills
+    /// that in twice in a window's life: when «От автора» opens and when the interface language
+    /// changes. A click writes `Letters::feed` through the tray and repaints the switch — and
+    /// before this method the repaint drew the copy of the opening: the file said the feed was
+    /// off while the tick said it was on, and a second click turned the feed back on under a
+    /// tick that had never moved (finding Э69-Б-1, read out of the code in stage Э69).
+    ///
+    /// Only the state follows. Whether there is a switch at all stays the verdict of
+    /// [`switch_is_shown`]: a hidden switch is not there to be clicked, and a setting that has
+    /// changed must not make one appear.
+    pub fn follow_feed(&mut self, state: &Letters) {
+        if let Some(on) = self.switch.as_mut() {
+            *on = state.feed;
+        }
+    }
 }
 
 /// The whole of what «От автора» says — FR-103.
