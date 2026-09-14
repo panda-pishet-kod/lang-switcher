@@ -2508,51 +2508,11 @@ fn a_resize_clears_everything_a_flush_clears() {
     );
 }
 
-/// **SEC-04a: a resize publishes the position counter, and the pair of mirrors stays possible.**
-///
-/// Task T-04-3-3 made the resize publish the zero it stored. Since task T-39-2 that zero comes from
-/// the general flush the resize goes through (`Recorder::reset` → `clear_ring`), and the new ring's
-/// length goes out through `Ring::set_len`, so both mirrors read zero the moment the resize is done. Before this task the position
-/// mirror was left alone, and a snapshot of SEC-04a could therefore carry `buffer_len = 0`
-/// beside a non-zero `cycle_position` — a pair the program itself can never be in, and the pair
-/// the bench of §11.5 reads for positions 16 and 17.
-///
-/// Under the `testing` feature because the mirror exists only there; the counter's own behaviour
-/// is asserted without it, a few tests above.
-#[cfg(feature = "testing")]
-#[test]
-fn a_resize_publishes_the_position_counter_next_to_the_length() {
-    use lang_switcher::control;
-
-    let mut recorder = fresh_of(8);
-    fill(&mut recorder, 3);
-    counter_at_three(&mut recorder);
-
-    // `advance_cycle` published the non-zero value, which is what makes the next assertion a
-    // check on `set_capacity` rather than on an atomic that happened to be zero already.
-    assert_eq!(
-        control::snapshot().cycle_position,
-        3,
-        "advance_cycle publishes, and the mirror is off zero before the resize"
-    );
-
-    recorder.set_capacity(64);
-
-    let published = control::snapshot();
-    assert_eq!(
-        published.cycle_position, 0,
-        "SEC-04a: the resize publishes the zero it stored"
-    );
-    assert_eq!(
-        published.cycle_position,
-        recorder.cycle_position(),
-        "the mirror agrees with the counter it mirrors"
-    );
-    assert_eq!(
-        published.buffer_len, 0,
-        "and the length mirror is the zero the new ring published through set_len"
-    );
-}
+// **Task T-69-4 (T-11-27): the test of the mirrors of SEC-04a that stood here — "a resize publishes
+// the position counter next to the length" — lives in `tests\buffer_mirror.rs`, alone in its
+// process.** Nearly every test of this binary publishes those mirrors, and a read of them here
+// raced the writers beside it; that file gives the numbers, and it keeps this one free of module
+// `control`. The counter's own behaviour across a resize is asserted a few tests above.
 
 // -------------------------------------------------------------------------------------
 // Task T-03-3, points 14 to 18 — FR-12: the flush that carries a timestamp
