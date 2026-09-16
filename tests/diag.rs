@@ -34,6 +34,7 @@ use std::thread;
 use lang_switcher::diag::{self, CAPACITY, Kind, LOG_FILE_NAME, Operation, OsCode};
 use lang_switcher::settings;
 use lang_switcher::switch::{self, Scope};
+use lang_switcher::tray;
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::core::Error as WinError;
 
@@ -384,6 +385,82 @@ fn a_refused_hotkey_capture_is_counted_and_journaled() {
     assert!(
         ours.is_some_and(|event| event.code == OsCode::NONE && event.kind() == Kind::Window),
         "the journal holds no entry «hotkey capture refused» with no code from this call: {ours:?}"
+    );
+}
+
+/// **Task T-73-1, backlog line Э71-Б-1 — a refused foreground of the tray menu reports under its
+/// own name.**
+///
+/// The owner's word of 2026-09-17 was that the menu of the icon does not go away on a click
+/// elsewhere. The cause was the gate of task T-41-3 refusing the `SetForegroundWindow` of the
+/// documented workaround, and the reason it lived through four deliveries is that the refusal was
+/// a **silence**: no name, no counter, nothing in a dump. The row «tray foreground refused» is
+/// that silence ended (decision 134.2).
+///
+/// ⚠ **Not a test that «is covered anyway»**, for the very reason the row above gives: the scan of
+/// the sources finds literal calls of `report_non_critical("…")`, and this refusal is recorded
+/// through `Operation::from_name`. A name missing from the table would narrow to «(unlisted)» and
+/// no other test would go red.
+///
+/// A fact and no value: `Kind::Tray`, the kind `SetForegroundWindow` itself already has — the
+/// business of the icon — and **no new `Kind`**. Neither tick and no distance between them can
+/// travel: the helper takes no argument at all.
+#[test]
+fn a_refused_tray_foreground_reports_under_its_own_name() {
+    let name = "tray foreground refused";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "Э71-Б-1: «{name}» has no row in the table — the refusal would reach the ring nameless"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(
+        operation.kind(),
+        Kind::Tray,
+        "a refused foreground of the menu is the business of the icon, like SetForegroundWindow"
+    );
+
+    let _guard = ring();
+
+    diag::record(operation, OsCode::NONE);
+
+    let dump = diag::render();
+
+    assert!(dump.contains(name), "the dump does not print {name}");
+}
+
+/// **Task T-73-1 — the refusal is journaled by the one helper the menu calls.**
+///
+/// `tray::note_foreground_refused` is what the `else` of the gate in `show_menu` carries out. A
+/// menu cannot be tracked here, so the helper is called directly, and `tests\tray.rs` sweeps the
+/// body of `show_menu` for the call.
+///
+/// ⚠ There is **no counter** beside it, by decision 134.2 — the ring of 1024 events carries any
+/// acceptance, and a counter would be a number this task has no use for. The ring is process-wide,
+/// so the journal is asked for «at least one more» and for **our** entry — the name, the code and
+/// an ordinal no older than the ticket counter before the call — and never for «exactly one».
+#[test]
+fn a_refused_tray_foreground_is_journaled() {
+    let _guard = ring();
+
+    let recorded = diag::recorded();
+
+    tray::note_foreground_refused();
+
+    assert!(
+        diag::recorded() > recorded,
+        "Э71-Б-1: the refused foreground did not reach the journal"
+    );
+
+    let ours = diag::snapshot().into_iter().find(|event| {
+        event.ordinal >= recorded && event.operation.name() == "tray foreground refused"
+    });
+
+    assert!(
+        ours.is_some_and(|event| event.code == OsCode::NONE && event.kind() == Kind::Tray),
+        "the journal holds no entry «tray foreground refused» with no code from this call: {ours:?}"
     );
 }
 

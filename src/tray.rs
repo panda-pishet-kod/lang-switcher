@@ -3599,36 +3599,74 @@ pub fn menu_point_of(
 /// that call is half of the documented way a popup menu is dismissed.
 pub const FOREGROUND_GRACE_MS: u32 = 1_000;
 
-/// Whether this program may pull itself to the front to show the menu — task T-41-3.
+/// How far apart two ticks of the same wrapping millisecond counter are — task **T-73-1**.
 ///
-/// `gap` is how long passed between the last thing the person did and the message being
-/// handled, in milliseconds — see [`last_input_gap`], which is where the two ticks meet.
+/// The counter `GetMessageTime` and `GetLastInputInfo` both answer in is 32 bits wide and wraps
+/// every forty-nine days, so «раньше» and «позже» are not properties of two of its readings: only
+/// the distance between them is, and the distance is the **shorter way round the ring**. That is
+/// what `a.wrapping_sub(b).min(b.wrapping_sub(a))` computes, and it is symmetric by construction —
+/// `tick_distance(a, b) == tick_distance(b, a)` — which is the whole repair of this task.
+///
+/// The answer is never greater than `u32::MAX / 2`: past the half-way point the other way round is
+/// the shorter one. Two ticks that really are twenty-five days apart are therefore read as being
+/// twenty-four days apart the other way — harmless here, where anything past a second is refused
+/// alike.
+pub fn tick_distance(a: u32, b: u32) -> u32 {
+    a.wrapping_sub(b).min(b.wrapping_sub(a))
+}
+
+/// Whether this program may pull itself to the front to show the menu — task T-41-3, repaired by
+/// task **T-73-1**.
+///
+/// The two arguments are ticks of the same wrapping millisecond counter: `message_tick` is when
+/// the message being handled was **put into the queue** (`GetMessageTime`), `last_input_tick` is
+/// when the session last saw input (`GetLastInputInfo`). The rule is that they lie no further
+/// apart than [`FOREGROUND_GRACE_MS`] — [`tick_distance`], **by either side**.
+///
+/// ⭐ **Why either side, and not «ввод раньше сообщения» — the defect this task repairs.** Until
+/// `e73` the rule subtracted in one direction only, and any input reaching the system **after** the
+/// shell queued the message turned the difference into about 4 294 967 000 ms and refused. That is
+/// not a rare race: releasing the very key that opened the menu happens after the message by
+/// definition, and so does the smallest movement of the mouse after the button comes up. Input on
+/// either side of the message is a person at the machine — which is what the gate is asking about.
+/// A forgery at an idle machine is far from the last input **both** ways round, so nothing of
+/// finding Н44 is given back.
 ///
 /// ⚠ **What the rule does not cover, said plainly.** A forged message sent while the person is
 /// busy typing in another program passes: nothing here can tell that click from this one. What
 /// it does cover is the case the finding describes — a message arriving at an idle machine, the
 /// menu unrolling by itself and taking the foreground away from whatever was in front.
-pub fn may_take_the_foreground(gap: u32) -> bool {
-    gap <= FOREGROUND_GRACE_MS
+pub fn may_take_the_foreground(message_tick: u32, last_input_tick: u32) -> bool {
+    tick_distance(message_tick, last_input_tick) <= FOREGROUND_GRACE_MS
 }
 
-/// Milliseconds between the last thing the person did and the message being handled — the
-/// argument of [`may_take_the_foreground`], task T-41-3.
+/// The tick of the message this thread is handling — one argument of
+/// [`may_take_the_foreground`], task T-41-3.
 ///
-/// Two ticks of the same wrapping millisecond counter: `GetMessageTime` answers with the tick of
-/// **the message this thread is handling** — which, on this road, is the click on the icon — and
-/// `GetLastInputInfo` with the tick of the last input the session saw. `wrapping_sub` is right
-/// across the wrap that happens every forty-nine days, the machine FR-80 exists for.
+/// `GetMessageTime` answers with the moment the message was **created — put into the queue of
+/// this thread**, in the units of the wrapping millisecond counter. On the road of the menu that
+/// message is the `WM_APP_TRAY` the shell posted for the click on the icon, and `show_menu` runs
+/// inside its handling, so this is the tick of the click itself.
 ///
-/// Under load both numbers move together, so a slow machine does not lose the foreground on a
-/// real click: the gap between the two is what is measured, not how long this program took to
-/// get here.
+/// Under load this number and the one below move together, so a slow machine does not lose the
+/// foreground call on a real click: what is measured is the distance between the two, not how
+/// long this program took to get here.
+fn message_tick() -> u32 {
+    // SAFETY: takes no arguments and touches no memory of ours.
+    let tick = unsafe { GetMessageTime() };
+
+    tick as u32
+}
+
+/// The tick of the last input the session saw, if the system will say — the other argument of
+/// [`may_take_the_foreground`], task T-41-3.
 ///
-/// NFR-13: a refusal of `GetLastInputInfo` answers **zero** — «только что», — because the harm
-/// of refusing a real click (a menu that will not dismiss) is greater than the harm of granting
-/// a forged one (a menu in front), and a system that will not answer is not evidence of a
-/// forgery.
-fn last_input_gap() -> u32 {
+/// NFR-13: a refusal of `GetLastInputInfo` answers **`None`**, and the caller lets the menu take
+/// the foreground — because the harm of refusing a real click (a menu that will not dismiss) is
+/// greater than the harm of granting a forged one (a menu in front), and a system that will not
+/// answer is not evidence of a forgery. Until task T-73-1 the same decision was spelled as a gap
+/// of **zero** — «только что»; the `None` says it in the open instead of hiding it in a number.
+fn last_input_tick() -> Option<u32> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 
     let mut info = LASTINPUTINFO {
@@ -3640,13 +3678,32 @@ fn last_input_gap() -> u32 {
     // only memory the call touches.
     if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
         app::report_non_critical("GetLastInputInfo", &WinError::from_thread());
-        return 0;
+        return None;
     }
 
-    // SAFETY: takes no arguments and touches no memory of ours.
-    let message = unsafe { GetMessageTime() } as u32;
+    Some(info.dwTime)
+}
 
-    message.wrapping_sub(info.dwTime)
+/// Writes down that the gate of [`may_take_the_foreground`] turned a showing away — task
+/// **T-73-1**, backlog line Э71-Б-1, decision 134.2.
+///
+/// **Nothing of the two ticks is kept** — not the distance, not either number. SEC-07 says what
+/// may reach the journal is a name chosen at compile time, and «tray foreground refused» is that
+/// name; a tick is a value, and a value has no field here. The shape of
+/// `letters::note_link_refused` and `settings::note_capture_refused`.
+///
+/// It exists because the refusal was a **silence**, and the silence is why the defect the owner
+/// named on 2026-09-17 lived through four deliveries: a menu that will not go away looks, from
+/// where the person stands, like the program being broken, and one line in the journal is the
+/// difference between «не работает» and «программа отказалась и сказала об этом». No counter and
+/// no line of the dump go with it — the ring of 1024 events carries any acceptance.
+///
+/// Public so that `tests\diag.rs` calls the very function the menu calls.
+pub fn note_foreground_refused() {
+    diag::record(
+        diag::Operation::from_name("tray foreground refused"),
+        diag::OsCode::NONE,
+    );
 }
 
 /// The cursor, if the system will say where it is — task T-41-3.
@@ -3777,7 +3834,24 @@ fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {
     // was doing. [`may_take_the_foreground`] compares the tick of **this message** with the tick
     // of the last thing the person did: a click on the icon puts them milliseconds apart, a
     // message posted at an idle machine puts them minutes apart.
-    if may_take_the_foreground(last_input_gap()) {
+    //
+    // ⭐⭐ **Task T-73-1: the gate is symmetric, and its refusal is no longer a silence.** The
+    // owner's word of 2026-09-17 was that the menu does not go away on a click elsewhere, and the
+    // cause was this gate: it subtracted in one direction only, so any input after the shell
+    // queued the message — the release of the key that opened the menu, a twitch of the mouse —
+    // refused, and the menu came up without the foreground, which is precisely the state the
+    // workaround above exists to avoid. [`tick_distance`] now measures the shorter way round the
+    // ring, and a refusal is written down by [`note_foreground_refused`], so the next time this
+    // is doubted the dump answers instead of a guess.
+    let may_take_it = match last_input_tick() {
+        // NFR-13: a system that will not say when the last input was is not evidence of a
+        // forgery, and the harm of refusing a real click is the greater one — so the showing
+        // goes ahead. See [`last_input_tick`].
+        None => true,
+        Some(last_input) => may_take_the_foreground(message_tick(), last_input),
+    };
+
+    if may_take_it {
         // SAFETY: `hwnd` is the live window this tray was installed on; the call reads no memory
         // of ours.
         let foreground = unsafe { SetForegroundWindow(hwnd) };
@@ -3789,6 +3863,14 @@ fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {
             // menu still appears, it may merely need a second click to be dismissed.
             app::report_non_critical("SetForegroundWindow", &WinError::from_thread());
         }
+    } else {
+        // ⭐ **Task T-73-1: the menu is shown anyway, and the refusal is written down.**
+        //
+        // Shown anyway because a menu that will not go away would be a worse defect than the one
+        // being repaired — that is the same judgement task T-41-3 made and it is not reopened
+        // here. Written down because the silence is what let the defect live through four
+        // deliveries: from `e73` on, «меню не гаснет» is a question a dump can answer.
+        note_foreground_refused();
     }
 
     // The gate of SEC-05 goes up here, immediately before `TrackPopupMenuEx`: from the
