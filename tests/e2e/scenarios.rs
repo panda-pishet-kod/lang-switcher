@@ -2153,7 +2153,7 @@ pub fn position_15(ctx: &Context) -> Vec<Row> {
     // `WM_DESTROYCLIPBOARD` to that owner with a **blocking** send. The bench's main thread is a
     // console loop and pumps no messages, so the application's `Ctrl+C` would sit in
     // `EmptyClipboard` until the system's hung-window timeout — measured at 5091 ms, against the
-    // 900 ms step 3 of FR-61 gives it. The product would then correctly report "there is no
+    // 300 ms step 3 of FR-61 gives it. The product would then correctly report "there is no
     // selection", and the position would be measuring the bench.
     //
     // A destroyed window cannot be sent to, so the notification is dropped and the copy is
@@ -2234,7 +2234,7 @@ const SELECTION_WINDOW_TITLE: &str = "LangSw-Selection-15";
 /// 14's publishes the length of its password box, and stops doing so as soon as there is one.
 /// That is what lets the scenario wait for the selection **on a condition** (requirement 1 of
 /// §11.5) instead of on a clock, and it matters more here than anywhere else in the matrix: step
-/// 3 of FR-61 waits 900 ms for the clipboard to move, so a hotkey pressed while the application
+/// 3 of FR-61 waits 300 ms for the clipboard to move, so a hotkey pressed while the application
 /// was still making the selection would measure that race and report "there is no selection".
 /// The timer stops itself once the selection exists, so the window is idle from that moment on.
 fn launch_selection_window() -> Result<App, String> {
@@ -2346,7 +2346,7 @@ fn selection_body(
     }
 
     // ⚠ **Requirement 1 of §11.5, and it is not a formality here.** The hotkey must not be sent
-    // until the selection really exists: the product answers `Ctrl+C` and waits 900 ms (§7) for
+    // until the selection really exists: the product answers `Ctrl+C` and waits 300 ms (§7) for
     // the clipboard to move, so a press that arrived while the application was still making the
     // selection would measure that race and report "there is no selection". The window publishes
     // the length of its own selection in its title — the shape position 14 uses for `pass=N` —
@@ -2388,7 +2388,7 @@ fn selection_body(
     // the clipboard sequence number rather than by asking the application anything.**
     //
     // This is requirement 1 of §11.5 applied to a place where the obvious reading of it is
-    // actively harmful. Step 3 of FR-61 gives the application 900 ms to put the selection on the
+    // actively harmful. Step 3 of FR-61 gives the application 300 ms to put the selection on the
     // clipboard, and the application here is a single-threaded WinForms window: UI Automation
     // calls are marshalled onto that same thread, so a bench that started polling the element
     // the instant the hotkey went out would be **competing with the very keystroke it is waiting
@@ -2470,7 +2470,7 @@ fn selection_body(
             "выделение через Shift+Home (с префиксом E0, FR-05); буфер набора после выделения: \
              {buffer_after_select} — FR-10 «Home — полный сброс», поэтому конвертировать могла \
              только выделенная фраза; приложение ответило на Ctrl+C продукта за {} мс (шаг 3 \
-             FR-61 ждёт 900 мс, §7); исходная раскладка окна {}; {counters}",
+             FR-61 ждёт 300 мс, §7); исходная раскладка окна {}; {counters}",
             answered_in.as_millis(),
             layout::describe(source_layout)
         )),

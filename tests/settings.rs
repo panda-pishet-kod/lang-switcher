@@ -147,7 +147,7 @@ fn defaults_match_section_7_field_by_field() {
     assert_eq!(config.replacement.inter_event_delay_ms, 0);
 
     assert!(config.selection.enabled);
-    assert_eq!(config.selection.clipboard_timeout_ms, 900);
+    assert_eq!(config.selection.clipboard_timeout_ms, 300);
     assert_eq!(config.selection.clipboard_restore_delay_ms, 200);
 
     assert_eq!(config.buffer.capacity, 256);
@@ -232,7 +232,7 @@ fn the_four_settings_the_dialog_no_longer_shows_survive_the_round_trip() {
 
     // Hand-written, the way the user of решение 81 edits it, and not one value is a default:
     // the method is `selection` (default `auto`), the delay 13 (default 0), the timeout 987
-    // (default 900), the restore delay 654 (default 200). `[buffer] capacity` and
+    // (default 300), the restore delay 654 (default 200). `[buffer] capacity` and
     // `[general] enabled` ride along as the family this joins.
     let path = write_file(
         &dir,
@@ -1839,7 +1839,7 @@ fn one_bad_number_loses_only_itself() {
             "selection",
             "clipboard_timeout_ms",
             |config| u64::from(config.selection.clipboard_timeout_ms),
-            900,
+            300,
         ),
         (
             "selection",
@@ -1963,7 +1963,7 @@ fn a_syntax_typo_in_one_soft_number_costs_that_number_and_nothing_else() {
             "selection",
             "clipboard_timeout_ms",
             |config| u64::from(config.selection.clipboard_timeout_ms),
-            900,
+            300,
         ),
         (
             "selection",
@@ -2202,10 +2202,11 @@ fn exactly_the_five_numbers_of_section_7_are_soft() {
 /// `impl Default for Config` carries the promise «The configuration of section 7 exactly as
 /// printed there», and until this task **nothing checked it**: the document and the function
 /// could drift apart in silence, and the only reader who would have noticed was a person holding
-/// the two side by side. The drift is not hypothetical — this task moves
-/// `[selection] clipboard_timeout_ms` from 300 to 900 (решение 135.2, слово владельца
-/// 2026-09-17) and has to move it in both places, which is exactly the moment such a promise is
-/// usually half-kept.
+/// the two side by side. The drift is not hypothetical — the task that wrote this guard moved
+/// `[selection] clipboard_timeout_ms` from 300 to 900 (решение 135.2), and task T-77-1 moved it
+/// back to 300 when that turned out to have been the wrong number to move (решение 137.2). Twice
+/// in two deliveries the document and the function had to move together, which is exactly the
+/// moment such a promise is usually half-kept.
 ///
 /// One field and not all five: this is the field the task moves, and a guard written for a field
 /// nobody is touching would be a guard nobody has ever seen fail. The document is read the way

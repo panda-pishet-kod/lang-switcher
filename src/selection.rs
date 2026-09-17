@@ -63,12 +63,12 @@
 //!
 //! Everything here is **slow by construction**. FR-62 prescribes ten attempts twenty
 //! milliseconds apart, so a single clipboard access can cost 180 ms before it gives up; step 3
-//! of FR-61 waits up to 900 ms for a sequence number to move; step 8 waits another 200 ms
+//! of FR-61 waits up to 300 ms for a sequence number to move; step 8 waits another 200 ms
 //! before restoring. Against that, FR-80 says the system removes a `WH_KEYBOARD_LL` hook
 //! **silently** when its callback overruns `LowLevelHooksTimeout`, and NFR-01 gives that
 //! callback a hundred microseconds. A low-level keyboard hook is called back on the thread that
 //! installed it, and that thread can only answer while it is pumping messages — so a thread that
-//! sits inside a 900 ms wait is a thread that is not answering the hook, and 900 ms is nine
+//! sits inside a 300 ms wait is a thread that is not answering the hook, and 300 ms is three
 //! thousand times NFR-01.
 //!
 //! Hence a hard rule, enforced rather than documented: **no blocking primitive of this module
@@ -81,7 +81,7 @@
 //! | Thread of section 6.1 | Why it is or is not the host |
 //! |---|---|
 //! | input | owns the `WH_KEYBOARD_LL` hook (FR-01) and the typing buffer (section 6.3). **Excluded** — this is the whole of the paragraph above |
-//! | watcher | owns the focus probe of FR-71 and FR-72, whose budget is 50 ms per level and on whose answer SEC-06 holds the typing buffer switched off. A 900 ms clipboard wait here would lengthen exactly the window in which the user's typing is deliberately dropped |
+//! | watcher | owns the focus probe of FR-71 and FR-72, whose budget is 50 ms per level and on whose answer SEC-06 holds the typing buffer switched off. A 300 ms clipboard wait here would lengthen exactly the window in which the user's typing is deliberately dropped |
 //! | **UI** | already the thread section 6.1 gives «Чтение и запись конфигурации» — the process's slow, deadline-free work — and the only one of the three with nothing on a latency budget. **The host** |
 //!
 //! Two independent tests answer [`caller_may_block`], and they cover each other: the typing
@@ -211,12 +211,15 @@ pub const SNAPSHOT_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 
 /// How often [`wait_for_change`] looks at the sequence number.
 ///
-/// Five milliseconds: a hundred and eighty looks across the 900 ms of step 3 of FR-61, each of
-/// them one call to `GetClipboardSequenceNumber`, which needs no clipboard lock and cannot
-/// block. Polling is the only option available — the system has no "wait until the clipboard
-/// changes" primitive, and the notification it does have, `WM_CLIPBOARDUPDATE`, is a message
-/// that would have to be pumped by a thread that is at that moment inside step 3 of a sequence
-/// of eight.
+/// Five milliseconds: sixty looks across the 300 ms of step 3 of FR-61, each of them one call
+/// to `GetClipboardSequenceNumber`, which needs no clipboard lock and cannot block. Polling is
+/// the only option available — the system has no "wait until the clipboard changes" primitive,
+/// and the notification it does have, `WM_CLIPBOARDUPDATE`, is a message that would have to be
+/// pumped by a thread that is at that moment inside step 3 of a sequence of eight.
+///
+/// ⚠ Since task T-76-1 the loop of [`wait_for_change`] does let **sent** messages through between
+/// these looks — see [`let_sent_messages_through`]. That is not a pump and changes nothing here:
+/// `WM_CLIPBOARDUPDATE` is posted, not sent, and is still not dispatched during step 3.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 /// Standard clipboard format `CF_UNICODETEXT`.
@@ -2383,7 +2386,7 @@ pub fn is_own_change(sequence: u32) -> bool {
 
 /// `[selection] clipboard_timeout_ms` as a duration — step 3 of FR-61.
 ///
-/// Acceptance point 18: the nine hundred milliseconds are the *default of section 7* and live
+/// Acceptance point 18: the three hundred milliseconds are the *default of section 7* and live
 /// in `src\settings.rs`; this module reads whatever the configuration carries and has no number
 /// of its own to fall back on.
 pub fn timeout_of(selection: &Selection) -> Duration {
@@ -2397,25 +2400,33 @@ pub fn restore_delay_of(selection: &Selection) -> Duration {
 
 /// ⭐ **The ceiling of `[selection] clipboard_timeout_ms` — task T-13-13.**
 ///
-/// The *default* is the nine hundred milliseconds [`timeout_of`] names one line above, and it
+/// The *default* is the three hundred milliseconds [`timeout_of`] names one line above, and it
 /// lives in `src\settings.rs`; the ceiling is the other end of the same field and lives here,
 /// beside the function that states the default. The pair is the shape [`crate::buffer`] already
 /// has for `[buffer] capacity` — `DEFAULT_CAPACITY` and `MAX_CAPACITY` side by side, with
 /// `effective_capacity` between them.
 ///
-/// ⚠ **Why nine hundred, and not the three hundred that stood here until `e75`.** Measured on the
-/// owner's machine 2026-09-17, with a debug build that printed the seven counters of the path:
-/// Notepad answers the `Ctrl+C` of step 2 over a **multi-word** selection later than three hundred
-/// milliseconds, so step 3 gave up, FR-60 read that as «there is no selection», and the first press
-/// of the hotkey came back as the idle tone of FR-100 while the second one worked. The clipboard
-/// had moved — `foreign_updates` counted it — only after the wait had stopped looking.
+/// ⛔⛔ **Read this before raising the default. It has been raised once, for nothing.**
 ///
-/// The larger number costs little, and the reason is worth stating: the full wait is paid **only by
-/// a press that was going to be idle anyway**. The probe runs at all only when the typing buffer is
-/// empty, and when a selection does exist the wait ends at the moment the copy arrives, not at the
-/// ceiling. What grows is the pause before the idle tone of a press that had nothing to convert.
-/// Nine hundred is the owner's word of 2026-09-17 — решение 135.2 — and not a measurement of
-/// Notepad, whose true delay is known only to lie between three hundred and eight hundred.
+/// Delivery `e75` moved it from three hundred to nine hundred against the defect «the first press
+/// on a selection is idle, the second one works», on a hypothesis that fitted three probes: that
+/// the application answers the `Ctrl+C` of step 2 later than the wait allows. The hypothesis was
+/// **wrong**, the nine hundred fixed nothing, and `e77` put the number back. What the instrument of
+/// task T-76-1 measured afterwards (decisions 135в–135д):
+///
+/// * a wait that **succeeds** takes **five milliseconds** — the very first look of
+///   [`POLL_INTERVAL`]. Not two hundred, not two hundred and eighty. Five;
+/// * a wait that **fails** is not helped by three hundred, by nine hundred, or by any number,
+///   because the application was blocked **on this program**: we own the clipboard after every
+///   step 6 and every step 8, and its `EmptyClipboard` waited on a `WM_DESTROYCLIPBOARD` sent to a
+///   window whose thread was asleep in this very loop;
+/// * **there is nothing in between.** The two outcomes are five milliseconds and never.
+///
+/// So three hundred is not a guess and not a compromise: it is sixty times the only duration a
+/// successful wait has ever been measured to need. A larger number buys nothing and is paid for by
+/// the one press that was going to be idle anyway — the pause before its tone. If a press is still
+/// idle, the answer is **not** here: it is a question about what is holding the other application,
+/// and task T-76-1 is where that was found the first time.
 ///
 /// ⚠ **Nothing in this module enforces it.** The clamp stands on the one publication, in
 /// `crate::app::publish_configuration`, so [`published_timeout`] already answers a value inside
@@ -3643,7 +3654,7 @@ pub fn run<P: Path>(path: &mut P, plan: &Plan) -> Outcome {
             // ---- the late `Ctrl+C` — the audit of 2026-08-24, task T-13-11 ------------------
             //
             // A timeout is not a promise that nothing will happen. Step 2 sent a real `Ctrl+C`,
-            // and a busy application — the case the nine hundred milliseconds exist for — can
+            // and a busy application — the case the three hundred milliseconds exist for — can
             // answer it after the wait has given up. So the sequence number is asked once more
             // against the mark step 1 left: if it has moved, the clipboard is no longer what the
             // user put there, and the snapshot in hand is the only copy of it left anywhere.
@@ -4449,7 +4460,7 @@ mod tests {
     fn the_two_timings_come_out_of_section_seven_and_not_out_of_this_module() {
         let default = Selection::default();
 
-        assert_eq!(timeout_of(&default), Duration::from_millis(900));
+        assert_eq!(timeout_of(&default), Duration::from_millis(300));
         assert_eq!(restore_delay_of(&default), Duration::from_millis(200));
         assert!(is_enabled(&default));
 
@@ -4844,7 +4855,7 @@ mod tests {
         let default = timeout_of(&Selection::default());
 
         assert!(POLL_INTERVAL < default);
-        assert_eq!(default.as_millis() / POLL_INTERVAL.as_millis(), 180);
+        assert_eq!(default.as_millis() / POLL_INTERVAL.as_millis(), 60);
     }
 
     // -------------------------------------------------------------------------------------
