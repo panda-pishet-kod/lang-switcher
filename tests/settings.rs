@@ -5092,8 +5092,7 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
 ///
 /// Four until task Т-23-4 (решение 82.5) added the «Как пользоваться» block: five numerals and
 /// five rows.
-const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 14] = [
-    (1121, "О программе: имя"),
+const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 13] = [
     (1122, "О программе: версия"),
     (1123, "О программе: первая строка"),
     (1124, "О программе: вторая строка"),
@@ -5816,6 +5815,134 @@ fn the_about_window_paints_both_of_its_buttons() {
     }
 }
 
+/// **⭐⭐ The подложка of the name is the highlight of the ground it stands on** — task T-78-3,
+/// решение 139.2 п. 7, and the guard of the one thing the user caught with his eye.
+///
+/// The first mock-up painted it with `hover_bg`, the field every other button lights with, and
+/// the user answered: «в варианте А в тумане я подложки не увидел при наведении». He was right,
+/// and the numbers say why — `hover_bg` is measured against `button_bg`, the ground the other
+/// buttons rest on, and the name rests on `window_bg`:
+///
+/// | | `window_bg` | `hover_bg` | off the ground | `menu_hover_bg` | off the ground |
+/// |---|---|---|---|---|---|
+/// | «Туман» | 237,239,242 | 234,238,242 | **3 / 1 / 0** | 216,222,229 | **21 / 17 / 13** |
+/// | «Графит» | 32,35,41 | 52,58,67 | 20 / 23 / 26 | 52,58,67 | 20 / 23 / 26 |
+///
+/// ⚠ **Both halves are measured here and neither is looked at.** The roles are asserted, and
+/// then the numbers behind them — because in «Графит» the two fields hold the *same* number, so
+/// a test of the colours alone would pass with the wrong role in the palette that matters.
+#[test]
+fn the_name_of_the_about_window_lights_with_the_ground_it_stands_on() {
+    /// «Lang Switcher» — `IDC_ABOUT_NAME` is not exported, and 1121 is the number `app.rc` gives.
+    const NAME: i32 = 1121;
+
+    for (what, palette) in [("Туман", &FOG), ("Графит", &GRAPHITE)] {
+        let rest = settings::about_button_colors(NAME, false, false, false);
+        let hot = settings::about_button_colors(NAME, true, false, false);
+
+        assert_eq!(
+            rest.face,
+            ButtonFaceRole::WindowBg,
+            "{what}: at rest the name is the ground of its window, so the window looks as it \
+             did while the name was a label"
+        );
+        assert_eq!(
+            hot.face,
+            ButtonFaceRole::MenuHoverBg,
+            "{what}: under the pointer the name lights with the highlight of the ground — NOT \
+             hover_bg, which the user could not see in «Туман»"
+        );
+
+        // The ink does not move with the face: the name is the window's own text in both states.
+        assert_eq!(rest.text, ButtonTextRole::Text);
+        assert_eq!(hot.text, ButtonTextRole::Text);
+
+        // And no frame in either state — the button must read as the label it replaced.
+        assert_eq!(rest.border, ButtonBorderRole::FaceItself);
+        assert_eq!(hot.border, ButtonBorderRole::FaceItself);
+
+        // ⚠ The numbers, and not only the names. `distance` is the smallest of the three
+        // channel gaps, which is what «не увидел подложки» comes down to.
+        let ground = palette.window_bg;
+        let lit = palette.menu_hover_bg;
+        let unlit = palette.hover_bg;
+
+        let distance = |a: u32, b: u32| {
+            let channel = |value: u32, shift: u32| {
+                i32::try_from((value >> shift) & 0xFF).expect("a channel is a byte")
+            };
+            [0, 8, 16]
+                .into_iter()
+                .map(|shift| (channel(a, shift) - channel(b, shift)).abs())
+                .min()
+                .expect("three channels")
+        };
+
+        let lit_by = distance(lit.0, ground.0);
+        let unlit_by = distance(unlit.0, ground.0);
+
+        println!("{what}: menu_hover_bg off window_bg by {lit_by}, hover_bg by {unlit_by}");
+
+        assert!(
+            lit_by >= 13,
+            "{what}: the подложка must stand off the ground of the window — it stands off by \
+             {lit_by}"
+        );
+    }
+
+    // ⚠⚠ And the whole finding in one line: in «Туман» the field the mock-up first used is
+    // invisible on this ground. If this ever stops being true the decision above may be
+    // revisited — until then it is why the role is what it is.
+    let fog_unlit = [0u32, 8, 16]
+        .into_iter()
+        .map(|shift| {
+            let channel = |value: u32| i32::try_from((value >> shift) & 0xFF).expect("a byte");
+            (channel(FOG.hover_bg.0) - channel(FOG.window_bg.0)).abs()
+        })
+        .min()
+        .expect("three channels");
+
+    assert_eq!(
+        fog_unlit, 0,
+        "«Туман»: hover_bg on window_bg is the 3/1/0 the user could not see — the measurement \
+         this decision rests on"
+    );
+}
+
+/// **The разбор of every face role into a colour, closed by the full table** — task T-78-3.
+///
+/// The role table above says *which* role the name wears; this says what each role **is**, and
+/// the two together are the whole of the decision. A role named right and resolved wrong paints
+/// the same wrong pixel as a role named wrong.
+///
+/// Every role of the vocabulary is here, so a new one cannot be added without this table being
+/// edited on purpose — the same closure `the_button_colour_roles_follow_the_closed_table_of_fr_92a`
+/// keeps over the identifiers.
+#[test]
+fn every_button_face_role_resolves_to_the_palette_field_it_is_named_after() {
+    for (what, palette) in [("Туман", &FOG), ("Графит", &GRAPHITE)] {
+        for (role, expected, field) in [
+            (ButtonFaceRole::ButtonBg, palette.button_bg, "button_bg"),
+            (ButtonFaceRole::AccentBg, palette.accent_bg, "accent_bg"),
+            (ButtonFaceRole::SelBg, palette.sel_bg, "sel_bg"),
+            (ButtonFaceRole::HoverBg, palette.hover_bg, "hover_bg"),
+            (ButtonFaceRole::SelFg, palette.sel_fg, "sel_fg"),
+            (ButtonFaceRole::WindowBg, palette.window_bg, "window_bg"),
+            (
+                ButtonFaceRole::MenuHoverBg,
+                palette.menu_hover_bg,
+                "menu_hover_bg",
+            ),
+        ] {
+            assert_eq!(
+                theme::button_face_color(role, palette),
+                expected,
+                "{what}: {role:?} is named after {field} and must resolve to it"
+            );
+        }
+    }
+}
+
 /// **Task T-71-1 — every visible owner-drawn button of the about template is painted.**
 ///
 /// The sentry of the next button. The built template is read by hand, every `Button` of it whose
@@ -5886,6 +6013,106 @@ fn every_visible_owner_drawn_button_of_the_about_template_is_painted() {
              goes blank"
         );
     }
+}
+
+/// **⛔⛔ Развилка C5 — the name «Lang Switcher» stands exactly where it stood** — task T-78-3.
+///
+/// The name became a `PUSHBUTTON` so that it could answer a click. Everything else about it had
+/// to stay: the user approved a name that is quiet until the pointer reaches it, and «quiet»
+/// means the window looks the way it looked. **Two things could have moved it and both are
+/// measured here rather than looked at** — which is the lesson of Э51, where a claim about the
+/// proportions of this very window was made from a picture and was wrong.
+///
+/// 1. **The rectangle.** `42, 12, 141, 11` in dialog units, as `LTEXT` gave it and `PUSHBUTTON`
+///    keeps it.
+/// 2. **The road the text is drawn by.** The two owner-drawn roads of this program do not lay
+///    text out the same way — `DT_LEFT | DT_TOP` for a label, `DT_CENTER | DT_VCENTER` for a
+///    button — so a name painted by [`paint_push_button`] would have been carried tens of pixels
+///    right inside a 141-unit box and a little down inside an 11-unit one, with the rectangle
+///    above still passing. The drawing therefore goes the **label** body, with the face and the
+///    ink read out of the very two tables the label road read them from.
+#[test]
+fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
+    /// «Lang Switcher» — the number `app.rc` gives it. A literal, as everywhere in these
+    /// template tests: an imported number would agree with any renumbering.
+    const NAME: u32 = 1121;
+    /// The ordinal of the predefined `Button` class in a dialog template.
+    const BUTTON_CLASS: u16 = 0x0080;
+    /// The type of a button is the low nibble of its style.
+    const BS_OWNERDRAW: u32 = 0x0B;
+    /// `WS_TABSTOP`, which a `PUSHBUTTON` statement carries unless the template says otherwise.
+    const TABSTOP: u32 = 0x0001_0000;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    // (1) The rectangle of `e77`, unmoved.
+    assert_eq!(
+        template.rect_of(NAME),
+        (42, 12, 42 + 141, 12 + 11),
+        "the name must keep the rectangle it had as a label — moving it is развилка C5"
+    );
+
+    // It is a button now, and an owner-drawn one, or nothing below is about it.
+    assert_eq!(
+        template
+            .classes
+            .iter()
+            .find(|(id, _)| *id == NAME)
+            .map(|(_, class)| *class),
+        Some(Some(BUTTON_CLASS)),
+        "the name is a Button since task T-78-3"
+    );
+
+    let style = template.style_of(NAME, "О программе: имя");
+    println!("«О программе: имя» ({NAME}): style {style:#010x}");
+
+    assert_eq!(
+        style & 0x0F,
+        BS_OWNERDRAW,
+        "and an owner-drawn one, or this program does not paint it at all"
+    );
+
+    // ⚠ And **not** a tab stop: it stands first in the template, so with one the dialog would
+    // open with the focus — and the dotted frame — on the name instead of «ОК».
+    assert_eq!(
+        style & TABSTOP,
+        0,
+        "the name must not take the focus: it is first in the template, and the window would \
+         open with a dotted rectangle round it"
+    );
+
+    // (2) The road. The label body, and the two tables the label road read.
+    let source = settings_module_source();
+    let body = function_body(&source, "unsafe fn draw_about_name(");
+
+    for needle in [
+        "about_label_face(IDC_ABOUT_NAME",
+        "about_static_color_role(IDC_ABOUT_NAME",
+        "paint_label_at_pitch(",
+    ] {
+        assert!(
+            body.contains(needle),
+            "the name must be drawn the way a label is — «{needle}» is not in draw_about_name"
+        );
+    }
+
+    assert!(
+        !body.contains("paint_push_button"),
+        "⛔⛔ C5: the name must not go the button road — it centres the caption in both axes"
+    );
+
+    // ⚠ Отрицательный контроль: the reading must refuse a body that went the button road, or
+    // the four assertions above prove nothing about what they are written against.
+    let of_the_button_road = body
+        .replace("paint_label_at_pitch(", "paint_push_button(")
+        .replace("about_label_face(IDC_ABOUT_NAME", "DialogFonts::text(fonts");
+
+    assert!(
+        of_the_button_road.contains("paint_push_button")
+            && !of_the_button_road.contains("about_label_face(IDC_ABOUT_NAME"),
+        "the control must differ from the body in exactly the two ways the assertions look at"
+    );
 }
 
 /// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
@@ -10241,7 +10468,11 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
         "the panel must lie inside the window"
     );
 
-    for (id, what) in OWNER_DRAWN_ABOUT_LABELS.iter().skip(4) {
+    // ⚠ `skip(3)` and not the `skip(4)` of every wave before T-78-3: the four labels above the
+    // panel became three when the name left this list for `ABOUT_BUTTONS`. The number of panel
+    // labels the two `skip`s leave is held to `ABOUT_LABELS_ON_THE_PANEL` a few lines down, so
+    // a stale skip is caught rather than silently checking nine of the ten.
+    for (id, what) in OWNER_DRAWN_ABOUT_LABELS.iter().skip(3) {
         let (left, top, right, bottom) = template.rect_of(*id);
 
         println!("«{what}» ({id}): {left},{top}..{right},{bottom}");
@@ -10257,7 +10488,7 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // cut a window-coloured hole in the block.
     let mut declared: Vec<i32> = OWNER_DRAWN_ABOUT_LABELS
         .iter()
-        .skip(4)
+        .skip(3)
         .map(|(id, _)| *id as i32)
         .collect();
     let mut listed = settings::ABOUT_LABELS_ON_THE_PANEL.to_vec();

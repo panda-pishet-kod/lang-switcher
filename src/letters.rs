@@ -5440,7 +5440,13 @@ fn perform(hwnd: HWND, action: Action) {
 ///
 /// ⚠ The owner window went with task T-41-4: [`settings::open_in_the_shell`] is shared by three
 /// callers and has no one window to give the shell's error box to.
-fn open_link(url: &str) {
+///
+/// ⭐ `pub(crate)` since task T-78-3: the name «Lang Switcher» of «О программе» opens the
+/// program's page, and that window lives in `settings`. It opens it **by this function** and not
+/// by a second road of its own — the gate of С52 above is the whole reason this function exists,
+/// and a caller that reached the shared door past it would be the future caller the paragraph
+/// above says a check in the parser could not stop.
+pub(crate) fn open_link(url: &str) {
     if url.is_empty() || links::is_placeholder(url) {
         return;
     }

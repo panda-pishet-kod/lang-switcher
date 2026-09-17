@@ -120,22 +120,23 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN,
     EC_RIGHTMARGIN, EN_SETFOCUS, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
     GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL, IDOK, IMAGE_ICON,
-    KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-    LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING,
-    MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN,
-    SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS,
-    SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE,
-    SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetDlgItemTextW,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, SystemParametersInfoW,
-    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
-    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
-    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
-    WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
-    WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON,
-    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
+    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND, IDCANCEL, IDOK,
+    IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
+    LB_GETTEXTLEN, LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW,
+    LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM,
+    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
+    SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES,
+    STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx,
+    SendDlgItemMessageW, SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR,
+    WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
+    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_SETCURSOR, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -6242,8 +6243,12 @@ pub const OWNER_DRAWN_LABELS: [i32; 15] = [
 ///
 /// Four until task Т-23-4 (решение 82.5) added the ten statics of the «Как пользоваться»
 /// panel: five numerals and five rows.
-pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 14] = [
-    IDC_ABOUT_NAME,
+///
+/// ⚠ **Thirteen since task T-78-3, and the one that left is the name.** «Lang Switcher» is a
+/// `PUSHBUTTON` now — it opens the program's own page — so it belongs to [`ABOUT_BUTTONS`] and
+/// not here. The two lists move together and a guard holds them to it: a control named in both
+/// would be drawn twice, and one named in neither goes blank.
+pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 13] = [
     IDC_ABOUT_VERSION,
     IDC_ABOUT_LINE_1,
     IDC_ABOUT_LINE_2,
@@ -6339,6 +6344,36 @@ pub const ABOUT_HELP_SENTENCES: [i32; 5] = [
 /// and a focused button under the cursor wears the hot face and the dotted frame at once.
 pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool) -> ButtonColors {
     let border = ButtonBorderRole::ButtonBorder;
+
+    // ⭐ The name «Lang Switcher» of «О программе» — task T-78-3, решение 139.2 п. 7. The one
+    // button of this program with no face of its own: at rest it is the ground of its window, so
+    // the window looks exactly as it did while the name was a label, and under the pointer it
+    // wears the highlight **of the ground it stands on**.
+    //
+    // ⛔ `MenuHoverBg` and not `HoverBg`, and that is the whole of the decision. `hover_bg` is
+    // measured against `button_bg`, the face the other buttons rest on; against `window_bg` it
+    // stands off by 3/1/0 in «Туман» and is no highlight at all. The user saw that on the
+    // mock-up before a line of this was written: «в варианте А в тумане я подложки не увидел при
+    // наведении». See [`theme::ButtonFaceRole::MenuHoverBg`] for the numbers.
+    //
+    // ⚠ **Above `disabled` and `pressed`, and that is on purpose.** The user chose a name with
+    // two states and only two — quiet, and lit under the pointer — and neither of those gates
+    // names a state it has. It is never disabled: the address it opens is a constant of the
+    // build and never a placeholder. And a press is always made with the pointer on it (the
+    // template gives it `NOT WS_TABSTOP`, so no key can press it), so the lit face **is** the
+    // pressed face; falling through to `SelBg` would flash a selection colour across the name
+    // of the program, which is neither of the two states approved.
+    if control == IDC_ABOUT_NAME {
+        return ButtonColors {
+            face: if hot {
+                ButtonFaceRole::MenuHoverBg
+            } else {
+                ButtonFaceRole::WindowBg
+            },
+            text: ButtonTextRole::Text,
+            border,
+        };
+    }
 
     if disabled {
         return ButtonColors {
@@ -11575,7 +11610,13 @@ const PUSH_BUTTONS: [i32; 11] = [
 /// The repaint the flag asks for costs nothing visible — a push button has drawn itself
 /// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
 /// that were there.
-pub const ABOUT_BUTTONS: [i32; 2] = [OK_COMMAND, IDC_ABOUT_AUTHOR];
+///
+/// ⭐ **Three since task T-78-3, and the third is the name «Lang Switcher».** It came here out of
+/// [`OWNER_DRAWN_ABOUT_LABELS`], where it had been a `SS_OWNERDRAW` label: a click on it opens
+/// the program's own page, and a button is what a thing that answers a click is. Nothing was
+/// written twice for it — the subclass, the hover flag, the gate of the drawing and the removal
+/// at `WM_DESTROY` are this one list, and adding a line to it wired all four.
+pub const ABOUT_BUTTONS: [i32; 3] = [OK_COMMAND, IDC_ABOUT_AUTHOR, IDC_ABOUT_NAME];
 
 /// Whether the `WM_DRAWITEM` of the about window paints the button `control` — task T-71-1,
 /// finding Э70-Б-1.
@@ -11676,6 +11717,32 @@ unsafe extern "system" fn button_proc(
 
         // The far end of the notification `enter_hot` armed.
         WM_MOUSELEAVE => leave_hot(button),
+
+        // ⭐ **The hand over the name «Lang Switcher», and over nothing else** — task T-78-3.
+        //
+        // The one message of this procedure that is **answered** rather than forwarded: a
+        // `WM_SETCURSOR` that reaches `DefSubclassProc` is answered by the class with the arrow,
+        // which would put the arrow back a moment after this put the hand there. `TRUE` is the
+        // documented «the cursor is set, stop here».
+        //
+        // The identifier is asked of the control rather than carried in the subclass's reference
+        // datum: the datum is zero for every button by the discipline `subclass_buttons` keeps,
+        // and one `GetDlgCtrlID` costs less than making that datum mean something.
+        //
+        // NFR-13: a refused `LoadCursorW` falls through to the arrow, which is the cursor the
+        // window had before this task — the degraded-but-alive answer, and there is no journal
+        // row for a cursor.
+        //
+        // SAFETY: `button` is a live control this procedure was installed on; `LoadCursorW` on a
+        // **shared** system cursor answers a handle the system owns and that must not be
+        // destroyed, and `SetCursor` takes it by value.
+        WM_SETCURSOR if unsafe { GetDlgCtrlID(button) } == IDC_ABOUT_NAME => {
+            if let Ok(hand) = unsafe { LoadCursorW(None, IDC_HAND) } {
+                unsafe { SetCursor(Some(hand)) };
+
+                return LRESULT(1);
+            }
+        }
 
         // The belt to the braces of the pair — see `subclass_buttons`. Forwarded on afterwards:
         // `WM_NCDESTROY` must reach every procedure of the chain.
@@ -16121,6 +16188,19 @@ unsafe extern "system" fn about_proc(
                 end_dialog(hwnd, isize::try_from(control).unwrap_or(0));
             }
 
+            // ⭐ **The fourth, and the one that does not end the window** — task T-78-3. The
+            // name opens the program's own page in the browser and the window stays where it
+            // is: nothing about it has changed, and closing «О программе» to show a web page
+            // would take away the very window the person was reading.
+            //
+            // It goes by `letters::open_link` and not by the shared door beneath it, because
+            // that function **is** the gate of С52 — https only, and only at a host this build
+            // declares. A window that reached the door past it would be exactly the caller that
+            // gate was written to stop.
+            if control == IDC_ABOUT_NAME {
+                crate::letters::open_link(crate::letters::links::PROGRAM_URL);
+            }
+
             0
         }
 
@@ -16817,6 +16897,108 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
     }
 }
 
+/// Draws the name «Lang Switcher» — task T-78-3, the one button of this program that is painted
+/// as a label.
+///
+/// # ⚠⚠ Why this is not [`paint_push_button`], and why that is the whole point
+///
+/// The name was an `SS_OWNERDRAW` label until this task and it has to go on **looking exactly
+/// like one** — the user approved a name that is quiet until the pointer reaches it, and the
+/// rectangle it stands in did not move a unit. The two painting roads do not lay text out the
+/// same way, and the difference is not a matter of degree:
+///
+/// | | horizontal | vertical |
+/// |---|---|---|
+/// | the label road ([`theme::LABEL_TEXT_FORMAT`]) | `DT_LEFT` | `DT_TOP` |
+/// | the button road ([`paint_push_button`]) | `DT_CENTER` | `DT_VCENTER` |
+///
+/// The control is 141 units wide and the name is nowhere near that, so `DT_CENTER` alone would
+/// have carried it tens of pixels to the right, and `DT_VCENTER` would have moved it down inside
+/// an 11-unit box. **Both are measured from the flags, not looked at** — развилка C5 of the
+/// mandate, and the lesson of Э51.
+///
+/// So the button borrows its **ground** from the button table and its **drawing** from the label
+/// body: [`about_button_colors`] chooses the face exactly as it does for «ОК», and the face's
+/// brush is then handed to [`theme::paint_label_at_pitch`] as the ground of a label. The face,
+/// the ink, the rectangle and the format are then the very values the label road passed — not
+/// equal ones, **the same ones**, read out of [`about_label_face`] and
+/// [`about_static_color_role`] — so the typography cannot move by a pixel without one of those
+/// two functions changing.
+///
+/// # Safety
+///
+/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM` message
+/// it is inside of.
+unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
+    // The colour choice, split from the painting — the borrow ends before the DC is touched,
+    // exactly as everywhere in this file.
+    //
+    // SAFETY: see the caller.
+    let choice = unsafe {
+        with_about_state(hwnd, |state| {
+            // `None` — the brushes were refused at initialisation (NFR-13).
+            let brushes = state.brushes.as_ref()?;
+
+            let (colors, hot_brush) = theme::resolve_button_colors(
+                // Pressed and disabled are not asked about: this button has two states and
+                // `button_color_roles` answers them above both gates — see it for why.
+                about_button_colors(IDC_ABOUT_NAME, hot, false, false),
+                // The ground of this window, the same one `on_about_ctl_color` answers with.
+                brushes.window_bg(),
+                brushes,
+                state.palette,
+            );
+
+            Some((
+                colors,
+                hot_brush,
+                // ⚠ The ink of the label it was, out of the one table that answers it.
+                label_ink(about_static_color_role(IDC_ABOUT_NAME), state.palette),
+                // ⚠ And the face of the label it was, out of the one table that answers that.
+                state
+                    .fonts
+                    .as_ref()
+                    .map(|fonts| about_label_face(IDC_ABOUT_NAME, fonts)),
+            ))
+        })
+    };
+
+    // `_hot_brush` is named and not discarded for the reason `on_about_draw_item` gives at its
+    // own: the brush of the lit face is made for the length of one paint and must outlive it.
+    let Some(Some((colors, _hot_brush, ink, face))) = choice else {
+        return 0;
+    };
+
+    let (face, pitch) = match face {
+        Some((face, pitch)) => (Some(face), pitch),
+        None => (None, None),
+    };
+
+    // Read after the borrow ends, for the reason `draw_label` gives. Without the trailing NUL:
+    // `DrawTextW` takes the length of the slice it is given.
+    let mut caption: Vec<u16> = get_text(hwnd, IDC_ABOUT_NAME).encode_utf16().collect();
+
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message; the face brush
+    // and `face` are objects this frame or this window's state owns for longer than this call.
+    unsafe {
+        theme::paint_label_at_pitch(
+            dc,
+            rect,
+            &mut caption,
+            theme::LabelStyle {
+                // ⭐ The one difference from `draw_about_label`, and the whole of the response:
+                // the ground is the button's face — the window's own colour at rest, the
+                // highlight of that ground under the pointer.
+                ground: colors.face,
+                ink,
+                face,
+                pitch,
+                reading: theme::Reading::Native,
+            },
+        )
+    }
+}
+
 /// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.
 ///
 /// The choosing half of a chip row; the laying and the painting are `theme::paint_chip_row`.
@@ -16952,6 +17134,18 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
     // and the second button of the list had nobody to paint it.
     if ctl_type != ODT_BUTTON || !about_button_is_painted(control) {
         return 0;
+    }
+
+    // ⭐ Task T-78-3: the name goes its own way, and the way is the **label** body it went by
+    // while it was a label. See [`draw_about_name`] — in one line, the two roads lay text out
+    // differently (`DT_LEFT | DT_TOP` against `DT_CENTER | DT_VCENTER`), and the name has to
+    // stand where it stood. No focus frame either: the template gives it `NOT WS_TABSTOP`, so
+    // there is no focus to draw, and a dotted rectangle round the name of the program was never
+    // part of what the user approved.
+    if control == IDC_ABOUT_NAME {
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only to
+        // paint into for the length of this send.
+        return unsafe { draw_about_name(hwnd, dc, rect, is_hot(item_window)) };
     }
 
     let pressed = item_state.0 & ODS_SELECTED.0 != 0;

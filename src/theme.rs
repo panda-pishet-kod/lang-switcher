@@ -4116,6 +4116,31 @@ pub enum ButtonFaceRole {
     /// and 245,246,247 on 35,38,43, so the pair the accent was designed with keeps its
     /// contrast under the pointer.
     SelFg,
+    /// [`Palette::window_bg`] — the face of a button that has **no face of its own**: it stands
+    /// on the ground of its window and is meant to be invisible until the pointer reaches it
+    /// (task T-78-3, the name «Lang Switcher» of «О программе»).
+    ///
+    /// Not a hole and not a special case in the painting: the button is filled with the ground
+    /// it stands on, so the window looks exactly as it did when the name was a label, and the
+    /// response of [`ButtonFaceRole::MenuHoverBg`] is what the pointer is answered with.
+    WindowBg,
+    /// [`Palette::menu_hover_bg`] — the face of a button that rests on the ground of its
+    /// window, while the pointer stands on it (task T-78-3).
+    ///
+    /// # ⭐⭐ Why this field and **not** [`ButtonFaceRole::HoverBg`]
+    ///
+    /// The very reason [`Palette::menu_hover_bg`] exists, said once more with a second user.
+    /// `hover_bg` is the response of a button that rests on [`Palette::button_bg`], and it is
+    /// measured against **that** ground. This button rests on [`Palette::window_bg`], where in
+    /// «Туман» `hover_bg` stands off by **3 / 1 / 0** — which is no highlight at all, and the
+    /// user said so of the mock-up before a line of this was written: «в варианте А в тумане я
+    /// подложки не увидел при наведении». `menu_hover_bg` stands off the same ground by
+    /// **21 / 17 / 13**, exactly as far as a hot button stands off its own rest.
+    ///
+    /// ℹ Nothing is broken in the other buttons: «ОК» and «От автора…» rest on their own
+    /// `button_bg`, where `hover_bg` is the visible 21/17/13. The colour only vanishes on the
+    /// ground of the window, where until this task nothing answered the pointer.
+    MenuHoverBg,
 }
 
 /// The ink the button's caption is drawn with, named as the palette field.
@@ -4246,6 +4271,30 @@ pub(crate) struct ResolvedButtonColors {
     pub(crate) border: COLORREF,
 }
 
+/// The colour one [`ButtonFaceRole`] names in this palette — **the** place a face role becomes a
+/// number, and pure so that a table test can close it.
+///
+/// ⭐ Written for task T-78-3 and immediately paid for itself: this mapping already existed
+/// **twice** inside [`resolve_button_colors`] — once as a choice of brushes and once, spelt out
+/// again arm for arm, as the colour of a frame that takes the face's own colour
+/// ([`ButtonBorderRole::FaceItself`]). Two new roles would have had to be written into both, and
+/// a role written into one of them only paints the frame in a colour the face never had.
+///
+/// The brushes cannot come from here — a brush is an owned object and a face may need one made
+/// for the length of a paint — so [`resolve_button_colors`] keeps that half and this function is
+/// what both halves agree on.
+pub fn button_face_color(role: ButtonFaceRole, palette: &Palette) -> COLORREF {
+    match role {
+        ButtonFaceRole::ButtonBg => palette.button_bg,
+        ButtonFaceRole::AccentBg => palette.accent_bg,
+        ButtonFaceRole::SelBg => palette.sel_bg,
+        ButtonFaceRole::HoverBg => palette.hover_bg,
+        ButtonFaceRole::SelFg => palette.sel_fg,
+        ButtonFaceRole::WindowBg => palette.window_bg,
+        ButtonFaceRole::MenuHoverBg => palette.menu_hover_bg,
+    }
+}
+
 /// The single place a button role becomes a brush or a colour of the resolved palette —
 /// the drawing never sees a role. One body shared by the settings dialog and the about
 /// dialog (§6.2, task T-11-11), moved out of `on_draw_item` rather than copied.
@@ -4269,13 +4318,29 @@ pub(crate) fn resolve_button_colors(
     let hot = match colors.face {
         ButtonFaceRole::HoverBg => HotBrush::new(palette.hover_bg),
         ButtonFaceRole::SelFg => HotBrush::new(palette.sel_fg),
-        ButtonFaceRole::ButtonBg | ButtonFaceRole::AccentBg | ButtonFaceRole::SelBg => None,
+        // Task T-78-3: the third face the window's brush set does not hold. The set is built
+        // for the fields a window paints itself out of, and the highlight of a menu row was
+        // never one of them until a button came to rest on the ground of the window.
+        ButtonFaceRole::MenuHoverBg => HotBrush::new(palette.menu_hover_bg),
+        ButtonFaceRole::ButtonBg
+        | ButtonFaceRole::AccentBg
+        | ButtonFaceRole::SelBg
+        | ButtonFaceRole::WindowBg => None,
     };
 
     let face = match colors.face {
         ButtonFaceRole::ButtonBg => brushes.button_bg(),
         ButtonFaceRole::AccentBg => brushes.accent_bg(),
         ButtonFaceRole::SelBg => brushes.sel_bg(),
+        // The ground of the window, which the set does hold — task T-78-3.
+        ButtonFaceRole::WindowBg => brushes.window_bg(),
+        // ⚠ And its refusal falls back to **the ground of the window**, not to `button_bg` like
+        // the two below: a refused brush must leave the name looking the way it looks at rest
+        // (NFR-13), and a white slab where the highlight should be would be worse than no
+        // highlight at all.
+        ButtonFaceRole::MenuHoverBg => hot
+            .as_ref()
+            .map_or_else(|| brushes.window_bg(), HotBrush::brush),
         ButtonFaceRole::HoverBg | ButtonFaceRole::SelFg => hot
             .as_ref()
             .map_or_else(|| brushes.button_bg(), HotBrush::brush),
@@ -4293,24 +4358,17 @@ pub(crate) fn resolve_button_colors(
     // new one — the whole point of [`ButtonBorderRole::FaceItself`].
     let border = match colors.border {
         ButtonBorderRole::ButtonBorder => palette.button_border,
-        ButtonBorderRole::FaceItself => match colors.face {
-            ButtonFaceRole::ButtonBg => palette.button_bg,
-            ButtonFaceRole::AccentBg => palette.accent_bg,
-            ButtonFaceRole::SelBg => palette.sel_bg,
-            // ⚠ **Это сочетание сегодня недостижимо, и ветвь всё равно написана верно.**
-            // `FaceItself` ставится единственным местом — `about_button_colors`, то есть
-            // только для кнопок окна «О программе»; а `HoverBg` рождается в
-            // `button_color_roles` ниже ворот `if control == OK_COMMAND`, куда «ОК» этого
-            // окна не доходит. Пара «безрамочная кнопка под курсором» не возникает.
-            //
-            // ⛔ Не удалять и не сливать с соседом: соседнее плечо `SelFg` было ровно таким
-            // же мёртвым до задачи T-15-2 и ожило от одной правки таблицы ролей. День, когда
-            // безрамочной кнопке дадут отклик на наведение, оживит и это — а слитая или
-            // выброшенная ветвь молча покрасит рамку не тем цветом. `unreachable!()` тоже
-            // нельзя: паника внутри `WM_DRAWITEM` — прямое нарушение NFR-13.
-            ButtonFaceRole::HoverBg => palette.hover_bg,
-            ButtonFaceRole::SelFg => palette.sel_fg,
-        },
+        // ⚠⚠ **Это плечо было вторым списком «роль → цвет», и задача T-78-3 его сняла.** Оно
+        // перечисляло те же роли ещё раз, рука об руку с выбором кистей выше, и две новые роли
+        // пришлось бы вписать в оба; вписанная в одно из них роль молча красит рамку цветом,
+        // которого у лица никогда не было. Теперь оба спрашивают [`button_face_color`].
+        //
+        // ⭐ И одна из этих двух ролей сделала живым то, что прежний комментарий здесь называл
+        // недостижимым: пара «безрамочная кнопка под курсором» не возникала, пока имя «Lang
+        // Switcher» не стало кнопкой без рамки, отвечающей на наведение. Соседнее плечо `SelFg`
+        // было точно так же мертво до задачи T-15-2 — вот почему такие ветви не сливают и не
+        // выбрасывают.
+        ButtonBorderRole::FaceItself => button_face_color(colors.face, palette),
     };
 
     (
