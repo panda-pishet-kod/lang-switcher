@@ -886,9 +886,157 @@ fn a_second_registration_of_the_same_window_is_refused() {
     assert!(second.is_err(), "the same window cannot listen twice");
 }
 
+/// The body of a free function of a module, from its signature to the brace in the first column.
+///
+/// The same reading, and for the same reason, as `function_body` in `tests\settings.rs`: a sweep
+/// that searched the whole file would go green on a call written anywhere, and what is asserted
+/// below is that the call is **in the loop of the wait**.
+fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+    let after = source
+        .split_once(signature)
+        .unwrap_or_else(|| panic!("the module must still declare `{signature}`"))
+        .1;
+
+    after
+        .split_once("\n}\n")
+        .unwrap_or_else(|| panic!("`{signature}` must end at a brace in the first column"))
+        .0
+}
+
+/// ⭐⭐⭐ **Task T-76-1 — the wait of step 3 answers what is *sent* to it while it sleeps.**
+///
+/// The guard of the repair, and it asserts the one thing the measurement beside it cannot:
+/// `a_thread_that_owns_the_clipboard_blocks_everybody_until_it_answers` proves that
+/// [`selection::let_sent_messages_through`] **works**; this proves that the product **calls it**,
+/// in the loop, on the path that sleeps. Those are two different claims and they need two
+/// different instruments — the lesson of finding 134.5.
+///
+/// Why it matters, in one line: while this program owns the clipboard — which it does after every
+/// step 6 and every step 8 — an application answering the `Ctrl+C` of step 2 blocks inside
+/// `EmptyClipboard` on a `WM_DESTROYCLIPBOARD` sent to our window, and a wait that does not answer
+/// it waits for something that is waiting for the wait. Decisions 135в, 135г, 135д.
+#[test]
+fn the_wait_of_step_three_answers_sent_messages_while_it_sleeps() {
+    let source = source_of("selection.rs");
+    let body = body_of(
+        &source,
+        "pub fn wait_for_change(baseline: u32, timeout: Duration) -> Wait {",
+    );
+
+    println!("{body}");
+
+    assert!(
+        body.contains("let_sent_messages_through()"),
+        "the loop of step 3 must let sent messages through, or an application answering our \
+         `Ctrl+C` blocks on us for the whole timeout — decisions 135в–135д"
+    );
+    assert!(
+        body.contains("sleep(POLL_INTERVAL.min(left))"),
+        "the nap of the poll is what the call above is there to make answerable; a body without \
+         it is a body this guard was not written for"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // The checks that change the clipboard — run deliberately, never by `cargo test`
 // ---------------------------------------------------------------------------------------
+
+/// How long a competing `EmptyClipboard` costs while another thread owns the clipboard and
+/// spends `HOLD` sleeping the way step 3 of FR-61 sleeps — task T-76-1.
+///
+/// `answering` is the whole experiment: with it the owning thread calls
+/// [`selection::let_sent_messages_through`] between its naps, without it it does exactly what the
+/// product did before this task. The competing write is the product's own
+/// [`selection::write_unicode_text`] — `OpenClipboard`, `EmptyClipboard`, `SetClipboardData`,
+/// `CloseClipboard`, the same four calls any application makes to answer a `Ctrl+C`, and the
+/// block lives inside the second of them.
+fn cost_of_a_competing_write(rival: HWND, answering: bool) -> Duration {
+    const HOLD: Duration = Duration::from_millis(600);
+
+    let (ready, is_ready) = std::sync::mpsc::channel();
+    let (done, is_done) = std::sync::mpsc::channel();
+
+    let owner = std::thread::spawn(move || {
+        // The owning thread needs a window **of its own**: `EmptyClipboard` makes the window
+        // passed to `OpenClipboard` the owner, and the blocking send goes to that window's thread.
+        let window = TestWindow::create();
+
+        selection::write_unicode_text(window.0, "langsw-probe-owner")
+            .expect("the owning thread takes the clipboard");
+
+        ready.send(()).expect("the main thread is waiting");
+
+        let started = Instant::now();
+
+        while started.elapsed() < HOLD {
+            if answering {
+                selection::let_sent_messages_through();
+            }
+
+            std::thread::sleep(selection::POLL_INTERVAL);
+        }
+
+        done.send(()).expect("the main thread is waiting");
+    });
+
+    is_ready
+        .recv()
+        .expect("the owning thread wrote and entered its loop");
+
+    // A breath, so that the loop is really running when the competing write starts.
+    std::thread::sleep(Duration::from_millis(20));
+
+    let started = Instant::now();
+
+    selection::write_unicode_text(rival, "langsw-probe-rival").expect("the competing write");
+
+    let elapsed = started.elapsed();
+
+    let _ = is_done.recv();
+    owner.join().expect("the owning thread finished");
+
+    elapsed
+}
+
+/// ⭐⭐⭐ **Task T-76-1, the defect of decisions 135в–135д — an owner that does not answer holds up
+/// everybody else, and [`selection::let_sent_messages_through`] is what stops it.**
+///
+/// This is the measurement the repair stands on, and it is the owner's own experiment made
+/// automatic: one thread takes the clipboard and then sleeps the way step 3 of FR-61 sleeps,
+/// another does what an application does to answer a `Ctrl+C`. Without the answer the second
+/// thread sits inside `EmptyClipboard` for as long as the first one sleeps — which in the product
+/// is the whole of `[selection] clipboard_timeout_ms`, and is why raising that number never
+/// helped and never could: the thing being waited for was waiting for the waiter.
+///
+/// ⚠ The numbers are deliberately loose. What is asserted is the **shape** — one round costs about
+/// the hold, the other almost nothing — because an assertion tight enough to be exact would be a
+/// flake on a busy machine, and the effect here is a factor of ten.
+#[test]
+#[ignore = "writes to the machine's clipboard and blocks a thread; run with --ignored --test-threads=1"]
+fn a_thread_that_owns_the_clipboard_blocks_everybody_until_it_answers() {
+    let _serialised = serialised();
+    let window = TestWindow::create();
+    let _keeper = Keeper::take(window.0);
+
+    let silent = cost_of_a_competing_write(window.0, false);
+    let answering = cost_of_a_competing_write(window.0, true);
+
+    println!("a competing EmptyClipboard against an owner that does NOT answer: {silent:?}");
+    println!("...and against one that lets sent messages through:               {answering:?}");
+
+    assert!(
+        silent >= Duration::from_millis(300),
+        "an owner asleep for 600 ms must hold the competing write up for most of it, not {silent:?}"
+    );
+    assert!(
+        answering <= Duration::from_millis(150),
+        "an owner that answers must cost the competing write almost nothing, not {answering:?}"
+    );
+    assert!(
+        silent >= answering * 3,
+        "the two rounds differ in one thing only, and it must show: {silent:?} against {answering:?}"
+    );
+}
 
 /// **Behavioural point 22.** Text, snapshot, our own write, restore — and the original comes
 /// back byte for byte, checked by the raw reader rather than by the module that copied it.

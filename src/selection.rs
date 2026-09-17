@@ -167,7 +167,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_C, VK_CONTROL, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, WM_APP, WM_CLIPBOARDUPDATE,
+    GetForegroundWindow, GetWindowThreadProcessId, MSG, PM_NOREMOVE, PeekMessageW, WM_APP,
+    WM_CLIPBOARDUPDATE, WM_USER,
 };
 use windows::core::{Error as WinError, Free, PCWSTR, Result as WinResult, w};
 
@@ -2151,6 +2152,61 @@ pub fn sequence_number() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
+/// ⭐⭐ **Lets the system deliver messages *sent* to this thread's windows — task T-76-1.**
+///
+/// # The defect this exists for, measured
+///
+/// A press whose selection path ran while **this program owned the clipboard** came back as the
+/// idle tone of FR-100, and the same press repeated worked. It lived through every delivery that
+/// had a selection path, and stage E75 spent a whole one raising the timeout of step 3 from three
+/// hundred milliseconds to nine hundred before measuring that the timeout is not the dimension it
+/// lives in at all (decisions 135в, 135г, 135д).
+///
+/// The chain is three links, and every one of them is this program's own doing:
+///
+/// 1. **We become the clipboard's owner whenever we write to it** — step 6 of FR-61 puts the
+///    converted text there and step 8 puts the user's snapshot back, and both go through
+///    [`Clipboard::empty`], which is what makes the window passed to `OpenClipboard` the owner.
+/// 2. **The next press waits on this very thread without answering it.** [`wait_for_change`] polls
+///    the sequence number every [`POLL_INTERVAL`] and sleeps in between, and it runs on the UI
+///    thread — the thread of the window that is now the owner.
+/// 3. **The application's `Ctrl+C` blocks on us.** When it answers step 2 it calls
+///    `EmptyClipboard`, and the system delivers `WM_DESTROYCLIPBOARD` to the current owner with a
+///    **blocking send**. The owner is a window of a thread asleep in the loop of link 2, so the
+///    application sits inside `EmptyClipboard` until that loop gives up. Then the sequence number
+///    has not moved, step 3 answers «there is no selection», and the press falls back to a typing
+///    buffer that a `Ctrl+A` has just emptied — one click, nothing converted.
+///
+/// ⚠ `tests\e2e\scenarios.rs` describes this from the other side and measured what it costs: a
+/// bench that owned the clipboard and pumped nothing held up the product's own `Ctrl+C` **5091
+/// ms**, the system's hung-window timeout. It was read there as a fact about the bench. It is a
+/// fact about any owner that stops answering, and this program is one for the length of a wait.
+///
+/// # Why a filtered `PeekMessage` and not a pump
+///
+/// Messages **sent** to a thread are delivered by the system inside any `PeekMessage`, whatever
+/// filter it carries — the filter selects among **posted** messages, which sit in the queue. So a
+/// range no posted message can match (`WM_USER..=WM_USER`) with `PM_NOREMOVE` answers the blocking
+/// send and **dispatches nothing**: not the hotkey the input thread posts, not the tray's menu,
+/// not the settings dialog. That matters more here than the brevity: the selection path holds a
+/// [`Session`] with the user's snapshot in it, and a real pump in the middle of it would let a
+/// second press, a menu or a dialog re-enter the module while that snapshot is owed back.
+///
+/// ⭐ The claim in the paragraph above is **measured, not quoted**:
+/// `a_thread_that_owns_the_clipboard_blocks_everybody_until_it_answers` in `tests\selection.rs`
+/// times a competing `EmptyClipboard` against a thread that sleeps the way step 3 sleeps, with
+/// this call and without it.
+pub fn let_sent_messages_through() {
+    let mut message = MSG::default();
+
+    // SAFETY: the pointer is to a live local, the window filter is `None` — every window of this
+    // thread — and the message range is `WM_USER..=WM_USER`, which no posted message of this
+    // program can match. `PM_NOREMOVE` takes nothing out of the queue. The call touches no state
+    // of ours and its `BOOL` answer is deliberately dropped: whether a posted message happened to
+    // match is not the question, and the delivery of sent messages is not reported by it.
+    let _ = unsafe { PeekMessageW(&raw mut message, None, WM_USER, WM_USER, PM_NOREMOVE) };
+}
+
 /// Waits for the clipboard sequence number to leave `baseline` — **step 3 of FR-61**.
 ///
 /// `timeout` comes from `[selection] clipboard_timeout_ms` of section 7 — see [`timeout_of`] —
@@ -2196,6 +2252,15 @@ pub fn wait_for_change(baseline: u32, timeout: Duration) -> Wait {
         if left.is_zero() {
             return Wait::TimedOut { waited };
         }
+
+        // ⭐⭐ **Task T-76-1 — this is not a courtesy, it is the repair.** While this program owns
+        // the clipboard, the application answering the `Ctrl+C` of step 2 blocks inside
+        // `EmptyClipboard` on a `WM_DESTROYCLIPBOARD` **sent** to our window; a loop that naps
+        // without answering it waits for something that is waiting for this loop, and no timeout
+        // can be large enough. It stands **before** the nap so the answer goes out at once rather
+        // than one poll late. See [`let_sent_messages_through`] for the whole chain and for why
+        // nothing posted is dispatched here.
+        let_sent_messages_through();
 
         sleep(POLL_INTERVAL.min(left));
     }
