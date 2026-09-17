@@ -4303,8 +4303,6 @@ pub struct AuthorView {
     pub switch: Option<bool>,
     /// The sentence under the switch.
     pub switch_note: String,
-    /// The address «Открыть страницу загрузки» leads to, when there is an update to lead to.
-    pub download: Option<String>,
     /// Whether «Последние письма» has anything to show.
     pub letters: bool,
     /// The paragraph of the «Обратная связь» panel.
@@ -4377,7 +4375,10 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
             text(IDS_NEWS_FILE_ONLY)
         },
         switch,
-        download: update.map(|item| item.link.clone()),
+        // ⛔ No `download` here any more — task T-78-2. «Открыть страницу загрузки» opens
+        // [`links::DOWNLOAD_URL`], a constant of this build, so there is nothing about it for a
+        // view of the feed to carry. Keeping the field would have left the entry's address one
+        // assignment away from creeping back into that button.
         letters: !feed.news.is_empty() || update.is_some(),
         feedback_text: text(IDS_FEEDBACK_TEXT),
     }
@@ -4828,16 +4829,20 @@ fn fill_author(hwnd: HWND, state: &WindowState) {
         !links::is_placeholder(links::CHANNEL_URL),
     );
 
-    // The download button leads where the **feed entry** points, and that address is the
-    // author's data rather than a constant of the build — so it is judged by the same rule as
-    // the two above and by nothing else. An entry that points at the placeholder host (which
-    // is what the site carries until it is published) leaves the button drawn and dead.
+    // ⭐ The download button leads where **this build** points and not where a feed entry
+    // does — task T-78-2, решение 139.2 п. 6. A feed entry is signed and dated, so the address
+    // in it is as old as the entry and goes stale; the download page is permanent and always
+    // carries the current version. Word of the user: «если новость об обновлении пришла, значит
+    // оно уже лежит на сайте, и перейдя по ссылке загрузки программы, мы уже попадаем на
+    // актуальную версию».
+    //
+    // So the button is judged by exactly the question the two above are judged by, and the feed
+    // has nothing to say about it. Until Э78 it was judged by the entry's `link`, and since
+    // there is no feed (138.4) it was translated into fourteen languages and shown to nobody.
     enable(
         hwnd,
         IDC_NEWS_DOWNLOAD,
-        view.download
-            .as_deref()
-            .is_some_and(|url| !links::is_placeholder(url)),
+        !links::is_placeholder(links::DOWNLOAD_URL),
     );
 }
 
@@ -5032,7 +5037,9 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
             y,
             inner_width,
             &[
-                (IDC_NEWS_DOWNLOAD, view.download.is_some()),
+                // Always — task T-78-2. The address it opens is a constant of this build, so
+                // there is no state of the feed in which the row should not carry it.
+                (IDC_NEWS_DOWNLOAD, true),
                 (IDC_NEWS_LETTERS, view.letters),
             ],
         );
@@ -5394,7 +5401,18 @@ fn perform(hwnd: HWND, action: Action) {
 
         Action::OpenChannel => open_link(links::CHANNEL_URL),
         Action::OpenSupport => open_link(links::SUPPORT_URL),
-        Action::OpenDownload | Action::OpenLink => open_link(&link),
+
+        // ⭐ Task T-78-2: the download page of **this build**, never the `link` of the feed
+        // entry that announced the update. See [`links::DOWNLOAD_URL`] for why the constant
+        // wins — in short, the entry is signed and dated and its address goes stale.
+        //
+        // ⚠ In «От автора» this was the only address it could have opened anyway: that window
+        // is built by [`open_author`], which never fills `state.link`, so the click reached
+        // `open_link("")` and returned having done nothing. The button was never laid out, so
+        // nobody could press it to find out.
+        Action::OpenDownload => open_link(links::DOWNLOAD_URL),
+
+        Action::OpenLink => open_link(&link),
 
         Action::OpenAuthor => open_author(owner),
         Action::OpenLetters => open_list(owner),

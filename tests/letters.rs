@@ -1406,7 +1406,6 @@ fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
         !before.feed_state.is_empty(),
         "and whether it has been read"
     );
-    assert!(before.download.is_none(), "no update to lead to");
     assert!(!before.letters, "and nothing in «Последние письма»");
 
     state.first_feed_letter = Some(day(2026, 9, 10));
@@ -1866,7 +1865,6 @@ fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
 
     let latest = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
     assert!(latest.version_state.contains("0.39.0"));
-    assert!(latest.download.is_none());
 
     let waiting = letters::author_view(&state, today, "0.39.0", feed);
     assert!(waiting.version_state.contains("0.39.0"));
@@ -1875,8 +1873,138 @@ fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
         "and the one that is waiting: {}",
         waiting.version_state
     );
-    assert!(waiting.download.is_some(), "with a page to open");
     assert!(waiting.letters, "and something for «Последние письма»");
+}
+
+// ---------------------------------------------------------------------------------------
+// Reading `src\letters.rs` as text — the shape `tests\watchdog.rs` and `tests\selection.rs`
+// settled on
+// ---------------------------------------------------------------------------------------
+
+/// `src\letters.rs` read as text with line endings normalised.
+fn letters_source() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("letters.rs");
+
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+
+    text.replace("\r\n", "\n")
+}
+
+/// The body of the item whose signature line starts with `signature` — from that line to the
+/// first `}` in column 0 after it.
+///
+/// A region and not the whole module: a sweep over everything would count the prose of a file
+/// that documents itself at length, and would be a sweep nobody could keep green.
+fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source.find(signature).unwrap_or_else(|| {
+        panic!("src\\letters.rs must contain \"{signature}\" — the sweep below is about it")
+    });
+
+    let rest = &source[start..];
+    let end = rest
+        .find("\n}")
+        .expect("the item must end at a closing brace in column 0");
+
+    let region = &rest[..end];
+
+    assert!(
+        !region.is_empty() && region.len() < rest.len(),
+        "\"{signature}\" was bounded rather than taken as the rest of the module"
+    );
+
+    region
+}
+
+/// The code lines of `text` — comments dropped.
+///
+/// Comments are dropped on purpose: this file explains its rules in prose beside them, and a
+/// sweep that counted a sentence about a call would assert nothing.
+fn code_lines(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//"))
+}
+
+/// Whether this body decides «Открыть страницу загрузки» **without asking the feed** — the shape
+/// task T-78-2 put in place of the one `e77` carried.
+///
+/// ⚠ Two halves, and the first is not decoration: a body that stopped naming the button at all
+/// would satisfy the second half by saying nothing, and the sweep would be green for the one
+/// reason that must never make it green.
+///
+/// ⚠⚠ The second half looks at **every** code line of the body and not only at the lines that
+/// name the button. Written the other way it could not have failed on the enabling body at all:
+/// `e77` spelt that one over five lines, with `IDC_NEWS_DOWNLOAD,` on one and `view.download` on
+/// another, so a line-by-line look would have found no line carrying both and called it clean.
+fn download_is_free_of_the_feed(body: &str) -> bool {
+    code_lines(body).any(|line| line.contains("IDC_NEWS_DOWNLOAD"))
+        && code_lines(body).all(|line| !line.contains("view.download"))
+}
+
+/// **«Открыть страницу загрузки» stands there whatever the feed says** — task T-78-2, решение
+/// 139.2 п. 3 и п. 6.
+///
+/// Until `e77` the button was put into the row only when an `update` entry of the feed existed,
+/// and enabled only when that entry's own `link` was not a placeholder. There is no feed
+/// (138.4), so the button was translated into fourteen languages and shown to nobody.
+///
+/// The sweep is over the two bodies that decide it, because neither is a pure function: one
+/// lays controls out in a window and the other enables them. What it asserts is the absence of
+/// the feed from both — that `view.download` is gone from the decision — and the presence of
+/// the build's own address in the enabling one.
+#[test]
+fn the_download_button_stands_there_whatever_the_feed_says() {
+    let source = letters_source();
+
+    for (signature, what) in [
+        ("unsafe fn layout_author(", "lays the button out"),
+        ("fn fill_author(", "enables it"),
+    ] {
+        assert!(
+            download_is_free_of_the_feed(body_of(&source, signature)),
+            "the body that {what} must name IDC_NEWS_DOWNLOAD and ask the feed nothing about it"
+        );
+    }
+
+    // The enabling body judges the button by the address this build carries, and by nothing
+    // else — the same question «Открыть канал» and «Открыть страницу поддержки» stand behind.
+    assert!(
+        body_of(&source, "fn fill_author(").contains("links::DOWNLOAD_URL"),
+        "the button is enabled by the build's own download address"
+    );
+
+    // ⚠ Отрицательный контроль — **the same predicate**, run over the two shapes `e77`
+    // carried. A control that asserted something else about them would leave the sweep above
+    // unproven.
+    for (what, sample) in [
+        (
+            "the row of e77",
+            "                (IDC_NEWS_DOWNLOAD, view.download.is_some()),",
+        ),
+        (
+            "the enabling of e77",
+            "    enable(\n        hwnd,\n        IDC_NEWS_DOWNLOAD,\n        view.download\n            \
+             .as_deref()\n            .is_some_and(|url| !links::is_placeholder(url)),\n    );",
+        ),
+    ] {
+        assert!(
+            !download_is_free_of_the_feed(sample),
+            "the sweep must refuse {what}, which is the shape it is written against"
+        );
+    }
+
+    // ⚠ And the first half of the predicate is load-bearing: a body that stopped naming the
+    // button would otherwise pass by saying nothing at all.
+    assert!(
+        !download_is_free_of_the_feed("    enable(hwnd, IDC_NEWS_LETTERS, true);"),
+        "a body that never names the button is not a body that lays it out"
+    );
+
+    // And «включена» is a fact rather than a hope: the address behind it is real.
+    assert!(!links::is_placeholder(links::DOWNLOAD_URL));
 }
 
 /// **«Последние письма»** — the update first, then the news newest first, each marked read or
