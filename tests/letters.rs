@@ -974,25 +974,17 @@ fn the_feed_switch_waits_for_a_letter_and_for_ninety_days() {
 /// program has no feed address at all.
 ///
 /// ⚠ This test is written so that it goes on being true when the real addresses arrive: it
-/// asserts the *rule*, not the placeholder. The one assertion about the current state of the
-/// constants is the last one, and it is the one that will be edited on the day the user's own
-/// addresses land — which is exactly the moment somebody should be made to look at this file.
+/// asserts the *rule*, not the placeholder. The assertions about the state of the constants
+/// were the ones edited on the day the user's own addresses landed (task T-78-1) — which is
+/// exactly what they were for; they live in
+/// `the_hard_wired_addresses_are_real_and_the_feed_is_not` now, where both halves of that state
+/// are said together.
 #[test]
 fn a_placeholder_address_is_recognised_by_its_reserved_domain() {
     assert!(links::is_placeholder("https://example.invalid/news.toml"));
     assert!(links::is_placeholder("https://example.invalid/channel"));
     assert!(!links::is_placeholder("https://t.me/lang_switcher"));
     assert!(!links::is_placeholder("https://example.com/support"));
-
-    // The state of the three constants today — полномочия П5, П7 и П8 of the mandate of Э32.
-    assert!(links::is_placeholder(links::CHANNEL_URL));
-    assert!(links::is_placeholder(links::SUPPORT_URL));
-    assert!(
-        links::FEED_URLS
-            .iter()
-            .all(|url| links::is_placeholder(url))
-    );
-    assert!(!links::feed_is_configured());
 }
 
 /// **SEC-03, ворота 3.** Every address this program can open is `https://`, and there are only
@@ -1005,6 +997,38 @@ fn every_address_in_the_program_is_https_and_named_here() {
 
     assert!(links::CHANNEL_URL.starts_with("https://"));
     assert!(links::SUPPORT_URL.starts_with("https://"));
+}
+
+/// **The hard-wired addresses of решение 139.2 are real, and the feed's is still not** — task
+/// T-78-1.
+///
+/// ⚠ Both halves are assertions and the second is the one worth writing down. `FEED_URLS` stays
+/// a placeholder **on purpose** — the mechanism behind it is not built (138.4) — and a test that
+/// said only «the real ones are real» would leave that looking like forgetfulness. Said out loud
+/// here, it is a decision with a guard on it.
+#[test]
+fn the_hard_wired_addresses_are_real_and_the_feed_is_not() {
+    for (what, url) in [
+        ("CHANNEL_URL", links::CHANNEL_URL),
+        ("SUPPORT_URL", links::SUPPORT_URL),
+        ("DOWNLOAD_URL", links::DOWNLOAD_URL),
+        ("PROGRAM_URL", links::PROGRAM_URL),
+    ] {
+        assert!(
+            !links::is_placeholder(url),
+            "{what} is still a placeholder: {url}"
+        );
+        assert!(links::is_allowed(url), "{what} must reach the shell: {url}");
+    }
+
+    // Отложено владельцем, не забыто — 138.4.
+    assert!(
+        links::FEED_URLS
+            .iter()
+            .all(|url| links::is_placeholder(url)),
+        "the feed address is deferred on purpose and must stay a placeholder"
+    );
+    assert!(!links::feed_is_configured());
 }
 
 /// **С52, task T-41-1 — the gatekeeper of the one door.** What the shell is handed is `https://`
@@ -1159,9 +1183,14 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
         2,
         "«Спасибо» carries the support page and the channel"
     );
+    // ⭐ Task T-78-1 ended the «while» this line used to carry: until then both addresses were
+    // placeholders and both buttons were drawn dead. They are the author's own now (139.2), and
+    // the assertion says the same rule from the other side — which is the half worth guarding,
+    // because a button that silently went back to grey is the failure a person would see.
     assert!(
-        thanks.panel_buttons.iter().all(|button| !button.enabled),
-        "and both are disabled while their addresses are placeholders (П7, П8)"
+        thanks.panel_buttons.iter().all(|button| button.enabled),
+        "«Открыть страницу поддержки» and «Открыть канал» are live once their addresses are real \
+         (П7, П8; решение 139.2)"
     );
     assert!(thanks.left.is_some(), "«Напомнить через неделю» is offered");
     assert!(
@@ -1183,8 +1212,8 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
     assert_eq!(news.rows.len(), 3, "«Что нового» names three changes");
     assert!(!news.demo);
     assert!(
-        news.left.as_ref().is_some_and(|button| !button.enabled),
-        "«Открыть канал» is drawn and disabled while the address is a placeholder"
+        news.left.as_ref().is_some_and(|button| button.enabled),
+        "«Открыть канал» is live once the channel's address is real (решение 139.2)"
     );
 
     // The two letters out of the feed have nothing to say without an entry behind them, and a

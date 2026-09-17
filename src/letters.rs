@@ -759,39 +759,83 @@ pub fn forget_expired(state: &mut Letters, feed: FeedView<'_>) {
 // 6. The three addresses — вопрос 101 п. 6, полномочия П5, П7 и П8
 // =========================================================================================
 
-/// The addresses the program links to, and the one rule that governs all three.
+/// The addresses the program links to, and the one rule that governs all of them.
+///
+/// # What is settled and what is not — решения 138 и 139.2
+///
+/// Four of the five addresses are the author's own and permanent: the channel, the support
+/// page, the download page and the program's page. They arrived in one word of the user's
+/// (2026-09-17) and they are string literals here and nothing else — which is what the
+/// paragraph below promised the day the placeholders went in.
+///
+/// The fifth, the feed's, is **still a placeholder, and on purpose**: the mechanism behind it
+/// is not built (138.4). So [`is_placeholder`] goes on being the one question every button with
+/// a link stands behind, and after Э78 it honestly answers «no» for four addresses and «yes»
+/// for the feed.
 ///
 /// # Placeholders, and why a button is drawn disabled rather than hidden
 ///
-/// Three addresses are not settled yet: the feed's, the channel's and the support page's. The
-/// user's answer (полномочия П5, П7 и П8 of the mandate) was to build the windows now and put
-/// a placeholder in each address — «кнопка пусть будет, вместо пути заглушка». So each is a
-/// constant of this module holding a `example.invalid` address, [`is_placeholder`] recognises
-/// them by their domain, and every button that would open one is drawn in the disabled role
-/// the own-drawn buttons already have. The window is the finished window; what is missing is
-/// visibly missing, and the day the addresses arrive they are three string literals and no
-/// code at all.
+/// The user's answer (полномочия П5, П7 и П8 of the mandate) was to build the windows now and
+/// put a placeholder in each unsettled address — «кнопка пусть будет, вместо пути заглушка». So
+/// each is a constant of this module, [`is_placeholder`] recognises a placeholder by its domain,
+/// and every button that would open one is drawn in the disabled role the own-drawn buttons
+/// already have. The window is the finished window; what is missing is visibly missing.
 ///
 /// `example.invalid` and not a made-up host: RFC 2606 reserves `.invalid` precisely so that it
 /// never resolves. A placeholder that fell out of this rule and reached the network would fail
 /// slowly, against somebody else's machine; this one fails at once, against nobody's.
+///
+/// # ⚠ Two different things, and the difference matters
+///
+/// **The network surface of this program is [`FEED_URLS`] and nothing else** — that is the one
+/// address the program itself goes out and *fetches*, unasked, on a timer. The four below are
+/// never fetched by this program at all: they are handed to the shell, one at a time, because a
+/// person clicked a button, and it is the browser that goes to them. Ворота 3 of
+/// `tools\verify-perimeter.ps1` reads the strings of the Release binary and refuses any
+/// `https://` that is not one of the five, which is why every one of them lives here.
 pub mod links {
     /// The reserved domain every placeholder address is under.
     const PLACEHOLDER_HOST: &str = "example.invalid";
 
     /// Where the feed is read from — FR-102, in order, the first good answer winning.
     ///
-    /// ⚠ **The whole of the network surface of this program is this array.** Ворота 3 of
-    /// `tools\verify-perimeter.ps1` reads the strings of the Release binary and refuses any
-    /// `https://` that is not one of these.
+    /// ⚠ **The whole of the network surface of this program is this array** — see the module's
+    /// own doc for what that does and does not mean about the four addresses below.
+    ///
+    /// ⛔ Still a placeholder **by decision, not by oversight**: the feed's mechanism is not
+    /// built and the user deferred it (138.4). The guard on that sentence is the test
+    /// `the_hard_wired_addresses_are_real_and_the_feed_is_not`.
     pub const FEED_URLS: [&str; 1] = ["https://example.invalid/news.toml"];
 
     /// The author's channel — FR-103, and the «Открыть канал» buttons of three letters.
-    pub const CHANNEL_URL: &str = "https://example.invalid/channel";
+    pub const CHANNEL_URL: &str = "https://t.me/panda_pishet_kod";
 
     /// The support page — FR-103, one link and no payment details of any kind in the program
     /// (вопрос 101 п. 6).
-    pub const SUPPORT_URL: &str = "https://example.invalid/support";
+    pub const SUPPORT_URL: &str = "https://panda-pishet-kod.dev/donate/";
+
+    /// The download page — FR-103, the target of «Открыть страницу загрузки».
+    ///
+    /// # Why the build's own address beats the one in the feed entry
+    ///
+    /// An `update` entry of the feed carries a `link` of its own, and until task T-78-2 that
+    /// link was what the button opened. It loses to this constant on one argument: a feed entry
+    /// is **signed and dated**, so its address is as old as the entry and goes stale, whereas
+    /// this page is permanent and always shows the current version. Word of the user, 2026-09-17:
+    /// «если новость об обновлении пришла, значит оно уже лежит на сайте, и перейдя по ссылке
+    /// загрузки программы, мы уже попадаем на актуальную версию».
+    ///
+    /// The `link` field stays in the feed format — it is the format's, not ours — and this
+    /// program simply no longer reads it for this button.
+    pub const DOWNLOAD_URL: &str = "https://panda-pishet-kod.dev/langswitcher/download/";
+
+    /// The program's own page — the target of a click on the name «Lang Switcher» in «О
+    /// программе», task T-78-3.
+    ///
+    /// The only address of the five with no button of its own: it is opened by a click on the
+    /// name itself, which is a push button without a border and looks like the label it used to
+    /// be until the pointer is over it.
+    pub const PROGRAM_URL: &str = "https://panda-pishet-kod.dev/langswitcher/";
 
     /// Whether this address is one of the placeholders — the one test every button that opens
     /// a link is behind.
@@ -836,17 +880,21 @@ pub mod links {
         (!host.is_empty() && !host.contains(':') && !host.contains('@')).then_some(host)
     }
 
-    /// Every host this program is allowed to reach — the three constants above **and nothing
-    /// else**.
+    /// Every host this program is allowed to reach — the constants above **and nothing else**.
     ///
     /// Read out of the constants rather than written down a second time: a separate list is a
-    /// second place to forget, and the day the author's real addresses replace the placeholders
-    /// this gate follows them with no edit at all.
+    /// second place to forget, and when the author's real addresses replaced the placeholders
+    /// (task T-78-1) this gate followed them with no edit but the two new names below.
+    ///
+    /// ⚠ Every constant of this module belongs in this chain, and being on a host some other
+    /// constant already names is **not** a reason to leave one out: that is an accident of where
+    /// the author happens to host the pages today, and the day one of them moves, the address
+    /// would stop opening for a reason nobody could see from the line that changed.
     fn allowed_hosts() -> impl Iterator<Item = &'static str> {
         FEED_URLS
             .iter()
             .copied()
-            .chain([CHANNEL_URL, SUPPORT_URL])
+            .chain([CHANNEL_URL, SUPPORT_URL, DOWNLOAD_URL, PROGRAM_URL])
             .filter_map(host_of)
     }
 

@@ -201,11 +201,15 @@ if ($crateFailed) {
 # поиском по строкам бинаря». This gate reads the strings of the FILE THAT SHIPS and refuses any
 # https:// that the program does not declare in `letters::links`.
 #
-# ⚠ THREE ADDRESSES AND NOT ONE. The mandate's sentence names the feed alone; the program also
-# carries the channel and the support page (FR-103), and both are https:// by SEC-03's own rule
-# that a link this program opens is a secure one. So the allowed set is what `letters::links`
-# declares, read out of the SOURCE rather than typed here -- a list typed twice is a list that
-# drifts.
+# ⚠ FIVE ADDRESSES AND NOT ONE. The mandate's sentence names the feed alone; the program also
+# carries the channel, the support page, the download page and its own page (FR-103, решение
+# 139.2), and every one of them is https:// by SEC-03's own rule that a link this program opens
+# is a secure one. So the allowed set is what `letters::links` declares, read out of the SOURCE
+# rather than typed here -- a list typed twice is a list that drifts.
+#
+# ⭐ That is why task T-78-1 changed four addresses and NOT ONE LINE of this gate: the two new
+# constants and the two new values were picked up by the read below the moment they were written.
+# A hand-kept list here would have been the second place to forget them.
 #
 # The strings are read the way `strings(1)` reads them: runs of printable ASCII of four or more
 # bytes, over the whole file. UTF-16 literals are found by the same walk with the zero bytes
