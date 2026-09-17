@@ -77,10 +77,10 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DT_CALCRECT,
     DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect,
     DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW, GetObjectW,
-    GetTextExtentPoint32W, GetTextFaceW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
-    LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, PAINTSTRUCT, ReleaseDC,
-    SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
-    TextOutW,
+    GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    InvalidateRect, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    PAINTSTRUCT, ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode,
+    SetTextColor, TEXTMETRICW, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -16965,13 +16965,16 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
                     .fonts
                     .as_ref()
                     .map(|fonts| about_label_face(IDC_ABOUT_NAME, fonts)),
+                // The ground of the window itself — what the rectangle outside the backing is
+                // erased with, in both states.
+                brushes.window_bg(),
             ))
         })
     };
 
     // `_hot_brush` is named and not discarded for the reason `on_about_draw_item` gives at its
     // own: the brush of the lit face is made for the length of one paint and must outlive it.
-    let Some(Some((colors, _hot_brush, ink, face))) = choice else {
+    let Some(Some((colors, _hot_brush, ink, face, window))) = choice else {
         return 0;
     };
 
@@ -16984,18 +16987,75 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
     // `DrawTextW` takes the length of the slice it is given.
     let mut caption: Vec<u16> = get_text(hwnd, IDC_ABOUT_NAME).encode_utf16().collect();
 
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message; the face brush
-    // and `face` are objects this frame or this window's state owns for longer than this call.
+    // ⭐ **The backing is measured off the word, not off the control** — task T-79-2. The user
+    // accepted the colour on the live product and turned the shape down: «должно быть по слову с
+    // закругленными краями подложки». So the figure is the box the **caption** asks for, and the
+    // arithmetic of that box is [`theme::chip_box`] — the very one the key chips of «Как
+    // пользоваться» are built with, in this same window, accepted by the same eye in Э26. A
+    // second set of paddings invented here would have been a second look to keep in step.
+    //
+    // Thickness 0: this button's frame is its own face ([`ButtonBorderRole::FaceItself`]), so
+    // there is no stroke to leave room for.
+    //
+    // SAFETY: `dc` is the DC of the message and `face` a live font of the window's state; the
+    // measuring selects that face, reads the extent of the caption and puts the previous handle
+    // back. `None` — the faces were refused at initialisation (NFR-13), and the box then comes
+    // out of the rectangle, which is what this drawing did before this task.
+    let chip = unsafe { name_backing_box(dc, face, &caption, rect) };
+
+    // The whole rectangle is erased with the ground of the window first: the system erases
+    // nothing before an owner-drawn button's `WM_DRAWITEM`, so whatever the backing does not
+    // cover has to be put back by hand, and a repaint has to be idempotent (task T-12-6).
+    //
+    // SAFETY: `dc` is the DC of the message, `rect` a live local, `window` a brush the window's
+    // state owns for longer than this call.
+    unsafe { FillRect(dc, &rect, window) };
+
+    let backing = RECT {
+        left: rect.left,
+        top: rect.top,
+        right: (rect.left + chip.width).min(rect.right),
+        bottom: rect.bottom,
+    };
+
+    // At rest the face **is** the ground of the window and the frame is the face, so this call
+    // puts back the very pixels the erase above laid down — the backing is invisible until the
+    // pointer arrives, which is the whole of what «в покое как раньше» means. No `if hot` here:
+    // one path, and the colour table is the only thing that knows the difference.
+    //
+    // ⓘ Safe: [`theme::paint_rounded`] owns every handle it makes and takes the DC by value, the
+    // way the rounded figure of a push button is drawn a few thousand lines above.
+    theme::paint_rounded(
+        dc,
+        &backing,
+        chip.radius,
+        colors.border,
+        colors.face,
+        theme::dc_dpi(dc),
+    );
+
+    // ⚠⚠ And the text lands where it landed before the rectangle grew. The rectangle moved 4
+    // dialog units left and 1 up — measured to be **exactly** the 7 and 2 pixels of this inset at
+    // 96 DPI — so `rect.left + inset_x` and `rect.top + inset_y` are the 73 and 25 the name has
+    // always stood at (решение 140.5). This is the guard of развилка C5 written as arithmetic
+    // rather than as hope, and a test holds it.
+    let text = RECT {
+        left: rect.left + chip.inset_x,
+        top: rect.top + chip.inset_y,
+        right: rect.right,
+        bottom: rect.bottom,
+    };
+
+    // SAFETY: see the caller — `dc` and `text` are the values of the message and a live local;
+    // `face` is a font this window's state owns for longer than this call. The ground is not
+    // touched here: it was laid down twice above, by the erase and by the backing.
     unsafe {
-        theme::paint_label_at_pitch(
+        theme::paint_label_text(
             dc,
-            rect,
+            text,
             &mut caption,
             theme::LabelStyle {
-                // ⭐ The one difference from `draw_about_label`, and the whole of the response:
-                // the ground is the button's face — the window's own colour at rest, the
-                // highlight of that ground under the pointer.
-                ground: colors.face,
+                ground: window,
                 ink,
                 face,
                 pitch,
@@ -17003,6 +17063,81 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
             },
         )
     }
+}
+
+/// The box of the backing behind the name — the chip of «Как пользоваться» measured around
+/// «Lang Switcher», task T-79-2.
+///
+/// Split out so that the choosing is one small body with one `unsafe` reason: it selects the
+/// name's face into the DC, asks GDI how wide the caption is in it and how tall its cell is, and
+/// hands both to the pure [`theme::chip_box`].
+///
+/// **NFR-13:** no face — the set was refused at initialisation — means no measuring either, and
+/// the answer is a box the size of the whole rectangle with no rounding and no insets. The name
+/// then draws exactly as it did before this task: a plain rectangle of the face colour with the
+/// text at the top left, which is degraded-but-alive and not a hole.
+///
+/// # Safety
+///
+/// `dc` must be the live DC of the `WM_DRAWITEM` this drawing is inside of, and `face` a font
+/// handle the window's state owns for longer than this call.
+unsafe fn name_backing_box(
+    dc: HDC,
+    face: Option<HFONT>,
+    caption: &[u16],
+    rect: RECT,
+) -> theme::ChipBox {
+    let Some(face) = face else {
+        return theme::ChipBox {
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top,
+            radius: 0,
+            inset_x: 0,
+            inset_y: 0,
+        };
+    };
+
+    // ⚠⚠ **The em is asked of the FONT and the cell of the DC, and they are two numbers.**
+    // `chip_box` wants the em for its paddings — they are percentages of it — and the height of
+    // the character cell for its interior. Handing it `tmHeight` for both would make the padding
+    // 45 % of 21 instead of 45 % of 16, that is **9 pixels instead of 7**, and the name would
+    // move two pixels to the right of where it has always stood. Measured, решение 140.5.
+    let mut declared = LOGFONTW::default();
+    // SAFETY: `face` is a live font handle and `declared` a live local of this frame; the call
+    // writes at most `size_of::<LOGFONTW>()` bytes into it.
+    let read = unsafe {
+        GetObjectW(
+            HGDIOBJ(face.0),
+            i32::try_from(size_of::<LOGFONTW>()).unwrap_or(0),
+            Some(std::ptr::from_mut(&mut declared).cast()),
+        )
+    };
+
+    // SAFETY: `dc` is the DC of the message and `face` a live font; the previous handle is put
+    // back below, and both calls only read metrics of the DC.
+    let previous = unsafe { SelectObject(dc, HGDIOBJ(face.0)) };
+
+    let mut metrics = TEXTMETRICW::default();
+    // SAFETY: as above; the structure is a live local of this frame.
+    let _ = unsafe { GetTextMetricsW(dc, &mut metrics) };
+
+    let mut size = SIZE::default();
+    // SAFETY: as above; `caption` and `size` are live locals of this frame and the caller's.
+    let _ = unsafe { GetTextExtentPoint32W(dc, caption, &mut size) };
+
+    // SAFETY: `previous` is what `SelectObject` answered for this same DC.
+    unsafe { SelectObject(dc, previous) };
+
+    // NFR-13: a refused `GetObjectW` leaves the em at zero, and the cell is the honest fallback —
+    // the paddings then come out a little larger, which is a backing a few pixels wider and
+    // never a hole.
+    let em = if read > 0 {
+        declared.lfHeight.abs()
+    } else {
+        metrics.tmHeight
+    };
+
+    theme::chip_box(size.cx, em, metrics.tmHeight, 0)
 }
 
 /// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.

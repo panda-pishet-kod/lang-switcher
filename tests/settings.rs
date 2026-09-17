@@ -6046,11 +6046,47 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
     let product = ProductImage::open();
     let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
 
-    // (1) The rectangle of `e77`, unmoved.
+    // (1) The rectangle. ⚠⚠ It **moved** in task T-79-2, and that is not the drift развилка C5
+    // is about: the backing needed room to the left of the word and above it, and an owner-drawn
+    // control cannot paint outside its own rectangle. What C5 forbids is the **name** moving, and
+    // the whole point of these four numbers is that it does not — see the assertion below them.
     assert_eq!(
         template.rect_of(NAME),
-        (42, 12, 42 + 141, 12 + 11),
-        "the name must keep the rectangle it had as a label — moving it is развилка C5"
+        (38, 11, 38 + 145, 11 + 12),
+        "the name's rectangle is the one task T-79-2 measured"
+    );
+
+    // ⭐ The right and bottom edges did not move at all: the rectangle grew only towards the
+    // corner the backing needed. 42 + 141 = 183 and 12 + 11 = 23 are the numbers of `e78`.
+    let (left, top, right, bottom) = template.rect_of(NAME);
+    assert_eq!(
+        (right, bottom),
+        (183, 23),
+        "the far corner of the name is fixed"
+    );
+
+    // ⭐⭐ **The name itself has not moved, and this is the arithmetic of it.** The drawing puts
+    // the text at `rect.left + inset_x` and `rect.top + inset_y`, where the insets are the chip's
+    // paddings — measured at 96 DPI to be exactly 7 and 2 pixels. Four dialog units of this
+    // template's font are exactly 7 pixels and one is exactly 2, so the text lands at the 73 and
+    // 25 it stood at while the rectangle began at 42, 12 (решение 140.5,
+    // `scratchpad-E79\probe-metrics.log`).
+    assert_eq!(
+        (left + 4, top + 1),
+        (42, 12),
+        "the rectangle moved by exactly the insets the drawing puts the text back by"
+    );
+
+    // And nothing was taken from the neighbours: the icon ends at 12 + 23 = 35 and the version
+    // line begins at 24. The template's own «every rectangle disjoint from every other» is
+    // checked in full by `the_help_panel_holds_its_ten_labels_and_nothing_overlaps`.
+    assert!(
+        left >= 36,
+        "the name must not reach the icon, which ends at 35"
+    );
+    assert!(
+        bottom <= 24,
+        "the name must not reach the version line at 24"
     );
 
     // It is a button now, and an owner-drawn one, or nothing below is about it.
@@ -6089,7 +6125,7 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
     for needle in [
         "about_label_face(IDC_ABOUT_NAME",
         "about_static_color_role(IDC_ABOUT_NAME",
-        "paint_label_at_pitch(",
+        "paint_label_text(",
     ] {
         assert!(
             body.contains(needle),
@@ -6102,10 +6138,37 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
         "⛔⛔ C5: the name must not go the button road — it centres the caption in both axes"
     );
 
+    // ⭐⭐ **And `paint_label_text` must be the label road itself and not a twin of it** — task
+    // T-79-2 split it out of `paint_label_at_pitch` so that a backing could be drawn between the
+    // ground and the glyphs. The guarantee that the name is set exactly as every other label of
+    // this window is that the label road **calls** this body; the day somebody copies it instead,
+    // the two can drift apart and nothing else would notice.
+    let theme = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("theme.rs"),
+    )
+    .expect("src\\theme.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = theme
+        .find("pub unsafe fn paint_label_at_pitch(")
+        .expect("the label road is `theme::paint_label_at_pitch`");
+    let road = &theme[at..];
+    let end = road
+        .find("\n}")
+        .expect("a function closes with a brace of its own");
+
+    assert!(
+        road[..end].contains("paint_label_text(dc, rect, caption, style)"),
+        "theme::paint_label_at_pitch must draw its glyphs BY paint_label_text — a second body \
+         would keep the name in step only until one of the two was edited"
+    );
+
     // ⚠ Отрицательный контроль: the reading must refuse a body that went the button road, or
-    // the four assertions above prove nothing about what they are written against.
+    // the assertions above prove nothing about what they are written against.
     let of_the_button_road = body
-        .replace("paint_label_at_pitch(", "paint_push_button(")
+        .replace("paint_label_text(", "paint_push_button(")
         .replace("about_label_face(IDC_ABOUT_NAME", "DialogFonts::text(fonts");
 
     assert!(
@@ -6113,6 +6176,129 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
             && !of_the_button_road.contains("about_label_face(IDC_ABOUT_NAME"),
         "the control must differ from the body in exactly the two ways the assertions look at"
     );
+
+    // (3) The backing is measured off the **word** — task T-79-2, решение 139а. A backing the
+    // width of the whole text column is what the user turned down on the live product.
+    assert!(
+        body.contains("name_backing_box(") && body.contains("chip.width"),
+        "the backing must be the box the caption asks for, not the rectangle of the control"
+    );
+    assert!(
+        body.contains("chip.radius"),
+        "and it must be rounded — «по слову с закругленными краями подложки»"
+    );
+}
+
+/// **⛔⛔ The rectangle of the name moved by exactly what the drawing puts the text back by** —
+/// task T-79-2, решение 140.5, and the arithmetic half of развилка C5.
+///
+/// The backing needed room to the left of the word and above it, so `app.rc` moved the name four
+/// dialog units left and one up. The drawing then lays the text at the chip's own insets from the
+/// new corner. **The name stands still only if those two are the same number of pixels**, and
+/// this test does not take that on trust: it builds the very faces the window builds, measures
+/// them, and re-derives the claim every time it runs. A face that changed, a padding percentage
+/// that moved, or a rectangle nudged by one unit all come out here as a failure.
+#[test]
+fn the_name_moved_by_exactly_what_its_backing_gives_back() {
+    /// «Lang Switcher» — the number `app.rc` gives it.
+    const NAME: u32 = 1121;
+    /// What the name says. It is a proper noun and is not translated (решение 85).
+    const CAPTION: &str = "Lang Switcher";
+    /// The reference scale. Everything below is in its pixels.
+    const DPI: i32 = 96;
+
+    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().collect() };
+
+    // The dialog's own face, exactly as IDD_ABOUT declares it: FONT 10, "Segoe UI", 400.
+    let mut base = LOGFONTW {
+        lfHeight: -((10 * DPI + 36) / 72),
+        lfWeight: 400,
+        ..Default::default()
+    };
+    for (at, ch) in wide("Segoe UI").into_iter().enumerate() {
+        base.lfFaceName[at] = ch;
+    }
+
+    let name_face = settings::about_name_logfont(base, settings::Emphasis::Semibold);
+
+    // SAFETY: every handle made below is selected out and deleted on the one path out of this
+    // block; the DC is a memory DC of this process.
+    let (unit_x, unit_y, em, line, text_width) = unsafe {
+        let dc = CreateCompatibleDC(None);
+
+        let dialog = CreateFontIndirectW(&base);
+        let previous = SelectObject(dc, dialog.into());
+
+        // The dialog base units, the way the documented formula computes them: the average of
+        // the fifty-two letters for the horizontal, and the height of the cell for the vertical.
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        let alphabet = wide("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let mut size = Default::default();
+        let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
+        let unit_x = (size.cx / 26 + 1) / 2;
+        let unit_y = metrics.tmHeight;
+
+        SelectObject(dc, previous);
+        let _ = DeleteObject(dialog.into());
+
+        let name = CreateFontIndirectW(&name_face);
+        let previous = SelectObject(dc, name.into());
+
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        let mut size = Default::default();
+        let _ = GetTextExtentPoint32W(dc, &wide(CAPTION), &mut size);
+
+        SelectObject(dc, previous);
+        let _ = DeleteObject(name.into());
+        let _ = DeleteDC(dc);
+
+        (
+            unit_x,
+            unit_y,
+            name_face.lfHeight.abs(),
+            metrics.tmHeight,
+            size.cx,
+        )
+    };
+
+    // Thickness 0: the frame of this button is its own face, so there is no stroke to leave room
+    // for. This is the same call `name_backing_box` makes on the live DC.
+    let chip = theme::chip_box(text_width, em, line, 0);
+
+    println!(
+        "«{CAPTION}»: em {em}, cell {line}, width {text_width}; chip {}x{}, radius {}, insets \
+         {}/{}; dialog units {unit_x} per 4 x, {unit_y} per 8 y",
+        chip.width, chip.height, chip.radius, chip.inset_x, chip.inset_y
+    );
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+    let (left, top, ..) = template.rect_of(NAME);
+
+    // Where the name stood while it was a label, and while it was a button of `e78`: 42, 12.
+    let was = ((42 * unit_x) / 4, (12 * unit_y) / 8);
+    // Where the drawing puts it now: the new corner plus the chip's own insets.
+    let now = (
+        (left * unit_x) / 4 + chip.inset_x,
+        (top * unit_y) / 8 + chip.inset_y,
+    );
+
+    assert_eq!(
+        now, was,
+        "⛔⛔ C5: the name must land on the pixel it has always stood on — the rectangle moved \
+         to {left}, {top} and the drawing gives back {}, {}",
+        chip.inset_x, chip.inset_y
+    );
+
+    // And the backing really is narrower than the text column: that is the whole of what the
+    // user asked for. The column is 141 units wide; the word plus its air is far less.
+    assert!(
+        chip.width < (141 * unit_x) / 4,
+        "the backing must hug the word, not fill the text column"
+    );
+    assert!(chip.radius > 0, "and its corners must be rounded");
 }
 
 /// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code

@@ -2824,22 +2824,52 @@ pub unsafe fn paint_label_at_pitch(
     caption: &mut [u16],
     style: LabelStyle,
 ) -> isize {
-    let LabelStyle {
-        ground,
-        ink,
-        face,
-        pitch,
-        reading,
-    } = style;
-
     // NFR-13, for the paint calls below: each answers a success flag or a previous value, and
     // every answer is deliberately dropped for the reason `paint_push_button` gives for its
     // own — the manager never hands a dead DC, only a forged message could (SEC-05), and the
     // right reaction to a forgery is indifference.
     //
     // SAFETY: `dc` is the DC of the message and `rect` is a live local of the caller's frame;
-    // `ground` is a live brush somebody else owns.
-    unsafe { FillRect(dc, &rect, ground) };
+    // `style.ground` is a live brush somebody else owns.
+    unsafe { FillRect(dc, &rect, style.ground) };
+
+    // SAFETY: as the contract of this function.
+    unsafe { paint_label_text(dc, rect, caption, style) }
+}
+
+/// The very same drawing **without the ground** — the half of [`paint_label_at_pitch`] that puts
+/// the glyphs down, split out by task T-79-2.
+///
+/// # Why it is split, and why nothing may be copied instead
+///
+/// One caller needs something *between* the ground and the glyphs: the name «Lang Switcher» of
+/// «О программе» draws a rounded backing behind itself, and a backing painted before
+/// [`paint_label_at_pitch`] would be erased by its `FillRect`, while one painted after would
+/// cover the very text it stands behind. The order has to be ground → backing → glyphs.
+///
+/// ⛔ **A second body would have been the bug.** The whole guarantee that the name has not moved
+/// a pixel since it was a label is that it goes through *this* code — the same format, the same
+/// pitch model, the same fallback — and a copy would keep that guarantee only until somebody
+/// edited one of the two. [`paint_label_at_pitch`] is now a `FillRect` and a call to this.
+///
+/// [`LabelStyle::ground`] belongs to the filling half and is not read here.
+///
+/// # Safety
+///
+/// As [`paint_label_at_pitch`].
+pub unsafe fn paint_label_text(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    style: LabelStyle,
+) -> isize {
+    let LabelStyle {
+        ground: _,
+        ink,
+        face,
+        pitch,
+        reading,
+    } = style;
 
     if caption.is_empty() {
         // TRUE — the label is drawn, and the ground is the whole of it.
