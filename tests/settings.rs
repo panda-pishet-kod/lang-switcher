@@ -12830,10 +12830,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 218] = [
         "Открыть канал",
         "Open the channel",
     ),
+    // ⚠ Task T-79-1: the caption used to be «Открыть страницу поддержки» / «Open the support
+    // page», and the user turned it down on the live product — it reads as a *technical* support
+    // page, where one asks questions about the program, and not as supporting its author. His
+    // words: «давай переименуем в «Поддержать автора»». The identifier keeps its name and its
+    // number; only the fourteen captions moved.
     (
         settings::IDS_SUPPORT_OPEN,
-        "Открыть страницу поддержки",
-        "Open the support page",
+        "Поддержать автора",
+        "Support the author",
     ),
     (
         settings::IDS_HELLO_TITLE,

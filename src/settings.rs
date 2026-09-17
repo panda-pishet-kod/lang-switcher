@@ -2932,7 +2932,13 @@ pub const IDS_LETTER_CAPTION: u16 = 3082;
 pub const IDS_CLOSE: u16 = 3083;
 /// «Открыть канал» — FR-103. Disabled while `letters::links::CHANNEL_URL` is a placeholder.
 pub const IDS_CHANNEL_OPEN: u16 = 3084;
-/// «Открыть страницу поддержки» — FR-103, on the same terms.
+/// «Поддержать автора» — FR-103, on the same terms.
+///
+/// ⚠ **The `OPEN` in the name is history, not the caption** — task T-79-1. Until `e79` the button
+/// said «Открыть страницу поддержки», and the user turned that down on the live product: it reads
+/// as a *technical* support page, where one asks questions about the program, rather than as
+/// supporting the person who made it. Only the fourteen captions moved; the identifier and the
+/// number 3085 stayed, because a rename here would be six edits and nothing visible.
 pub const IDS_SUPPORT_OPEN: u16 = 3085;
 /// «Привет» — the heading.
 pub const IDS_HELLO_TITLE: u16 = 3086;
