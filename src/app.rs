@@ -1705,8 +1705,8 @@ fn serve_window(role: Role) -> WinResult<()> {
     // registering here is also what publishes that thread to module `selection`.
     //
     // The **UI** thread, and not the other two. The input thread owns the `WH_KEYBOARD_LL` hook
-    // (FR-01) and a clipboard access costs up to 180 ms of FR-62 retries plus the 300 ms wait of
-    // FR-61 step 3 — three thousand times NFR-01, on the one thread FR-80 removes the hook from
+    // (FR-01) and a clipboard access costs up to 180 ms of FR-62 retries plus the 900 ms wait of
+    // FR-61 step 3 — nine thousand times NFR-01, on the one thread FR-80 removes the hook from
     // when it stops answering. The watcher thread owns the focus probe of FR-71 and FR-72, on
     // whose answer SEC-06 holds the typing buffer switched off, and lengthening that window is
     // paid for in the user's keystrokes. Section 6.1 already gives the UI thread the process's
@@ -2331,7 +2331,7 @@ pub(crate) fn post_to_watcher_thread(message: u32) -> bool {
 ///
 /// **The handover of task T-07-2**, and the third of its kind in this program. The primitives of
 /// module `selection` refuse the thread that owns the hook outright — `OpenClipboard` takes a
-/// system-wide lock, the retries of FR-62 cost up to 180 ms and step 3 of FR-61 waits up to 300,
+/// system-wide lock, the retries of FR-62 cost up to 180 ms and step 3 of FR-61 waits up to 900,
 /// against the hundred microseconds NFR-01 gives the hook callback and the few seconds FR-80
 /// says the system waits before removing the hook silently. So the input thread decides *whether*
 /// the press belongs to the selection path and posts this; the work is done on the **UI** thread,

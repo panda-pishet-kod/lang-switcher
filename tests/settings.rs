@@ -147,7 +147,7 @@ fn defaults_match_section_7_field_by_field() {
     assert_eq!(config.replacement.inter_event_delay_ms, 0);
 
     assert!(config.selection.enabled);
-    assert_eq!(config.selection.clipboard_timeout_ms, 300);
+    assert_eq!(config.selection.clipboard_timeout_ms, 900);
     assert_eq!(config.selection.clipboard_restore_delay_ms, 200);
 
     assert_eq!(config.buffer.capacity, 256);
@@ -232,7 +232,7 @@ fn the_four_settings_the_dialog_no_longer_shows_survive_the_round_trip() {
 
     // Hand-written, the way the user of решение 81 edits it, and not one value is a default:
     // the method is `selection` (default `auto`), the delay 13 (default 0), the timeout 987
-    // (default 300), the restore delay 654 (default 200). `[buffer] capacity` and
+    // (default 900), the restore delay 654 (default 200). `[buffer] capacity` and
     // `[general] enabled` ride along as the family this joins.
     let path = write_file(
         &dir,
@@ -1839,7 +1839,7 @@ fn one_bad_number_loses_only_itself() {
             "selection",
             "clipboard_timeout_ms",
             |config| u64::from(config.selection.clipboard_timeout_ms),
-            300,
+            900,
         ),
         (
             "selection",
@@ -1963,7 +1963,7 @@ fn a_syntax_typo_in_one_soft_number_costs_that_number_and_nothing_else() {
             "selection",
             "clipboard_timeout_ms",
             |config| u64::from(config.selection.clipboard_timeout_ms),
-            300,
+            900,
         ),
         (
             "selection",
@@ -2194,6 +2194,60 @@ fn exactly_the_five_numbers_of_section_7_are_soft() {
             "soft_buffer_idle_timeout_s",
         ],
         "решение 120.2: exactly the five numbers of section 7 are soft, in this order"
+    );
+}
+
+/// ⭐ **Task T-75-2 — section 7 of `SPEC.md` and the default in the code are one number.**
+///
+/// `impl Default for Config` carries the promise «The configuration of section 7 exactly as
+/// printed there», and until this task **nothing checked it**: the document and the function
+/// could drift apart in silence, and the only reader who would have noticed was a person holding
+/// the two side by side. The drift is not hypothetical — this task moves
+/// `[selection] clipboard_timeout_ms` from 300 to 900 (решение 135.2, слово владельца
+/// 2026-09-17) and has to move it in both places, which is exactly the moment such a promise is
+/// usually half-kept.
+///
+/// One field and not all five: this is the field the task moves, and a guard written for a field
+/// nobody is touching would be a guard nobody has ever seen fail. The document is read the way
+/// [`exactly_the_five_numbers_of_section_7_are_soft`] reads `src\settings.rs` — out of
+/// `CARGO_MANIFEST_DIR`, with the line endings flattened — so the check is against the file that
+/// ships and not against a copy of the number kept here.
+#[test]
+fn the_clipboard_timeout_of_section_7_and_the_default_of_the_code_are_one_number() {
+    let spec = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("SPEC.md"))
+        .expect("SPEC.md must be readable")
+        .replace("\r\n", "\n");
+
+    let printed: Vec<&str> = spec
+        .lines()
+        .filter(|line| line.starts_with("clipboard_timeout_ms"))
+        .collect();
+
+    assert_eq!(
+        printed.len(),
+        1,
+        "section 7 prints the field once and this reads that one line: {printed:?}"
+    );
+
+    let value: u32 = printed[0]
+        .split_once('=')
+        .expect("the line of section 7 is `key = value`")
+        .1
+        .split('#')
+        .next()
+        .expect("a split answers at least once")
+        .trim()
+        .parse()
+        .expect("the value of section 7 is a whole number of milliseconds");
+
+    println!("SPEC.md §7: {:?}  ->  {value}", printed[0]);
+
+    let default = Config::default().selection.clipboard_timeout_ms;
+
+    assert_eq!(
+        value, default,
+        "`impl Default for Config` promises the configuration of section 7 exactly as printed \
+         there: SPEC.md says {value}, the code says {default}"
     );
 }
 

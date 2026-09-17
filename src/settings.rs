@@ -823,7 +823,7 @@ pub struct Selection {
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// How long to wait for the clipboard to carry the selection, milliseconds.
-    /// Default `300`. Soft — решение 120.2, `soft_whole_number`.
+    /// Default `900`. Soft — решение 120.2, `soft_whole_number`.
     #[serde(
         default = "default_clipboard_timeout_ms",
         deserialize_with = "soft_clipboard_timeout_ms"
@@ -1258,7 +1258,7 @@ fn default_cycle() -> Vec<String> {
 
 /// Serde default for `selection.clipboard_timeout_ms`.
 fn default_clipboard_timeout_ms() -> u32 {
-    300
+    900
 }
 
 /// Serde default for `selection.clipboard_restore_delay_ms`.
