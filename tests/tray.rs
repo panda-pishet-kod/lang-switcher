@@ -2167,12 +2167,12 @@ fn packed_point(x: i32, y: i32) -> WPARAM {
 /// edges, the far negative numbers a forged message names, `i32::MAX`, and a rectangle a display
 /// driver answered nonsense with.
 ///
-/// ⭐ **Task T-73-1, backlog line Э71-Б-1 — the fourth table, the gate of the foreground, is fed
-/// two ticks now and not a ready-made difference.** It had to be: the defect the owner named on
-/// 2026-09-17 is precisely the case a single difference cannot express — the last input arriving
-/// **after** the message the shell queued. Two of the rows below are an honest red on the
-/// arithmetic of `e72`, «клавиатура» and «переворот счётчика в другую сторону», and so is the far
-/// side of the boundary pair; every one of them is a person at the machine.
+/// ⛔ **A fourth table stood here on `e73` — the gate of the foreground.** It was fed two ticks
+/// and answered whether the program might pull itself to the front. Task T-73-3 (decision 134в)
+/// took that gate out of the product: the live acceptance of `e73` recorded sixteen refusals of
+/// the owner's own clicks and not one failure of the call the gate was guarding. What remains of
+/// task T-41-3 is the three rules above, and they are the half that mattered — a forged point is
+/// still pulled back onto the desktop.
 #[test]
 fn the_point_the_menu_opens_at_follows_its_three_rules() {
     // A work area with a task bar at the bottom, of the shape this machine really has.
@@ -2250,123 +2250,48 @@ fn the_point_the_menu_opens_at_follows_its_three_rules() {
         "a showing from the keyboard follows the icon, because the cursor may be anywhere"
     );
 
-    // And when the foreground may be taken — task T-73-1: the tick of the message and the tick
-    // of the last input, in that order, and the rule must answer the same on either side.
-    let mut wrong: Vec<String> = Vec::new();
-
-    for (message_tick, last_input_tick, expected, what) in [
-        (5000, 5000, true, "the click that is happening right now"),
-        (
-            5080,
-            5000,
-            true,
-            "the mouse: the message 80 ms after the button came up",
-        ),
-        (
-            5000,
-            5080,
-            true,
-            "the keyboard: the key released 80 ms AFTER the message — the defect of Э71-Б-1",
-        ),
-        (
-            6000,
-            5000,
-            true,
-            "the grace itself, input before the message",
-        ),
-        (
-            5000,
-            6000,
-            true,
-            "the grace itself, input after the message — the far side of the same boundary",
-        ),
-        (6001, 5000, false, "one millisecond past it, before"),
-        (5000, 6001, false, "one millisecond past it, after"),
-        (
-            10,
-            u32::MAX - 10,
-            true,
-            "the counter wrapped between the input and the message",
-        ),
-        (
-            u32::MAX - 10,
-            10,
-            true,
-            "and wrapped the other way round — the second red of `e72`",
-        ),
-        (
-            65_000,
-            5000,
-            false,
-            "a message at a machine nobody has touched for a minute",
-        ),
-        (
-            5000,
-            65_000,
-            false,
-            "and a thread a minute behind the input it is asking about",
-        ),
-    ] {
-        let distance = tray::tick_distance(message_tick, last_input_tick);
-        let answer = tray::may_take_the_foreground(message_tick, last_input_tick);
-
-        println!(
-            "message {message_tick}, last input {last_input_tick} -> distance {distance} ms, may \
-             take the foreground: {answer} ({what})"
-        );
-
-        // The rows are gathered and judged below rather than asserted one by one, so that a red
-        // run names **every** row it disagrees with. On the arithmetic of `e72` that is three of
-        // them, and reading all three at once is what says «одностороннее вычитание», while the
-        // first alone would only say «эта строка».
-        if answer != expected {
-            wrong.push(format!(
-                "message {message_tick}, last input {last_input_tick}: {answer} instead of \
-                 {expected} — {what}"
-            ));
-        }
-
-        // The distance is the shorter way round the ring, and a ring has no direction: asking it
-        // the other way about must not change the answer. A rule built on a one-sided
-        // subtraction cannot satisfy this, which is why it is asked beside every row.
-        assert_eq!(
-            distance,
-            tray::tick_distance(last_input_tick, message_tick),
-            "the distance between two ticks is symmetric ({what})"
-        );
-    }
-
-    assert!(
-        wrong.is_empty(),
-        "T-73-1: the gate of the foreground disagrees with {} of its rows: {wrong:#?}",
-        wrong.len()
-    );
+    // ⛔ A fourth table stood here on `e73` — the gate of the foreground, fed the tick of the
+    // message and the tick of the last input. Task T-73-3 (decision 134в) took that gate out of
+    // the product after the live acceptance recorded sixteen refusals of the owner's own clicks,
+    // so there is no rule of ours left to table: the foreground is asked for and Windows is the
+    // one that refuses. `the_menu_takes_the_foreground_without_asking` below asks the question
+    // that remains — that the call is made, and that neither gate stands in front of it.
 }
 
-/// Whether a body of `show_menu` asks the repaired gate and writes its refusal down — the
-/// predicate of the sweep below, task **T-73-1**.
+/// Whether a body of `show_menu` asks Windows for the foreground **without a gate of its own** —
+/// the predicate of the sweep below, task **T-73-3**.
 ///
-/// Two names and no indentation: a guard written against a literal line of code breaks when a
-/// neighbouring line is moved (lesson Э50), and this one must survive that. The first name is the
-/// refusal note the defect of Э71-Б-1 was missing; the second is the function whose one-sided
-/// arithmetic caused it, which no longer exists — a body still calling it is a body that was
-/// never repaired.
-fn show_menu_asks_the_gate_and_records_its_refusal(body: &str) -> bool {
-    body.contains("note_foreground_refused()") && !body.contains("last_input_gap")
+/// Three names and no indentation, for the reason the guard above gave: a sweep written against a
+/// literal line of code breaks when a neighbour moves (lesson Э50). The call must be there, and
+/// neither of the two gates this stage tried may stand in front of it.
+fn show_menu_takes_the_foreground_unconditionally(body: &str) -> bool {
+    body.contains("SetForegroundWindow(hwnd)")
+        && !body.contains("may_take_the_foreground")
+        && !body.contains("note_foreground_refused")
 }
 
-/// **Task T-73-1, backlog line Э71-Б-1 — the showing of the menu asks the repaired gate, and a
-/// refusal of it reaches the journal.**
+/// **Task T-73-3, backlog line Э71-Б-1, decision 134в — the menu asks Windows for the foreground
+/// and lets Windows be the one to refuse.**
 ///
-/// The table above proves the *rule*; this proves the menu is wired to it. Both are needed: the
-/// lesson of Э41 is that a repair is checked two ways, and a rule nobody calls repairs nothing.
+/// The live acceptance of `e73` failed: the repaired, symmetric gate still refused sixteen
+/// showings out of the owner's own clicks, and the dump carried **no** `SetForegroundWindow` at
+/// all — the call was never reached. Decision 134в, by the owner's word, takes the gate out and
+/// returns to the shape of `e63` and everything before it.
 ///
-/// The body is taken by the names in it, never by a line of source, and the predicate is shown
-/// **failing** on three bodies that must not pass — among them the real text of `e72`, where the
-/// gate was asked through `last_input_gap()` and its refusal went nowhere. A sweep that cannot
-/// fail is not a measurement.
+/// ⭐ **Why this is not a weakening dressed up as a repair.** Windows already enforces exactly the
+/// rule the gate was imitating, and enforces it better: `SetForegroundWindow` refuses a process
+/// that has no right to the foreground, and the system knows **which process received the input**,
+/// which two ticks of a millisecond counter cannot know at all. The gate's own documentation
+/// admitted the hole — a forged message sent while the person types in another program passed it —
+/// and that is precisely the case the system's rule catches, because the typing went elsewhere.
+/// The other half of task T-41-3 stays whole: a forged point is still pulled back onto the desktop
+/// (`a_forged_menu_point_is_pulled_back_onto_the_desktop` below), and SEC-05 still allows one
+/// showing at a time.
+///
+/// The refusal remains observable: `SetForegroundWindow` has had its own row in the journal since
+/// task T-08-2, and a failure of the call is reported under it.
 #[test]
-fn the_menu_records_a_refused_foreground() {
+fn the_menu_takes_the_foreground_without_asking() {
     let source = fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src")
@@ -2385,9 +2310,10 @@ fn the_menu_records_a_refused_foreground() {
 
     println!("длина тела show_menu: {} знаков", body.len());
     println!(
-        "note_foreground_refused: {}, last_input_gap: {}",
-        body.contains("note_foreground_refused()"),
-        body.contains("last_input_gap")
+        "SetForegroundWindow: {}, may_take_the_foreground: {}, note_foreground_refused: {}",
+        body.contains("SetForegroundWindow(hwnd)"),
+        body.contains("may_take_the_foreground"),
+        body.contains("note_foreground_refused")
     );
 
     assert!(
@@ -2396,29 +2322,66 @@ fn the_menu_records_a_refused_foreground() {
     );
 
     assert!(
-        show_menu_asks_the_gate_and_records_its_refusal(body),
-        "T-73-1: `show_menu` must call `note_foreground_refused()` when the gate says no, and \
-         must not go back to the one-sided `last_input_gap`"
+        show_menu_takes_the_foreground_unconditionally(body),
+        "T-73-3: `show_menu` must call `SetForegroundWindow` with no gate of its own in front of \
+         it — the gate refused sixteen of the owner's own clicks on `e73`"
     );
 
-    // Отрицательные контроли. The first is the real text of `e72` — the shape the defect had.
+    // The gate is not merely unused: it is gone, and so is the name its refusal was written
+    // under. A rule nobody calls is a rule somebody calls again.
+    for dead in [
+        "FOREGROUND_GRACE_MS",
+        "fn may_take_the_foreground",
+        "fn tick_distance",
+        "fn last_input_tick",
+        "fn note_foreground_refused",
+    ] {
+        assert!(
+            !source.contains(dead),
+            "T-73-3: `{dead}` must be gone from the module, not left behind unused"
+        );
+    }
+
+    let vocabulary = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("diag.rs"),
+    )
+    .expect("src\\diag.rs must be readable");
+
+    // The needle is the **row**, not the words: the note that records why the row was taken out
+    // names it in prose, and a guard that could not tell the two apart would forbid the history
+    // as well as the row.
+    assert!(
+        !vocabulary.contains("(\"tray foreground refused\""),
+        "T-73-3: the vocabulary must not keep a row nothing can produce any more"
+    );
+
+    // Отрицательные контроли: the two shapes this stage shipped, and one with no call at all.
+    let e73 = "\n    let may_take_it = match last_input_tick() {\n        None => true,\n        \
+               Some(last_input) => may_take_the_foreground(message_tick(), last_input),\n    \
+               };\n    if may_take_it {\n        let foreground = unsafe { \
+               SetForegroundWindow(hwnd) };\n    } else {\n        note_foreground_refused();\n    \
+               }\n";
     let e72 = "\n    if may_take_the_foreground(last_input_gap()) {\n        let foreground = \
                unsafe { SetForegroundWindow(hwnd) };\n    }\n";
 
     for (candidate, what) in [
-        (e72, "the body of `e72`: the gate asked, the refusal silent"),
         (
-            "\n    if may_take_the_foreground(message_tick(), last_input_gap()) {\n    } else {\n \
-             note_foreground_refused()\n    }\n",
-            "the note added but the one-sided gap kept",
+            e73,
+            "the body of `e73`: the symmetric gate that refused sixteen clicks",
         ),
         (
-            "\n    let foreground = unsafe { SetForegroundWindow(hwnd) };\n",
-            "no gate at all, which is `e63` and not a repair either",
+            e72,
+            "the body of `e72`: the one-sided gate the stage was opened for",
+        ),
+        (
+            "\n    let palette = theme::resolve(theme_setting, theme::system_is_light());\n",
+            "no call to SetForegroundWindow at all, which is no workaround either",
         ),
     ] {
         assert!(
-            !show_menu_asks_the_gate_and_records_its_refusal(candidate),
+            !show_menu_takes_the_foreground_unconditionally(candidate),
             "отрицательный контроль обязан быть отвергнут: {what}"
         );
     }

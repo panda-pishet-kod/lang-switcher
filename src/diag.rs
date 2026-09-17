@@ -778,20 +778,14 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // screen. `Kind::Window` — a refusal is the business of a dialog, like «link refused» — and
     // **no new `Kind`**, the rule every note above follows.
     ("hotkey capture refused", Kind::Window),
-    // ⭐ **Task T-73-1, backlog line Э71-Б-1, decision 134.2** — the gate of task T-41-3 turned a
-    // showing of the tray menu away, so `SetForegroundWindow` was not asked for and the menu came
-    // up without the foreground. That is the state the owner named on 2026-09-17: «при щелчке в
-    // другом окне или смене фокуса оно не закрывается». The refusal was a **silence** until now,
-    // which is why the defect lived through four deliveries. Recorded by
-    // `tray::note_foreground_refused`, where the gate is asked. Appended at the end so that no
-    // index above it moves.
-    //
-    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the tick of the message, not the tick of
-    // the last input, not the distance between them: the helper takes no argument at all.
-    // `Kind::Tray` — the business of the icon, the kind «SetForegroundWindow» itself already has —
-    // and **no new `Kind`**, the rule every note above follows. No counter and no line of the dump
-    // go with it: the ring of 1024 events carries any acceptance.
-    ("tray foreground refused", Kind::Tray),
+    // ⛔ **A row «tray foreground refused» stood here on `e73` alone (task T-73-1) and was taken
+    // out again by task T-73-3, decision 134в.** It named a refusal of the tray's own foreground
+    // gate; the live acceptance of `e73` recorded sixteen of them against the owner's own clicks,
+    // the gate was removed, and nothing can produce the name any more. It is removed rather than
+    // left standing because a name in this table is a promise that something writes it. Removing
+    // the **last** row moves no index above it, which is why the row was appended there in the
+    // first place. A refusal of the foreground is still journalled — by the system's own answer,
+    // under `SetForegroundWindow` above.
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
