@@ -1883,18 +1883,22 @@ fn row_named<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// **Task T-34-4, finding Н95.** Every counter of `guard::Counters` and of
-/// `selection::Counters` is a row of the dump, under its own name — fourteen and fifteen of
-/// them on the day this was written, and the numbers are not the point.
+/// **Task T-34-4, finding Н95.** Every counter of `guard::Counters`, of `selection::Counters`
+/// and of `selection::PathCounters` is a row of the dump, under its own name — the numbers of
+/// them are not the point.
 ///
 /// The list of names is built by taking each structure apart **field by field, without `..`**:
-/// a fifteenth field of `guard::Counters`, or a sixteenth of `selection::Counters`, refuses to
-/// compile this test until it has been named here — and the assertion that runs then asks the
-/// dump for that name. The other direction is asserted too: the dump carries exactly as many
-/// `guard.` rows and `selection.` rows as the structures have fields, so a row printed under a
-/// misspelt name is caught as well as a row that is absent. The values are printed and not
-/// asserted — the structure and the dump are two snapshots, and the machine may count between
-/// them.
+/// a new field of any of the three refuses to compile this test until it has been named here —
+/// and the assertion that runs then asks the dump for that name. The other direction is
+/// asserted too: the dump carries exactly as many `guard.` rows and `selection.` rows as the
+/// structures have fields, so a row printed under a misspelt name is caught as well as a row
+/// that is absent. The values are printed and not asserted — the structure and the dump are two
+/// snapshots, and the machine may count between them.
+///
+/// ⚠ **The third structure was added after it had already been missed.** `PathCounters` was not
+/// taken apart here until the seven rows of the selection path were found to be in no dump at
+/// all, which is exactly the hole this test was written to close and did not, because it named
+/// two structures and the module had three.
 #[test]
 fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
     let lang_switcher::guard::Counters {
@@ -1982,10 +1986,41 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
         ("selection.restore_failures", restore_failures),
     ];
 
+    // ⭐ **The third structure, and the finding that added it.** `selection::PathCounters` counts
+    // the *path* — what a press did — where the structure above counts the *clipboard*. It was
+    // outside every dump from the day it was written: nobody took it apart here, so nothing
+    // refused to compile, and the seven numbers existed only inside the process. A dump could say
+    // how often the clipboard had been opened and could not say whether a press had found a
+    // selection at all, which is the one question §4.7 is about. Taken apart field by field,
+    // without `..`, for the reason the two above are.
+    let lang_switcher::selection::PathCounters {
+        handovers,
+        conversions,
+        no_selection,
+        refusals,
+        console_refusals,
+        own_window_refusals,
+        late_copies,
+    } = lang_switcher::selection::path_counters();
+
+    let path_rows = [
+        ("selection.handovers", handovers),
+        ("selection.conversions", conversions),
+        ("selection.no_selection", no_selection),
+        ("selection.refusals", refusals),
+        ("selection.console_refusals", console_refusals),
+        ("selection.own_window_refusals", own_window_refusals),
+        ("selection.late_copies", late_copies),
+    ];
+
     let text = diag::render();
     let mut missing: Vec<&str> = Vec::new();
 
-    for (name, value) in guard_rows.iter().chain(selection_rows.iter()) {
+    for (name, value) in guard_rows
+        .iter()
+        .chain(selection_rows.iter())
+        .chain(path_rows.iter())
+    {
         match row_named(&text, name) {
             Some(row) => println!("{row}   (the reader answered {value})"),
             None => missing.push(name),
@@ -2002,7 +2037,7 @@ fn every_counter_of_the_guard_and_of_the_clipboard_is_a_row_of_the_dump() {
 
     assert_eq!(
         (guard_in_dump, selection_in_dump),
-        (guard_rows.len(), selection_rows.len()),
+        (guard_rows.len(), selection_rows.len() + path_rows.len()),
         "the dump carries a `guard.` or `selection.` row the structures do not have"
     );
 }

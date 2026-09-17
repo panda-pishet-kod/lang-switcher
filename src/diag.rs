@@ -1749,6 +1749,39 @@ fn render_counters(out: &mut String) {
         "selection.restore_failures",
         clipboard.restore_failures,
     );
+
+    // ⭐ **The seven counters of the selection path itself.** Everything above this line counts
+    // the **clipboard** — opens, formats, restores. These count the **press**: what the path did
+    // with it, and which of the eight roads of `wants_selection_path` and of the eight steps of
+    // FR-61 it went down. They are `selection::PathCounters`, a second structure of the same
+    // module, and until this task not one of them reached a dump: the reader above takes
+    // `selection::counters()` apart and there was no reader for this one.
+    //
+    // ⚠ **What the hole cost, said plainly.** A press that comes back as a single click — the
+    // idle tone of FR-100 — can mean four different things: step 3 timed out and there was no
+    // selection (`no_selection`), the path refused for one of the reasons of `Refusal`
+    // (`refusals`), the window in front was a console or a window of our own thread
+    // (`console_refusals`, `own_window_refusals`), or the path was never entered because the
+    // typing buffer was not empty — in which case none of the seven moves at all. Without these
+    // rows a dump could not tell those apart, and the difference is the whole diagnosis.
+    // `late_copies` is the fifth answer and the one a person could never guess: the application
+    // answered the `Ctrl+C` of step 2 **after** step 3 had given up, so the press was read as «no
+    // selection» although there was one — the race of tasks T-13-11 and T-38-4.
+    //
+    // SEC-01 and SEC-07: seven counts of this program's own decisions. Not one of them is
+    // derived from what was selected, copied or typed, and none can be turned back into it.
+    let path = crate::selection::path_counters();
+    row_u32(out, "selection.handovers", path.handovers);
+    row_u32(out, "selection.conversions", path.conversions);
+    row_u32(out, "selection.no_selection", path.no_selection);
+    row_u32(out, "selection.refusals", path.refusals);
+    row_u32(out, "selection.console_refusals", path.console_refusals);
+    row_u32(
+        out,
+        "selection.own_window_refusals",
+        path.own_window_refusals,
+    );
+    row_u32(out, "selection.late_copies", path.late_copies);
 }
 
 /// Width of the name column of the counter section. One place, so the columns line up.
