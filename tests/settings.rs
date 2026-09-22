@@ -6101,19 +6101,30 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
     // is about: the backing needed room to the left of the word and above it, and an owner-drawn
     // control cannot paint outside its own rectangle. What C5 forbids is the **name** moving, and
     // the whole point of these four numbers is that it does not — see the assertion below them.
+    //
+    // ⚠⚠ **145 → 206 задачей T-81-1** (решение 142.2 п. 2): окно стало 256 единиц и колонка
+    // текста идёт до правого поля 244, а этот прямоугольник занимает её целиком — 38 + 206 = 244.
+    // Ширина прямоугольника имени никогда и не была шириной слова: подложка лепится по слову
+    // (проверено ниже), а прямоугольник — это комната, в которой её можно нарисовать.
     assert_eq!(
         template.rect_of(NAME),
-        (38, 11, 38 + 145, 11 + 12),
-        "the name's rectangle is the one task T-79-2 measured"
+        (38, 11, 38 + 206, 11 + 12),
+        "the name's rectangle is the one task T-79-2 measured, on the column task T-81-1 widened"
     );
 
-    // ⭐ The right and bottom edges did not move at all: the rectangle grew only towards the
-    // corner the backing needed. 42 + 141 = 183 and 12 + 11 = 23 are the numbers of `e78`.
+    // ⭐ The near corner did not move at all — 38 and 11 are the numbers of `e79`, and the name
+    // itself is what stands on them. The far corner follows the text column: 244 is the right
+    // margin of решение 142.2 п. 3, where `e78` and `e79` had 183 in a window of 191.
     let (left, top, right, bottom) = template.rect_of(NAME);
     assert_eq!(
+        (left, top),
+        (38, 11),
+        "the near corner of the name is fixed — the backing is drawn from it"
+    );
+    assert_eq!(
         (right, bottom),
-        (183, 23),
-        "the far corner of the name is fixed"
+        (244, 23),
+        "and the far corner reaches the margin of the family"
     );
 
     // ⭐⭐ **The name itself has not moved, and this is the arithmetic of it.** The drawing puts
@@ -6344,9 +6355,10 @@ fn the_name_moved_by_exactly_what_its_backing_gives_back() {
     );
 
     // And the backing really is narrower than the text column: that is the whole of what the
-    // user asked for. The column is 141 units wide; the word plus its air is far less.
+    // user asked for. The column is 202 units wide since task T-81-1; the word plus its air is
+    // far less.
     assert!(
-        chip.width < (141 * unit_x) / 4,
+        chip.width < (202 * unit_x) / 4,
         "the backing must hug the word, not fill the text column"
     );
     assert!(chip.radius > 0, "and its corners must be rounded");
@@ -6430,14 +6442,34 @@ fn the_button_gate_of_the_about_window_asks_the_predicate() {
 /// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
 #[test]
 fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
-    const SLOT_UNITS: i32 = 86;
+    /// ⚠ **86 → 92 задачей T-81-1** (решение 142.2 п. 2 и п. 7). Окно стало 256 единиц, и ширина
+    /// этой кнопки посчитана тем же правилом, которым `letters::button_width` считает кнопки
+    /// четырёх других окон: самая широкая подпись из четырнадцати локалей плюс
+    /// `air::BUTTON_PAD` × 2 = 20 единиц. Греческое «Από τον δημιουργό…» — 125 px = 72 единицы,
+    /// плюс воздух = 92. ⛔ Число здесь — **литерал, как во всех тестах шаблона**: импортированное
+    /// согласилось бы с любой правкой. Оно же стоит в `app.rc`, и свип ширин их сводит.
+    const SLOT_UNITS: i32 = 92;
     const SLOT_BEFORE_117B: i32 = 72;
 
     let _guard = with_product_strings();
 
     let product = ProductImage::open();
-    let font = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT))
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    // ⭐ The literal above is held against the template it claims to measure. A stand whose slot
+    // and whose window have parted is a stand that measures nothing — and the two parted for real
+    // in task T-81-1, where the button grew and this number did not follow of itself.
+    let (left, _, right, _) = template.rect_of(1136);
+    assert_eq!(
+        right - left,
+        SLOT_UNITS,
+        "«От автора…» is {} units wide in app.rc and this stand measures {SLOT_UNITS}",
+        right - left
+    );
+
+    let font = template
         .font
+        .clone()
         .expect("the about template declares DS_SETFONT");
     let sheet = Sheet::new(64);
     let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
@@ -6825,28 +6857,30 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
                 }
                 .expect("the memory DC must answer the metrics of its own face");
 
-                // ⚠ **The one named exception — решение 128.4** (task T-43-7, finding Н83). With
-                // its caveat the Greek third row and the widest key name wrap into **four**
-                // lines, one more than the three its slot was grown to; the user chose «one line
-                // taller» for the window, and this case takes its fourth line from the live fit
-                // (`settings::fit_about_help`, in `WM_INITDIALOG`, before the window is shown).
-                // The exception is this case at this size and nothing else: a fifth line, the
-                // case fitting again, or any other language, row or key overflowing turn the
-                // test red — so it cannot grow into a hole.
+                // ⭐⭐ **The one named exception of решение 128.4 is GONE, and задача T-81-1 is
+                // what took it away.** With its caveat the Greek third row and the widest key
+                // name used to wrap into **four** lines in a column of 142 units — one more than
+                // the slot had — and took the fourth from the live fit
+                // (`settings::fit_about_help`). The column is **207** units since решение 142.2
+                // п. 2, and the same sentence wraps into **three**.
+                //
+                // ⚠ The case is still named, because «the exception went away» is a statement and
+                // not a forgetting: it is held to fitting its slot outright. If a wording, a face
+                // or a width ever puts it over again, this line goes red before the general
+                // assertion below does, and it says which case came back.
                 if language == Language::El && row == 1133 && key == widest_key.as_str() {
                     assert!(
-                        lines == 4 && needed > height,
-                        "El: the exception of решение 128.4 is row 1133 with «{key}» needing \
-                         exactly one line over its {units_h} units = {height} px; it wraps into \
-                         {lines} lines and wants {needed} px — the exception must be re-decided"
+                        lines <= 3 && needed <= height,
+                        "El row 1133 with «{key}» was the one exception of решение 128.4 and task \
+                         T-81-1 closed it by widening the column; it wraps into {lines} lines and \
+                         wants {needed} px of the {units_h} units = {height} px it has — the \
+                         exception has come back and must be re-decided"
                     );
 
                     println!(
-                        "the named exception of решение 128.4: El row {row} key «{key}» — {lines} \
-                         lines, {needed} px against {height} px, the fourth line from the live fit"
+                        "the exception of решение 128.4, closed by T-81-1: El row {row} key \
+                         «{key}» — {lines} lines, {needed} px against {height} px"
                     );
-
-                    continue;
                 }
 
                 if height - needed < tightest.0 {
@@ -10665,10 +10699,18 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // against the 40 of its 19 units, and no honest wording fits two. The question went to the
     // user, as 128.1 required, and the answer was «one line taller»: the row is 27 units and
     // the window grew by the same eight. The width is untouched.
+    // ⚠⚠ **191 × 271 → 256 × 237 by решение 142.2** (task T-81-1). The width moved for the first
+    // time in the life of this window, and it moved by the owner's own word: «типизировал по
+    // ширине все окна кроме главного окна настроек, приведем их к 256». The height followed the
+    // width rather than a hand — in a column of 207 units instead of 142 the five help rows need
+    // 3 / 2 / 3 / 2 / 1 lines where they needed 4 / 2 / 4 / 2 / 2, and the two description lines
+    // need one line each where they needed two. ⚠ 237 is the **natural** height of this window
+    // after the widening; the typical height of the three windows of решение 142.2 п. 8 is set in
+    // task T-81-4, and the panel takes what it adds.
     assert_eq!(
         template.size,
-        (191, 271),
-        "the about window of решения 82.5, 87, 124.1 и 128.4 is 191 × 271 dialog units"
+        (256, 237),
+        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 237 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
@@ -21525,5 +21567,319 @@ fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
         settings.matches("open_in_the_shell(&dir.display()").count(),
         1,
         "and so does «Открыть папку журнала»"
+    );
+}
+
+/// The five windows that became one family in stage Э81 — решение 142.2 п. 2 и п. 3.
+///
+/// The settings dialog is deliberately absent: it is 430 units wide by the owner's word and its
+/// controls keep their own columns. Its width is held below all the same, so that «the four came
+/// to 256» cannot quietly become «all six did».
+const FAMILY_OF_E81: [&str; 5] = [
+    "IDD_ABOUT",
+    "IDD_LETTER",
+    "IDD_LETTERS_LIST",
+    "IDD_AUTHOR",
+    "IDD_WIZARD",
+];
+
+/// One `DIALOGEX` of `app.rc`: its name, its `(cx, cy)`, and every control statement inside it
+/// as `(statement, x, y, cx, cy)`.
+struct RcDialog {
+    name: String,
+    size: (i32, i32),
+    controls: Vec<(String, i32, i32, i32, i32)>,
+}
+
+/// Reads every `DIALOGEX` out of the **text** of `app.rc`.
+///
+/// ⚠ The text and not the compiled template, and that is the point: the sweep has to be runnable
+/// against the `app.rc` of another wave, which is what makes the negative control possible at all.
+///
+/// Quoted strings are blanked before a line is split on commas — a caption of this file carries
+/// commas of its own («Исправляет текст, набранный в неверной раскладке.»), and a parser that
+/// counted them would read the wrong four numbers. The four numbers of a statement are the **last
+/// four integers** it names, whatever stands before them: `ICON` names a resource first, `CONTROL`
+/// names a class, `EDITTEXT` names nothing at all.
+fn dialogs_of_the_resource(text: &str) -> Vec<RcDialog> {
+    /// Every statement that puts a control into a template — the whole vocabulary this file uses.
+    const STATEMENTS: [&str; 15] = [
+        "ICON",
+        "LTEXT",
+        "RTEXT",
+        "CTEXT",
+        "PUSHBUTTON",
+        "DEFPUSHBUTTON",
+        "CONTROL",
+        "EDITTEXT",
+        "COMBOBOX",
+        "GROUPBOX",
+        "LISTBOX",
+        "SCROLLBAR",
+        "AUTOCHECKBOX",
+        "CHECKBOX",
+        "AUTORADIOBUTTON",
+    ];
+
+    let blanked = |line: &str| -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut inside = false;
+
+        for character in line.chars() {
+            if character == '"' {
+                inside = !inside;
+                continue;
+            }
+
+            out.push(if inside { ' ' } else { character });
+        }
+
+        out
+    };
+
+    let mut dialogs: Vec<RcDialog> = Vec::new();
+    let mut open: Option<RcDialog> = None;
+
+    for line in text.replace("\r\n", "\n").lines() {
+        let trimmed = line.trim();
+
+        if let Some((name, tail)) = trimmed.split_once(" DIALOGEX ")
+            && !name.contains(' ')
+            && !name.starts_with("//")
+        {
+            let numbers: Vec<i32> = tail
+                .split(',')
+                .filter_map(|field| field.trim().parse::<i32>().ok())
+                .collect();
+
+            assert_eq!(
+                numbers.len(),
+                4,
+                "the DIALOGEX line of {name} must name four numbers: {trimmed}"
+            );
+
+            open = Some(RcDialog {
+                name: name.to_owned(),
+                size: (numbers[2], numbers[3]),
+                controls: Vec::new(),
+            });
+
+            continue;
+        }
+
+        if trimmed == "END"
+            && let Some(dialog) = open.take()
+        {
+            dialogs.push(dialog);
+            continue;
+        }
+
+        let Some(dialog) = open.as_mut() else {
+            continue;
+        };
+
+        let statement = trimmed.split_whitespace().next().unwrap_or_default();
+
+        if !STATEMENTS.contains(&statement) {
+            continue;
+        }
+
+        let numbers: Vec<i32> = blanked(trimmed)
+            .split(',')
+            .filter_map(|field| field.trim().parse::<i32>().ok())
+            .collect();
+
+        assert!(
+            numbers.len() >= 4,
+            "a control statement of {} must name at least four numbers: {trimmed}",
+            dialog.name
+        );
+
+        let tail = &numbers[numbers.len() - 4..];
+
+        dialog
+            .controls
+            .push((trimmed.to_owned(), tail[0], tail[1], tail[2], tail[3]));
+    }
+
+    assert!(open.is_none(), "a DIALOGEX of app.rc was never closed");
+
+    dialogs
+}
+
+/// **The sweep of task T-81-1** — answers what is wrong with an `app.rc`, or nothing at all.
+///
+/// Separate from the test so that it can be turned on a text that is **not** the tree's: that is
+/// the negative control, and without it a sweep is a thing that cannot fail.
+fn what_breaks_the_family_of_e81(text: &str) -> Vec<String> {
+    /// The outer margin of the family — решение 142.2 п. 3.
+    const MARGIN: i32 = 12;
+    /// The width of every window of the family — решение 142.2 п. 2.
+    const WIDTH: i32 = 256;
+    /// The width of the settings dialog, which the stage does not touch.
+    const SETTINGS_WIDTH: i32 = 430;
+
+    let dialogs = dialogs_of_the_resource(text);
+    let mut broken = Vec::new();
+
+    if dialogs.len() != 6 {
+        broken.push(format!(
+            "app.rc declares {} dialogs, not six",
+            dialogs.len()
+        ));
+    }
+
+    for name in FAMILY_OF_E81 {
+        let Some(dialog) = dialogs.iter().find(|dialog| dialog.name == name) else {
+            broken.push(format!("{name} is missing from app.rc"));
+            continue;
+        };
+
+        if dialog.size.0 != WIDTH {
+            broken.push(format!(
+                "{name} is {} units wide and the family is {WIDTH}",
+                dialog.size.0
+            ));
+        }
+
+        for (statement, x, _, cx, _) in &dialog.controls {
+            let head = statement
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            if *x < MARGIN {
+                broken.push(format!(
+                    "{name}: «{head}…» starts at {x}, left of the margin of {MARGIN}"
+                ));
+            }
+
+            if x + cx > dialog.size.0 - MARGIN {
+                broken.push(format!(
+                    "{name}: «{head}…» ends at {}, past the margin of {MARGIN} at {}",
+                    x + cx,
+                    dialog.size.0 - MARGIN
+                ));
+            }
+        }
+
+        // ⭐ **«Не уже поля» is not «the margin is twelve».** The wizard of `e80` was laid out on
+        // a margin of sixteen and broke no rule above: nothing of it stood left of twelve and
+        // nothing ran past the edge. The margin is a number the window **reaches**, on both
+        // sides, and решение 142.2 п. 3 says which number.
+        let left = dialog.controls.iter().map(|(_, x, ..)| *x).min();
+        let right = dialog.controls.iter().map(|(_, x, _, cx, _)| x + cx).max();
+
+        if left != Some(MARGIN) {
+            broken.push(format!(
+                "{name}: the leftmost control stands at {left:?} and the margin is {MARGIN}"
+            ));
+        }
+
+        if right != Some(dialog.size.0 - MARGIN) {
+            broken.push(format!(
+                "{name}: the rightmost control ends at {right:?} and the margin is {MARGIN} at {}",
+                dialog.size.0 - MARGIN
+            ));
+        }
+    }
+
+    match dialogs.iter().find(|dialog| dialog.name == "IDD_SETTINGS") {
+        Some(dialog) if dialog.size.0 == SETTINGS_WIDTH => {}
+        Some(dialog) => broken.push(format!(
+            "IDD_SETTINGS is {} units wide — the owner's word is {SETTINGS_WIDTH}",
+            dialog.size.0
+        )),
+        None => broken.push("IDD_SETTINGS is missing from app.rc".to_owned()),
+    }
+
+    broken
+}
+
+/// **Task T-81-1, решение 142.2 п. 2 и п. 3** — the four windows come to 256 units, the wizard
+/// comes to the same outer margin, and the settings dialog stays where the owner left it.
+///
+/// ⚠ **The red before.** On `e80` this sweep names twenty-nine faults at once: three windows 191
+/// units wide, one 246, and every control of the wizard standing on the margin of 16 it was laid
+/// out with. That red is the whole of what the task closes.
+///
+/// ⛔ A sweep that cannot fail is not a check, so the two controls below turn it on texts that
+/// must be rejected: the resource of `e80` (the negative control) and the resource of this tree
+/// with one window put back to 191 (the mutant).
+#[test]
+fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
+    let resource = Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
+    let text = fs::read_to_string(&resource).expect("app.rc must be readable");
+
+    let broken = what_breaks_the_family_of_e81(&text);
+
+    for fault in &broken {
+        println!("СВИП: {fault}");
+    }
+
+    assert!(
+        broken.is_empty(),
+        "the family of решение 142.2 is broken in {} places: {broken:#?}",
+        broken.len()
+    );
+
+    // Контроль прибора, первый — **отрицательный**: the resource as `e80` had it. Three windows
+    // were 191 units wide and one 246; a sweep that passes this text is measuring nothing.
+    let of_e80 = text
+        .replace(
+            "IDD_ABOUT DIALOGEX 0, 0, 256,",
+            "IDD_ABOUT DIALOGEX 0, 0, 191,",
+        )
+        .replace(
+            "IDD_AUTHOR DIALOGEX 0, 0, 256,",
+            "IDD_AUTHOR DIALOGEX 0, 0, 246,",
+        );
+
+    assert_ne!(
+        of_e80, text,
+        "the control must change the text it is made of"
+    );
+    assert!(
+        !what_breaks_the_family_of_e81(&of_e80).is_empty(),
+        "the sweep does not see the resource of e80 — it cannot fail"
+    );
+
+    // Контроль прибора, второй — **мутант**: one window put back and the sweep must name it.
+    let mutant = text.replace(
+        "IDD_LETTER DIALOGEX 0, 0, 256,",
+        "IDD_LETTER DIALOGEX 0, 0, 191,",
+    );
+
+    assert_ne!(
+        mutant, text,
+        "the mutant must change the text it is made of"
+    );
+
+    let names = what_breaks_the_family_of_e81(&mutant);
+
+    assert!(
+        names
+            .iter()
+            .any(|fault| fault.starts_with("IDD_LETTER is 191")),
+        "the sweep must name the window that was put back: {names:#?}"
+    );
+
+    // And the parser really did read the templates, rather than answering «nothing is wrong»
+    // because it found nothing at all.
+    let dialogs = dialogs_of_the_resource(&text);
+
+    for dialog in &dialogs {
+        println!(
+            "{}: {:?} units, {} controls",
+            dialog.name,
+            dialog.size,
+            dialog.controls.len()
+        );
+    }
+
+    assert!(
+        dialogs.iter().all(|dialog| !dialog.controls.is_empty()),
+        "every template of app.rc must carry controls"
     );
 }

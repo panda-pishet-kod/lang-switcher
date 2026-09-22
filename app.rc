@@ -917,7 +917,7 @@ END
 // ⚠⚠ **256 → 263 задачей T-42-2** (находка С44, решение 124.4): панель справки выросла на семь
 // единиц под ЗАМЕРЕННУЮ высоту своей первой строки, и окно выросло ровно на них. Ширина 191 не
 // тронута — решения 82.5 и 87 говорят «окно растёт только вниз», и это по-прежнему так.
-IDD_ABOUT DIALOGEX 0, 0, 191, 271
+IDD_ABOUT DIALOGEX 0, 0, 256, 237
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -949,15 +949,21 @@ BEGIN
     // WS_TABSTOP по умолчанию, а эта кнопка стоит в шаблоне первой: с табуляцией начальный фокус
     // диалога пришёл бы на имя вместо «ОК», и окно открывалось бы с пунктиром вокруг имени. Без
     // табуляции щелчок мышью по-прежнему доходит — нажатие кнопки и обход по Tab это разные вещи.
-    PUSHBUTTON      "Lang Switcher", IDC_ABOUT_NAME, 38, 11, 145, 12, BS_OWNERDRAW | NOT WS_TABSTOP
-    LTEXT           "", IDC_ABOUT_VERSION, 42, 24, 141, 8, SS_OWNERDRAW
+    PUSHBUTTON      "Lang Switcher", IDC_ABOUT_NAME, 38, 11, 206, 12, BS_OWNERDRAW | NOT WS_TABSTOP
+    LTEXT           "", IDC_ABOUT_VERSION, 42, 24, 202, 8, SS_OWNERDRAW
     // ⚠ 141 units wide and not the 101 they were until task Т-26-2: the accepted mock-up runs
     // its `.applines` the full width of the text column, level with the name above them, and
     // at 101 units the larger face of решение 85 broke both sentences into three lines apiece.
     // Two lines each, 10 units of air under the version line — `.applines { margin-top: 10px }`
     // of the mock-up, which is 5,3 vertical units here.
-    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 37, 141, 20, SS_OWNERDRAW
-    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 57, 141, 20, SS_OWNERDRAW
+    // ⚠⚠ **141 → 202 и 20 → 10 единиц — задача T-81-1, решение 142.2 п. 2.** Окно стало 256
+    // единиц, и колонка текста идёт теперь от 42 до правого поля 244. В колонке 202 единицы обе
+    // фразы укладываются в **одну** строку в каждой из четырнадцати локалей — замер
+    // `scratchpad-E81\probe-widths.log`: 19 px против 38 px в прежней колонке 141. Десять единиц —
+    // это «(n − 1) × 9,6 + 9,1, вверх» той же лестницы, по которой считаны строки справки ниже;
+    // для одной строки она даёт 10.
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_ABOUT_LINE_1, 42, 37, 202, 10, SS_OWNERDRAW
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_ABOUT_LINE_2, 42, 47, 202, 10, SS_OWNERDRAW
 
     // -- «Как пользоваться»: FR-92а, task Т-23-4, решение 82.5 ----------------------------
     //
@@ -1018,17 +1024,28 @@ BEGIN
     // 8 единиц, воздух между строками — прежние 4, ширина 191 не тронута. Единственный случай
     // сверх — `el` с «PrintScreen», четыре строки — берёт четвёртую у `fit_about_help`; тест
     // шаблона называет его поимённо и держит ровно таким.
-    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 83, 167, 157
-    LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 97, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_1, 30, 97, 142, 36, SS_OWNERDRAW
-    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 137, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_2, 30, 137, 142, 19, SS_OWNERDRAW
-    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 160, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_3, 30, 160, 142, 27, SS_OWNERDRAW
-    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 191, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_4, 30, 191, 142, 19, SS_OWNERDRAW
-    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 214, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_ABOUT_HELP_5, 30, 214, 142, 19, SS_OWNERDRAW
+    // ⚠⚠ **Пере-измерено задачей T-81-1 под колонку 207 единиц** (решение 142.2 п. 2). Панель
+    // идёт теперь от 12 до 244, её содержимое — от 19 до 237, а строка с цифрой — от 30 до 237,
+    // то есть **207** единиц против прежних 142. В такой колонке строки просят меньше, и числа
+    // ниже — ЗАМЕР четырнадцати локалей обоими именами клавиши
+    // (`scratchpad-E81\probe-widths.log`), а не подгонка: 57 / 38 / 57 / 38 / 19 px, то есть
+    // 3 / 2 / 3 / 2 / 1 строки. По лестнице этого файла («29 for three lines, 19 for two, 10 for
+    // one») это **29 / 19 / 29 / 19 / 10**. Воздух между строками — прежние 4 единицы, шапка
+    // панели — прежние 14.
+    // ⭐ **Именованное исключение решения 128.4 тем самым снято делом:** греческая третья строка
+    // с самым широким именем клавиши просила в колонке 142 четыре строки и брала четвёртую у
+    // живой подгонки; в колонке 207 ей хватает трёх.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 63, 232, 143
+    LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 77, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_1, 30, 77, 207, 29, SS_OWNERDRAW
+    LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 110, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_2, 30, 110, 207, 19, SS_OWNERDRAW
+    LTEXT           "3", IDC_ABOUT_HELP_N3, 19, 133, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_3, 30, 133, 207, 29, SS_OWNERDRAW
+    LTEXT           "4", IDC_ABOUT_HELP_N4, 19, 166, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_4, 30, 166, 207, 19, SS_OWNERDRAW
+    LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 189, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_5, 30, 189, 207, 10, SS_OWNERDRAW
 
     // FR-103, task Т-32-4: the way into «От автора». It stands to the left of «ОК» and the
     // window does not grow — решение 101 п. 7 — which is why it takes the air that was already
@@ -1039,8 +1056,14 @@ BEGIN
     // (T-42-2). Поле под ними осталось прежним — 263 − 256 = 7, как было 256 − 249.
     // ⚠ 242 → **250**: ещё на восемь — за третьей строкой справки (T-43-7, решение 128.4); поле
     // под кнопками прежнее — 271 − 264 = 7.
-    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 250, 86, 14, BS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 144, 250, 39, 14, BS_OWNERDRAW
+    // ⚠⚠ **Ширины пере-измерены задачей T-81-1 по правилу «подпись плюс воздух»** — тому же,
+    // которым `letters::button_width` считает кнопки четырёх других окон: самая широкая подпись
+    // из четырнадцати локалей плюс `air::BUTTON_PAD` × 2 = 20 единиц, и не уже 40.
+    // «От автора…» — `El` «Από τον δημιουργό…», 125 px = 72 единицы ⇒ **92**; «ОК» — `Es`
+    // «Aceptar», 45 px = 26 единиц ⇒ **46** (`scratchpad-E81\probe-widths.log`). Прежние 86 и 39
+    // подписи вмещали, но воздуха давали меньше, чем те же кнопки получают в окнах `letters`.
+    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 216, 92, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 198, 216, 46, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -1067,7 +1090,7 @@ END
 // 555 × 8 / 15 is 296. Решение 101 п. 7 fixes it there for every letter, so that a person does
 // not meet a window that changes size depending on what the author had to say.
 
-IDD_LETTER DIALOGEX 0, 0, 191, 308
+IDD_LETTER DIALOGEX 0, 0, 256, 308
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, for the reason the two windows above carry it: the owner is
 // this program's hidden WS_EX_TOOLWINDOW window, and an owned window inherits its owner's
@@ -1077,65 +1100,74 @@ EXSTYLE 0x00040000
 CAPTION "Письмо от автора"
 FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
+    // ⚠⚠ **Ширины пере-разложены задачей T-81-1, решение 142.2 п. 2 и п. 3.** Окно 256 единиц:
+    // внешнее поле 12 с обеих сторон, колонка текста рядом со значком 42…244 = **202**, блок во
+    // всю ширину 12…244 = **232**, содержимое панели 19…237 = **218**, строка с маркером
+    // 30…237 = **207**. Числа шаблона здесь — **стартовая форма**: окно раскладывается кодом
+    // (`letters::layout_letter`) от своей клиентской ширины, и шаблон обязан быть ей согласен, а
+    // не подменять её.
     ICON            IDI_APP_ACTIVE, IDC_LETTER_ICON, 12, 13, 23, 22
-    LTEXT           "", IDC_LETTER_TITLE, 42, 12, 141, 22, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_SUBTITLE, 42, 35, 141, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_LEAD, 42, 46, 141, 40, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_PARA, 12, 88, 167, 30, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_DEMO, 12, 120, 167, 34, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_DEMO_CAP, 12, 156, 167, 20, SS_OWNERDRAW
-    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 167, 80
-    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 194, 153, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 206, 153, 30, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_TITLE, 42, 12, 202, 22, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_SUBTITLE, 42, 35, 202, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_LEAD, 42, 46, 202, 40, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_PARA, 12, 88, 232, 30, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_DEMO, 12, 120, 232, 34, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_DEMO_CAP, 12, 156, 232, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 232, 80
+    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 194, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 206, 218, 30, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_N1, 19, 194, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_N2, 19, 208, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_N3, 19, 222, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_N4, 19, 236, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_1, 30, 194, 142, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_2, 30, 208, 142, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_3, 30, 222, 142, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_4, 30, 236, 142, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_1, 30, 194, 207, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_2, 30, 208, 207, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_3, 30, 222, 207, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_4, 30, 236, 207, 12, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 250, 86, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 250, 63, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 268, 74, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_RIGHT, 90, 268, 44, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_ACCENT, 138, 268, 41, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_FOOT, 12, 284, 167, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 268, 44, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 268, 41, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_FOOT, 12, 284, 232, 10, SS_OWNERDRAW
 END
 
 // «Последние письма» — FR-101. The letter's outline with four entry slots in place of the
 // rows: each entry is a heading, a line of «when and whether it was read», one line of the
 // text, and up to two buttons. Built in stage А and filled in stage Б, when there is a feed to
 // fill it from.
-IDD_LETTERS_LIST DIALOGEX 0, 0, 191, 296
+IDD_LETTERS_LIST DIALOGEX 0, 0, 256, 296
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "Последние письма"
 FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
-    CONTROL         "", IDC_LETTERS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 12, 167, 240
-    LTEXT           "", IDC_LETTERS_T1, 19, 20, 153, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D1, 19, 32, 153, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X1, 19, 42, 153, 20, SS_OWNERDRAW
+    // ⚠⚠ **Пере-разложено задачей T-81-1 под ширину 256** — те же колонки, что у письма: панель
+    // 12…244 = 232, её содержимое 19…237 = 218. Числа шаблона — стартовая форма;
+    // `letters::layout_list` кладёт записи от клиентской ширины окна.
+    CONTROL         "", IDC_LETTERS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 12, 232, 240
+    LTEXT           "", IDC_LETTERS_T1, 19, 20, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D1, 19, 32, 218, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X1, 19, 42, 218, 20, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_B1, 19, 63, 60, 13, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_R1, 83, 63, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T2, 19, 82, 153, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D2, 19, 94, 153, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X2, 19, 104, 153, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T2, 19, 82, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D2, 19, 94, 218, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X2, 19, 104, 218, 20, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_B2, 19, 125, 60, 13, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_R2, 83, 125, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T3, 19, 144, 153, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D3, 19, 156, 153, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X3, 19, 166, 153, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T3, 19, 144, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D3, 19, 156, 218, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X3, 19, 166, 218, 20, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_B3, 19, 187, 60, 13, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_R3, 83, 187, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T4, 19, 206, 153, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D4, 19, 218, 153, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X4, 19, 228, 153, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_T4, 19, 206, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_D4, 19, 218, 218, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_X4, 19, 228, 218, 20, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_B4, 19, 249, 60, 13, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_R4, 83, 249, 48, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 138, 268, 41, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_FOOT, 12, 284, 167, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 203, 268, 41, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTERS_FOOT, 12, 284, 232, 10, SS_OWNERDRAW
 END
 
 // «От автора» — FR-103. Wider than a letter and the one window of the three whose height the
@@ -1143,32 +1175,37 @@ END
 // this font. Three panels, and the middle one has two states — before the feed has shown a
 // letter it carries a quiet line saying the setting is edited in the file, and after it (and
 // after ninety days) a switch stands in that line's place (FR-102).
-IDD_AUTHOR DIALOGEX 0, 0, 246, 300
+IDD_AUTHOR DIALOGEX 0, 0, 256, 300
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "От автора"
 FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
+    // ⚠⚠ **Пере-разложено задачей T-81-1 под ширину 256** (246 → 256, решение 142.2 п. 2): те же
+    // колонки, что у остальных четырёх окон семьи — поле 12, панель 12…244 = 232, её содержимое
+    // 19…237 = 218, колонка текста рядом со значком 42…244 = 202. Числа шаблона — стартовая
+    // форма: `letters::layout_author` кладёт всё от клиентской ширины и **сам считает высоту
+    // окна**, почему кнопка «Закрыть» и стоит здесь за нижним краем шаблона.
     ICON            IDI_APP_ACTIVE, IDC_AUTHOR_ICON, 12, 13, 23, 22
-    LTEXT           "Lang Switcher", IDC_AUTHOR_NAME, 42, 12, 192, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_AUTHOR_VERSION, 42, 25, 192, 9, SS_OWNERDRAW
-    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 44, 222, 76
-    LTEXT           "", IDC_AUTHOR_TEXT, 19, 60, 208, 40, SS_OWNERDRAW
+    LTEXT           "Lang Switcher", IDC_AUTHOR_NAME, 42, 12, 202, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_AUTHOR_VERSION, 42, 25, 202, 9, SS_OWNERDRAW
+    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 44, 232, 76
+    LTEXT           "", IDC_AUTHOR_TEXT, 19, 60, 218, 40, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_AUTHOR_SUPPORT, 19, 101, 110, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_AUTHOR_CHANNEL, 133, 101, 63, 14, BS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 126, 222, 100
-    LTEXT           "", IDC_NEWS_ABOUT, 19, 142, 208, 30, SS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 142, 208, 10
-    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 153, 195, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_STATE, 19, 175, 208, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_VERSION, 19, 196, 208, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 126, 232, 100
+    LTEXT           "", IDC_NEWS_ABOUT, 19, 142, 218, 30, SS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 142, 218, 10
+    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 153, 205, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_STATE, 19, 175, 218, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_VERSION, 19, 196, 218, 10, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_NEWS_DOWNLOAD, 19, 207, 110, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_NEWS_LETTERS, 133, 207, 63, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 223, 208, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 232, 222, 60
-    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 248, 208, 30, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 223, 218, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 232, 232, 60
+    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 248, 218, 30, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 273, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 296, 41, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 296, 51, 14, BS_OWNERDRAW
 END
 
 // The wizard «Написать автору» — FR-104, task Т-32-8.
@@ -1191,13 +1228,20 @@ EXSTYLE 0x00040000
 CAPTION "Написать автору"
 FONT 10, "Segoe UI", 400, 0, 0x1
 BEGIN
-    LTEXT           "", IDC_WZ_STEP, 16, 12, 224, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_PROGRESS, 16, 23, 224, 3, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_TITLE, 16, 30, 224, 16, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_NOTE, 16, 48, 224, 20, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_CARD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 72, 224, 30
-    CONTROL         "", IDC_WZ_CARD_2, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 106, 224, 30
-    CONTROL         "", IDC_WZ_CARD_3, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 140, 224, 30
+    // ⚠⚠ **Внешнее поле 16 → 12 — задача T-81-1, решение 142.2 п. 3.** Ширина окна не менялась:
+    // мастер был 256 единиц и остался. Менялось поле, и с ним ширина каждого слота: 224 → 232,
+    // то есть от 12 до 244, как у четырёх остальных окон семьи.
+    // ⭐ **Шаблон тем самым приведён в согласие с кодом, а не наоборот.** `letters::layout_wizard`
+    // кладёт каждый слот от `air::PAD`, а `air::PAD` **уже был 12**: на живом окне мастер стоял
+    // на поле 12, а число 16 в шаблоне было мёртвой стартовой формой и рассинхроном. Проверено
+    // замером: 32 вызова `place` в `layout_wizard`, все от `pad`.
+    LTEXT           "", IDC_WZ_STEP, 12, 12, 232, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_PROGRESS, 12, 23, 232, 3, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_TITLE, 12, 30, 232, 16, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_NOTE, 12, 48, 232, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_CARD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 12, 72, 232, 30
+    CONTROL         "", IDC_WZ_CARD_2, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 12, 106, 232, 30
+    CONTROL         "", IDC_WZ_CARD_3, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 12, 140, 232, 30
     // ⛔ **Носители строк, а не элементы окна — задача Т-33-2, решение 103.2.** Шесть подписей
     // карточек `NOT WS_VISIBLE`: слова в них живут, а рисует их сама карточка (`draw_card`).
     // Пока они были видимыми статиками, наведение на карточку стирало их с экрана — кнопка
@@ -1207,56 +1251,60 @@ BEGIN
     // Замер: чернил внутри карточки 3030 → 0 (`scratchpad-Э33\причина-2-наведение.log`).
     // Тот же приём, что у панелей писем и у «Как пользоваться»: строка живёт в ресурсе,
     // рисует владелец.
-    LTEXT           "", IDC_WZ_CARD_T1, 26, 78, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_CARD_T2, 26, 112, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_CARD_T3, 26, 146, 206, 11, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_CARD_S1, 26, 89, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_CARD_S2, 26, 123, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_CARD_S3, 26, 157, 206, 10, SS_OWNERDRAW | NOT WS_VISIBLE
-    LTEXT           "", IDC_WZ_PROGRAM_LABEL, 16, 72, 60, 10, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_PROGRAM, 78, 70, 100, 14, ES_AUTOHSCROLL | NOT WS_BORDER
-    PUSHBUTTON      "", IDC_WZ_CAPTURE, 182, 70, 58, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CAPTURE_NOTE, 16, 88, 224, 20, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_FIELD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 16, 112, 224, 10
-    CONTROL         "", IDC_WZ_FIELD_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 126, 224, 10
-    LTEXT           "", IDC_WZ_FIELD_2_SUB, 29, 137, 211, 20, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_FIELD_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 160, 224, 10
-    LTEXT           "", IDC_WZ_TYPED_LABEL, 16, 72, 100, 10, SS_OWNERDRAW
-    COMBOBOX        IDC_WZ_LAYOUT, 16, 84, 150, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | CBS_OWNERDRAWFIXED | WS_TABSTOP | WS_VSCROLL
-    LTEXT           "", IDC_WZ_PRESSED_LABEL, 172, 86, 30, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_CHIP, 204, 84, 36, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_EXPECTED_LABEL, 16, 104, 100, 10, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_EXPECTED, 16, 116, 224, 14, ES_AUTOHSCROLL | NOT WS_BORDER
-    LTEXT           "", IDC_WZ_GOT_LABEL, 16, 134, 100, 10, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_GOT, 16, 146, 224, 14, ES_AUTOHSCROLL | NOT WS_BORDER
-    LTEXT           "", IDC_WZ_REPEAT_LABEL, 16, 166, 100, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_REPEAT_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 16, 178, 70, 10
-    CONTROL         "", IDC_WZ_REPEAT_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 92, 178, 70, 10
-    CONTROL         "", IDC_WZ_REPEAT_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 168, 178, 70, 10
-    LTEXT           "", IDC_WZ_IDEA_LABEL, 16, 72, 224, 10, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_IDEA, 16, 84, 224, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
-    LTEXT           "", IDC_WZ_HELPS_LABEL, 16, 140, 224, 10, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_HELPS, 16, 152, 224, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
-    CONTROL         "", IDC_WZ_ATTACH_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 16, 72, 224, 10
-    LTEXT           "", IDC_WZ_ATTACH_V1, 29, 83, 211, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_ATTACH_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 96, 224, 10
-    LTEXT           "", IDC_WZ_ATTACH_V2, 29, 107, 211, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_ATTACH_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 120, 224, 10
-    LTEXT           "", IDC_WZ_ATTACH_V3, 29, 131, 211, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_WZ_ATTACH_4, "Button", BS_OWNERDRAW | BS_NOTIFY, 16, 144, 224, 10
-    LTEXT           "", IDC_WZ_ATTACH_V4, 29, 155, 211, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_WZ_ATTACH_FOOT, 16, 178, 224, 30, SS_OWNERDRAW
-    EDITTEXT        IDC_WZ_PREVIEW, 16, 72, 224, 120, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
-    PUSHBUTTON      "", IDC_WZ_COPY, 16, 196, 130, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_SAVE, 150, 196, 90, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_WZ_STATUS, 16, 213, 224, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CARD_T1, 22, 78, 214, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_T2, 22, 112, 214, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_T3, 22, 146, 214, 11, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S1, 22, 89, 214, 10, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S2, 22, 123, 214, 10, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_CARD_S3, 22, 157, 214, 10, SS_OWNERDRAW | NOT WS_VISIBLE
+    LTEXT           "", IDC_WZ_PROGRAM_LABEL, 12, 72, 60, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_PROGRAM, 74, 70, 108, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "", IDC_WZ_CAPTURE, 186, 70, 58, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CAPTURE_NOTE, 12, 88, 232, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_FIELD_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 12, 112, 232, 10
+    CONTROL         "", IDC_WZ_FIELD_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 12, 126, 232, 10
+    LTEXT           "", IDC_WZ_FIELD_2_SUB, 25, 137, 219, 20, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_FIELD_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 12, 160, 232, 10
+    LTEXT           "", IDC_WZ_TYPED_LABEL, 12, 72, 100, 10, SS_OWNERDRAW
+    COMBOBOX        IDC_WZ_LAYOUT, 12, 84, 150, 100, CBS_DROPDOWNLIST | CBS_HASSTRINGS | CBS_OWNERDRAWFIXED | WS_TABSTOP | WS_VSCROLL
+    LTEXT           "", IDC_WZ_PRESSED_LABEL, 176, 86, 30, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_CHIP, 208, 84, 36, 12, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_EXPECTED_LABEL, 12, 104, 100, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_EXPECTED, 12, 116, 232, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_GOT_LABEL, 12, 134, 100, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_GOT, 12, 146, 232, 14, ES_AUTOHSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_REPEAT_LABEL, 12, 166, 100, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_REPEAT_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_GROUP | WS_TABSTOP, 12, 178, 74, 10
+    CONTROL         "", IDC_WZ_REPEAT_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 91, 178, 74, 10
+    CONTROL         "", IDC_WZ_REPEAT_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 170, 178, 74, 10
+    LTEXT           "", IDC_WZ_IDEA_LABEL, 12, 72, 232, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_IDEA, 12, 84, 232, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    LTEXT           "", IDC_WZ_HELPS_LABEL, 12, 140, 232, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_HELPS, 12, 152, 232, 50, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    CONTROL         "", IDC_WZ_ATTACH_1, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 12, 72, 232, 10
+    LTEXT           "", IDC_WZ_ATTACH_V1, 25, 83, 219, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_2, "Button", BS_OWNERDRAW | BS_NOTIFY, 12, 96, 232, 10
+    LTEXT           "", IDC_WZ_ATTACH_V2, 25, 107, 219, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_3, "Button", BS_OWNERDRAW | BS_NOTIFY, 12, 120, 232, 10
+    LTEXT           "", IDC_WZ_ATTACH_V3, 25, 131, 219, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_WZ_ATTACH_4, "Button", BS_OWNERDRAW | BS_NOTIFY, 12, 144, 232, 10
+    LTEXT           "", IDC_WZ_ATTACH_V4, 25, 155, 219, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_WZ_ATTACH_FOOT, 12, 178, 232, 30, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_PREVIEW, 12, 72, 232, 120, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    PUSHBUTTON      "", IDC_WZ_COPY, 12, 196, 130, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_SAVE, 146, 196, 98, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_WZ_STATUS, 12, 213, 232, 10, SS_OWNERDRAW
     // Step «Готово» — задача Т-33-3. The paragraph and the one button of the thanks; both are
     // laid out at run time like every other slot of this pool.
-    LTEXT           "", IDC_WZ_THANKS, 16, 72, 224, 60, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_CHANNEL, 16, 140, 90, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_CANCEL, 16, 228, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_BACK, 130, 228, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_NEXT, 186, 228, 54, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_WZ_THANKS, 12, 72, 232, 60, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_CHANNEL, 12, 140, 90, 14, BS_OWNERDRAW
+    // ⚠ Ширины трёх кнопок ряда — по тому же правилу «подпись плюс воздух», которым их считает
+    // `letters::button_width` на живом окне: самая широкая подпись из четырнадцати локалей плюс
+    // 20 единиц. «Отмена» — `De` «Abbrechen» 63 px = 36 ед. ⇒ **56**; «Назад» — `It` «Indietro»
+    // 45 px = 26 ед. ⇒ **46**; «Далее» — `Es` «Siguiente» 53 px = 31 ед. ⇒ **51**.
+    PUSHBUTTON      "", IDC_WZ_CANCEL, 12, 228, 56, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_BACK, 143, 228, 46, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_NEXT, 193, 228, 51, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
