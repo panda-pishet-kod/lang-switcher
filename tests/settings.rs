@@ -5471,9 +5471,17 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
             402,
             9,
         ),
-        (1, "ОК", 263, 354, 50, 14),
-        (2, "Отмена", 317, 354, 50, 14),
-        (1080, "Применить", 371, 354, 52, 14),
+        // ⚠⚠ **Три кнопки переставлены задачей T-81-2, решение 142.2 п. 7 и 142.4.** Ряд
+        // кончался на 423 при ширине 430 — правый отступ **7**; правило единой нижней строки
+        // говорит **12**, и ряд переехал вправым краем на 418. Ширины пришли к правилу «подпись
+        // плюс воздух» — самая широкая подпись из четырнадцати локалей плюс 20 единиц:
+        // 50 → **46**, 50 → **56**, 52 → **63** (`scratchpad-E81\probe-widths.log`).
+        // ⛔ `y` остался **354**: нижний отступ этого ряда — 7, и пяти единиц до 12 в замороженной
+        // высоте 375 нет. Замер и три способа их взять — в `app.rc` рядом с кнопками и в решении
+        // 142.4; вопрос 142.5 задан владельцу. Ширина и высота окна не тронуты.
+        (1, "ОК", 245, 354, 46, 14),
+        (2, "Отмена", 295, 354, 56, 14),
+        (1080, "Применить", 355, 354, 63, 14),
     ];
 
     for (id, what, x, y, cx, cy) in MOVED {
@@ -10707,10 +10715,12 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // need one line each where they needed two. ⚠ 237 is the **natural** height of this window
     // after the widening; the typical height of the three windows of решение 142.2 п. 8 is set in
     // task T-81-4, and the panel takes what it adds.
+    // ⚠ 237 → **242** задачей T-81-2: под нижним рядом стало поле 12 вместо 7 (решение 142.2
+    // п. 7), а воздух между панелью справки и рядом остался прежним.
     assert_eq!(
         template.size,
-        (256, 237),
-        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 237 dialog units"
+        (256, 242),
+        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 242 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
@@ -21881,5 +21891,430 @@ fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
     assert!(
         dialogs.iter().all(|dialog| !dialog.controls.is_empty()),
         "every template of app.rc must carry controls"
+    );
+}
+
+/// Where the bottom row of one window stands, in dialog units — the pure half of the guard of
+/// task T-81-2.
+#[derive(Debug, PartialEq, Eq)]
+struct BottomRow {
+    /// The height every button of the row shares, or the heights that differ.
+    heights: Vec<i32>,
+    /// The air under the row — the window's height less the bottom of the row.
+    under: i32,
+    /// The air to the right of the row — the window's width less the right edge of the row.
+    right: i32,
+    /// The gaps inside the right-hand run, left to right.
+    gaps: Vec<i32>,
+    /// Where each button standing outside the right-hand run starts, left to right.
+    ///
+    /// ⛔ A `Vec` and not an `Option`, and that is the hole the first draft of this guard had.
+    /// A run broken in the middle leaves **two** buttons outside it, and a guard that only asked
+    /// «where does the leftmost one stand» would have called the wizard's row правильным with
+    /// «Назад» knocked five units out of line: the run would be «Далее» alone, the gaps empty,
+    /// and the leftmost button still at twelve. Everything outside the run is counted, and more
+    /// than one thing outside it is itself the fault.
+    apart: Vec<i32>,
+}
+
+/// **Where the bottom row of a template stands — задача T-81-2, решение 142.2 п. 7.**
+///
+/// The row is every control sharing the lowest `y` of the template: after this task nothing of
+/// any of the six windows stands under its buttons, and that is itself part of the rule — the
+/// quiet line of «Письмо» and «Последние письма» moved **above** the row, where the accepted
+/// mock-up puts it.
+///
+/// ⚠ The right-hand run is walked from the right edge inwards while the gap is exactly the air
+/// of the rule; what is left of it is the button of the other kind («От автора…», «Отмена»),
+/// which stands in the left margin. That is the shape решение 142.2 п. 7 names, and the settings
+/// dialog — three buttons in one run and nothing apart — is the same shape with an empty
+/// remainder.
+fn bottom_row_of(dialog: &RcDialog, gap: i32) -> BottomRow {
+    let lowest = dialog
+        .controls
+        .iter()
+        .map(|(_, _, y, ..)| *y)
+        .max()
+        .expect("a template must carry controls");
+
+    let mut row: Vec<(i32, i32, i32)> = dialog
+        .controls
+        .iter()
+        .filter(|(_, _, y, ..)| *y == lowest)
+        .map(|(_, x, _, cx, cy)| (*x, *x + *cx, *cy))
+        .collect();
+
+    row.sort_unstable();
+
+    let heights = row.iter().map(|(_, _, cy)| *cy).collect();
+    let bottom = lowest + row.iter().map(|(_, _, cy)| *cy).max().unwrap_or(0);
+    let right = dialog.size.0 - row.last().map_or(0, |(_, edge, _)| *edge);
+
+    // The run, from the right edge inwards, while the gap is the one of the rule.
+    let mut first_of_run = row.len() - 1;
+
+    while first_of_run > 0 && row[first_of_run].0 - row[first_of_run - 1].1 == gap {
+        first_of_run -= 1;
+    }
+
+    let gaps = row[first_of_run..]
+        .windows(2)
+        .map(|pair| pair[1].0 - pair[0].1)
+        .collect();
+
+    let apart = row[..first_of_run].iter().map(|(x, ..)| *x).collect();
+
+    BottomRow {
+        heights,
+        under: dialog.size.1 - bottom,
+        right,
+        gaps,
+        apart,
+    }
+}
+
+/// **Task T-81-2, решение 142.2 п. 7** — one bottom row in all six windows of the program.
+///
+/// The rule, in the owner's own composition: buttons **14** units tall, the row pinned to the
+/// bottom with **12** under it, the right edge of the last button **12** from the right edge of
+/// the window, **4** between neighbours, and the button of another kind — «От автора…»,
+/// «Отмена» — standing apart in the left margin at **12**.
+///
+/// ⚠ **The red before.** On the tree this task starts from the rule holds nowhere: «О программе»
+/// and the settings dialog leave **7** under their rows and 8 and 7 to the right of them;
+/// «Письмо» and «Последние письма» keep **26** under theirs, because the quiet line stands below
+/// the buttons instead of above them; «От автора» puts its button **past** the bottom edge of its
+/// template altogether; and the wizard leaves 26. Six windows, six faults.
+///
+/// ⛔ The settings dialog is in this test although its width is the owner's frozen 430: the row
+/// was promised «во всех окнах», and 141а names that dialog as the very model the other five were
+/// to come to.
+#[test]
+fn every_window_of_the_program_carries_the_same_bottom_row() {
+    /// The air of решение 142.2 п. 7: under the row, right of it, and between two buttons.
+    const MARGIN: i32 = 12;
+    const GAP: i32 = 4;
+    /// The height of a push button — `letters::air::BUTTON`, written out as a literal here for
+    /// the reason every template test writes its numbers out.
+    const BUTTON: i32 = 14;
+
+    let resource = Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
+    let text = fs::read_to_string(&resource).expect("app.rc must be readable");
+    let dialogs = dialogs_of_the_resource(&text);
+
+    let mut broken = Vec::new();
+
+    for name in [
+        "IDD_SETTINGS",
+        "IDD_ABOUT",
+        "IDD_LETTER",
+        "IDD_LETTERS_LIST",
+        "IDD_AUTHOR",
+        "IDD_WIZARD",
+    ] {
+        let dialog = dialogs
+            .iter()
+            .find(|dialog| dialog.name == name)
+            .unwrap_or_else(|| panic!("app.rc must declare {name}"));
+
+        let row = bottom_row_of(dialog, GAP);
+
+        println!("{name}: {row:?}");
+
+        if row.heights.iter().any(|height| *height != BUTTON) {
+            broken.push(format!("{name}: the row is {:?} units tall", row.heights));
+        }
+
+        // ⛔⛔ **Одно названное исключение — решение 142.4, окно настроек.** Его высота 375
+        // заморожена словом владельца, а под панелью «Состояние» остаётся 27 единиц: воздух
+        // над рядом 6 + кнопка 14 + поле 12 просят 32. Пяти единиц нет, и взять их можно только
+        // тем, что владелец заморозил. До его слова (вопрос 142.5) поле здесь **7**, и это
+        // утверждение: станет другим — тест красен и скажет, каким, а не промолчит.
+        let wanted = if name == "IDD_SETTINGS" { 7 } else { MARGIN };
+
+        if row.under != wanted {
+            broken.push(format!(
+                "{name}: {} units under the row, and the rule here is {wanted}",
+                row.under
+            ));
+        }
+
+        if row.right != MARGIN {
+            broken.push(format!("{name}: {} units right of the row", row.right));
+        }
+
+        if row.gaps.iter().any(|air| *air != GAP) {
+            broken.push(format!("{name}: the gaps of the run are {:?}", row.gaps));
+        }
+
+        // At most one button stands outside the run, and it stands in the left margin. Two of
+        // them mean the run itself is broken — see the note on the field.
+        match row.apart.as_slice() {
+            [] => {}
+            [apart] if *apart == MARGIN => {}
+            [apart] => broken.push(format!("{name}: the button apart starts at {apart}")),
+            many => broken.push(format!(
+                "{name}: {} buttons stand outside the run, at {many:?}",
+                many.len()
+            )),
+        }
+    }
+
+    assert!(
+        broken.is_empty(),
+        "the bottom row of решение 142.2 п. 7 is broken in {} places: {broken:#?}",
+        broken.len()
+    );
+
+    // Контроль прибора — **мутант**: the row of one window pushed one unit off the bottom, which
+    // is the smallest thing this rule forbids. A guard that passes it is measuring nothing.
+    let author = dialogs_of_the_resource(&text)
+        .into_iter()
+        .find(|dialog| dialog.name == "IDD_AUTHOR")
+        .expect("app.rc must declare IDD_AUTHOR");
+
+    let moved = RcDialog {
+        name: author.name.clone(),
+        size: (author.size.0, author.size.1 + 1),
+        controls: author.controls.clone(),
+    };
+
+    assert_ne!(
+        bottom_row_of(&moved, GAP).under,
+        MARGIN,
+        "the guard does not see a row one unit off the bottom — it cannot fail"
+    );
+
+    // And a second mutant, sideways: «Назад» knocked one unit out of the run. ⛔ This is the case
+    // the first draft of the guard let through — the run shrinks to «Далее» alone, the gaps go
+    // empty and the leftmost button is still at twelve. It is caught by counting what stands
+    // outside the run rather than by looking only at the leftmost thing.
+    let knocked = RcDialog {
+        name: "IDD_WIZARD".to_owned(),
+        size: (256, 268),
+        controls: vec![
+            ("PUSHBUTTON IDC_WZ_CANCEL".to_owned(), 12, 242, 56, 14),
+            ("PUSHBUTTON IDC_WZ_BACK".to_owned(), 142, 242, 46, 14),
+            ("PUSHBUTTON IDC_WZ_NEXT".to_owned(), 193, 242, 51, 14),
+        ],
+    };
+
+    let row = bottom_row_of(&knocked, GAP);
+
+    println!("мутант «Назад» на единицу в сторону: {row:?}");
+
+    assert_eq!(
+        row.apart,
+        vec![12, 142],
+        "a button knocked out of the run must be counted as standing outside it: {row:?}"
+    );
+}
+
+/// **Task T-81-2, развилка C3** — every bottom row this stage touched still fits its window in
+/// all fourteen languages.
+///
+/// Two kinds of row are measured, because the program has two kinds:
+///
+/// * a row whose widths are **frozen in `app.rc`** — «О программе» and the settings dialog. The
+///   caption has to fit the slot the template gives it, and there is nowhere for it to go if it
+///   does not.
+/// * a row the code lays out — «Письмо», «Последние письма», «От автора» and the wizard. There
+///   `letters::button_width` gives every button the width of its own caption plus the air, so a
+///   caption cannot be clipped; what **can** happen is that the row as a whole runs off the
+///   window, and that is what is measured here.
+///
+/// ⚠ The air of the second kind is read out of `src\letters.rs` rather than written down twice:
+/// the literals below are held against that file, so a change to `air::BUTTON_GAP` or
+/// `air::BUTTON_PAD` cannot leave this stand measuring the rule of a previous wave.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
+    /// The window of the family, in dialog units — решение 142.2 п. 2.
+    const FAMILY_WIDTH: i32 = 256;
+
+    let _guard = with_product_strings();
+
+    // The air, read out of the module that uses it.
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    for (name, value) in [
+        ("PAD", 12),
+        ("BUTTON", 14),
+        ("BUTTON_PAD", 10),
+        ("BUTTON_MIN", 40),
+        ("BUTTON_GAP", 4),
+    ] {
+        assert!(
+            source.contains(&format!("const {name}: i32 = {value};")),
+            "air::{name} is not the {value} this stand measures — the rule moved and the \
+             instrument did not"
+        );
+    }
+
+    let margin = 12;
+    let gap = 4;
+    let button_pad = 10;
+    let button_min = 40;
+
+    let product = ProductImage::open();
+    let about = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+    let settings = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+
+    let font = about
+        .font
+        .clone()
+        .expect("the about template declares DS_SETFONT");
+
+    let sheet = Sheet::new(64);
+    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+
+    let alphabet = extent_of(
+        &sheet,
+        &face,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let unit_x = (alphabet / 26 + 1) / 2;
+    let px = |units: i32| (units * unit_x + 2) / 4;
+
+    println!("base unit {unit_x}/4 px");
+
+    // Контроль прибора: a caption three times over must not fit the slot it fits once. Without
+    // it this stand is a thing that cannot fail.
+    let tripled = extent_of(&sheet, &face, &"Применить".repeat(3)).cx;
+    assert!(
+        tripled > px(63),
+        "the instrument cannot see a clip at all: {tripled} px in {} px",
+        px(63)
+    );
+
+    // The rows whose widths `app.rc` freezes: the slot is read off the template, so a slot and
+    // a stand cannot part.
+    let frozen: [(&str, &DialogTemplate, u32, u16); 4] = [
+        ("«ОК» of «О программе»", &about, 1, settings::IDS_ABOUT_OK),
+        ("«ОК» of настройки", &settings, 1, settings::IDS_OK),
+        ("«Отмена» of настройки", &settings, 2, settings::IDS_CANCEL),
+        ("«Применить»", &settings, 1080, settings::IDS_APPLY),
+    ];
+
+    // The bottom row of every letter the program can show, **pair by pair as `letters.rs` builds
+    // them** — `left` and `accent`; the middle slot is never given a button.
+    //
+    // ⛔ The first draft of this stand took the **two widest captions of the whole list**, on the
+    // grounds that it was the stricter measure. It is stricter than the program: it put
+    // «Відкрити налаштування» beside a caption from another letter and reported развилка C3 at
+    // 257 units of 256 for a row that no window ever shows. A measure stricter than the thing
+    // measured is not a safety margin, it is a false red — and a false red spends the owner's
+    // word on a question he does not have.
+    let letters_of_the_program: [(&str, u16, u16); 4] = [
+        (
+            "«Здравствуйте»",
+            settings::IDS_HELLO_SETTINGS,
+            settings::IDS_HELLO_OK,
+        ),
+        ("«Спасибо»", settings::IDS_CHANNEL_OPEN, settings::IDS_CLOSE),
+        (
+            "«Доступна версия»",
+            settings::IDS_CLOSE,
+            settings::IDS_NEWS_DOWNLOAD,
+        ),
+        (
+            "«Новость»",
+            settings::IDS_NEWS_LATER,
+            settings::IDS_NEWS_READ_BUTTON,
+        ),
+    ];
+
+    let mut clips = Vec::new();
+    let mut tightest = (i32::MAX, String::new());
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for (what, template, control, string) in frozen {
+            let caption = settings::text(string);
+            let (left, _, right, _) = template.rect_of(control);
+            let slot = px(right - left);
+            let width = extent_of(&sheet, &face, &caption).cx;
+
+            println!("{language:?} {what}: «{caption}» {width} px of {slot} px");
+
+            if width > slot {
+                clips.push(format!(
+                    "{language:?} {what} «{caption}»: {width} px in a slot of {slot} px"
+                ));
+            }
+        }
+
+        // A button the code lays out is as wide as its caption plus the air, never narrower than
+        // the floor — the arithmetic of `letters::button_width`, in units.
+        let wanted = |string: u16| -> i32 {
+            let caption = settings::text(string);
+            let text_units = (extent_of(&sheet, &face, &caption).cx * 4 + unit_x - 1) / unit_x;
+            (text_units + button_pad * 2).max(button_min)
+        };
+
+        let mut rows: Vec<(String, Vec<i32>)> = letters_of_the_program
+            .iter()
+            .map(|(what, left, accent)| {
+                (
+                    format!("«Письмо» {what}"),
+                    vec![wanted(*left), wanted(*accent)],
+                )
+            })
+            .collect();
+
+        rows.push((
+            "«Последние письма»".to_owned(),
+            vec![wanted(settings::IDS_CLOSE)],
+        ));
+        rows.push(("«От автора»".to_owned(), vec![wanted(settings::IDS_CLOSE)]));
+        rows.push((
+            "мастер".to_owned(),
+            vec![
+                wanted(settings::IDS_WIZARD_CANCEL),
+                wanted(settings::IDS_WIZARD_BACK),
+                wanted(settings::IDS_WIZARD_NEXT),
+            ],
+        ));
+
+        for (what, widths) in rows {
+            let count = i32::try_from(widths.len()).unwrap_or(0);
+            let taken: i32 = widths.iter().sum::<i32>() + gap * (count - 1) + margin * 2;
+            let spare = FAMILY_WIDTH - taken;
+
+            println!("{language:?} {what}: {widths:?} units, {taken} of {FAMILY_WIDTH}");
+
+            if spare < tightest.0 {
+                tightest = (spare, format!("{language:?} {what}"));
+            }
+
+            if taken > FAMILY_WIDTH {
+                clips.push(format!(
+                    "{language:?} {what}: the row wants {taken} units of the {FAMILY_WIDTH} the \
+                     window has"
+                ));
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    println!(
+        "the tightest row: {} units to spare — {}",
+        tightest.0, tightest.1
+    );
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3: {} rows do not fit: {clips:#?}",
+        clips.len()
     );
 }

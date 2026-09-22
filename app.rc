@@ -846,9 +846,30 @@ BEGIN
     // survive owner drawing. The behaviour survives by the documented replacement: the dialog
     // sends itself DM_SETDEFID with IDOK on WM_INITDIALOG (src\settings.rs), so Enter still
     // lands on «ОК»; the accent face is painted by WM_DRAWITEM, keyed on the identifier.
-    PUSHBUTTON      "ОК", IDOK, 263, 354, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Отмена", IDCANCEL, 317, 354, 50, 14, BS_OWNERDRAW
-    PUSHBUTTON      "Применить", IDC_APPLY, 371, 354, 52, 14, BS_OWNERDRAW
+    // ⚠⚠ **Ряд приведён к единому правилу задачей T-81-2 — решение 142.2 п. 7 — НА СКОЛЬКО
+    // ПОЗВОЛИЛА ЗАМОРОЖЕННАЯ ВЫСОТА ОКНА.**
+    // Правый отступ был **7**, стал **12**, как у пяти остальных окон; зазор 4 у этого ряда и
+    // был — это окно и есть образец, к которому пришли другие (решение 141а); высота кнопок 14.
+    // Ширины пришли к правилу «подпись плюс воздух» (самая широкая подпись из четырнадцати
+    // локалей плюс `air::BUTTON_PAD` × 2 = 20 единиц): «ОК» — `Es` «Aceptar» 45 px = 26 ед.
+    // ⇒ **46**; «Отмена» — `De` «Abbrechen» 63 px = 36 ед. ⇒ **56**; «Применить» — `De`
+    // «Übernehmen» 75 px = 43 ед. ⇒ **63** (`scratchpad-E81\probe-widths.log`). Прежние
+    // 50 / 50 / 52 подписи вмещали, но воздуха давали меньше, и одна и та же подпись выходила
+    // в разных окнах разной ширины.
+    //
+    // ⛔⛔ **Нижний отступ остался 7, и это ЗАМЕР, а не забывчивость — решение 142.4.**
+    // «Состояние» кончается на 348, окно — на 375, то есть под панелью 27 единиц. Единая нижняя
+    // строка просит там 6 (воздух над рядом) + 14 (кнопка) + 12 (поле) = **32**. Пяти единиц
+    // нет, и взять их можно только тремя способами, каждый из которых трогает то, что владелец
+    // заморозил: вырастить окно 375 → 380, подвинуть всю внутренность вверх на 5, или ужать
+    // воздух над рядом с 6 до 1 — кнопки прижмутся к панели «Состояние» вплотную. Вопрос
+    // 142.5 задан владельцу; до его слова стоит то, что не трогает заморозку.
+    // ⚠ Порядок кнопок не менялся: «ОК» — «Отмена» — «Применить» — порядок Windows, и владелец
+    // смотрел на него на приёмке Э80 как на образец. Правило «главная — правая» описывает ряд
+    // из кнопок разного рода в окнах семьи, а не этот.
+    PUSHBUTTON      "ОК", IDOK, 245, 354, 46, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Отмена", IDCANCEL, 295, 354, 56, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Применить", IDC_APPLY, 355, 354, 63, 14, BS_OWNERDRAW
 END
 
 // ---------------------------------------------------------------------------------------
@@ -917,7 +938,7 @@ END
 // ⚠⚠ **256 → 263 задачей T-42-2** (находка С44, решение 124.4): панель справки выросла на семь
 // единиц под ЗАМЕРЕННУЮ высоту своей первой строки, и окно выросло ровно на них. Ширина 191 не
 // тронута — решения 82.5 и 87 говорят «окно растёт только вниз», и это по-прежнему так.
-IDD_ABOUT DIALOGEX 0, 0, 256, 237
+IDD_ABOUT DIALOGEX 0, 0, 256, 242
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -1126,10 +1147,14 @@ BEGIN
     LTEXT           "", IDC_LETTER_ROW_4, 30, 236, 207, 12, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 250, 86, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 250, 63, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 268, 74, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 268, 44, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 268, 41, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_FOOT, 12, 284, 232, 10, SS_OWNERDRAW
+    // ⚠⚠ **Тихая строка переехала НАД ряд кнопок — задача T-81-2, решение 142.2 п. 7.** Правило
+    // «ряд прижат к низу с отступом 12» и строка под кнопками — вещи несовместные, и макет,
+    // принятый владельцем, кладёт эту строку именно над рядом. Числа шаблона — стартовая форма;
+    // порядок снизу вверх задаёт `letters::layout_letter`.
+    LTEXT           "", IDC_LETTER_FOOT, 12, 269, 232, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 282, 74, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 282, 44, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 282, 41, 14, BS_OWNERDRAW
 END
 
 // «Последние письма» — FR-101. The letter's outline with four entry slots in place of the
@@ -1166,8 +1191,10 @@ BEGIN
     LTEXT           "", IDC_LETTERS_X4, 19, 228, 218, 20, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_B4, 19, 249, 60, 13, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_LETTERS_R4, 83, 249, 48, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 203, 268, 41, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_FOOT, 12, 284, 232, 10, SS_OWNERDRAW
+    // ⚠⚠ Тихая строка над рядом кнопок — задача T-81-2, как у письма. Ширина «Закрыть» — по
+    // правилу «подпись плюс воздух»: `De` «Schließen» 54 px = 31 единица плюс 20 ⇒ **51**.
+    LTEXT           "", IDC_LETTERS_FOOT, 12, 257, 232, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 193, 270, 51, 14, BS_OWNERDRAW
 END
 
 // «От автора» — FR-103. Wider than a letter and the one window of the three whose height the
@@ -1175,7 +1202,7 @@ END
 // this font. Three panels, and the middle one has two states — before the feed has shown a
 // letter it carries a quiet line saying the setting is edited in the file, and after it (and
 // after ninety days) a switch stands in that line's place (FR-102).
-IDD_AUTHOR DIALOGEX 0, 0, 256, 300
+IDD_AUTHOR DIALOGEX 0, 0, 256, 326
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "От автора"
@@ -1205,7 +1232,12 @@ BEGIN
     CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 232, 232, 60
     LTEXT           "", IDC_FEEDBACK_TEXT, 19, 248, 218, 30, SS_OWNERDRAW
     PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 273, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 296, 51, 14, BS_OWNERDRAW
+    // ⚠⚠ **Кнопка вернулась внутрь шаблона — задача T-81-2.** Она стояла на `y = 296` при высоте
+    // 300, то есть за нижним краем: шаблон здесь условен, потому что окно пересчитывает свою
+    // высоту на ходу. Условность — не повод: правило решения 142.2 п. 7 проверяется по шаблону,
+    // и шаблон обязан его нести. Высота 300 → 326: панель «Обратная связь» кончается на 292,
+    // над рядом `air::GAP` = 8, ряд 300…314, под ним поле 12.
+    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 300, 51, 14, BS_OWNERDRAW
 END
 
 // The wizard «Написать автору» — FR-104, task Т-32-8.
@@ -1302,9 +1334,9 @@ BEGIN
     // `letters::button_width` на живом окне: самая широкая подпись из четырнадцати локалей плюс
     // 20 единиц. «Отмена» — `De` «Abbrechen» 63 px = 36 ед. ⇒ **56**; «Назад» — `It` «Indietro»
     // 45 px = 26 ед. ⇒ **46**; «Далее» — `Es` «Siguiente» 53 px = 31 ед. ⇒ **51**.
-    PUSHBUTTON      "", IDC_WZ_CANCEL, 12, 228, 56, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_BACK, 143, 228, 46, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_NEXT, 193, 228, 51, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_CANCEL, 12, 242, 56, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_BACK, 143, 242, 46, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_NEXT, 193, 242, 51, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================

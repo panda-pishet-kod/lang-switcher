@@ -2231,7 +2231,12 @@ mod air {
     /// The narrowest a button may be.
     pub(super) const BUTTON_MIN: i32 = 40;
     /// The air between two buttons of a row.
-    pub(super) const BUTTON_GAP: i32 = 6;
+    ///
+    /// ⚠ **6 → 4 задачей T-81-2, решение 142.2 п. 7.** Четыре — это число окна настроек, у
+    /// которого ряд стоял по правилу и до этого этапа; на приёмке Э80 владелец смотрел на то
+    /// окно как на образец (решение 141а), и «единая нижняя строка во всех окнах» означает
+    /// прийти к его зазору, а не завести седьмой.
+    pub(super) const BUTTON_GAP: i32 = 4;
     /// The width of the marker column of a panel row.
     pub(super) const MARKER: i32 = 7;
     /// Where the text of a panel row starts, from the panel's own inset.
@@ -2782,19 +2787,14 @@ unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
         hide(hwnd, IDC_LETTER_DEMO_CAP);
     }
 
-    // --- from the bottom: the quiet line, then the row of buttons --------------------------
+    // --- from the bottom: the row of buttons, and the quiet line above it -------------------
+    //
+    // ⚠⚠ **Порядок перевёрнут задачей T-81-2, решение 142.2 п. 7.** Тихая строка стояла **под**
+    // кнопками, и ряд из-за неё висел в 26 единицах от нижнего края вместо 12. Правило «ряд
+    // прижат к низу с отступом 12» и строка под ним несовместны; макет, принятый владельцем
+    // глазом, кладёт эту строку над рядом. Ряд берётся от края первым, строка — тем, что над
+    // ним, и панель получает остаток, как и получала.
     let mut bottom = client.bottom - metrics.y(air::PAD);
-
-    if plan.foot.is_empty() {
-        hide(hwnd, IDC_LETTER_FOOT);
-    } else {
-        // SAFETY: as above.
-        let height = unsafe { measure(dc, faces.text, full_width, &plan.foot, None) };
-
-        bottom -= height;
-        place(hwnd, IDC_LETTER_FOOT, pad, bottom, full_width, height);
-        bottom -= tight;
-    }
 
     if plan.left.is_some() || plan.right.is_some() || plan.accent.is_some() {
         bottom -= metrics.y(air::BUTTON);
@@ -2815,13 +2815,23 @@ unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
                 ],
             );
         }
-
-        bottom -= gap;
     } else {
         for control in [IDC_LETTER_LEFT, IDC_LETTER_RIGHT, IDC_LETTER_ACCENT] {
             hide(hwnd, control);
         }
     }
+
+    if plan.foot.is_empty() {
+        hide(hwnd, IDC_LETTER_FOOT);
+    } else {
+        // SAFETY: as above.
+        let height = unsafe { measure(dc, faces.text, full_width, &plan.foot, None) };
+
+        bottom -= tight + height;
+        place(hwnd, IDC_LETTER_FOOT, pad, bottom, full_width, height);
+    }
+
+    bottom -= gap;
 
     // --- and the panel takes what is left --------------------------------------------------
     // SAFETY: `dc` is this window's DC; the borrow of the state ends with this call.
@@ -4717,9 +4727,32 @@ unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
     let tight = metrics.y(air::TIGHT);
 
     // The line under the window and the button that closes it, from the bottom.
+    // ⚠⚠ **Порядок перевёрнут задачей T-81-2, решение 142.2 п. 7** — по той же причине, что и в
+    // письме: тихая строка стояла под кнопкой и не давала ряду прижаться к низу.
     let mut bottom = client.bottom - metrics.y(air::PAD);
 
     // SAFETY: `dc` is this window's DC and the faces are its own.
+    let width = unsafe {
+        button_width(
+            dc,
+            faces.text,
+            metrics,
+            &settings::get_text(hwnd, IDC_LETTERS_CLOSE),
+        )
+    };
+
+    bottom -= metrics.y(air::BUTTON);
+
+    place(
+        hwnd,
+        IDC_LETTERS_CLOSE,
+        client.right - pad - width,
+        bottom,
+        width,
+        metrics.y(air::BUTTON),
+    );
+
+    // SAFETY: as above.
     let foot = unsafe {
         measure(
             dc,
@@ -4730,28 +4763,8 @@ unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
         )
     };
 
-    bottom -= foot;
+    bottom -= tight + foot;
     place(hwnd, IDC_LETTERS_FOOT, pad, bottom, full_width, foot);
-    bottom -= tight + metrics.y(air::BUTTON);
-
-    // SAFETY: as above.
-    let width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_LETTERS_CLOSE),
-        )
-    };
-
-    place(
-        hwnd,
-        IDC_LETTERS_CLOSE,
-        client.right - pad - width,
-        bottom,
-        width,
-        metrics.y(air::BUTTON),
-    );
 
     let top = metrics.y(air::TOP);
 
