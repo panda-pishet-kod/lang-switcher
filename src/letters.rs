@@ -1063,7 +1063,10 @@ const IDC_LETTERS_FOOT: i32 = 1252;
 
 // Controls of `IDD_AUTHOR`, mirrored from `app.rc`.
 const IDC_AUTHOR_ICON: i32 = 1260;
-const IDC_AUTHOR_NAME: i32 = 1261;
+/// ⭐ **Публичен с задачи T-81-3** — решение 142.2 п. 6. Имя программы стало кнопкой-ссылкой и в
+/// этом окне, и `settings::is_the_program_name` спрашивает **этот** номер, а не второй такой же,
+/// записанный у себя: зеркальное число — число, которое может разойтись.
+pub const IDC_AUTHOR_NAME: i32 = 1261;
 const IDC_AUTHOR_VERSION: i32 = 1262;
 const IDC_AUTHOR_PANEL: i32 = 1263;
 const IDC_AUTHOR_TEXT: i32 = 1264;
@@ -1082,6 +1085,9 @@ const IDC_FEEDBACK_PANEL: i32 = 1276;
 const IDC_FEEDBACK_TEXT: i32 = 1277;
 const IDC_FEEDBACK_WRITE: i32 = 1278;
 const IDC_AUTHOR_CLOSE: i32 = 1279;
+/// Две строки описания общей шапки — задача T-81-3. Слова у них те же, что в «О программе».
+const IDC_AUTHOR_LINE_1: i32 = 1280;
+const IDC_AUTHOR_LINE_2: i32 = 1281;
 
 // Controls of `IDD_WIZARD`, mirrored from `app.rc` — FR-104.
 const IDC_WZ_STEP: i32 = 1300;
@@ -1319,6 +1325,9 @@ pub enum Action {
     OpenSupport,
     /// «Открыть страницу загрузки» — the link the `update` entry of the feed carries.
     OpenDownload,
+    /// The page of the application — the click on the program's name in the head of «От автора»,
+    /// задача T-81-3. The same address the same name opens in «О программе».
+    OpenProgram,
     /// «Открыть ссылку» — the link a `news` entry carries.
     OpenLink,
     /// The «От автора» window — FR-103.
@@ -2048,6 +2057,9 @@ impl WindowState {
         // letter — so they answer by identifier and not out of a plan.
         if self.kind == Kind::Author {
             return match control {
+                // Задача T-81-3, решение 142.2 п. 6: имя открывает страницу приложения — то же,
+                // что делает щелчок по имени в «О программе», и тем же адресом.
+                IDC_AUTHOR_NAME => Some(Action::OpenProgram),
                 IDC_AUTHOR_SUPPORT => Some(Action::OpenSupport),
                 IDC_AUTHOR_CHANNEL => Some(Action::OpenChannel),
                 IDC_NEWS_DOWNLOAD => Some(Action::OpenDownload),
@@ -3111,6 +3123,12 @@ unsafe fn with_state<R>(hwnd: HWND, body: impl FnOnce(&mut WindowState) -> R) ->
 pub fn label_color_role(control: i32) -> StaticColorRole {
     match control {
         IDC_LETTER_SUBTITLE | IDC_LETTER_FOOT | IDC_LETTER_DEMO_CAP => StaticColorRole::Muted,
+        // ⭐ **Шапка «От автора» = шапка «О программе», задача T-81-3, решение 142.2 п. 4.**
+        // Там строка версии и обе строки описания приглушены (`about_static_color_role`), и
+        // здесь они приглушены по той же причине: это одна шапка, а не две похожие. ⚠ Строка
+        // версии до этой задачи падала сюда в `Label` и оттого была в двух окнах разного цвета —
+        // расхождение того же рода, что и ссылка у одной копии шапки из двух.
+        IDC_AUTHOR_VERSION | IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => StaticColorRole::Muted,
         control if (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control) => StaticColorRole::Muted,
         // The demonstration is a field of its own — it is drawn as one, and its ground is the
         // field colour rather than the window's.
@@ -3134,6 +3152,9 @@ pub fn label_color_role(control: i32) -> StaticColorRole {
 fn label_face(control: i32, faces: &Faces) -> (HFONT, Option<i32>) {
     match control {
         IDC_LETTER_TITLE => (faces.name, None),
+        // Задача T-81-3: описание в шапке набрано читающим лицом и его шагом — ровно то, что
+        // `settings::about_label_face` отвечает про `IDC_ABOUT_LINE_1` и `_2`.
+        IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => (faces.body, Some(faces.body_pitch())),
         IDC_LETTER_PANEL_TITLE => (faces.number, None),
         control if (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control) => (faces.number, None),
         IDC_LETTER_LEAD
@@ -3697,6 +3718,55 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             })
         }
         .unwrap_or(0);
+    }
+
+    // ⭐⭐ **The name of the program — задача T-81-3, решение 142.2 п. 6.** It is a button of this
+    // window now, and it is drawn by the **one body** that draws it in «О программе»:
+    // `settings::paint_program_name`. What this window supplies is what this window knows — its
+    // own brushes, its own palette, its own face for the name — and nothing else differs. ⛔ The
+    // arithmetic of the backing is not copied here; a second copy of it is the very расхождение
+    // this decision closes.
+    if control == IDC_AUTHOR_NAME {
+        // Read **before** the borrow, the discipline of every drawing of this file.
+        let mut caption: Vec<u16> = settings::get_text(hwnd, IDC_AUTHOR_NAME)
+            .encode_utf16()
+            .collect();
+
+        // SAFETY: see the caller.
+        let choice = unsafe {
+            with_state(hwnd, |state| {
+                let brushes = state.brushes.as_ref()?;
+
+                let (colors, hot_brush) = theme::resolve_button_colors(
+                    settings::button_color_roles(control, hot, false, false),
+                    // The head stands on the ground of the window, never on a block — the same
+                    // question every drawing of this file asks (task T-80-1).
+                    brushes.window_bg(),
+                    brushes,
+                    state.palette,
+                );
+
+                Some((
+                    colors,
+                    hot_brush,
+                    theme::label_ink(label_color_role(control), state.palette),
+                    state.fonts.as_ref().map(|faces| faces.name),
+                    brushes.window_bg(),
+                ))
+            })
+        };
+
+        // `_hot_brush` is named and not discarded: the brush of the lit face is made for the
+        // length of one paint and must outlive it.
+        let Some(Some((colors, _hot_brush, ink, face, window))) = choice else {
+            return 0;
+        };
+
+        // SAFETY: see the caller — `dc` and `rect` are the values of the message; `face` and
+        // `window` are handles this window's state owns for longer than this call.
+        return unsafe {
+            settings::paint_program_name(dc, rect, &mut caption, face, None, ink, colors, window)
+        };
     }
 
     // The one control of these three windows that is not a push button: the switch of FR-102.
@@ -4275,9 +4345,14 @@ const LIST_LABELS: [i32; 13] = [
 ];
 
 /// The owner-drawn statics of «От автора».
-const AUTHOR_LABELS: [i32; 9] = [
-    IDC_AUTHOR_NAME,
+///
+/// ⚠ **Имя ушло отсюда в [`AUTHOR_BUTTONS`] задачей T-81-3** — решение 142.2 п. 6, тем же
+/// образцом, каким T-78-3 перевела имя из надписей в кнопки в «О программе»; вместо него сюда
+/// пришли две строки описания общей шапки. Парность списков и шаблона держит тест.
+const AUTHOR_LABELS: [i32; 10] = [
     IDC_AUTHOR_VERSION,
+    IDC_AUTHOR_LINE_1,
+    IDC_AUTHOR_LINE_2,
     IDC_AUTHOR_TEXT,
     IDC_NEWS_ABOUT,
     IDC_NEWS_SWITCH_SUB,
@@ -4312,7 +4387,11 @@ const LIST_BUTTONS: [i32; 9] = [
 ];
 
 /// The owner-drawn buttons of «От автора».
-const AUTHOR_BUTTONS: [i32; 6] = [
+const AUTHOR_BUTTONS: [i32; 7] = [
+    // ⭐ **Имя программы — задача T-81-3, решение 142.2 п. 6.** Кнопка без рамки, открывающая
+    // страницу приложения; в список она входит затем, чтобы `subclass_buttons` поставила ей руку
+    // курсора и подсветку наведения теми же телами, что и в «О программе».
+    IDC_AUTHOR_NAME,
     IDC_AUTHOR_SUPPORT,
     IDC_AUTHOR_CHANNEL,
     IDC_NEWS_DOWNLOAD,
@@ -4335,8 +4414,17 @@ const AUTHOR_BUTTONS: [i32; 6] = [
 /// yet, and a feed that has never said anything is not something to turn off.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorView {
-    /// The line under the program's name: the version and the author's alias.
+    /// The line under the program's name: the version.
+    ///
+    /// ⚠ **«and the author's alias» no more — задача T-81-3, решение 142.2 п. 5.** The line is
+    /// `IDS_ABOUT_VERSION` now, the very one «О программе» writes, and the signature the owner
+    /// asked to remove («не надо вставлять панда, он же панда») went with the string that
+    /// carried it.
     pub version_line: String,
+    /// The first line of the head's description — `IDS_ABOUT_LINE_1`, задача T-81-3.
+    pub line_1: String,
+    /// The second — `IDS_ABOUT_LINE_2`.
+    pub line_2: String,
     /// The paragraph of the «Автор» panel.
     pub author_text: String,
     /// What the feed is and how often it is read — said from the first day (FR-102).
@@ -4382,16 +4470,22 @@ impl AuthorView {
 /// The whole of what «От автора» says — FR-103.
 pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'_>) -> AuthorView {
     use crate::settings::{
-        IDS_AUTHOR_TEXT, IDS_AUTHOR_VERSION, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
-        IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST, IDS_NEWS_NEVER_READ,
-        IDS_NEWS_READ_ON, IDS_NEWS_SWITCH_SUB, format_text, text,
+        IDS_ABOUT_LINE_1, IDS_ABOUT_LINE_2, IDS_ABOUT_VERSION, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT,
+        IDS_NEWS_ABOUT_FEED, IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST,
+        IDS_NEWS_NEVER_READ, IDS_NEWS_READ_ON, IDS_NEWS_SWITCH_SUB, format_text, text,
     };
 
     let switch = switch_is_shown(state, today).then_some(state.feed);
     let update = update_is_pending(version, feed);
 
     AuthorView {
-        version_line: format_text(IDS_AUTHOR_VERSION, &[version]),
+        // ⭐⭐ **`IDS_ABOUT_VERSION` и не `IDS_AUTHOR_VERSION` — задача T-81-3, решение 142.2
+        // п. 5.** Вторая строка несла «версия {0} · Панда, он же Panda_Pishet_Kod» и снята со
+        // всеми четырнадцатью переводами; шапка у двух окон одна, и строка версии у них одна.
+        version_line: format_text(IDS_ABOUT_VERSION, &[version]),
+        // Две строки описания общей шапки — те же слова, что в «О программе», из тех же строк.
+        line_1: text(IDS_ABOUT_LINE_1),
+        line_2: text(IDS_ABOUT_LINE_2),
         author_text: text(IDS_AUTHOR_TEXT),
         // The sentence about the feed moves under the switch once there is one — it is the
         // same sentence, and two copies of it on one panel would be a stutter.
@@ -4848,6 +4942,10 @@ fn fill_author(hwnd: HWND, state: &WindowState) {
 
     for (control, caption) in [
         (IDC_AUTHOR_VERSION, view.version_line.clone()),
+        // Задача T-81-3: две строки описания общей шапки. Имя над ними — литерал шаблона, как и
+        // в «О программе»: «Lang Switcher» читается одинаково во всех четырнадцати локалях.
+        (IDC_AUTHOR_LINE_1, view.line_1.clone()),
+        (IDC_AUTHOR_LINE_2, view.line_2.clone()),
         (IDC_AUTHOR_PANEL, text(IDS_AUTHOR_PANEL)),
         (IDC_AUTHOR_TEXT, view.author_text.clone()),
         (IDC_AUTHOR_SUPPORT, text(IDS_SUPPORT_OPEN)),
@@ -4980,7 +5078,45 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
         version_height,
     );
 
-    top = (top + version_height).max(metrics.y(13 + 22)) + gap;
+    top += version_height;
+
+    // ⭐⭐ **Две строки описания — задача T-81-3, решение 142.2 п. 4.** Шапка этого окна стала
+    // шапкой «О программе» целиком, и описание программы — её часть. Воздух над ними — тот же
+    // `TIGHT`, каким имя отделено от версии; каждая строка меряется по своей ширине, потому что
+    // в четырнадцати локалях длина у них разная, а в узком окне они переносятся.
+    for control in [IDC_AUTHOR_LINE_1, IDC_AUTHOR_LINE_2] {
+        let caption = if control == IDC_AUTHOR_LINE_1 {
+            &view.line_1
+        } else {
+            &view.line_2
+        };
+
+        // SAFETY: as above.
+        let height = unsafe {
+            measure(
+                dc,
+                faces.body,
+                client.right - metrics.x(air::TEXT_X) - pad,
+                caption,
+                pitch,
+            )
+        };
+
+        top += tight;
+
+        place(
+            hwnd,
+            control,
+            metrics.x(air::TEXT_X),
+            top,
+            client.right - metrics.x(air::TEXT_X) - pad,
+            height,
+        );
+
+        top += height;
+    }
+
+    top = top.max(metrics.y(13 + 22)) + gap;
 
     // --- panel «Автор» ----------------------------------------------------------------------
     let mut panel_top = top;
@@ -5464,6 +5600,11 @@ fn perform(hwnd: HWND, action: Action) {
         // `open_link("")` and returned having done nothing. The button was never laid out, so
         // nobody could press it to find out.
         Action::OpenDownload => open_link(links::DOWNLOAD_URL),
+
+        // Задача T-81-3: щелчок по имени программы в шапке «От автора». Адрес — тот же, что
+        // открывает имя в «О программе», и той же дверью `open_link`, которая **и есть** ворота
+        // С52: только https и только на хосте, объявленном этой сборкой.
+        Action::OpenProgram => open_link(links::PROGRAM_URL),
 
         Action::OpenLink => open_link(&link),
 

@@ -281,6 +281,10 @@
 #define IDC_FEEDBACK_TEXT      1277
 #define IDC_FEEDBACK_WRITE     1278
 #define IDC_AUTHOR_CLOSE       1279
+// ⭐ Две строки описания общей шапки — задача T-81-3, решение 142.2 п. 4. Слова у них те же, что
+// в «О программе» (`IDS_ABOUT_LINE_1` и `_2`): шапка у двух окон одна, а не две похожие.
+#define IDC_AUTHOR_LINE_1      1280
+#define IDC_AUTHOR_LINE_2      1281
 
 // Controls of the wizard IDD_WIZARD — FR-104, task Т-32-8. A block of their own from 1300,
 // with the gap after 1279 left deliberately: the three windows above may still grow a slot,
@@ -1202,7 +1206,7 @@ END
 // this font. Three panels, and the middle one has two states — before the feed has shown a
 // letter it carries a quiet line saying the setting is edited in the file, and after it (and
 // after ninety days) a switch stands in that line's place (FR-102).
-IDD_AUTHOR DIALOGEX 0, 0, 256, 326
+IDD_AUTHOR DIALOGEX 0, 0, 256, 345
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE 0x00040000
 CAPTION "От автора"
@@ -1213,31 +1217,44 @@ BEGIN
     // 19…237 = 218, колонка текста рядом со значком 42…244 = 202. Числа шаблона — стартовая
     // форма: `letters::layout_author` кладёт всё от клиентской ширины и **сам считает высоту
     // окна**, почему кнопка «Закрыть» и стоит здесь за нижним краем шаблона.
+    // ⭐⭐ **Шапка ТОЧЬ-В-ТОЧЬ как у `IDD_ABOUT` — задача T-81-3, решение 142.2 п. 4 и п. 6.**
+    // Значок стоял в тех же координатах и до этого этапа. Имя стало **кнопкой** с тем же
+    // прямоугольником-правилом, что у `IDC_ABOUT_NAME`: 38 вместо 42 и 11 вместо 12 — это не
+    // сдвиг имени, а комната под подложку (задача T-79-2), и текст ложится в те же 42, 12.
+    // Строка версии опустилась с 25 на **24** — она стояла на единицу ниже, чем в «О программе»,
+    // без причины. Две строки описания заведены здесь впервые и несут те же слова
+    // `IDS_ABOUT_LINE_1` и `_2`: шапка у двух окон **одна**, а не две похожие.
+    // ⚠ Всё, что ниже шапки, съехало ровно на **19** единиц — на столько выросла шапка
+    // (34 → 57 по нижнему краю, минус прежний зазор). Числа шаблона — стартовая форма:
+    // `letters::layout_author` кладёт всё заново и сам считает высоту окна.
     ICON            IDI_APP_ACTIVE, IDC_AUTHOR_ICON, 12, 13, 23, 22
-    LTEXT           "Lang Switcher", IDC_AUTHOR_NAME, 42, 12, 202, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_AUTHOR_VERSION, 42, 25, 202, 9, SS_OWNERDRAW
-    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 44, 232, 76
-    LTEXT           "", IDC_AUTHOR_TEXT, 19, 60, 218, 40, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_SUPPORT, 19, 101, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_CHANNEL, 133, 101, 63, 14, BS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 126, 232, 100
-    LTEXT           "", IDC_NEWS_ABOUT, 19, 142, 218, 30, SS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 142, 218, 10
-    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 153, 205, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_STATE, 19, 175, 218, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_VERSION, 19, 196, 218, 10, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_NEWS_DOWNLOAD, 19, 207, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_NEWS_LETTERS, 133, 207, 63, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 223, 218, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 232, 232, 60
-    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 248, 218, 30, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 273, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "Lang Switcher", IDC_AUTHOR_NAME, 38, 11, 206, 12, BS_OWNERDRAW | NOT WS_TABSTOP
+    LTEXT           "", IDC_AUTHOR_VERSION, 42, 24, 202, 8, SS_OWNERDRAW
+    LTEXT           "Исправляет текст, набранный в неверной раскладке.", IDC_AUTHOR_LINE_1, 42, 37, 202, 10, SS_OWNERDRAW
+    LTEXT           "Перекодировка — по нажатию одной клавиши.", IDC_AUTHOR_LINE_2, 42, 47, 202, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 63, 232, 76
+    LTEXT           "", IDC_AUTHOR_TEXT, 19, 79, 218, 40, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_SUPPORT, 19, 120, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_AUTHOR_CHANNEL, 133, 120, 63, 14, BS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 145, 232, 100
+    LTEXT           "", IDC_NEWS_ABOUT, 19, 161, 218, 30, SS_OWNERDRAW
+    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 161, 218, 10
+    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 172, 205, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_STATE, 19, 194, 218, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_VERSION, 19, 215, 218, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_NEWS_DOWNLOAD, 19, 226, 110, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_NEWS_LETTERS, 133, 226, 63, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 242, 218, 10, SS_OWNERDRAW
+    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 251, 232, 60
+    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 267, 218, 30, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 292, 110, 14, BS_OWNERDRAW
     // ⚠⚠ **Кнопка вернулась внутрь шаблона — задача T-81-2.** Она стояла на `y = 296` при высоте
     // 300, то есть за нижним краем: шаблон здесь условен, потому что окно пересчитывает свою
     // высоту на ходу. Условность — не повод: правило решения 142.2 п. 7 проверяется по шаблону,
-    // и шаблон обязан его нести. Высота 300 → 326: панель «Обратная связь» кончается на 292,
-    // над рядом `air::GAP` = 8, ряд 300…314, под ним поле 12.
-    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 300, 51, 14, BS_OWNERDRAW
+    // и шаблон обязан его нести. Высота 300 → 326 → **345** (T-81-3, общая шапка подняла всё на
+    // 19): панель «Обратная связь» кончается на 311, над рядом `air::GAP` = 8, ряд 319…333, под
+    // ним поле 12.
+    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 319, 51, 14, BS_OWNERDRAW
 END
 
 // The wizard «Написать автору» — FR-104, task Т-32-8.
@@ -1562,7 +1579,12 @@ END
 #define IDS_WHATSNEW_3          3108
 #define IDS_WHATSNEW_FULL       3109
 #define IDS_AUTHOR_CAPTION      3110
-#define IDS_AUTHOR_VERSION      3111
+// ⛔⛔ **3111 — `IDS_AUTHOR_VERSION` — УДАЛЕНА задачей T-81-3, решение 142.2 п. 5.** Она несла
+// «версия {0} · Панда, он же Panda_Pishet_Kod»; слово владельца: «не надо вставлять панда, он же
+// панда». Строку версии обоих окон шапки пишет теперь `IDS_ABOUT_VERSION` (3062, «версия {0}»).
+// ⚠ Это **первое за проект удаление** строки интерфейса: канон `INTERFACE_STRINGS` поехал вниз,
+// 218 → 217, и это нормально. Номер 3111 **не переиспользуется** — как и 3004, снятый задачей
+// T-21-5: дыра в ряду дешевле, чем номер, значащий в старой сборке одно, а в новой другое.
 #define IDS_AUTHOR_PANEL        3112
 #define IDS_AUTHOR_TEXT         3113
 #define IDS_NEWS_PANEL          3114
@@ -1852,7 +1874,6 @@ BEGIN
     IDS_WHATSNEW_3          "Журнал надёжнее: неудачная запись не портит прежний файл, галка «Вести журнал» действует сразу в этом сеансе, а серый пункт «Возобновить» говорит, почему он серый."
     IDS_WHATSNEW_FULL       "Полный список изменений опубликован в канале."
     IDS_AUTHOR_CAPTION      "От автора"
-    IDS_AUTHOR_VERSION      "версия {0} · Панда, он же Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Автор"
     IDS_AUTHOR_TEXT         "Программу делает один человек в свободное время. Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько способов. Классно, что вы цените чужой труд ♥"
     IDS_NEWS_PANEL          "Новости и обновления"
@@ -2079,7 +2100,6 @@ BEGIN
     IDS_WHATSNEW_3          "The journal is more reliable: a failed write does not damage the previous file, «Keep a journal» acts at once in this session, and the greyed «Resume» says why it is grey."
     IDS_WHATSNEW_FULL       "The full list of changes is published in the channel."
     IDS_AUTHOR_CAPTION      "From the author"
-    IDS_AUTHOR_VERSION      "version {0} · Panda, also known as Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "The author"
     IDS_AUTHOR_TEXT         "The program is made by one person in their spare time. It is free and will stay that way. If you would like to say thank you in deed, the support page lists a few ways. It is good that you value somebody else's work ♥"
     IDS_NEWS_PANEL          "News and updates"
@@ -2319,7 +2339,6 @@ BEGIN
     IDS_WHATSNEW_3          "Журнал надійніший: невдалий запис не псує попередній файл, прапорець «Вести журнал» діє одразу в цьому сеансі, а сірий пункт «Відновити» каже, чому він сірий."
     IDS_WHATSNEW_FULL       "Повний список змін опубліковано в каналі."
     IDS_AUTHOR_CAPTION      "Від автора"
-    IDS_AUTHOR_VERSION      "версія {0} · Панда, він же Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Автор"
     IDS_AUTHOR_TEXT         "Програму робить одна людина у вільний час. Програма безкоштовна і залишиться такою. Якщо хочете подякувати ділом, на сторінці підтримки є кілька способів. Класно, що ви цінуєте чужу працю ♥"
     IDS_NEWS_PANEL          "Новини та оновлення"
@@ -2542,7 +2561,6 @@ BEGIN
     IDS_WHATSNEW_3          "Das Protokoll ist verlässlicher: ein fehlgeschlagener Schreibvorgang beschädigt die vorige Datei nicht, „Protokoll führen“ wirkt sofort in dieser Sitzung, und das graue „Fortsetzen“ sagt, warum es grau ist."
     IDS_WHATSNEW_FULL       "Die vollständige Liste der Änderungen ist im Kanal veröffentlicht."
     IDS_AUTHOR_CAPTION      "Vom Autor"
-    IDS_AUTHOR_VERSION      "Version {0} · Panda, auch bekannt als Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Der Autor"
     IDS_AUTHOR_TEXT         "Das Programm macht ein einzelner Mensch in seiner Freizeit. Es ist kostenlos und bleibt es. Wenn Sie sich mit einer Tat bedanken möchten, nennt die Unterstützungsseite einige Wege. Schön, dass Sie fremde Arbeit zu schätzen wissen ♥"
     IDS_NEWS_PANEL          "Nachrichten und Updates"
@@ -2767,7 +2785,6 @@ BEGIN
     IDS_WHATSNEW_3          "Le journal est plus fiable : une écriture échouée n'abîme pas le fichier précédent, « Tenir un journal » agit aussitôt dans cette session, et le « Reprendre » grisé dit pourquoi il est grisé."
     IDS_WHATSNEW_FULL       "La liste complète des changements est publiée dans la chaîne."
     IDS_AUTHOR_CAPTION      "De l'auteur"
-    IDS_AUTHOR_VERSION      "version {0} · Panda, alias Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "L'auteur"
     IDS_AUTHOR_TEXT         "Le programme est fait par une seule personne sur son temps libre. Il est gratuit et le restera. Si vous voulez dire merci par un geste, la page de soutien propose plusieurs moyens. C'est bien de savoir apprécier le travail d'autrui ♥"
     IDS_NEWS_PANEL          "Nouvelles et mises à jour"
@@ -2989,7 +3006,6 @@ BEGIN
     IDS_WHATSNEW_3          "El registro es más fiable: una escritura fallida no daña el archivo anterior, «Llevar un registro» actúa al momento en esta sesión, y el «Reanudar» en gris dice por qué está en gris."
     IDS_WHATSNEW_FULL       "La lista completa de cambios está publicada en el canal."
     IDS_AUTHOR_CAPTION      "Del autor"
-    IDS_AUTHOR_VERSION      "versión {0} · Panda, alias Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "El autor"
     IDS_AUTHOR_TEXT         "El programa lo hace una sola persona en su tiempo libre. Es gratuito y seguirá siéndolo. Si quiere dar las gracias con un gesto, la página de apoyo ofrece varias formas. Está bien saber valorar el trabajo ajeno ♥"
     IDS_NEWS_PANEL          "Noticias y actualizaciones"
@@ -3209,7 +3225,6 @@ BEGIN
     IDS_WHATSNEW_3          "O registro está mais confiável: uma gravação falhada não estraga o arquivo anterior, «Manter um registro» vale de imediato nesta sessão, e o «Retomar» em cinza diz por que está em cinza."
     IDS_WHATSNEW_FULL       "A lista completa de mudanças está publicada no canal."
     IDS_AUTHOR_CAPTION      "Do autor"
-    IDS_AUTHOR_VERSION      "versão {0} · Panda, também conhecido como Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "O autor"
     IDS_AUTHOR_TEXT         "O programa é feito por uma pessoa só no tempo livre. É gratuito e continuará assim. Se quiser agradecer com um gesto, a página de apoio tem algumas formas. É bom que você valorize o trabalho dos outros ♥"
     IDS_NEWS_PANEL          "Notícias e atualizações"
@@ -3434,7 +3449,6 @@ BEGIN
     IDS_WHATSNEW_3          "Il registro è più affidabile: una scrittura fallita non rovina il file precedente, «Tenere un registro» vale subito in questa sessione, e il «Riprendi» in grigio dice perché è in grigio."
     IDS_WHATSNEW_FULL       "L'elenco completo dei cambiamenti è pubblicato nel canale."
     IDS_AUTHOR_CAPTION      "Dall'autore"
-    IDS_AUTHOR_VERSION      "versione {0} · Panda, alias Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "L'autore"
     IDS_AUTHOR_TEXT         "Il programma è fatto da una sola persona nel tempo libero. È gratuito e resterà tale. Se vuoi dire grazie con un gesto, la pagina di sostegno propone alcuni modi. È bello che tu apprezzi il lavoro altrui ♥"
     IDS_NEWS_PANEL          "Notizie e aggiornamenti"
@@ -3659,7 +3673,6 @@ BEGIN
     IDS_WHATSNEW_3          "Dziennik jest pewniejszy: nieudany zapis nie psuje poprzedniego pliku, „Prowadź dziennik” działa od razu w tej sesji, a szare „Wznów” mówi, dlaczego jest szare."
     IDS_WHATSNEW_FULL       "Pełna lista zmian jest opublikowana na kanale."
     IDS_AUTHOR_CAPTION      "Od autora"
-    IDS_AUTHOR_VERSION      "wersja {0} · Panda, znany też jako Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Autor"
     IDS_AUTHOR_TEXT         "Program robi jedna osoba w wolnym czasie. Jest darmowy i taki zostanie. Jeśli chcesz podziękować czynem, na stronie wsparcia jest kilka sposobów. Fajnie, że cenisz cudzą pracę ♥"
     IDS_NEWS_PANEL          "Wiadomości i aktualizacje"
@@ -3880,7 +3893,6 @@ BEGIN
     IDS_WHATSNEW_3          "Protokol je spolehlivější: neúspěšný zápis nepoškodí předchozí soubor, „Vést protokol“ platí ihned v této relaci a šedé „Pokračovat“ říká, proč je šedé."
     IDS_WHATSNEW_FULL       "Úplný seznam změn je zveřejněn na kanálu."
     IDS_AUTHOR_CAPTION      "Od autora"
-    IDS_AUTHOR_VERSION      "verze {0} · Panda, známý též jako Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Autor"
     IDS_AUTHOR_TEXT         "Program dělá jeden člověk ve volném čase. Je zdarma a zůstane takový. Jestli chcete poděkovat skutkem, na stránce podpory je několik možností. Je hezké, že si vážíte cizí práce ♥"
     IDS_NEWS_PANEL          "Novinky a aktualizace"
@@ -4104,7 +4116,6 @@ BEGIN
     IDS_WHATSNEW_3          "Günlük daha güvenilir: başarısız bir yazma önceki dosyayı bozmuyor, «Günlük tut» bu oturumda hemen geçerli oluyor ve gri «Sürdür» neden gri olduğunu söylüyor."
     IDS_WHATSNEW_FULL       "Değişikliklerin tam listesi kanalda yayımlandı."
     IDS_AUTHOR_CAPTION      "Yazardan"
-    IDS_AUTHOR_VERSION      "sürüm {0} · Panda, namıdiğer Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Yazar"
     IDS_AUTHOR_TEXT         "Programı boş zamanında tek bir kişi yapıyor. Ücretsizdir ve öyle kalacak. Teşekkürünüzü bir davranışla göstermek isterseniz destek sayfasında birkaç yol var. Başkasının emeğine değer vermeniz güzel ♥"
     IDS_NEWS_PANEL          "Haberler ve güncellemeler"
@@ -4332,7 +4343,6 @@ BEGIN
     IDS_WHATSNEW_3          "Η καταγραφή είναι πιο αξιόπιστη: μια αποτυχημένη εγγραφή δεν χαλά το προηγούμενο αρχείο, η «Τήρηση καταγραφής» ισχύει αμέσως σε αυτή τη συνεδρία, και η γκρίζα «Συνέχιση» λέει γιατί είναι γκρίζα."
     IDS_WHATSNEW_FULL       "Ο πλήρης κατάλογος αλλαγών δημοσιεύεται στο κανάλι."
     IDS_AUTHOR_CAPTION      "Από τον δημιουργό"
-    IDS_AUTHOR_VERSION      "έκδοση {0} · Πάντα, γνωστός και ως Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "Ο δημιουργός"
     IDS_AUTHOR_TEXT         "Το πρόγραμμα το φτιάχνει ένας άνθρωπος στον ελεύθερο χρόνο του. Είναι δωρεάν και θα παραμείνει. Αν θέλετε να πείτε ευχαριστώ έμπρακτα, η σελίδα υποστήριξης έχει μερικούς τρόπους. Ωραίο που εκτιμάτε τον κόπο των άλλων ♥"
     IDS_NEWS_PANEL          "Ειδήσεις και ενημερώσεις"
@@ -4567,7 +4577,6 @@ BEGIN
     IDS_WHATSNEW_3          "היומן אמין יותר: כתיבה שנכשלה אינה פוגעת בקובץ הקודם, «ניהול יומן» פועל מיד בהפעלה זו, ו«המשך» האפור אומר מדוע הוא אפור."
     IDS_WHATSNEW_FULL       "הרשימה המלאה של השינויים מתפרסמת בערוץ."
     IDS_AUTHOR_CAPTION      "מהמפתח"
-    IDS_AUTHOR_VERSION      "גרסה {0} · פנדה, הידוע גם כ־Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "המפתח"
     IDS_AUTHOR_TEXT         "את התוכנה עושה אדם אחד בזמנו הפנוי. היא חינמית ותישאר כזאת. אם בא לכם להגיד תודה במעשה, בעמוד התמיכה יש כמה דרכים. נחמד שאתם מעריכים עבודה של אחרים ♥"
     IDS_NEWS_PANEL          "חדשות ועדכונים"
@@ -4787,7 +4796,6 @@ BEGIN
     IDS_WHATSNEW_3          "السجل أكثر موثوقية: الكتابة الفاشلة لا تُتلف الملف السابق، و«حفظ السجل» يسري فورًا في هذه الجلسة، و«استئناف» الرمادي يقول لماذا هو رمادي."
     IDS_WHATSNEW_FULL       "قائمة التغييرات الكاملة منشورة في القناة."
     IDS_AUTHOR_CAPTION      "من المؤلف"
-    IDS_AUTHOR_VERSION      "الإصدار {0} · باندا، المعروف أيضًا بـ Panda_Pishet_Kod"
     IDS_AUTHOR_PANEL        "المؤلف"
     IDS_AUTHOR_TEXT         "يصنع البرنامج شخص واحد في وقت فراغه. وهو مجاني وسيبقى كذلك. إن أردت أن تشكر بفعل، ففي صفحة الدعم عدة طرق. جميل أنك تقدّر عمل الآخرين ♥"
     IDS_NEWS_PANEL          "الأخبار والتحديثات"

@@ -6202,23 +6202,85 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
     );
 
     // (2) The road. The label body, and the two tables the label road read.
+    //
+    // ⚠⚠ **The body split in two in task T-81-3** — решение 142.2 п. 6. The gathering stayed in
+    // `draw_about_name`, which is what reads this window's tables; the painting moved into
+    // `paint_program_name`, because «От авторе» carries the very same name now and a second copy
+    // of that arithmetic is the расхождение the decision exists to close. So the two halves are
+    // swept separately, and a third assertion holds that the first really calls the second.
     let source = settings_module_source();
-    let body = function_body(&source, "unsafe fn draw_about_name(");
+    let gathering = function_body(&source, "unsafe fn draw_about_name(");
+    let painting = function_body(&source, "pub(crate) unsafe fn paint_program_name(");
 
     for needle in [
         "about_label_face(IDC_ABOUT_NAME",
         "about_static_color_role(IDC_ABOUT_NAME",
-        "paint_label_text(",
     ] {
         assert!(
-            body.contains(needle),
-            "the name must be drawn the way a label is — «{needle}» is not in draw_about_name"
+            gathering.contains(needle),
+            "the name must be given the ink and the face of a label — «{needle}» is not in \
+             draw_about_name"
         );
     }
 
     assert!(
-        !body.contains("paint_push_button"),
-        "⛔⛔ C5: the name must not go the button road — it centres the caption in both axes"
+        gathering.contains("paint_program_name("),
+        "the gathering must hand its pieces to the one body that paints the name"
+    );
+
+    assert!(
+        painting.contains("paint_label_text("),
+        "the name must be drawn the way a label is — «paint_label_text(» is not in \
+         paint_program_name"
+    );
+
+    for (what, body) in [
+        ("draw_about_name", &gathering),
+        ("paint_program_name", &painting),
+    ] {
+        assert!(
+            !body.contains("paint_push_button"),
+            "⛔⛔ C5: the name must not go the button road — it centres the caption in both \
+             axes, and {what} takes it"
+        );
+    }
+
+    // ⭐⭐ **And the second window really goes this very road** — решение 142.2 п. 6. Without this
+    // line «одно тело на два окна» would be a sentence in a comment; with it, a copy of the
+    // arithmetic in `letters.rs` turns the test red.
+    let letters = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    assert!(
+        letters.contains("settings::paint_program_name("),
+        "«От авторе» must paint its name with the one body, not with a copy of it"
+    );
+    // ⚠ The needle is `name_backing_box`, not `chip_box`: `letters.rs` measures a chip of its own
+    // and always has — the figure round the key name in a letter's rows — and that is a different
+    // figure round a different word. What must not be copied is the box of the **name's** backing
+    // and the erase-and-round dance around it, which is what this one body is.
+    assert!(
+        !letters.contains("name_backing_box("),
+        "⛔ the arithmetic of the name's backing must live in one place — letters.rs measures it \
+         too"
+    );
+    // ⛔ **And there are exactly two callers of the body — one per window.** A third would be a
+    // third window drawing the name, and a second in either file would be the copy this decision
+    // forbids. ⚠ The count in `settings.rs` is two occurrences: the definition and the one call.
+    assert_eq!(
+        letters.matches("paint_program_name(").count(),
+        1,
+        "«От авторе» must call the one body exactly once"
+    );
+    assert_eq!(
+        source.matches("paint_program_name(").count(),
+        2,
+        "settings.rs must hold the body and its one caller — no more"
     );
 
     // ⭐⭐ **And `paint_label_text` must be the label road itself and not a twin of it** — task
@@ -6248,26 +6310,29 @@ fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
          would keep the name in step only until one of the two was edited"
     );
 
-    // ⚠ Отрицательный контроль: the reading must refuse a body that went the button road, or
-    // the assertions above prove nothing about what they are written against.
-    let of_the_button_road = body
-        .replace("paint_label_text(", "paint_push_button(")
-        .replace("about_label_face(IDC_ABOUT_NAME", "DialogFonts::text(fonts");
+    // ⚠ Отрицательный контроль: the reading must refuse bodies that went the button road, or the
+    // assertions above prove nothing about what they are written against.
+    let of_the_button_road = painting.replace("paint_label_text(", "paint_push_button(");
+    let of_the_plain_face = gathering.replace("about_label_face(IDC_ABOUT_NAME", "fonts.text(");
 
     assert!(
         of_the_button_road.contains("paint_push_button")
-            && !of_the_button_road.contains("about_label_face(IDC_ABOUT_NAME"),
-        "the control must differ from the body in exactly the two ways the assertions look at"
+            && !of_the_button_road.contains("paint_label_text("),
+        "the control must differ from the painting in exactly the way the assertion looks at"
+    );
+    assert!(
+        !of_the_plain_face.contains("about_label_face(IDC_ABOUT_NAME"),
+        "the control must differ from the gathering in exactly the way the assertion looks at"
     );
 
     // (3) The backing is measured off the **word** — task T-79-2, решение 139а. A backing the
     // width of the whole text column is what the user turned down on the live product.
     assert!(
-        body.contains("name_backing_box(") && body.contains("chip.width"),
+        painting.contains("name_backing_box(") && painting.contains("chip.width"),
         "the backing must be the box the caption asks for, not the rectangle of the control"
     );
     assert!(
-        body.contains("chip.radius"),
+        painting.contains("chip.radius"),
         "and it must be rounded — «по слову с закругленными краями подложки»"
     );
 }
@@ -12815,7 +12880,13 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// away: `IDS_LANGUAGE_RESTART` left (71) and the two words of the tray tooltip arrived (73).
 /// The count has followed `settings::INTERFACE_STRINGS` since, row for row; **218 since task
 /// T-43-9** (решение 128.2), whose notification of FR-82 is the last row.
-const FR_94_STRINGS: [(u16, &str, &str); 218] = [
+///
+/// ⚠⚠ **217 since task T-81-3** — решение 142.2 п. 5, and the first time this number has gone
+/// **down**. `IDS_AUTHOR_VERSION` carried the author's signature under the name of the program
+/// in «От авторе» and the owner asked for it to leave; the head of that window is the head of
+/// «О программе» now, version line included, so the string had no second reader and went with
+/// all fourteen of its translations.
+const FR_94_STRINGS: [(u16, &str, &str); 217] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -13285,11 +13356,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 218] = [
         "The full list of changes is published in the channel.",
     ),
     (settings::IDS_AUTHOR_CAPTION, "От автора", "From the author"),
-    (
-        settings::IDS_AUTHOR_VERSION,
-        "версия {0} · Панда, он же Panda_Pishet_Kod",
-        "version {0} · Panda, also known as Panda_Pishet_Kod",
-    ),
+    // ⛔⛔ `IDS_AUTHOR_VERSION` (3111) стояла здесь и **снята задачей T-81-3**, решение 142.2
+    // п. 5: «версия {0} · Панда, он же Panda_Pishet_Kod». Шапка двух окон стала одной, и строку
+    // версии в обоих пишет `IDS_ABOUT_VERSION`. Надгробие стоит, чтобы снятие читалось как
+    // решение, а не как пропущенная строка.
     (settings::IDS_AUTHOR_PANEL, "Автор", "The author"),
     (
         settings::IDS_AUTHOR_TEXT,
@@ -19561,10 +19631,22 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         !settings::INTERFACE_STRINGS.contains(&RETIRED),
         "the vocabulary of the interface must not name a retired identifier"
     );
+    // ⛔⛔ **3111 is a second hole since task T-81-3** — решение 142.2 п. 5, and the first time
+    // this canon has gone **down**. `IDS_AUTHOR_VERSION` carried «версия {0} · Панда, он же
+    // Panda_Pishet_Kod» under the name of the program in «От авторе»; the owner asked for the
+    // signature to leave, the head of that window became the head of «О программе» — version
+    // line included — and the string went with all fourteen of its translations. The hole is
+    // held by the same three checks 3004 is held by, a few lines down.
+    assert!(
+        !settings::INTERFACE_STRINGS.contains(&3111),
+        "3111 left the vocabulary with task T-81-3 and must not come back into it"
+    );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        218,
-        "two hundred and eighteen identifiers in use — the mandate of Э32 authorised the canon \
+        217,
+        "two hundred and SEVENTEEN identifiers in use — two hundred and eighteen until task \
+         T-81-3 (решение 142.2 п. 5) took `IDS_AUTHOR_VERSION` away, which is the first time \
+         this canon has moved downwards. Before that: the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
          sixty-one strings of the letters from the author (FR-101…FR-103, task Т-32-3), the \
          ten of the two letters out of the feed (Т-32-6), the fifty-nine of the wizard \
@@ -19588,14 +19670,22 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     let mut read = 0;
 
     for (tag, langid, _) in ALL_LOCALES {
-        let retired = product.string_of_langid(langid, RETIRED);
+        // ⚠ **Both holes, since task T-81-3.** 3111 is checked on exactly the terms 3004 is: it
+        // has to be gone from the resource and not only from the crate's list, and its block has
+        // to read across it. 3111 sits in the block 3104..3119, so 3110 and 3112 are its
+        // neighbours and 3119 is the last row of that block.
+        for retired_id in [RETIRED, 3111] {
+            let retired = product.string_of_langid(langid, retired_id);
 
-        if !retired.trim().is_empty() {
-            still_there.push(format!("{tag} ({langid:#06X}) still carries «{retired}»"));
+            if !retired.trim().is_empty() {
+                still_there.push(format!(
+                    "{tag} ({langid:#06X}) still carries {retired_id} «{retired}»"
+                ));
+            }
         }
 
-        // The two neighbours of the hole and the last row of the same sixteen-string block.
-        for id in [3003_u16, 3005, 3015] {
+        // The two neighbours of each hole and the last row of each sixteen-string block.
+        for id in [3003_u16, 3005, 3015, 3110, 3112, 3119] {
             let string = product.string_of_langid(langid, id);
             read += 1;
 
@@ -19619,9 +19709,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        ALL_LOCALES.len() * 3,
-        "three rows in each of the fourteen locales — «no holes» out of no readings is the \
-         cheapest lie such a sweep tells"
+        ALL_LOCALES.len() * 6,
+        "six rows in each of the fourteen locales — three round each of the two holes; «no \
+         holes» out of no readings is the cheapest lie such a sweep tells"
     );
 }
 
@@ -22324,5 +22414,197 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
         clips.is_empty(),
         "развилка C3: {} rows do not fit: {clips:#?}",
         clips.len()
+    );
+}
+
+/// **Task T-81-3, решение 142.2 п. 4** — the head of «От авторе» is the head of «О программе»,
+/// rectangle for rectangle.
+///
+/// ⚠ «Точь-в-точь» is the kind of claim an eye cannot keep: two heads laid out by two hands drift
+/// apart a unit at a time, and Э78 is the proof — it gave the name of one head a link and left
+/// the other a label for four waves. So the two templates are read out of the **built product**
+/// and compared control by control, and the version line is in that comparison because it was
+/// one unit lower in «От авторе» than in «О программе», for no reason anybody could name.
+#[test]
+fn the_head_of_both_windows_is_the_same_head() {
+    /// The controls of the head, paired: «О программе» and «От авторе».
+    const HEAD: [(&str, u32, u32); 5] = [
+        ("значок", 1120, 1260),
+        ("имя", 1121, 1261),
+        ("строка версии", 1122, 1262),
+        ("описание, строка 1", 1123, 1280),
+        ("описание, строка 2", 1124, 1281),
+    ];
+
+    /// The ordinal of the predefined `Button` class in a dialog template.
+    const BUTTON_CLASS: u16 = 0x0080;
+    /// The type of a button is the low nibble of its style.
+    const BS_OWNERDRAW: u32 = 0x0B;
+    /// `WS_TABSTOP`, which a `PUSHBUTTON` statement carries unless the template says otherwise.
+    const TABSTOP: u32 = 0x0001_0000;
+
+    let product = ProductImage::open();
+    let about = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+    let author = DialogTemplate::parse(&product.resource(RT_DIALOG, 204));
+
+    for (what, here, there) in HEAD {
+        let one = about.rect_of(here);
+        let two = author.rect_of(there);
+
+        println!("«{what}»: «О программе» {one:?}, «От авторе» {two:?}");
+
+        assert_eq!(
+            one, two,
+            "«{what}» stands at {one:?} in «О программе» and at {two:?} in «От авторе» — the head \
+             of решение 142.2 п. 4 is one head, not two alike"
+        );
+    }
+
+    // And the name of «От авторе» is a button of the same type as its twin, and takes the focus
+    // no more than its twin does — решение 142.2 п. 6.
+    let class = author
+        .classes
+        .iter()
+        .find(|(control, _)| *control == 1261)
+        .map(|(_, class)| *class)
+        .expect("the author template must carry the name");
+
+    assert_eq!(
+        class,
+        Some(BUTTON_CLASS),
+        "the name must be a button of the predefined class"
+    );
+
+    let style = author.style_of(1261, "имя «От авторе»");
+
+    println!("имя «От авторе» (1261): style {style:#010x}");
+
+    assert_eq!(
+        style & 0x0F,
+        BS_OWNERDRAW,
+        "and an owner-drawn one, or this program does not paint it at all"
+    );
+    assert_eq!(
+        style & TABSTOP,
+        0,
+        "and not a tab stop: it stands first in the template, as it does in «О программе»"
+    );
+}
+
+/// **Task T-81-3, решение 142.2 п. 6** — one colour rule for the name, asked by two numbers.
+///
+/// ⛔ The failure this guards against is the one Э78 actually made: a rule written twice, and the
+/// two copies drifting. So the two numbers are put to [`settings::button_color_roles`] in both
+/// states and the answers have to be **equal**, not merely both plausible — and the negative
+/// control shows that this table answers different things to different controls at all.
+#[test]
+fn both_names_of_the_program_get_one_and_the_same_pair_of_colours() {
+    /// «Lang Switcher» in «О программе» — the number `app.rc` gives it.
+    const ABOUT_NAME: i32 = 1121;
+
+    for hot in [false, true] {
+        let one = settings::button_color_roles(ABOUT_NAME, hot, false, false);
+        let two = settings::button_color_roles(letters::IDC_AUTHOR_NAME, hot, false, false);
+
+        println!("hot={hot}: «О программе» {one:?}, «От авторе» {two:?}");
+
+        assert_eq!(
+            one, two,
+            "the two names of the program must be given one and the same pair of colours"
+        );
+        assert_eq!(
+            one.border,
+            theme::ButtonBorderRole::FaceItself,
+            "and both must be the frameless row of the table — a name that opens a page is not \
+             a button that looks like one"
+        );
+    }
+
+    // And the predicate that joins them really answers for both, and for nothing else.
+    assert!(settings::is_the_program_name(ABOUT_NAME));
+    assert!(settings::is_the_program_name(letters::IDC_AUTHOR_NAME));
+    assert!(!settings::is_the_program_name(1));
+    assert!(!settings::is_the_program_name(1136));
+
+    // Контроль прибора: an ordinary button must **not** come out of that table the same way, or
+    // the equality above would hold of everything and mean nothing.
+    let ordinary = settings::button_color_roles(1136, false, false, false);
+
+    assert_ne!(
+        ordinary,
+        settings::button_color_roles(ABOUT_NAME, false, false, false),
+        "«От автора…» and the name must not be given the same colours — the table would be \
+         answering one thing to everybody"
+    );
+    assert_eq!(
+        ordinary.border,
+        theme::ButtonBorderRole::ButtonBorder,
+        "every other button of this program has a frame — the finding of the mock-up of Э81"
+    );
+}
+
+/// **Task T-81-3, решение 142.2 п. 5** — `IDS_AUTHOR_VERSION` is gone from the resource, with all
+/// fourteen of its translations.
+///
+/// ⚠ The tombstone in `app.rc` names it in prose, and prose is not a string table: the sweep
+/// looks for the **statement** — the identifier followed by a quoted string, and the `#define`
+/// that gave it a number — so a comment about the removal does not read as the removal undone.
+#[test]
+fn the_authors_signature_left_the_resource_with_all_fourteen_translations() {
+    let resource = Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
+    let text = fs::read_to_string(&resource)
+        .expect("app.rc must be readable")
+        .replace("\r\n", "\n");
+
+    let statements = |body: &str| -> usize {
+        body.lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with("IDS_AUTHOR_VERSION") && line.contains('"')
+            })
+            .count()
+    };
+
+    let defines = |body: &str| -> usize {
+        body.lines()
+            .filter(|line| line.trim_start().starts_with("#define IDS_AUTHOR_VERSION"))
+            .count()
+    };
+
+    println!(
+        "IDS_AUTHOR_VERSION: {} statements, {} defines",
+        statements(&text),
+        defines(&text)
+    );
+
+    assert_eq!(
+        statements(&text),
+        0,
+        "all fourteen translations of the author's signature must be gone from app.rc"
+    );
+    assert_eq!(defines(&text), 0, "and so must the number that named it");
+
+    // Контроль прибора — **мутант**: put one translation back and the sweep must see it. Without
+    // this the two zeroes above would also be what a sweep looking at the wrong file answers.
+    let mutant = text.replace(
+        "    IDS_AUTHOR_PANEL        \"Автор\"",
+        "    IDS_AUTHOR_VERSION      \"версия {0} · Панда, он же Panda_Pishet_Kod\"\n    \
+         IDS_AUTHOR_PANEL        \"Автор\"",
+    );
+
+    assert_ne!(
+        mutant, text,
+        "the mutant must change the text it is made of"
+    );
+    assert!(
+        statements(&mutant) > 0,
+        "the sweep does not see a translation put back — it cannot fail"
+    );
+
+    // And the tombstone really is prose: the sweep must be blind to it, or it would be reading
+    // comments for statements.
+    assert!(
+        text.contains("`IDS_AUTHOR_VERSION` — УДАЛЕНА задачей T-81-3"),
+        "the tombstone must stand, so that the removal reads as a decision"
     );
 }

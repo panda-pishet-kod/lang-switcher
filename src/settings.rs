@@ -2991,8 +2991,12 @@ pub const IDS_WHATSNEW_3: u16 = 3108;
 pub const IDS_WHATSNEW_FULL: u16 = 3109;
 /// The caption of the «От автора» window — FR-103.
 pub const IDS_AUTHOR_CAPTION: u16 = 3110;
-/// The line under the program's name in that window: the version and the author's alias.
-pub const IDS_AUTHOR_VERSION: u16 = 3111;
+// ⛔⛔ **3111 — `IDS_AUTHOR_VERSION` — снята задачей T-81-3, решение 142.2 п. 5.** Она несла
+// «версия {0} · Панда, он же Panda_Pishet_Kod» под именем программы в «От авторе»; слово
+// владельца — «не надо вставлять панда, он же панда». Шапка у двух окон стала одна, и строку
+// версии в обоих пишет [`IDS_ABOUT_VERSION`]. Это **первое за проект удаление** строки
+// интерфейса: [`INTERFACE_STRINGS`] поехал 218 → 217, и это нормально. Номер не
+// переиспользуется — надгробие тут по той же причине, по какой стоит надгробие 3004.
 /// The caption of its first panel.
 pub const IDS_AUTHOR_PANEL: u16 = 3112;
 /// The text of that panel, the heart included.
@@ -3304,7 +3308,15 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and eighteen since task T-43-9** (решение 128.2 authorised 217 → 218): the
 /// notification of FR-82 left its English literal in `app` for [`IDS_ALREADY_RUNNING`], the
 /// last row.
-pub const INTERFACE_STRINGS: [u16; 218] = [
+///
+/// ⚠⚠ **And two hundred and seventeen since task T-81-3** — решение 142.2 п. 5. The canon went
+/// **down** for the first time in the life of this program: `IDS_AUTHOR_VERSION` (3111) is gone,
+/// with all fourteen of its translations, because the owner asked for the author's signature to
+/// leave the head of «От автора» («не надо вставлять панда, он же панда») and the two windows
+/// of that head now share one version line, [`IDS_ABOUT_VERSION`]. A canon that only ever grows
+/// is a canon nobody may tidy; this one moves by a decision, in either direction, and 3111 joins
+/// 3004 as a hole that is not walked.
+pub const INTERFACE_STRINGS: [u16; 217] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3422,7 +3434,6 @@ pub const INTERFACE_STRINGS: [u16; 218] = [
     IDS_WHATSNEW_3,
     IDS_WHATSNEW_FULL,
     IDS_AUTHOR_CAPTION,
-    IDS_AUTHOR_VERSION,
     IDS_AUTHOR_PANEL,
     IDS_AUTHOR_TEXT,
     IDS_NEWS_PANEL,
@@ -6375,7 +6386,13 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
     // of four windows; the user turned that down on the live product and asked for one typed
     // mechanism instead. The frame is a column of this table now, and this is the single row in
     // which it is `FaceItself`: a name that opens a page is not a button that looks like one.
-    if control == IDC_ABOUT_NAME {
+    //
+    // ⭐⭐ **И с задачи T-81-3 строк-номеров у этой строки таблицы два, а самой строки
+    // по-прежнему одна** — решение 142.2 п. 6. Имя программы стоит теперь в двух окнах,
+    // «О программе» и «От авторе», и оба спрашивают **эту** ветку через
+    // [`is_the_program_name`]. Второй такой же ветки в файле нет и быть не должно: расхождение
+    // двух копий одного правила — ровно то, что завёл Э78, дав ссылку одной копии шапки из двух.
+    if is_the_program_name(control) {
         return ButtonColors {
             face: if hot {
                 ButtonFaceRole::MenuHoverBg
@@ -11629,6 +11646,22 @@ const PUSH_BUTTONS: [i32; 11] = [
 /// at `WM_DESTROY` are this one list, and adding a line to it wired all four.
 pub const ABOUT_BUTTONS: [i32; 3] = [OK_COMMAND, IDC_ABOUT_AUTHOR, IDC_ABOUT_NAME];
 
+/// Whether `control` is the **name of the program** — the one button of this program with no
+/// frame of its own, and the one that opens the page of the application.
+///
+/// ⭐⭐ **Two windows carry it since task T-81-3** — решение 142.2 п. 6: «О программе», where
+/// задача T-78-3 first made the name a button, and «От авторе», whose head became the very same
+/// head. This predicate is what keeps them **one** rather than two alike: the colour table
+/// ([`button_color_roles`]), the hand cursor of [`button_proc`] and the drawing
+/// ([`paint_program_name`]) all ask it, and none of the three knows two numbers of its own.
+///
+/// ⛔ The number of «От авторе» lives in `letters.rs`, beside the other controls of that window,
+/// and is read from there rather than written down a second time here: a mirrored number is a
+/// number that can drift, and this file already learnt that from the head it is mending.
+pub fn is_the_program_name(control: i32) -> bool {
+    control == IDC_ABOUT_NAME || control == crate::letters::IDC_AUTHOR_NAME
+}
+
 /// Whether the `WM_DRAWITEM` of the about window paints the button `control` — task T-71-1,
 /// finding Э70-Б-1.
 ///
@@ -11747,7 +11780,7 @@ unsafe extern "system" fn button_proc(
         // SAFETY: `button` is a live control this procedure was installed on; `LoadCursorW` on a
         // **shared** system cursor answers a handle the system owns and that must not be
         // destroyed, and `SetCursor` takes it by value.
-        WM_SETCURSOR if unsafe { GetDlgCtrlID(button) } == IDC_ABOUT_NAME => {
+        WM_SETCURSOR if is_the_program_name(unsafe { GetDlgCtrlID(button) }) => {
             if let Ok(hand) = unsafe { LoadCursorW(None, IDC_HAND) } {
                 unsafe { SetCursor(Some(hand)) };
 
@@ -16998,6 +17031,38 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
     // `DrawTextW` takes the length of the slice it is given.
     let mut caption: Vec<u16> = get_text(hwnd, IDC_ABOUT_NAME).encode_utf16().collect();
 
+    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `face` and
+    // `window` are handles this window's state owns for longer than this call.
+    unsafe { paint_program_name(dc, rect, &mut caption, face, pitch, ink, colors, window) }
+}
+
+/// **Paints the name of the program** — the half of the drawing that is the same in both windows
+/// that carry it, задача T-81-3, решение 142.2 п. 6.
+///
+/// The two windows differ in where the pieces come from — «О программе» reads them out of its
+/// own state, «От авторе» out of its own — and in nothing else. So the gathering stays in each
+/// window and the **painting is one body**: the erase, the backing measured off the word, the
+/// rounded figure and the text laid at the chip's insets. ⛔ A second copy of this arithmetic in
+/// `letters.rs` is exactly the расхождение решение 142.2 п. 6 exists to close.
+///
+/// Everything the body needs is passed in, and every sentence of the reasoning is written at the
+/// step it belongs to below.
+///
+/// # Safety
+///
+/// `dc` and `rect` are the values of a `WM_DRAWITEM` this call is inside of; `face` is a font and
+/// `window` a brush the calling window's state owns for longer than this call.
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn paint_program_name(
+    dc: HDC,
+    rect: RECT,
+    caption: &mut [u16],
+    face: Option<HFONT>,
+    pitch: Option<i32>,
+    ink: COLORREF,
+    colors: theme::ResolvedButtonColors,
+    window: HBRUSH,
+) -> isize {
     // ⭐ **The backing is measured off the word, not off the control** — task T-79-2. The user
     // accepted the colour on the live product and turned the shape down: «должно быть по слову с
     // закругленными краями подложки». So the figure is the box the **caption** asks for, and the
@@ -17012,7 +17077,7 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
     // measuring selects that face, reads the extent of the caption and puts the previous handle
     // back. `None` — the faces were refused at initialisation (NFR-13), and the box then comes
     // out of the rectangle, which is what this drawing did before this task.
-    let chip = unsafe { name_backing_box(dc, face, &caption, rect) };
+    let chip = unsafe { name_backing_box(dc, face, caption, rect) };
 
     // The whole rectangle is erased with the ground of the window first: the system erases
     // nothing before an owner-drawn button's `WM_DRAWITEM`, so whatever the backing does not
@@ -17064,7 +17129,7 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
         theme::paint_label_text(
             dc,
             text,
-            &mut caption,
+            caption,
             theme::LabelStyle {
                 ground: window,
                 ink,
