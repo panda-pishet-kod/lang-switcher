@@ -22493,6 +22493,78 @@ fn the_head_of_both_windows_is_the_same_head() {
         0,
         "and not a tab stop: it stands first in the template, as it does in «О программе»"
     );
+
+    // ⛔⛔⛔ **И «От авторе» обязано этот шаблон УВАЖАТЬ — находка 142б.1, задача T-81-6.**
+    //
+    // Всё, что выше, было зелено и на `e81`, а живое окно выглядело иначе: `layout_author`
+    // выбрасывал прямоугольники шапки и клал её заново своей арифметикой. Имя уезжало вправо на
+    // инсет подложки, низ подложки срезался, между версией и описанием появлялся лишний воздух.
+    // **Совпадение шаблонов — не совпадение окон, если окно кладёт себя само.**
+    //
+    // Поэтому здесь держится механизм: тело раскладки не должно ставить **ни один** контрол
+    // шапки. Оно спрашивает у них, где шапка кончилась, и начинает под ней.
+    let letters = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = letters
+        .find("unsafe fn layout_author(")
+        .expect("src\\letters.rs must hold the layout of «От автора»");
+    let rest = &letters[at..];
+    let end = rest
+        .find("\n}")
+        .expect("a function closes with a brace of its own");
+    let body = &rest[..end];
+
+    // ⚠ The body is read with its whitespace squeezed out: `cargo fmt` breaks a call over five
+    // lines or one as the arguments happen to fit, and a needle that spelled the indentation
+    // would have been blind to the very code this guard was written against. The first draft of
+    // it **was** — it spelled twelve spaces where `e81` had eight.
+    let squeezed: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+
+    let places =
+        |text: &str, control: &str| -> bool { text.contains(&format!("place(hwnd,{control},")) };
+
+    for control in [
+        "IDC_AUTHOR_ICON",
+        "IDC_AUTHOR_NAME",
+        "IDC_AUTHOR_VERSION",
+        "IDC_AUTHOR_LINE_1",
+        "IDC_AUTHOR_LINE_2",
+    ] {
+        assert!(
+            !places(&squeezed, control),
+            "«От автора» must leave {control} where the template put it — the head of решение \
+             142.2 п. 4 is the template's, and the template's is the about window's"
+        );
+    }
+
+    assert!(
+        squeezed.contains("settings::child_rect_in_client(hwnd,control)"),
+        "and it must ask the head's own controls where it ended, rather than re-deriving it"
+    );
+
+    // ⛔ **Отрицательный контроль: тело, которое кладёт шапку рукой** — ровно то, чем `e81` и
+    // отличался. Форма контроля — та же, что у сторожей T-78-3 и T-80-2: тело с возвращённым
+    // дефектом. ⚠ Проверено ещё и рукой, вне теста: в `layout_author` коммита `df29bf1`
+    // `place(hwnd, IDC_AUTHOR_NAME, …)` стоял, и эта игла его находит.
+    let by_hand = squeezed.replace(
+        "lethead=[",
+        "place(hwnd,IDC_AUTHOR_NAME,metrics.x(air::TEXT_X),top,0,0);lethead=[",
+    );
+
+    assert_ne!(
+        by_hand, squeezed,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        places(&by_hand, "IDC_AUTHOR_NAME"),
+        "the sweep does not see a head laid out by hand — it cannot fail"
+    );
 }
 
 /// **Task T-81-3, решение 142.2 п. 6** — one colour rule for the name, asked by two numbers.
@@ -22738,5 +22810,78 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
     assert_ne!(
         moved.size.1, TYPICAL,
         "the reading does not see a height one unit off the typical — it cannot fail"
+    );
+}
+
+/// **Task T-81-6, находка 142б.2** — a help row takes the height it needs **now**, not the one
+/// the template kept for the worst key name.
+///
+/// ⛔ **The template is sized for «PrintScreen», the widest key name the program can show, and it
+/// has to be** — it must hold any of them, and the fitting stand above proves it does. But the
+/// key a person actually has is their own, and on «Pause» the Russian rows want 18 / 9 / 18 / 9 / 9
+/// units where the template keeps 29 / 19 / 29 / 19 / 10: **43 units of air inside the block**
+/// (`scratchpad-E81\probe-widths.log`). While the column was 142 units the difference was small;
+/// task T-81-1 widened it to 207, every row needed fewer lines, and the worst-case sizing showed
+/// on the screen. The owner saw it on the live 0.81.0: «текст в окне о программе получился
+/// сильно разряженным по высоте».
+///
+/// So `fit_about_help` lays every row at its **measured** height and re-stacks them — it used to
+/// do that only when the rows wanted **more** than their slots, and leave them alone otherwise.
+/// ⚠ The window is not shortened by this: the typical height of three windows is решение 142.2
+/// п. 8, and the free height stays with the help panel, which is what the accepted mock-up shows.
+#[test]
+fn a_help_row_takes_the_height_it_needs_and_not_the_slot_of_the_worst_key() {
+    let source = settings_module_source();
+    let body = function_body(&source, "unsafe fn fit_about_help(");
+
+    // ⚠ The comment lines are dropped before the whitespace is squeezed, and that is not
+    // tidiness: the prose beside this very code **names** `needed.max(height)` to say why it is
+    // gone, and a sweep reading prose for code would have called the repair undone. The same
+    // reason `about_gate_asks_the_predicate` drops them.
+    let squeezed: String = body
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(|line| line.chars())
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    // (1) The measured height, and not the larger of the two.
+    assert!(
+        squeezed.contains("rows.push((row,numeral,text_rect,numeral_rect,needed))"),
+        "a row must be given the height it needs; `needed.max(height)` is the slot of the worst \
+         key name and keeps the air of task T-81-1 in the block"
+    );
+    assert!(
+        !squeezed.contains("needed.max(height)"),
+        "⛔ the slot must not win over the measurement — that is the defect 142б.2 itself"
+    );
+
+    // (2) The rows are moved on **every** path. Until task T-81-6 the body returned early when
+    // nothing had to grow, and «nothing to grow» is now the ordinary case.
+    let move_rows = squeezed
+        .find("move_child(hwnd,*row,tops[index]")
+        .expect("the body must move its rows");
+    let early_return = squeezed
+        .find("ifgrow<=0{return;}")
+        .expect("the body must still leave the growth alone when there is none");
+
+    assert!(
+        move_rows < early_return,
+        "the rows have to be re-stacked BEFORE the body gives up on growing — otherwise the \
+         ordinary case (the rows fit with room to spare) leaves them in the worst key's slots"
+    );
+
+    // ⚠ Отрицательный контроль: тело `e81`, в котором ранний выход стоял перед перестановкой и
+    // строка брала больший из двух размеров. Без него оба утверждения — ни о чём.
+    let of_e81 = squeezed
+        .replace(
+            "rows.push((row,numeral,text_rect,numeral_rect,needed))",
+            "rows.push((row,numeral,text_rect,numeral_rect,needed.max(height)))",
+        )
+        .replace("ifgrow<=0{return;}", "");
+
+    assert!(
+        of_e81.contains("needed.max(height)") && !of_e81.contains("ifgrow<=0{return;}"),
+        "the control must differ from the body in exactly the two ways the assertions look at"
     );
 }

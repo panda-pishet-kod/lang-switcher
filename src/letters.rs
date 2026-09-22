@@ -5056,89 +5056,44 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
     let gap = metrics.y(air::GAP);
     let button = metrics.y(air::BUTTON);
 
-    // The head: the name is a template literal and the version line is the view's.
-    let mut top = metrics.y(air::TOP);
-
-    // SAFETY: `dc` is this window's DC and the faces are its own.
-    let name_height = unsafe {
-        measure(
-            dc,
-            faces.name,
-            full_width - metrics.x(air::TEXT_X - air::PAD),
-            "Lang Switcher",
-            None,
-        )
-    };
-
-    place(
-        hwnd,
+    // ⭐⭐⭐ **ШАПКА ЗДЕСЬ НЕ РАСКЛАДЫВАЕТСЯ ВОВСЕ — задача T-81-6, находка 142б.1.**
+    //
+    // ⛔ До этой задачи она раскладывалась, и своей арифметикой: имя ставилось на `TEXT_X` с
+    // высотой ровно по тексту, версия — под ним через `TIGHT`, обе строки описания — ещё через
+    // `TIGHT` каждая. Шаблон при этом нёс шапку «О программе» **прямоугольник в прямоугольник**,
+    // и тест это подтверждал — только окно те прямоугольники выбрасывало и клало всё заново.
+    // Три симптома, которые владелец увидел на живой 0.81.0, — это **одна** причина:
+    //   * имя ставилось на `TEXT_X` = 42, а прямоугольник имени обязан начинаться на **38**:
+    //     четыре единицы слева и одна сверху — это не сдвиг имени, а **комната под подложку**
+    //     (задача T-79-2), и отрисовка кладёт текст на `rect.left + chip.inset_x`. На 42 текст
+    //     уезжал вправо ровно на инсет;
+    //   * высота ставилась по тексту, а подложке нужен ещё инсет сверху и снизу — низ подложки
+    //     и низ буквы срезались;
+    //   * между версией и строками описания появлялся `TIGHT`, которого в шаблоне нет, и шапка
+    //     расходилась по высоте.
+    //
+    // ⭐ **Лечение — не вторая арифметика, а отсутствие второй арифметики.** Геометрия шапки
+    // живёт в шаблоне, и там она общая с «О программе»; раскладка начинается **под** ней, а где
+    // она кончилась — спрашивается у самих контролов той же дорогой, какой это делает
+    // `settings::fit_about_help` (⚠ и только ею: у зеркального окна `ScreenToClient` меняет углы
+    // местами, и `screen_rect_in_client` внутри — единственное чтение этого проекта, которое это
+    // переживает).
+    let head = [
+        IDC_AUTHOR_ICON,
         IDC_AUTHOR_NAME,
-        metrics.x(air::TEXT_X),
-        top,
-        client.right - metrics.x(air::TEXT_X) - pad,
-        name_height,
-    );
-    top += name_height + tight;
-
-    // SAFETY: as above.
-    let version_height = unsafe {
-        measure(
-            dc,
-            faces.text,
-            client.right - metrics.x(air::TEXT_X) - pad,
-            &view.version_line,
-            None,
-        )
-    };
-
-    place(
-        hwnd,
         IDC_AUTHOR_VERSION,
-        metrics.x(air::TEXT_X),
-        top,
-        client.right - metrics.x(air::TEXT_X) - pad,
-        version_height,
-    );
+        IDC_AUTHOR_LINE_1,
+        IDC_AUTHOR_LINE_2,
+    ]
+    .into_iter()
+    .filter_map(|control| settings::child_rect_in_client(hwnd, control))
+    .map(|rect| rect.bottom)
+    .max()
+    // NFR-13: не ответил ни один контрол — окно раскладывается от числа шаблона, то есть
+    // выглядит как всегда, а не остаётся пустым прямоугольником.
+    .unwrap_or_else(|| metrics.y(57));
 
-    top += version_height;
-
-    // ⭐⭐ **Две строки описания — задача T-81-3, решение 142.2 п. 4.** Шапка этого окна стала
-    // шапкой «О программе» целиком, и описание программы — её часть. Воздух над ними — тот же
-    // `TIGHT`, каким имя отделено от версии; каждая строка меряется по своей ширине, потому что
-    // в четырнадцати локалях длина у них разная, а в узком окне они переносятся.
-    for control in [IDC_AUTHOR_LINE_1, IDC_AUTHOR_LINE_2] {
-        let caption = if control == IDC_AUTHOR_LINE_1 {
-            &view.line_1
-        } else {
-            &view.line_2
-        };
-
-        // SAFETY: as above.
-        let height = unsafe {
-            measure(
-                dc,
-                faces.body,
-                client.right - metrics.x(air::TEXT_X) - pad,
-                caption,
-                pitch,
-            )
-        };
-
-        top += tight;
-
-        place(
-            hwnd,
-            control,
-            metrics.x(air::TEXT_X),
-            top,
-            client.right - metrics.x(air::TEXT_X) - pad,
-            height,
-        );
-
-        top += height;
-    }
-
-    top = top.max(metrics.y(13 + 22)) + gap;
+    let mut top = head + gap;
 
     // --- panel «Автор» ----------------------------------------------------------------------
     let mut panel_top = top;

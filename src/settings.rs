@@ -16468,7 +16468,25 @@ unsafe fn fit_about_help(hwnd: HWND) {
             return;
         };
 
-        rows.push((row, numeral, text_rect, numeral_rect, needed.max(height)));
+        // ⭐⭐ **`needed`, а не `needed.max(height)` — задача T-81-6, находка 142б.2.**
+        //
+        // Строка берёт ту высоту, которая ей нужна **сейчас**, а не ту, что шаблон отвёл ей на
+        // худший случай. Шаблон размечен по самому широкому имени клавиши, какое программа может
+        // показать («PrintScreen»), — и это правильно: он обязан вмещать любое. Но клавиша у
+        // человека своя, и на «Pause» русские строки просят 18 / 9 / 18 / 9 / 9 единиц там, где
+        // шаблон отвёл 29 / 19 / 29 / 19 / 10: **43 единицы воздуха** внутри блока
+        // (`scratchpad-E81\probe-widths.log`). Пока колонка была 142 единицы, разница была мала
+        // и её не было видно; задача T-81-1 расширила колонку до 207, каждой строке стало хватать
+        // меньшего числа строк — и разметка по худшему случаю проступила на экране. Владелец
+        // увидел это на живой 0.81.0 дословно: «текст в окне о программе получился сильно
+        // разряженным по высоте».
+        //
+        // ⚠ Окно при этом **не укорачивается**: типовая высота трёх окон — решение 142.2 п. 8, и
+        // свободную высоту забирает блок справки, как макет и показывает. Сжимаются только
+        // строки внутри блока; ниже растёт по-прежнему только вверх.
+        let _ = height;
+
+        rows.push((row, numeral, text_rect, numeral_rect, needed));
     }
 
     // SAFETY: the DC was taken from this window above and is not needed past this point.
@@ -16490,12 +16508,12 @@ unsafe fn fit_about_help(hwnd: HWND) {
         tops[rows.len() - 1] + needed - rect.bottom
     });
 
-    if grow <= 0 {
-        return;
-    }
-
     // The rows and their numerals, each to its new top; the sentence also takes its measured
     // height, so the clip of `paint_chip_row` is the height the text actually needs.
+    //
+    // ⚠ **Ставятся ВСЕГДА, и это с задачи T-81-6.** Прежде при `grow <= 0` функция уходила
+    // ничего не сделав, и строки оставались в слотах худшего случая — а теперь именно этот путь
+    // и есть обычный: блок, размеченный под «PrintScreen», на «Pause» сжимается.
     for (index, (row, numeral, rect, numeral_rect, needed)) in rows.iter().enumerate() {
         move_child(hwnd, *row, tops[index], Some(*needed), rect);
         move_child(
@@ -16505,6 +16523,15 @@ unsafe fn fit_about_help(hwnd: HWND) {
             None,
             numeral_rect,
         );
+    }
+
+    // ⛔ **Ниже — только РОСТ, и только он.** Блок, ряд кнопок и само окно двигаются, когда
+    // строкам не хватило слотов шаблона: тогда окно растёт вниз, как оно росло с задачи T-42-2.
+    // Когда строкам хватило с запасом, здесь не делается **ничего**: окно держит типовую высоту
+    // решения 142.2 п. 8, а свободная высота остаётся блоку справки — ровно то, что показывает
+    // принятый макет. Укорачивать окно тут нельзя: три окна семьи одной высоты.
+    if grow <= 0 {
+        return;
     }
 
     // The panel under them, then the two buttons of the bottom row, then the window itself —
@@ -16582,7 +16609,7 @@ pub fn stacked_tops(first: i32, heights: &[i32], air: i32) -> Vec<i32> {
 ///
 /// The pair of [`screen_rect_in_client`] for a **named** control: [`child_rects_in_client`]
 /// walks every child, and task T-42-2 needs twelve of them by identifier.
-fn child_rect_in_client(hwnd: HWND, control: i32) -> Option<RECT> {
+pub(crate) fn child_rect_in_client(hwnd: HWND, control: i32) -> Option<RECT> {
     // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
     let child = unsafe { GetDlgItem(Some(hwnd), control) }.ok()?;
 
