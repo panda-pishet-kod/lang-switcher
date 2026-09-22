@@ -2954,42 +2954,93 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
 /// the table above and not in a seventh column of it: this test says the wrapper changes the
 /// frame **and only** the frame, in every state of the table, which is what «заливка и чернила
 /// прежние» means where a table can say it.
+///
+/// ## ⛔⛔ Отменено задачей T-80-2 — словом владельца, а не вкусом исполнителя
+///
+/// Finding A-13 read the mock-up right: its about window draws a fill and no outline. What a
+/// mock-up cannot show is what a frameless button does **on a live machine, in the light
+/// palette, under the pointer**. Measured on `e79`: the hot face is `hover_bg` 234,238,242 and
+/// the ground of that window is `window_bg` 237,239,242 — **3/1/0**, and with no frame the
+/// button simply goes out. In «От автора» it is worse: those buttons stand on blocks, and in
+/// «Туман» `panel_bg` and `button_bg` are the same 255,255,255, so a frameless button at rest is
+/// invisible **except** for the corners the rounding cut away.
+///
+/// Word of the user at the live acceptance of `e79`: «кнопки в разделе от автора сливаются с
+/// фоном не имея каймы… Нужно привести все кнопки к типизированному механизму, который у нас уже
+/// существует». So there is one table now — [`settings::button_color_roles`] — and the frame is
+/// a column of it rather than a wrapper around it.
+///
+/// **The one control that keeps `FaceItself` is the name «Lang Switcher»:** it is a name that
+/// opens a page, not a button that looks like one, and its two states were accepted by the same
+/// eye in the same sitting.
 #[test]
-fn the_about_button_is_the_same_table_without_a_frame() {
-    // The whole table of the wrapped function, on both the ordinary identifier and «ОК» —
-    // there is only one button in that window, but the wrapper is not told so, and a wrapper
-    // that quietly answered something else for a foreign identifier would be a trap.
-    for control in [1, 1012] {
+fn one_table_answers_every_button_and_the_frame_is_a_column_of_it() {
+    /// «Lang Switcher» — the one frameless control, `IDC_ABOUT_NAME`.
+    const NAME: i32 = 1121;
+
+    // Every ordinary button of every window, «ОК» and «Отмена» included, in every state.
+    for control in [1, 2, 1012, 1080, 1136, 1265, 1266, 1271, 1278, 1279] {
         for hot in [false, true] {
             for pressed in [false, true] {
                 for disabled in [false, true] {
-                    let framed = settings::button_color_roles(control, hot, pressed, disabled);
-                    let plain = settings::about_button_colors(control, hot, pressed, disabled);
-
                     assert_eq!(
-                        framed.face, plain.face,
-                        "the face must not move ({control}, hot = {hot}, pressed = {pressed}, \
-                         disabled = {disabled})"
-                    );
-                    assert_eq!(
-                        framed.text, plain.text,
-                        "the ink must not move ({control}, hot = {hot}, pressed = {pressed}, \
-                         disabled = {disabled})"
-                    );
-                    assert_eq!(
-                        framed.border,
+                        settings::button_color_roles(control, hot, pressed, disabled).border,
                         ButtonBorderRole::ButtonBorder,
-                        "the settings dialog keeps its frame ({control})"
-                    );
-                    assert_eq!(
-                        plain.border,
-                        ButtonBorderRole::FaceItself,
-                        "the about window's button has no frame in any state ({control})"
+                        "button {control} wears the frame of the one table (hot = {hot}, \
+                         pressed = {pressed}, disabled = {disabled})"
                     );
                 }
             }
         }
     }
+
+    // And the name, in both of the two states it has.
+    for hot in [false, true] {
+        assert_eq!(
+            settings::button_color_roles(NAME, hot, false, false).border,
+            ButtonBorderRole::FaceItself,
+            "the name «Lang Switcher» is the one control drawn without a frame (hot = {hot})"
+        );
+    }
+
+    // ⭐ And there is **no second table**: the frameless wrapper `about_button_colors` is gone
+    // from the whole of `src\`, so no window can ask a different question than its neighbour.
+    // That is the defect of `e79` written as a guard — the about window and the three windows of
+    // `letters` asked the wrapper while the settings dialog asked the table.
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found: Vec<&str> = Vec::new();
+
+    for module in ["settings.rs", "letters.rs", "theme.rs", "app.rs", "tray.rs"] {
+        let Ok(text) = std::fs::read_to_string(sources.join(module)) else {
+            continue;
+        };
+
+        // ⚠ The needle carries the parenthesis: a call and a definition both have one, and the
+        // prose that records why the wrapper was removed does not. A needle without it would
+        // find the tombstone and call it a body.
+        if text.contains("about_button_colors(") {
+            found.push(module);
+        }
+    }
+
+    assert!(
+        found.is_empty(),
+        "the frameless wrapper must be gone — still called in {found:?}"
+    );
+
+    // ⚠ Отрицательный контроль: the needle must find a call when there **is** one, and must not
+    // find one in the prose that explains the removal — otherwise the assertion above is green
+    // for the reason that it looked at nothing.
+    assert!(
+        "let plain = about_button_colors(control, hot, pressed, disabled);"
+            .contains("about_button_colors("),
+        "the needle must match a call"
+    );
+    assert!(
+        !"`about_button_colors` стояла здесь и снята задачей T-80-2"
+            .contains("about_button_colors("),
+        "and must not match the sentence that says it is gone"
+    );
 }
 
 /// **Criterion 9 of T-12-8** — the response of the cursor is a member of the palette and not a
@@ -5796,8 +5847,8 @@ fn the_about_window_paints_both_of_its_buttons() {
     // The colours: the ordinary roles in every state, and not the accent of «ОК» — the control
     // that the comparison can tell the two apart at all.
     assert_ne!(
-        settings::about_button_colors(FROM_THE_AUTHOR, false, false, false),
-        settings::about_button_colors(OK, false, false, false),
+        settings::button_color_roles(FROM_THE_AUTHOR, false, false, false),
+        settings::button_color_roles(OK, false, false, false),
         "«От автора…» must not wear the accent of «ОК»"
     );
 
@@ -5805,8 +5856,8 @@ fn the_about_window_paints_both_of_its_buttons() {
         for pressed in [false, true] {
             for disabled in [false, true] {
                 assert_eq!(
-                    settings::about_button_colors(FROM_THE_AUTHOR, hot, pressed, disabled),
-                    settings::about_button_colors(1012, hot, pressed, disabled),
+                    settings::button_color_roles(FROM_THE_AUTHOR, hot, pressed, disabled),
+                    settings::button_color_roles(1012, hot, pressed, disabled),
                     "«От автора…» wears the ordinary roles (hot = {hot}, pressed = {pressed}, \
                      disabled = {disabled})"
                 );
@@ -5837,8 +5888,8 @@ fn the_name_of_the_about_window_lights_with_the_ground_it_stands_on() {
     const NAME: i32 = 1121;
 
     for (what, palette) in [("Туман", &FOG), ("Графит", &GRAPHITE)] {
-        let rest = settings::about_button_colors(NAME, false, false, false);
-        let hot = settings::about_button_colors(NAME, true, false, false);
+        let rest = settings::button_color_roles(NAME, false, false, false);
+        let hot = settings::button_color_roles(NAME, true, false, false);
 
         assert_eq!(
             rest.face,

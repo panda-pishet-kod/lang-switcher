@@ -6336,7 +6336,7 @@ pub const ABOUT_HELP_SENTENCES: [i32; 5] = [
 ///   and darker in «Тумане» (43,47,54 → 35,38,43) — so the accent is strengthened rather
 ///   than lost, and the caption keeps the contrast `accent_fg` was chosen for. Nothing else
 ///   moves: the frame stays `button_border`, and the about window's «ОК» rides along by
-///   construction through [`about_button_colors`];
+///   construction — since task T-80-2 it asks this very table, with no wrapper between;
 /// - **горячая** — the cursor stands on an ordinary, enabled, unpressed button: the face
 ///   goes to `hover_bg` and **nothing else moves**. The frame stays `button_border` and the
 ///   caption stays `text`, exactly as at rest — the response is a change of ground, the way
@@ -6369,6 +6369,12 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
     // template gives it `NOT WS_TABSTOP`, so no key can press it), so the lit face **is** the
     // pressed face; falling through to `SelBg` would flash a selection colour across the name
     // of the program, which is neither of the two states approved.
+    //
+    // ⭐⭐ **And it is the one control of this program with no frame** — task T-80-2. Until `e80`
+    // «no frame» was a *wrapper* round this table (`about_button_colors`), worn by every button
+    // of four windows; the user turned that down on the live product and asked for one typed
+    // mechanism instead. The frame is a column of this table now, and this is the single row in
+    // which it is `FaceItself`: a name that opens a page is not a button that looks like one.
     if control == IDC_ABOUT_NAME {
         return ButtonColors {
             face: if hot {
@@ -6377,7 +6383,7 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
                 ButtonFaceRole::WindowBg
             },
             text: ButtonTextRole::Text,
-            border,
+            border: ButtonBorderRole::FaceItself,
         };
     }
 
@@ -6424,24 +6430,23 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
     }
 }
 
-/// The colour roles of the one button of the **about** window — finding **A-13**, task T-12-4.
-///
-/// The table above and one difference: the frame. The mock-up's about window draws its «ОК»
-/// with a fill and no outline (`chrome.ps1:200-202` fills a rounded rectangle and never
-/// strokes it), while the settings dialog's buttons are drawn framed a few lines earlier in
-/// the same generator — so the difference belongs to the *window*, not to the state of the
-/// button, and this is a wrapper over [`button_color_roles`] rather than a seventh column in
-/// it. Face and ink come from there unchanged, which is what keeps «заливка и чернила кнопки
-/// прежние» true by construction: there is one table of them and this function does not touch
-/// it.
-///
-/// Pure, so the table test can close it the way it closes the one it wraps.
-pub fn about_button_colors(control: i32, hot: bool, pressed: bool, disabled: bool) -> ButtonColors {
-    ButtonColors {
-        border: ButtonBorderRole::FaceItself,
-        ..button_color_roles(control, hot, pressed, disabled)
-    }
-}
+// ⛔⛔ **`about_button_colors` стояла здесь и снята задачей T-80-2.**
+//
+// Это была обёртка над таблицей выше, заменявшая рамку на `FaceItself` для **всех** кнопок окна
+// «О программе» и трёх окон `letters`. Основанием была находка A-13: макет рисует кнопку окна «О
+// программе» заливкой без обводки. Макет прочитан верно — но макет не показывает, что делает
+// безрамочная кнопка на живой машине:
+//
+// - в «Тумане» горячее лицо `hover_bg` 234,238,242 стоит на земле окна `window_bg` 237,239,242 —
+//   **3/1/0**, и без каймы кнопка под курсором просто гаснет;
+// - в «От автора» кнопки стоят на блоках, а в «Тумане» `panel_bg` и `button_bg` — одно и то же
+//   255,255,255, так что безрамочная кнопка в покое невидима целиком.
+//
+// Владелец увидел это на `e79` и назвал лечение сам: «Нужно привести все кнопки к
+// типизированному механизму, который у нас уже существует, а не придумывать отдельное решение».
+// Поэтому рамка стала **столбцом** таблицы [`button_color_roles`], а обёртки нет: четыре окна
+// больше не могут спрашивать не то, что спрашивает пятое. Единственная строка без рамки —
+// `IDC_ABOUT_NAME`, и она написана там же, в таблице.
 
 /// The glyph kind of one control identifier, `None` for everything that is not one of the
 /// six owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
@@ -11630,7 +11635,7 @@ pub const ABOUT_BUTTONS: [i32; 3] = [OK_COMMAND, IDC_ABOUT_AUTHOR, IDC_ABOUT_NAM
 /// Pure and exported, so that a test can hold the gate of [`on_about_draw_item`] against the
 /// template — the precedent of [`OWNER_DRAWN_ABOUT_LABELS`] for the labels of the same window. It
 /// answers [`ABOUT_BUTTONS`] and nothing else, and both buttons go the one way:
-/// [`paint_push_button`] with [`about_button_colors`], which gives the accent to «ОК» alone. Until
+/// [`paint_push_button`] with [`button_color_roles`], which gives the accent to «ОК» alone. Until
 /// this task the gate compared the identifier with `OK_COMMAND`, and «От автора…» stood blank from
 /// its birth.
 pub fn about_button_is_painted(control: i32) -> bool {
@@ -16924,7 +16929,7 @@ unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isi
 /// mandate, and the lesson of Э51.
 ///
 /// So the button borrows its **ground** from the button table and its **drawing** from the label
-/// body: [`about_button_colors`] chooses the face exactly as it does for «ОК», and the face's
+/// body: [`button_color_roles`] chooses the face exactly as it does for «ОК», and the face's
 /// brush is then handed to [`theme::paint_label_at_pitch`] as the ground of a label. The face,
 /// the ink, the rectangle and the format are then the very values the label road passed — not
 /// equal ones, **the same ones**, read out of [`about_label_face`] and
@@ -16948,7 +16953,7 @@ unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
             let (colors, hot_brush) = theme::resolve_button_colors(
                 // Pressed and disabled are not asked about: this button has two states and
                 // `button_color_roles` answers them above both gates — see it for why.
-                about_button_colors(IDC_ABOUT_NAME, hot, false, false),
+                button_color_roles(IDC_ABOUT_NAME, hot, false, false),
                 // The ground of this window, the same one `on_about_ctl_color` answers with.
                 brushes.window_bg(),
                 brushes,
@@ -17314,7 +17319,7 @@ unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
                 // Task T-12-4, finding A-13: the same face and the same ink as everywhere —
                 // and no frame, which is the one thing this window's button does differently
                 // from the nine of the settings dialog.
-                about_button_colors(control, hot, pressed, disabled),
+                button_color_roles(control, hot, pressed, disabled),
                 // The ground of this window has no panels in it: `on_about_ctl_color`
                 // answers `WM_CTLCOLORBTN` with the window brush and nothing else
                 // (task T-12-6).
