@@ -4821,57 +4821,20 @@ unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
     let tight = metrics.y(air::TIGHT);
 
     // The line under the window and the button that closes it, from the bottom.
-    // ⚠⚠ **Порядок перевёрнут задачей T-81-2, решение 142.2 п. 7** — по той же причине, что и в
-    // письме: тихая строка стояла под кнопкой и не давала ряду прижаться к низу.
-    let mut bottom = client.bottom - metrics.y(air::PAD);
-
-    // SAFETY: `dc` is this window's DC and the faces are its own.
-    let width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_LETTERS_CLOSE),
-        )
-    };
-
-    bottom -= metrics.y(air::BUTTON);
-
-    place(
-        hwnd,
-        IDC_LETTERS_CLOSE,
-        client.right - pad - width,
-        bottom,
-        width,
-        metrics.y(air::BUTTON),
-    );
-
-    // SAFETY: as above.
-    let foot = unsafe {
-        measure(
-            dc,
-            faces.text,
-            full_width,
-            &settings::get_text(hwnd, IDC_LETTERS_FOOT),
-            None,
-        )
-    };
-
-    bottom -= tight + foot;
-    place(hwnd, IDC_LETTERS_FOOT, pad, bottom, full_width, foot);
-
+    // ⭐⭐ **Порядок перевёрнут задачей T-81-4, решение 142.2 п. 8 и 142.3 — окно стало считать
+    // свою высоту по содержимому.**
+    //
+    // ⛔ До этой задачи оно её не считало вовсе: записи раскладывались в панель, а панель
+    // получала ту высоту, какая оставалась от шаблонных 296 единиц. ТЗ Э81 держало посылку, что
+    // «два окна уже умеют считать высоту»; замер показал, что `resize_client` звалась **ровно
+    // один раз**, из `layout_author`. Владелец решил «по содержимому» для обоих (142.2 п. 8), и
+    // это — исполнение его решения тем же телом, а не второй его копией.
+    //
+    // Поэтому счёт идёт сверху вниз: записи, потом панель ровно по ним, потом тихая строка и ряд
+    // кнопок под ней, и в конце окно берёт ту высоту, которая из этого вышла.
     let top = metrics.y(air::TOP);
-
-    place(
-        hwnd,
-        IDC_LETTERS_PANEL,
-        pad,
-        top,
-        full_width,
-        bottom - metrics.y(air::GAP) - top,
-    );
-
     let mut y = top + inset;
+    let mut any = false;
 
     for index in 0..NEWS_KEPT + 1 {
         let offset = i32::try_from(index).unwrap_or(0);
@@ -4918,10 +4881,69 @@ unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
         }
 
         y += metrics.y(air::GAP);
+        any = true;
     }
+
+    // The panel is as tall as what stands in it: the trailing air of the last entry is given
+    // back and the inset of the block put in its place. An empty list keeps a block of the head
+    // and the two insets — there is nothing to be as tall as.
+    let panel_bottom = if any {
+        y - metrics.y(air::GAP) + inset
+    } else {
+        y + inset
+    };
+
+    place(
+        hwnd,
+        IDC_LETTERS_PANEL,
+        pad,
+        top,
+        full_width,
+        panel_bottom - top,
+    );
+
+    // Then the quiet line, and the row of buttons under it — решение 142.2 п. 7.
+    let mut below = panel_bottom + metrics.y(air::GAP);
+
+    // SAFETY: `dc` is this window's DC and the faces are its own.
+    let foot = unsafe {
+        measure(
+            dc,
+            faces.text,
+            full_width,
+            &settings::get_text(hwnd, IDC_LETTERS_FOOT),
+            None,
+        )
+    };
+
+    place(hwnd, IDC_LETTERS_FOOT, pad, below, full_width, foot);
+    below += foot + tight;
+
+    // SAFETY: as above.
+    let width = unsafe {
+        button_width(
+            dc,
+            faces.text,
+            metrics,
+            &settings::get_text(hwnd, IDC_LETTERS_CLOSE),
+        )
+    };
+
+    place(
+        hwnd,
+        IDC_LETTERS_CLOSE,
+        client.right - pad - width,
+        below,
+        width,
+        metrics.y(air::BUTTON),
+    );
+
+    let wanted = below + metrics.y(air::BUTTON) + metrics.y(air::PAD);
 
     // SAFETY: releases exactly the DC taken at the top of this function, once.
     unsafe { ReleaseDC(Some(hwnd), dc) };
+
+    resize_client(hwnd, client.bottom, wanted);
 }
 
 /// Puts the words of [`AuthorView`] into «От автора» — FR-103.

@@ -942,7 +942,7 @@ END
 // ⚠⚠ **256 → 263 задачей T-42-2** (находка С44, решение 124.4): панель справки выросла на семь
 // единиц под ЗАМЕРЕННУЮ высоту своей первой строки, и окно выросло ровно на них. Ширина 191 не
 // тронута — решения 82.5 и 87 говорят «окно растёт только вниз», и это по-прежнему так.
-IDD_ABOUT DIALOGEX 0, 0, 256, 242
+IDD_ABOUT DIALOGEX 0, 0, 256, 276
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW — task T-21-4, П-1, for the reason given at IDD_SETTINGS: the
 // «О программе» window is owned by the same WS_EX_TOOLWINDOW window and was equally absent
@@ -1060,7 +1060,12 @@ BEGIN
     // ⭐ **Именованное исключение решения 128.4 тем самым снято делом:** греческая третья строка
     // с самым широким именем клавиши просила в колонке 142 четыре строки и брала четвёртую у
     // живой подгонки; в колонке 207 ей хватает трёх.
-    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 63, 232, 143
+    // ⚠⚠ **143 → 177 задачей T-81-4: свободную высоту забирает ПАНЕЛЬ, а не пустота под ней.**
+    // Типовая высота трёх окон — **276** единиц, а этому окну по содержимому нужно 242; лишние
+    // 34 отданы блоку справки, как того просит решение 142.2 п. 8 («приём уже есть в коде —
+    // панель тянется на свободную высоту»). Строки внутри блока стоят там же, где стояли:
+    // растёт только сам блок.
+    CONTROL         "Как пользоваться", IDC_ABOUT_HELP, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 63, 232, 177
     LTEXT           "1", IDC_ABOUT_HELP_N1, 19, 77, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_HELP_1, 30, 77, 207, 29, SS_OWNERDRAW
     LTEXT           "2", IDC_ABOUT_HELP_N2, 19, 110, 7, 10, SS_OWNERDRAW
@@ -1087,8 +1092,8 @@ BEGIN
     // «От автора…» — `El` «Από τον δημιουργό…», 125 px = 72 единицы ⇒ **92**; «ОК» — `Es`
     // «Aceptar», 45 px = 26 единиц ⇒ **46** (`scratchpad-E81\probe-widths.log`). Прежние 86 и 39
     // подписи вмещали, но воздуха давали меньше, чем те же кнопки получают в окнах `letters`.
-    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 216, 92, 14, BS_OWNERDRAW
-    PUSHBUTTON      "ОК", IDOK, 198, 216, 46, 14, BS_OWNERDRAW
+    PUSHBUTTON      "От автора…", IDC_ABOUT_AUTHOR, 12, 250, 92, 14, BS_OWNERDRAW
+    PUSHBUTTON      "ОК", IDOK, 198, 250, 46, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================
@@ -1115,7 +1120,7 @@ END
 // 555 × 8 / 15 is 296. Решение 101 п. 7 fixes it there for every letter, so that a person does
 // not meet a window that changes size depending on what the author had to say.
 
-IDD_LETTER DIALOGEX 0, 0, 256, 308
+IDD_LETTER DIALOGEX 0, 0, 256, 276
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 // 0x00040000 = WS_EX_APPWINDOW, for the reason the two windows above carry it: the owner is
 // this program's hidden WS_EX_TOOLWINDOW window, and an owned window inherits its owner's
@@ -1138,27 +1143,32 @@ BEGIN
     LTEXT           "", IDC_LETTER_PARA, 12, 88, 232, 30, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_DEMO, 12, 120, 232, 34, SS_OWNERDRAW
     LTEXT           "", IDC_LETTER_DEMO_CAP, 12, 156, 232, 20, SS_OWNERDRAW
-    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 232, 80
-    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 194, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 206, 218, 30, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N1, 19, 194, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N2, 19, 208, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N3, 19, 222, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N4, 19, 236, 7, 10, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_1, 30, 194, 207, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_2, 30, 208, 207, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_3, 30, 222, 207, 12, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_4, 30, 236, 207, 12, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 250, 86, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 250, 63, 14, BS_OWNERDRAW
+    // ⚠ Нижний блок поджат задачей T-81-4: окно стало типовых **276** единиц вместо 308, потому
+    // что в колонке 256 самое высокое письмо — греческое «Здравствуйте» — просит 276, а не 308
+    // (замер `scratchpad-E81\probe-letter-height.log`). Числа здесь — стартовая форма;
+    // `letters::layout_letter` кладёт всё заново, а панель берёт то, что осталось между шапкой
+    // и рядом кнопок.
+    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 232, 48
+    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 190, 218, 11, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 202, 218, 20, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N1, 19, 190, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N2, 19, 200, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N3, 19, 210, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_N4, 19, 220, 7, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_1, 30, 190, 207, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_2, 30, 200, 207, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_3, 30, 210, 207, 9, SS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_ROW_4, 30, 220, 207, 9, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 212, 86, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 212, 63, 14, BS_OWNERDRAW
     // ⚠⚠ **Тихая строка переехала НАД ряд кнопок — задача T-81-2, решение 142.2 п. 7.** Правило
     // «ряд прижат к низу с отступом 12» и строка под кнопками — вещи несовместные, и макет,
     // принятый владельцем, кладёт эту строку именно над рядом. Числа шаблона — стартовая форма;
     // порядок снизу вверх задаёт `letters::layout_letter`.
-    LTEXT           "", IDC_LETTER_FOOT, 12, 269, 232, 10, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 282, 74, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 282, 44, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 282, 41, 14, BS_OWNERDRAW
+    LTEXT           "", IDC_LETTER_FOOT, 12, 237, 232, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 250, 74, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 250, 44, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 250, 41, 14, BS_OWNERDRAW
 END
 
 // «Последние письма» — FR-101. The letter's outline with four entry slots in place of the
@@ -1271,7 +1281,7 @@ END
 // step «Что приложить?» in **Greek** — the longest of the fourteen — and its footnote ran
 // through the button row. Eighteen units is what the four values of that step need there, and
 // on every shorter locale they become air above the buttons, which are pinned to the bottom.
-IDD_WIZARD DIALOGEX 0, 0, 256, 268
+IDD_WIZARD DIALOGEX 0, 0, 256, 276
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 EXSTYLE 0x00040000
 CAPTION "Написать автору"
@@ -1351,9 +1361,9 @@ BEGIN
     // `letters::button_width` на живом окне: самая широкая подпись из четырнадцати локалей плюс
     // 20 единиц. «Отмена» — `De` «Abbrechen» 63 px = 36 ед. ⇒ **56**; «Назад» — `It` «Indietro»
     // 45 px = 26 ед. ⇒ **46**; «Далее» — `Es` «Siguiente» 53 px = 31 ед. ⇒ **51**.
-    PUSHBUTTON      "", IDC_WZ_CANCEL, 12, 242, 56, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_BACK, 143, 242, 46, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_WZ_NEXT, 193, 242, 51, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_CANCEL, 12, 250, 56, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_BACK, 143, 250, 46, 14, BS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_NEXT, 193, 250, 51, 14, BS_OWNERDRAW
 END
 
 // =======================================================================================

@@ -10795,10 +10795,14 @@ fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
     // task T-81-4, and the panel takes what it adds.
     // ⚠ 237 → **242** задачей T-81-2: под нижним рядом стало поле 12 вместо 7 (решение 142.2
     // п. 7), а воздух между панелью справки и рядом остался прежним.
+    // ⚠ 242 → **276** задачей T-81-4: это число — **типовая высота трёх окон** (решение 142.2
+    // п. 8), а по содержимому этому окну хватило бы 242. Лишние 34 единицы забрал **блок
+    // справки**, а не пустота под ним, — сам приём назван в решении. Почему именно 276 и чем это
+    // измерено, написано у теста `three_windows_share_one_height_and_two_keep_their_own`.
     assert_eq!(
         template.size,
-        (256, 242),
-        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 242 dialog units"
+        (256, 276),
+        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 276 dialog units"
     );
 
     // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
@@ -22606,5 +22610,133 @@ fn the_authors_signature_left_the_resource_with_all_fourteen_translations() {
     assert!(
         text.contains("`IDS_AUTHOR_VERSION` — УДАЛЕНА задачей T-81-3"),
         "the tombstone must stand, so that the removal reads as a decision"
+    );
+}
+
+/// **Task T-81-4, решение 142.2 п. 8** — three windows of one height, and two of their own.
+///
+/// ⭐ **276 единиц, и вот почему именно оно.** The typical height is the tallest of the three
+/// windows that share it, measured **after** the widening — and the tallest is «Письмо» with the
+/// Greek «Здравствуйте»: 276 units (`scratchpad-E81\probe-letter-height.log`). «О программе»
+/// needs 242 of its own and takes the other 34 into its help panel rather than into air under it;
+/// the wizard's 268 was measured in an earlier wave for the Greek step «Что приложить?» at a
+/// **narrower** slot (224 units against today's 232), so a wider slot cannot want more.
+///
+/// ⚠ The control that makes the 276 believable: the same instrument, run at the **old** width of
+/// 191, answers 320 for a window that lived at 308 — it reads high, never low, because it
+/// measures a row that may carry a key chip with `theme::measure_chip_row` where the window uses
+/// the narrower `chip_overhang`. An instrument that errs towards «taller» is the safe one for
+/// choosing a height.
+///
+/// ⛔ **«Два других — нет» is an assertion and not forgetfulness.** «От автора» and «Последние
+/// письма» compute their own height from their content (решение 142.2 п. 8), so a template height
+/// equal to the typical one would mean somebody had quietly made them typical too.
+#[test]
+fn three_windows_share_one_height_and_two_keep_their_own() {
+    /// The height of решение 142.2 п. 8 — a literal, as everywhere in these template tests.
+    const TYPICAL: i32 = 276;
+
+    let resource = Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
+    let text = fs::read_to_string(&resource).expect("app.rc must be readable");
+    let dialogs = dialogs_of_the_resource(&text);
+
+    let height = |name: &str| -> i32 {
+        dialogs
+            .iter()
+            .find(|dialog| dialog.name == name)
+            .unwrap_or_else(|| panic!("app.rc must declare {name}"))
+            .size
+            .1
+    };
+
+    for name in ["IDD_ABOUT", "IDD_LETTER", "IDD_WIZARD"] {
+        println!("{name}: {} units tall", height(name));
+
+        assert_eq!(
+            height(name),
+            TYPICAL,
+            "{name} must carry the typical height of решение 142.2 п. 8"
+        );
+    }
+
+    for name in ["IDD_AUTHOR", "IDD_LETTERS_LIST"] {
+        println!("{name}: {} units tall — by its content", height(name));
+
+        assert_ne!(
+            height(name),
+            TYPICAL,
+            "{name} counts its own height from what it says, and a template height equal to the \
+             typical one would mean somebody had made it typical after all"
+        );
+    }
+
+    // ⭐⭐ **And both of them really do count it** — решение 142.3. «Последние письма» did not
+    // until this task: `resize_client` was called once in the whole module, from `layout_author`.
+    // The count is the guard: two callers, one per window, and no third.
+    let letters = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let body_of = |needle: &str| -> String {
+        let at = letters
+            .find(needle)
+            .unwrap_or_else(|| panic!("src\\letters.rs must hold «{needle}»"));
+        let rest = &letters[at..];
+        let end = rest
+            .find("\n}")
+            .expect("a function closes with a brace of its own");
+        rest[..end].to_owned()
+    };
+
+    for what in ["unsafe fn layout_author(", "unsafe fn layout_list("] {
+        assert!(
+            body_of(what).contains("resize_client("),
+            "«{what}» must give its window the height its content asks for"
+        );
+    }
+
+    assert!(
+        !body_of("unsafe fn layout_letter(").contains("resize_client("),
+        "«Письмо» keeps the typical height and must not resize itself"
+    );
+    assert!(
+        !body_of("unsafe fn layout_wizard(").contains("resize_client("),
+        "and neither must the wizard — a window that grew under the mouse as «Далее» was \
+         pressed is the very thing its template forbids"
+    );
+
+    // Контроль прибора: the reading must refuse a body that lost the call, or the three
+    // assertions above hold of nothing.
+    let without = body_of("unsafe fn layout_list(").replace("resize_client(", "let _ = (");
+
+    assert!(
+        !without.contains("resize_client("),
+        "the control must differ from the body in exactly the way the assertions look at"
+    );
+
+    // ⚠ **Мутант:** one of the three moved by a single unit, which is the smallest thing this
+    // rule forbids. A guard that passes it is measuring nothing.
+    let mutant = text.replace(
+        "IDD_LETTER DIALOGEX 0, 0, 256, 276",
+        "IDD_LETTER DIALOGEX 0, 0, 256, 277",
+    );
+
+    assert_ne!(
+        mutant, text,
+        "the mutant must change the text it is made of"
+    );
+
+    let moved = dialogs_of_the_resource(&mutant)
+        .into_iter()
+        .find(|dialog| dialog.name == "IDD_LETTER")
+        .expect("app.rc must declare IDD_LETTER");
+
+    assert_ne!(
+        moved.size.1, TYPICAL,
+        "the reading does not see a height one unit off the typical — it cannot fail"
     );
 }
