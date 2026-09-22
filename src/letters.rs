@@ -1235,11 +1235,19 @@ const LETTER_LABELS: [i32; 17] = [
 /// control of every template has a number of its own, so «is this label on a block» is a
 /// question about the number and not about the window.
 ///
+/// ⭐⭐ **Labels only until task T-80-1, and that was the defect.** A button is owner-drawn too,
+/// and its drawing cuts a rounded figure out of the rectangle and fills what it cuts away with
+/// the ground — so a button standing on a panel but told «window» came out with four corners in
+/// the wrong colour: 18/16/13 off the panel in «Туман», 7/8/9 in «Графит», measured. The user saw
+/// exactly that on `e79` and named the cure himself — one mechanism for all of them, not a second
+/// one beside it. Hence this function is no longer about labels, and its name says so.
+///
 /// ⚠ The demonstration of «Привет» is **not** on a panel — it is a field of its own on the
 /// window's ground, and it fills its whole rectangle itself.
-pub fn label_stands_on_a_panel(control: i32) -> bool {
+pub fn stands_on_a_panel(control: i32) -> bool {
     matches!(
         control,
+        // The paragraphs and lines of the three blocks.
         IDC_AUTHOR_TEXT
             | IDC_NEWS_ABOUT
             | IDC_NEWS_SWITCH_SUB
@@ -1249,11 +1257,30 @@ pub fn label_stands_on_a_panel(control: i32) -> bool {
             | IDC_FEEDBACK_TEXT
             | IDC_LETTER_PANEL_TITLE
             | IDC_LETTER_PANEL_TEXT
+            // ⭐ **The buttons, since task T-80-1.** Every one of these is laid into a block by
+            // `place_panel_buttons`, which is handed the block's own inner corner — so «on a
+            // panel» is a fact of the layout and not a guess about pixels. The three that are
+            // absent are absent on purpose: «Закрыть» of «От автора» and of «Последние письма»,
+            // and the row of buttons under a letter, all stand below every block on the ground
+            // of the window.
+            | IDC_AUTHOR_SUPPORT
+            | IDC_AUTHOR_CHANNEL
+            | IDC_NEWS_DOWNLOAD
+            | IDC_NEWS_LETTERS
+            | IDC_FEEDBACK_WRITE
+            | IDC_LETTER_PANEL_BTN_1
+            | IDC_LETTER_PANEL_BTN_2
     ) || (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control)
         || (IDC_LETTER_ROW_1..IDC_LETTER_ROW_1 + 4).contains(&control)
         || (IDC_LETTERS_T1..IDC_LETTERS_T1 + 4).contains(&control)
         || (IDC_LETTERS_D1..IDC_LETTERS_D1 + 4).contains(&control)
         || (IDC_LETTERS_X1..IDC_LETTERS_X1 + 4).contains(&control)
+        // ⭐ The two buttons of every entry of «Последние письма», task T-80-1 — laid by
+        // `place_panel_buttons` at the same inner corner as the three labels of the run above
+        // them, and therefore on the same block. Runs and not a list, for the reason this
+        // function's doc gives: a list is where a run gets written short.
+        || (IDC_LETTERS_B1..IDC_LETTERS_B1 + 4).contains(&control)
+        || (IDC_LETTERS_R1..IDC_LETTERS_R1 + 4).contains(&control)
         // The two lines of every card of the wizard stand **on** that card, and the card is
         // drawn with the panel brush — see `draw_card`, which never changes its fill for
         // exactly this reason.
@@ -3682,7 +3709,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
                 // The accented button of a letter is the accent of this window, and every
                 // other button is a plain one — the same table the about window's «ОК» is
                 // drawn by, asked about the identifier that is accented **here**.
-                settings::about_button_colors(
+                settings::button_color_roles(
                     if control == accent {
                         settings::OK_COMMAND
                     } else {
@@ -3692,7 +3719,20 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
                     pressed,
                     disabled,
                 ),
-                brushes.window_bg(),
+                // ⭐⭐ **The ground the button actually stands on** — task T-80-1. This was
+                // `window_bg` for every button of these three windows, and five of the seven
+                // buttons of «От автора» stand on a block. The drawing cuts a rounded figure out
+                // of the rectangle and fills what it cuts away with this brush, so the wrong one
+                // does not tint the button — it paints four square corners of another colour
+                // around it, which is precisely what the user saw on `e79` in both palettes.
+                //
+                // The question is [`stands_on_a_panel`], the one the labels of this file have
+                // always asked. Not a second answer beside theirs — the same one.
+                if stands_on_a_panel(control) {
+                    brushes.panel_bg()
+                } else {
+                    brushes.window_bg()
+                },
                 brushes,
                 state.palette,
             );
@@ -3728,7 +3768,7 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
             let brushes = state.brushes.as_ref()?;
 
             Some((
-                if label_stands_on_a_panel(control) {
+                if stands_on_a_panel(control) {
                     brushes.panel_bg()
                 } else {
                     brushes.window_bg()

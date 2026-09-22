@@ -2193,7 +2193,7 @@ fn every_row_of_every_run_stands_on_its_panel() {
     // The four rows of a letter and their four markers.
     for control in 1210..1218 {
         assert!(
-            letters::label_stands_on_a_panel(control),
+            letters::stands_on_a_panel(control),
             "control {control} is a row of a letter's panel"
         );
     }
@@ -2201,7 +2201,7 @@ fn every_row_of_every_run_stands_on_its_panel() {
     // The three labels of each of the four entries of «Последние письма».
     for control in (1231..1235).chain(1235..1239).chain(1239..1243) {
         assert!(
-            letters::label_stands_on_a_panel(control),
+            letters::stands_on_a_panel(control),
             "control {control} is a label of an entry"
         );
     }
@@ -2209,7 +2209,7 @@ fn every_row_of_every_run_stands_on_its_panel() {
     // The paragraphs of the three panels of «От автора».
     for control in [1264, 1268, 1275, 1269, 1270, 1273, 1277] {
         assert!(
-            letters::label_stands_on_a_panel(control),
+            letters::stands_on_a_panel(control),
             "control {control} stands on a panel of «От автора»"
         );
     }
@@ -2218,8 +2218,95 @@ fn every_row_of_every_run_stands_on_its_panel() {
     // buttons, the name and version of «От автора», the footnote of the list.
     for control in [1201, 1202, 1203, 1204, 1205, 1206, 1223, 1261, 1262, 1252] {
         assert!(
-            !letters::label_stands_on_a_panel(control),
+            !letters::stands_on_a_panel(control),
             "control {control} stands on the window's own ground"
         );
     }
+}
+
+/// **⭐⭐ A BUTTON asks the same question as a label, and until task T-80-1 it did not** —
+/// finding of the live acceptance of `e79`.
+///
+/// The drawing cuts a rounded figure out of the button's rectangle and fills what it cuts away
+/// with **the ground the button stands on**. The buttons of these windows were handed
+/// `window_bg` unconditionally, and five of the buttons of «От автора» stand **on panels**. So
+/// the corners came out in the colour of the window over a panel of another colour — measured
+/// 18/16/13 in «Туман» and 7/8/9 in «Графит» — and what the eye saw was four square corners round
+/// a button whose own face, in «Туман», is the panel's colour exactly. Word of the user: «видны
+/// углы по краям кнопок… в темной теме также видны углы кнопок».
+///
+/// ⛔ The answer is **the function the labels already use**, not a second one beside it. That is
+/// the whole of what «привести все кнопки к типизированному механизму, который у нас уже
+/// существует» asks for.
+#[test]
+fn a_button_on_a_panel_says_so_by_the_same_question_a_label_does() {
+    // «От автора»: five buttons stand on the three panels — two on «Автор», two on «Новости и
+    // обновления», one on «Обратная связь».
+    for (control, what) in [
+        (1265, "«Поддержать автора» on the Author panel"),
+        (1266, "«Открыть канал» on the Author panel"),
+        (1271, "«Открыть страницу загрузки» on the News panel"),
+        (1272, "«Последние письма» on the News panel"),
+        (1278, "«Написать автору…» on the Feedback panel"),
+    ] {
+        assert!(
+            letters::stands_on_a_panel(control),
+            "{what} ({control}) stands on a panel and must be told so"
+        );
+    }
+
+    // The two panel buttons of a letter stand on its one panel.
+    for control in [1218, 1219] {
+        assert!(
+            letters::stands_on_a_panel(control),
+            "control {control} is a panel button of a letter"
+        );
+    }
+
+    // And the two buttons of each of the four entries of «Последние письма» — the run a list
+    // would have written short. They are laid by the very call that lays the three labels above
+    // them, at the same inner corner of the same block.
+    for control in (1243..1247).chain(1247..1251) {
+        assert!(
+            letters::stands_on_a_panel(control),
+            "control {control} is a button of an entry and stands on the block"
+        );
+    }
+
+    // And the buttons that stand on the window's own ground do **not** — «Закрыть» of «От
+    // автора», the three buttons under a letter, and the close of the list. A list that said
+    // «panel» for these would paint their corners in the panel's colour over the window, which
+    // is the same defect facing the other way.
+    for (control, what) in [
+        (1279, "«Закрыть» of «От автора», below every panel"),
+        (1220, "the left button of a letter"),
+        (1221, "the right button of a letter"),
+        (1222, "the accented button of a letter"),
+        (1251, "«Закрыть» of «Последние письма»"),
+    ] {
+        assert!(
+            !letters::stands_on_a_panel(control),
+            "{what} ({control}) stands on the window's own ground"
+        );
+    }
+
+    // ⚠⚠ **And the drawing must ASK.** A list that answers right while nobody consults it is a
+    // guard that cannot fail — measured: with the question put back to a flat `window_bg()`, every
+    // assertion above stayed green and the defect was whole. So the body that chooses the button's
+    // ground is read, and it has to name this function.
+    let source = letters_source();
+    let body = body_of(&source, "unsafe fn on_draw_item(");
+
+    assert!(
+        body.contains("stands_on_a_panel(control)"),
+        "the button branch of on_draw_item must ask stands_on_a_panel for its ground"
+    );
+
+    // Отрицательный контроль — the shape of `e79`, which the reading must refuse.
+    assert!(
+        !body
+            .replace("stands_on_a_panel(control)", "false")
+            .contains("stands_on_a_panel(control)"),
+        "the reading must refuse the body that asked nothing"
+    );
 }
