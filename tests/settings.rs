@@ -4872,10 +4872,15 @@ fn the_window_carries_the_geometry_chosen_at_the_control_point() {
     // ⚠ 364 → 375 by решение 117.5 (task T-34-6): the fourth line of «Состояние» — the acting
     // pair and the refusals of selection — did not fit under the three (six units free at a
     // pitch of eleven), so the panel grew 44 → 55 and the window with it. Width untouched.
+    // ⚠ 375 → **380 by решение 142.5** (task T-81-2): the unified bottom row of решение 142.2
+    // п. 7 wants twelve units under it and this window had seven, with no five to spare between
+    // «Состояние» and the edge. The owner was asked and chose to give the window those five
+    // rather than move its insides or squeeze the air over the row. **Nothing inside moved** —
+    // the row still stands at 354 — and the width is still the 430 he froze.
     assert_eq!(
         template.size,
-        (430, 375),
-        "the window of решения 83, 87 и 117.5 is 430 × 375 dialog units"
+        (430, 380),
+        "the window of решения 83, 87, 117.5 и 142.5 is 430 × 380 dialog units"
     );
 
     let bottom = |panel: u32| -> i32 {
@@ -5437,10 +5442,14 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // ⚠ The **height** is what this test is about, and it did not move: 364 units, decided by
     // решение 83 п. 3 and untouched by Т-26-3. The width went 420 → 430 (решение 87 п. 3) —
     // see the sister test for why that is a horizontal matter and this one is not.
+    // ⚠ 375 → **380 by решение 142.5** — task T-81-2, the five units the unified bottom row
+    // needed under itself. See the sister test for the whole of it; nothing inside this window
+    // moved but the row's own width and right edge.
     assert_eq!(
         template.size,
-        (430, 375),
-        "the settings dialog has to be 430 x 375 dialog units — решения 83 п. 3, 87 п. 3 и 117.5"
+        (430, 380),
+        "the settings dialog has to be 430 x 380 dialog units — решения 83 п. 3, 87 п. 3, 117.5 \
+         и 142.5"
     );
 
     // The eight rectangles that moved, in full: a `y` alone would say nothing about a width
@@ -5551,9 +5560,13 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
         air_buttons, 6,
         "the air between «Состояние» and the buttons has to stay the 6 units it was"
     );
+    // ⚠ **7 → 12 by решение 142.5** (task T-81-2). What T-11-19 is about — that the rhythm below
+    // the last block is a decided number and not a leftover — holds exactly as before: the
+    // number is the twelve of решение 142.2 п. 7, and it is the same twelve in all six windows
+    // of the program. The row itself did not move a unit; the window grew by the five it needed.
     assert_eq!(
-        margin, 7,
-        "the margin under the buttons has to stay the 7 units it was"
+        margin, 12,
+        "the margin under the buttons is the twelve of the unified bottom row — решение 142.5"
     );
 }
 
@@ -22025,18 +22038,13 @@ fn every_window_of_the_program_carries_the_same_bottom_row() {
             broken.push(format!("{name}: the row is {:?} units tall", row.heights));
         }
 
-        // ⛔⛔ **Одно названное исключение — решение 142.4, окно настроек.** Его высота 375
-        // заморожена словом владельца, а под панелью «Состояние» остаётся 27 единиц: воздух
-        // над рядом 6 + кнопка 14 + поле 12 просят 32. Пяти единиц нет, и взять их можно только
-        // тем, что владелец заморозил. До его слова (вопрос 142.5) поле здесь **7**, и это
-        // утверждение: станет другим — тест красен и скажет, каким, а не промолчит.
-        let wanted = if name == "IDD_SETTINGS" { 7 } else { MARGIN };
-
-        if row.under != wanted {
-            broken.push(format!(
-                "{name}: {} units under the row, and the rule here is {wanted}",
-                row.under
-            ));
+        // ⭐ **Исключения нет ни у одного окна, включая настройки — решение 142.5.** Под их
+        // рядом было семь единиц, и пяти до двенадцати в высоте 375 не было: «Состояние»
+        // кончается на 348, а правило просит под панелью 6 + 14 + 12 = 32 из бывших 27. Владелец
+        // выбрал дать окну эти пять (375 → 380) вместо того, чтобы двигать его внутренность или
+        // жать воздух над рядом. Шесть окон — одно правило, без оговорок.
+        if row.under != MARGIN {
+            broken.push(format!("{name}: {} units under the row", row.under));
         }
 
         if row.right != MARGIN {

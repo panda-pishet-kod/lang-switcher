@@ -14888,7 +14888,13 @@ pub fn widened_for_scroll_bar(window_width: i32, bar: i32) -> i32 {
 /// `IDD_SETTINGS` is 375 dialog units tall, and a dialog unit follows the font, which follows
 /// the display scale: 17 px at 100 % and **23 px at 125 %**. So the window is ~826 px on one
 /// and **~1113 px** on the other, against a work area of 1032 px on a 1080p screen — and the
-/// bottom row of buttons is off the edge of the screen. The owner met it on the live product:
+/// bottom row of buttons is off the edge of the screen.
+///
+/// ⚠ **375 is what the template said when this was measured; решение 142.5 made it 380** (task
+/// T-81-2 — the five units the unified bottom row needed under itself). The numbers above are
+/// left as the measurement of Э42, and five units more only make the case for this mechanism
+/// stronger: the cure below does not depend on the height, it depends on the window ceasing to
+/// be taller than the work area, whatever the height is. The owner met it on the live product:
 /// «нижняя часть окна приложения не вписывается в экран и у меня нет возможности нажать
 /// кнопки».
 ///
