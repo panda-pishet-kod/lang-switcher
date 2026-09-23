@@ -6751,6 +6751,62 @@ fn the_live_author_window_catches_the_mouse_on_the_backing_only() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **⛔ C5 — the mirror holds at a reduced step — задачи T-83-3 и T-83-4.**
+///
+/// The step and the mirror patch the same copy of the template, two fields apart: `pointsize` in
+/// the font block and `WS_EX_LAYOUTRTL` in `exStyle`. In Hebrew and in Arabic, at ten points and at
+/// eight, «От автора» must come out mirrored, at the face of its step, and with its name's button
+/// exactly its backing at that face — the one body of T-83-1 measures in whatever face the window
+/// got.
+#[cfg(feature = "testing")]
+#[test]
+fn the_mirror_holds_at_a_reduced_step() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, WS_EX_LAYOUTRTL,
+    };
+
+    let _guard = with_product_strings();
+
+    for language in [Language::He, Language::Ar] {
+        settings::set_ui_language(language);
+
+        for step in [10_u16, 8] {
+            let face = theme::face_at(step, 96);
+            let (mirrored, font, name) = settings::testing::with_font_step(step, || {
+                let window = HiddenAuthor::open("0.83.0");
+                // SAFETY: the window is live for this block; the style is only read.
+                let styles = unsafe { GetWindowLongPtrW(window.window, GWL_EXSTYLE) };
+                (
+                    styles & isize::try_from(WS_EX_LAYOUTRTL.0).expect("a bit") != 0,
+                    window.dialog_font_height(),
+                    window.control_rect(1261),
+                )
+            });
+            let (_, _, chip) = name_backing_at(face);
+
+            println!(
+                "{language:?} {step} pt: mirrored {mirrored}, lfHeight {font}, the name's button \
+                 {}x{} over a backing of {}",
+                name.right - name.left,
+                name.bottom - name.top,
+                chip.width
+            );
+
+            assert!(
+                mirrored,
+                "⛔ C5, {language:?} {step} pt: the window must be mirrored"
+            );
+            assert_eq!(font, -face, "{language:?} {step} pt: the face of the step");
+            assert!(
+                button_is_its_backing(name, &chip),
+                "{language:?} {step} pt: the name's button must be its backing at this face"
+            );
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// «От автора», built hidden through the measuring door and destroyed on drop — задача T-83-1.
 #[cfg(feature = "testing")]
 struct HiddenAuthor {
@@ -6824,6 +6880,25 @@ impl HiddenAuthor {
                 right: corners[0].x.max(corners[1].x),
                 bottom: corners[0].y.max(corners[1].y),
             }
+        }
+    }
+
+    /// The `lfHeight` of the font the dialog manager gave the window — what the template's
+    /// `pointsize` became (C7).
+    fn dialog_font_height(&self) -> i32 {
+        use windows::Win32::Graphics::Gdi::{GetObjectW, HGDIOBJ};
+        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_GETFONT};
+
+        // SAFETY: the window is live until `Drop`; the font is the manager's and only read.
+        unsafe {
+            let font = SendMessageW(self.window, WM_GETFONT, None, None);
+            let mut logical = LOGFONTW::default();
+            let _ = GetObjectW(
+                HGDIOBJ(font.0 as *mut _),
+                i32::try_from(size_of::<LOGFONTW>()).expect("small"),
+                Some(std::ptr::from_mut(&mut logical).cast()),
+            );
+            logical.lfHeight
         }
     }
 
@@ -7223,6 +7298,56 @@ fn the_model_of_the_author_window_is_the_live_window() {
     );
 }
 
+/// **The model of «От автора» IS the live window at every face a test can reach — задача T-83-3.**
+///
+/// The debug substitution of the step opens the window at 8…15 pt, and at 96 DPI those are the
+/// faces 11, 12, 13, 15, 16, 17, 19 and 20 px — every face the rule may answer with except 14 and
+/// 18, which a 96-DPI screen cannot make and the model alone gives. Fourteen languages × eight
+/// faces: the model must be the window at all of them, and the window must have been given the face
+/// the step asks for (C7 through the product's own road — `put_font_step` in `show_modeless_dialog`).
+///
+/// ⚠ «Красное до»: without the substitution every one of these windows opens at 13 px.
+#[cfg(feature = "testing")]
+#[test]
+fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
+    let _guard = with_product_strings();
+    let mut differences = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let words = AuthorWords::now("0.83.0");
+
+        for step in 8..=15_u16 {
+            let face = theme::face_at(step, 96);
+            let (live, font) = settings::testing::with_font_step(step, || {
+                let window = HiddenAuthor::open("0.83.0");
+                (window.client_height(), window.dialog_font_height())
+            });
+            let model = author_client_by_model(face, 96, &words);
+
+            if font != -face {
+                differences.push(format!(
+                    "{language:?} {step} pt: the window got lfHeight {font}, not -{face} (C7)"
+                ));
+            } else if live != model {
+                differences.push(format!(
+                    "{language:?} {step} pt ({face} px): live {live}, model {model}"
+                ));
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{} windows measured, differences: {differences:?}", 14 * 8);
+
+    assert!(
+        differences.is_empty(),
+        "the model of layout_author is not the window at every face: {differences:?}"
+    );
+}
+
 /// The faces the rule may answer with, at the least — every face from the floor up to the 40 px
 /// of ten points at 300 % (задача T-83-2; the ТЗ names 11…20 «как минимум»). Custom scaling makes
 /// any DPI, so every whole face in between is one some screen can ask for.
@@ -7469,6 +7594,555 @@ fn the_rule_keeps_its_floor_and_its_ceiling() {
             [20, 18, 16, 14, 12]
         ]
     );
+}
+
+/// The six dialog templates of the program — `IDD_SETTINGS` … `IDD_WIZARD` — with the offset of
+/// their `pointsize`, measured by the probe of the stage (`scratchpad-E83\probe-premises-e83.log`).
+const SIX_TEMPLATES: [(u16, usize); 6] = [
+    (200, 82),
+    (201, 54),
+    (202, 64),
+    (203, 64),
+    (204, 50),
+    (205, 62),
+];
+
+/// **The font block of the six templates is found where the dialog manager reads it — задача
+/// T-83-3.**
+///
+/// `settings::template_point_size_at` walks the menu, the class and the title of a `DLGTEMPLATEEX`
+/// to its font block; on the six real templates of the product image it must land on `pointsize`
+/// **10** and the typeface **«Segoe UI»** (the known answers of `app.rc`), at the offsets the probe
+/// measured, and agree with this file's own parser of templates. `settings::template_face` must
+/// read the face the manager is asked for: 400, not italic, `DEFAULT_CHARSET`.
+///
+/// ⚠ Controls: the old form of the template, a buffer that ends before its size, and a template
+/// without `DS_SETFONT` are refused — nothing to patch is nothing patched.
+#[test]
+fn the_font_block_of_the_six_templates_is_found_where_the_manager_reads_it() {
+    let product = ProductImage::open();
+
+    for (id, offset) in SIX_TEMPLATES {
+        let bytes = product.resource(RT_DIALOG, id);
+        let at = settings::template_point_size_at(&bytes)
+            .unwrap_or_else(|| panic!("template {id}: the font block must be found"));
+        let points = u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let face = settings::template_face(&bytes)
+            .unwrap_or_else(|| panic!("template {id}: the face must be read"));
+        let name = String::from_utf16_lossy(
+            &face.lfFaceName[..face
+                .lfFaceName
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(face.lfFaceName.len())],
+        );
+
+        println!(
+            "template {id}: pointsize at {at} = {points}, «{name}», weight {}, italic {}, charset {}",
+            face.lfWeight, face.lfItalic, face.lfCharSet.0
+        );
+
+        assert_eq!(at, offset, "template {id}: the offset the probe measured");
+        assert_eq!(points, 10, "template {id}: FONT 10 of app.rc");
+        assert_eq!(name, "Segoe UI", "template {id}: the typeface of app.rc");
+        assert_eq!(
+            (face.lfWeight, face.lfItalic, face.lfCharSet.0),
+            (400, 0, 1),
+            "template {id}: 400, not italic, DEFAULT_CHARSET"
+        );
+
+        let parsed = DialogTemplate::parse(&bytes)
+            .font
+            .expect("every template of the program declares DS_SETFONT");
+        assert_eq!(
+            (parsed.points, parsed.face.as_str()),
+            (points, name.as_str()),
+            "template {id}: this file's parser and the product's must agree"
+        );
+
+        // ⚠ Контроли.
+        let mut old_form = bytes.clone();
+        old_form[2] = 0;
+        old_form[3] = 0;
+        assert_eq!(
+            settings::template_point_size_at(&old_form),
+            None,
+            "template {id}: the old DLGTEMPLATE must be refused"
+        );
+        assert_eq!(
+            settings::template_point_size_at(&bytes[..at + 1]),
+            None,
+            "template {id}: a buffer that ends inside the size must be refused"
+        );
+        let mut no_font = bytes.clone();
+        no_font[12] &= !0x40;
+        assert_eq!(
+            settings::template_point_size_at(&no_font),
+            None,
+            "template {id}: a template without DS_SETFONT has no size to patch"
+        );
+    }
+}
+
+/// **At the template's own step the copy is the resource byte for byte — задача T-83-3, the guard
+/// «100 % без перемен».**
+///
+/// `settings::put_font_step` is what both `show_*` put the step in with. At ten points — the step
+/// of every window on a screen that takes the whole of it — it must not write a single byte: the
+/// copy the dialog manager is handed is then the very template it was always handed. At eight it
+/// must write the `pointsize` and nothing else.
+#[test]
+fn at_the_template_step_the_copy_is_the_resource_byte_for_byte() {
+    let product = ProductImage::open();
+
+    for (id, _) in SIX_TEMPLATES {
+        let resource = product.resource(RT_DIALOG, id);
+
+        let mut copy = resource.clone();
+        settings::put_font_step(&mut copy, 10);
+        assert_eq!(
+            copy, resource,
+            "template {id}: at ten points not a byte may change"
+        );
+
+        let mut smaller = resource.clone();
+        settings::put_font_step(&mut smaller, 8);
+        let at = settings::template_point_size_at(&resource).expect("the font block");
+        let changed: Vec<usize> = (0..resource.len())
+            .filter(|index| smaller[*index] != resource[*index])
+            .collect();
+
+        assert_eq!(
+            changed,
+            vec![at],
+            "template {id}: eight points change the low byte of `pointsize` and nothing else"
+        );
+        assert_eq!(u16::from_le_bytes([smaller[at], smaller[at + 1]]), 8);
+    }
+}
+
+/// The dialog procedure of a template opened bare, for the measuring below: it lets the manager
+/// choose the focus and answers nothing else.
+unsafe extern "system" fn bare_dialog_proc(
+    _hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    _wparam: windows::Win32::Foundation::WPARAM,
+    _lparam: windows::Win32::Foundation::LPARAM,
+) -> isize {
+    isize::from(message == windows::Win32::UI::WindowsAndMessaging::WM_INITDIALOG)
+}
+
+/// A hidden owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never
+/// shown. Destroyed on drop.
+struct HiddenOwner(windows::Win32::Foundation::HWND);
+
+impl HiddenOwner {
+    fn new() -> Self {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, WS_EX_TOOLWINDOW, WS_POPUP,
+        };
+        use windows::core::{PCWSTR, w};
+
+        // SAFETY: a system class, no parent, no pointer of ours; destroyed in `Drop`.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden owner must be creatable");
+
+        Self(owner)
+    }
+}
+
+impl Drop for HiddenOwner {
+    fn drop(&mut self) {
+        // SAFETY: made by `new` on this thread, destroyed once.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.0) };
+    }
+}
+
+/// One template of the product image opened bare and hidden on `owner`, and what the manager made
+/// of it: the `lfHeight` of its font, and its window and client rectangles. The window is destroyed
+/// before the answer.
+fn open_template_bare(
+    owner: &HiddenOwner,
+    module: windows::Win32::Foundation::HMODULE,
+    template: &[u8],
+) -> (
+    i32,
+    windows::Win32::Foundation::RECT,
+    windows::Win32::Foundation::RECT,
+) {
+    use windows::Win32::Foundation::{HINSTANCE, LPARAM, RECT};
+    use windows::Win32::Graphics::Gdi::{GetObjectW, HGDIOBJ};
+    use windows::Win32::UI::Controls::{
+        ICC_LISTVIEW_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateDialogIndirectParamW, DLGTEMPLATE, DestroyWindow, GetClientRect, GetWindowRect,
+        SendMessageW, WM_GETFONT,
+    };
+
+    // The settings template carries a list view, whose class the product registers on demand.
+    let request = INITCOMMONCONTROLSEX {
+        dwSize: u32::try_from(size_of::<INITCOMMONCONTROLSEX>()).expect("small"),
+        dwICC: ICC_LISTVIEW_CLASSES,
+    };
+    // SAFETY: the structure is a live local the call reads.
+    let _ = unsafe { InitCommonControlsEx(&request) };
+
+    // Aligned for the `u32` fields of the header, as `AlignedTemplate` holds it in the product.
+    let mut words = vec![0_u32; template.len().div_ceil(4)];
+    // SAFETY: the destination is at least `template.len()` bytes long.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            template.as_ptr(),
+            words.as_mut_ptr().cast::<u8>(),
+            template.len(),
+        );
+    }
+
+    // SAFETY: a whole template in a live aligned buffer, a live owner of this thread, a procedure
+    // that dereferences nothing; the window is destroyed below.
+    let window = unsafe {
+        CreateDialogIndirectParamW(
+            Some(HINSTANCE(module.0)),
+            words.as_ptr().cast::<DLGTEMPLATE>(),
+            Some(owner.0),
+            Some(bare_dialog_proc),
+            LPARAM(0),
+        )
+    }
+    .expect("the template must open");
+
+    let mut outer = RECT::default();
+    let mut client = RECT::default();
+    let mut logical = LOGFONTW::default();
+
+    // SAFETY: the window is live until the `DestroyWindow` below; the buffers are locals.
+    unsafe {
+        let _ = GetWindowRect(window, &mut outer);
+        let _ = GetClientRect(window, &mut client);
+        let font = SendMessageW(window, WM_GETFONT, None, None);
+        let _ = GetObjectW(
+            HGDIOBJ(font.0 as *mut _),
+            i32::try_from(size_of::<LOGFONTW>()).expect("small"),
+            Some(std::ptr::from_mut(&mut logical).cast()),
+        );
+        let _ = DestroyWindow(window);
+    }
+
+    (logical.lfHeight, outer, client)
+}
+
+/// **⛔ C7 — the dialog manager obeys the patched `pointsize`, in every one of the six templates —
+/// задача T-83-3.**
+///
+/// Each template of the product image, its copy put at eight points by the very function the
+/// windows use, opened hidden: the font the manager gives the window must be **11 px** (`lfHeight =
+/// −11`, `MulDiv(8, 96, 72)`), and at the template's own ten **13 px**. A manager that ignored the
+/// patch would answer −13 for both — развилка C7.
+#[test]
+fn every_template_put_at_eight_points_opens_at_eleven_pixels() {
+    let product = ProductImage::open();
+    let owner = HiddenOwner::new();
+
+    for (id, _) in SIX_TEMPLATES {
+        let resource = product.resource(RT_DIALOG, id);
+        let mut eight = resource.clone();
+        settings::put_font_step(&mut eight, 8);
+
+        let (at_ten, ..) = open_template_bare(&owner, product.module, &resource);
+        let (at_eight, ..) = open_template_bare(&owner, product.module, &eight);
+
+        println!("template {id}: lfHeight {at_ten} at ten points, {at_eight} at eight");
+
+        assert_eq!(at_ten, -13, "template {id}: ten points at 96 DPI are 13 px");
+        assert_eq!(
+            at_eight, -11,
+            "⛔ C7, template {id}: the manager must obey the patched pointsize"
+        );
+    }
+}
+
+/// **Both `show_*` put the step by the ONE body — задача T-83-3.**
+///
+/// The modal call opens «Настройки» and «О программе», the modeless one the four windows of the
+/// letters: each has to call `apply_font_step` on its copy exactly once, and that body has to ask
+/// the one `font_step_for` and put the answer by `put_font_step`.
+///
+/// ⚠ Отрицательный контроль: the text of `e82` — both calls without it — finds nothing.
+#[test]
+fn both_show_calls_put_the_step_by_the_one_body() {
+    const CALL: &str = "apply_font_step(owner, copy.as_mut_bytes());";
+
+    let source = settings_module_source();
+    let code_of = |text: &str| -> String {
+        text.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let calls = |text: &str| -> (usize, usize) {
+        (
+            code_of(function_body(text, "unsafe fn show_modal_dialog("))
+                .matches(CALL)
+                .count(),
+            code_of(function_body(
+                text,
+                "pub(crate) unsafe fn show_modeless_dialog(",
+            ))
+            .matches(CALL)
+            .count(),
+        )
+    };
+
+    assert_eq!(
+        calls(&source),
+        (1, 1),
+        "both show_* must put the step of the font by the one body, once each"
+    );
+
+    let body = code_of(function_body(&source, "fn apply_font_step("));
+    assert!(
+        body.contains("let step = font_step_for(owner, template);")
+            && body.contains("put_font_step(template, step);"),
+        "the one body must ask the one function of the step and put its answer"
+    );
+
+    // ⚠ Контроль: the shape of `e82`, where neither call put a step at all.
+    let of_e82 = source.replace(CALL, "");
+    assert_ne!(of_e82, source, "the control must change the text");
+    assert_eq!(calls(&of_e82), (0, 0), "the control must be caught");
+}
+
+/// **⛔ A grown window moves only when it would leave the air of the rule — решение 143.10 (а),
+/// задача T-83-3.**
+///
+/// `DS_CENTER` centres «От автора» for its template of 345 units, and the window then grows
+/// downwards to its content. On the two screens the owner will look at:
+///
+/// * **100 %, 1080p, 10 pt** — the greek window, the tallest, stands at 130 from the top and keeps
+///   34 px at the bottom: it **stays** — not a pixel moves at 100 %;
+/// * **150 %, 1080p, 7 pt** — the template window stands at 66 and the grown greek one would end
+///   at 1027 in a work area of 1008, **under the task bar** (the shape of `e82`): it is put in the
+///   middle, 23 px above and 24 below.
+///
+/// The heights are the model's, held against the live window above; the frames 39 and 56 are the
+/// measured ones. A window taller than the work area goes to its top.
+///
+/// ⚠ «Красное до»: the placement of `e82` keeps the top, and the 150 % window ends 19 px past the air.
+#[test]
+fn a_grown_window_moves_only_when_it_would_leave_the_air() {
+    /// Решение 143.3 — written here apart from the code.
+    const AIR: i32 = 12;
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::El);
+    let words = AuthorWords::now("0.83.0");
+    settings::set_ui_language(Language::Ru);
+
+    // `(what, work area, frame, face, drawing DPI, where it must stand, and whether it moves)`.
+    let screens = [
+        ("100 %, 10 pt", 1032, 39, 13, 96),
+        ("150 %, 7 pt", 1008, 56, 14, 100),
+    ];
+
+    for (what, work, frame, face, drawing) in screens {
+        let cell = cell_of(face);
+        let template = mul_div(345, cell, 8) + frame;
+        let centred_for_the_template = (work - template) / 2;
+        let grown = author_client_by_model(face, drawing, &words) + frame;
+
+        let top = settings::grown_window_top(centred_for_the_template, grown, 0, work);
+        let keeps_the_air = |top: i32| top >= AIR && work - (top + grown) >= AIR;
+
+        println!(
+            "{what}: the template window {template} px stands at {centred_for_the_template}; grown \
+             to {grown} px it would end at {}; it stands at {top} — {} px above, {} px below",
+            centred_for_the_template + grown,
+            top,
+            work - (top + grown)
+        );
+
+        assert!(
+            keeps_the_air(top),
+            "{what}: the grown window must keep {AIR} px above and below"
+        );
+
+        if keeps_the_air(centred_for_the_template) {
+            assert_eq!(
+                top, centred_for_the_template,
+                "{what}: a window that keeps the air must not move by a pixel"
+            );
+        } else {
+            assert_eq!(
+                top,
+                (work - grown) / 2,
+                "{what}: a window that would leave the air goes to the middle"
+            );
+        }
+    }
+
+    // The two screens are the two cases: at 100 % the greek window keeps the air where it stands,
+    // at 150 % it would not — the shape of `e82`, where the top was kept and the bottom went under
+    // the task bar.
+    let at_150 = (
+        (1008 - (mul_div(345, cell_of(14), 8) + 56)) / 2,
+        author_client_by_model(14, 100, &words) + 56,
+    );
+    assert!(
+        1008 - (at_150.0 + at_150.1) < AIR,
+        "the control: at 150 % the window of e82 must leave the air — else this test proves nothing"
+    );
+
+    // A window taller than the work area goes to its top, never above it.
+    assert_eq!(settings::grown_window_top(-40, 1200, 0, 1008), 0);
+}
+
+/// **The live «От автора» stands where решение 143.10 puts it — задача T-83-3.**
+///
+/// At the template's ten points the grown window stays where the manager centred it for its
+/// template — exactly; at fifteen points on this 96-DPI machine (the debug substitution) the greek
+/// window no longer keeps the air where it stands and is put in the middle of the work area.
+#[cfg(feature = "testing")]
+#[test]
+fn the_live_author_window_stands_where_the_rule_expects() {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::El);
+
+    for step in [10_u16, 11, 15] {
+        let face = theme::face_at(step, 96);
+        let (outer, client, work) = settings::testing::with_font_step(step, || {
+            let window = HiddenAuthor::open("0.83.0");
+            let mut outer = RECT::default();
+            // SAFETY: the window is live for this block; the buffers are locals.
+            let work = unsafe {
+                let _ = GetWindowRect(window.window, &mut outer);
+                let monitor = MonitorFromWindow(window.window, MONITOR_DEFAULTTONEAREST);
+                let mut info = MONITORINFO {
+                    cbSize: u32::try_from(size_of::<MONITORINFO>()).expect("small"),
+                    ..Default::default()
+                };
+                let _ = GetMonitorInfoW(monitor, &mut info);
+                info.rcWork
+            };
+            (outer, window.client_height(), work)
+        });
+
+        let frame = (outer.bottom - outer.top) - client;
+        let template = mul_div(345, cell_of(face), 8) + frame;
+        let centred = work.top + ((work.bottom - work.top) - template) / 2;
+        let expected =
+            settings::grown_window_top(centred, outer.bottom - outer.top, work.top, work.bottom);
+
+        println!(
+            "El {step} pt ({face} px): the window {} px stands at {} (the template's centre {centred}, \
+             the rule's place {expected}); {} px below",
+            outer.bottom - outer.top,
+            outer.top,
+            work.bottom - outer.bottom
+        );
+
+        assert_eq!(
+            outer.top, expected,
+            "El {step} pt: the place of решение 143.10"
+        );
+
+        if step == 10 {
+            assert_eq!(
+                outer.top, centred,
+                "at the template's ten points the window must stand where it always stood"
+            );
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+}
+
+/// **The monitor is measured before the window exists — задача T-83-3, посылка П5.**
+///
+/// `settings::screen_of` asks, for an owner shaped like `LangSwitcher.Hidden`, the work area of the
+/// monitor `DS_CENTER` will use, its DPI, and the frame the template's style costs there. Held here
+/// against what the dialog manager itself does with the same template on the same owner: the frame
+/// of the real window — at 96 DPI the **39 px** of решение 143 — and the monitor it lands on.
+#[test]
+fn the_monitor_is_measured_before_the_window_exists() {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+
+    let product = ProductImage::open();
+    let owner = HiddenOwner::new();
+
+    for (id, _) in SIX_TEMPLATES {
+        let template = product.resource(RT_DIALOG, id);
+        let screen = settings::screen_of(owner.0, &template)
+            .unwrap_or_else(|| panic!("template {id}: the monitor must be measurable"));
+
+        // SAFETY: a live owner; the buffer is a live local whose `cbSize` the call reads first.
+        let work_area = unsafe {
+            let monitor = MonitorFromWindow(owner.0, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO {
+                cbSize: u32::try_from(size_of::<MONITORINFO>()).expect("small"),
+                ..Default::default()
+            };
+            assert!(GetMonitorInfoW(monitor, &mut info).as_bool());
+            info.rcWork.bottom - info.rcWork.top
+        };
+
+        let (_, outer, client) = open_template_bare(&owner, product.module, &template);
+        let real_frame = (outer.bottom - outer.top) - (client.bottom - client.top);
+
+        println!(
+            "template {id}: work area {} px, DPI {}, frame {} px (the real window's {real_frame}); \
+             the rule answers {} pt",
+            screen.work_area,
+            screen.dpi,
+            screen.frame,
+            settings::font_step(
+                screen.work_area,
+                screen.dpi,
+                screen.frame,
+                settings::tallest_window_units,
+                cell_of
+            )
+        );
+
+        assert_eq!(
+            screen.work_area, work_area,
+            "template {id}: the owner's work area"
+        );
+        assert_eq!(
+            screen.frame, real_frame,
+            "template {id}: the frame measured before the window must be the window's own"
+        );
+        if screen.dpi == 96 {
+            assert_eq!(
+                screen.frame, 39,
+                "template {id}: 39 px at 96 DPI — решение 143"
+            );
+        }
+    }
 }
 
 /// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
@@ -18916,6 +19590,11 @@ fn the_face_is_handed_over_by_the_one_send_this_module_uses_for_its_own_controls
 /// is taken from. The probe of `resolve_emphasis` is the one face made outside the set, and it
 /// is deliberately named here: it is a **question to GDI**, freed in the same function, and
 /// never handed to a window.
+///
+/// ⚠ **Four since задача T-83-3, решение 143.12**: the rule of the step asks GDI for the real
+/// `tmHeight` of every candidate face (`cell_of_face`) — the second question of the very same
+/// kind, made and freed in one function and never handed to a window. It is named here beside the
+/// first; what the assertion holds — nothing hands a window a face outside its set — is unchanged.
 #[test]
 fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     let made = product_lines_with("CreateFontIndirectW(");
@@ -18934,9 +19613,16 @@ fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     }
     assert_eq!(
         created.len(),
-        3,
-        "the declaration, the one loop of `DialogFonts::new` and the one probe of \
-         `resolve_emphasis` — and nothing else asks for a face: {created:?}"
+        4,
+        "the declaration, the one loop of `DialogFonts::new`, the one probe of \
+         `resolve_emphasis` and the one probe of the rule of the step — and nothing else asks for \
+         a face: {created:?}"
+    );
+    assert!(
+        created
+            .iter()
+            .any(|line| line.contains("let Some(probe) = create_font(logical) else {")),
+        "the fourth is the probe of the rule, `cell_of_face`, and nothing else: {created:?}"
     );
 
     // …and the size of the set is the length of the array the loop walks, which is where the

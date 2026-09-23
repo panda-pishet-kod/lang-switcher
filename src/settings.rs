@@ -4252,6 +4252,9 @@ unsafe fn show_modal_dialog(
     let mirrored = ui_language().is_rtl();
 
     if let Some(mut copy) = compiled_template(instance, template) {
+        // Вопрос 143, задача T-83-3: the step of the font, by the one body both calls share.
+        apply_font_step(owner, copy.as_mut_bytes());
+
         if mirrored && mirror_template(copy.as_mut_bytes()).is_none() {
             // The template is not the extended form after all, so there is nothing safe to
             // patch. Run it unmirrored rather than corrupt a style (NFR-13).
@@ -4336,6 +4339,9 @@ pub(crate) unsafe fn show_modeless_dialog(
     if let Some(mut copy) = compiled_template(instance, template)
         && (!mirrored || mirror_template(copy.as_mut_bytes()).is_some())
     {
+        // Вопрос 143, задача T-83-3: the step of the font, by the one body both calls share.
+        apply_font_step(owner, copy.as_mut_bytes());
+
         // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template. The
         // dialog manager reads it while it builds the window and keeps no pointer into it —
         // the window exists by the time this returns, which is what makes a frame buffer
@@ -4679,6 +4685,420 @@ pub fn font_step(
     }
 
     floor.unwrap_or(FONT_STEPS[0])
+}
+
+/// The `DS_SETFONT` bit of a template's `style` — a `DLGTEMPLATEEX` carries its font block only
+/// when this bit (or `DS_SHELLFONT`, which contains it) is set.
+const DS_SETFONT_BIT: u32 = 0x40;
+
+/// The length of the fixed header of a `DLGTEMPLATEEX`: version, signature, help identifier,
+/// extended style, style, the count of items and the four coordinates — 2 + 2 + 4 + 4 + 4 + 2 +
+/// 2 × 4 bytes.
+const DLGTEMPLATEEX_HEADER: usize = 26;
+
+/// Where the `pointsize` of a compiled `DLGTEMPLATEEX` lies — задача T-83-3, the pure half.
+///
+/// The font block is not at a fixed offset: it follows the menu, the window class and the title,
+/// and the first two are each a `sz_Or_Ord` — a zero word for «none», `0xFFFF` and an ordinal, or
+/// a string ended by a zero word — and the title is a string. So the offset is walked, field by
+/// field, the way the dialog manager walks it. The six templates of this program answer 82, 54,
+/// 64, 64, 50 and 62 (measured, `scratchpad-E83\probe-premises-e83.log`).
+///
+/// `None` for a buffer that is not the extended form, that ends inside a field, or whose style
+/// asks for no font — **a template without `DS_SETFONT` is not patched**, it has no size to patch.
+/// SEC-05: every length here came from a resource, and each is checked before it is read.
+pub fn template_point_size_at(template: &[u8]) -> Option<usize> {
+    let word = |at: usize| -> Option<u16> {
+        Some(u16::from_le_bytes([
+            *template.get(at)?,
+            *template.get(at + 1)?,
+        ]))
+    };
+
+    // A string of `WCHAR`s ended by a zero word: the offset right after its terminator.
+    let after_string = |mut at: usize| -> Option<usize> {
+        while word(at)? != 0 {
+            at += 2;
+        }
+
+        Some(at + 2)
+    };
+
+    if (word(0)?, word(2)?) != (1, 0xFFFF) {
+        return None;
+    }
+
+    let style = u32::from_le_bytes(template.get(12..16)?.try_into().ok()?);
+
+    if style & DS_SETFONT_BIT == 0 {
+        return None;
+    }
+
+    let mut at = DLGTEMPLATEEX_HEADER;
+
+    // The menu and the window class: none, an ordinal, or a string.
+    for _ in 0..2 {
+        at = match word(at)? {
+            0 => at + 2,
+            0xFFFF => at + 4,
+            _ => after_string(at)?,
+        };
+    }
+
+    // The title is always a string, the empty one included.
+    at = after_string(at)?;
+
+    // The size itself has to be inside the buffer before its offset is worth anything.
+    word(at)?;
+
+    Some(at)
+}
+
+/// Sets the `pointsize` of a compiled `DLGTEMPLATEEX` in place and answers what it was —
+/// задача T-83-3. `None`, and not a byte changed, for every template
+/// [`template_point_size_at`] refuses.
+pub fn set_template_point_size(template: &mut [u8], points: u16) -> Option<u16> {
+    let at = template_point_size_at(template)?;
+    let before = u16::from_le_bytes([template[at], template[at + 1]]);
+
+    template[at..at + 2].copy_from_slice(&points.to_le_bytes());
+
+    Some(before)
+}
+
+/// The step the next window of this thread is to open at when it is **forced** — the debug
+/// substitution of задача T-83-3, and nothing a Release build carries.
+///
+/// Two doors, both absent from the shipped binary (criterion 8 of §13):
+/// * the `testing` feature's [`testing::with_font_step`], for the measuring tests — a value of the
+///   thread, so tests running side by side cannot force each other's windows;
+/// * a debug build's `LANGSW_DEBUG_FONT_STEP` (6…15), read once — the FR-97 pattern, for the eye:
+///   a debug build at 100 % opens its windows at 8 pt and shows what 125 % will look like.
+fn forced_font_step() -> Option<u16> {
+    #[cfg(feature = "testing")]
+    if let Some(step) = testing::forced() {
+        return Some(step);
+    }
+
+    #[cfg(debug_assertions)]
+    if let Some(step) = debug_font_step::configured() {
+        return Some(step);
+    }
+
+    None
+}
+
+/// The debug substitution of the step — задача T-83-3, compiled into debug builds only, the way
+/// FR-97's deadline is (`app::debug_timeout`): absent from the Release build, not disabled in it.
+#[cfg(debug_assertions)]
+mod debug_font_step {
+    use std::sync::OnceLock;
+
+    /// Environment variable that forces the step of every window, in whole points — 6 to 15.
+    const FONT_STEP_ENV_VAR: &str = "LANGSW_DEBUG_FONT_STEP";
+
+    /// The forced step, read once; `None` when the variable is absent or not a step.
+    pub(super) fn configured() -> Option<u16> {
+        static STEP: OnceLock<Option<u16>> = OnceLock::new();
+
+        *STEP.get_or_init(|| {
+            std::env::var(FONT_STEP_ENV_VAR)
+                .ok()?
+                .trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|step| (6..=15).contains(step))
+        })
+    }
+}
+
+/// The measuring doors of stage Э83 on the side of this module — compiled only under the
+/// `testing` feature (SEC-04a; criterion 8 finds no trace of it in the Release build).
+#[cfg(feature = "testing")]
+pub mod testing {
+    use std::cell::Cell;
+
+    thread_local! {
+        /// The step forced on the windows this thread opens, or zero for none.
+        static FORCED: Cell<u16> = const { Cell::new(0) };
+    }
+
+    /// The forced step, if one is in force on this thread.
+    pub(super) fn forced() -> Option<u16> {
+        Some(FORCED.with(Cell::get)).filter(|step| *step != 0)
+    }
+
+    /// Runs `body` with every window this thread opens forced to `step` points — the debug
+    /// substitution of задача T-83-3, for the measuring tests. The step before is put back
+    /// however `body` leaves.
+    pub fn with_font_step<R>(step: u16, body: impl FnOnce() -> R) -> R {
+        struct Restore(u16);
+
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                FORCED.with(|forced| forced.set(self.0));
+            }
+        }
+
+        let _restore = Restore(FORCED.with(|forced| forced.replace(step)));
+
+        body()
+    }
+}
+
+/// **The step of the font of the next window of `owner`, put into the copy of its template** —
+/// задача T-83-3, **the one body** both [`show_modal_dialog`] and [`show_modeless_dialog`] call, so
+/// the six windows cannot come to disagree about their size.
+fn apply_font_step(owner: HWND, template: &mut [u8]) {
+    let step = font_step_for(owner, template);
+
+    put_font_step(template, step);
+}
+
+/// Puts `step` into the copy of a template as its `pointsize` — задача T-83-3.
+///
+/// ⚠ **At the step of the template itself nothing is written**: the copy stays equal to the
+/// resource byte for byte, which is what «при 100 % не меняется ни один пиксель» rests on.
+///
+/// Pure, and public so the test calls the very function the windows call.
+pub fn put_font_step(template: &mut [u8], step: u16) {
+    let Some(at) = template_point_size_at(template) else {
+        return;
+    };
+
+    if u16::from_le_bytes([template[at], template[at + 1]]) != step {
+        let _ = set_template_point_size(template, step);
+    }
+}
+
+/// The face a compiled `DLGTEMPLATEEX` asks for — its typeface, weight, italic and charset, as the
+/// dialog manager hands them to `CreateFontIndirectW` — with `lfHeight` left for the caller.
+/// `None` for every template [`template_point_size_at`] refuses. Pure; SEC-05 as there.
+pub fn template_face(template: &[u8]) -> Option<LOGFONTW> {
+    let at = template_point_size_at(template)?;
+    let weight = u16::from_le_bytes([*template.get(at + 2)?, *template.get(at + 3)?]);
+    let italic = *template.get(at + 4)?;
+    let charset = *template.get(at + 5)?;
+
+    let mut face = LOGFONTW {
+        lfWeight: i32::from(weight),
+        lfItalic: italic,
+        lfCharSet: windows::Win32::Graphics::Gdi::FONT_CHARSET(charset),
+        ..Default::default()
+    };
+
+    // The typeface: `WCHAR`s ended by a zero word, no longer than `LF_FACESIZE` less its NUL.
+    let mut name = at + 6;
+    let mut written = 0;
+
+    loop {
+        let unit = u16::from_le_bytes([*template.get(name)?, *template.get(name + 1)?]);
+
+        if unit == 0 {
+            break;
+        }
+
+        if written + 1 >= face.lfFaceName.len() {
+            return None;
+        }
+
+        face.lfFaceName[written] = unit;
+        written += 1;
+        name += 2;
+    }
+
+    Some(face)
+}
+
+/// The cell — `tmHeight`, the vertical base unit of a dialog set in it — of `face` at `pixels`,
+/// asked of GDI on a memory DC. Zero on a refusal (NFR-13), which the rule reads as «fits» and
+/// answers the template's own ten with: the look of the program before this stage.
+///
+/// ⚠ **A question to GDI, like the probe of [`resolve_emphasis`]**: the face is made here, measured
+/// and freed here, and never handed to a window. The rule of вопрос 143 needs the real `tmHeight`
+/// of each candidate face — Segoe UI rounds its cell its own way (13 px → 17, 14 → 19, 15 → 20) —
+/// and nothing but GDI knows it.
+fn cell_of_face(face: LOGFONTW, pixels: i32) -> i32 {
+    let logical = LOGFONTW {
+        lfHeight: -pixels,
+        ..face
+    };
+
+    // SAFETY: a memory DC of this process; deleted below on every path.
+    let dc = unsafe { CreateCompatibleDC(None) };
+
+    if dc.is_invalid() {
+        return 0;
+    }
+
+    let Some(probe) = create_font(logical) else {
+        // SAFETY: deletes exactly the DC created above, once.
+        let _ = unsafe { DeleteDC(dc) };
+        return 0;
+    };
+
+    // SAFETY: `dc` and `probe` are live and ours; the previous face is put back below.
+    let previous = unsafe { SelectObject(dc, probe.into()) };
+    let mut metrics = TEXTMETRICW::default();
+    // SAFETY: `metrics` is a live local the call fills.
+    let read = unsafe { GetTextMetricsW(dc, &mut metrics) }.as_bool();
+
+    // SAFETY: puts back exactly what `SelectObject` answered, then frees the probe and the DC, each
+    // once — the probe is selected out before it is deleted.
+    unsafe {
+        SelectObject(dc, previous);
+        let _ = DeleteObject(probe.into());
+        let _ = DeleteDC(dc);
+    }
+
+    if read { metrics.tmHeight } else { 0 }
+}
+
+/// What the rule has to know about the monitor a window of `owner` will open on, taken **before**
+/// the window exists — задача T-83-3, посылка П5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Screen {
+    /// The height of the work area — the monitor less the task bar — in pixels.
+    pub work_area: i32,
+    /// The DPI of the monitor.
+    pub dpi: i32,
+    /// What a window of the template's style costs besides its client area there: the caption and
+    /// the two borders, in pixels.
+    pub frame: i32,
+}
+
+/// **The monitor `DS_CENTER` puts a window of `owner` on — its work area, its DPI and the frame of
+/// the template's style there** — задача T-83-3, посылка П5.
+///
+/// The monitor is the owner's: `DS_CENTER` centres a dialog in the work area of the monitor that
+/// contains its owner (measured on the owner shaped like `LangSwitcher.Hidden`,
+/// `scratchpad-E83\probe-premises-e83.log`).
+///
+/// ⛔ **The DPI and the frame are not computed, they are asked of a window.** `GetDpiForMonitor`
+/// and `AdjustWindowRectExForDpi` live in `Win32_UI_HiDpi`, which is not in the closed list of
+/// features (SEC-03), and scaling the 39 px of 100 % would be wrong: 59 against the 56 of 150 %,
+/// three of the four pixels 7 pt has there. So a window of the template's own styles is made
+/// **hidden** on that monitor — a top-level window of a `PerMonitorV2` process takes the DPI of the
+/// monitor it is made on — its frame is read the way `fit_window_to_work_area` reads the dialog's
+/// (`GetWindowRect` less `GetClientRect`; 39 px at 96 DPI, the dialog's own, measured) and the DPI
+/// off its DC; then it is destroyed. It is never shown, takes no focus, and lives for a few calls.
+///
+/// NFR-13: any refusal answers `None`, and the window opens at the template's own ten points.
+///
+/// Public so the test measures the very function the windows ask.
+pub fn screen_of(owner: HWND, template: &[u8]) -> Option<Screen> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DS_MODALFRAME, DestroyWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WS_EX_DLGMODALFRAME, WS_VISIBLE,
+    };
+
+    let style = u32::from_le_bytes(template.get(12..16)?.try_into().ok()?);
+    let ex_style = u32::from_le_bytes(template.get(8..12)?.try_into().ok()?);
+
+    // SAFETY: `owner` is a live window of this thread; the call reads a system table.
+    let monitor = unsafe { MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST) };
+
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(size_of::<MONITORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: the handle came from the call above and the buffer is a live local whose `cbSize`
+    // the call reads first, as it documents.
+    if !unsafe { GetMonitorInfoW(monitor, &raw mut info) }.as_bool() {
+        return None;
+    }
+
+    let work = info.rcWork;
+
+    // The window part of the template's style — the low word is the dialog's own (`DS_*`) and
+    // means something else to a static — never visible; and the frame the dialog manager gives a
+    // `DS_MODALFRAME` template.
+    let window_style = WINDOW_STYLE(style & 0xFFFF_0000 & !WS_VISIBLE.0);
+    let mut window_ex_style = WINDOW_EX_STYLE(ex_style);
+
+    if style & u32::try_from(DS_MODALFRAME).unwrap_or(0) != 0 {
+        window_ex_style |= WS_EX_DLGMODALFRAME;
+    }
+
+    // SAFETY: a system class, no parent, no menu, no pointer of ours; the rectangle is inside the
+    // work area of the monitor, so the window is made on it. Destroyed below on every path.
+    //
+    // NFR-13, examined in words: a refusal costs the step — the window opens at the template's own
+    // ten points, the look of before this stage — and is deliberately not journaled: the
+    // vocabulary of `diag` is a closed table, and a cosmetic fallback does not widen it
+    // (reviews\T-11-1.md, the reason `Brushes::new` gives).
+    let probe = unsafe {
+        CreateWindowExW(
+            window_ex_style,
+            w!("STATIC"),
+            PCWSTR::null(),
+            window_style,
+            (work.left + work.right) / 2 - 50,
+            (work.top + work.bottom) / 2 - 50,
+            100,
+            100,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .ok()?;
+
+    let mut window = RECT::default();
+    let mut client = RECT::default();
+
+    // SAFETY: `probe` is the live window just made; the buffers are live locals of this frame.
+    let read = unsafe { GetWindowRect(probe, &raw mut window) }.is_ok()
+        && unsafe { GetClientRect(probe, &raw mut client) }.is_ok();
+
+    // SAFETY: `probe` is live; the DC is released right after the one question asked of it.
+    let dpi = unsafe {
+        let dc = GetDC(Some(probe));
+        let dpi = if dc.is_invalid() { 0 } else { dc_dpi(dc) };
+        ReleaseDC(Some(probe), dc);
+        dpi
+    };
+
+    // SAFETY: the window was made above by this thread and is destroyed once, here.
+    let _ = unsafe { DestroyWindow(probe) };
+
+    if !read || dpi <= 0 {
+        return None;
+    }
+
+    Some(Screen {
+        work_area: work.bottom - work.top,
+        dpi,
+        frame: (window.bottom - window.top) - (client.bottom - client.top),
+    })
+}
+
+/// **The step of the font the next window of `owner` is to open at** — задача T-83-3, the one
+/// function both `show_*` ask, from the same inputs, so the windows of one monitor share one step
+/// (решение Э51 «один кегль» stands).
+///
+/// The forced step of the debug substitution first ([`forced_font_step`], absent from Release);
+/// otherwise [`font_step`] over the monitor [`screen_of`] measures, the tallest window
+/// [`tallest_window_units`] names at each face, and the cell of the template's own face at it.
+/// Any refusal on the way answers the template's own ten points (NFR-13).
+fn font_step_for(owner: HWND, template: &[u8]) -> u16 {
+    if let Some(step) = forced_font_step() {
+        return step;
+    }
+
+    let (Some(screen), Some(face)) = (screen_of(owner, template), template_face(template)) else {
+        return FONT_STEPS[0];
+    };
+
+    font_step(
+        screen.work_area,
+        screen.dpi,
+        screen.frame,
+        tallest_window_units,
+        |pixels| cell_of_face(face, pixels),
+    )
 }
 
 // Control identifiers, mirrored from `app.rc`. Same rule as above.
@@ -15125,6 +15545,14 @@ unsafe fn fit_window_to_work_area(hwnd: HWND) {
 ///
 /// NFR-13: a refusal answers `None` and the caller leaves the window as the template made it.
 fn monitor_work_area(hwnd: HWND) -> Option<i32> {
+    monitor_work_rect(hwnd).map(|work| work.bottom - work.top)
+}
+
+/// The work area of the monitor `hwnd` is on, as a rectangle of the screen — the one body
+/// [`monitor_work_area`] answers the height of, and решение 143.10 needs the edges of.
+///
+/// NFR-13: a refusal answers `None`.
+pub(crate) fn monitor_work_rect(hwnd: HWND) -> Option<RECT> {
     // SAFETY: `hwnd` is a live window; the call reads a system table and keeps no pointer.
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
 
@@ -15139,7 +15567,27 @@ fn monitor_work_area(hwnd: HWND) -> Option<i32> {
         return None;
     }
 
-    Some(info.rcWork.bottom - info.rcWork.top)
+    Some(info.rcWork)
+}
+
+/// **Where a window that has grown to its content stands** — решение 143.10 (а), задача T-83-3.
+///
+/// `DS_CENTER` centres a window in the work area **for the height of its template**, before
+/// `WM_INITDIALOG`, and the window that then grows to its content grows **downwards** whole
+/// (measured: «От автора» at 100 % stood 130 px from the top and 36 from the bottom). The rule of
+/// the step (решение 143.1) weighs the tallest window as if it stood in the middle, so a grown
+/// window that would not keep [`FONT_STEP_AIR`] above and below where it stands is put **in the
+/// middle of the work area** — never above its top. A window that keeps the air stays exactly where
+/// it stands: at 100 % on the owner's screen that is every window, and not a pixel moves.
+///
+/// Pure: all four numbers are pixels of the screen — the window's top and height, the work area's
+/// top and bottom.
+pub fn grown_window_top(top: i32, height: i32, work_top: i32, work_bottom: i32) -> i32 {
+    if top - work_top >= FONT_STEP_AIR && work_bottom - (top + height) >= FONT_STEP_AIR {
+        return top;
+    }
+
+    (work_top + (work_bottom - work_top - height) / 2).max(work_top)
 }
 
 /// Puts the scroll bar on the window and tells it what it is scrolling — task T-42-12.

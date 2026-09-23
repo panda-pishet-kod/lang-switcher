@@ -5383,18 +5383,27 @@ fn resize_client(hwnd: HWND, current: i32, wanted: i32) {
     }
 
     let chrome = (window.bottom - window.top) - current;
+    let height = wanted + chrome;
+
+    // ⭐ Решение 143.10 (а), задача T-83-3. The manager centred the window for the height of its
+    // template, and the growth goes downwards whole: a window that still keeps the air of the rule
+    // above and below stays exactly where it stands — at 100 % on a 1080p screen every one does,
+    // and nothing moves — and one that does not is put in the middle of the work area of its
+    // monitor. `settings::grown_window_top` is the whole of the choice. NFR-13: a work area that
+    // cannot be read leaves the window where the manager put it, as before this stage.
+    let top = settings::monitor_work_rect(hwnd).map_or(window.top, |work| {
+        settings::grown_window_top(window.top, height, work.top, work.bottom)
+    });
 
     // SAFETY: `hwnd` is the live window; the numbers are plain values and no pointer is passed.
-    // `SWP_NOMOVE` is not asked for — the window is centred by the manager and moving it would
-    // put it somewhere nobody chose.
     let _ = unsafe {
         SetWindowPos(
             hwnd,
             None,
             window.left,
-            window.top,
+            top,
             window.right - window.left,
-            wanted + chrome,
+            height,
             SWP_NOZORDER | SWP_NOACTIVATE,
         )
     };
