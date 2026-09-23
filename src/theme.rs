@@ -728,6 +728,128 @@ pub fn face_at(points: u16, dpi: i32) -> i32 {
     mul_div_round(i32::from(points), dpi, 72)
 }
 
+/// The steps a window of this program can be given, in points — the five of the rule of вопрос 143
+/// (10 down to 6) and, above them, what the debug substitution of задача T-83-3 may force (to 15).
+const WINDOW_STEPS: std::ops::RangeInclusive<u16> = 6..=15;
+
+/// The step of a window whose dialog font came out at `face` pixels on a monitor of `dpi` — the
+/// inverse of [`face_at`] — or **ten**, the template's own, when no step makes that face.
+///
+/// Inverse because a step is a whole point, and at 72 DPI and above a point is at least a pixel, so
+/// two steps never make one face: at 96 DPI they make 8, 9, 11, 12, 13 … px, at 120 DPI 10, 12, 13,
+/// 15, 17 … px. Pure.
+pub fn step_of_face(face: i32, dpi: i32) -> u16 {
+    WINDOW_STEPS
+        .into_iter()
+        .find(|step| face_at(*step, dpi) == face)
+        .unwrap_or(10)
+}
+
+/// The DPI of our drawing in a window of `step` points on a screen of `screen_dpi` — **screen × step
+/// / 10**, решение 143.4. At ten points it is the screen's own, to the unit. Pure.
+pub fn drawing_dpi_at(screen_dpi: i32, step: u16) -> i32 {
+    screen_dpi * i32::from(step) / 10
+}
+
+/// **The DPI this program draws at in the window a DC paints** — задача T-83-4, решение 143.4: the
+/// DPI of the screen × the step of the window's font / 10, and at ten points exactly [`dc_dpi`].
+///
+/// # Why a second lever, and why this one
+///
+/// The font of a window follows its template's `pointsize`, and since вопрос 143 that is the step
+/// the rule chose for the screen: 8 pt at 125 % on a 1080p screen, 7 pt at 150 %. Everything the
+/// **dialog** lays out follows the font by itself — dialog units are shares of it. But everything
+/// **this program draws** — frames, corner radii, insets, the pitch of lines, the logo, the glyphs
+/// — was scaled by the DPI of the screen through [`scaled`], and at 125 % with an 8-point font it
+/// would have been drawn at 125 % around text at 100 %: the proportions go. So the drawing takes the
+/// same step: at 125 % and 8 pt it is drawn at 96, exactly as at 100 %.
+///
+/// # Where the step comes from
+///
+/// **From the window's own font**, read back: the dialog manager made it `MulDiv(step, dpi, 72)`
+/// pixels, and [`step_of_face`] turns the face back into the step. So no window has to be told its
+/// step, no message has to have arrived first — the font exists before the first child is created,
+/// and a `WM_MEASUREITEM` sent during creation already reads it — and a window opened at ten points,
+/// or by the fallback road of NFR-13 straight from the resource, reads ten. The window is the root of
+/// the DC's window (`GetAncestor(GA_ROOT)`); a DC of no window — a memory surface, the screen — reads
+/// ten, which is the look before this stage.
+///
+/// ⚠ **On the DC of the message, never on a buffer**, the rule [`PaintBuffer`] states for [`dc_dpi`]:
+/// a memory surface belongs to no window.
+///
+/// What Windows draws — the scroll bar, the caption of a window, the tray's menu and icon — stays on
+/// the true DPI: it does not come through here.
+pub fn drawing_dpi(dc: HDC) -> i32 {
+    let screen = dc_dpi(dc);
+
+    drawing_dpi_at(screen, window_font_step(dc, screen))
+}
+
+/// The step of the font of the window `dc` paints — [`step_of_face`] of the face the dialog manager
+/// made for its root — or ten when there is no window, no font, or a face no step makes (NFR-13).
+fn window_font_step(dc: HDC, screen_dpi: i32) -> u16 {
+    use windows::Win32::Graphics::Gdi::{GetObjectW, HGDIOBJ, LOGFONTW, WindowFromDC};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GA_ROOT, GetAncestor, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETFONT,
+    };
+
+    // SAFETY: `dc` is a handle passed by value; the call answers the window it belongs to, or
+    // null for a DC of no window.
+    let window = unsafe { WindowFromDC(dc) };
+
+    if window.is_invalid() {
+        return 10;
+    }
+
+    // SAFETY: `window` is the live window just answered; the call walks its parents.
+    let root = unsafe { GetAncestor(window, GA_ROOT) };
+
+    if root.is_invalid() {
+        return 10;
+    }
+
+    let mut font = 0_usize;
+
+    // ⛔ FR-72: no bare `SendMessageW` in `src\` — a bounded send, as `letters::wizard_refresh`.
+    // The window is of this thread and the answer is immediate; the bound is the rule's.
+    //
+    // SAFETY: `root` is live; `WM_GETFONT` carries no pointer and the answer is a handle written
+    // into a live local.
+    let answered = unsafe {
+        SendMessageTimeoutW(
+            root,
+            WM_GETFONT,
+            windows::Win32::Foundation::WPARAM(0),
+            windows::Win32::Foundation::LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            50,
+            Some(&raw mut font),
+        )
+    };
+
+    if answered.0 == 0 || font == 0 {
+        return 10;
+    }
+
+    let mut logical = LOGFONTW::default();
+
+    // SAFETY: `font` is the live font of the dialog, only read; the size argument is the size of
+    // `logical`, a live local, so the call cannot write past it.
+    let copied = unsafe {
+        GetObjectW(
+            HGDIOBJ(font as *mut std::ffi::c_void),
+            i32::try_from(size_of::<LOGFONTW>()).unwrap_or(0),
+            Some((&raw mut logical).cast()),
+        )
+    };
+
+    if copied == 0 {
+        return 10;
+    }
+
+    step_of_face(logical.lfHeight.abs(), screen_dpi)
+}
+
 /// Corner radius of **everything this dialog rounds off** — group panel, input field, closed
 /// part of a combo box, push button and both lists — in the pixels of the mock-ups, п. 1 of
 /// task T-11-16.
@@ -2923,7 +3045,7 @@ pub unsafe fn paint_label_text(
     // The model pitch of В-6 — or the caller's own, task Т-26-2 — or `None`, «one plain call»,
     // which is the drawing of T-11-18 byte for byte. [`label_model_pitch`] is the whole of the
     // decision and is pure.
-    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, dc_dpi(dc)));
+    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, drawing_dpi(dc)));
 
     let model = measured.and_then(|(lines, natural)| {
         label_model_pitch(lines, natural, asked).map(|pitch| (lines, natural, pitch))
@@ -3038,7 +3160,7 @@ pub unsafe fn measure_label(dc: HDC, width: i32, caption: &mut [u16], pitch: Opt
         return height.max(0);
     };
 
-    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, dc_dpi(dc)));
+    let asked = pitch.unwrap_or_else(|| scaled(LABEL_LINE_PITCH, drawing_dpi(dc)));
 
     match label_model_pitch(lines, natural, asked) {
         // The very arithmetic `paint_label_lines` lays the bands out by: line `i` starts at

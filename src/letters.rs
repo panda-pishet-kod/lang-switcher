@@ -2356,7 +2356,7 @@ unsafe fn chip_overhang(dc: HDC, face: HFONT, chip: Chip<'_>, caption: &str) -> 
         key_width,
         chip.height,
         metrics.tmHeight,
-        theme::scaled(theme::BORDER_THICKNESS, theme::dc_dpi(dc)),
+        theme::scaled(theme::BORDER_THICKNESS, theme::drawing_dpi(dc)),
     );
 
     (box_of_chip.width - placeholder).max(0)
@@ -3228,7 +3228,7 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
 
     theme::paint_caption_underline(dc, &client, line);
 
-    let dpi = theme::dc_dpi(dc);
+    let dpi = theme::drawing_dpi(dc);
     let panels: &[i32] = match kind {
         Kind::Letter => &[IDC_LETTER_PANEL],
         Kind::List => &[IDC_LETTERS_PANEL],
@@ -3491,7 +3491,7 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
         return 0;
     };
 
-    let dpi = theme::dc_dpi(dc);
+    let dpi = theme::drawing_dpi(dc);
     let palette = state.palette;
     let frame = demo_frame(state.tick);
 
@@ -3913,7 +3913,7 @@ unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
                         ink: palette.text,
                     },
                     pitch: pitch.unwrap_or(0),
-                    dpi: theme::dc_dpi(dc),
+                    dpi: theme::drawing_dpi(dc),
                 },
             )
         };
@@ -7534,7 +7534,7 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
             // Теперь прямоугольник подписи равен её тексту, а между текстом и полем
             // резервируется зазор макета плюс толщина кромки. Число зазора — [`LABEL_TO_FIELD`],
             // и оно названо пользователем.
-            let dpi = theme::dc_dpi(dc);
+            let dpi = theme::drawing_dpi(dc);
             let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
             let field_x = pad + label_width + theme::scaled(air::LABEL_TO_FIELD, dpi) + thickness;
 
@@ -8085,7 +8085,7 @@ unsafe fn draw_combo_row(
             // Тот же отступ, что был: три единицы диалога окна настроек — это ≈5 px, и шесть
             // пикселей макета через масштаб дают столько же. Число не трогается (решение
             // 109.9: палитра и строки списка раскладок — вне этапа).
-            theme::scaled(6, theme::dc_dpi(dc)),
+            theme::scaled(6, theme::drawing_dpi(dc)),
         );
     }
 
@@ -8116,7 +8116,7 @@ unsafe fn draw_progress(dc: HDC, rect: RECT, state: &WindowState) -> isize {
         i32::try_from(wizard.step + 1).unwrap_or(1).clamp(1, steps)
     };
     let width = rect.right - rect.left;
-    let gap = theme::scaled(4, theme::dc_dpi(dc));
+    let gap = theme::scaled(4, theme::drawing_dpi(dc));
     let each = (width - gap * (steps - 1)) / steps;
 
     for index in 0..steps {
@@ -8157,7 +8157,7 @@ unsafe fn draw_chip(dc: HDC, rect: RECT, state: &WindowState, key: &str) -> isiz
     };
 
     let palette = state.palette;
-    let dpi = theme::dc_dpi(dc);
+    let dpi = theme::drawing_dpi(dc);
 
     // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
     unsafe { FillRect(dc, &rect, brushes.window_bg()) };
@@ -8278,7 +8278,7 @@ unsafe fn draw_card(
     };
 
     let palette = state.palette;
-    let dpi = theme::dc_dpi(dc);
+    let dpi = theme::drawing_dpi(dc);
     let chosen = wizard_is_checked(wizard, control);
 
     // ⚠ **Один кадр вместо череды — задача Т-33-5, находка глазом пользователя.** Тело ниже
@@ -8500,7 +8500,7 @@ unsafe fn draw_glyph(dc: HDC, rect: RECT, state: &WindowState, glyph: Glyph, lab
     };
 
     let palette = state.palette;
-    let dpi = theme::dc_dpi(dc);
+    let dpi = theme::drawing_dpi(dc);
     let colors = theme::glyph_color_roles(glyph.kind, glyph.checked, glyph.disabled);
 
     // The ground of the whole rectangle. It is also what grounds the buffer below: the corners of

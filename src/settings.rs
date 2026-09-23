@@ -163,7 +163,7 @@ use crate::theme::{
     GlyphMarkRole, GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting,
     caption_advance, check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles,
     combo_fill_brush, combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
-    draw_combo_chevron, glyph_color_roles, label_ink, list_frame_air, list_frame_box,
+    draw_combo_chevron, drawing_dpi, glyph_color_roles, label_ink, list_frame_air, list_frame_box,
     list_item_color_roles, measure_chip_row, paint_caption_underline, paint_chip_row,
     paint_ellipse, paint_label, paint_label_at_pitch, paint_rounded, paint_rounded_corners,
     paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
@@ -8342,7 +8342,7 @@ unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
             selected,
             checked,
             palette,
-            dc_dpi(draw.nmcd.hdc),
+            drawing_dpi(draw.nmcd.hdc),
         );
     }
 
@@ -8669,7 +8669,7 @@ pub(crate) unsafe fn paint_push_button(
     // `debug_assert` handing the forger a crash of a debug build, and no journal row for
     // GDI refusals (reviews\T-11-1.md).
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     // ⚠ **Один кадр вместо череды — task T-15-1.** The surface the steps below are drawn onto.
     // Every one of them used to write straight into the DC of the message, and DWM samples the
@@ -9235,7 +9235,7 @@ unsafe fn draw_list_item(
         return 0;
     };
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     // NFR-13, for the paint calls below: every answer is deliberately dropped, for the reason
     // `draw_combo_item` states for its own.
@@ -9552,7 +9552,7 @@ unsafe fn draw_glyph_element(
         return 0;
     };
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
     // and the same cure task T-15-1 gave the push buttons. Measured on the стенд with a self-check
@@ -10332,7 +10332,7 @@ unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
         return 0;
     };
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     if !ready {
         // Built **outside** every borrow of the state, exactly as the drawing of every other
@@ -11804,7 +11804,7 @@ unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC, reference_data: usize) {
         return;
     };
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
     // and the same cure task T-15-1 gave the push buttons: a string of separate GDI calls
@@ -12596,7 +12596,7 @@ unsafe fn patch_list_corners(list: HWND) {
         return;
     }
 
-    let dpi = dc_dpi(dc);
+    let dpi = drawing_dpi(dc);
 
     // The figure is the frame of the **window**; `client` is only the licence — what of that
     // figure this DC is allowed to write. A corner that falls wholly in the non-client scroll bar
@@ -14703,7 +14703,22 @@ pub fn install_check_images(hwnd: HWND) {
         .map(|(_, vertical)| (vertical - LVIEW_ROW_OVERHEAD).max(0))
         .unwrap_or(0);
 
-    let Some(list) = build_check_image_list(row_height) else {
+    // Задача T-83-4: the cell is cut at the DPI of this window's drawing — the step of its font
+    // taken into account — and not at the screen's.
+    //
+    // SAFETY: `hwnd` is the live dialog; the DC is released right after the one question.
+    let dpi = unsafe {
+        let dc = GetDC(Some(hwnd));
+        let dpi = drawing_dpi(dc);
+
+        if !dc.is_invalid() {
+            ReleaseDC(Some(hwnd), dc);
+        }
+
+        dpi
+    };
+
+    let Some(list) = build_check_image_list(row_height, dpi) else {
         // NFR-13, examined in words: with no cells of our own the system pair simply stays —
         // its own row height, its own column, and its light squares drawn over the tick this
         // dialog paints — which is a coarser list rather than no list. No journal row for
@@ -14836,7 +14851,14 @@ impl Drop for ImageList {
 /// The answer is an [`ImageList`] since task T-43-14: the caller owns it, and it frees itself
 /// unless it is released to a control that has been seen to hold it (see
 /// [`install_check_images`]). A test that only draws the cells lets it go out of scope.
-pub fn build_check_image_list(row_height: i32) -> Option<ImageList> {
+///
+/// ⚠ **`dpi` is the DPI of the drawing of the window the list is for — задача T-83-4.** Until
+/// this stage the cell was sized by the DPI of the **screen** DC the build hangs from, the one
+/// place of the 28 that asked a DC of no window: it could not know the step of the window's font,
+/// and at 125 % with an 8-point window it would have cut a 125 % cell beside rows of 100 %. The
+/// caller asks [`drawing_dpi`] of the window and hands the answer down; the screen DC is kept for
+/// what it is for — the colour depth of the cells.
+pub fn build_check_image_list(row_height: i32, dpi: i32) -> Option<ImageList> {
     // SAFETY: the screen DC of this process; released below, on every path.
     let screen = unsafe { GetDC(None) };
 
@@ -14845,7 +14867,7 @@ pub fn build_check_image_list(row_height: i32) -> Option<ImageList> {
         return None;
     }
 
-    let list = build_check_frames(screen, row_height);
+    let list = build_check_frames(screen, row_height, dpi);
 
     // SAFETY: releases exactly the DC taken above, once.
     unsafe { ReleaseDC(None, screen) };
@@ -14857,7 +14879,7 @@ pub fn build_check_image_list(row_height: i32) -> Option<ImageList> {
 /// through. ⚠ The bitmaps are compatible with the **screen**, not with this DC: a memory DC
 /// is born with a monochrome bitmap selected, and a bitmap compatible with *it* would carry
 /// one bit per pixel — the classic trap the task's «в память» route walks past.
-fn build_check_frames(screen: HDC, row_height: i32) -> Option<ImageList> {
+fn build_check_frames(screen: HDC, row_height: i32, dpi: i32) -> Option<ImageList> {
     // SAFETY: a memory DC over the live screen DC; deleted below, on every path.
     let dc = unsafe { CreateCompatibleDC(Some(screen)) };
 
@@ -14866,7 +14888,7 @@ fn build_check_frames(screen: HDC, row_height: i32) -> Option<ImageList> {
         return None;
     }
 
-    let list = draw_frames_into_list(screen, dc, row_height);
+    let list = draw_frames_into_list(screen, dc, row_height, dpi);
 
     // SAFETY: deletes exactly the DC created above, once; the cell bitmaps were deselected
     // before their own deletion, so nothing of ours is still selected into it.
@@ -14900,11 +14922,10 @@ const CHECK_CELL_KEY: COLORREF = COLORREF(0x00FF_00FF);
 /// The two cells are identical and empty; the order constant is still what counts them, because
 /// what it says — one cell per state image index, «снята» first — is exactly what has to stay
 /// true for the participation bits of FR-31 to keep landing on a cell that exists.
-fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32) -> Option<ImageList> {
-    // The whole cell, in the pixels of the screen it is made for — the DPI of the
-    // screen DC this whole build hangs from (NFR-13: a DC that will not say is answered as 96
-    // by `dc_dpi`, which is the 100 % cell).
-    let dpi = dc_dpi(screen);
+fn draw_frames_into_list(screen: HDC, dc: HDC, row_height: i32, dpi: i32) -> Option<ImageList> {
+    // The whole cell, in the pixels of the window it is made for — the DPI of its drawing,
+    // handed down by the caller (задача T-83-4; NFR-13 lives there: a DC that will not say is
+    // answered as 96 by `dc_dpi`, which is the 100 % cell).
     let cell = check_cell(dpi, row_height);
 
     // Owned by this frame until it is handed to the caller, and freed by its own `Drop` on every
@@ -16465,7 +16486,7 @@ impl AboutLogo {
 
         // NFR-13 is one level down: `dc_dpi` answers 96 for a DC that will not say, which is
         // the 100 % size and a legal one.
-        let size = scaled(ABOUT_LOGO_SIZE, dc_dpi(dc));
+        let size = scaled(ABOUT_LOGO_SIZE, drawing_dpi(dc));
 
         if !dc.is_invalid() {
             // SAFETY: releases exactly the DC taken above, once.
@@ -17004,7 +17025,7 @@ unsafe fn fit_about_help(hwnd: HWND) {
         body: Some(body),
         chip_face: Some(chip),
         pitch,
-        dpi: dc_dpi(dc),
+        dpi: drawing_dpi(dc),
     };
 
     // The rectangles the template gave the five rows and their numerals, in the client
@@ -17325,7 +17346,7 @@ unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
     {
         // NFR-13 one level down: `dc_dpi` answers 96 for a DC that will not say, which is the
         // 100 % size and a legal one.
-        let dpi = dc_dpi(dc);
+        let dpi = drawing_dpi(dc);
 
         paint_rounded(
             dc,
@@ -17703,7 +17724,7 @@ pub(crate) unsafe fn paint_program_name(
         chip.radius,
         colors.border,
         colors.face,
-        theme::dc_dpi(dc),
+        theme::drawing_dpi(dc),
     );
 
     // ⚠⚠ And the text lands where it landed before the rectangle grew. The rectangle moved 4
@@ -17953,8 +17974,11 @@ unsafe fn draw_about_help_row(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> 
                     },
                     // Task T-43-5, finding Н69: a window whose faces were refused draws its
                     // sentences at the pitch of a settings label, not on top of each other.
-                    pitch: about_help_row_pitch(fonts.map(DialogFonts::body_pitch), dc_dpi(dc)),
-                    dpi: dc_dpi(dc),
+                    pitch: about_help_row_pitch(
+                        fonts.map(DialogFonts::body_pitch),
+                        drawing_dpi(dc),
+                    ),
+                    dpi: drawing_dpi(dc),
                 },
                 state.hotkey.clone(),
             ))

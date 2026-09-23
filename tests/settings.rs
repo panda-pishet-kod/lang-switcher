@@ -4279,7 +4279,9 @@ fn a_state_image_list_the_control_never_took_is_freed_and_not_lost() {
         let held = windows::Win32::UI::Controls::HIMAGELIST(held);
         // A window that is not a dialog maps no dialog units, so the cell the popup was given is
         // the one built for a row height of zero — built here the same way, and freed by its owner.
-        let fresh = settings::build_check_image_list(0).expect("the state image list must build");
+        // A popup carries no font of a step, so its drawing goes at the screen's own DPI (T-83-4).
+        let fresh = settings::build_check_image_list(0, screen_dpi())
+            .expect("the state image list must build");
 
         println!(
             "the control holds a list of {:?} cells, {} of them; a fresh list of this program is \
@@ -5794,36 +5796,60 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
         "the instrument does not see the clip of решение 117б: {clipped} px in {old_slot} px"
     );
 
-    let mut widest = (0, String::new());
+    // Задача T-83-4, развилка C3: at every face the rule may open the window at, not at 13 px
+    // alone. The control above is of the template's own face, where решение 117б was measured.
+    let mut clips = Vec::new();
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = (SLOT_UNITS * base + 2) / 4;
+        let mut widest = (0, String::new());
 
-        for id in [settings::IDS_LOG_SAVE, settings::IDS_LOG_SAVED] {
-            let caption = settings::text(id);
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-            assert!(
-                !caption.trim().is_empty(),
-                "{language:?}: string {id} did not load — the instrument would measure nothing"
-            );
+            for id in [settings::IDS_LOG_SAVE, settings::IDS_LOG_SAVED] {
+                let caption = settings::text(id);
 
-            let width = extent_of(&sheet, &face, &caption).cx;
+                assert!(
+                    !caption.trim().is_empty(),
+                    "{language:?}: string {id} did not load — the instrument would measure nothing"
+                );
 
-            if width > widest.0 {
-                widest = (width, format!("{language:?} «{caption}»"));
+                let width = extent_of(&sheet, &face, &caption).cx;
+
+                if width > widest.0 {
+                    widest = (width, format!("{language:?} «{caption}»"));
+                }
+
+                if width > slot {
+                    clips.push(format!(
+                        "{pixels} px, {language:?}: «{caption}» takes {width} px and the button \
+                         is {slot} px ({SLOT_UNITS} units at a base unit of {base})"
+                    ));
+                }
             }
-
-            assert!(
-                width <= slot,
-                "{language:?}: «{caption}» takes {width} px and the button is {slot} px \
-                 ({SLOT_UNITS} units at a base unit of {base}) — the caption would be clipped"
-            );
         }
+
+        println!(
+            "{pixels} px: the widest caption {} px of {slot} — {}",
+            widest.0, widest.1
+        );
     }
 
-    println!("the widest caption: {} px — {}", widest.0, widest.1);
-
     settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3 — the caption would be clipped: {clips:#?}"
+    );
 }
 
 /// **Task T-71-1, finding Э70-Б-1 — the gate of the about window paints both of its buttons.**
@@ -7145,6 +7171,70 @@ fn units_of_client(pixels: i32, cell: i32) -> i32 {
     units
 }
 
+/// **Every face, with the DPI of its drawing, the rule of вопрос 143 may open the windows at** on
+/// the scales Windows offers — 100, 125, 150, 175, 200, 225, 250 and 300 % × the steps 10…6 pt, the
+/// face not under the floor (задача T-83-4, развилка C3). Sorted by face; a face two scales make
+/// with two drawing DPIs is there twice.
+///
+/// The fitting stands of П9 measure at every one of these, not at the 13 px of 100 % alone: at 15
+/// and 17 px a text is wider against the dialog unit than at 13 (13 / 7 = 1,857; 15 / 8 = 1,875;
+/// 17 / 9 = 1,889), and a caption that fits at 100 % may not fit there.
+fn rule_configurations() -> Vec<(i32, i32)> {
+    const DPIS: [i32; 8] = [96, 120, 144, 168, 192, 216, 240, 288];
+
+    let mut all = Vec::new();
+
+    for dpi in DPIS {
+        for step in settings::FONT_STEPS {
+            let face = theme::face_at(step, dpi);
+
+            if face >= settings::FONT_STEP_FLOOR {
+                all.push((face, theme::drawing_dpi_at(dpi, step)));
+            }
+        }
+    }
+
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
+/// The faces of [`rule_configurations`], each once — for the stands whose measure does not depend
+/// on the DPI of the drawing (a caption against a slot of dialog units).
+fn rule_faces() -> Vec<i32> {
+    let mut faces: Vec<i32> = rule_configurations()
+        .into_iter()
+        .map(|(face, _)| face)
+        .collect();
+
+    faces.dedup();
+    faces
+}
+
+/// The dialog's own face at `face` pixels — the manager's `LOGFONTW` of `font` with the height the
+/// step makes.
+fn manager_face_at(sheet: &Sheet, font: &TemplateFont, face: i32) -> LOGFONTW {
+    LOGFONTW {
+        lfHeight: -face,
+        ..manager_logfont(sheet.dc, font, CLEARTYPE_QUALITY)
+    }
+}
+
+/// The DPI of the screen DC of this process — what the state image list was cut at before задача
+/// T-83-4 handed it the DPI of its window's drawing. A test's own windows carry no font of a step,
+/// so their drawing goes at exactly this.
+fn screen_dpi() -> i32 {
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+
+    // SAFETY: the screen DC of this process, released right after the one question.
+    unsafe {
+        let screen = GetDC(None);
+        let dpi = theme::dc_dpi(screen);
+        ReleaseDC(None, screen);
+        dpi
+    }
+}
+
 /// The cell of Segoe UI at `face` pixels — `tmHeight`, the vertical base unit, asked of GDI.
 fn cell_of(face: i32) -> i32 {
     let base = dialog_face_at(face);
@@ -7929,6 +8019,250 @@ fn both_show_calls_put_the_step_by_the_one_body() {
     assert_eq!(calls(&of_e82), (0, 0), "the control must be caught");
 }
 
+/// The code of the four files of the windows, comment lines dropped — what the sweep of задача
+/// T-83-4 reads. ⛔ Prose beside code names the construction it replaced (the lesson of Э81), so a
+/// comment is never counted as a call.
+fn window_code() -> Vec<(&'static str, String)> {
+    ["letters.rs", "settings.rs", "theme.rs", "widgets.rs"]
+        .into_iter()
+        .map(|file| {
+            let text =
+                fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file))
+                    .unwrap_or_else(|_| panic!("src\\{file} must be readable"))
+                    .replace("\r\n", "\n");
+            (file, text)
+        })
+        .collect()
+}
+
+/// Where the screen's own DPI is asked in the code of the windows: every `dc_dpi(` outside the two
+/// places allowed to ask it — the one function of our drawing, which multiplies it by the step, and
+/// the measuring of the monitor before a window exists, which is not drawing (задача T-83-3).
+fn screen_dpi_askers(files: &[(&'static str, String)]) -> Vec<String> {
+    let allowed = |body_of: &str, text: &str| -> usize {
+        if !text.contains(body_of) {
+            return 0;
+        }
+
+        function_body(text, body_of)
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .map(|line| line.matches("dc_dpi(").count())
+            .sum()
+    };
+
+    let mut found = Vec::new();
+
+    for (file, text) in files {
+        let calls: usize = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .map(|line| line.matches("dc_dpi(").count())
+            .sum();
+
+        let definitions =
+            usize::from(*file == "theme.rs" && text.contains("pub fn dc_dpi(dc: HDC)"));
+        let permitted = allowed("pub fn drawing_dpi(dc: HDC) -> i32 {", text)
+            + allowed(
+                "pub fn screen_of(owner: HWND, template: &[u8]) -> Option<Screen> {",
+                text,
+            );
+
+        let extra = calls.saturating_sub(definitions + permitted);
+
+        if extra > 0 {
+            found.push(format!("{file}: {extra}"));
+        }
+    }
+
+    found
+}
+
+/// **⛔⛔ All our drawing goes by the step — задача T-83-4, решение 143.4.**
+///
+/// The 28 places of the windows that scaled a frame, a radius, an inset, the pitch of a line, the
+/// logo or a glyph by the DPI of the **screen** go through `theme::drawing_dpi` now — the screen ×
+/// the step of the window's font / 10. The sweep reads the four files of the windows and finds no
+/// `dc_dpi(` outside that function and the measuring of the monitor.
+///
+/// ⚠ Отрицательный контроль: the text of `e82` — every `drawing_dpi(` put back to `dc_dpi(` — is
+/// caught at the 28 places, and the mutant of the task — one place put back — at the one.
+#[test]
+fn all_our_drawing_goes_by_the_step() {
+    let files = window_code();
+
+    let askers = screen_dpi_askers(&files);
+    assert!(
+        askers.is_empty(),
+        "⛔⛔ drawing by the screen's DPI, not by the step: {askers:?}"
+    );
+
+    let calls: usize = files
+        .iter()
+        .map(|(_, text)| {
+            text.lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .map(|line| line.matches("drawing_dpi(").count())
+                .sum::<usize>()
+        })
+        .sum();
+
+    // The 28 places, the definition, and its one use inside the function itself is none — the
+    // body asks `dc_dpi`.
+    assert_eq!(calls, 28 + 1, "the 28 places of П4 and the definition");
+
+    // ⚠ Контроль «текст e82»: every place put back.
+    let of_e82: Vec<(&'static str, String)> = files
+        .iter()
+        .map(|(file, text)| {
+            (
+                *file,
+                text.replace(
+                    "pub fn drawing_dpi(dc: HDC)",
+                    "pub fn drawing_dpi_KEPT(dc: HDC)",
+                )
+                .replace("drawing_dpi(", "dc_dpi(")
+                .replace(
+                    "pub fn drawing_dpi_KEPT(dc: HDC)",
+                    "pub fn drawing_dpi(dc: HDC)",
+                ),
+            )
+        })
+        .collect();
+    let caught: usize = screen_dpi_askers(&of_e82)
+        .iter()
+        .map(|line| {
+            line.rsplit(": ")
+                .next()
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(0)
+        })
+        .sum();
+    assert_eq!(
+        caught, 28,
+        "the text of e82 must be caught at all 28 places"
+    );
+
+    // ⚠ Контроль «мутант задачи»: one place of `letters.rs` put back.
+    let mutant: Vec<(&'static str, String)> = files
+        .iter()
+        .map(|(file, text)| {
+            let changed = if *file == "letters.rs" {
+                text.replacen("theme::drawing_dpi(dc)", "theme::dc_dpi(dc)", 1)
+            } else {
+                text.clone()
+            };
+            (*file, changed)
+        })
+        .collect();
+    assert_eq!(
+        screen_dpi_askers(&mutant),
+        vec!["letters.rs: 1".to_owned()],
+        "one place put back must be caught"
+    );
+}
+
+/// **The DPI of our drawing is the screen's at ten points and the step's below — задача T-83-4.**
+///
+/// The pure halves: the face turned back into its step, and the step into the DPI of the drawing.
+#[test]
+fn the_drawing_dpi_follows_the_step_of_the_font() {
+    // A step makes one face, and the face gives the step back.
+    for dpi in [96, 120, 144, 168, 192] {
+        for step in 6..=15_u16 {
+            let face = theme::face_at(step, dpi);
+            assert_eq!(
+                theme::step_of_face(face, dpi),
+                step,
+                "{dpi} DPI: {step} pt is {face} px, and {face} px must read {step} pt back"
+            );
+        }
+    }
+
+    // A face no step makes reads the template's own ten.
+    assert_eq!(theme::step_of_face(10, 96), 10);
+
+    // At ten points the drawing is the screen's to the unit; at eight on 96 DPI it is 76.
+    for dpi in [96, 120, 144, 168, 192] {
+        assert_eq!(theme::drawing_dpi_at(dpi, 10), dpi);
+    }
+    assert_eq!(theme::drawing_dpi_at(96, 8), 96 * 8 / 10);
+    assert_eq!(
+        theme::drawing_dpi_at(120, 8),
+        96,
+        "125 % at 8 pt draws as 100 %"
+    );
+    assert_eq!(theme::drawing_dpi_at(144, 7), 100);
+}
+
+/// **The live window draws by its step — задача T-83-4, the check of the function on a window.**
+///
+/// «От автора», hidden, at ten points and at eight on this 96-DPI machine: at ten its drawing DPI
+/// is the screen's own; at eight it is 96 × 8 / 10, and the corner radius, the frame, the pitch of
+/// a line and the logo are `scaled(x, 76)` — the logo is read off the window itself, the size of its
+/// icon control after `STM_SETICON`.
+///
+/// ⚠ «Красное до»: the drawing of `e82` ignores the step — 96 and a 40 px logo at eight points.
+#[cfg(feature = "testing")]
+#[test]
+fn the_live_window_draws_by_its_step() {
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::Ru);
+
+    let at = |step: u16| -> (i32, i32, i32) {
+        settings::testing::with_font_step(step, || {
+            let window = HiddenAuthor::open("0.83.0");
+            // SAFETY: the window is live for this block; the DC is released at once.
+            let (screen, drawing) = unsafe {
+                let dc = GetDC(Some(window.window));
+                let answer = (theme::dc_dpi(dc), theme::drawing_dpi(dc));
+                ReleaseDC(Some(window.window), dc);
+                answer
+            };
+            let logo = window.control_rect(1260);
+            (screen, drawing, logo.right - logo.left)
+        })
+    };
+
+    let (screen, at_ten, logo_at_ten) = at(10);
+    let (_, at_eight, logo_at_eight) = at(8);
+
+    println!(
+        "screen {screen} DPI; drawing at 10 pt {at_ten}, logo {logo_at_ten} px; at 8 pt {at_eight}, \
+         logo {logo_at_eight} px"
+    );
+
+    assert_eq!(
+        at_ten, screen,
+        "at ten points our drawing is the screen's own DPI"
+    );
+    assert_eq!(
+        at_eight,
+        screen * 8 / 10,
+        "at eight points it is the screen's × 8 / 10"
+    );
+    assert_eq!(
+        logo_at_eight,
+        theme::scaled(56, screen * 8 / 10),
+        "the logo is scaled by the step"
+    );
+    assert_eq!(logo_at_ten, theme::scaled(56, screen));
+
+    for (what, length) in [
+        ("the corner radius", 6),
+        ("the frame", 1),
+        ("a line's pitch", 23),
+    ] {
+        assert_eq!(
+            theme::scaled(length, at_eight),
+            theme::scaled(length, screen * 8 / 10),
+            "{what} at eight points"
+        );
+    }
+}
+
 /// **⛔ A grown window moves only when it would leave the air of the rule — решение 143.10 (а),
 /// задача T-83-3.**
 ///
@@ -8290,40 +8624,57 @@ fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
         "the instrument cannot see a clip in this slot at all: {tripled} px in {slot} px"
     );
 
-    let mut widest = (0, String::new());
+    // Задача T-83-4, развилка C3: at every face the rule may open the window at.
     let mut clips = Vec::new();
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = (SLOT_UNITS * base + 2) / 4;
+        let mut widest = (0, String::new());
 
-        let caption = settings::text(settings::IDS_ABOUT_AUTHOR);
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-        assert!(
-            !caption.trim().is_empty(),
-            "{language:?}: the caption did not load — the instrument would measure nothing"
+            let caption = settings::text(settings::IDS_ABOUT_AUTHOR);
+
+            assert!(
+                !caption.trim().is_empty(),
+                "{language:?}: the caption did not load — the instrument would measure nothing"
+            );
+
+            let width = extent_of(&sheet, &face, &caption).cx;
+
+            if width > widest.0 {
+                widest = (width, format!("{language:?} «{caption}»"));
+            }
+
+            if width > slot {
+                clips.push(format!(
+                    "{pixels} px, {language:?} «{caption}» {width} px of {slot} px ({SLOT_UNITS} \
+                     units at a base unit of {base})"
+                ));
+            }
+        }
+
+        println!(
+            "{pixels} px: the widest caption {} px of {slot} — {}",
+            widest.0, widest.1
         );
-
-        let width = extent_of(&sheet, &face, &caption).cx;
-
-        println!("{language:?}: «{caption}» {width} px of {slot}");
-
-        if width > widest.0 {
-            widest = (width, format!("{language:?} «{caption}»"));
-        }
-
-        if width > slot {
-            clips.push(format!("{language:?} «{caption}» {width} px"));
-        }
     }
-
-    println!("the widest caption: {} px — {}", widest.0, widest.1);
 
     settings::set_ui_language(Language::Ru);
 
     assert!(
         clips.is_empty(),
-        "развилка C3: the button is {slot} px ({SLOT_UNITS} units at a base unit of {base}) and \
-         the caption is clipped in {clips:?} — the width or the caption is the owner's to choose"
+        "развилка C3: the caption is clipped in {clips:#?} — the width or the caption is the \
+         owner's to choose"
     );
 }
 
@@ -8372,46 +8723,71 @@ fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
         "the instrument cannot see an overflow at all: {overflowing} px against {ceiling} px"
     );
 
-    let mut tallest = (0, String::new());
+    // Задача T-83-4, развилка C3: at every face the rule may open the window at.
+    let mut clips = Vec::new();
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = (SLOT_UNITS * base + 2) / 4;
+        let line = extent_of(&sheet, &face, "Ag").cy;
+        let ceiling = line * SLOT_LINES;
+        let mut tallest = (0, String::new());
 
-        for refusal in [
-            settings::Refusal::Modifier,
-            settings::Refusal::Combination,
-            settings::Refusal::Emergency,
-            settings::Refusal::Reserved,
-            settings::Refusal::Editing,
-            settings::Refusal::Text,
-            settings::Refusal::Nameless,
-        ] {
-            let sentence = settings::text(refusal.string_id());
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-            assert!(
-                !sentence.trim().is_empty(),
-                "{language:?}: {refusal:?} did not load — the instrument would measure nothing"
-            );
+            for refusal in [
+                settings::Refusal::Modifier,
+                settings::Refusal::Combination,
+                settings::Refusal::Emergency,
+                settings::Refusal::Reserved,
+                settings::Refusal::Editing,
+                settings::Refusal::Text,
+                settings::Refusal::Nameless,
+            ] {
+                let sentence = settings::text(refusal.string_id());
 
-            let height = wrapped_height(&sheet, &face, &sentence, slot);
+                assert!(
+                    !sentence.trim().is_empty(),
+                    "{language:?}: {refusal:?} did not load — the instrument would measure nothing"
+                );
 
-            if height > tallest.0 {
-                tallest = (height, format!("{language:?} {refusal:?} «{sentence}»"));
+                let height = wrapped_height(&sheet, &face, &sentence, slot);
+
+                if height > tallest.0 {
+                    tallest = (height, format!("{language:?} {refusal:?} «{sentence}»"));
+                }
+
+                if height > ceiling {
+                    clips.push(format!(
+                        "{pixels} px, {language:?}: {refusal:?} «{sentence}» wraps to {height} px \
+                         and the note holds {ceiling} px ({SLOT_LINES} lines of {line} px, \
+                         {SLOT_UNITS} units wide at a base unit of {base})"
+                    ));
+                }
             }
-
-            assert!(
-                height <= ceiling,
-                "{language:?}: {refusal:?} «{sentence}» wraps to {height} px and the note holds \
-                 {ceiling} px ({SLOT_LINES} lines of {line} px, {SLOT_UNITS} units wide at a \
-                 base unit of {base}) — the third line would be outside the control and the \
-                 tail of the sentence would be gone"
-            );
         }
+
+        println!(
+            "{pixels} px: the tallest refusal {} px of {ceiling} — {}",
+            tallest.0, tallest.1
+        );
     }
 
-    println!("the tallest refusal: {} px — {}", tallest.0, tallest.1);
-
     settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3 — the third line would be outside the control and the tail of the sentence \
+         would be gone: {clips:#?}"
+    );
 }
 
 /// How tall `text` becomes when it is wrapped into `width` — the measure of a two-line label.
@@ -8487,38 +8863,61 @@ fn the_health_line_of_the_state_panel_fits_in_all_fourteen_languages() {
         "the instrument cannot see a clip at all: {too_wide} px in {slot} px"
     );
 
-    let mut widest = (0, String::new());
+    // Задача T-83-4, развилка C3: at every face the rule may open the window at.
+    let mut clips = Vec::new();
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = (SLOT_UNITS * base + 2) / 4;
+        let mut widest = (0, String::new());
 
-        let health = settings::format_text(settings::IDS_STATE_HEALTH, &["144", "144", "144"]);
-        let line = settings::format_text(
-            settings::IDS_STATE_JOINED,
-            &[&settings::text(settings::IDS_STATE_WORKING), &health],
-        );
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-        assert!(
-            line.contains("144"),
-            "{language:?}: the numbers did not reach the line — «{line}»"
-        );
+            let health = settings::format_text(settings::IDS_STATE_HEALTH, &["144", "144", "144"]);
+            let line = settings::format_text(
+                settings::IDS_STATE_JOINED,
+                &[&settings::text(settings::IDS_STATE_WORKING), &health],
+            );
 
-        let width = extent_of(&sheet, &face, &line).cx;
+            assert!(
+                line.contains("144"),
+                "{language:?}: the numbers did not reach the line — «{line}»"
+            );
 
-        if width > widest.0 {
-            widest = (width, format!("{language:?} «{line}»"));
+            let width = extent_of(&sheet, &face, &line).cx;
+
+            if width > widest.0 {
+                widest = (width, format!("{language:?} «{line}»"));
+            }
+
+            if width > slot {
+                clips.push(format!(
+                    "{pixels} px, {language:?}: «{line}» takes {width} px and the control is \
+                     {slot} px ({SLOT_UNITS} units at a base unit of {base})"
+                ));
+            }
         }
 
-        assert!(
-            width <= slot,
-            "{language:?}: «{line}» takes {width} px and the control is {slot} px \
-             ({SLOT_UNITS} units at a base unit of {base}) — the line would be clipped"
+        println!(
+            "{pixels} px: the widest health line {} px of {slot} — {}",
+            widest.0, widest.1
         );
     }
 
-    println!("the widest health line: {} px — {}", widest.0, widest.1);
-
     settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3 — the line would be clipped: {clips:#?}"
+    );
 }
 
 /// **Task T-42-2, finding С44, решение 124.4** — every sentence of the «Как пользоваться»
@@ -8557,20 +8956,6 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
         .expect("the about template declares DS_SETFONT");
 
     let sheet = Sheet::new(64);
-    let base = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
-
-    // The body face and the chip face the window builds out of the manager's — the very two
-    // `DialogFonts` hands the drawing.
-    let body = Face::new(settings::about_body_logfont(base));
-    let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
-    let chip = Face::new(chip_logical);
-
-    let metrics = theme::ChipRowMetrics {
-        body: Some(body.0),
-        chip_face: Some((chip.0, chip_logical.lfHeight)),
-        pitch: settings::about_body_line_pitch(settings::about_body_logfont(base).lfHeight.abs()),
-        dpi: 96,
-    };
 
     let bounds = |id: u32| {
         template
@@ -8581,112 +8966,137 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
             .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
     };
 
-    // The base unit of this template, by the manager's own rule — see the test above.
-    let letters = extent_of(
-        &sheet,
-        &Face::new(base),
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    )
-    .cx;
-    let unit_x = (letters / 26 + 1) / 2;
-    let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
+    // Задача T-83-4, развилка C3: at every face the rule may open the window at, with the DPI its
+    // drawing then goes at — the chip's air is scaled by that DPI, so here it is the pair.
+    let mut clips = Vec::new();
 
-    println!("about template: base unit {unit_x}/4 by x, {unit_y}/8 by y");
+    for (pixels, drawing) in rule_configurations() {
+        let base = manager_face_at(&sheet, &font, pixels);
 
-    // The name the chip is drawn with: the **widest** one the program can put there, so the
-    // row is measured at its worst (finding Н85 — the fitting stand used to measure one).
-    let widest_key = (1_u16..=254)
-        .filter_map(settings::key_name)
-        .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
-        .expect("the program must name at least one key");
+        // The body face and the chip face the window builds out of the manager's — the very two
+        // `DialogFonts` hands the drawing.
+        let body = Face::new(settings::about_body_logfont(base));
+        let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
+        let chip = Face::new(chip_logical);
 
-    println!("the widest key name: «{widest_key}»");
+        let metrics = theme::ChipRowMetrics {
+            body: Some(body.0),
+            chip_face: Some((chip.0, chip_logical.lfHeight)),
+            pitch: settings::about_body_line_pitch(
+                settings::about_body_logfont(base).lfHeight.abs(),
+            ),
+            dpi: drawing,
+        };
 
-    let mut tightest = (i32::MAX, String::new());
+        // The base unit of this template, by the manager's own rule — see the test above.
+        let letters = extent_of(
+            &sheet,
+            &Face::new(base),
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit_x = (letters / 26 + 1) / 2;
+        let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+        // The name the chip is drawn with: the **widest** one the program can put there, so the
+        // row is measured at its worst (finding Н85 — the fitting stand used to measure one).
+        let widest_key = (1_u16..=254)
+            .filter_map(settings::key_name)
+            .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
+            .expect("the program must name at least one key");
 
-        for (row, string) in [
-            (1131_u32, settings::IDS_ABOUT_HELP_1),
-            (1132, settings::IDS_ABOUT_HELP_2),
-            (1133, settings::IDS_ABOUT_HELP_3),
-            (1134, settings::IDS_ABOUT_HELP_4),
-            (1135, settings::IDS_ABOUT_HELP_5),
-        ] {
-            let sentence = settings::text(string);
+        let mut tightest = (i32::MAX, String::new());
 
-            assert!(
-                !sentence.trim().is_empty(),
-                "{language:?}: string {string} did not load — the instrument would measure nothing"
-            );
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-            let (units_w, units_h) = bounds(row);
-            let width = (units_w * unit_x + 2) / 4;
-            let height = (units_h * unit_y + 4) / 8;
-
-            for key in [widest_key.as_str(), "Pause"] {
-                // SAFETY: the sheet's DC is live and both faces outlive the call; nothing is
-                // drawn — this is the measuring half of the pair.
-                let (lines, needed) = unsafe {
-                    theme::measure_chip_row(
-                        sheet.dc,
-                        width,
-                        theme::chip_row(&sentence, key),
-                        metrics,
-                    )
-                }
-                .expect("the memory DC must answer the metrics of its own face");
-
-                // ⭐⭐ **The one named exception of решение 128.4 is GONE, and задача T-81-1 is
-                // what took it away.** With its caveat the Greek third row and the widest key
-                // name used to wrap into **four** lines in a column of 142 units — one more than
-                // the slot had — and took the fourth from the live fit
-                // (`settings::fit_about_help`). The column is **207** units since решение 142.2
-                // п. 2, and the same sentence wraps into **three**.
-                //
-                // ⚠ The case is still named, because «the exception went away» is a statement and
-                // not a forgetting: it is held to fitting its slot outright. If a wording, a face
-                // or a width ever puts it over again, this line goes red before the general
-                // assertion below does, and it says which case came back.
-                if language == Language::El && row == 1133 && key == widest_key.as_str() {
-                    assert!(
-                        lines <= 3 && needed <= height,
-                        "El row 1133 with «{key}» was the one exception of решение 128.4 and task \
-                         T-81-1 closed it by widening the column; it wraps into {lines} lines and \
-                         wants {needed} px of the {units_h} units = {height} px it has — the \
-                         exception has come back and must be re-decided"
-                    );
-
-                    println!(
-                        "the exception of решение 128.4, closed by T-81-1: El row {row} key \
-                         «{key}» — {lines} lines, {needed} px against {height} px"
-                    );
-                }
-
-                if height - needed < tightest.0 {
-                    tightest = (
-                        height - needed,
-                        format!("{language:?} row {row} key «{key}»: {lines} lines"),
-                    );
-                }
+            for (row, string) in [
+                (1131_u32, settings::IDS_ABOUT_HELP_1),
+                (1132, settings::IDS_ABOUT_HELP_2),
+                (1133, settings::IDS_ABOUT_HELP_3),
+                (1134, settings::IDS_ABOUT_HELP_4),
+                (1135, settings::IDS_ABOUT_HELP_5),
+            ] {
+                let sentence = settings::text(string);
 
                 assert!(
-                    needed <= height,
-                    "{language:?}: row {row} wraps into {lines} lines and wants {needed} px, \
-                     the template gives it {units_h} units = {height} px — the last line would \
-                     be cut off by the clip of paint_chip_row. Sentence: «{sentence}»"
+                    !sentence.trim().is_empty(),
+                    "{language:?}: string {string} did not load — the instrument would measure \
+                     nothing"
                 );
+
+                let (units_w, units_h) = bounds(row);
+                let width = (units_w * unit_x + 2) / 4;
+                let height = (units_h * unit_y + 4) / 8;
+
+                for key in [widest_key.as_str(), "Pause"] {
+                    // SAFETY: the sheet's DC is live and both faces outlive the call; nothing is
+                    // drawn — this is the measuring half of the pair.
+                    let (lines, needed) = unsafe {
+                        theme::measure_chip_row(
+                            sheet.dc,
+                            width,
+                            theme::chip_row(&sentence, key),
+                            metrics,
+                        )
+                    }
+                    .expect("the memory DC must answer the metrics of its own face");
+
+                    // ⭐⭐ **The one named exception of решение 128.4 is GONE, and задача T-81-1 is
+                    // what took it away.** With its caveat the Greek third row and the widest key
+                    // name used to wrap into **four** lines in a column of 142 units — one more
+                    // than the slot had — and took the fourth from the live fit
+                    // (`settings::fit_about_help`). The column is **207** units since решение
+                    // 142.2 п. 2, and the same sentence wraps into **three**.
+                    //
+                    // ⚠ The case is still named, because «the exception went away» is a statement
+                    // and not a forgetting: it is held to fitting its slot outright. If a wording,
+                    // a face or a width ever puts it over again, this line goes red before the
+                    // general assertion below does, and it says which case came back.
+                    if language == Language::El
+                        && row == 1133
+                        && key == widest_key.as_str()
+                        && !(lines <= 3 && needed <= height)
+                    {
+                        clips.push(format!(
+                            "{pixels} px at {drawing} DPI: El row 1133 with «{key}» was the one \
+                             exception of решение 128.4 and task T-81-1 closed it by widening the \
+                             column; it wraps into {lines} lines and wants {needed} px of the \
+                             {units_h} units = {height} px it has — the exception has come back"
+                        ));
+                    }
+
+                    if height - needed < tightest.0 {
+                        tightest = (
+                            height - needed,
+                            format!("{language:?} row {row} key «{key}»: {lines} lines"),
+                        );
+                    }
+
+                    if needed > height {
+                        clips.push(format!(
+                            "{pixels} px at {drawing} DPI, {language:?}: row {row} wraps into \
+                             {lines} lines and wants {needed} px, the template gives it {units_h} \
+                             units = {height} px. Sentence: «{sentence}»"
+                        ));
+                    }
+                }
             }
         }
+
+        println!(
+            "{pixels} px at {drawing} DPI (units {unit_x}/4, {unit_y}/8, widest key «{widest_key}»): \
+             the tightest row {} px to spare — {}",
+            tightest.0, tightest.1
+        );
     }
 
-    println!(
-        "the tightest row: {} px to spare — {}",
-        tightest.0, tightest.1
-    );
-
     settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C3 — the last line would be cut off by the clip of paint_chip_row: {clips:#?}"
+    );
 }
 
 /// **Task T-42-2, п. 3** — no row of the help panel ever overlaps its neighbour or its own
@@ -10625,7 +11035,8 @@ fn the_cell_of_the_state_image_list_is_a_hole_edge_to_edge() {
     // The row height of the layout list at 96 DPI, near enough: what the cell is measured
     // for is the row, and the test only needs a cell big enough to see. The owner frees the list
     // when it goes out of scope (task T-43-14).
-    let owned = settings::build_check_image_list(19).expect("the state image list must build");
+    let owned = settings::build_check_image_list(19, screen_dpi())
+        .expect("the state image list must build");
     let list = owned.handle();
 
     // SAFETY: `list` is the live list just built and owned by this frame.
@@ -10725,8 +11136,8 @@ fn the_state_image_cell_gives_back_the_indent_the_list_view_adds_after_it() {
 
     // И лист, который модуль действительно строит, — той же ширины: это то, что видит контрол.
     let cell_height = 22;
-    let owned =
-        settings::build_check_image_list(cell_height).expect("the state image list must build");
+    let owned = settings::build_check_image_list(cell_height, screen_dpi())
+        .expect("the state image list must build");
     let (mut cx, mut cy) = (0i32, 0i32);
 
     // SAFETY: the list is live and owned by this frame; both pointers are to live locals the call
@@ -17596,8 +18007,22 @@ fn a_help_sentence_of_a_window_without_faces_keeps_the_pitch_of_a_label() {
     .replace("\r\n", "\n");
     let pen = function_body(&source, "unsafe fn draw_about_help_row(");
 
+    // ⚠ `drawing_dpi` and not `dc_dpi` since задача T-83-4: this pen is one of the 28 places of our
+    // drawing that go by the step of the window's font (решение 143.4). What this test holds — the
+    // pitch comes out of `about_help_row_pitch` — is unchanged; the needle names the DPI the pen
+    // hands it now.
+    // ⚠ And it is read **without whitespace and without the trailing comma**: `cargo fmt` broke the
+    // call over four lines the moment the longer name went in, and a needle written as one line of
+    // a call stops matching after `fmt` (the lesson of Э32).
+    let squeezed = |text: &str| -> String {
+        text.chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>()
+            .replace(",)", ")")
+    };
     assert!(
-        pen.contains("about_help_row_pitch(fonts.map(DialogFonts::body_pitch), dc_dpi(dc))"),
+        squeezed(pen)
+            .contains("about_help_row_pitch(fonts.map(DialogFonts::body_pitch),drawing_dpi(dc))"),
         "draw_about_help_row must take its pitch from about_help_row_pitch"
     );
     assert!(
@@ -20229,7 +20654,8 @@ fn the_cells_are_a_hole_only_while_the_image_list_keeps_no_ground_of_its_own() {
     };
 
     // The owner frees the list when it goes out of scope (task T-43-14).
-    let owned = settings::build_check_image_list(19).expect("the state image list must build");
+    let owned = settings::build_check_image_list(19, screen_dpi())
+        .expect("the state image list must build");
     let list = owned.handle();
     let ground = COLORREF(0x0040_3020);
 
@@ -23982,27 +24408,25 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
         .expect("the about template declares DS_SETFONT");
 
     let sheet = Sheet::new(64);
-    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
 
-    let alphabet = extent_of(
-        &sheet,
-        &face,
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    )
-    .cx;
-    let unit_x = (alphabet / 26 + 1) / 2;
-    let px = |units: i32| (units * unit_x + 2) / 4;
-
-    println!("base unit {unit_x}/4 px");
-
-    // Контроль прибора: a caption three times over must not fit the slot it fits once. Without
-    // it this stand is a thing that cannot fail.
-    let tripled = extent_of(&sheet, &face, &"Применить".repeat(3)).cx;
-    assert!(
-        tripled > px(63),
-        "the instrument cannot see a clip at all: {tripled} px in {} px",
-        px(63)
-    );
+    // Контроль прибора, at the template's own face: a caption three times over must not fit the
+    // slot it fits once. Without it this stand is a thing that cannot fail.
+    {
+        let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+        let alphabet = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit_x = (alphabet / 26 + 1) / 2;
+        let tripled = extent_of(&sheet, &face, &"Применить".repeat(3)).cx;
+        assert!(
+            tripled > (63 * unit_x + 2) / 4,
+            "the instrument cannot see a clip at all: {tripled} px in {} px",
+            (63 * unit_x + 2) / 4
+        );
+    }
 
     // The rows whose widths `app.rc` freezes: the slot is read off the template, so a slot and
     // a stand cannot part.
@@ -24042,84 +24466,98 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
     ];
 
     let mut clips = Vec::new();
-    let mut tightest = (i32::MAX, String::new());
 
-    for language in Language::ALL {
-        settings::set_ui_language(language);
+    // Задача T-83-4, развилка C3: at every face the rule may open the windows at.
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let alphabet = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let unit_x = (alphabet / 26 + 1) / 2;
+        let px = |units: i32| (units * unit_x + 2) / 4;
+        let mut tightest = (i32::MAX, String::new());
 
-        for (what, template, control, string) in frozen {
-            let caption = settings::text(string);
-            let (left, _, right, _) = template.rect_of(control);
-            let slot = px(right - left);
-            let width = extent_of(&sheet, &face, &caption).cx;
+        for language in Language::ALL {
+            settings::set_ui_language(language);
 
-            println!("{language:?} {what}: «{caption}» {width} px of {slot} px");
+            for (what, template, control, string) in frozen {
+                let caption = settings::text(string);
+                let (left, _, right, _) = template.rect_of(control);
+                let slot = px(right - left);
+                let width = extent_of(&sheet, &face, &caption).cx;
 
-            if width > slot {
-                clips.push(format!(
-                    "{language:?} {what} «{caption}»: {width} px in a slot of {slot} px"
-                ));
+                if slot - width < tightest.0 {
+                    tightest = (slot - width, format!("{language:?} {what} (px)"));
+                }
+
+                if width > slot {
+                    clips.push(format!(
+                        "{pixels} px, {language:?} {what} «{caption}»: {width} px in a slot of \
+                         {slot} px"
+                    ));
+                }
+            }
+
+            // A button the code lays out is as wide as its caption plus the air, never narrower
+            // than the floor — the arithmetic of `letters::button_width`, in units.
+            let wanted = |string: u16| -> i32 {
+                let caption = settings::text(string);
+                let text_units = (extent_of(&sheet, &face, &caption).cx * 4 + unit_x - 1) / unit_x;
+                (text_units + button_pad * 2).max(button_min)
+            };
+
+            let mut rows: Vec<(String, Vec<i32>)> = letters_of_the_program
+                .iter()
+                .map(|(what, left, accent)| {
+                    (
+                        format!("«Письмо» {what}"),
+                        vec![wanted(*left), wanted(*accent)],
+                    )
+                })
+                .collect();
+
+            rows.push((
+                "«Последние письма»".to_owned(),
+                vec![wanted(settings::IDS_CLOSE)],
+            ));
+            rows.push(("«От автора»".to_owned(), vec![wanted(settings::IDS_CLOSE)]));
+            rows.push((
+                "мастер".to_owned(),
+                vec![
+                    wanted(settings::IDS_WIZARD_CANCEL),
+                    wanted(settings::IDS_WIZARD_BACK),
+                    wanted(settings::IDS_WIZARD_NEXT),
+                ],
+            ));
+
+            for (what, widths) in rows {
+                let count = i32::try_from(widths.len()).unwrap_or(0);
+                let taken: i32 = widths.iter().sum::<i32>() + gap * (count - 1) + margin * 2;
+                let spare = FAMILY_WIDTH - taken;
+
+                if spare < tightest.0 {
+                    tightest = (spare, format!("{language:?} {what} (units)"));
+                }
+
+                if taken > FAMILY_WIDTH {
+                    clips.push(format!(
+                        "{pixels} px, {language:?} {what}: the row wants {taken} units of the \
+                         {FAMILY_WIDTH} the window has"
+                    ));
+                }
             }
         }
 
-        // A button the code lays out is as wide as its caption plus the air, never narrower than
-        // the floor — the arithmetic of `letters::button_width`, in units.
-        let wanted = |string: u16| -> i32 {
-            let caption = settings::text(string);
-            let text_units = (extent_of(&sheet, &face, &caption).cx * 4 + unit_x - 1) / unit_x;
-            (text_units + button_pad * 2).max(button_min)
-        };
-
-        let mut rows: Vec<(String, Vec<i32>)> = letters_of_the_program
-            .iter()
-            .map(|(what, left, accent)| {
-                (
-                    format!("«Письмо» {what}"),
-                    vec![wanted(*left), wanted(*accent)],
-                )
-            })
-            .collect();
-
-        rows.push((
-            "«Последние письма»".to_owned(),
-            vec![wanted(settings::IDS_CLOSE)],
-        ));
-        rows.push(("«От автора»".to_owned(), vec![wanted(settings::IDS_CLOSE)]));
-        rows.push((
-            "мастер".to_owned(),
-            vec![
-                wanted(settings::IDS_WIZARD_CANCEL),
-                wanted(settings::IDS_WIZARD_BACK),
-                wanted(settings::IDS_WIZARD_NEXT),
-            ],
-        ));
-
-        for (what, widths) in rows {
-            let count = i32::try_from(widths.len()).unwrap_or(0);
-            let taken: i32 = widths.iter().sum::<i32>() + gap * (count - 1) + margin * 2;
-            let spare = FAMILY_WIDTH - taken;
-
-            println!("{language:?} {what}: {widths:?} units, {taken} of {FAMILY_WIDTH}");
-
-            if spare < tightest.0 {
-                tightest = (spare, format!("{language:?} {what}"));
-            }
-
-            if taken > FAMILY_WIDTH {
-                clips.push(format!(
-                    "{language:?} {what}: the row wants {taken} units of the {FAMILY_WIDTH} the \
-                     window has"
-                ));
-            }
-        }
+        println!(
+            "{pixels} px (unit {unit_x}/4): the tightest {} to spare — {}",
+            tightest.0, tightest.1
+        );
     }
 
     settings::set_ui_language(Language::Ru);
-
-    println!(
-        "the tightest row: {} units to spare — {}",
-        tightest.0, tightest.1
-    );
 
     assert!(
         clips.is_empty(),

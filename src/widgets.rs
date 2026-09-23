@@ -77,7 +77,7 @@ pub fn dialog_units(hwnd: HWND, horizontal: i32, vertical: i32) -> Option<(i32, 
 pub mod combo {
     use super::{HWND, RECT, dialog_units};
     use crate::settings::{DIALOG_FONT_HEIGHT_DLU, send_to};
-    use crate::theme::{dc_dpi, scaled};
+    use crate::theme::{drawing_dpi, scaled};
     use windows::Win32::Foundation::COLORREF;
     use windows::Win32::Graphics::Gdi::{GetDC, HDC, HFONT, ReleaseDC};
     use windows::Win32::UI::WindowsAndMessaging::{CB_ERR, CB_SETITEMHEIGHT};
@@ -203,7 +203,7 @@ pub mod combo {
         let dc = unsafe { GetDC(Some(hwnd)) };
 
         // NFR-13: examined — see the doc comment above.
-        let extra = scaled(air, dc_dpi(dc));
+        let extra = scaled(air, drawing_dpi(dc));
 
         if !dc.is_invalid() {
             // SAFETY: releases exactly the DC taken above, once.
@@ -422,9 +422,10 @@ pub mod combo {
         // освобождается ниже на обеих дорогах.
         let dc = unsafe { GetDC(Some(hwnd)) };
 
-        // NFR-13: отказ `GetDC` разобран — `dc_dpi` отвечает на недопустимом дескрипторе
-        // масштабом 100 %, то есть видом на 96 DPI, а не молчаливым нулём.
-        let scaled_pixels = scaled(pixels, dc_dpi(dc));
+        // NFR-13: отказ `GetDC` разобран — `drawing_dpi` отвечает на недопустимом дескрипторе
+        // масштабом 100 %, то есть видом на 96 DPI, а не молчаливым нулём. Задача T-83-4: по
+        // шагу шрифта окна, как всё наше рисование.
+        let scaled_pixels = scaled(pixels, drawing_dpi(dc));
 
         if !dc.is_invalid() {
             // SAFETY: освобождает ровно взятый выше DC, один раз.
