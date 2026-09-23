@@ -6450,6 +6450,408 @@ fn the_name_moved_by_exactly_what_its_backing_gives_back() {
     assert!(chip.radius > 0, "and its corners must be rounded");
 }
 
+/// `MulDiv` of Windows for the positive numbers a dialog is made of: the product over the
+/// divisor, **rounded half up** — the way the dialog manager maps a template into pixels
+/// (measured, `scratchpad-E83\probe-premises-e83.log`: 38 units at 7 px per 4 → **67**, 206 →
+/// **361**, 12 units at 17 px per 8 → **26**; truncation would say 66, 360 and 25).
+fn mul_div(number: i32, numerator: i32, denominator: i32) -> i32 {
+    let product = i64::from(number) * i64::from(numerator);
+
+    i32::try_from((product + i64::from(denominator) / 2) / i64::from(denominator))
+        .expect("a dialog is small")
+}
+
+/// The base units of the dialog face at `face` pixels, and the box of the backing round «Lang
+/// Switcher» in the name's face derived from it — the numbers [`settings::fit_program_name`] and
+/// `paint_program_name` both ask `name_backing_box` for, built here the way the window builds them.
+fn name_backing_at(face: i32) -> (i32, i32, theme::ChipBox) {
+    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().collect() };
+
+    let mut base = LOGFONTW {
+        lfHeight: -face,
+        lfWeight: 400,
+        ..Default::default()
+    };
+    for (at, ch) in wide("Segoe UI").into_iter().enumerate() {
+        base.lfFaceName[at] = ch;
+    }
+
+    let name_face = settings::about_name_logfont(base, settings::Emphasis::Semibold);
+
+    // SAFETY: every handle made below is selected out and deleted on the one path out of this
+    // block; the DC is a memory DC of this process.
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+
+        let dialog = CreateFontIndirectW(&base);
+        let previous = SelectObject(dc, dialog.into());
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        let alphabet = wide("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let mut size = Default::default();
+        let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
+        let unit_x = (size.cx / 26 + 1) / 2;
+        let unit_y = metrics.tmHeight;
+        SelectObject(dc, previous);
+        let _ = DeleteObject(dialog.into());
+
+        let name = CreateFontIndirectW(&name_face);
+        let previous = SelectObject(dc, name.into());
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        let mut size = Default::default();
+        let _ = GetTextExtentPoint32W(dc, &wide("Lang Switcher"), &mut size);
+        SelectObject(dc, previous);
+        let _ = DeleteObject(name.into());
+        let _ = DeleteDC(dc);
+
+        (
+            unit_x,
+            unit_y,
+            theme::chip_box(size.cx, name_face.lfHeight.abs(), metrics.tmHeight, 0),
+        )
+    }
+}
+
+/// The rectangle `paint_program_name` fills with the backing inside a button of `rect`: from
+/// the left edge, the width of the chip, never past the right edge — the arithmetic of the drawing,
+/// written out so that the assertion below compares the button with **what is drawn**.
+fn drawn_backing(rect: windows::Win32::Foundation::RECT, chip: &theme::ChipBox) -> (i32, i32) {
+    (rect.left, (rect.left + chip.width).min(rect.right))
+}
+
+/// Whether the button is exactly its backing — the one statement of задача T-83-1.
+///
+/// ⚠ **Both halves, and the first draft had only the second**: the drawing clips the backing to
+/// the button, so a button one pixel **narrower** than the chip is also «wholly covered by what is
+/// drawn» — and the backing is then cut. The control «−1 px» caught exactly that draft. The button
+/// is its backing when it is as wide as the chip **and** the drawn figure fills it.
+fn button_is_its_backing(rect: windows::Win32::Foundation::RECT, chip: &theme::ChipBox) -> bool {
+    rect.right - rect.left == chip.width && drawn_backing(rect, chip) == (rect.left, rect.right)
+}
+
+/// **⛔⛔ The button of the name IS its backing — задача T-83-1, решение 143.6, долг Э81-Б-2.**
+///
+/// The statement held here is **«the rectangle of the name's button equals the backing»**, in
+/// pixels, on the faces of the template — and not the neighbouring «the backing is narrower than
+/// the column» the guard of Э81 held, which was green on the defect: the button was then 361 px
+/// wide over a backing of 116, and the mouse woke the hand over the empty two thirds of the line.
+///
+/// The rectangle is the one the dialog manager makes of the template (`MulDiv`, measured), the
+/// backing is the chip the drawing measures, and the narrowing is `settings::name_rect_of_backing`
+/// — the pure half of the very body both windows call. Both templates, one statement.
+///
+/// ⚠ Controls: the rectangle the template gives — the whole column — is caught (the shape of
+/// `e82`); a rectangle narrowed by one pixel too many or too few is caught too.
+#[test]
+fn the_button_of_the_name_is_exactly_its_backing() {
+    /// «Lang Switcher» — the number `app.rc` gives it in the two windows.
+    const NAMES: [(u16, u32); 2] = [(IDD_ABOUT, 1121), (letters::IDD_AUTHOR, 1261)];
+    /// The width of the backing at 13 px, 10 pt at 96 DPI — решение 143.6 names it: **116**.
+    const BACKING_AT_13: i32 = 116;
+
+    let (unit_x, unit_y, chip) = name_backing_at(13);
+
+    assert_eq!(
+        chip.width, BACKING_AT_13,
+        "the backing at the face of the template is the 116 px решение 143.6 was taken on"
+    );
+
+    let product = ProductImage::open();
+
+    for (dialog, name) in NAMES {
+        let template = DialogTemplate::parse(&product.resource(RT_DIALOG, dialog));
+        let (left, top, right, bottom) = template.rect_of(name);
+
+        // The rectangle the dialog manager makes of it — `x` and `cx` mapped each on its own.
+        let x = mul_div(left, unit_x, 4);
+        let y = mul_div(top, unit_y, 8);
+        let rect = windows::Win32::Foundation::RECT {
+            left: x,
+            top: y,
+            right: x + mul_div(right - left, unit_x, 4),
+            bottom: y + mul_div(bottom - top, unit_y, 8),
+        };
+
+        let fitted = settings::name_rect_of_backing(rect, chip.width);
+
+        println!(
+            "dialog {dialog}: template rectangle {}x{} at {},{}; backing {}; the button now \
+             {}x{} at {},{}",
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            rect.left,
+            rect.top,
+            chip.width,
+            fitted.right - fitted.left,
+            fitted.bottom - fitted.top,
+            fitted.left,
+            fitted.top
+        );
+
+        assert!(
+            button_is_its_backing(fitted, &chip),
+            "⛔⛔ Э81-Б-2: dialog {dialog} — the button of the name is {} px wide over a backing \
+             of {}: the mouse is caught where nothing is drawn",
+            fitted.right - fitted.left,
+            chip.width
+        );
+        assert_eq!(
+            (fitted.left, fitted.top, fitted.bottom),
+            (rect.left, rect.top, rect.bottom),
+            "dialog {dialog}: the name must not move — only the right edge comes in (C5 of Э79)"
+        );
+
+        // ⚠ Отрицательный контроль: the rectangle of the template itself — the whole column, the
+        // shape of `e82` — must be caught, and so must a button one pixel off the backing either
+        // way.
+        assert!(
+            !button_is_its_backing(rect, &chip),
+            "the control must be caught: the column-wide button of e82"
+        );
+        for off_by_one in [-1, 1] {
+            let off = windows::Win32::Foundation::RECT {
+                right: fitted.right + off_by_one,
+                ..fitted
+            };
+            assert!(
+                !button_is_its_backing(off, &chip),
+                "the control must be caught: a button {off_by_one:+} px off its backing"
+            );
+        }
+    }
+}
+
+/// **Both windows narrow the name by the ONE body — задача T-83-1.**
+///
+/// `settings::fit_program_name` is the measuring and the moving; `«О программе»` calls it from
+/// its `WM_INITDIALOG`, `«От автора»` from its own. The count is the guard, the way
+/// `paint_program_name` is guarded: exactly one call in `letters.rs`, exactly two occurrences in
+/// `settings.rs` (the definition and the one call), and the body measures by the drawing's own
+/// `name_backing_box` and narrows by the pure `name_rect_of_backing`.
+///
+/// ⚠ Controls: `letters.rs` with its call taken out — the mutant of the task, «не ужимать в одном
+/// из окон» — is caught, and so is `settings.rs` with its call taken out.
+#[test]
+fn both_windows_narrow_the_name_by_the_one_body() {
+    let source = settings_module_source();
+    let letters = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let code_of = |text: &str| -> String {
+        text.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let calls_in_letters = |text: &str| {
+        code_of(text)
+            .matches("settings::fit_program_name(hwnd, IDC_AUTHOR_NAME,")
+            .count()
+    };
+    let occurrences_in_settings = |text: &str| code_of(text).matches("fit_program_name(").count();
+
+    assert_eq!(
+        calls_in_letters(&letters),
+        1,
+        "«От автора» must narrow its name by the one body, exactly once"
+    );
+    assert_eq!(
+        occurrences_in_settings(&source),
+        2,
+        "settings.rs must hold the body and the one call of «О программе» — no more"
+    );
+    assert!(
+        code_of(&source).contains("fit_program_name(hwnd, IDC_ABOUT_NAME, name_face)"),
+        "«О программе» must narrow its own name"
+    );
+
+    let body = function_body(&source, "pub(crate) unsafe fn fit_program_name(");
+    assert!(
+        body.contains("name_backing_box(dc, face, &caption, rect)")
+            && body.contains("name_rect_of_backing(rect, chip.width)")
+            && body.contains("child_rect_in_client(hwnd, control)")
+            && body.contains("move_child(hwnd, control, narrowed.top, None, &narrowed)"),
+        "the body must measure by the drawing's own box and move by the mirror-safe road"
+    );
+
+    // ⚠ Контроли: the mutant of the task — one window left unnarrowed — in either file.
+    let letters_without = letters.replace(
+        "settings::fit_program_name(hwnd, IDC_AUTHOR_NAME, name_face)",
+        "()",
+    );
+    let settings_without = source.replace(
+        "unsafe { fit_program_name(hwnd, IDC_ABOUT_NAME, name_face) };",
+        "",
+    );
+    assert_ne!(
+        letters_without, letters,
+        "the control must change letters.rs"
+    );
+    assert_ne!(
+        settings_without, source,
+        "the control must change settings.rs"
+    );
+    assert_eq!(
+        calls_in_letters(&letters_without),
+        0,
+        "the letters control must be caught"
+    );
+    assert_eq!(
+        occurrences_in_settings(&settings_without),
+        1,
+        "the settings control must be caught"
+    );
+}
+
+/// **The live «От автора» catches the mouse on the backing only — задача T-83-1.**
+///
+/// The window itself, not its template: built hidden through the measuring door of the tests
+/// (`letters::testing`, the product's own `open_window` on the product's own templates), laid out
+/// by the product's `WM_INITDIALOG`, and its name's button read back — in a left-to-right locale and
+/// in both mirrored ones, where the rectangle comes back through the mirror (Т-30-2).
+///
+/// ⚠ «О программе» is modal and cannot be built beside a test; it is held by the pure statement and
+/// by the sweep above.
+#[cfg(feature = "testing")]
+#[test]
+fn the_live_author_window_catches_the_mouse_on_the_backing_only() {
+    let _guard = with_product_strings();
+    let (_, _, chip) = name_backing_at(13);
+
+    for language in [Language::Ru, Language::El, Language::He, Language::Ar] {
+        settings::set_ui_language(language);
+
+        let window = HiddenAuthor::open("0.83.0");
+        let rect = window.control_rect(1261);
+
+        println!(
+            "{language:?}: the name's button {}x{} at {},{}; the client {} px tall",
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            rect.left,
+            rect.top,
+            window.client_height()
+        );
+
+        assert!(
+            button_is_its_backing(rect, &chip),
+            "⛔⛔ Э81-Б-2, {language:?}: the live name's button is {} px wide over a backing of {}",
+            rect.right - rect.left,
+            chip.width
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
+}
+
+/// «От автора», built hidden through the measuring door and destroyed on drop — задача T-83-1.
+#[cfg(feature = "testing")]
+struct HiddenAuthor {
+    owner: windows::Win32::Foundation::HWND,
+    window: windows::Win32::Foundation::HWND,
+}
+
+#[cfg(feature = "testing")]
+impl HiddenAuthor {
+    /// An owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never shown —
+    /// and the window on it.
+    fn open(version: &str) -> Self {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, WS_EX_TOOLWINDOW, WS_POPUP,
+        };
+        use windows::core::{PCWSTR, w};
+
+        // SAFETY: a system class, no parent, no pointer of ours; destroyed in `Drop`.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden owner must be creatable");
+
+        let window =
+            letters::testing::open_author_hidden(owner, ProductImage::shared().module, version)
+                .expect("«От автора» must open out of the product's templates");
+
+        Self { owner, window }
+    }
+
+    /// One control's rectangle in the client coordinates of the window, corners in order.
+    fn control_rect(&self, control: i32) -> windows::Win32::Foundation::RECT {
+        use windows::Win32::Foundation::{POINT, RECT};
+        use windows::Win32::Graphics::Gdi::ScreenToClient;
+        use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, GetWindowRect};
+
+        // SAFETY: the window is live until `Drop`; the buffers are locals of this frame.
+        unsafe {
+            let child = GetDlgItem(Some(self.window), control).expect("the control must exist");
+            let mut rect = RECT::default();
+            GetWindowRect(child, &mut rect).expect("its rectangle must be readable");
+            let mut corners = [
+                POINT {
+                    x: rect.left,
+                    y: rect.top,
+                },
+                POINT {
+                    x: rect.right,
+                    y: rect.bottom,
+                },
+            ];
+            for corner in &mut corners {
+                let _ = ScreenToClient(self.window, corner);
+            }
+            RECT {
+                left: corners[0].x.min(corners[1].x),
+                top: corners[0].y.min(corners[1].y),
+                right: corners[0].x.max(corners[1].x),
+                bottom: corners[0].y.max(corners[1].y),
+            }
+        }
+    }
+
+    /// The height of the client area — what `layout_author` made the window.
+    fn client_height(&self) -> i32 {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+        let mut client = RECT::default();
+        // SAFETY: the window is live until `Drop`.
+        unsafe { GetClientRect(self.window, &mut client) }.expect("the client rectangle");
+        client.bottom - client.top
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Drop for HiddenAuthor {
+    fn drop(&mut self) {
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+        // SAFETY: both are windows of this thread made by `open`, destroyed once, window first.
+        unsafe {
+            let _ = DestroyWindow(self.window);
+            let _ = DestroyWindow(self.owner);
+        }
+    }
+}
+
 /// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
 /// with the comment lines dropped and the whitespace squeezed, so that `cargo fmt` breaking the
 /// condition does not break the needle and a sentence of prose is not taken for the gate.

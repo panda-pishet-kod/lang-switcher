@@ -16113,6 +16113,26 @@ unsafe extern "system" fn about_proc(
                 })
             };
 
+            // Задача T-83-1, решение 143.6: the name's button is narrowed to its backing, so the
+            // mouse is caught by the word and not by the whole line. **After** the faces — the
+            // backing is measured in the face the drawing uses — and by the one body «От автора»
+            // calls too. The face leaves the borrow before the button is moved.
+            //
+            // SAFETY: as above — the pointer was stored at the top of this arm.
+            let name_face = unsafe {
+                with_about_state(hwnd, |state| {
+                    state
+                        .fonts
+                        .as_ref()
+                        .map(|fonts| about_label_face(IDC_ABOUT_NAME, fonts).0)
+                })
+            }
+            .flatten();
+
+            // SAFETY: `hwnd` is the live dialog in its `WM_INITDIALOG`; the face belongs to the
+            // state, which outlives this modal call.
+            unsafe { fit_program_name(hwnd, IDC_ABOUT_NAME, name_face) };
+
             // Task T-42-2, finding С44: the help panel is laid under the **measured** height of
             // its five sentences. **After** `DialogFonts::new` — the measurement is made in the
             // faces the drawing will use — and before the window is shown, so the growth lands
@@ -17241,6 +17261,94 @@ unsafe fn name_backing_box(
     };
 
     theme::chip_box(size.cx, em, metrics.tmHeight, 0)
+}
+
+/// The rectangle of the name's button once it is exactly as wide as its backing — задача
+/// T-83-1, решение 143.6, долг Э81-Б-2.
+///
+/// Pure. The left edge, the top and the bottom stay where the template put them: the text is laid
+/// at `rect.left + chip.inset_x` and must not move by a pixel (развилка C5 of Э79). Only the right
+/// edge comes in, to the backing — and the backing is exactly what [`paint_program_name`] draws
+/// from the left edge, so the button and its figure become one rectangle.
+///
+/// A backing that is not narrower than the rectangle, or not wider than nothing, leaves the
+/// rectangle as it is (NFR-13): the fallback of [`name_backing_box`] answers the whole rectangle
+/// when the faces were refused, and a button of zero width would be a name nobody can click.
+pub fn name_rect_of_backing(rect: RECT, backing_width: i32) -> RECT {
+    if backing_width <= 0 || backing_width >= rect.right - rect.left {
+        return rect;
+    }
+
+    RECT {
+        right: rect.left + backing_width,
+        ..rect
+    }
+}
+
+/// **Makes the name's button exactly as wide as its backing** — задача T-83-1, решение 143.6,
+/// долг Э81-Б-2. One body for the two windows that carry the name, «О программе» and «От
+/// автора», the way [`paint_program_name`] is one body for its drawing.
+///
+/// # The defect
+///
+/// The name is a `BS_OWNERDRAW` button, and a button catches the mouse over **the whole of its
+/// window**. The template gives it the whole text column (206 units — 361 × 26 px at 100 %), and
+/// the drawing puts the backing round the word only (116 × 26), so the hand and the backing woke
+/// up over empty ground right of the word and a click there opened the page: a dead zone of two
+/// thirds of the line. Words of the owner in 142г: «должно быть только при наведении на саму
+/// надпись и область подсветки».
+///
+/// ⛔ The guard of Э81 said «the backing is narrower than the column», which is a **neighbouring**
+/// statement and was green on the defect. What is held now is that the button **is** its backing.
+///
+/// # What is done
+///
+/// On `WM_INITDIALOG`, after the faces are built, the backing is measured by the very
+/// [`name_backing_box`] the drawing measures it with, on the button's own DC, and the button is
+/// narrowed to it by [`name_rect_of_backing`]. The rectangle comes out of
+/// [`child_rect_in_client`] and goes back through [`move_child`], so a mirrored window keeps the
+/// name at its reading edge (the lesson of Т-30-2). Nothing else moves: the text lies where it
+/// lay, and the ground right of the word is the window's own, which is the colour the button
+/// erased it with.
+///
+/// NFR-13: a control, a DC or a rectangle that cannot be had leaves the button as the template
+/// made it — the defect, and a working window.
+///
+/// # Safety
+///
+/// `hwnd` is a live dialog of this thread in its `WM_INITDIALOG`; `face` is the font the name is
+/// drawn in, owned by the window's state for longer than this call.
+pub(crate) unsafe fn fit_program_name(hwnd: HWND, control: i32, face: Option<HFONT>) {
+    let Some(rect) = child_rect_in_client(hwnd, control) else {
+        return;
+    };
+
+    // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
+    let Ok(child) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        return;
+    };
+
+    // SAFETY: `child` is the live button; the DC is released below on the one path out.
+    let dc = unsafe { GetDC(Some(child)) };
+
+    if dc.is_invalid() {
+        return;
+    }
+
+    let caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
+
+    // SAFETY: `dc` is the button's live DC and `face` a font the window's state owns; the
+    // measuring puts the previous face back before it returns.
+    let chip = unsafe { name_backing_box(dc, face, &caption, rect) };
+
+    // SAFETY: `dc` came from the `GetDC` above and is released exactly once, here.
+    unsafe { ReleaseDC(Some(child), dc) };
+
+    let narrowed = name_rect_of_backing(rect, chip.width);
+
+    if narrowed != rect {
+        move_child(hwnd, control, narrowed.top, None, &narrowed);
+    }
 }
 
 /// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.

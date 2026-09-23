@@ -4048,6 +4048,21 @@ unsafe extern "system" fn letter_proc(
                 })
             };
 
+            // Задача T-83-1, решение 143.6: the name's button is narrowed to its backing — by the
+            // one body «О программе» calls, `settings::fit_program_name`, and in the face the
+            // drawing uses. The face leaves the borrow before the button is moved.
+            if kind == Kind::Author {
+                // SAFETY: as above — the pointer names the live box.
+                let name_face = unsafe {
+                    with_state(hwnd, |state| state.fonts.as_ref().map(|faces| faces.name))
+                }
+                .flatten();
+
+                // SAFETY: `hwnd` is the live window in its `WM_INITDIALOG`; the face belongs to
+                // the state, which lives until `WM_NCDESTROY`.
+                unsafe { settings::fit_program_name(hwnd, IDC_AUTHOR_NAME, name_face) };
+            }
+
             // The accented button is the default one, handed to the manager by the documented
             // replacement — *posted*, not sent, for the reason `dialog_proc` gives at its own
             // (FR-72).
@@ -5652,6 +5667,12 @@ fn note_link_refused() {
 
 /// Raises a window that is already open — the answer to «open it again».
 fn raise(hwnd: HWND, activate: bool) {
+    // The measuring door of the tests keeps its windows off the screen — see [`testing`].
+    #[cfg(feature = "testing")]
+    if testing::hidden() {
+        return;
+    }
+
     // SAFETY: `hwnd` is a live window of this module.
     let _ = unsafe {
         ShowWindow(
@@ -5699,6 +5720,11 @@ fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> 
                 return None;
             }
         };
+
+    // The measuring door of the tests names the module the templates come out of — see
+    // [`testing`].
+    #[cfg(feature = "testing")]
+    let module = testing::templates().unwrap_or(module);
 
     let template = match kind {
         Kind::Letter => IDD_LETTER,
@@ -5811,6 +5837,17 @@ pub fn show_letter(owner: HWND, letter: Letter, item: Option<&FeedItem>, activat
 
 /// **Shows «От автора»** — FR-103.
 pub fn open_author(owner: HWND) {
+    open_window(owner, author_state(owner, &version_string()), true);
+}
+
+/// The state «От автора» opens with — the words of [`AuthorView`] for `version`, out of the
+/// configuration and the feed as they stand.
+///
+/// Split out of [`open_author`] by задача T-83-1 so that the measuring door of the tests builds
+/// the window from **the same** state the product builds it from, with the version named — a test
+/// binary carries no version resource of its own, and the version stands in one of the sentences
+/// the window is as tall as.
+fn author_state(owner: HWND, version: &str) -> WindowState {
     let stored = state_now();
     let mut state = fresh_state(owner, Kind::Author);
 
@@ -5818,12 +5855,61 @@ pub fn open_author(owner: HWND) {
         author_view(
             &stored,
             today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
-            &version_string(),
+            version,
             feed,
         )
     });
 
-    open_window(owner, state, true);
+    state
+}
+
+/// **The measuring door of stage Э83** — hidden windows of this module for the tests, compiled
+/// only under the `testing` feature (SEC-04a; criterion 8 finds no trace of it in the Release
+/// build).
+///
+/// A test binary carries no templates — `embed-resource` links `app.rc` into the product only —
+/// and a window of this module shown on the owner's screen by a test would be a window on the
+/// owner's screen. So the door takes the templates out of a module the test names (the product
+/// image it maps as a data file) and keeps the window **hidden**: it is built, laid out and
+/// measured exactly as the product builds it, and never shown.
+#[cfg(feature = "testing")]
+pub mod testing {
+    use super::{HWND, author_state, open_window};
+    use std::cell::Cell;
+    use windows::Win32::Foundation::HMODULE;
+
+    thread_local! {
+        /// Whether [`super::raise`] must leave the window hidden.
+        static HIDDEN: Cell<bool> = const { Cell::new(false) };
+        /// The module the templates come out of, or zero for the running program's own.
+        static TEMPLATES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Whether the window being opened is to stay hidden.
+    pub(super) fn hidden() -> bool {
+        HIDDEN.with(Cell::get)
+    }
+
+    /// The module the templates come out of while the door is open.
+    pub(super) fn templates() -> Option<HMODULE> {
+        let raw = TEMPLATES.with(Cell::get);
+
+        (raw != 0).then(|| HMODULE(std::ptr::without_provenance_mut(raw)))
+    }
+
+    /// Opens «От автора» on `owner` out of the templates of `module`, for `version`, and never
+    /// shows it. The window answered is the caller's to destroy.
+    pub fn open_author_hidden(owner: HWND, module: HMODULE, version: &str) -> Option<HWND> {
+        HIDDEN.with(|hidden| hidden.set(true));
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let window = open_window(owner, author_state(owner, version), false);
+
+        HIDDEN.with(|hidden| hidden.set(false));
+        TEMPLATES.with(|templates| templates.set(0));
+
+        window
+    }
 }
 
 /// **Shows «Последние письма»** — FR-101. Built in stage А and filled in stage Б.
