@@ -6852,6 +6852,625 @@ impl Drop for HiddenAuthor {
     }
 }
 
+/// What «От автора» says in the locale in force, for `version` — the words `layout_author`
+/// measures, out of the product's own `author_view` and string table (задача T-83-2). The
+/// configuration is the one of a machine that has never shown a letter, so the switch of FR-102
+/// is hidden — решение 143.9 keeps it out of the tallest window until the feed is ready.
+struct AuthorWords {
+    view: letters::AuthorView,
+    /// The captions of the four push buttons standing on the three panels.
+    support: String,
+    channel: String,
+    download: String,
+    write: String,
+}
+
+impl AuthorWords {
+    fn now(version: &str) -> Self {
+        let view = letters::author_view(
+            &settings::Letters::default(),
+            letters::Date::from_ymd(2026, 9, 23).expect("a day"),
+            version,
+            letters::FeedView::EMPTY,
+        );
+
+        assert!(
+            view.switch.is_none(),
+            "the model is of the window without the switch — решение 143.9"
+        );
+        assert!(
+            !view.letters,
+            "and without «Последние письма»: there is no feed"
+        );
+
+        Self {
+            view,
+            support: settings::text(settings::IDS_SUPPORT_OPEN),
+            channel: settings::text(settings::IDS_CHANNEL_OPEN),
+            download: settings::text(settings::IDS_NEWS_DOWNLOAD),
+            write: settings::text(settings::IDS_WRITE_TO_AUTHOR),
+        }
+    }
+}
+
+/// The dialog's own face at `face` pixels, as the dialog manager makes it of `FONT 10, "Segoe
+/// UI", 400, 0, 0x1` — weight 400, `DEFAULT_CHARSET`, the family named.
+fn dialog_face_at(face: i32) -> LOGFONTW {
+    let mut base = LOGFONTW {
+        lfHeight: -face,
+        lfWeight: 400,
+        lfCharSet: FONT_CHARSET(1),
+        ..Default::default()
+    };
+
+    for (at, ch) in "Segoe UI".encode_utf16().enumerate() {
+        base.lfFaceName[at] = ch;
+    }
+
+    base
+}
+
+/// **The model of `letters::layout_author`** — the client height of «От автора» at a dialog face
+/// of `face` pixels whose drawing goes at `drawing_dpi`, on a memory DC (задача T-83-2, the road
+/// the prибор of Э81 took).
+///
+/// Every step is the window's own, in the window's order and with the window's integer
+/// arithmetic: the base units the documented way, a dialog unit to pixels by **truncation** (the
+/// `Metrics` of `letters`, `dlu × base / 4|8`), the template's head by `MulDiv` (the dialog manager,
+/// measured), `theme::measure_label` for every paragraph in the face the window measures it in,
+/// and the wrapping row of buttons of `place_panel_buttons`. The head's bottom is the lowest of its
+/// five controls; the logo is `theme::scaled(56)` at the drawing DPI.
+///
+/// ⚠ A model is a second opinion until it is held against the window: the live «От автора» of the
+/// measuring door is its known answer, locale by locale.
+fn author_client_by_model(face: i32, drawing_dpi: i32, words: &AuthorWords) -> i32 {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{DT_CALCRECT, DT_SINGLELINE, DrawTextW};
+
+    /// The head of the template, `(y, cy)` in dialog units: name, version, the two lines.
+    const HEAD: [(i32, i32); 4] = [(11, 12), (24, 8), (37, 10), (47, 10)];
+    /// The icon's `y` in dialog units; its height is the logo's.
+    const ICON_Y: i32 = 13;
+
+    let base = dialog_face_at(face);
+    let body_face = settings::about_body_logfont(base);
+    let text_face = theme::smoothed_logfont(base);
+    let pitch = Some(settings::about_body_line_pitch(body_face.lfHeight));
+
+    // SAFETY: every handle made below is selected out and deleted on the one path out of this
+    // block; the DC is a memory DC of this process.
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+
+        let dialog = CreateFontIndirectW(&base);
+        let previous = SelectObject(dc, dialog.into());
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        let alphabet: Vec<u16> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            .encode_utf16()
+            .collect();
+        let mut size = Default::default();
+        let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
+        let unit_x = (size.cx / 26 + 1) / 2;
+        let unit_y = metrics.tmHeight;
+        SelectObject(dc, previous);
+        let _ = DeleteObject(dialog.into());
+
+        let body = CreateFontIndirectW(&body_face);
+        let text = CreateFontIndirectW(&text_face);
+
+        let x = |units: i32| units * unit_x / 4;
+        let y = |units: i32| units * unit_y / 8;
+
+        let client_width = mul_div(256, unit_x, 4);
+        let pad = x(12);
+        let full_width = client_width - pad * 2;
+        let inset = x(7);
+        let inner_width = full_width - inset * 2;
+        let tight = y(3);
+        let gap = y(8);
+        let button = y(14);
+
+        let measure = |face: HFONT, width: i32, caption: &str, pitch: Option<i32>| -> i32 {
+            if caption.is_empty() {
+                return 0;
+            }
+            let mut wide: Vec<u16> = caption.encode_utf16().collect();
+            let previous = SelectObject(dc, face.into());
+            let height = theme::measure_label(dc, width, &mut wide, pitch);
+            SelectObject(dc, previous);
+            height
+        };
+
+        let button_width = |caption: &str| -> i32 {
+            let mut wide: Vec<u16> = caption.encode_utf16().collect();
+            let previous = SelectObject(dc, text.into());
+            let mut rect = RECT::default();
+            let _ = DrawTextW(dc, &mut wide, &mut rect, DT_CALCRECT | DT_SINGLELINE);
+            SelectObject(dc, previous);
+            (rect.right - rect.left + x(10) * 2).max(x(40))
+        };
+
+        // `place_panel_buttons`: left to right, a new line when the next would run off the block.
+        let buttons = |top: i32, captions: &[&str]| -> i32 {
+            let height = y(14);
+            let between = x(4);
+            let mut left = 0;
+            let mut row = top;
+            for caption in captions {
+                let width = button_width(caption);
+                if left > 0 && left + width > inner_width {
+                    left = 0;
+                    row += height + y(3);
+                }
+                left += width + between;
+            }
+            if captions.is_empty() {
+                top
+            } else {
+                row + height + y(3)
+            }
+        };
+
+        let logo = theme::scaled(56, drawing_dpi);
+        let head = HEAD
+            .iter()
+            .map(|(top, height)| mul_div(*top, unit_y, 8) + mul_div(*height, unit_y, 8))
+            .chain(std::iter::once(mul_div(ICON_Y, unit_y, 8) + logo))
+            .max()
+            .expect("a head");
+
+        let view = &words.view;
+
+        // «Автор»
+        let mut top = head + gap;
+        let mut at = top + y(20);
+        at += measure(body, inner_width, &view.author_text, pitch) + tight;
+        at = buttons(at, &[&words.support, &words.channel]);
+        top = at + inset + gap;
+
+        // «Новости и обновления», without the switch
+        at = top + y(20);
+        at += measure(body, inner_width, &view.feed_about, pitch) + tight;
+        for caption in [&view.feed_state, &view.version_state] {
+            at += measure(body, inner_width, caption, pitch) + tight;
+        }
+        at = buttons(at, &[&words.download]);
+        if !view.file_only.is_empty() {
+            at += measure(text, inner_width, &view.file_only, None) + tight;
+        }
+        top = at + inset + gap;
+
+        // «Обратная связь»
+        at = top + y(20);
+        at += measure(body, inner_width, &view.feedback_text, pitch) + tight;
+        at = buttons(at, &[&words.write]);
+        top = at + inset + gap;
+
+        let _ = DeleteObject(body.into());
+        let _ = DeleteObject(text.into());
+        let _ = DeleteDC(dc);
+
+        top + button + y(12)
+    }
+}
+
+/// The dialog units a client of `pixels` needs at a face whose cell is `cell` pixels tall: the
+/// least `u` for which the dialog manager's `MulDiv(u, cell, 8)` reaches it.
+fn units_of_client(pixels: i32, cell: i32) -> i32 {
+    let mut units = pixels * 8 / cell;
+
+    while mul_div(units, cell, 8) < pixels {
+        units += 1;
+    }
+    while units > 0 && mul_div(units - 1, cell, 8) >= pixels {
+        units -= 1;
+    }
+
+    units
+}
+
+/// The cell of Segoe UI at `face` pixels — `tmHeight`, the vertical base unit, asked of GDI.
+fn cell_of(face: i32) -> i32 {
+    let base = dialog_face_at(face);
+
+    // SAFETY: the font is selected out and deleted before the DC.
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+        let font = CreateFontIndirectW(&base);
+        let previous = SelectObject(dc, font.into());
+        let mut metrics = TEXTMETRICW::default();
+        let _ = GetTextMetricsW(dc, &mut metrics);
+        SelectObject(dc, previous);
+        let _ = DeleteObject(font.into());
+        let _ = DeleteDC(dc);
+        metrics.tmHeight
+    }
+}
+
+/// The client height «О программе» comes out at on a dialog face of `face` pixels drawn at
+/// `drawing_dpi`, with `key` in its help — the template's own 276 units, plus what
+/// `fit_about_help` grows the window by when the five rows of the help need more than their slots
+/// (задача T-83-2). The arithmetic is the window's: the rows' rectangles as the dialog manager maps
+/// them, `theme::measure_chip_row` for each sentence, `settings::stacked_tops` for the stack, and
+/// growth only downwards.
+fn about_client_by_model(face: i32, drawing_dpi: i32, key: &str) -> i32 {
+    const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    let product = ProductImage::shared();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+    let font = template
+        .font
+        .clone()
+        .expect("the about template declares DS_SETFONT");
+
+    let bounds = |id: u32| {
+        template
+            .bounds
+            .iter()
+            .find(|(candidate, ..)| *candidate == id)
+            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
+            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
+    };
+
+    let rows = [
+        (1131_u32, settings::IDS_ABOUT_HELP_1),
+        (1132, settings::IDS_ABOUT_HELP_2),
+        (1133, settings::IDS_ABOUT_HELP_3),
+        (1134, settings::IDS_ABOUT_HELP_4),
+        (1135, settings::IDS_ABOUT_HELP_5),
+    ];
+
+    let sheet = Sheet::new(64);
+    let manager = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
+    let base = LOGFONTW {
+        lfHeight: -face,
+        ..manager
+    };
+
+    let body = Face::new(settings::about_body_logfont(base));
+    let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
+    let chip = Face::new(chip_logical);
+
+    let metrics = theme::ChipRowMetrics {
+        body: Some(body.0),
+        chip_face: Some((chip.0, chip_logical.lfHeight)),
+        pitch: settings::about_body_line_pitch(settings::about_body_logfont(base).lfHeight.abs()),
+        dpi: drawing_dpi,
+    };
+
+    let unit_x = (extent_of(&sheet, &Face::new(base), ALPHABET).cx / 26 + 1) / 2;
+    let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
+    let px_x = |units: i32| mul_div(units, unit_x, 4);
+    let px_y = |units: i32| mul_div(units, unit_y, 8);
+
+    // The rows' live rectangles: `y` and `cy` mapped each on its own, as the manager does.
+    let tops_of_template: Vec<(i32, i32)> = rows
+        .iter()
+        .map(|(row, _)| {
+            let (_, y, _, cy) = bounds(*row);
+            (px_y(y), px_y(cy))
+        })
+        .collect();
+
+    let air = tops_of_template
+        .windows(2)
+        .map(|pair| pair[1].0 - (pair[0].0 + pair[0].1))
+        .min()
+        .expect("five rows");
+
+    let heights: Vec<i32> = rows
+        .iter()
+        .map(|(row, string)| {
+            let (_, _, cx, _) = bounds(*row);
+
+            // SAFETY: the sheet's DC is live and both faces outlive the call.
+            unsafe {
+                theme::measure_chip_row(
+                    sheet.dc,
+                    px_x(cx),
+                    theme::chip_row(&settings::text(*string), key),
+                    metrics,
+                )
+            }
+            .expect("the memory DC must answer the metrics of its own face")
+            .1
+        })
+        .collect();
+
+    let tops = settings::stacked_tops(tops_of_template[0].0, &heights, air);
+    let (last_top, last_height) = tops_of_template[rows.len() - 1];
+    let grow = tops[rows.len() - 1] + heights[rows.len() - 1] - (last_top + last_height);
+
+    mul_div(276, unit_y, 8) + grow.max(0)
+}
+
+/// **The model of «От автора» IS the live window — задача T-83-2, the known answer.**
+///
+/// The model that counts the tallest window at every face has to be held against the window it
+/// stands for before anything is believed of it (the lesson of Э81: the one instrument worth
+/// trusting at once was the one held against a known answer). The known answer is the live
+/// «От автора» itself — built hidden through the measuring door, laid out by the product's own
+/// `WM_INITDIALOG` — in all fourteen languages at the template's face.
+///
+/// ⚠ The numbers of П6 in the ТЗ (789 / 827 / 846) are those of Э81's model **before** T-81-6 made
+/// the head the template's; on `e82` the window is two pixels taller: 791 / 829 (measured here).
+#[cfg(feature = "testing")]
+#[test]
+fn the_model_of_the_author_window_is_the_live_window() {
+    let _guard = with_product_strings();
+    let mut differences = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let words = AuthorWords::now("0.83.0");
+        let live = HiddenAuthor::open("0.83.0").client_height();
+        let model = author_client_by_model(13, 96, &words);
+
+        println!("{language:?}: live {live} px, model {model} px");
+
+        if live != model {
+            differences.push(format!("{language:?}: live {live}, model {model}"));
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        differences.is_empty(),
+        "the model of layout_author is not the window: {differences:?}"
+    );
+}
+
+/// The faces the rule may answer with, at the least — every face from the floor up to the 40 px
+/// of ten points at 300 % (задача T-83-2; the ТЗ names 11…20 «как минимум»). Custom scaling makes
+/// any DPI, so every whole face in between is one some screen can ask for.
+const RULE_FACES: std::ops::RangeInclusive<i32> = 11..=40;
+
+/// **The tallest window of the program, face by face, is the table the rule counts with —
+/// задача T-83-2, решения 143.1, 143.9 и 143.11.**
+///
+/// For every face the rule may answer with: the six windows × fourteen languages, each in dialog
+/// units — «От автора» by the model held against the live window above, «О программе» by the model
+/// of `fit_about_help` with the widest key the program can name and with «Pause», and the four
+/// windows whose height the template decides (настройки 380; «Письмо» and the wizard 276, which
+/// their layouts never resize; «Последние письма» 296, whose content is the feed — a stub today, so
+/// its template stands for it, the way 143.9 keeps the switch out). The switch of FR-102 is not
+/// counted (143.9).
+///
+/// The statement is **equality** at every face: the table is the least number of units that holds
+/// the tallest window there — enough (`MulDiv(table, cell, 8)` reaches the window) and no more
+/// (one unit less does not). Beyond the table, the table's own maximum.
+///
+/// ⚠ Отрицательный контроль: the table one unit short at any face is caught — the tallest window at
+/// that face does not fit it.
+#[test]
+fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
+    /// The templates whose height the template decides, in dialog units.
+    const FIXED: [(&str, i32); 4] = [
+        ("настройки", 380),
+        ("«Последние письма»", 296),
+        ("«Письмо»", 276),
+        ("мастер", 276),
+    ];
+
+    let _guard = with_product_strings();
+
+    let sheet = Sheet::new(64);
+    let widest_key = {
+        let chip_face = Face::new(settings::about_chip_logfont(
+            dialog_face_at(13),
+            settings::Emphasis::Semibold,
+        ));
+        (1_u16..=254)
+            .filter_map(settings::key_name)
+            .max_by_key(|name| extent_of(&sheet, &chip_face, name).cx)
+            .expect("the program must name at least one key")
+    };
+
+    let mut measured = Vec::new();
+
+    for face in RULE_FACES {
+        let cell = cell_of(face);
+        // The DPI our drawing goes at for a face — `dpi × step / 10` against `dpi × step / 72`:
+        // whatever the pair, it is 7,2 faces.
+        let drawing = mul_div(face, 72, 10);
+        let mut tallest = (0, String::new());
+
+        for (window, units) in FIXED {
+            if units > tallest.0 {
+                tallest = (units, window.to_owned());
+            }
+        }
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            let words = AuthorWords::now("0.83.0");
+            let author = units_of_client(author_client_by_model(face, drawing, &words), cell);
+
+            if author > tallest.0 {
+                tallest = (author, format!("«От автора» {language:?}"));
+            }
+
+            for key in [widest_key.as_str(), "Pause"] {
+                let about = units_of_client(about_client_by_model(face, drawing, key), cell);
+
+                if about > tallest.0 {
+                    tallest = (about, format!("«О программе» {language:?} «{key}»"));
+                }
+            }
+        }
+
+        println!(
+            "face {face} px (cell {cell}): tallest {} units — {}; the table says {}",
+            tallest.0,
+            tallest.1,
+            settings::tallest_window_units(face)
+        );
+
+        measured.push((face, tallest.0, cell));
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    // Where a table and the measurement part: a face at which the table is not the least number
+    // of units that holds the tallest window.
+    let disagreements = |table: &dyn Fn(i32) -> i32| -> Vec<String> {
+        measured
+            .iter()
+            .filter(|(face, units, _)| table(*face) != *units)
+            .map(|(face, units, _)| {
+                format!("face {face}: measured {units}, table {}", table(*face))
+            })
+            .collect()
+    };
+
+    let wrong = disagreements(&settings::tallest_window_units);
+
+    assert!(
+        wrong.is_empty(),
+        "⛔⛔ the table of the tallest window is not what the windows need — перемерить: {wrong:?}"
+    );
+
+    let most = measured
+        .iter()
+        .map(|(_, units, _)| *units)
+        .max()
+        .expect("faces");
+
+    assert_eq!(
+        settings::tallest_window_units(RULE_FACES.end() + 1),
+        most,
+        "beyond the table the rule must count with the table's own maximum"
+    );
+
+    // ⚠ Отрицательный контроль: the table one unit short — at every face at once, and at the one
+    // face the 150 % of a 1080p screen turns on — must be caught, and one unit short must really
+    // be a smaller window there.
+    let short = |face: i32| settings::tallest_window_units(face) - 1;
+    let short_at_14 = |face: i32| settings::tallest_window_units(face) - i32::from(face == 14);
+
+    assert_eq!(
+        disagreements(&short).len(),
+        measured.len(),
+        "the control must be caught at every face"
+    );
+    let caught = disagreements(&short_at_14);
+    assert!(
+        caught.len() == 1 && caught[0].starts_with("face 14:"),
+        "the control must be caught at the one face it moved, and nowhere else: {caught:?}"
+    );
+    for (face, units, cell) in &measured {
+        assert!(
+            mul_div(units - 1, *cell, 8) < mul_div(*units, *cell, 8),
+            "face {face}: one unit less must be a smaller window"
+        );
+    }
+}
+
+/// **The rule answers, on the six screens of the decision, what the owner took on the mock-up —
+/// развилка C4 of задача T-83-2, решения 143.1, 143.3 и 143.5.**
+///
+/// The screens: 1920 × 1080 at 100, 125 and 150 %, 1366 × 768 at 100 %, 2560 × 1440 at 125 % and
+/// 3840 × 2160 at 150 %; their work areas — the screen less a taskbar of 48 points — 1032, 1020,
+/// 1008, 720, 1380 and 2088 px; the frame of these windows at the DPI, measured by the живое окно
+/// and `AdjustWindowRectExForDpi` — 39, 47 and 56 px; the cell of every face asked of GDI itself.
+///
+/// ⚠ The threshold and the floor are **the numbers of the decision, written here apart from the
+/// code** (the lesson of Э53а: a guard that takes its expectation from the constant it checks cannot
+/// fail) — the mutant «порог 12 → 0» turns the row 125 % to nine points.
+#[test]
+fn the_rule_answers_what_the_owner_took_on_the_six_screens() {
+    /// Решение 143.3.
+    const AIR: i32 = 12;
+    /// Решение 143.5.
+    const FLOOR: i32 = 11;
+    /// The six screens: `(what, work area, dpi, frame, the step the owner took)`.
+    const SCREENS: [(&str, i32, i32, i32, u16); 6] = [
+        ("1920 × 1080, 100 %", 1032, 96, 39, 10),
+        ("1920 × 1080, 125 %", 1020, 120, 47, 8),
+        ("1920 × 1080, 150 %", 1008, 144, 56, 7),
+        ("1366 × 768, 100 %", 720, 96, 39, 8),
+        ("2560 × 1440, 125 %", 1380, 120, 47, 10),
+        ("3840 × 2160, 150 %", 2088, 144, 56, 10),
+    ];
+
+    assert_eq!(
+        (settings::FONT_STEP_AIR, settings::FONT_STEP_FLOOR),
+        (AIR, FLOOR),
+        "the threshold and the floor are the owner's numbers"
+    );
+
+    let mut wrong = Vec::new();
+
+    for (screen, work, dpi, frame, owner) in SCREENS {
+        let step = settings::font_step(work, dpi, frame, settings::tallest_window_units, cell_of);
+        let face = theme::face_at(step, dpi);
+        let window = mul_div(settings::tallest_window_units(face), cell_of(face), 8) + frame;
+
+        println!(
+            "{screen}: {step} pt, face {face} px, the tallest window {window} px in {work} — {} px \
+             of air above and below",
+            (work - window) / 2
+        );
+
+        if step != owner {
+            wrong.push(format!(
+                "{screen}: {step} pt against the owner's {owner} pt"
+            ));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "⛔⛔ C4: the rule does not answer what the owner took — {wrong:?}"
+    );
+}
+
+/// **The rule keeps its floor and its ceiling — задача T-83-2**: never larger than ten points,
+/// never a face under the floor while a step above it is allowed, the floor when nothing fits, and
+/// ten on a monitor where even ten points come out under the floor.
+#[test]
+fn the_rule_keeps_its_floor_and_its_ceiling() {
+    // A work area nothing fits in: the floor — the smallest step whose face is not under 11 px.
+    assert_eq!(
+        settings::font_step(100, 96, 39, settings::tallest_window_units, cell_of),
+        8
+    );
+    assert_eq!(
+        settings::font_step(100, 120, 47, settings::tallest_window_units, cell_of),
+        7
+    );
+    assert_eq!(
+        settings::font_step(100, 144, 56, settings::tallest_window_units, cell_of),
+        6
+    );
+
+    // A work area everything fits in: ten, and never more.
+    assert_eq!(
+        settings::font_step(100_000, 144, 56, settings::tallest_window_units, cell_of),
+        10
+    );
+
+    // A monitor on which ten points come out under the floor — none that Windows makes: ten.
+    assert_eq!(
+        settings::font_step(100, 72, 39, settings::tallest_window_units, cell_of),
+        10
+    );
+
+    // The face of a step is the dialog manager's `MulDiv`, rounded half up.
+    assert_eq!(
+        [96, 120, 144].map(|dpi| settings::FONT_STEPS.map(|step| theme::face_at(step, dpi))),
+        [
+            [13, 12, 11, 9, 8],
+            [17, 15, 13, 12, 10],
+            [20, 18, 16, 14, 12]
+        ]
+    );
+}
+
 /// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
 /// with the comment lines dropped and the whitespace squeezed, so that `cargo fmt` breaking the
 /// condition does not break the needle and a sentence of prose is not taken for the gate.

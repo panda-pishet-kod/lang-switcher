@@ -706,6 +706,28 @@ pub fn dc_dpi(dc: HDC) -> i32 {
     if dpi > 0 { dpi } else { SCREEN_DPI }
 }
 
+/// `MulDiv` of Windows for positive numbers: the product over the divisor, **rounded half up** —
+/// the way the dialog manager turns points into pixels and dialog units into pixels (measured, 38
+/// units at 7 px per 4 → 67, `scratchpad-E83\probe-premises-e83.log`). ⛔ Not `[math]::Round` nor a
+/// truncation: both answer a pixel less at every half. A divisor of zero or less answers the number
+/// unchanged (NFR-13) rather than dividing by it.
+pub fn mul_div_round(number: i32, numerator: i32, denominator: i32) -> i32 {
+    if denominator <= 0 {
+        return number;
+    }
+
+    let product = i64::from(number) * i64::from(numerator);
+
+    i32::try_from((product + i64::from(denominator) / 2) / i64::from(denominator))
+        .unwrap_or(i32::MAX)
+}
+
+/// The face, in pixels, of a dialog font of `points` on a monitor of `dpi` — `MulDiv(points, dpi,
+/// 72)`, exactly what the dialog manager asks `CreateFontIndirectW` for (вопрос 143).
+pub fn face_at(points: u16, dpi: i32) -> i32 {
+    mul_div_round(i32::from(points), dpi, 72)
+}
+
 /// Corner radius of **everything this dialog rounds off** — group panel, input field, closed
 /// part of a combo box, push button and both lists — in the pixels of the mock-ups, п. 1 of
 /// task T-11-16.
