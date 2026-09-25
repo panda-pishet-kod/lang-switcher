@@ -2633,6 +2633,9 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
 ///    bands that are exactly the six panel captions, because `on_erase_background` draws them
 ///    into a picture whose key knows nothing about text. With the line in, the difference is 0.
 /// 3. **«ОК» does not relabel and does not rebuild** — решение 99: записать и закрыть.
+///    ⚠ This third claim reads the **text** of the arm, and so it was green on the defect of
+///    решение 144.1: the repaint of the closing window was hidden inside the call the arm makes.
+///    The claim that follows the call is the next test.
 ///
 /// ⚠ Э22's trap: a sweep that finds its own needle. This one reads `src\settings.rs` and nothing
 /// else, and cuts the product half off at the test module before looking.
@@ -2730,6 +2733,267 @@ fn the_two_mechanisms_of_the_language_change_are_written_where_the_measurement_p
         "…and does neither mechanism: the window has a moment to live, and relabelling or \
          rebuilding it in that moment would be a flash and nothing else"
     );
+}
+
+/// **Решение 144.1, задача T-85-1: «ОК» does not repaint the window it closes — followed through
+/// the calls, not read off the text of the arm.**
+///
+/// The defect: «ОК» called the very function «Применить» calls, and that function repainted the
+/// window — `refresh_palette` put on the new palette and only **marked** the window, then
+/// `EndDialog` took the focus off the button, and the button drew itself at once in the new theme,
+/// corners of the new ground included, a moment before the window was hidden. Measured on a desktop
+/// of its own (`scratchpad-E85\probe-ok-mechanism.log`): the `WM_DRAWITEM` of the lost focus comes
+/// after the three `LVM_SET*COLOR` of `refresh_palette` and before `SWP_HIDEWINDOW`, with the corner
+/// pixel `0xF2EFED` — the ground of «Туман» — on a window of «Графит»; and the four state lines of
+/// `fill_state_lines` repaint themselves the same way on their `WM_SETTEXT`.
+///
+/// The claims, over the code of `src\settings.rs` with the comment lines dropped:
+/// 1. from the «ОК» arm of `on_command`, no chain of calls reaches `refresh_palette` or
+///    `fill_state_lines` — the window disappears in the theme it had;
+/// 2. from the «Применить» arm, both are reached — «Применить» is as it was, and a sweep that is
+///    green because the repaint was removed altogether is not a guard;
+/// 3. «ОК» still reads the window and publishes — the settings apply as before, решение 144.1;
+/// 4. one body of applying: the window is read and the settings are published in one place each.
+///
+/// The negative control is the arrangement of `e84` rebuilt in the text — the repaint put back into
+/// the body the arm calls: the same sweep must find the way through it.
+#[test]
+fn what_ok_calls_never_reaches_the_repaint_and_what_apply_calls_does() {
+    let source = settings_module_source();
+    let product = source
+        .split_once("\n#[cfg(test)]\nmod tests {")
+        .map_or(source.as_str(), |(before, _)| before);
+
+    let functions = functions_of(product);
+    let (ok_arm, apply_arm) = command_arms(&functions);
+
+    println!("--- the «ОК» arm, code only ---\n{ok_arm}");
+    println!("--- the «Применить» arm, code only ---\n{apply_arm}");
+
+    for repaint in ["refresh_palette", "fill_state_lines"] {
+        let from_ok = trail(&functions, &ok_arm, |body| {
+            calls_in(body).contains(&repaint)
+        });
+        let from_apply = trail(&functions, &apply_arm, |body| {
+            calls_in(body).contains(&repaint)
+        });
+
+        println!("{repaint}: from «ОК» {from_ok:?}, from «Применить» {from_apply:?}");
+
+        assert_eq!(
+            from_ok, None,
+            "⛔ решение 144.1: «ОК» reaches `{repaint}` — the window it closes is repainted in the \
+             new theme a moment before it is hidden (the chain of calls is printed above)"
+        );
+        assert!(
+            from_apply.is_some(),
+            "«Применить» must still reach `{repaint}`: the window stays open and must put on what \
+             was applied — as it was before решение 144.1"
+        );
+    }
+
+    // «ОК» still writes and publishes: the half both buttons share.
+    for (what, needle) in [
+        ("reads the window", "read_dialog(hwnd, state)"),
+        ("publishes the settings", "(state.apply)(&updated)"),
+    ] {
+        let found = trail(&functions, &ok_arm, |body| body.contains(needle));
+
+        println!("«ОК» {what}: {found:?}");
+
+        assert!(
+            found.is_some(),
+            "⛔ C5: «ОК» must still apply — it no longer {what} (`{needle}`)"
+        );
+        assert_eq!(
+            code_lines(product).matches(needle).count(),
+            1,
+            "one body of applying: `{needle}` must be written once, for both buttons"
+        );
+    }
+
+    // The negative control: the repaint put back where `e84` had it, inside the body «ОК» calls —
+    // right after the publication, in the same borrow of the state.
+    let publication = "(state.apply)(&updated);";
+    assert_eq!(
+        product.matches(publication).count(),
+        1,
+        "the control needs its anchor"
+    );
+
+    let of_e84 = product.replacen(
+        publication,
+        "(state.apply)(&updated);\n            refresh_palette(hwnd, state);",
+        1,
+    );
+    let functions_of_e84 = functions_of(&of_e84);
+    let (ok_arm_of_e84, _) = command_arms(&functions_of_e84);
+    let caught = trail(&functions_of_e84, &ok_arm_of_e84, |body| {
+        calls_in(body).contains(&"refresh_palette")
+    });
+
+    println!("control, the arrangement of e84: {caught:?}");
+
+    assert!(
+        caught.is_some(),
+        "the control must be caught: with the repaint back in the body «ОК» calls, the sweep must \
+         find the way to it"
+    );
+}
+
+/// The code of a source with the comment lines dropped — prose beside code names the construction
+/// it replaced (the lesson of Э81), so a comment is never taken for a call.
+fn code_lines(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Every function of a source that has a body, free or in an `impl`, by name: from its signature to
+/// the brace that closes it at the signature's own indentation — the way `cargo fmt` lays every body
+/// out. Comment lines are dropped first. A declaration without a body is skipped.
+fn functions_of(source: &str) -> Vec<(String, String)> {
+    const QUALIFIERS: [&str; 7] = [
+        "pub",
+        "pub(crate)",
+        "pub(super)",
+        "unsafe",
+        "const",
+        "extern",
+        "\"system\"",
+    ];
+
+    let code = code_lines(source);
+    let lines: Vec<&str> = code.lines().collect();
+    let mut found = Vec::new();
+
+    for (at, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+
+        let Some((before, after)) = trimmed.split_once("fn ") else {
+            continue;
+        };
+
+        if !before
+            .split_whitespace()
+            .all(|word| QUALIFIERS.contains(&word))
+        {
+            continue;
+        }
+
+        let name: String = after
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+
+        if name.is_empty() {
+            continue;
+        }
+
+        // A signature that ends before it opens a body is a declaration.
+        let opens = lines[at..]
+            .iter()
+            .find(|l| l.contains('{') || l.trim_end().ends_with(';'))
+            .is_some_and(|l| l.contains('{'));
+
+        if !opens {
+            continue;
+        }
+
+        let close = format!("{}}}", &line[..line.len() - trimmed.len()]);
+
+        if let Some(length) = lines[at..].iter().position(|l| *l == close) {
+            found.push((name, lines[at..=at + length].join("\n")));
+        }
+    }
+
+    found
+}
+
+/// The names called in a piece of code: every identifier followed by an opening parenthesis.
+fn calls_in(code: &str) -> Vec<&str> {
+    let bytes = code.as_bytes();
+    let mut names = Vec::new();
+    let mut at = 0;
+
+    while at < bytes.len() {
+        if !(bytes[at].is_ascii_alphabetic() || bytes[at] == b'_') {
+            at += 1;
+            continue;
+        }
+
+        let start = at;
+
+        while at < bytes.len() && (bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_') {
+            at += 1;
+        }
+
+        let mut next = at;
+
+        while next < bytes.len() && bytes[next] == b' ' {
+            next += 1;
+        }
+
+        if bytes.get(next) == Some(&b'(') {
+            names.push(&code[start..at]);
+        }
+    }
+
+    names
+}
+
+/// The chain of calls from a piece of code to the first function body `reached` answers yes for —
+/// breadth first, through every function of the source the code calls by name — or `None`.
+fn trail(
+    functions: &[(String, String)],
+    from: &str,
+    reached: impl Fn(&str) -> bool,
+) -> Option<Vec<String>> {
+    let mut queue = std::collections::VecDeque::from([(from.to_string(), Vec::new())]);
+    let mut seen = std::collections::HashSet::new();
+
+    while let Some((code, chain)) = queue.pop_front() {
+        if reached(&code) {
+            return Some(chain);
+        }
+
+        for called in calls_in(&code) {
+            for (name, body) in functions.iter().filter(|(name, _)| name == called) {
+                if seen.insert(body.clone()) {
+                    let mut longer = chain.clone();
+                    longer.push(name.clone());
+                    queue.push_back((body.clone(), longer));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// The «ОК» arm and the «Применить» arm of `on_command`, code only.
+fn command_arms(functions: &[(String, String)]) -> (String, String) {
+    let (_, commands) = functions
+        .iter()
+        .find(|(name, _)| name == "on_command")
+        .expect("on_command must be in this file");
+
+    let ok_at = commands
+        .find("OK_COMMAND => {")
+        .expect("the «ОК» arm must be in on_command");
+    let apply_at = commands
+        .find("IDC_APPLY => {")
+        .expect("the «Применить» arm must be in on_command");
+    let cancel_at = commands
+        .find("CANCEL_COMMAND =>")
+        .expect("the «Отмена» arm must be in on_command");
+
+    (
+        commands[ok_at..apply_at].to_string(),
+        commands[apply_at..cancel_at].to_string(),
+    )
 }
 
 // =========================================================================================

@@ -5675,7 +5675,7 @@ pub fn show_dialog(
     // FR-92а, task T-11-4: the palette of this dialog, resolved once at initialisation —
     // the setting comes from the configuration the dialog was opened with, and the system
     // switch is read exactly once, so the first paint is one consistent palette. Who
-    // re-resolves and when is written down in `apply_now` (a pressed «Применить») and in
+    // re-resolves and when is written down in `refresh_in_place` (a pressed «Применить») and in
     // task T-11-9 (`WM_SETTINGCHANGE`), not here.
     let palette = theme::resolve(config.general.theme, theme::system_is_light());
 
@@ -6227,9 +6227,9 @@ struct DialogState<'a> {
     ///
     /// Resolved once when the dialog is created — the setting from the configuration, the
     /// system switch read exactly once — and replaced in exactly one place: a pressed
-    /// «Применить» that resolves to the other palette (see [`apply_now`]). `&'static`
+    /// «Применить» that resolves to the other palette (see [`refresh_in_place`]). `&'static`
     /// because `theme::resolve` answers identity, not a copy, and identity is what
-    /// [`title_bar_is_dark`] and the change test in [`apply_now`] compare by.
+    /// [`title_bar_is_dark`] and the change test in [`refresh_palette`] compare by.
     palette: &'static theme::Palette,
     /// The brushes of `palette`, owned for as long as the window can be asked to paint.
     ///
@@ -6246,7 +6246,7 @@ struct DialogState<'a> {
     /// Built exactly once, on `WM_INITDIALOG`, by [`collect_panel_children`] — geometry
     /// of the template's rectangles and nothing else. Deliberately *not* rebuilt on a
     /// palette change: rectangles do not move when colours change, which is why
-    /// [`apply_now`] recreates the brushes and leaves this map alone.
+    /// [`refresh_in_place`] recreates the brushes and leaves this map alone.
     panel_children: Vec<i32>,
     /// The two faces this dialog sets **its own** text in — FR-92а, task T-11-17.
     ///
@@ -13003,8 +13003,8 @@ fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
     prepare_cycle_list(hwnd);
 
     // FR-92а, task T-11-7: the list carries palette state of its own — the three colours,
-    // set here for the first showing and again by `apply_now` on every palette change — and a
-    // state image list, which since task T-11-25 carries no colour at all and is therefore
+    // set here for the first showing and again by `refresh_in_place` on every palette change —
+    // and a state image list, which since task T-11-25 carries no colour at all and is therefore
     // built once, here. After `prepare_cycle_list`: the extended style must exist before the
     // system pair it creates can be replaced.
     paint_cycle_list(hwnd, state.palette);
@@ -13367,6 +13367,12 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
         // and relabelling or rebuilding it in that moment would be a flash and nothing else.
         // Everything opened afterwards — the menu, «О программе», these settings again — is
         // built in the new locale, which task Т-31-1 published before this line was reached.
+        //
+        // Решение 144.1, задача T-85-1: nor is the window repainted — `refresh_in_place` is
+        // «Применить»'s alone. A new palette here only marked the window, `EndDialog` took the
+        // focus off this button, and the button drew itself at once in the new theme, corners of
+        // the new ground included, a moment before the window was hidden
+        // (`scratchpad-E85\probe-ok-mechanism.log`). The window leaves in the theme it had.
         OK_COMMAND => {
             // SAFETY: see the caller.
             let _ = unsafe { apply_now(hwnd) };
@@ -13374,10 +13380,16 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
         }
 
         // …and «Применить» is the button that stays in the window, so the window has to become
-        // the one the new language asks for — решение 99.1, the two mechanisms.
+        // the one the new settings ask for: first the palette and the state lines, as it always
+        // was, then the language — решение 99.1, the two mechanisms.
         IDC_APPLY => {
             // SAFETY: see the caller.
-            match unsafe { apply_now(hwnd) } {
+            let switch = unsafe { apply_now(hwnd) };
+
+            // SAFETY: see the caller.
+            unsafe { refresh_in_place(hwnd) };
+
+            match switch {
                 // The language did not move. Pressing «Применить» twice must not blink.
                 LanguageSwitch::Unchanged => {}
                 // SAFETY: see the caller.
@@ -13500,6 +13512,10 @@ fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
 /// the window (решение 99.1); «ОК» does neither — it writes and closes, and everything opened
 /// afterwards is in the new language anyway.
 ///
+/// Nor does it repaint anything — решение 144.1, задача T-85-1. The palette and the state lines
+/// are [`refresh_in_place`]'s, which only «Применить» calls: a repaint made here reached the
+/// window «ОК» was closing, too.
+///
 /// # Safety
 ///
 /// Called from [`dialog_proc`] only.
@@ -13529,22 +13545,33 @@ unsafe fn apply_now(hwnd: HWND) -> LanguageSwitch {
 
             let updated = state.working.clone();
             (state.apply)(&updated);
-
-            // FR-92а, task T-11-4 — the half of position 25 this dialog owns: the person
-            // who chose «Тёмное» and pressed «Применить» sees the change now, not on the
-            // next opening. Task T-11-9 runs the same refresh from its own message, which
-            // is why the body lives in `refresh_palette` rather than here.
-            refresh_palette(hwnd, state);
         })
     };
 
-    // Outside the borrow above: the state lines show what the modules answer *after* the
-    // publication, and reading them needs no state of the dialog beyond the session list.
+    language_switch(was, ui_language())
+}
+
+/// The window that stays open puts on what was just applied — the half of «Применить» that «ОК»
+/// does not have (решение 144.1, задача T-85-1).
+///
+/// # Safety
+///
+/// Called from [`on_command`] only, with the `hwnd` of the dialog it belongs to, after
+/// [`apply_now`] has published.
+unsafe fn refresh_in_place(hwnd: HWND) {
+    // FR-92а, task T-11-4 — the half of position 25 this dialog owns: the person who chose
+    // «Тёмное» and pressed «Применить» sees the change now, not on the next opening. Task T-11-9
+    // runs the same refresh from its own message, which is why the body lives in
+    // `refresh_palette` rather than here.
+    //
+    // SAFETY: see the caller.
+    unsafe { with_state(hwnd, |state| refresh_palette(hwnd, state)) };
+
+    // The state lines show what the modules answer *after* the publication, and reading them
+    // needs no state of the dialog beyond the session list.
     //
     // SAFETY: see the caller.
     unsafe { with_state(hwnd, |state| fill_state_lines(hwnd, state)) };
-
-    language_switch(was, ui_language())
 }
 
 /// Механизм (а) решения 99.1 — the window keeps its handle, its place and its selections, and
