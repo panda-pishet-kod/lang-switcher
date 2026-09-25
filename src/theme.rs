@@ -774,12 +774,22 @@ pub fn drawing_dpi_at(screen_dpi: i32, step: u16) -> i32 {
 /// the DC's window (`GetAncestor(GA_ROOT)`); a DC of no window — a memory surface, the screen — reads
 /// ten, which is the look before this stage.
 ///
-/// ⚠ **On the DC of the message, never on a buffer**, the rule [`PaintBuffer`] states for [`dc_dpi`]:
-/// a memory surface belongs to no window.
+/// ⛔⛔ **A [`PaintBuffer`] answers for the window it stands for — задача T-83-6, находка 143б.**
+/// The first edition of this function said «on the DC of the message, never on a buffer», and the
+/// drawing of a label did not keep it: its model pitch asks this function on the DC it draws into,
+/// and the labels of «От автора» and of the wizard draw into a buffer. A memory surface belongs to
+/// no window, so it read ten — the full scale of the screen — and at 150 % the lines of a paragraph
+/// came out 25 px apart in the room of 21 (the owner's screens, the bands of pixels measured). Now
+/// the buffer carries over the answer of the DC it was made for, as it carries the face; a memory DC
+/// that is no buffer of ours still reads ten.
 ///
 /// What Windows draws — the scroll bar, the caption of a window, the tray's menu and icon — stays on
 /// the true DPI: it does not come through here.
 pub fn drawing_dpi(dc: HDC) -> i32 {
+    if let Some(dpi) = dpi_of_buffer(dc) {
+        return dpi;
+    }
+
     let screen = dc_dpi(dc);
 
     drawing_dpi_at(screen, window_font_step(dc, screen))
@@ -925,7 +935,7 @@ pub const BORDER_THICKNESS: i32 = 1;
 /// Three lines around a drawing body that is otherwise left exactly as it was:
 ///
 /// ```text
-/// let dpi = dc_dpi(dc);                                     // ⚠ off the DC of the message
+/// let dpi = drawing_dpi(dc);                                // ⚠ off the DC of the message
 /// let buffer = PaintBuffer::for_rect(dc, &rect);            // None on a refusal of GDI
 /// let target = buffer.as_ref().map_or(dc, PaintBuffer::dc);
 /// … the body exactly as it was, writing into `target` …
@@ -943,6 +953,12 @@ pub const BORDER_THICKNESS: i32 = 1;
 /// reading it off the DC it paints on. A radius scaled off this buffer would be wrong at every
 /// scale that is not 100 %, and nothing would say so — no red test and no warning, just another
 /// figure. The DPI is read off the DC of the message, before the substitution.
+///
+/// ⛔ **[`drawing_dpi`] of this buffer is the one exception, since задача T-83-6** (находка 143б):
+/// a drawing body that asks it on the DC it draws into — the model pitch of a label does — gets the
+/// answer of the DC the buffer was made for, because [`PaintBuffer::for_rect`] carries it over with
+/// the face. Before that it got the screen's, and at 150 % the last line of a paragraph went under
+/// the buttons. [`dc_dpi`] of the buffer still answers for the memory.
 ///
 /// **The ground.** [`Supersample::render`] reads the ground of a corner back **out of** the DC
 /// it is drawing into, so whatever lies under the four corners is what the smoothing blends the
@@ -1069,6 +1085,15 @@ impl PaintBuffer {
             unsafe { SelectObject(buffer.dc, face) };
         }
 
+        // ⛔⛔ **The DPI of our drawing, carried over for the very reason the face is — задача
+        // T-83-6, находка 143б живой приёмки `e83`.** [`drawing_dpi`] finds the step of a window
+        // through the window of the DC, and a memory DC belongs to none: asked of this surface it
+        // answered the DPI of the screen, and a label drawn through it spaced its lines at the full
+        // scale while the layout had given it the room of the step — at 150 % 25 px a line against
+        // 21, and the last line of a paragraph went under the buttons. Read off `target` here, while
+        // it is still the DC of the message, and answered for this surface until it is dropped.
+        register_buffer_dpi(buffer.dc, drawing_dpi(target));
+
         Some(buffer)
     }
 
@@ -1114,6 +1139,10 @@ impl PaintBuffer {
 
 impl Drop for PaintBuffer {
     fn drop(&mut self) {
+        // Before the DC goes: a handle freed here may be handed to the next memory DC of this
+        // thread, which is no buffer and must not inherit this one's DPI.
+        forget_buffer_dpi(self.dc);
+
         // SAFETY: `self.previous` is the bitmap this DC was born with, kept since `for_rect`;
         // putting it back frees `self.bitmap` to be deleted. The answer is dropped — there is
         // nothing to put back if the DC is already gone, and this path carries no journal row
@@ -1125,6 +1154,66 @@ impl Drop for PaintBuffer {
         // and never reassigned, and `drop` runs once.
         let _ = unsafe { DeleteObject(self.bitmap.into()) };
         let _ = unsafe { DeleteDC(self.dc) };
+    }
+}
+
+thread_local! {
+    /// The DPI of our drawing for every live [`PaintBuffer`] of this thread, by its memory DC —
+    /// задача T-83-6. A thread's own because a DC is, and so is a buffer: it lives for the one
+    /// message it paints.
+    static BUFFER_DRAWING_DPI: std::cell::RefCell<Vec<(HDC, i32)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Records what [`drawing_dpi`] answers for the memory DC of a new [`PaintBuffer`].
+///
+/// NFR-13: a record that cannot be made — the thread is being torn down, or the list is being read
+/// at this very moment — leaves the buffer answering what a memory DC answered before задача
+/// T-83-6, the DPI of the screen: the look of `e83`, degraded and alive.
+fn register_buffer_dpi(dc: HDC, dpi: i32) {
+    let _ = BUFFER_DRAWING_DPI.try_with(|all| {
+        if let Ok(mut all) = all.try_borrow_mut() {
+            all.push((dc, dpi));
+        }
+    });
+}
+
+/// Forgets the memory DC of a [`PaintBuffer`] that is being dropped — every record of it.
+fn forget_buffer_dpi(dc: HDC) {
+    let _ = BUFFER_DRAWING_DPI.try_with(|all| {
+        if let Ok(mut all) = all.try_borrow_mut() {
+            all.retain(|(buffer, _)| *buffer != dc);
+        }
+    });
+}
+
+/// The DPI of our drawing recorded for `dc`, when it is the memory DC of a live [`PaintBuffer`] of
+/// this thread; `None` for every other DC.
+fn dpi_of_buffer(dc: HDC) -> Option<i32> {
+    BUFFER_DRAWING_DPI
+        .try_with(|all| {
+            all.try_borrow().ok().and_then(|all| {
+                all.iter()
+                    .rev()
+                    .find(|(buffer, _)| *buffer == dc)
+                    .map(|(_, dpi)| *dpi)
+            })
+        })
+        .ok()
+        .flatten()
+}
+
+/// The doors of the tests into this module — compiled only under the `testing` feature.
+#[cfg(feature = "testing")]
+pub mod testing {
+    /// How many [`super::PaintBuffer`]s of this thread have their DPI recorded — задача T-83-6. The
+    /// record of a buffer has to live exactly as long as the buffer: otherwise the list grows by one
+    /// with every element painted, and a handle `DeleteDC` frees and GDI hands to the next memory DC
+    /// answers the DPI of a buffer that is gone.
+    pub fn buffers_recorded() -> usize {
+        super::BUFFER_DRAWING_DPI
+            .try_with(|all| all.try_borrow().map_or(0, |all| all.len()))
+            .unwrap_or(0)
     }
 }
 

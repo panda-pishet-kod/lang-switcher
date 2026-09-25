@@ -8107,11 +8107,17 @@ fn all_our_drawing_goes_by_the_step() {
         })
         .sum();
 
-    // The 28 places, the definition, and its one use inside the function itself is none — the
-    // body asks `dc_dpi`.
-    assert_eq!(calls, 28 + 1, "the 28 places of П4 and the definition");
+    // The 28 places, the definition, and — since задача T-83-6, находка 143б — the one carry of the
+    // paint buffer: `PaintBuffer::for_rect` asks it of the DC of the message for the surface it
+    // makes, so that a drawing asking it of the surface gets the window's step. Its use inside the
+    // function itself is none — the body asks `dc_dpi`.
+    assert_eq!(
+        calls,
+        28 + 1 + 1,
+        "the 28 places of П4, the definition and the buffer's carry"
+    );
 
-    // ⚠ Контроль «текст e82»: every place put back.
+    // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
     let of_e82: Vec<(&'static str, String)> = files
         .iter()
         .map(|(file, text)| {
@@ -8139,8 +8145,9 @@ fn all_our_drawing_goes_by_the_step() {
         })
         .sum();
     assert_eq!(
-        caught, 28,
-        "the text of e82 must be caught at all 28 places"
+        caught,
+        28 + 1,
+        "the text of e82 must be caught at all 28 places and at the buffer's carry"
     );
 
     // ⚠ Контроль «мутант задачи»: one place of `letters.rs` put back.
@@ -8261,6 +8268,400 @@ fn the_live_window_draws_by_its_step() {
             "{what} at eight points"
         );
     }
+}
+
+/// **⛔⛔ The paint buffer draws by the step of the window it stands for — задача T-83-6, находка
+/// 143б живой приёмки `e83`.**
+///
+/// The labels of «От автора» and of the wizard are drawn through `theme::PaintBuffer` (Т-33-8,
+/// against the flicker), and a memory DC belongs to no window: `drawing_dpi` found no font behind
+/// it and answered the DPI of the screen. At 150 % the lines of a paragraph came out 25 px apart
+/// where the layout had allowed 21, and the last line went under the buttons — on the owner's
+/// screens the bands of pixels are 25 px apart at 150 % and 29 at 175 %, `scaled(23, 144)` and
+/// `scaled(23, 168)`. The buffer carries the drawing DPI of the DC it is made for over, as it
+/// carries the face.
+///
+/// A hidden window given the face of each step on this screen: a buffer made for its DC answers
+/// what the DC answers — the screen's own at ten points, screen × step / 10 below — and so does a
+/// buffer made for that buffer; a memory DC that is no buffer of ours answers the screen, as before.
+///
+/// ⚠ «Красное до» (`e83`): the buffer answers the screen's 96 at every step.
+#[test]
+fn the_paint_buffer_draws_by_the_step_of_the_window_it_stands_for() {
+    use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateFontIndirectW, DeleteDC, DeleteObject, GetDC, ReleaseDC,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, SendMessageW, WM_SETFONT, WS_EX_TOOLWINDOW, WS_POPUP,
+    };
+    use windows::core::{PCWSTR, w};
+
+    let area = RECT {
+        left: 0,
+        top: 0,
+        right: 120,
+        bottom: 40,
+    };
+    let mut wrong = Vec::new();
+
+    for step in [10_u16, 9, 8, 7, 6] {
+        // SAFETY: a system class, no parent, never shown; destroyed at the end of the pass.
+        let window = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                400,
+                200,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden window must be creatable");
+
+        // SAFETY: the window is live; the DC is released at the end of the pass.
+        let dc = unsafe { GetDC(Some(window)) };
+        let screen = theme::dc_dpi(dc);
+        let face = theme::face_at(step, screen);
+
+        // SAFETY: a plain font of this pass, deleted after the window that carries it.
+        let font = unsafe {
+            CreateFontIndirectW(&LOGFONTW {
+                lfHeight: -face,
+                lfWeight: 400,
+                ..Default::default()
+            })
+        };
+
+        // SAFETY: our own window of this thread; the font outlives it.
+        unsafe {
+            SendMessageW(
+                window,
+                WM_SETFONT,
+                Some(WPARAM(font.0 as usize)),
+                Some(LPARAM(0)),
+            )
+        };
+
+        let of_window = theme::drawing_dpi(dc);
+
+        // SAFETY: `dc` is live for the calls; each buffer frees its own DC and bitmap on drop,
+        // the inner one first.
+        let (of_buffer, of_nested) = unsafe {
+            let buffer = theme::PaintBuffer::for_rect(dc, &area).expect("a buffer");
+            let nested =
+                theme::PaintBuffer::for_rect(buffer.dc(), &area).expect("a buffer of a buffer");
+            (
+                theme::drawing_dpi(buffer.dc()),
+                theme::drawing_dpi(nested.dc()),
+            )
+        };
+
+        // A memory DC that is no buffer of ours belongs to no window, as before this task.
+        //
+        // SAFETY: made and deleted here, never selected into.
+        let of_bare = unsafe {
+            let bare = CreateCompatibleDC(Some(dc));
+            let answer = theme::drawing_dpi(bare);
+            let _ = DeleteDC(bare);
+            answer
+        };
+
+        println!(
+            "{step} pt, face {face} px: the window's DC {of_window}, its buffer {of_buffer}, a \
+             buffer of the buffer {of_nested}, a bare memory DC {of_bare}"
+        );
+
+        let expected = theme::drawing_dpi_at(screen, step);
+
+        if (of_window, of_buffer, of_nested, of_bare) != (expected, expected, expected, screen) {
+            wrong.push(format!(
+                "{step} pt: window {of_window}, buffer {of_buffer}, nested {of_nested}, bare \
+                 {of_bare} — expected {expected}, {expected}, {expected}, {screen}"
+            ));
+        }
+
+        // SAFETY: releases the DC taken above and destroys our window, then deletes its font.
+        unsafe {
+            ReleaseDC(Some(window), dc);
+            let _ = DestroyWindow(window);
+            let _ = DeleteObject(font.into());
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "⛔⛔ 143б: a paint buffer does not draw by the step of its window — {wrong:?}"
+    );
+}
+
+/// **The record of a paint buffer lives exactly as long as the buffer — задача T-83-6.** Otherwise
+/// the list grows by one with every element painted, and a handle `DeleteDC` frees and GDI hands to
+/// the next memory DC answers the DPI of a buffer that is gone.
+///
+/// ⚠ The mutant «`Drop` forgets nothing» passes
+/// `the_paint_buffer_draws_by_the_step_of_the_window_it_stands_for` — a freed handle is not handed
+/// out again reliably enough for its bare memory DC to meet it (`mutant-T-83-6-no-forget.log`) —
+/// and is caught here.
+#[cfg(feature = "testing")]
+#[test]
+fn the_record_of_a_paint_buffer_lives_as_long_as_the_buffer() {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+
+    let area = RECT {
+        left: 0,
+        top: 0,
+        right: 64,
+        bottom: 24,
+    };
+    let before = theme::testing::buffers_recorded();
+
+    // SAFETY: the screen DC of this process, released at the end; both buffers are dropped before
+    // it, the inner one first.
+    unsafe {
+        let screen = GetDC(None);
+
+        {
+            let buffer = theme::PaintBuffer::for_rect(screen, &area).expect("a buffer");
+            assert_eq!(
+                theme::testing::buffers_recorded(),
+                before + 1,
+                "one buffer, one record"
+            );
+
+            {
+                let _nested =
+                    theme::PaintBuffer::for_rect(buffer.dc(), &area).expect("a buffer of a buffer");
+                assert_eq!(theme::testing::buffers_recorded(), before + 2);
+            }
+
+            assert_eq!(
+                theme::testing::buffers_recorded(),
+                before + 1,
+                "the inner record goes with the inner buffer"
+            );
+        }
+
+        assert_eq!(
+            theme::testing::buffers_recorded(),
+            before,
+            "every record goes with its buffer"
+        );
+
+        ReleaseDC(None, screen);
+    }
+}
+
+/// **⛔⛔ The paragraphs of «От автора» are drawn inside their rectangles at every step — задача
+/// T-83-6, находка 143б.**
+///
+/// The layout gives a paragraph the height of its lines at the pitch of the body face; the drawing
+/// sets it in the window's text face at the model pitch of a label, `scaled(23, drawing DPI)`, which
+/// the model refuses whenever it is not larger than the face's own line (В-6). Drawn through the
+/// buffer at the screen's DPI, the model pitch came out larger than the body's pitch at the steps
+/// of 150 % and 175 %, and the last line was cut: at 150 %, 94 px of drawing in 83 px of room.
+///
+/// The live window, hidden, in the fourteen locales at the five steps on this screen; each
+/// paragraph drawn in the text face with the label's own pitch is measured **the way its drawing
+/// measures it** — through a `PaintBuffer` made for the control's own DC, by `theme::measure_label`,
+/// the documented twin of the painter — and must not ask for more than the rectangle the layout gave
+/// it.
+///
+/// ⚠ At 96 DPI the steps 7 and 6 are faces of 9 and 8 px, which the rule never shows on this screen
+/// — but the error is a ratio, screen / drawing = 10 / step, and 96 at step 7 is the ratio of 144 at
+/// step 7: the lab stands for 150 %. «Красное до» (`e83`): cut at 7 and 6 points.
+#[cfg(feature = "testing")]
+#[test]
+fn the_paragraphs_of_the_author_window_are_drawn_inside_their_rectangles() {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        CreateFontIndirectW, DeleteObject, GetDC, GetObjectW, HGDIOBJ, ReleaseDC, SelectObject,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, GetDlgItem, GetWindowLongW, GetWindowTextW, SendMessageW, WM_GETFONT, WS_VISIBLE,
+    };
+
+    /// What «От автора» draws in the text face at the label's own pitch — `letters::label_face`
+    /// answers `(faces.text, None)` for each of them.
+    const PARAGRAPHS: [(&str, i32); 6] = [
+        ("IDC_AUTHOR_TEXT", 1264),
+        ("IDC_NEWS_ABOUT", 1268),
+        ("IDC_NEWS_STATE", 1269),
+        ("IDC_NEWS_VERSION", 1270),
+        ("IDC_NEWS_FILE_ONLY", 1273),
+        ("IDC_FEEDBACK_TEXT", 1277),
+    ];
+
+    let _guard = with_product_strings();
+    let mut cut = Vec::new();
+    let mut measured = 0_usize;
+
+    for step in [10_u16, 9, 8, 7, 6] {
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            settings::testing::with_font_step(step, || {
+                let window = HiddenAuthor::open("0.83.0");
+
+                // SAFETY: the window and its children are live for this block; the face made here
+                // is selected out of every DC before it is deleted, and every DC is released.
+                unsafe {
+                    let font = SendMessageW(window.window, WM_GETFONT, None, None);
+                    let mut base = LOGFONTW::default();
+                    let _ = GetObjectW(
+                        HGDIOBJ(font.0 as *mut _),
+                        i32::try_from(size_of::<LOGFONTW>()).expect("small"),
+                        Some(std::ptr::from_mut(&mut base).cast()),
+                    );
+                    let text_face = CreateFontIndirectW(&theme::smoothed_logfont(base));
+
+                    for (name, control) in PARAGRAPHS {
+                        let Ok(child) = GetDlgItem(Some(window.window), control) else {
+                            continue;
+                        };
+
+                        if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
+                            continue;
+                        }
+
+                        let rect = window.control_rect(control);
+                        let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+                        let mut text = [0_u16; 1024];
+                        let copied = usize::try_from(GetWindowTextW(child, &mut text)).unwrap_or(0);
+
+                        if copied == 0 || width <= 0 || height <= 0 {
+                            continue;
+                        }
+
+                        let mut caption = text[..copied].to_vec();
+                        let dc = GetDC(Some(child));
+                        let area = RECT {
+                            left: 0,
+                            top: 0,
+                            right: width,
+                            bottom: height,
+                        };
+                        let asked = theme::PaintBuffer::for_rect(dc, &area)
+                            .map(|buffer| {
+                                let previous = SelectObject(buffer.dc(), text_face.into());
+                                let asked =
+                                    theme::measure_label(buffer.dc(), width, &mut caption, None);
+                                SelectObject(buffer.dc(), previous);
+                                asked
+                            })
+                            .expect("a buffer for the paragraph");
+                        ReleaseDC(Some(child), dc);
+                        measured += 1;
+
+                        if asked > height {
+                            cut.push(format!(
+                                "{step} pt, {language:?}, {name}: the drawing asks {asked} px in \
+                                 {height}"
+                            ));
+                        }
+                    }
+
+                    let _ = DeleteObject(text_face.into());
+                }
+            });
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{measured} paragraphs measured; cut: {cut:?}");
+
+    assert!(
+        measured >= 5 * 14 * 4,
+        "every step, every locale, at least the four paragraphs that always show: {measured}"
+    );
+    assert!(
+        cut.is_empty(),
+        "⛔⛔ 143б: a paragraph of «От автора» is drawn past its rectangle — {cut:?}"
+    );
+}
+
+/// **The pitch the drawing takes fits the room the layout gives, on every screen of the rule —
+/// задача T-83-6, находка 143б.** The model of the two halves, at the real faces.
+///
+/// For every scale Windows offers × the steps 10…6 pt (the face not under the floor) and for a
+/// paragraph of two to six lines: the layout's height at the body face and its pitch
+/// (`settings::about_body_line_pitch`, the face one step larger — `ABOUT_BODY_POINTS_TENTHS` over
+/// `DIALOG_FONT_POINTS_TENTHS`), against the drawing's in the text face at `scaled(23, DPI)` or its
+/// own line when the model refuses (`theme::label_model_pitch`). Drawn **at the DPI of the
+/// drawing** — what the buffer answers since this task — it never asks for more than it was given.
+///
+/// ⚠ Контроль «буфер e83»: the same drawing at the DPI of the **screen** is caught — at 150 %,
+/// 7 pt, four lines: 94 px in 83, the owner's screen.
+#[test]
+fn the_pitch_of_the_drawing_fits_the_room_of_the_layout_on_every_screen_of_the_rule() {
+    const DPIS: [i32; 8] = [96, 120, 144, 168, 192, 216, 240, 288];
+
+    let height_at = |natural: i32, pitch: i32, lines: i32| -> i32 {
+        match theme::label_model_pitch(lines, natural, pitch) {
+            Some(pitch) => (lines - 1) * pitch + natural,
+            None => lines * natural,
+        }
+    };
+
+    let mut cut = Vec::new();
+    let mut caught = Vec::new();
+
+    for dpi in DPIS {
+        for step in settings::FONT_STEPS {
+            let face = theme::face_at(step, dpi);
+
+            if face < settings::FONT_STEP_FLOOR {
+                continue;
+            }
+
+            let body =
+                face * settings::ABOUT_BODY_POINTS_TENTHS / settings::DIALOG_FONT_POINTS_TENTHS;
+            let body_pitch = settings::about_body_line_pitch(-body);
+            let drawing = theme::drawing_dpi_at(dpi, step);
+
+            for lines in 2..=6 {
+                let room = height_at(cell_of(body), body_pitch, lines);
+                let asked = height_at(
+                    cell_of(face),
+                    theme::scaled(theme::LABEL_LINE_PITCH, drawing),
+                    lines,
+                );
+                let asked_at_the_screen = height_at(
+                    cell_of(face),
+                    theme::scaled(theme::LABEL_LINE_PITCH, dpi),
+                    lines,
+                );
+
+                if asked > room {
+                    cut.push(format!(
+                        "{dpi} DPI, {step} pt, {lines} lines: {asked} px in {room}"
+                    ));
+                }
+
+                if asked_at_the_screen > room {
+                    caught.push((dpi, step, lines, asked_at_the_screen, room));
+                }
+            }
+        }
+    }
+
+    assert!(
+        cut.is_empty(),
+        "⛔⛔ 143б: the drawing asks for more than the layout gives — {cut:?}"
+    );
+    assert!(
+        caught.contains(&(144, 7, 4, 94, 83)),
+        "the control — the drawing of e83 at the screen's DPI — must be caught at 150 %, 7 pt, four \
+         lines, 94 px in 83: {caught:?}"
+    );
 }
 
 /// **⛔ A grown window moves only when it would leave the air of the rule — решение 143.10 (а),
