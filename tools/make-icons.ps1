@@ -7,7 +7,7 @@
     drawn from the same 100x100 vector description, so a change of proportion or tone is one
     edit here rather than seven hand-retouched bitmaps that drift apart.
 
-    OUTPUT: the four icons of res\ (see $targets at the end), nineteen frames each -- the list and
+    OUTPUT: the eight icons of res\ (see $targets at the end), nineteen frames each -- the list and
     why each size is there is at $SIZES below. 16/20/24/32 are the sizes FR-90 names and
     SM_CXSMICON selects between; the larger ones exist because the same file is the icon of the
     executable (app.rc, IDI_APP_ACTIVE/IDI_APP_PAUSED) and of the installer (SetupIconFile), and
@@ -16,11 +16,21 @@
     Frames are stored as PNG, which is what the icons this replaces already did: Windows Vista
     and later read PNG frames from an .ico, and at 256 px a BMP frame would cost 256 KB.
 
-    ONE SET FOR BOTH TASKBAR THEMES, deliberately: the dark plate is what reads on a light
-    taskbar, the light glyph is what reads on a dark one, so FR-90 is satisfied by the drawing
-    itself and no theme-switching of icon sets exists to go wrong. The mirror-image light
-    palette (variant 02) is kept in the table below so trying it is one argument rather than
-    a redraw -- but no file in res\ is made from it.
+    TWO SETS SINCE TASK T-86-1 (decisions 144e and 145.1), and the second exists for one place
+    only. The MAIN set -- langswitcher-*.ico, the dark plate carrying a white glyph -- is the icon
+    of the executable, the installer, the Start menu, the window headers, the balloon, and the
+    tray on a LIGHT taskbar, where the plate is what reads. On a DARK taskbar the plate melted
+    into the bar (finding 144b: RGB(43,47,54) against RGB(45,45,45), the outer ring of the 16 px
+    frame half transparent) and the icon read smaller than its neighbours, which draw a bright
+    glyph over the whole cell. So the DARKBAR set -- langswitcher-darkbar-*.ico: the same glyph
+    1.30 x larger about the centre, NO plate, the dot of a letter cutting a transparent ring out
+    of whatever is under it -- is what the tray shows while Windows reports a dark taskbar
+    (SystemUsesLightTheme = 0), and nothing else takes it. The owner chose it on the mock-up among
+    five variants drawn by this very description (scratchpad-E86\render-tray-dark-variants.ps1,
+    branch 'bare'); the frames 16..32 of its three mock-up states are held to that mock-up BYTE
+    FOR BYTE by scratchpad-E86\darkbar-vs-mockup.ps1. The mirror-image light palette (variant 02)
+    is kept in the table below so trying it is one argument rather than a redraw -- but no file
+    in res\ is made from it.
 #>
 
 Add-Type -AssemblyName System.Drawing
@@ -94,6 +104,11 @@ function New-PausePath {
 # centre of the dot to the outline of the arrow as drawn in this frame, less the outer radius of the
 # ring. Positive -- the dot stands clear of the arrow; zero or less -- it touches or covers it, and
 # the generator refuses to write the icon rather than ship it (see Render-Frame).
+#
+# Task T-86-1: the guard is for the sets WITH a plate. In the darkbar set the dot sits ON the arrow
+# by design -- a badge: the transparent ring cuts the arrow, the dot stands in the cut -- so this
+# measure is negative there on purpose and is not asked. What holds that set's picture is the
+# byte-for-byte comparison with the mock-up the owner chose (scratchpad-E86\darkbar-vs-mockup.ps1).
 function Get-DotClearance([System.Drawing.PointF[]]$outline, [double]$cx, [double]$cy, [double]$outer) {
   $least = [double]::MaxValue
   $inside = $false
@@ -114,7 +129,7 @@ function Get-DotClearance([System.Drawing.PointF[]]$outline, [double]$cx, [doubl
 # The least clearance of the dot met while one file was drawn -- printed beside the file.
 $script:LeastClearance = [double]::MaxValue
 
-function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
+function Render-Frame([int]$size, [string]$paletteName, [string]$state, [bool]$bare = $false) {
   $pal = $PALETTE[$paletteName]
   $n = $size * $SS
 
@@ -125,10 +140,14 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   $g.Clear([System.Drawing.Color]::Transparent)
   $g.ScaleTransform([single]($n/100.0), [single]($n/100.0))
 
-  $plate = New-RoundedPath 2 2 96 96 24
-  $br = New-Object System.Drawing.SolidBrush($pal.Plate)
-  $g.FillPath($br, $plate)
-  $br.Dispose(); $plate.Dispose()
+  # Task T-86-1: the darkbar set has no plate -- the glyph alone over the whole cell, like the
+  # system's own glyphs on a dark taskbar (finding 144b, decision 144e).
+  if (-not $bare) {
+    $plate = New-RoundedPath 2 2 96 96 24
+    $br = New-Object System.Drawing.SolidBrush($pal.Plate)
+    $g.FillPath($br, $plate)
+    $br.Dispose(); $plate.Dispose()
+  }
 
   if ($state -eq 'paused' -or $state -eq 'paused-unread') { $glyph = New-PausePath; $ink = $pal.Paused }
   else { $glyph = New-ArrowPath; $ink = $pal.Active }
@@ -139,8 +158,10 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   # shaft of 1.8 px -- a white speck, too small, as the owner rightly said. 32 and larger stay at
   # 70 %: the 32 px frame is also the icon of the headers of «О программе» and «От автора» and of
   # the balloon (SM_CXICON at 100 %). The pause follows the same scale.
+  # Task T-86-1, decision 145.1: in the darkbar set the glyph is 1.30 in EVERY frame -- there is
+  # no plate to fit into, and the mock-up the owner chose was drawn at 1.30 for 16 to 32 px alike.
   $small = $size -le 30
-  $s = if ($small) { [single]0.95 } else { [single]0.70 }
+  $s = if ($bare) { [single]1.30 } elseif ($small) { [single]0.95 } else { [single]0.70 }
   $d = [single](50 - 50 * $s)
   $m = New-Object System.Drawing.Drawing2D.Matrix($s, [single]0, [single]0, $s, $d, $d)
   $glyph.Transform($m); $m.Dispose()
@@ -173,10 +194,16 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
     # a little: (82, 82), r 12, ring 4 -- 5.63 units clear of the arrow, 3.84 px across at 16 px
     # (the floor is 3 px), and the second pause bar just touched. Chosen on the proof sheet of the
     # candidates, scratchpad-E85\dot-candidates-x8.png. The large frames keep the old place.
-    if ($small) { $cx = 82.0; $cy = 82.0; $r = 12.0; $ring = 4.0 }
-    else        { $cx = 78.0; $cy = 78.0; $r = 14.0; $ring = 5.0 }
+    # Task T-86-1: the darkbar set keeps the small-frame place in EVERY frame -- (82, 82), r 12,
+    # ring 4 -- as the mock-up did; and its ring is not the plate's colour but a CUT: the pixels
+    # under it are replaced with transparency (SourceCopy), so the dot stands in a clear hole in
+    # the arrow, badge-like, whatever the taskbar's colour. The guard of the dot is not asked for
+    # this set: the ring cutting the arrow is the design, not a defect (see Get-DotClearance).
+    if ($bare)      { $cx = 82.0; $cy = 82.0; $r = 12.0; $ring = 4.0 }
+    elseif ($small) { $cx = 82.0; $cy = 82.0; $r = 12.0; $ring = 4.0 }
+    else            { $cx = 78.0; $cy = 78.0; $r = 14.0; $ring = 5.0 }
 
-    if ($null -ne $arrow) {
+    if ($null -ne $arrow -and -not $bare) {
       $clearance = Get-DotClearance $arrow $cx $cy ($r + $ring)
       if ($clearance -le 0) {
         throw ("the dot of the letter touches the arrow in the {0} px frame of {1}: clearance {2:N2} units -- no file is written" -f $size, $state, $clearance)
@@ -184,10 +211,19 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
       $script:LeastClearance = [math]::Min($script:LeastClearance, $clearance)
     }
 
-    $ringBrush = New-Object System.Drawing.SolidBrush($pal.Plate)
-    $g.FillEllipse($ringBrush, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
-                   [single](2*($r+$ring)), [single](2*($r+$ring)))
-    $ringBrush.Dispose()
+    if ($bare) {
+      $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $cut = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::Transparent)
+      $g.FillEllipse($cut, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
+                     [single](2*($r+$ring)), [single](2*($r+$ring)))
+      $cut.Dispose()
+      $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+    } else {
+      $ringBrush = New-Object System.Drawing.SolidBrush($pal.Plate)
+      $g.FillEllipse($ringBrush, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
+                     [single](2*($r+$ring)), [single](2*($r+$ring)))
+      $ringBrush.Dispose()
+    }
     $dotBrush = New-Object System.Drawing.SolidBrush($ink)
     $g.FillEllipse($dotBrush, [single]($cx-$r), [single]($cy-$r), [single](2*$r), [single](2*$r))
     $dotBrush.Dispose()
@@ -216,9 +252,9 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   ,$bytes
 }
 
-function Render-Set([string]$paletteName, [string]$state) {
+function Render-Set([string]$paletteName, [string]$state, [bool]$bare = $false) {
   $frames = @()
-  foreach ($s in $SIZES) { $frames += ,(Render-Frame $s $paletteName $state) }
+  foreach ($s in $SIZES) { $frames += ,(Render-Frame $s $paletteName $state $bare) }
   ,$frames
 }
 
@@ -254,16 +290,23 @@ function Write-Ico([string]$path, $frames) {
   $bw.Flush(); $bw.Close(); $fs.Close()
 }
 
-# Exactly the two files app.rc and the installer reference, both from the graphite palette.
-# The light palette stays available above but produces no file in res\.
+# Exactly the eight files app.rc references, all from the graphite palette. The light palette
+# stays available above but produces no file in res\.
 $targets = @(
-  @{ File = 'langswitcher-active.ico'; Palette = 'graphite'; State = 'active' },
-  @{ File = 'langswitcher-paused.ico'; Palette = 'graphite'; State = 'paused' },
+  @{ File = 'langswitcher-active.ico'; Palette = 'graphite'; State = 'active'; Bare = $false },
+  @{ File = 'langswitcher-paused.ico'; Palette = 'graphite'; State = 'paused'; Bare = $false },
   # FR-90's third state, task T-32-4: the same two icons carrying the dot of FR-101. Two files
   # and not one, because the state of the program and the state of the letters are independent:
   # a person can pause the program with a letter unread.
-  @{ File = 'langswitcher-active-unread.ico'; Palette = 'graphite'; State = 'active-unread' },
-  @{ File = 'langswitcher-paused-unread.ico'; Palette = 'graphite'; State = 'paused-unread' }
+  @{ File = 'langswitcher-active-unread.ico'; Palette = 'graphite'; State = 'active-unread'; Bare = $false },
+  @{ File = 'langswitcher-paused-unread.ico'; Palette = 'graphite'; State = 'paused-unread'; Bare = $false },
+  # Task T-86-1, decisions 144e and 145.1: the darkbar set -- the four states again, without
+  # the plate, for the tray on a dark taskbar (app.rc 105..108). The fourth state was not on the
+  # mock-up and is drawn by the same rules as the other three.
+  @{ File = 'langswitcher-darkbar-active.ico'; Palette = 'graphite'; State = 'active'; Bare = $true },
+  @{ File = 'langswitcher-darkbar-paused.ico'; Palette = 'graphite'; State = 'paused'; Bare = $true },
+  @{ File = 'langswitcher-darkbar-active-unread.ico'; Palette = 'graphite'; State = 'active-unread'; Bare = $true },
+  @{ File = 'langswitcher-darkbar-paused-unread.ico'; Palette = 'graphite'; State = 'paused-unread'; Bare = $true }
 )
 
 # Every frame of every file is drawn before any file is written -- task T-85-3: a guard that refuses
@@ -271,7 +314,7 @@ $targets = @(
 $sets = @()
 foreach ($t in $targets) {
   $script:LeastClearance = [double]::MaxValue
-  $frames = Render-Set $t.Palette $t.State
+  $frames = Render-Set $t.Palette $t.State $t.Bare
   $sets += [pscustomobject]@{ Target = $t; Frames = $frames; Clearance = $script:LeastClearance }
 }
 
@@ -283,5 +326,5 @@ foreach ($set in $sets) {
   if ($set.Clearance -lt [double]::MaxValue) {
     $note = "  dot clear of the arrow by >= {0:N2} units" -f $set.Clearance
   }
-  Write-Output ("{0,-34} {1,7} bytes  {2} frames{3}" -f $set.Target.File, $len, $SIZES.Count, $note)
+  Write-Output ("{0,-40} {1,7} bytes  {2} frames{3}" -f $set.Target.File, $len, $SIZES.Count, $note)
 }

@@ -1,8 +1,10 @@
 ﻿<#
-    verify-icons.ps1 -- measures what criteria 9 and 10 of task T-11-8 claim about the four
-    icons in res\: one PNG frame of every size of $SIZES below in each .ico -- nineteen since
-    task T-85-2, the list kept in step with tools\make-icons.ps1 -- and LoadImageW handing back
-    every one of those sizes exactly, not a neighbour.
+    verify-icons.ps1 -- measures what criteria 9 and 10 of task T-11-8 claim about the eight
+    icons in res\ -- the four of the main set and, since task T-86-1 (decision 145.1), the four
+    of the darkbar set langswitcher-darkbar-*.ico the tray shows on a dark taskbar: one PNG
+    frame of every size of $SIZES below in each .ico -- nineteen since task T-85-2, the list
+    kept in step with tools\make-icons.ps1 -- and LoadImageW handing back every one of those
+    sizes exactly, not a neighbour.
 
     TWO DELIBERATE DETOURS AROUND System.Drawing.Icon -- do not "improve" them back.
 
@@ -134,8 +136,13 @@ function Get-LoadedIconSize([string]$path, [int]$px) {
 
 # FR-90's third state, task T-32-4: the same two icons carrying the dot of FR-101. Four files
 # and not two -- the state of the program and the state of the letters are independent.
+# Task T-86-1, decision 145.1: four more -- the darkbar set the tray shows on a dark taskbar,
+# the same four states without the plate (app.rc 105..108). Eight files, all held to the same
+# nineteen frames and to the same "own frame" rule.
 $files = @('langswitcher-active.ico','langswitcher-paused.ico',
-           'langswitcher-active-unread.ico','langswitcher-paused-unread.ico')
+           'langswitcher-active-unread.ico','langswitcher-paused-unread.ico',
+           'langswitcher-darkbar-active.ico','langswitcher-darkbar-paused.ico',
+           'langswitcher-darkbar-active-unread.ico','langswitcher-darkbar-paused-unread.ico')
 # Task T-42-11, finding 124б.2: 28, 40 and 56 joined the list. The product asks for the small
 # metric (16 at 96 DPI) and the large one (32) scaled to the monitor -- 16/20/24/28/32 and
 # 32/40/48/56/64 at 100/125/150/175/200 % -- and before this task the shell was handed a 24 px
@@ -148,6 +155,9 @@ $fail = 0
 
 foreach ($f in $files) {
   $p = Join-Path $ResDir $f
+  # A missing file is a refusal of its own and not a crash of the instrument -- task T-86-1,
+  # whose red «до» this is: on the tree before it the four darkbar files did not exist.
+  if (-not (Test-Path -LiteralPath $p)) { Write-Output "$f : ОТКАЗ: файла нет в res\"; $fail++; continue }
   $b = [System.IO.File]::ReadAllBytes($p)
   $count = [BitConverter]::ToUInt16($b,4)
   Write-Output "$f : type=$([BitConverter]::ToUInt16($b,2)) frames=$count размер=$($b.Length)"
@@ -210,12 +220,18 @@ if ($null -eq $ctlLoaded -or $null -eq $ctlOther) {
 $rows = @(@{f='langswitcher-active.ico';label='активна'},
           @{f='langswitcher-paused.ico';label='пауза'},
           @{f='langswitcher-active-unread.ico';label='активна + письмо'},
-          @{f='langswitcher-paused-unread.ico';label='пауза + письмо'})
+          @{f='langswitcher-paused-unread.ico';label='пауза + письмо'},
+          # Task T-86-1: the darkbar set -- what the tray shows on a dark taskbar. Drawn on both
+          # panels like the rest: the dark panel is its place, the light one is for comparison.
+          @{f='langswitcher-darkbar-active.ico';label='без плиты: активна'},
+          @{f='langswitcher-darkbar-paused.ico';label='без плиты: пауза'},
+          @{f='langswitcher-darkbar-active-unread.ico';label='без плиты: активна + письмо'},
+          @{f='langswitcher-darkbar-paused-unread.ico';label='без плиты: пауза + письмо'})
 # Task T-85-3: 28 and 30 joined the sheet -- the frames whose glyph grew to 95 % (решения 144.2 и
 # 144.2а) are 16 to 30, and the owner judges them here before the delivery (144.3); 32 and 48 stay
 # beside them as the frames that did not change.
 $shown = @(16,20,24,28,30,32,48)
-$W = 820; $H = 56 + $rows.Count*84
+$W = 920; $H = 56 + $rows.Count*84
 $bmp = New-Object System.Drawing.Bitmap($W,$H,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode='AntiAlias'; $g.TextRenderingHint='ClearTypeGridFit'
@@ -223,7 +239,7 @@ $g.Clear([System.Drawing.Color]::FromArgb(255,250,250,250))
 $fnt = New-Object System.Drawing.Font('Segoe UI',10,[System.Drawing.FontStyle]::Bold)
 $brD = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,40,42,46))
 $brL = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,200,204,210))
-$xL=130; $xDk=475; $panW=335
+$xL=230; $xDk=575; $panW=335
 $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,243,243,243))),$xL,0,$panW,$H)
 $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,32,32,32))),$xDk,0,$panW,$H)
 $g.DrawString('светлая панель',$fnt,$brD,$xL+12,14)
@@ -232,6 +248,8 @@ for ($r=0; $r -lt $rows.Count; $r++) {
   $y = 56 + $r*84
   $g.DrawString($rows[$r].label,$fnt,$brD,14,$y+28)
   $p = Join-Path $ResDir $rows[$r].f
+  # Counted above already; the sheet only leaves the row empty.
+  if (-not (Test-Path -LiteralPath $p)) { continue }
   foreach ($panel in @($xL,$xDk)) {
     $x = $panel + 16
     foreach ($s in $shown) {
