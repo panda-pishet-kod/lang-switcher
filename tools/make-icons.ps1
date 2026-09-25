@@ -90,6 +90,30 @@ function New-PausePath {
   $p
 }
 
+# Task T-85-3, решение 144.3 -- the guard of the dot, in the vector: the least distance from the
+# centre of the dot to the outline of the arrow as drawn in this frame, less the outer radius of the
+# ring. Positive -- the dot stands clear of the arrow; zero or less -- it touches or covers it, and
+# the generator refuses to write the icon rather than ship it (see Render-Frame).
+function Get-DotClearance([System.Drawing.PointF[]]$outline, [double]$cx, [double]$cy, [double]$outer) {
+  $least = [double]::MaxValue
+  $inside = $false
+  for ($i = 0; $i -lt $outline.Count; $i++) {
+    $a = $outline[$i]; $b = $outline[($i + 1) % $outline.Count]
+    $dx = $b.X - $a.X; $dy = $b.Y - $a.Y
+    $t = [math]::Max(0.0, [math]::Min(1.0, (($cx - $a.X) * $dx + ($cy - $a.Y) * $dy) / ($dx * $dx + $dy * $dy)))
+    $qx = $a.X + $t * $dx; $qy = $a.Y + $t * $dy
+    $least = [math]::Min($least, [math]::Sqrt(($cx - $qx) * ($cx - $qx) + ($cy - $qy) * ($cy - $qy)))
+    if ((($a.Y -gt $cy) -ne ($b.Y -gt $cy)) -and ($cx -lt ($b.X - $a.X) * ($cy - $a.Y) / ($b.Y - $a.Y) + $a.X)) {
+      $inside = -not $inside
+    }
+  }
+  if ($inside) { return -($least + $outer) }
+  return $least - $outer
+}
+
+# The least clearance of the dot met while one file was drawn -- printed beside the file.
+$script:LeastClearance = [double]::MaxValue
+
 function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   $pal = $PALETTE[$paletteName]
   $n = $size * $SS
@@ -109,14 +133,26 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   if ($state -eq 'paused' -or $state -eq 'paused-unread') { $glyph = New-PausePath; $ink = $pal.Paused }
   else { $glyph = New-ArrowPath; $ink = $pal.Active }
 
-  # Scale the glyph to 70% about the centre of the plate.
-  $s = [single]0.70
+  # Scale the glyph about the centre of the plate: 70 % -- and, task T-85-3, решения 144.2 и 144.2а,
+  # 95 % in the frames up to 30 px inclusive: the notification area at 100/125/150/175 % (16, 20,
+  # 24, 28) and the standard 30. At 70 % the arrow of the 16 px frame came out about 8 x 5 px with a
+  # shaft of 1.8 px -- a white speck, too small, as the owner rightly said. 32 and larger stay at
+  # 70 %: the 32 px frame is also the icon of the headers of «О программе» and «От автора» and of
+  # the balloon (SM_CXICON at 100 %). The pause follows the same scale.
+  $small = $size -le 30
+  $s = if ($small) { [single]0.95 } else { [single]0.70 }
   $d = [single](50 - 50 * $s)
   $m = New-Object System.Drawing.Drawing2D.Matrix($s, [single]0, [single]0, $s, $d, $d)
   $glyph.Transform($m); $m.Dispose()
   $br = New-Object System.Drawing.SolidBrush($ink)
   $g.FillPath($br, $glyph)
-  $br.Dispose(); $glyph.Dispose()
+  $br.Dispose()
+  # The outline as drawn, for the guard of the dot below -- the arrow is a polygon, so its path
+  # points are its corners. The pause is not guarded: in the large frames the old ring has always
+  # grazed the corner of its second bar (0.99 units), and those frames do not change.
+  $arrow = $null
+  if ($state -notlike 'paused*') { $arrow = $glyph.PathPoints }
+  $glyph.Dispose()
 
   # FR-90's third state, task T-32-4: "there is an unread letter". The mark is a dot in the
   # icon's OWN colours -- filled with the colour of the glyph, ringed with the colour of the
@@ -130,7 +166,24 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   if ($state -like '*-unread') {
     # Tuned against the proof sheet rather than guessed: at r = 17 the dot ate the right head
     # of the arrow at 16 px, which is the size the notification area actually shows.
-    $cx = 78.0; $cy = 78.0; $r = 14.0; $ring = 5.0
+    #
+    # Task T-85-3, решение 144.3: at 95 % the tip of the right head stands at x 84 and its lower
+    # corner at (63, 70), and the old place -- (78, 78), r 14, ring 5 -- covered the lower half of
+    # the head (3.03 units into it). In the small frames the dot moves into the corner and shrinks
+    # a little: (82, 82), r 12, ring 4 -- 5.63 units clear of the arrow, 3.84 px across at 16 px
+    # (the floor is 3 px), and the second pause bar just touched. Chosen on the proof sheet of the
+    # candidates, scratchpad-E85\dot-candidates-x8.png. The large frames keep the old place.
+    if ($small) { $cx = 82.0; $cy = 82.0; $r = 12.0; $ring = 4.0 }
+    else        { $cx = 78.0; $cy = 78.0; $r = 14.0; $ring = 5.0 }
+
+    if ($null -ne $arrow) {
+      $clearance = Get-DotClearance $arrow $cx $cy ($r + $ring)
+      if ($clearance -le 0) {
+        throw ("the dot of the letter touches the arrow in the {0} px frame of {1}: clearance {2:N2} units -- no file is written" -f $size, $state, $clearance)
+      }
+      $script:LeastClearance = [math]::Min($script:LeastClearance, $clearance)
+    }
+
     $ringBrush = New-Object System.Drawing.SolidBrush($pal.Plate)
     $g.FillEllipse($ringBrush, [single]($cx-$r-$ring), [single]($cy-$r-$ring),
                    [single](2*($r+$ring)), [single](2*($r+$ring)))
@@ -163,10 +216,13 @@ function Render-Frame([int]$size, [string]$paletteName, [string]$state) {
   ,$bytes
 }
 
-function Write-Ico([string]$path, [string]$paletteName, [string]$state) {
+function Render-Set([string]$paletteName, [string]$state) {
   $frames = @()
   foreach ($s in $SIZES) { $frames += ,(Render-Frame $s $paletteName $state) }
+  ,$frames
+}
 
+function Write-Ico([string]$path, $frames) {
   $fs = New-Object System.IO.FileStream($path, [System.IO.FileMode]::Create)
   $bw = New-Object System.IO.BinaryWriter($fs)
 
@@ -210,9 +266,22 @@ $targets = @(
   @{ File = 'langswitcher-paused-unread.ico'; Palette = 'graphite'; State = 'paused-unread' }
 )
 
+# Every frame of every file is drawn before any file is written -- task T-85-3: a guard that refuses
+# (the dot of the letter touching the arrow) must leave res\ as it was, not half regenerated.
+$sets = @()
 foreach ($t in $targets) {
-  $p = Join-Path $OutDir $t.File
-  Write-Ico $p $t.Palette $t.State
+  $script:LeastClearance = [double]::MaxValue
+  $frames = Render-Set $t.Palette $t.State
+  $sets += [pscustomobject]@{ Target = $t; Frames = $frames; Clearance = $script:LeastClearance }
+}
+
+foreach ($set in $sets) {
+  $p = Join-Path $OutDir $set.Target.File
+  Write-Ico $p $set.Frames
   $len = (Get-Item $p).Length
-  Write-Output ("{0,-34} {1,7} bytes  {2} frames" -f $t.File, $len, $SIZES.Count)
+  $note = ''
+  if ($set.Clearance -lt [double]::MaxValue) {
+    $note = "  dot clear of the arrow by >= {0:N2} units" -f $set.Clearance
+  }
+  Write-Output ("{0,-34} {1,7} bytes  {2} frames{3}" -f $set.Target.File, $len, $SIZES.Count, $note)
 }

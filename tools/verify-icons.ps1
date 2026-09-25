@@ -211,8 +211,11 @@ $rows = @(@{f='langswitcher-active.ico';label='активна'},
           @{f='langswitcher-paused.ico';label='пауза'},
           @{f='langswitcher-active-unread.ico';label='активна + письмо'},
           @{f='langswitcher-paused-unread.ico';label='пауза + письмо'})
-$shown = @(16,20,24,32,48)
-$W = 700; $H = 56 + $rows.Count*84
+# Task T-85-3: 28 and 30 joined the sheet -- the frames whose glyph grew to 95 % (решения 144.2 и
+# 144.2а) are 16 to 30, and the owner judges them here before the delivery (144.3); 32 and 48 stay
+# beside them as the frames that did not change.
+$shown = @(16,20,24,28,30,32,48)
+$W = 820; $H = 56 + $rows.Count*84
 $bmp = New-Object System.Drawing.Bitmap($W,$H,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.SmoothingMode='AntiAlias'; $g.TextRenderingHint='ClearTypeGridFit'
@@ -220,7 +223,7 @@ $g.Clear([System.Drawing.Color]::FromArgb(255,250,250,250))
 $fnt = New-Object System.Drawing.Font('Segoe UI',10,[System.Drawing.FontStyle]::Bold)
 $brD = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,40,42,46))
 $brL = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,200,204,210))
-$xL=130; $xDk=420; $panW=280
+$xL=130; $xDk=475; $panW=335
 $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,243,243,243))),$xL,0,$panW,$H)
 $g.FillRectangle((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,32,32,32))),$xDk,0,$panW,$H)
 $g.DrawString('светлая панель',$fnt,$brD,$xL+12,14)
