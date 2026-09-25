@@ -40,8 +40,9 @@ use windows::Win32::Foundation::{
     WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
-    CLEARTYPE_QUALITY, GetMonitorInfoW, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromPoint,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLEARTYPE_QUALITY, DIB_RGB_COLORS, DeleteObject, GetDC,
+    GetDIBits, GetMonitorInfoW, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    ReleaseDC,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
@@ -49,13 +50,14 @@ use windows::Win32::System::LibraryLoader::{
 };
 use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW,
-    GetMenuState, GetSystemMetrics, HMENU, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION,
-    MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
-    RT_DIALOG, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
+    CreateWindowExW, DestroyIcon, DestroyWindow, GetIconInfo, GetMenuItemCount, GetMenuItemID,
+    GetMenuItemInfoW, GetMenuState, GetSystemMetrics, HICON, HMENU, ICONINFO, IMAGE_ICON,
+    LR_DEFAULTCOLOR, LoadImageW, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION, MF_CHECKED,
+    MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW, RT_DIALOG,
+    RT_GROUP_ICON, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
     SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP,
     WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION,
-    WM_SETTINGCHANGE, WS_EX_TOOLWINDOW, WS_POPUP,
+    WM_SETTINGCHANGE, WM_THEMECHANGED, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -3076,6 +3078,502 @@ fn the_icon_is_loaded_at_the_size_the_system_asks_for() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// FR-90, task T-86-2 — the tray follows the theme of the taskbar
+// ---------------------------------------------------------------------------------------
+
+/// The colour bitmap of an icon as 32 bpp top-down pixels — `GetIconInfo` + `GetDIBits`, the
+/// reader `tools\verify-icons.ps1` uses for the same question since task T-85-2. The two
+/// bitmaps `GetIconInfo` creates are deleted here; the icon itself stays the caller's.
+fn icon_pixels(icon: HICON, size: (i32, i32)) -> Vec<u32> {
+    let (width, height) = size;
+    let mut info = ICONINFO::default();
+
+    // SAFETY: `icon` is a live handle of this process; `info` is a live local the call fills.
+    unsafe { GetIconInfo(icon, &raw mut info) }.expect("GetIconInfo answers for a live icon");
+
+    let mut block = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: u32::try_from(size_of::<BITMAPINFOHEADER>()).expect("forty bytes"),
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut pixels = vec![0u32; usize::try_from(width * height).expect("a positive area")];
+
+    // SAFETY: the screen DC is taken and released on this thread; `hbmColor` is the live
+    // bitmap `GetIconInfo` made a moment ago; `pixels` holds `width × height` values of 32
+    // bits, which is exactly what a top-down read of `height` lines at 32 bpp writes.
+    let dc = unsafe { GetDC(None) };
+    let lines = unsafe {
+        GetDIBits(
+            dc,
+            info.hbmColor,
+            0,
+            u32::try_from(height).expect("a positive height"),
+            Some(pixels.as_mut_ptr().cast()),
+            &raw mut block,
+            DIB_RGB_COLORS,
+        )
+    };
+
+    // SAFETY: the DC and the two bitmaps were made above and are released exactly once.
+    unsafe {
+        ReleaseDC(None, dc);
+        let _ = DeleteObject(info.hbmColor.into());
+        let _ = DeleteObject(info.hbmMask.into());
+    }
+
+    assert_eq!(lines, height, "GetDIBits must read every line of the icon");
+
+    pixels
+}
+
+/// How many pixels of two pictures differ — alpha anywhere, colour where alpha is 255: the
+/// rule of `tools\verify-icons.ps1`, because the bitmap `LoadImageW` builds is premultiplied
+/// at its anti-aliased edge and the colour there is not comparable.
+fn pixel_difference(a: &[u32], b: &[u32]) -> usize {
+    assert_eq!(a.len(), b.len(), "pictures of one size");
+
+    a.iter()
+        .zip(b)
+        .filter(|(x, y)| {
+            let (ax, ay) = (*x >> 24, *y >> 24);
+
+            ax != ay || (ax == 255 && (*x & 0x00FF_FFFF) != (*y & 0x00FF_FFFF))
+        })
+        .count()
+}
+
+/// The frame of resource `id` of the product image at `size`, as pixels — loaded the way the
+/// tray loads it (`LoadImageW`, `IMAGE_ICON`, `LR_DEFAULTCOLOR`) and destroyed here.
+fn resource_pixels(product: &ProductImage, id: u16, size: (i32, i32)) -> Vec<u32> {
+    // SAFETY: the image is mapped for the life of `product`; the name is an integer identifier
+    // in `MAKEINTRESOURCE` form, dereferenced by nobody; the handle is destroyed below, once.
+    let handle = unsafe {
+        LoadImageW(
+            Some(product.instance()),
+            PCWSTR(std::ptr::without_provenance(usize::from(id))),
+            IMAGE_ICON,
+            size.0,
+            size.1,
+            LR_DEFAULTCOLOR,
+        )
+    }
+    .unwrap_or_else(|error| panic!("resource {id} must load at {size:?}: {error}"));
+    let icon = HICON(handle.0);
+    let pixels = icon_pixels(icon, size);
+
+    // SAFETY: `icon` came from the `LoadImageW` above without `LR_SHARED`.
+    unsafe { DestroyIcon(icon) }.expect("the icon is destroyed once");
+
+    pixels
+}
+
+/// **Task T-86-2, guard (1): the rule of the eight icons, all eight rows.**
+///
+/// Three questions — is the program working, is a letter unread, is the taskbar light — and
+/// the resource each answer lands on, written out as the numbers of `app.rc` and not read back
+/// out of the crate. The light half is the table `state_icon` has answered since task Т-32-4;
+/// the dark half is this task: the same four states out of the darkbar set 105…108.
+///
+/// ⚠ The red «до» is measured: the same eight rows against the old rule inside the new
+/// signature — the taskbar ignored — fail on the four dark rows,
+/// `scratchpad-E86\red-before-T-86-2-table-and-record.log`.
+#[test]
+fn the_state_icon_is_a_rule_of_three_answers_and_a_dark_taskbar_moves_it_to_the_darkbar_set() {
+    for (enabled, unread, taskbar_light, expected) in [
+        (true, false, true, 101u16),
+        (false, false, true, 102),
+        (true, true, true, 103),
+        (false, true, true, 104),
+        (true, false, false, 105),
+        (false, false, false, 106),
+        (true, true, false, 107),
+        (false, true, false, 108),
+    ] {
+        let choice = tray::state_icon_for(enabled, unread, taskbar_light);
+
+        println!(
+            "enabled={enabled} unread={unread} taskbar_light={taskbar_light} -> {choice:?} = \
+             resource {}",
+            choice.resource()
+        );
+
+        assert_eq!(
+            choice.resource(),
+            expected,
+            "state_icon_for({enabled}, {unread}, {taskbar_light})"
+        );
+    }
+}
+
+/// **Task T-86-2, guard (3): the icon in the record follows the taskbar's theme — pixel for
+/// pixel, against the frame the product's own resources carry.**
+///
+/// A real tray on a real window, icons out of the shipped binary. The answer is read out of
+/// the record itself — `Tray::record_icon`, the `hIcon` the shell is handed — and compared with
+/// `LoadImageW` of the resource the rule names, by the reader of `tools\verify-icons.ps1`:
+/// alpha everywhere, colour where alpha is 255. First the control: the two «active» frames
+/// must differ at this size, or nothing below could fail.
+///
+/// * (а) the machine's own answer: on a dark taskbar the record carries the darkbar icon, on a
+///   light one the main icon — whatever this machine says;
+/// * (б) both answers, driven through the seam the message arms use
+///   (`follow_taskbar_theme_with`), working and suspended: dark → 105 / 106, light → 101 / 102;
+/// * (в) the same answer twice costs no `NIM_MODIFY` — `modify_calls` stands still — and a
+///   changed one costs exactly one;
+/// * (г) `[general].theme` of the program, `Light`, `Dark` or `System`, moves nothing here.
+///
+/// ⚠ The red «до» is measured with the old rule inside the new signature (the taskbar
+/// ignored): on this machine (a dark taskbar) the record carried 101 where 105 is asserted —
+/// `scratchpad-E86\red-before-T-86-2-table-and-record.log`.
+#[test]
+fn the_record_icon_follows_the_taskbar_theme_pixel_for_pixel() {
+    // (б) below pauses and resumes the program, and a pause asks the input thread for the wipe
+    // of FR-10 row 9 through a process-wide counter — so this test takes the turn every test
+    // that toggles takes, or it would move the count under `the_pause_from_the_tray_asks_for_
+    // the_wipe_of_row_nine` (seen once: «left: 1, right: 0» at its resumption).
+    let _turn = toggle_turn();
+    let window = TestWindow::new();
+    let home = TestDir::new("darkbar_record");
+    let mut tray = install(&window, &home);
+    let product = ProductImage::open();
+    let size = tray.icon_size();
+    let machine = theme::taskbar_is_light();
+
+    assert_eq!(
+        tray.taskbar_is_light(),
+        machine,
+        "the tray read the taskbar switch at install"
+    );
+
+    let control = pixel_difference(
+        &resource_pixels(&product, 101, size),
+        &resource_pixels(&product, 105, size),
+    );
+
+    println!(
+        "size {size:?}; the two «active» frames differ by {control} px; machine: light = {machine}"
+    );
+
+    assert!(
+        control > 0,
+        "101 and 105 must differ at this size, or the comparison cannot fail"
+    );
+
+    // (а) Whatever the machine says: the record is the icon of the set the taskbar names.
+    let (own, other) = if machine {
+        (101u16, 105u16)
+    } else {
+        (105, 101)
+    };
+    let record = icon_pixels(tray.record_icon(), size);
+
+    println!(
+        "record vs {own}: {} px; record vs {other}: {} px",
+        pixel_difference(&record, &resource_pixels(&product, own, size)),
+        pixel_difference(&record, &resource_pixels(&product, other, size))
+    );
+
+    assert_eq!(
+        pixel_difference(&record, &resource_pixels(&product, own, size)),
+        0,
+        "the record carries the icon of the set the taskbar theme names"
+    );
+
+    // (б) Both answers through the seam, in both states of the program.
+    for light in [false, true] {
+        tray.follow_taskbar_theme_with(light);
+        assert_eq!(tray.taskbar_is_light(), light, "the answer is held");
+
+        let expected = if light { 101 } else { 105 };
+        let record = icon_pixels(tray.record_icon(), size);
+
+        assert_eq!(
+            pixel_difference(&record, &resource_pixels(&product, expected, size)),
+            0,
+            "taskbar light = {light}, working: the record is resource {expected}"
+        );
+
+        tray.toggle_state();
+        assert!(!tray.enabled(), "suspended now");
+
+        let expected = if light { 102 } else { 106 };
+        let record = icon_pixels(tray.record_icon(), size);
+
+        assert_eq!(
+            pixel_difference(&record, &resource_pixels(&product, expected, size)),
+            0,
+            "taskbar light = {light}, suspended: the record is resource {expected}"
+        );
+
+        tray.toggle_state();
+        assert!(tray.enabled(), "working again");
+    }
+
+    // (в) The same answer costs nothing; a changed one costs exactly one update.
+    tray.follow_taskbar_theme_with(machine);
+    let before = tray.modify_calls();
+
+    tray.follow_taskbar_theme_with(machine);
+    assert_eq!(
+        tray.modify_calls(),
+        before,
+        "the same answer twice costs no NIM_MODIFY"
+    );
+
+    tray.follow_taskbar_theme_with(!machine);
+    assert_eq!(
+        tray.modify_calls(),
+        before + 1,
+        "a changed answer costs exactly one NIM_MODIFY"
+    );
+
+    tray.follow_taskbar_theme_with(machine);
+    assert_eq!(tray.modify_calls(), before + 2, "and back costs one more");
+
+    // (г) The theme of the program's own windows has no say.
+    let own_pixels = resource_pixels(&product, own, size);
+
+    for setting in [
+        ThemeSetting::Light,
+        ThemeSetting::Dark,
+        ThemeSetting::System,
+    ] {
+        let mut config = tray.config().clone();
+        config.general.theme = setting;
+        tray.replace_config(config);
+
+        let record = icon_pixels(tray.record_icon(), size);
+
+        assert_eq!(
+            pixel_difference(&record, &own_pixels),
+            0,
+            "[general].theme = {setting:?} moves no icon: the taskbar is the only third question"
+        );
+    }
+}
+
+/// **Task T-86-2, guard (4), the behavioural half: both message arms reach the taskbar switch
+/// and the update — outside the gate of task T-13-20.**
+///
+/// The tray's field is pushed to the opposite of what the machine says (through the seam, one
+/// `NIM_MODIFY`), and then the product's own `Tray::handle_message` is fed a real
+/// `WM_SETTINGCHANGE` with an `lParam` that names nothing — the pointer of the T-13-20 tests
+/// above. If the arm re-reads the switch, the field comes back to the machine's answer and
+/// exactly one more `NIM_MODIFY` goes out; a second message finds the answer unchanged and
+/// costs nothing. Then the same for `WM_THEMECHANGED`.
+///
+/// The gate of T-13-20 is shut on both halves while this runs — no window of FR-92а is up and
+/// `[general].theme` is fixed to `Dark` — so an arm that followed the taskbar only through
+/// `on_setting_change` would never get there. That is the claim «вне ворот», measured.
+///
+/// ⚠ The red «до» is measured before the arms were wired: the field stayed at the pushed
+/// value and `modify_calls` stood still — `scratchpad-E86\red-before-T-86-2-arms.log`. The
+/// mutant — the call taken out of the `WM_SETTINGCHANGE` arm again — is
+/// `scratchpad-E86\mutant-T-86-2.log`.
+#[test]
+fn both_theme_arms_follow_the_taskbar_switch_outside_the_gate_of_t_13_20() {
+    let window = TestWindow::new();
+    let home = TestDir::new("darkbar_arms");
+    let mut tray = install(&window, &home);
+    let machine = theme::taskbar_is_light();
+    let nowhere = LPARAM(0x2A2A);
+
+    // The gate of T-13-20, shut on both halves.
+    assert!(
+        !settings::dialog_is_open() && !settings::about_is_open(),
+        "no window of FR-92а on this thread"
+    );
+
+    let mut fixed = tray.config().clone();
+    fixed.general.theme = ThemeSetting::Dark;
+    tray.replace_config(fixed);
+
+    assert!(
+        !tray::setting_name_is_wanted(
+            settings::dialog_is_open(),
+            settings::about_is_open(),
+            tray.config().general.theme
+        ),
+        "the gate of T-13-20 is shut"
+    );
+
+    for (name, message) in [
+        ("WM_SETTINGCHANGE", WM_SETTINGCHANGE),
+        ("WM_THEMECHANGED", WM_THEMECHANGED),
+    ] {
+        tray.follow_taskbar_theme_with(!machine);
+        assert_eq!(
+            tray.taskbar_is_light(),
+            !machine,
+            "pushed to the opposite of the machine's answer"
+        );
+        let before = tray.modify_calls();
+
+        let reaction = tray.handle_message(message, WPARAM(0), nowhere);
+
+        println!(
+            "{name}: reaction {reaction:?}; taskbar light {} (machine {machine}); NIM_MODIFY \
+             {before} -> {}",
+            tray.taskbar_is_light(),
+            tray.modify_calls()
+        );
+
+        assert_eq!(
+            reaction,
+            Reaction::Ignored,
+            "{name} goes on to DefWindowProcW as before"
+        );
+        assert_eq!(
+            tray.taskbar_is_light(),
+            machine,
+            "{name}: the arm re-read the switch and the field came back"
+        );
+        assert_eq!(
+            tray.modify_calls(),
+            before + 1,
+            "{name}: one NIM_MODIFY for the changed answer"
+        );
+
+        let reaction = tray.handle_message(message, WPARAM(0), nowhere);
+
+        assert_eq!(reaction, Reaction::Ignored);
+        assert_eq!(tray.taskbar_is_light(), machine);
+        assert_eq!(
+            tray.modify_calls(),
+            before + 1,
+            "{name}: the same answer again costs nothing"
+        );
+    }
+}
+
+/// **Task T-86-2, guard (4), the text half: the two arms call the following BEFORE the gate,
+/// and the following reaches the switch and the update.**
+///
+/// Swept over the product half of `src\tray.rs` without its comment lines — the sweep of task
+/// T-85-1: a claim about a branch is made of its calls, not of its prose. Four claims: the
+/// `WM_SETTINGCHANGE` arm names `self.follow_taskbar_theme()` and names it before
+/// `on_setting_change(`; the `WM_THEMECHANGED` arm names it before
+/// `settings::on_system_theme_message(`; `follow_taskbar_theme` reaches
+/// `theme::taskbar_is_light()` and its seam reaches `self.refresh_icon()`; and none of the four
+/// bodies goes through `setting_name_is_wanted(`. Plus the count: the following is called from
+/// exactly the two arms.
+///
+/// The negative control is measured: the same sweep over the tree before the arms were wired
+/// fails on the first claim — `scratchpad-E86\red-before-T-86-2-arms.log`.
+#[test]
+fn the_theme_arms_call_the_following_before_the_gate_by_their_calls_and_not_their_prose() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let at = source
+        .find("\n#[cfg(test)]\nmod tests {")
+        .expect("the unit-test module must be at the foot of this file");
+    let product: String = source[..at]
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+
+    // An arm of `handle_message`: from its pattern to the next arm's.
+    let arm = |pattern: &str, next: &str| -> String {
+        let start = product
+            .find(pattern)
+            .unwrap_or_else(|| panic!("{pattern} must be an arm of handle_message"));
+        let rest = &product[start..];
+        let end = rest
+            .find(next)
+            .unwrap_or_else(|| panic!("{next} must follow {pattern}"));
+
+        rest[..end].to_owned()
+    };
+    let setting_change = arm("WM_SETTINGCHANGE => {", "WM_THEMECHANGED => {");
+    let theme_changed = arm("WM_THEMECHANGED => {", "_ => Reaction::Ignored,");
+
+    println!(
+        "--- WM_SETTINGCHANGE arm ---\n{setting_change}--- WM_THEMECHANGED arm ---\n{theme_changed}"
+    );
+
+    let before = |body: &str, first: &str, second: &str| {
+        let a = body
+            .find(first)
+            .unwrap_or_else(|| panic!("«{first}» must be in the arm"));
+        let b = body
+            .find(second)
+            .unwrap_or_else(|| panic!("«{second}» must be in the arm"));
+
+        assert!(a < b, "«{first}» must stand before «{second}»");
+    };
+    before(
+        &setting_change,
+        "self.follow_taskbar_theme()",
+        "on_setting_change(",
+    );
+    before(
+        &theme_changed,
+        "self.follow_taskbar_theme()",
+        "settings::on_system_theme_message(",
+    );
+
+    // The body of a method: from its signature to the first brace that closes at its depth.
+    let method = |signature: &str| -> String {
+        let start = product
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} must be in src\\tray.rs"));
+        let rest = &product[start..];
+        let end = rest
+            .find("\n    }\n")
+            .expect("a method closes with a brace of its own");
+
+        rest[..end].to_owned()
+    };
+    let follow = method("fn follow_taskbar_theme(&mut self) {");
+    let follow_with =
+        method("pub fn follow_taskbar_theme_with(&mut self, taskbar_is_light: bool) {");
+
+    println!(
+        "--- follow_taskbar_theme ---\n{follow}\n--- follow_taskbar_theme_with ---\n{follow_with}"
+    );
+
+    assert!(
+        follow.contains("theme::taskbar_is_light()"),
+        "the following reads the switch"
+    );
+    assert!(
+        follow.contains("self.follow_taskbar_theme_with("),
+        "and hands the answer to the seam"
+    );
+    assert!(
+        follow_with.contains("self.refresh_icon()"),
+        "the seam reaches the update"
+    );
+
+    for body in [&setting_change, &theme_changed, &follow, &follow_with] {
+        assert!(
+            !body.contains("setting_name_is_wanted("),
+            "the following does not go through the gate of T-13-20"
+        );
+    }
+
+    assert_eq!(
+        product.matches("self.follow_taskbar_theme()").count(),
+        2,
+        "the following is called from exactly the two arms"
+    );
+}
+
 /// **Задача Т-33а-1, находка глазом пользователя: «размытая иконка в уведомлении».**
 ///
 /// Причина, измеренная приборами `значок-резкость.ps1` и `красное-до-1-значок.log`: шар
@@ -5782,6 +6280,72 @@ fn messages_the_tray_does_not_know_are_left_to_the_default_procedure() {
 // ---------------------------------------------------------------------------------------
 // The about window — a MessageBoxW until task T-11-11 made it the dialog IDD_ABOUT
 // ---------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------
+// FR-90, task T-86-2 — the darkbar set ships in the product resources
+// ---------------------------------------------------------------------------------------
+
+/// The nineteen frames every icon of `res\` carries — `$SIZES` of `tools\make-icons.ps1`,
+/// written out here so that the test does not read the list back out of the thing it checks.
+const ICON_FRAMES: [u32; 19] = [
+    16, 20, 24, 28, 30, 32, 36, 40, 45, 48, 54, 56, 60, 63, 64, 72, 80, 96, 256,
+];
+
+/// **Task T-86-2, guard (2): the product image carries the darkbar set — `RT_GROUP_ICON`
+/// 105…108, nineteen entries each, of exactly the sizes of `$SIZES`.**
+///
+/// Read out of the bytes `rc.exe` really produced, through `ProductImage`, the way the version
+/// resource is read below: a missing `ICON` line in `app.rc` costs nothing at build time —
+/// `embed-resource` links whatever the script says — and would fail at the first `LoadImageW`
+/// of a dark taskbar, which no test on a light machine would ever reach.
+///
+/// The main set is walked too, so the same reader that says «есть» for 105 is seen saying it
+/// for 101 with the same nineteen sizes. The red «до» of this test is measured, not assumed:
+/// on the product image of the base `bc7c456` resource 105 is absent and `ProductImage::resource`
+/// stops at «resource 105 must be present» — `scratchpad-E86\red-before-T-86-2-resources.log`.
+#[test]
+fn the_darkbar_set_ships_in_the_product_resources_with_all_nineteen_frames() {
+    let product = ProductImage::open();
+
+    for id in [101u16, 102, 103, 104, 105, 106, 107, 108] {
+        let bytes = product.resource(RT_GROUP_ICON, id);
+
+        // GRPICONDIR: idReserved, idType, idCount — then GRPICONDIRENTRY × idCount, 14 bytes
+        // each: bWidth, bHeight, bColorCount, bReserved, wPlanes, wBitCount, dwBytesInRes,
+        // nId. 256 is stored as a zero byte, as in the directory of the `.ico` itself.
+        assert!(
+            bytes.len() >= 6,
+            "RT_GROUP_ICON {id} is too short: {} bytes",
+            bytes.len()
+        );
+        assert_eq!(
+            u16::from_le_bytes([bytes[2], bytes[3]]),
+            1,
+            "RT_GROUP_ICON {id}: the type is icon"
+        );
+        let count = usize::from(u16::from_le_bytes([bytes[4], bytes[5]]));
+        assert_eq!(
+            bytes.len(),
+            6 + 14 * count,
+            "RT_GROUP_ICON {id}: {count} entries of 14 bytes"
+        );
+
+        let mut sizes: Vec<u32> = (0..count)
+            .map(|i| match u32::from(bytes[6 + 14 * i]) {
+                0 => 256,
+                width => width,
+            })
+            .collect();
+        sizes.sort_unstable();
+
+        println!("RT_GROUP_ICON {id}: {count} frames {sizes:?}");
+
+        assert_eq!(
+            sizes, ICON_FRAMES,
+            "RT_GROUP_ICON {id} must carry exactly the nineteen frames of the generator"
+        );
+    }
+}
 
 #[test]
 fn the_version_of_the_about_box_comes_out_of_the_version_resource() {

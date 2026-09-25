@@ -40,6 +40,15 @@
 // the letters are independent — a person can pause the program with a letter unread.
 #define IDI_APP_ACTIVE_UNREAD  103
 #define IDI_APP_PAUSED_UNREAD  104
+// FR-90, task T-86-2 (решения 144е и 145.1): the same four states WITHOUT the plate — the set
+// the tray shows while the taskbar of Windows is dark (SystemUsesLightTheme = 0), where the
+// plate of the main set melted into the bar (finding 144б). Nothing but the tray takes them:
+// the executable, the installer, the Start menu, the window headers and the balloon keep
+// 101…104.
+#define IDI_TRAY_DARK_ACTIVE  105
+#define IDI_TRAY_DARK_PAUSED  106
+#define IDI_TRAY_DARK_ACTIVE_UNREAD  107
+#define IDI_TRAY_DARK_PAUSED_UNREAD  108
 
 // Identifier of the settings dialog of FR-92, task T-08-1. Above the icons and well clear of
 // them: a resource identifier is only unique within its type, but keeping the numbering
@@ -466,6 +475,12 @@ IDI_APP_ACTIVE  ICON  "res/langswitcher-active.ico"
 IDI_APP_PAUSED  ICON  "res/langswitcher-paused.ico"
 IDI_APP_ACTIVE_UNREAD  ICON  "res/langswitcher-active-unread.ico"
 IDI_APP_PAUSED_UNREAD  ICON  "res/langswitcher-paused-unread.ico"
+// FR-90, task T-86-2: the darkbar set, drawn by the same generator (tools\make-icons.ps1) —
+// the tray's icons on a dark taskbar, nineteen frames each like the four above.
+IDI_TRAY_DARK_ACTIVE  ICON  "res/langswitcher-darkbar-active.ico"
+IDI_TRAY_DARK_PAUSED  ICON  "res/langswitcher-darkbar-paused.ico"
+IDI_TRAY_DARK_ACTIVE_UNREAD  ICON  "res/langswitcher-darkbar-active-unread.ico"
+IDI_TRAY_DARK_PAUSED_UNREAD  ICON  "res/langswitcher-darkbar-paused-unread.ico"
 
 // The manifest is chosen by a /d define passed from build.rs, NOT hard-wired.
 //

@@ -251,6 +251,19 @@ const IDI_APP_ACTIVE_UNREAD: u16 = 103;
 /// The "suspended, and a letter is unread" icon.
 const IDI_APP_PAUSED_UNREAD: u16 = 104;
 
+/// The darkbar set — the same four states without the plate, for a dark taskbar; FR-90, task
+/// T-86-2, решение 145.1. The "active" icon of that set.
+const IDI_TRAY_DARK_ACTIVE: u16 = 105;
+
+/// The "suspended" icon of the darkbar set.
+const IDI_TRAY_DARK_PAUSED: u16 = 106;
+
+/// The "active, and a letter is unread" icon of the darkbar set.
+const IDI_TRAY_DARK_ACTIVE_UNREAD: u16 = 107;
+
+/// The "suspended, and a letter is unread" icon of the darkbar set.
+const IDI_TRAY_DARK_PAUSED_UNREAD: u16 = 108;
+
 /// Identifier of our one and only notify icon, unique within this window.
 const TRAY_ICON_ID: u32 = 1;
 
@@ -587,6 +600,15 @@ pub struct Tray {
     /// задача Т-33а-1. `None` when the system refused to load them, and then the balloon goes
     /// out exactly as it did before (NFR-13): a letter must not be lost over its picture.
     balloon: Option<BalloonIcons>,
+    /// The four state icons of the darkbar set at [`small_icon_size`] — task T-86-2, решение
+    /// 145.1: what the record carries while the taskbar is dark. `None` when the system refused
+    /// to load them, and then the main set serves both taskbars, as it did before this task
+    /// (NFR-13): a tray must not fail to stand over its second set.
+    darkbar: Option<DarkbarIcons>,
+    /// What `SystemUsesLightTheme` said the last time it was asked — at install, and on every
+    /// `WM_SETTINGCHANGE` and `WM_THEMECHANGED` since ([`Tray::follow_taskbar_theme`]). The
+    /// third answer of [`state_icon_for`].
+    taskbar_is_light: bool,
     /// The configuration; `general.enabled` *is* the state of FR-90.
     config: Config,
     /// Where the configuration is written back to. `None` when `%APPDATA%` is not set.
@@ -678,6 +700,13 @@ impl Tray {
         // стоит одной записи в журнале и возвращает шару прежний вид (NFR-13).
         let balloon = BalloonIcons::load(Some(hwnd), instance);
 
+        // Задача T-86-2, решение 145.1: набор без плиты — те же четыре состояния для тёмной
+        // панели, тем же малым размером. ⚠ Без `?`, как и набор шара: трей, не вставший из-за
+        // второго набора, хуже трея с плитой на тёмной панели (NFR-13). Переключатель панели
+        // читается здесь один раз; дальше его перечитывают ветки сообщений темы.
+        let darkbar = DarkbarIcons::load(instance, icon_size);
+        let taskbar_is_light = theme::taskbar_is_light();
+
         let (config, save_policy, on_disk) = match config_path.as_deref() {
             Some(path) => {
                 // Task T-55-5, finding Т8: the temporaries an interrupted write left beside the
@@ -752,6 +781,8 @@ impl Tray {
             active_unread,
             paused_unread,
             balloon,
+            darkbar,
+            taskbar_is_light,
             config,
             config_path,
             save_policy,
@@ -805,6 +836,18 @@ impl Tray {
     /// The size the icons were loaded at — `(SM_CXSMICON, SM_CYSMICON)`.
     pub fn icon_size(&self) -> (i32, i32) {
         self.icon_size
+    }
+
+    /// What the taskbar switch said the last time the tray asked — FR-90, task T-86-2.
+    pub fn taskbar_is_light(&self) -> bool {
+        self.taskbar_is_light
+    }
+
+    /// The icon the shell is handed in the record — `hIcon` of [`Tray::notify_data`], the very
+    /// handle `NIM_ADD` and `NIM_MODIFY` carry. Task T-86-2: what a test compares, pixel for
+    /// pixel, with the frame the resources hold.
+    pub fn record_icon(&self) -> HICON {
+        self.notify_data().hIcon
     }
 
     /// Whether the icon is believed to be in the notification area right now.
@@ -949,7 +992,17 @@ impl Tray {
             //
             // The setting is read out of `self` here, on the way in, because it is the one
             // cheap local fact this arm has and the gate inside needs it.
+            //
+            // ⭐ **FR-90, task T-86-2, решение 145.2: the icon follows the taskbar first.** The
+            // taskbar switch is re-read and, if it moved, the record gets the icon of the other
+            // set — **before** `on_setting_change` and its gate of task T-13-20, because that
+            // gate is about repainting the windows of FR-92а and the icon has to follow with
+            // every window closed and under a hand-fixed theme alike. Still nothing of the
+            // message is read: a forged broadcast buys one reading of the switch and, while
+            // the answer stands, no `NIM_MODIFY`.
             WM_SETTINGCHANGE => {
+                self.follow_taskbar_theme();
+
                 on_setting_change(self.config().general.theme);
 
                 Reaction::Ignored
@@ -957,8 +1010,11 @@ impl Tray {
 
             // `WM_THEMECHANGED` carries no string: it *is* the theme notification, by its
             // own name, so it enters the same decision as a `WM_SETTINGCHANGE` that named
-            // the switch — one path after the string check, not two.
+            // the switch — one path after the string check, not two. And the same first
+            // step as its neighbour: the icon follows the taskbar (task T-86-2).
             WM_THEMECHANGED => {
+                self.follow_taskbar_theme();
+
                 settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
 
                 Reaction::Ignored
@@ -1236,17 +1292,75 @@ impl Tray {
     // -----------------------------------------------------------------------------------
 
     /// The icon that matches the current state.
+    ///
+    /// FR-90's third state, task Т-32-4: the dot of FR-101 rides on **both** of the two states
+    /// this program has always had, because they are independent — a person can pause the
+    /// program with a letter unread. Task T-86-2 added the third question — the theme of the
+    /// taskbar — and moved the whole rule into [`state_icon_for`], where a table can close it;
+    /// this method only asks the three questions of itself and turns the answer into a handle.
     fn state_icon(&self) -> HICON {
-        // FR-90's third state, task Т-32-4: the dot of FR-101 rides on **both** of the two
-        // states this program has always had, because they are independent — a person can pause
-        // the program with a letter unread. Four icons, two questions, and neither of them
-        // knows about the other.
-        match (self.enabled(), self.has_unread()) {
-            (true, false) => self.active.handle,
-            (false, false) => self.paused.handle,
-            (true, true) => self.active_unread.handle,
-            (false, true) => self.paused_unread.handle,
+        self.icon_of(state_icon_for(
+            self.enabled(),
+            self.has_unread(),
+            self.taskbar_is_light,
+        ))
+    }
+
+    /// The handle of one of the eight icons — the exhaustive twin of [`state_icon_for`].
+    ///
+    /// NFR-13: a darkbar icon whose set never loaded is answered with the main icon of the same
+    /// state, so a dark taskbar shows the plate rather than nothing — the state the program was
+    /// in before task T-86-2.
+    fn icon_of(&self, which: StateIcon) -> HICON {
+        match which {
+            StateIcon::Active => self.active.handle,
+            StateIcon::Paused => self.paused.handle,
+            StateIcon::ActiveUnread => self.active_unread.handle,
+            StateIcon::PausedUnread => self.paused_unread.handle,
+            StateIcon::DarkbarActive => self
+                .darkbar
+                .as_ref()
+                .map_or(self.active.handle, |set| set.active.handle),
+            StateIcon::DarkbarPaused => self
+                .darkbar
+                .as_ref()
+                .map_or(self.paused.handle, |set| set.paused.handle),
+            StateIcon::DarkbarActiveUnread => self
+                .darkbar
+                .as_ref()
+                .map_or(self.active_unread.handle, |set| set.active_unread.handle),
+            StateIcon::DarkbarPausedUnread => self
+                .darkbar
+                .as_ref()
+                .map_or(self.paused_unread.handle, |set| set.paused_unread.handle),
         }
+    }
+
+    /// Re-reads the taskbar switch and, if it moved, hands the shell the icon of the other set —
+    /// FR-90, task T-86-2, решение 145.2. The `WM_SETTINGCHANGE` and `WM_THEMECHANGED` arms of
+    /// [`Tray::handle_message`] call this **before** the gate of task T-13-20: that gate is about
+    /// repainting the windows of FR-92а, and the icon has to follow the taskbar with every window
+    /// closed.
+    ///
+    /// SEC-05: nothing of the message is read. A forged broadcast buys the sender one reading of
+    /// the personalization switch and, while the answer stands, no `NIM_MODIFY` at all.
+    fn follow_taskbar_theme(&mut self) {
+        self.follow_taskbar_theme_with(theme::taskbar_is_light());
+    }
+
+    /// The same, with the answer handed in — the seam `tests\tray.rs` drives both ways without
+    /// touching the registry, which belongs to whoever runs the tests.
+    ///
+    /// The same answer twice is nothing: no field moves and no update goes out. A changed answer
+    /// is one `NIM_MODIFY` through [`Tray::refresh_icon`], which takes its icon from
+    /// [`Tray::state_icon`] — the three questions asked afresh.
+    pub fn follow_taskbar_theme_with(&mut self, taskbar_is_light: bool) {
+        if self.taskbar_is_light == taskbar_is_light {
+            return;
+        }
+
+        self.taskbar_is_light = taskbar_is_light;
+        self.refresh_icon();
     }
 
     /// The same choice as [`Tray::state_icon`], but out of the large set — задача Т-33а-1.
@@ -4589,6 +4703,45 @@ impl BalloonIcons {
     }
 }
 
+/// The four state icons of the darkbar set at [`small_icon_size`] — FR-90, task T-86-2, решение
+/// 145.1: the glyph alone, no plate, for a dark taskbar.
+///
+/// A type of its own for the reason [`BalloonIcons`] is one: the whole set is either there or
+/// absent, so the tray never mixes a plate-less «active» with a plated «paused».
+struct DarkbarIcons {
+    /// The "active" icon, without the plate.
+    active: Icon,
+    /// The "suspended" icon, without the plate.
+    paused: Icon,
+    /// The "active, and a letter is unread" icon, without the plate.
+    active_unread: Icon,
+    /// The "suspended, and a letter is unread" icon, without the plate.
+    paused_unread: Icon,
+}
+
+impl DarkbarIcons {
+    /// Loads all four at `size`, or none — NFR-13.
+    ///
+    /// Journaled once under a name of its own and not an error of the tray: with this set absent
+    /// the main set serves both taskbars, which is exactly the program before task T-86-2.
+    fn load(instance: HINSTANCE, size: (i32, i32)) -> Option<Self> {
+        let load = |id: u16| match Icon::load(instance, id, size) {
+            Ok(icon) => Some(icon),
+            Err(error) => {
+                app::report_non_critical("LoadImageW(SM_CXSMICON, darkbar)", &error);
+                None
+            }
+        };
+
+        Some(Self {
+            active: load(IDI_TRAY_DARK_ACTIVE)?,
+            paused: load(IDI_TRAY_DARK_PAUSED)?,
+            active_unread: load(IDI_TRAY_DARK_ACTIVE_UNREAD)?,
+            paused_unread: load(IDI_TRAY_DARK_PAUSED_UNREAD)?,
+        })
+    }
+}
+
 impl Drop for Icon {
     fn drop(&mut self) {
         // SAFETY: `handle` came from a successful `LoadImageW` without `LR_SHARED`, so it is
@@ -4691,6 +4844,69 @@ pub fn large_icon_size(hwnd: Option<HWND>) -> (i32, i32) {
         metric_at_window_dpi(hwnd, SM_CXICON, 32),
         metric_at_window_dpi(hwnd, SM_CYICON, 32),
     )
+}
+
+/// Which of the eight icons of FR-90 the record carries — task T-86-2, решение 145.1.
+///
+/// Four states, each in two sets: the main set (a dark plate, a white glyph) for a light taskbar
+/// and for everything that is not the tray, and the darkbar set (the glyph alone, no plate) for a
+/// dark taskbar, where the plate melted into the bar (finding 144б). An enumeration and not a
+/// bare resource number so that [`Tray::icon_of`] can be exhaustive: a ninth icon is a compile
+/// error, not a fallthrough.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StateIcon {
+    /// Working, nothing unread — the main set.
+    Active,
+    /// Suspended — the main set.
+    Paused,
+    /// Working, a letter unread — the main set.
+    ActiveUnread,
+    /// Suspended, a letter unread — the main set.
+    PausedUnread,
+    /// Working — the darkbar set.
+    DarkbarActive,
+    /// Suspended — the darkbar set.
+    DarkbarPaused,
+    /// Working, a letter unread — the darkbar set.
+    DarkbarActiveUnread,
+    /// Suspended, a letter unread — the darkbar set.
+    DarkbarPausedUnread,
+}
+
+impl StateIcon {
+    /// The resource of `app.rc` this icon is loaded from.
+    pub fn resource(self) -> u16 {
+        match self {
+            Self::Active => IDI_APP_ACTIVE,
+            Self::Paused => IDI_APP_PAUSED,
+            Self::ActiveUnread => IDI_APP_ACTIVE_UNREAD,
+            Self::PausedUnread => IDI_APP_PAUSED_UNREAD,
+            Self::DarkbarActive => IDI_TRAY_DARK_ACTIVE,
+            Self::DarkbarPaused => IDI_TRAY_DARK_PAUSED,
+            Self::DarkbarActiveUnread => IDI_TRAY_DARK_ACTIVE_UNREAD,
+            Self::DarkbarPausedUnread => IDI_TRAY_DARK_PAUSED_UNREAD,
+        }
+    }
+}
+
+/// The rule of the icon — FR-90, task T-86-2: three answers in, one of eight icons out.
+///
+/// The shape of [`setting_name_is_wanted`], for the same reason: the facts are read once by the
+/// caller — `general.enabled`, the feed of the letters, the taskbar switch the tray holds — and
+/// handed in, so the rule is a function of its arguments and an eight-row table in
+/// `tests\tray.rs` closes it. The first two questions are the table [`Tray::state_icon`] has
+/// answered since task Т-32-4; the third is this task, and it chooses the set.
+pub fn state_icon_for(enabled: bool, unread: bool, taskbar_light: bool) -> StateIcon {
+    match (enabled, unread, taskbar_light) {
+        (true, false, true) => StateIcon::Active,
+        (false, false, true) => StateIcon::Paused,
+        (true, true, true) => StateIcon::ActiveUnread,
+        (false, true, true) => StateIcon::PausedUnread,
+        (true, false, false) => StateIcon::DarkbarActive,
+        (false, false, false) => StateIcon::DarkbarPaused,
+        (true, true, false) => StateIcon::DarkbarActiveUnread,
+        (false, true, false) => StateIcon::DarkbarPausedUnread,
+    }
 }
 
 /// A resource identifier in the `MAKEINTRESOURCE` form the resource loader expects.
@@ -5099,9 +5315,12 @@ mod tests {
     /// five scales are the frames that exist in the resources.
     #[test]
     fn an_icon_size_follows_the_scale_and_lands_on_a_frame_that_exists() {
-        // The frames all four `.ico` files carry — `res\langswitcher-*.ico`, checked by
-        // `tools\verify-icons.ps1`.
-        let frames = [16, 20, 24, 28, 32, 40, 48, 56, 64, 256];
+        // The frames all eight `.ico` files carry — `res\langswitcher-*.ico`, nineteen since
+        // task T-85-2 and eight files since task T-86-2 — checked by `tools\verify-icons.ps1`
+        // (решение 145.6: this list had stood at the ten of task T-42-11).
+        let frames = [
+            16, 20, 24, 28, 30, 32, 36, 40, 45, 48, 54, 56, 60, 63, 64, 72, 80, 96, 256,
+        ];
 
         // What the arithmetic of `metric_at_window_dpi` gives for the two metrics at the five
         // scales the fitting stand of the контур measures.

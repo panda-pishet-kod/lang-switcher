@@ -68,10 +68,11 @@
 //!
 //! # The registry — read and never written
 //!
-//! [`system_is_light`] performs the one registry access of this module: a single
-//! `RegGetValueW` of `AppsUseLightTheme`. Nothing here writes to the registry under any
-//! circumstance — the whole of what this program writes there is the autostart value of
-//! FR-93, and that belongs to module `settings`.
+//! [`system_is_light`] and, since task T-86-2, [`taskbar_is_light`] are the two registry
+//! reads of this module, and both go through one body: a single `RegGetValueW` of
+//! `AppsUseLightTheme` or of `SystemUsesLightTheme` under the same key. Nothing here writes to
+//! the registry under any circumstance — the whole of what this program writes there is the
+//! autostart value of FR-93, and that belongs to module `settings`.
 //!
 //! # SEC-05
 //!
@@ -334,31 +335,61 @@ pub static FOG: Palette = Palette {
 };
 
 // =========================================================================================
-// The system switch — FR-92а, `AppsUseLightTheme`
+// The system switches — FR-92а, `AppsUseLightTheme`; FR-90, `SystemUsesLightTheme`
 // =========================================================================================
 
-/// The subkey of `HKEY_CURRENT_USER` that holds the system's app-theme switch (FR-92а).
+/// The subkey of `HKEY_CURRENT_USER` that holds the system's two theme switches — the one of
+/// the applications (FR-92а) and, since task T-86-2, the one of the taskbar (FR-90).
 ///
 /// ⚠ **Read and never written.** The one registry access of this module is the single
-/// `RegGetValueW` in [`system_is_light`]; writing the user's personalization settings is
-/// not this program's business under any requirement, and the session's permissions say the
-/// same thing.
+/// `RegGetValueW` in [`personalize_switch_is_light`], behind [`system_is_light`] and
+/// [`taskbar_is_light`]; writing the user's personalization settings is not this program's
+/// business under any requirement, and the session's permissions say the same thing.
 const PERSONALIZE_KEY_PATH: PCWSTR =
     w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
 
 /// Name of the value under [`PERSONALIZE_KEY_PATH`] that FR-92а names.
 const APPS_USE_LIGHT_THEME_VALUE: PCWSTR = w!("AppsUseLightTheme");
 
+/// Name of the value under the same key that says whether the **taskbar** is light — the switch
+/// FR-90 follows since task T-86-2 (решение 145.1). Windows moves it together with the
+/// applications' switch under «Параметры → Персонализация → Цвета → Выберите режим», and apart
+/// from it under «Выберите режим Windows по умолчанию» — which is exactly why the tray asks this
+/// value and not the other: the icon sits on the taskbar, not in a window of ours.
+const SYSTEM_USES_LIGHT_THEME_VALUE: PCWSTR = w!("SystemUsesLightTheme");
+
 /// Whether the system asks applications for a light theme — FR-92а, one `REG_DWORD` read.
 ///
 /// Any answer but a readable zero is the light theme: a non-zero value says light in so
 /// many words, and a missing value, a missing key or any other refusal to read is the
 /// ordinary state of a profile whose user never touched the switch — FR-92а reads it as
-/// «отсутствие значения читается как светлая тема». Deliberately *not pure*: this is the
-/// one function of the module that looks at the machine, kept apart from [`resolve`] so
+/// «отсутствие значения читается как светлая тема». Deliberately *not pure*: this is one of
+/// the two functions of the module that look at the machine, kept apart from [`resolve`] so
 /// that the latter can be verified by a table and this one only has to answer without
 /// falling over.
 pub fn system_is_light() -> bool {
+    personalize_switch_is_light(APPS_USE_LIGHT_THEME_VALUE)
+}
+
+/// Whether the system paints the **taskbar** light — FR-90, task T-86-2 (решение 145.1): one
+/// `REG_DWORD` read of `SystemUsesLightTheme`.
+///
+/// The tray asks this before it hands the shell an icon. On a dark taskbar the plate of the main
+/// set melts into the bar (finding 144б: RGB(43, 47, 54) against RGB(45, 45, 45), the outer ring
+/// of the 16 px frame half transparent), so there the icon comes out of the darkbar set — the
+/// glyph alone, no plate — and on a light one out of the main set, as it always did. The rule
+/// of the answer is [`system_is_light`]'s, and so is the reader: a readable zero is dark, and
+/// everything else — a non-zero value, a missing value, a missing key, any refusal — is light,
+/// which is the set the program has always shown. `[general].theme` and `AppsUseLightTheme`
+/// have no say here: they are about the windows of this program, and the icon sits on the
+/// taskbar.
+pub fn taskbar_is_light() -> bool {
+    personalize_switch_is_light(SYSTEM_USES_LIGHT_THEME_VALUE)
+}
+
+/// One `REG_DWORD` of [`PERSONALIZE_KEY_PATH`] read as a theme switch — the one body behind
+/// [`system_is_light`] and [`taskbar_is_light`], and the one `RegGetValueW` of this module.
+fn personalize_switch_is_light(value_name: PCWSTR) -> bool {
     let mut value: u32 = 0;
     let mut size = size_of::<u32>() as u32;
 
@@ -370,7 +401,7 @@ pub fn system_is_light() -> bool {
         RegGetValueW(
             HKEY_CURRENT_USER,
             PERSONALIZE_KEY_PATH,
-            APPS_USE_LIGHT_THEME_VALUE,
+            value_name,
             RRF_RT_REG_DWORD,
             None,
             Some((&raw mut value).cast()),

@@ -7,14 +7,16 @@
 //! or to run: it would silently paint everything in someone else's colours. Independent
 //! recomputation is the only test that catches it.
 //!
-//! [`system_is_light`] is the one machine-dependent function here and is tested for its
-//! contract alone: it answers without panicking. Its value mirrors this machine's
-//! `AppsUseLightTheme` and is deliberately not compared with anything.
+//! [`system_is_light`] and, since task T-86-2, [`taskbar_is_light`] are the two
+//! machine-dependent functions here. The first is tested for its contract alone: it answers
+//! without panicking, and its value mirrors this machine's `AppsUseLightTheme` and is
+//! deliberately not compared with anything. The second is held to a second reading of the
+//! same value by another road of the registry API, and to a sweep of its source.
 
 use lang_switcher::theme::{
     Brushes, CheckMark, FOG, GRAPHITE, LABEL_TEXT_FORMAT, PaintBuffer, Palette, Reading,
     ThemeSetting, check_mark_points, combo_chevron_points, dc_is_rtl, draw_check_mark,
-    label_format, reading_order, resolve, system_is_light,
+    label_format, reading_order, resolve, system_is_light, taskbar_is_light,
 };
 use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Graphics::Gdi::{
@@ -24,7 +26,12 @@ use windows::Win32::Graphics::Gdi::{
     HBRUSH, HDC, HGDIOBJ, LAYOUT_RTL, LOGBRUSH, OBJ_FONT, OEM_FIXED_FONT, ReleaseDC, SRCCOPY,
     SYSTEM_FONT, SelectObject, SetLayout, SetPixel,
 };
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_CURRENT_USER, KEY_READ, REG_DWORD, REG_VALUE_TYPE, RegCloseKey, RegOpenKeyExW,
+    RegQueryValueExW,
+};
 use windows::Win32::System::Threading::{GR_GDIOBJECTS, GetCurrentProcess, GetGuiResources};
+use windows::core::w;
 
 // =========================================================================================
 // The palettes — criterion 11, the BGR trap
@@ -296,6 +303,141 @@ fn system_is_light_answers_without_panicking_and_the_value_is_machine_dependent(
         println!("this machine asks its applications for the light theme");
     } else {
         println!("this machine asks its applications for the dark theme");
+    }
+}
+
+// =========================================================================================
+// The taskbar switch — FR-90, task T-86-2
+// =========================================================================================
+
+/// **Task T-86-2, FR-90: the taskbar switch, read by the product and read again by another
+/// road.**
+///
+/// The product's [`taskbar_is_light`] is one `RegGetValueW` of `SystemUsesLightTheme`. This
+/// test reads the same value through `RegOpenKeyExW` + `RegQueryValueExW` — a second reader
+/// that shares no line with the first — and applies the rule of FR-92а by hand: a readable
+/// `REG_DWORD` zero is dark, anything else is light. The two must agree on this machine,
+/// whatever it says; the value itself is machine-dependent and is not pinned.
+///
+/// ⚠ What this cannot catch, said plainly: a product that read `AppsUseLightTheme` instead
+/// would agree with this reader on every machine where the two switches move together —
+/// which is what «Выберите режим» does, and what the owner's machine shows (0 and 0). The
+/// name of the value is therefore held separately, by the sweep below.
+#[test]
+fn taskbar_is_light_agrees_with_a_second_reading_of_system_uses_light_theme() {
+    let answer = taskbar_is_light();
+
+    let mut key = HKEY::default();
+
+    // SAFETY: the subkey is a NUL-terminated `'static` literal; `key` is a live local the
+    // call writes once, and it is closed below on the same thread.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            None,
+            KEY_READ,
+            &raw mut key,
+        )
+    };
+
+    let second = if opened.is_ok() {
+        let mut kind = REG_VALUE_TYPE::default();
+        let mut data = [0u8; 4];
+        let mut size = u32::try_from(data.len()).expect("four fits");
+
+        // SAFETY: `key` was opened a line above and is closed right after; every out-pointer
+        // names a live local of at least the size `size` promises.
+        let read = unsafe {
+            RegQueryValueExW(
+                key,
+                w!("SystemUsesLightTheme"),
+                None,
+                Some(&raw mut kind),
+                Some(data.as_mut_ptr()),
+                Some(&raw mut size),
+            )
+        };
+
+        // SAFETY: closing the key opened above, exactly once.
+        let _ = unsafe { RegCloseKey(key) };
+
+        if read.is_ok() && kind == REG_DWORD && size == 4 {
+            let value = u32::from_le_bytes(data);
+            println!("SystemUsesLightTheme = {value} (REG_DWORD)");
+            value != 0
+        } else {
+            println!(
+                "SystemUsesLightTheme: absent or not a DWORD ({read:?}, {kind:?}, {size} bytes) \
+                 — light by the rule of FR-92а"
+            );
+            true
+        }
+    } else {
+        println!("Personalize key: {opened:?} — light by the rule of FR-92а");
+        true
+    };
+
+    println!("taskbar_is_light() = {answer}; the second reading says light = {second}");
+
+    assert_eq!(
+        answer, second,
+        "the product and the second reader must agree on this machine"
+    );
+}
+
+/// **Task T-86-2, guard (4), the `theme.rs` half: `SystemUsesLightTheme` is read in one place,
+/// and the module writes nothing into the registry.**
+///
+/// Swept over `src\theme.rs` as a whole — the file keeps no unit-test module at its foot, so
+/// there is no suite text to cut away. Three claims: the value name is spelled exactly once
+/// (the `w!` literal behind the constant); `RegGetValueW` is called exactly once (the one
+/// body behind both switches); and no writing call of the registry API is named at all.
+///
+/// The negative control is measured, not assumed: the first claim over the base `bc7c456`
+/// answers 0 and the sweep fails there — `scratchpad-E86\sweep-theme-negative-control-T-86-2.log`.
+#[test]
+fn the_taskbar_switch_is_read_once_and_theme_never_writes_the_registry() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("theme.rs"),
+    )
+    .expect("src\\theme.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let count = |needle: &str| source.matches(needle).count();
+
+    let name = count("\"SystemUsesLightTheme\"");
+    let reads = count("RegGetValueW(");
+
+    println!("«\"SystemUsesLightTheme\"»: {name}; «RegGetValueW(»: {reads}");
+
+    assert_eq!(
+        name, 1,
+        "the value name is spelled in one place — the constant behind taskbar_is_light"
+    );
+    assert_eq!(
+        reads, 1,
+        "one RegGetValueW — the one body behind both switches"
+    );
+
+    for writer in [
+        "RegSetValue",
+        "RegSetKeyValue",
+        "RegCreateKey",
+        "RegDeleteValue",
+        "RegDeleteKey",
+        "RegDeleteTree",
+    ] {
+        let found = count(writer);
+
+        println!("«{writer}»: {found}");
+
+        assert_eq!(
+            found, 0,
+            "theme.rs never writes the registry — «{writer}» must not be named"
+        );
     }
 }
 

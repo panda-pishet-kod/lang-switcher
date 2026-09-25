@@ -367,6 +367,10 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // значка потому, что и последствие у отказа своё — уведомление уходит со старым, малым
     // значком, а не пропадает (NFR-13); журнал обязан различать эти два случая.
     ("LoadImageW(SM_CXICON)", Kind::Tray),
+    // Задача T-86-2, решение 145.1: набор трея без плиты для тёмной панели. Своё имя по той же
+    // причине, что у строки выше: последствие отказа своё — трей показывает основной набор на
+    // обеих панелях (NFR-13), больше ничего не теряется, — и журнал обязан отличать его от шара.
+    ("LoadImageW(SM_CXSMICON, darkbar)", Kind::Tray),
     // ⛔ **The seven rows of the channel stood here until task T-41-11 (finding Н43).** They are
     // now in [`CHANNEL_OPERATIONS`], at the end of the vocabulary and under the same feature as
     // the channel itself — `#[cfg]` cannot be put on an element of an array literal, which is
