@@ -561,8 +561,11 @@ fn the_file_that_will_be_published_verifies_with_the_shipped_keys() {
 ///
 /// The two halves:
 ///
-/// * **negative** — `read_now` over the addresses actually in the build. Every one of them is
-///   a placeholder today (П5), the reader skips placeholders, and the journal stays clean;
+/// * **negative** — [`feed::read_from`] over a placeholder address the test hands it. The
+///   reader skips placeholders (П5), and the journal stays clean. Until `e88` this half asked
+///   `read_now` and leaned on the build carrying a placeholder; since task T-88-1 the address in
+///   the build is the author's real one, and asking `read_now` would go out to the author's
+///   site — so the placeholder is the test's own, and the check it meets is the product's;
 /// * **positive** — one `fetch` at an address that is real in form and dead in fact
 ///   (`localhost`, where nothing listens on 443). If the line failed to appear here it would be
 ///   worthless above.
@@ -589,8 +592,9 @@ fn the_journal_says_whether_a_request_was_made_at_all() {
 
     let before = requests_in_journal();
 
-    // The negative half: what the shipped build would do on its own schedule today.
-    let answer = feed::read_now("ru");
+    // The negative half: the reader of the product over a placeholder of the test's own — the
+    // same skip `read_now` makes over the addresses of the build (task T-88-1).
+    let answer = feed::read_from(&["https://example.invalid/news.toml"], "ru");
 
     assert!(
         answer.is_none(),

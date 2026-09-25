@@ -943,6 +943,105 @@ fn the_feed_is_read_once_in_fifteen_days_and_not_at_all_when_it_is_off() {
     );
 }
 
+/// **A feed asked today is not asked again before tomorrow** — task T-88-1, решение 148.8.
+///
+/// A read that fails leaves `feed_last_read` where it was, so the feed stays due. Until `e88`
+/// that meant a new request at every tick of the letters — once an hour, for as long as the
+/// host did not answer — and the placeholder address hid it, because a placeholder is never
+/// read at all. `feed_last_try` is the day the feed was last asked, whatever came of it, and
+/// one attempt a day is all a feed gets; a good read still closes it for fifteen days.
+#[test]
+fn a_feed_asked_today_is_not_asked_again_before_tomorrow() {
+    let mut state = settled("0.88.0");
+    let today = day(2026, 9, 25);
+
+    // The machine of the owner on the day of `e88`: never read, never asked.
+    assert!(letters::feed_read_is_due(&state, today));
+
+    // Asked today, and nothing came back: no second request today, the next one tomorrow.
+    state.feed_last_try = Some(today);
+    assert!(
+        !letters::feed_read_is_due(&state, today),
+        "one attempt a day — the next tick of the letters must not ask again"
+    );
+    assert!(letters::feed_read_is_due(&state, today.plus_days(1)));
+
+    // A good read closes the feed for fifteen days, whatever day the last attempt was on.
+    state.feed_last_read = Some(today);
+    assert!(!letters::feed_read_is_due(&state, today.plus_days(1)));
+    assert!(letters::feed_read_is_due(&state, today.plus_days(15)));
+
+    // Overdue and already asked today: the panel says one day, because the next attempt is
+    // tomorrow; asked yesterday, it says zero — the read is due now.
+    state.feed_last_read = Some(day(2026, 9, 1));
+    assert_eq!(
+        letters::days_until_feed_read(&state, today),
+        1,
+        "a read that was tried today and failed waits for tomorrow"
+    );
+    state.feed_last_try = Some(day(2026, 9, 24));
+    assert_eq!(letters::days_until_feed_read(&state, today), 0);
+    assert!(letters::feed_read_is_due(&state, today));
+
+    // And the switch still wins over everything.
+    state.feed = false;
+    assert!(!letters::feed_read_is_due(&state, today));
+}
+
+/// Whether the branch of `tick` that starts the read writes the day of the attempt **first** —
+/// the due check, then the write, then the start, in that order among the code lines.
+fn the_attempt_is_written_before_the_read(body: &str) -> bool {
+    let lines: Vec<&str> = code_lines(body).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+
+    matches!(
+        (
+            at("if feed_read_is_due("),
+            at("feed_last_try = Some(today)"),
+            at("start_feed_read("),
+        ),
+        (Some(due), Some(written), Some(started)) if due < written && written < started
+    )
+}
+
+/// **The tick writes the day of the attempt before it starts the read** — task T-88-1, решение
+/// 148.8.
+///
+/// `tick` needs the tray, the configuration and a window, so this is a sweep over its body, the
+/// road Э70 took for the same reason. Written after the start, the day would be lost with a
+/// read that never came back — a thread that could not start, a program closed mid-request —
+/// and the next tick would ask again.
+///
+/// ⚠ Отрицательный контроль — **the same predicate** over the branch `e87` carried, which starts
+/// the read and writes nothing, and over the same write put after the start.
+#[test]
+fn the_tick_writes_the_day_of_the_attempt_before_it_starts_the_read() {
+    let source = letters_source();
+    let body = body_of(&source, "pub fn tick(");
+
+    assert!(
+        the_attempt_is_written_before_the_read(body),
+        "tick must write feed_last_try between the due check and the start of the read:\n{body}"
+    );
+
+    let e87 = "    if feed_read_is_due(&stored, today) {\n\
+               \x20       start_feed_read(owner, settings::ui_language().tag().to_owned());\n\
+               \x20   }\n";
+    assert!(
+        !the_attempt_is_written_before_the_read(e87),
+        "the sweep must refuse the branch of e87, which writes nothing"
+    );
+
+    let after = "    if feed_read_is_due(&stored, today) {\n\
+                 \x20       start_feed_read(owner, settings::ui_language().tag().to_owned());\n\
+                 \x20       update_state(|state| state.feed_last_try = Some(today));\n\
+                 \x20   }\n";
+    assert!(
+        !the_attempt_is_written_before_the_read(after),
+        "and the write put after the start"
+    );
+}
+
 /// The switch in «От автора» appears only after both conditions of FR-102, and it is an `&&`.
 #[test]
 fn the_feed_switch_waits_for_a_letter_and_for_ninety_days() {
@@ -970,15 +1069,13 @@ fn the_feed_switch_waits_for_a_letter_and_for_ninety_days() {
 // The three addresses — полномочия П5, П7 и П8
 // =========================================================================================
 
-/// While an address is a placeholder, the button that would open it is disabled — and the
-/// program has no feed address at all.
+/// While an address is a placeholder, the button that would open it is disabled.
 ///
 /// ⚠ This test is written so that it goes on being true when the real addresses arrive: it
-/// asserts the *rule*, not the placeholder. The assertions about the state of the constants
-/// were the ones edited on the day the user's own addresses landed (task T-78-1) — which is
-/// exactly what they were for; they live in
-/// `the_hard_wired_addresses_are_real_and_the_feed_is_not` now, where both halves of that state
-/// are said together.
+/// asserts the *rule*, not the placeholder — and it stayed true through both days they arrived
+/// (tasks T-78-1 and T-88-1). The assertions about the state of the constants were the ones
+/// edited on those days, which is exactly what they were for; they live in
+/// `the_hard_wired_addresses_are_real_and_so_is_the_feed`.
 #[test]
 fn a_placeholder_address_is_recognised_by_its_reserved_domain() {
     assert!(links::is_placeholder("https://example.invalid/news.toml"));
@@ -999,21 +1096,26 @@ fn every_address_in_the_program_is_https_and_named_here() {
     assert!(links::SUPPORT_URL.starts_with("https://"));
 }
 
-/// **The hard-wired addresses of решение 139.2 are real, and the feed's is still not** — task
-/// T-78-1.
+/// **The hard-wired addresses of решения 139.2 и 147.3 are real — the feed's among them** —
+/// tasks T-78-1 and T-88-1.
 ///
-/// ⚠ Both halves are assertions and the second is the one worth writing down. `FEED_URLS` stays
-/// a placeholder **on purpose** — the mechanism behind it is not built (138.4) — and a test that
-/// said only «the real ones are real» would leave that looking like forgetfulness. Said out loud
-/// here, it is a decision with a guard on it.
+/// ⚠ Until `e88` the second half of this test said the opposite and was named
+/// `the_hard_wired_addresses_are_real_and_the_feed_is_not`: `FEED_URLS` stayed a placeholder
+/// **on purpose** (138.4), and a guard said so out loud, so that it read as a decision and not
+/// as forgetfulness. The user named the address on 2026-09-25 (147.3, 148.1) and the guard
+/// turned over with it: all five are real, the program has a feed to read, and the feed's host
+/// is one the gate of С52 lets through.
 #[test]
-fn the_hard_wired_addresses_are_real_and_the_feed_is_not() {
+fn the_hard_wired_addresses_are_real_and_so_is_the_feed() {
     for (what, url) in [
         ("CHANNEL_URL", links::CHANNEL_URL),
         ("SUPPORT_URL", links::SUPPORT_URL),
         ("DOWNLOAD_URL", links::DOWNLOAD_URL),
         ("PROGRAM_URL", links::PROGRAM_URL),
-    ] {
+    ]
+    .into_iter()
+    .chain(links::FEED_URLS.map(|url| ("FEED_URLS", url)))
+    {
         assert!(
             !links::is_placeholder(url),
             "{what} is still a placeholder: {url}"
@@ -1021,14 +1123,91 @@ fn the_hard_wired_addresses_are_real_and_the_feed_is_not() {
         assert!(links::is_allowed(url), "{what} must reach the shell: {url}");
     }
 
-    // Отложено владельцем, не забыто — 138.4.
-    assert!(
-        links::FEED_URLS
-            .iter()
-            .all(|url| links::is_placeholder(url)),
-        "the feed address is deferred on purpose and must stay a placeholder"
+    // Решение 148.1: one address, the author's, and no second road behind it.
+    assert_eq!(
+        links::FEED_URLS,
+        ["https://panda-pishet-kod.dev/langswitcher/news.toml"]
     );
-    assert!(!links::feed_is_configured());
+    assert!(
+        links::feed_is_configured(),
+        "the program has a real feed address to read from"
+    );
+
+    // And the gate did not open on the way: a foreign host is refused as it always was.
+    assert!(!links::is_allowed("https://evil.example/news.toml"));
+}
+
+/// The code lines of `text` that name the reserved domain, each with its line number.
+///
+/// Comments are not code: the module `links` names the domain in its doc to say why it was
+/// chosen, and a sweep that counted that sentence would be red for a sentence.
+fn lines_naming_the_reserved_domain(text: &str) -> Vec<(usize, &str)> {
+    text.lines()
+        .enumerate()
+        .map(|(index, line)| (index + 1, line.trim()))
+        .filter(|(_, line)| !line.starts_with("//") && line.contains("example.invalid"))
+        .collect()
+}
+
+/// **No placeholder address is left in the program** — task T-88-1.
+///
+/// A sweep over every code line of `src\`: the reserved domain may be named in exactly one
+/// place, the definition of `PLACEHOLDER_HOST` that [`links::is_placeholder`] recognises it by.
+/// Any other line naming it is a placeholder address back in the build — a feed that is never
+/// read, or a button drawn dead.
+///
+/// ⚠ Отрицательный контроль — **the same predicate** over the lines `ec05521` carried: the
+/// definition and the feed's address must both be found, and the doc line beside them must not.
+/// Without it the sweep could be green by reading nothing.
+#[test]
+fn no_placeholder_address_is_left_in_the_program() {
+    const DEFINITION: &str = r#"const PLACEHOLDER_HOST: &str = "example.invalid";"#;
+
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut read = 0;
+    let mut found = Vec::new();
+
+    for entry in std::fs::read_dir(&src).expect("src must be readable") {
+        let path = entry.expect("an entry of src").path();
+
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        read += 1;
+        found.extend(
+            lines_naming_the_reserved_domain(&text)
+                .into_iter()
+                .map(|(number, line)| format!("{name}:{number}: {line}")),
+        );
+    }
+
+    assert!(
+        found.len() == 1 && found[0].starts_with("letters.rs:") && found[0].ends_with(DEFINITION),
+        "in {read} files of src the reserved domain must be named by one line of code, its \
+         definition, and by no address: {found:#?}"
+    );
+
+    // Отрицательный контроль: the same predicate over the text of `ec05521`.
+    let base = "/// `example.invalid` and not a made-up host: RFC 2606 reserves `.invalid`\n\
+                const PLACEHOLDER_HOST: &str = \"example.invalid\";\n\
+                pub const FEED_URLS: [&str; 1] = [\"https://example.invalid/news.toml\"];\n";
+
+    assert_eq!(
+        lines_naming_the_reserved_domain(base)
+            .iter()
+            .map(|(number, _)| *number)
+            .collect::<Vec<_>>(),
+        [2, 3],
+        "the sweep must find both lines of ec05521 and skip the comment above them"
+    );
 }
 
 /// **С52, task T-41-1 — the gatekeeper of the one door.** What the shell is handed is `https://`
@@ -1047,28 +1226,32 @@ fn only_https_at_a_host_of_this_program_reaches_the_shell() {
         "file:///C:/Windows/System32/cmd.exe",
         "ms-settings:privacy",
         "http://example.com",
-        "http://example.invalid/news.toml",
+        "http://panda-pishet-kod.dev/langswitcher/news.toml",
         "javascript:alert(1)",
         r"\\сервер\общая\пуск.exe",
         r"C:\Windows\System32\cmd.exe",
         "https://злой.example.org/",
         // A foreign host — the reason a white list exists at all.
         "https://example.com/news.toml",
+        // ⚠ Task T-88-1, решение 148.7: the reserved domain was a host of this program for as
+        // long as the feed's address was a placeholder on it, and it left with the placeholder.
+        // Every example below that needs «our host» names the author's real one since.
+        "https://example.invalid/news.toml",
         // A host that merely **ends** with ours, and one that merely starts with it.
-        "https://evil-example.invalid/",
-        "https://example.invalid.evil.example/",
+        "https://evil-panda-pishet-kod.dev/",
+        "https://panda-pishet-kod.dev.evil.example/",
         // Credentials and a port: the reading of the host must not be talked into answering
         // the left half of either.
-        "https://example.invalid@evil.example/",
-        "https://example.invalid:8080/",
+        "https://panda-pishet-kod.dev@evil.example/",
+        "https://panda-pishet-kod.dev:8080/",
         // A backslash is a slash to every browser, so it ends the host here too — otherwise
         // `evil.example` would be read as one long host and refused for the wrong reason,
         // and a browser would go somewhere this program never allowed.
-        r"https://evil.example\example.invalid/",
+        r"https://evil.example\panda-pishet-kod.dev/",
         // Degenerate shapes of the scheme itself.
         "https://",
-        "https:/example.invalid/",
-        "https:example.invalid",
+        "https:/panda-pishet-kod.dev/",
+        "https:panda-pishet-kod.dev",
     ];
 
     for url in refused {
@@ -1083,10 +1266,10 @@ fn only_https_at_a_host_of_this_program_reaches_the_shell() {
         links::CHANNEL_URL,
         links::SUPPORT_URL,
         // The hard-wired host, and the same host with a path, a query and a fragment under it.
-        "https://example.invalid/news.toml",
-        "https://example.invalid/a/b/c?d=e#f",
+        "https://panda-pishet-kod.dev/langswitcher/news.toml",
+        "https://panda-pishet-kod.dev/a/b/c?d=e#f",
         // A scheme is a scheme in whatever case it is written, and so is a host name.
-        "HTTPS://EXAMPLE.INVALID/news.toml",
+        "HTTPS://PANDA-PISHET-KOD.DEV/langswitcher/news.toml",
     ];
 
     for url in allowed {
@@ -1234,12 +1417,13 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     with_product_strings();
 
     let mut item = news(12);
-    // ⚠ **Task T-41-1: this address used to be `https://example.com/post`.** The button of a
-    // news entry is drawn for an address the gate of `links::is_allowed` passes, and that gate
-    // knows only the hosts this build carries — which is the whole of finding С52. The host
-    // below is one of them; that it is also the reserved one is why the button comes out dead,
-    // and the assertion right after says so.
-    item.link = "https://example.invalid/post".to_owned();
+    // ⚠ **Task T-41-1: this address used to be `https://example.com/post`**, and task T-88-1
+    // moved it again. The button of a news entry is drawn for an address the gate of
+    // `links::is_allowed` passes, and that gate knows only the hosts this build carries — which
+    // is the whole of finding С52. Until `e88` the one such host a test could name was the
+    // reserved one, so the button came out dead; since then it is the author's own, the address
+    // is the one the first file of the feed carries, and the button is live (решение 148.7).
+    item.link = links::PROGRAM_URL.to_owned();
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
@@ -1261,9 +1445,10 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert_eq!(plan.panel_text, item.text, "and so is the text");
     assert_eq!(plan.panel_buttons.len(), 1, "and the link it carried");
     assert!(
-        !plan.panel_buttons[0].enabled,
-        "the reserved domain leaves the button drawn and dead — П5"
+        plan.panel_buttons[0].enabled,
+        "an address of this program leaves the button drawn and live"
     );
+    assert_eq!(plan.panel_buttons[0].action, letters::Action::OpenLink);
     assert!(
         plan.accent
             .as_ref()
@@ -1295,6 +1480,26 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert!(
         plan.panel_buttons.is_empty(),
         "and no button at all for an address this build will not open — С52"
+    );
+
+    // Task T-88-1, решение 148.7: the reserved domain takes the same road since `e88` — its host
+    // left the program with the feed's placeholder, so an entry pointing there gets no button at
+    // all rather than a dead one.
+    let mut reserved = news(12);
+    reserved.link = "https://example.invalid/post".to_owned();
+
+    let plan = letters::plan_for(
+        Letter::News(12),
+        &letters::PlanContext {
+            item: Some(&reserved),
+            ..context.clone()
+        },
+    );
+
+    assert_eq!(plan.panel_text, reserved.text, "the entry is still shown");
+    assert!(
+        plan.panel_buttons.is_empty(),
+        "and no button for the reserved domain either — 148.7"
     );
 
     // An update has nothing to mark as read: its accented button is the download page, and the

@@ -596,21 +596,34 @@ pub fn switch_is_shown(state: &Letters, today: Date) -> bool {
             .is_some_and(|first| today.days_since(first) >= SWITCH_AFTER_DAYS)
 }
 
-/// Whether the feed may be read today — FR-102: once in fifteen days, and the first read
-/// happens on the first run, when there is nothing to count from.
+/// Whether the feed may be read today — FR-102: once in fifteen days, the first read happens on
+/// the first run, when there is nothing to count from, and **one attempt a day** at most.
+///
+/// ⭐ Task T-88-1, решение 148.8: a read that fails leaves `feed_last_read` where it was, so
+/// the feed stays due — and until `e88` the next tick of the letters started it again, once an
+/// hour, for as long as the host did not answer. `feed_last_try` is the day the feed was last
+/// asked, whatever came of it; a feed already asked today waits for tomorrow.
 pub fn feed_read_is_due(state: &Letters, today: Date) -> bool {
     state.feed
+        && state.feed_last_try != Some(today)
         && state
             .feed_last_read
             .is_none_or(|last| today.days_since(last) >= FEED_EVERY_DAYS)
 }
 
 /// How many days are left until the next feed read — what the «Новости и обновления» panel
-/// says out loud. Zero when a read is due now.
+/// says out loud. Zero when a read is due now; one when it is due but the feed was already
+/// asked today, because the next attempt is tomorrow (решение 148.8).
 pub fn days_until_feed_read(state: &Letters, today: Date) -> i64 {
-    state
+    let left = state
         .feed_last_read
-        .map_or(0, |last| (FEED_EVERY_DAYS - today.days_since(last)).max(0))
+        .map_or(0, |last| (FEED_EVERY_DAYS - today.days_since(last)).max(0));
+
+    if left == 0 && state.feed_last_try == Some(today) {
+        1
+    } else {
+        left
+    }
 }
 
 /// Whether the icon carries the dot of FR-90 — an unread news item among the ones kept.
@@ -761,17 +774,16 @@ pub fn forget_expired(state: &mut Letters, feed: FeedView<'_>) {
 
 /// The addresses the program links to, and the one rule that governs all of them.
 ///
-/// # What is settled and what is not — решения 138 и 139.2
+/// # What is settled — решения 138, 139.2 и 147.3
 ///
-/// Four of the five addresses are the author's own and permanent: the channel, the support
-/// page, the download page and the program's page. They arrived in one word of the user's
-/// (2026-09-17) and they are string literals here and nothing else — which is what the
-/// paragraph below promised the day the placeholders went in.
+/// All five addresses are the author's own and permanent. The channel, the support page, the
+/// download page and the program's page arrived in one word of the user's (2026-09-17); the
+/// feed's followed on 2026-09-25 (147.3, stage Э88). They are string literals here and nothing
+/// else — which is what the paragraph below promised the day the placeholders went in.
 ///
-/// The fifth, the feed's, is **still a placeholder, and on purpose**: the mechanism behind it
-/// is not built (138.4). So [`is_placeholder`] goes on being the one question every button with
-/// a link stands behind, and after Э78 it honestly answers «no» for four addresses and «yes»
-/// for the feed.
+/// No placeholder address is left in this module, and [`is_placeholder`] stays all the same: it
+/// is the one question every button with a link stands behind, and the link of a feed entry is
+/// written by the author's hand, not by this module. For the five constants it answers «no».
 ///
 /// # Placeholders, and why a button is drawn disabled rather than hidden
 ///
@@ -802,10 +814,11 @@ pub mod links {
     /// ⚠ **The whole of the network surface of this program is this array** — see the module's
     /// own doc for what that does and does not mean about the four addresses below.
     ///
-    /// ⛔ Still a placeholder **by decision, not by oversight**: the feed's mechanism is not
-    /// built and the user deferred it (138.4). The guard on that sentence is the test
-    /// `the_hard_wired_addresses_are_real_and_the_feed_is_not`.
-    pub const FEED_URLS: [&str; 1] = ["https://example.invalid/news.toml"];
+    /// The author's own address since `e88` — word of the user, 2026-09-25 (решения 147.3 и
+    /// 148.1): the host of the other four, and **one** address, with no second road behind it.
+    /// Until then this was a placeholder by decision (138.4), and the guard that said so is now
+    /// the test `the_hard_wired_addresses_are_real_and_so_is_the_feed`.
+    pub const FEED_URLS: [&str; 1] = ["https://panda-pishet-kod.dev/langswitcher/news.toml"];
 
     /// The author's channel — FR-103, and the «Открыть канал» buttons of three letters.
     pub const CHANNEL_URL: &str = "https://t.me/panda_pishet_kod";
@@ -1626,9 +1639,9 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                 panel_title: item.title.clone(),
                 panel_text: item.text.clone(),
                 // Task T-41-1, finding С52: the road an empty address already took is the road
-                // an address the gate refuses takes now. A placeholder still gets its button —
-                // [`links::is_allowed`] passes it on the host and [`links::is_placeholder`]
-                // draws it disabled — so nothing about today's appearance moves.
+                // an address the gate refuses takes now. Since `e88` a placeholder takes it too:
+                // its host left `links` with the feed's placeholder (task T-88-1, решение
+                // 148.7), so [`links::is_allowed`] refuses it and it gets no button at all.
                 panel_buttons: if links::is_allowed(&item.link) {
                     vec![Button::link(
                         text(IDS_NEWS_OPEN_LINK),
@@ -6091,10 +6104,15 @@ pub fn tick(owner: HWND) {
         update_state(move |state| *state = fresh);
     }
 
-    // FR-102: the one read of the feed, when it is due. Started **before** the letters are
-    // looked at, on a thread of its own — what it brings back reaches the next tick, and the
-    // one after that if the answer was slow. Nothing waits for it.
+    // FR-102: the one read of the feed, when it is due — started **before** the letters are
+    // looked at, on a thread of its own. Nothing waits for it: the answer is taken the moment
+    // the thread posts `WM_APP_FEED`, and the letters it brings are looked at on the next tick.
+    //
+    // ⭐ Task T-88-1, решение 148.8: the day of the attempt is written **first**, whatever the
+    // read comes to. A host that does not answer is asked again tomorrow and not at every tick,
+    // and the day is in the file, so a restart does not buy another attempt either.
     if feed_read_is_due(&stored, today) {
+        update_state(|state| state.feed_last_try = Some(today));
         start_feed_read(owner, settings::ui_language().tag().to_owned());
     }
 
@@ -9922,7 +9940,8 @@ pub mod feed {
     /// open, a status that is not 200, a body over the ceiling. FR-102 says a refusal is
     /// silent: the journal is told the name of the call, the interface is told nothing, and
     /// `feed_last_read` is **not** moved, so a broken host is tried again tomorrow rather than
-    /// in fifteen days.
+    /// in fifteen days — and not sooner: the tick wrote the day of this attempt before it started
+    /// it (`feed_last_try`, решение 148.8).
     ///
     /// # Safety
     ///
@@ -10166,7 +10185,15 @@ pub mod feed {
         String::from_utf8(body).ok()
     }
 
-    /// **One read of the feed**: every address in order, the first good answer winning.
+    /// **One read of the feed** — FR-102: [`read_from`] over the addresses this build carries,
+    /// [`super::links::FEED_URLS`], and over nothing else. The product reads the feed through
+    /// this function and through no other.
+    pub fn read_now(language: &str) -> Option<Feed> {
+        read_from(&super::links::FEED_URLS, language)
+    }
+
+    /// **One read of the feed from these addresses**: every address in order, the first good
+    /// answer winning.
     ///
     /// «Good» means all of it — the answer arrived, the signature checked out against one of the
     /// two keys, and the document parsed. An address that answers with something that is not
@@ -10174,9 +10201,18 @@ pub mod feed {
     /// answer, and the next address is tried.
     ///
     /// `None` when no address gave one. The caller then leaves `feed_last_read` where it is, so
-    /// the next attempt is tomorrow rather than in fifteen days.
-    pub fn read_now(language: &str) -> Option<Feed> {
-        for url in super::links::FEED_URLS {
+    /// the read stays due and is tried again tomorrow — the day of this attempt is already in
+    /// `feed_last_try` (решение 148.8) — rather than in fifteen days.
+    ///
+    /// # Why the addresses are a parameter — task T-88-1
+    ///
+    /// Since `e88` the address in the build is the author's real one, so a test can no longer
+    /// prove «a placeholder is not read at all» by asking [`read_now`]: that would go out to the
+    /// author's site. This is the same read over the addresses it is handed, and the test hands
+    /// it a placeholder of its own — the battery stays without a socket, and the check it makes
+    /// is the check the product makes. [`read_now`] is the only caller in the program.
+    pub fn read_from(urls: &[&str], language: &str) -> Option<Feed> {
+        for &url in urls {
             // A placeholder address is not read at all: `.invalid` never resolves, and asking
             // costs a DNS timeout for nothing (полномочие П5).
             if super::links::is_placeholder(url) {

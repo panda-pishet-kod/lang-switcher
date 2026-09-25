@@ -1015,6 +1015,20 @@ pub struct Letters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feed_last_read: Option<letters::Date>,
 
+    /// The day the feed was last **asked**, whatever came of it — FR-102, task T-88-1, решение
+    /// 148.8.
+    ///
+    /// Written by the tick of the letters **before** the read starts. `feed_last_read` alone
+    /// cannot say «already asked today»: a failed read does not move it, so until `e88` a host
+    /// that did not answer was asked again at every tick, once an hour. A day in the file, like
+    /// `last_letter` above, because a rule that has to survive a restart needs one.
+    ///
+    /// ⚠ **Not in the печать of section 7 of `SPEC.md`**, which stage Э88 does not touch
+    /// (решение 148.5). The schema stays 6: an older build ignores the key, as it ignored
+    /// `idle_timeout_s`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feed_last_try: Option<letters::Date>,
+
     /// The day the first letter out of the feed was shown — half of the condition the feed
     /// switch of FR-102 appears on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1054,6 +1068,7 @@ impl Default for Letters {
             last_seen_version: String::new(),
             last_letter: None,
             feed_last_read: None,
+            feed_last_try: None,
             first_feed_letter: None,
             latest_known: String::new(),
             read_ids: Vec::new(),

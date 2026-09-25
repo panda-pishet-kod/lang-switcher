@@ -1286,6 +1286,8 @@ fn every_field_of_the_letters_section_survives_the_file() {
     written.letters.last_seen_version = "0.39.0".to_owned();
     written.letters.last_letter = letters::Date::from_ymd(2026, 9, 30);
     written.letters.feed_last_read = letters::Date::from_ymd(2026, 9, 20);
+    // Task T-88-1, решение 148.8: the day the feed was last asked is a field of the section too.
+    written.letters.feed_last_try = letters::Date::from_ymd(2026, 9, 22);
     written.letters.first_feed_letter = letters::Date::from_ymd(2026, 9, 21);
     written.letters.latest_known = "0.40.0".to_owned();
     written.letters.read_ids = vec![12, 13];
@@ -1316,6 +1318,44 @@ fn every_field_of_the_letters_section_survives_the_file() {
     assert_eq!(read_back.letters.reminders_sent(14), 1);
     assert_eq!(
         read_back.letters.first_shown_on(14),
+        letters::Date::from_ymd(2026, 9, 25)
+    );
+}
+
+/// **`feed_last_try` stays out of the file until the feed has been asked** — task T-88-1,
+/// решение 148.8.
+///
+/// The field is new in `e88` and the schema stays 6, so the file of a machine the feed has never
+/// asked comes out of this build as it came out of `e87`: no new line until there is a day to put
+/// in it. A day, once there is one, is a bare TOML date and is read back as the same day.
+#[test]
+fn the_day_of_the_last_feed_attempt_is_written_only_once_there_is_one() {
+    let dir = TestDir::new("letters_feed_last_try");
+    let path = dir.config();
+
+    let mut config = Config::default();
+    settings::write_to(&path, &config).expect("writing the configuration must succeed");
+    let text = fs::read_to_string(&path).expect("the file must be readable as text");
+
+    assert!(
+        !text.contains("feed_last_try"),
+        "a feed never asked leaves no line in the file:\n{text}"
+    );
+
+    config.letters.feed_last_try = letters::Date::from_ymd(2026, 9, 25);
+    settings::write_to(&path, &config).expect("writing the configuration must succeed");
+    let text = fs::read_to_string(&path).expect("the file must be readable as text");
+
+    assert!(
+        text.contains("feed_last_try = 2026-09-25"),
+        "the day is a bare TOML date, like every other day of the section:\n{text}"
+    );
+
+    let (read_back, outcome) = settings::read_from(&path).expect("reading it back must succeed");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(
+        read_back.letters.feed_last_try,
         letters::Date::from_ymd(2026, 9, 25)
     );
 }
