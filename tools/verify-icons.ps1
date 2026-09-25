@@ -1,7 +1,8 @@
 ﻿<#
-    verify-icons.ps1 -- measures what criteria 9 and 10 of task T-11-8 claim about the two
-    tray icons in res\: seven PNG frames of 16/20/24/32/48/64/256 px in each .ico, and
-    LoadImageW handing back every one of those sizes exactly, not a neighbour.
+    verify-icons.ps1 -- measures what criteria 9 and 10 of task T-11-8 claim about the four
+    icons in res\: one PNG frame of every size of $SIZES below in each .ico -- nineteen since
+    task T-85-2, the list kept in step with tools\make-icons.ps1 -- and LoadImageW handing back
+    every one of those sizes exactly, not a neighbour.
 
     TWO DELIBERATE DETOURS AROUND System.Drawing.Icon -- do not "improve" them back.
 
@@ -15,6 +16,14 @@
     2. THE PROOF SHEET IS DRAWN BY DECODING EACH PNG FRAME DIRECTLY, NOT VIA Icon.ToBitmap().
        ToBitmap() cannot decode PNG-compressed frames and throws; Bitmap.FromStream on the
        frame's own bytes can.
+
+    3. THE SIZE LoadImageW ANSWERS PROVES NOTHING ABOUT THE FRAME -- task T-85-2, measured. Asked
+       for a size the file lacks, LoadImageW stretches the nearest frame and answers exactly the
+       size asked: the old ten-frame files passed "LoadImage(36) -> 36x36" for all nine sizes they
+       did not carry. So each size is checked twice: the file must DECLARE a frame of it, and the
+       bitmap LoadImageW builds must BE that frame, pixel by pixel -- alpha everywhere, colour
+       where alpha is 255 (the loaded bitmap is premultiplied at the anti-aliased edge). A control
+       at the end compares a frame with a frame of the other file and must see them differ.
 
     The proof sheet (-ProofPath, default %TEMP%\icons-proof.png) shows both states at the true
     pixel sizes 16/20/24/32/48 on a light and a dark panel, for the human judgement of
@@ -52,8 +61,61 @@ public class Ico {
     public int bmType; public int bmWidth; public int bmHeight; public int bmWidthBytes;
     public ushort bmPlanes; public ushort bmBitsPixel; public IntPtr bmBits;
   }
+  [StructLayout(LayoutKind.Sequential)] public struct BITMAPINFOHEADER {
+    public uint biSize; public int biWidth; public int biHeight; public ushort biPlanes; public ushort biBitCount;
+    public uint biCompression; public uint biSizeImage; public int biXPelsPerMeter; public int biYPelsPerMeter;
+    public uint biClrUsed; public uint biClrImportant;
+  }
+  [DllImport("gdi32.dll")] public static extern int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint lines, [Out] int[] bits, ref BITMAPINFOHEADER bmi, uint usage);
+  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+  // The colour bitmap LoadImageW builds at a size, as 32 bpp top-down ARGB -- task T-85-2.
+  public static int[] Pixels(string path, int size) {
+    IntPtr h = LoadImageW(IntPtr.Zero, path, 1, size, size, 0x10);
+    if (h == IntPtr.Zero) return null;
+    ICONINFO info; GetIconInfo(h, out info);
+    BITMAPINFOHEADER bmi = new BITMAPINFOHEADER();
+    bmi.biSize = 40; bmi.biWidth = size; bmi.biHeight = -size; bmi.biPlanes = 1; bmi.biBitCount = 32;
+    int[] bits = new int[size * size];
+    IntPtr dc = GetDC(IntPtr.Zero);
+    int lines = GetDIBits(dc, info.hbmColor, 0, (uint)size, bits, ref bmi, 0);
+    ReleaseDC(IntPtr.Zero, dc);
+    if (info.hbmColor != IntPtr.Zero) DeleteObject(info.hbmColor);
+    if (info.hbmMask != IntPtr.Zero) DeleteObject(info.hbmMask);
+    DestroyIcon(h);
+    return lines == size ? bits : null;
+  }
 }
 '@
+}
+
+# The PNG frame of one size decoded from the file, as 32 bpp ARGB -- or $null when the file has none.
+function Get-FramePixels([byte[]]$bytes, [int]$px) {
+  $n = [BitConverter]::ToUInt16($bytes,4)
+  for ($i = 0; $i -lt $n; $i++) {
+    $o = 6 + 16*$i
+    $decl = [int]$bytes[$o]; if ($decl -eq 0) { $decl = 256 }
+    if ($decl -ne $px) { continue }
+    $len = [int][BitConverter]::ToUInt32($bytes,$o+8); $off = [int][BitConverter]::ToUInt32($bytes,$o+12)
+    $ms = New-Object System.IO.MemoryStream($bytes, $off, $len)
+    $img = [System.Drawing.Image]::FromStream($ms); $bm = New-Object System.Drawing.Bitmap($img)
+    $data = $bm.LockBits((New-Object System.Drawing.Rectangle(0,0,$px,$px)), 'ReadOnly', 'Format32bppArgb')
+    $pixels = New-Object int[] ($px*$px)
+    [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $pixels, 0, $px*$px)
+    $bm.UnlockBits($data); $bm.Dispose(); $img.Dispose(); $ms.Dispose()
+    return ,$pixels
+  }
+  return $null
+}
+
+# How many pixels of two pictures of one size differ: alpha anywhere, colour where alpha is 255.
+function Get-PixelDifference([int[]]$a, [int[]]$b) {
+  $d = 0
+  for ($i = 0; $i -lt $a.Length; $i++) {
+    $aa = ($a[$i] -shr 24) -band 0xFF; $ab = ($b[$i] -shr 24) -band 0xFF
+    if ($aa -ne $ab -or ($aa -eq 255 -and ($a[$i] -band 0xFFFFFF) -ne ($b[$i] -band 0xFFFFFF))) { $d++ }
+  }
+  return $d
 }
 
 function Get-LoadedIconSize([string]$path, [int]$px) {
@@ -78,7 +140,10 @@ $files = @('langswitcher-active.ico','langswitcher-paused.ico',
 # metric (16 at 96 DPI) and the large one (32) scaled to the monitor -- 16/20/24/28/32 and
 # 32/40/48/56/64 at 100/125/150/175/200 % -- and before this task the shell was handed a 24 px
 # frame stretched to 28 at 175 %, and a 32 px one stretched to 40 at 125 %.
-$SIZES = @(16,20,24,28,32,40,48,56,64,256)
+# Task T-85-2, решение 144.4: nine more -- 30, 36, 45, 54, 60, 63, 72, 80, 96 -- for the Start menu
+# (a tile is 36 px at 100 %) and the other views of Windows. Kept in step with $SIZES of the
+# generator by hand: the two scripts share no file.
+$SIZES = @(16,20,24,28,30,32,36,40,45,48,54,56,60,63,64,72,80,96,256)
 $fail = 0
 
 foreach ($f in $files) {
@@ -105,16 +170,40 @@ foreach ($f in $files) {
     Write-Output ("  кадр {0}: заявлен {1,3}  PNG {2}x{3}  {4} bpp  {5,6} байт  {6}" -f $i,$declared,$pw,$ph,$bpp,$len,$(if($ok){'ок'}else{'ОТКАЗ'}))
   }
 
-  # Behaviour: LoadImage must hand back each size FR-90 needs, at the exact pixel size asked.
+  # Behaviour: LoadImage must hand back each size FR-90 needs, at the exact pixel size asked --
+  # and, task T-85-2, it must be the file's OWN frame of that size, not a neighbour stretched to
+  # it (detour 3 in the header: the size alone cannot fail).
   foreach ($s in $SIZES) {
     $got = Get-LoadedIconSize $p $s
     if ($null -eq $got) { Write-Output "  ОТКАЗ: LoadImage($s) вернул NULL"; $fail++; continue }
     if ($got[0] -ne $s -or $got[1] -ne $s) {
-      Write-Output ("  ОТКАЗ: LoadImage({0}) отдал {1}x{2}" -f $s,$got[0],$got[1]); $fail++
+      Write-Output ("  ОТКАЗ: LoadImage({0}) отдал {1}x{2}" -f $s,$got[0],$got[1]); $fail++; continue
+    }
+    $own = Get-FramePixels $b $s
+    if ($null -eq $own) {
+      Write-Output ("  ОТКАЗ: кадра {0} в файле нет -- LoadImage({0}) растянул соседа" -f $s); $fail++; continue
+    }
+    $loaded = [Ico]::Pixels($p, $s)
+    if ($null -eq $loaded) { Write-Output "  ОТКАЗ: растр LoadImage($s) не прочитан"; $fail++; continue }
+    $diff = Get-PixelDifference $own $loaded
+    if ($diff -ne 0) {
+      Write-Output ("  ОТКАЗ: LoadImage({0}) отдал не свой кадр -- {1} пикселей расходятся" -f $s,$diff); $fail++
     } else {
-      Write-Output ("  LoadImage({0,3}) -> {1}x{2}  ок" -f $s,$got[0],$got[1])
+      Write-Output ("  LoadImage({0,3}) -> {1}x{2}, свой кадр  ок" -f $s,$got[0],$got[1])
     }
   }
+}
+
+# The control of detour 3: the comparison must be able to fail. The 16 px bitmap LoadImageW builds
+# from the "active" file against the 16 px frame of the "paused" file -- two different drawings.
+$ctlLoaded = [Ico]::Pixels((Join-Path $ResDir 'langswitcher-active.ico'), 16)
+$ctlOther = Get-FramePixels ([System.IO.File]::ReadAllBytes((Join-Path $ResDir 'langswitcher-paused.ico'))) 16
+if ($null -eq $ctlLoaded -or $null -eq $ctlOther) {
+  Write-Output 'ОТКАЗ: контроль сличения не поднялся'; $fail++
+} else {
+  $ctl = Get-PixelDifference $ctlOther $ctlLoaded
+  if ($ctl -eq 0) { Write-Output 'ОТКАЗ: контроль -- сличение не видит разницы двух рисунков'; $fail++ }
+  else { Write-Output "контроль сличения: активный 16 против паузы 16 -- $ctl пикселей расходятся  ок" }
 }
 
 # Proof sheet at true pixel sizes on both taskbar colours.

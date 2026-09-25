@@ -7,10 +7,11 @@
     drawn from the same 100x100 vector description, so a change of proportion or tone is one
     edit here rather than seven hand-retouched bitmaps that drift apart.
 
-    OUTPUT: res\langswitcher-active.ico and res\langswitcher-paused.ico, seven frames each.
-    16/20/24/32 are the sizes FR-90 names and SM_CXSMICON selects between; 48/64/256 exist
-    because the same file is the icon of the executable (app.rc, IDI_APP_ACTIVE/IDI_APP_PAUSED)
-    and of the installer (SetupIconFile), and Explorer picks those in its larger views.
+    OUTPUT: the four icons of res\ (see $targets at the end), nineteen frames each -- the list and
+    why each size is there is at $SIZES below. 16/20/24/32 are the sizes FR-90 names and
+    SM_CXSMICON selects between; the larger ones exist because the same file is the icon of the
+    executable (app.rc, IDI_APP_ACTIVE/IDI_APP_PAUSED) and of the installer (SetupIconFile), and
+    Explorer and the Start menu pick those in their larger views.
 
     Frames are stored as PNG, which is what the icons this replaces already did: Windows Vista
     and later read PNG frames from an .ico, and at 256 px a BMP frame would cost 256 KB.
@@ -34,7 +35,13 @@ $OutDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'res'
 # at 175 % the shell was handed a 24 px frame stretched to 28, and at 125 % a 32 px one
 # stretched to 40. Every frame is DRAWN from the same vector description, not resampled from a
 # bigger one, so three more of them cost nothing but bytes.
-$SIZES  = @(16, 20, 24, 28, 32, 40, 48, 56, 64, 256)
+#
+# Task T-85-2, решение 144.4: nine more, for the Start menu and the other views of Windows. A
+# tile of the Start menu takes 36 px at 100 % (54 at 150 % on the owner's screenshot) -- there was
+# no such frame, and the shell handed out the 48 squeezed bilinearly (scratchpad-E85\
+# shell-probe-base-e84.log). Added: the standard sizes of Microsoft 30, 36, 60, 72, 80, 96, and
+# the tile at 125/150/175 % -- 45, 54, 63. The drawing is the same; nothing else changes.
+$SIZES  = @(16, 20, 24, 28, 30, 32, 36, 40, 45, 48, 54, 56, 60, 63, 64, 72, 80, 96, 256)
 
 # Supersampling factor. The glyph is drawn at SIZE*SS and boxed down, which is what keeps the
 # 2 px shaft of the arrow from breaking up at 16 px.
