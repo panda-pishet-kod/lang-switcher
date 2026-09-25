@@ -2,6 +2,7 @@
 name = "lang_switcher"
 version = "0.87.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 # Two targets on purpose. Integration tests under tests\ can only link against a library
 # target, so a bin-only crate would make that directory useless and force a rebuild of the
