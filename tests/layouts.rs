@@ -37,6 +37,14 @@ const SCAN_A: u16 = 0x1E;
 /// pair task T-02-1a separated.
 const SCAN_SLASH: u16 = 0x35;
 
+/// Scan code of the `.>` key of the main block — the key US `.` is found on.
+const SCAN_FULL_STOP: u16 = 0x34;
+
+/// Scan code of the decimal separator of the keypad, `VK_DECIMAL`, in the plain half of the
+/// cache — the pair `VK_DELETE`/`VK_DECIMAL` the module documentation of `layouts` names.
+/// Question 146.1, task T-87-1.
+const SCAN_KEYPAD_DECIMAL: u16 = 0x53;
+
 /// The extended flag of FR-05 for a key of the main block, and for one of the keypad.
 const MAIN_BLOCK: bool = false;
 /// See [`MAIN_BLOCK`].
@@ -460,6 +468,51 @@ fn the_reverse_index_carries_the_extended_flag() {
         .expect("the Russian layout must have a key that produces '.'");
     assert_eq!(full_stop.scan, SCAN_SLASH);
     assert!(!full_stop.extended);
+}
+
+/// **Premises П3 and П2 of stage Э87, question 146.1 — measured on this machine, task T-87-1.**
+///
+/// The rule step 5 of FR-61 applies to a separator standing between two digits rests on what the
+/// decimal key of the keypad gives in each layout of the pair, unmodified and in the plain half:
+/// `,` in Russian and `.` in US. Were it anything else, the rule would stand on nothing.
+///
+/// And the reconstruction the user met — `афиду 5,1` → `fable 5?1` — is the reverse index
+/// keeping its first writer: the keys are walked in ascending order, so neither separator is ever
+/// found on the keypad. Russian `,` answers with `Shift` + the `/?` key, which is `?` in US, and US
+/// `.` with the `.>` key of the main block, which is `ю` in Russian.
+#[test]
+fn the_keypad_decimal_key_gives_each_layout_its_own_separator() {
+    let cache = cache();
+    let russian = map_of(&cache, RUSSIAN);
+    let us = map_of(&cache, US);
+
+    assert_eq!(
+        char_at(russian, SCAN_KEYPAD_DECIMAL, MAIN_BLOCK, Mods::NONE),
+        ','
+    );
+    assert_eq!(
+        char_at(us, SCAN_KEYPAD_DECIMAL, MAIN_BLOCK, Mods::NONE),
+        '.'
+    );
+
+    assert_eq!(
+        russian.find_key(','),
+        Some(KeyPress {
+            scan: SCAN_SLASH,
+            extended: false,
+            mods: Mods::SHIFT,
+        }),
+        "the Russian `,` is found on `Shift` + the `/?` key, not on the keypad"
+    );
+    assert_eq!(
+        us.find_key('.'),
+        Some(KeyPress {
+            scan: SCAN_FULL_STOP,
+            extended: false,
+            mods: Mods::NONE,
+        }),
+        "the US `.` is found on the `.>` key of the main block, not on the keypad"
+    );
 }
 
 // -- beyond the required set --------------------------------------------------------------

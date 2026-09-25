@@ -175,7 +175,7 @@ use windows::core::{Error as WinError, Free, PCWSTR, Result as WinResult, w};
 use crate::convert::Keystroke;
 use crate::hook::INJECTED_SIGNATURE;
 use crate::inject::{Dispatched, Modifiers};
-use crate::layouts::{Cycle, LayoutId, LayoutMap};
+use crate::layouts::{Cycle, KeyPress, LayoutId, LayoutMap, Mods};
 use crate::settings::Selection;
 
 // ---------------------------------------------------------------------------------------
@@ -2905,16 +2905,90 @@ pub fn detect_source(text: &str, maps: &[LayoutMap], fallback: LayoutId) -> Opti
     maps.iter().position(|map| map.layout() == fallback)
 }
 
+/// The decimal separator of the numeric keypad — `VK_DECIMAL`, which reports the scan code `0x53`
+/// in the plain half of the cache (see the module documentation of `layouts`), with no modifier.
+/// Question **146.1**, task **T-87-1**.
+const KEYPAD_DECIMAL: KeyPress = KeyPress {
+    scan: 0x53,
+    extended: false,
+    mods: Mods::NONE,
+};
+
+/// **Which key of `source` typed `ch`, standing between `before` and `after`** — the backward
+/// lookup of step 5 of FR-61, made here and nowhere else. Task **T-87-1**, question **146.1**.
+///
+/// The answer is that of [`LayoutMap::find_key`] — the plainest key, the main block before the
+/// keypad — with one exception. The character the keypad decimal key gives in `source`, standing
+/// between two digits `0`…`9`, is that key: `,` of Russian, `.` of US. The reverse index cannot say
+/// so by itself: it keeps the first writer, and the keys are walked in ascending order, so Russian
+/// `,` is found on `Shift` + the `/?` key, which is `?` in US, and US `.` on the `.>` key, which is
+/// `ю` in Russian. The owner's finding of 2026-09-25 was exactly that — `афиду 5,1` came out as
+/// `fable 5?1` — and between two digits a separator is what the keypad was pressed for: `5,1` ↔
+/// `5.1`. Everywhere else the reverse index stands, and `црфе,` is still `what?`.
+///
+/// The typing-buffer path never comes here: it holds the scan code the hook saw, `0x53` included.
+/// A map with nothing on the keypad key — the hardwired table of FR-25 — has no key to name, and
+/// the answer stays that of the reverse index.
+///
+/// ⚠ **The one place the key is picked.** [`recode_into`] writes by it, and [`recoded_len`] and
+/// [`units_bound`] count by it ahead of the writing. Were one of them to ask the reverse index
+/// itself, the vector made at the count would grow between two digits and leave a copy of the
+/// user's text behind — task **T-38-9B**, finding **Н34**; `tests\selection.rs` sweeps the three.
+fn key_between(
+    source: &LayoutMap,
+    before: Option<char>,
+    ch: char,
+    after: Option<char>,
+) -> Option<KeyPress> {
+    let digit = |neighbour: Option<char>| neighbour.is_some_and(|ch| ch.is_ascii_digit());
+
+    if digit(before) && digit(after) {
+        let keypad = source.lookup(
+            KEYPAD_DECIMAL.scan,
+            KEYPAD_DECIMAL.extended,
+            KEYPAD_DECIMAL.mods,
+        );
+
+        // Dead keys stay out, for the reason the reverse index keeps them out of itself.
+        if !keypad.is_dead() && keypad.single_char() == Some(ch) {
+            return Some(KEYPAD_DECIMAL);
+        }
+    }
+
+    source.find_key(ch)
+}
+
+/// Every character of `text` with the one before it and the one after it — what [`key_between`]
+/// decides by. Task **T-87-1**.
+///
+/// One walk over `chars()` with a character of memory and one of look-ahead, both held by the walk
+/// itself: no `Vec<char>` and no second `String` of the user's text is made for the neighbours —
+/// SEC-01, SEC-02, and the copies `tests\selection.rs` names stay nine.
+fn with_neighbours(text: &str) -> impl Iterator<Item = (Option<char>, char, Option<char>)> + '_ {
+    let mut before = None;
+    let mut chars = text.chars().peekable();
+
+    core::iter::from_fn(move || {
+        let ch = chars.next()?;
+        let neighbours = (before, ch, chars.peek().copied());
+
+        before = Some(ch);
+
+        Some(neighbours)
+    })
+}
+
 /// **Recodes `text` from `source` into `target` — the second half of step 5 of FR-61.**
 ///
 /// Two lookups per character and nothing else:
 ///
-/// 1. **backwards**, `source.find_key(ch)` — which physical key produces this character in the
+/// 1. **backwards**, [`key_between`] — which physical key produces this character in the
 ///    layout the text was typed under. This is the step the main path never has to take: the
 ///    typing buffer *holds* scan codes (FR-04), and FR-32 rests on that. Here there is only
 ///    text, so the scan code is reconstructed from the character, and that reconstruction is
 ///    ambiguous in principle — the specification says as much where it says «скан-коды здесь
-///    недоступны»;
+///    недоступны». The reverse index answers with the plainest key; a separator between two
+///    digits is the keypad key since task **T-87-1**;
 /// 2. **forwards**, [`crate::convert::convert_stroke`] — what the same physical key gives in the
 ///    target layout. That is FR-22 unchanged, the accepted engine of section 11.1, reached
 ///    through its own public function and not re-implemented here.
@@ -2966,8 +3040,8 @@ fn recode_into(
     let mut mapped = 0usize;
     let mut carried = 0usize;
 
-    for ch in text.chars() {
-        match source.find_key(ch) {
+    for (before, ch, after) in with_neighbours(text) {
+        match key_between(source, before, ch, after) {
             Some(key) => {
                 let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
                 units.extend_from_slice(crate::convert::convert_stroke(stroke, target).units());
@@ -2988,25 +3062,32 @@ fn recode_into(
 /// writing, the question [`crate::convert::converted_len`] answers for strokes. **Task T-38-9B,
 /// finding Н34**: a vector made at this capacity is filled without growing.
 fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
-    text.chars()
-        .map(|ch| match source.find_key(ch) {
-            Some(key) => {
-                let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
-                crate::convert::convert_stroke(stroke, target).units().len()
-            }
-            None => ch.len_utf16(),
-        })
+    with_neighbours(text)
+        .map(
+            |(before, ch, after)| match key_between(source, before, ch, after) {
+                Some(key) => {
+                    let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+                    crate::convert::convert_stroke(stroke, target).units().len()
+                }
+                None => ch.len_utf16(),
+            },
+        )
         .sum()
 }
 
 /// The most code units [`recode_words`] can write for `text` under the layouts of a plan — **task
 /// T-38-9B, finding Н34**.
 ///
-/// For each character, the larger of what it is as it stands and of what any key producing it in
-/// any of `maps` makes in any of `maps`: the word it stands in is either recoded between two of
-/// them or carried over, and both answers are among those counted. Where every key of the layouts
-/// makes one unit, as the layouts of a pair of real scripts do, this is the exact count; a ligature
-/// on a key of a layout the text is not in makes it larger than needed, and never smaller.
+/// For each character, the larger of what it is as it stands and of what the key [`key_between`]
+/// names for it in any of `maps` makes in any of `maps`: the word it stands in is either recoded
+/// between two of them or carried over, and both answers are among those counted. Where every key
+/// of the layouts makes one unit, as the layouts of a pair of real scripts do, this is the exact
+/// count; a ligature on a key of a layout the text is not in makes it larger than needed, and
+/// never smaller.
+///
+/// The neighbours are those of the whole text, where [`recode_into`] sees those of one word, and
+/// the two agree: a word ends at a separator or at an end of the text, and neither is a digit —
+/// task **T-87-1**.
 ///
 /// # Why not the exact count, the way [`recoded_len`] gives it for [`recode`]
 ///
@@ -3015,10 +3096,12 @@ fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
 /// refusal it makes. A counting pass that decided every word a second time would count every
 /// refused word twice. This bound decides nothing and counts nothing.
 fn units_bound(text: &str, maps: &[LayoutMap]) -> usize {
-    text.chars()
-        .map(|ch| {
+    with_neighbours(text)
+        .map(|(before, ch, after)| {
             maps.iter()
-                .filter_map(|source| source.find_key(ch).map(|key| (source, key)))
+                .filter_map(|source| {
+                    key_between(source, before, ch, after).map(|key| (source, key))
+                })
                 .flat_map(|(source, key)| {
                     let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
 

@@ -55,7 +55,9 @@ use std::{fs, path::Path};
 use lang_switcher::convert;
 use lang_switcher::diag::{Kind, Operation};
 use lang_switcher::inject::{self, Dispatched, Modifiers};
-use lang_switcher::layouts::{Cycle, KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, Mods};
+use lang_switcher::layouts::{
+    Cycle, KeyMapping, LayoutCache, LayoutId, LayoutMap, LayoutMapBuilder, Mods,
+};
 use lang_switcher::selection::{
     self, CF_UNICODETEXT, CHORD_EVENTS, ClipboardError, OPEN_ATTEMPTS, OPEN_RETRY_INTERVAL, Origin,
     Outcome, Path as SelectionPath, Plan, ProbeAnswer, Refusal, SNAPSHOT_BUDGET_BYTES, Snapshot,
@@ -3969,6 +3971,306 @@ fn a_cycle_of_three_layouts_sends_each_word_to_the_next_after_its_own_source() {
     // Three distinguishing characters each: the text as a whole decides nothing, the foreground
     // layout breaks the tie, and step 7 switches to the next one after **that**.
     assert_eq!(bench.switched, Some(second));
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-61 step 5 — the separator between two digits, question 146.1, task T-87-1
+// ---------------------------------------------------------------------------------------
+
+/// Scan code of the decimal separator of the keypad, `VK_DECIMAL`, in the plain half of a map.
+const KEYPAD_DECIMAL: u16 = 0x53;
+
+/// Scan code of the `/?` key of the main block — the key Russian `,` is found on with `Shift`.
+const SLASH_KEY: u16 = 0x35;
+
+/// One known answer of task T-87-1: `text` selected with `foreground` in front, and what step 6
+/// is owed for it.
+struct Owed {
+    text: &'static str,
+    foreground: LayoutId,
+    owed: &'static str,
+    why: &'static str,
+}
+
+/// **The owner's rule, question 146.1:** the character the keypad decimal key gives in the source
+/// layout, standing between two digits, is recoded as that key — `5,1` ↔ `5.1`.
+///
+/// Where the text has letters, they decide the direction and the foreground layout does not enter
+/// into it; where it has none, the foreground layout is the tie-break of step 5 and names the
+/// direction.
+const BETWEEN_TWO_DIGITS: [Owed; 6] = [
+    Owed {
+        text: "афиду 5,1",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "fable 5.1",
+        why: "the owner's finding",
+    },
+    Owed {
+        text: "5,1",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "5.1",
+        why: "one number",
+    },
+    Owed {
+        text: "1,2,3",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "1.2.3",
+        why: "one after another",
+    },
+    Owed {
+        text: "5.1",
+        foreground: convert::FALLBACK_US,
+        owed: "5,1",
+        why: "the mirror",
+    },
+    Owed {
+        text: "fable 5.1",
+        foreground: convert::FALLBACK_US,
+        owed: "афиду 5,1",
+        why: "the finding, the way back",
+    },
+    Owed {
+        text: "12.09.2026",
+        foreground: convert::FALLBACK_US,
+        owed: "12,09,2026",
+        why: "the consequence the owner was told of before choosing",
+    },
+];
+
+/// **Away from two digits the reverse index answers as it did** — the negative control of task
+/// T-87-1, green before the task and after it: the rule did not spread.
+///
+/// ⚠ `what` typed on the keys of the Russian layout is `црфе`. The ТЗ of stage Э87 wrote `цреф`,
+/// which comes out as `whta` — measured on the base, question 146.5.
+const AWAY_FROM_DIGITS: [Owed; 4] = [
+    Owed {
+        text: "црфе,",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "what?",
+        why: "a comma after a letter",
+    },
+    Owed {
+        text: "5,",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "5?",
+        why: "a digit on the left only",
+    },
+    Owed {
+        text: ",5",
+        foreground: convert::FALLBACK_RUSSIAN,
+        owed: "?5",
+        why: "a digit on the right only",
+    },
+    Owed {
+        text: "what?",
+        foreground: convert::FALLBACK_US,
+        owed: "црфе,",
+        why: "`?` is not what the keypad key gives in US",
+    },
+];
+
+/// The rows of `answers` step 5 did not answer as owed over `maps` — the pair US, Russian, in the
+/// order of the cycle — each with what came out instead, so that a failure names every row at once.
+fn unanswered(maps: &[LayoutMap], answers: &[Owed]) -> Vec<String> {
+    let mut wrong = Vec::new();
+
+    for row in answers {
+        let cycle = Cycle::from_layouts(&[convert::FALLBACK_US, convert::FALLBACK_RUSSIAN])
+            .expect("a cycle of the pair");
+        let plan = Plan::new(
+            maps.to_vec(),
+            cycle,
+            row.foreground,
+            Duration::from_millis(300),
+            Duration::from_millis(200),
+            0,
+        );
+
+        let mut bench = Bench::with_selection(row.text);
+        let _ = selection::run(&mut bench, &plan);
+        let written = bench.written.unwrap_or_default();
+
+        if written != row.owed {
+            wrong.push(format!(
+                "{:?} -> {written:?}, owed {:?} ({})",
+                row.text, row.owed, row.why
+            ));
+        }
+    }
+
+    wrong
+}
+
+/// `layout` of the hardwired pair of FR-25 with the one key its table does not carry — the decimal
+/// separator of the keypad, giving `separator` — so that the rule is seen without the machine.
+///
+/// Every entry of the hardwired map is carried over as it stands. The order of `set` does not
+/// enter the reverse index, which walks the keys in ascending order: `,` of Russian is found on
+/// `Shift` + the `/?` key here exactly as on the installed layout, and that is the finding.
+fn with_the_keypad_decimal(layout: LayoutId, separator: char) -> LayoutMap {
+    let hardwired = convert::fallback_map(layout).expect("the hardwired map of FR-25");
+    let mut builder = LayoutMapBuilder::new(layout);
+
+    for scan in 0..=0xFF_u16 {
+        for extended in [false, true] {
+            for mods in Mods::ALL {
+                builder.set(scan, extended, mods, hardwired.lookup(scan, extended, mods));
+            }
+        }
+    }
+
+    assert!(
+        builder.set(
+            KEYPAD_DECIMAL,
+            false,
+            Mods::NONE,
+            KeyMapping::from_char(separator)
+        ),
+        "the hardwired table of FR-25 carries no keypad key, so the slot is free"
+    );
+
+    builder.finish()
+}
+
+/// The pair US, Russian with the keypad decimal key: `.` in US, `,` in Russian.
+fn keypad_pair() -> Vec<LayoutMap> {
+    vec![
+        with_the_keypad_decimal(convert::FALLBACK_US, '.'),
+        with_the_keypad_decimal(convert::FALLBACK_RUSSIAN, ','),
+    ]
+}
+
+/// The pair US, Russian as this machine has it installed — section 4 of TOOLCHAIN.md; the key the
+/// rule names is measured there by `tests\layouts.rs`,
+/// `the_keypad_decimal_key_gives_each_layout_its_own_separator`.
+fn installed_pair() -> Vec<LayoutMap> {
+    let cache = LayoutCache::build().expect("the mapping cache must build on this machine");
+
+    [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN]
+        .into_iter()
+        .map(|layout| {
+            cache
+                .get(layout)
+                .unwrap_or_else(|| panic!("layout {layout} is installed — TOOLCHAIN.md section 4"))
+                .clone()
+        })
+        .collect()
+}
+
+/// **Task T-87-1 on a pair that has the keypad key** — the hardwired maps of FR-25 and the one key
+/// their table lacks. The machine does not enter into it.
+#[test]
+fn between_two_digits_the_separator_is_recoded_as_the_keypad_key() {
+    let maps = keypad_pair();
+
+    // The stand is where the finding is: the reverse index of this pair finds Russian `,` on
+    // `Shift` + the `/?` key and not on the keypad, the reconstruction that gave `fable 5?1`.
+    let comma = maps[1].find_key(',').expect("Russian carries `,`");
+    assert_eq!((comma.scan, comma.mods), (SLASH_KEY, Mods::SHIFT));
+
+    let wrong = unanswered(&maps, &BETWEEN_TWO_DIGITS);
+
+    assert!(
+        wrong.is_empty(),
+        "between two digits the separator is recoded as the keypad key:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// **Task T-87-1 on the layouts installed on this machine** — Russian `00000419` and US
+/// `00000409`, with the direction of each row decided by step 5 itself.
+#[test]
+fn between_two_digits_the_separator_is_recoded_as_the_keypad_key_on_the_installed_layouts() {
+    let wrong = unanswered(&installed_pair(), &BETWEEN_TWO_DIGITS);
+
+    assert!(
+        wrong.is_empty(),
+        "between two digits the separator is recoded as the keypad key:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// **The negative control of task T-87-1: away from two digits nothing moved** — on the pair with
+/// the keypad key and on the installed layouts.
+///
+/// And on the hardwired pair of FR-25, which has no keypad key at all: there the rule has no key to
+/// name, and a separator between two digits keeps the reconstruction it always had — the table is
+/// not widened, §0 п. 8 of the ТЗ of stage Э87.
+#[test]
+fn away_from_two_digits_the_separator_keeps_the_answer_it_had() {
+    for (maps, what) in [
+        (keypad_pair(), "the pair with the keypad key"),
+        (installed_pair(), "the installed layouts"),
+    ] {
+        let wrong = unanswered(&maps, &AWAY_FROM_DIGITS);
+
+        assert!(
+            wrong.is_empty(),
+            "{what}: away from two digits the separator keeps its answer:\n{}",
+            wrong.join("\n")
+        );
+    }
+
+    assert_eq!(step_five("5,1", convert::FALLBACK_RUSSIAN), "5?1");
+    assert_eq!(step_five("5.1", convert::FALLBACK_US), "5ю1");
+    assert_eq!(step_five("црфе,", convert::FALLBACK_RUSSIAN), "what?");
+}
+
+/// **One function picks the key for all three walks of step 5 — task T-87-1, §0 п. 3 of the ТЗ of
+/// stage Э87.**
+///
+/// `recode_into` writes the code units, `recoded_len` counts them ahead for `recode` and
+/// `units_bound` bounds them ahead for `recode_words`. The three must pick the same key for every
+/// character, or the vector made at the count grows — and a growth leaves a copy of the user's
+/// text that nobody named (task T-38-9B, finding Н34). Between two digits the key depends on the
+/// neighbours, so a walk that asked the reverse index itself would pick the main block key where
+/// `recode_into` picks the keypad one; on a real pair the two make one code unit each, and no
+/// answer of step 5 shows the difference. Hence this sweep: none of the three asks `find_key`
+/// directly, each asks `key_between` once, and `key_between` asks `find_key` once.
+///
+/// Read without comment lines. The negative control is the text of `e85` and `e86`: three direct
+/// calls, one in each body. The growth itself is measured in `tests\selection_growth.rs`.
+#[test]
+fn the_three_walks_of_step_five_pick_the_key_in_one_function() {
+    let source = source_of("selection.rs");
+    let product = cut_at(&source, "mod tests {", "the product half of the module");
+    let mut failures = Vec::new();
+
+    for signature in ["fn recode_into(", "fn recoded_len(", "fn units_bound("] {
+        let body = body_after(product, signature);
+
+        let direct = code_lines_with(&body, "find_key(");
+        if !direct.is_empty() {
+            failures.push(format!(
+                "`{signature}` asks the reverse index itself: {direct:?}"
+            ));
+        }
+
+        let shared = code_lines_with(&body, "key_between(").len();
+        if shared != 1 {
+            failures.push(format!(
+                "`{signature}` asks `key_between` {shared} times, and once is owed"
+            ));
+        }
+    }
+
+    if product.contains("fn key_between(") {
+        let lookups = code_lines_with(&body_after(product, "fn key_between("), "find_key(").len();
+
+        if lookups != 1 {
+            failures.push(format!(
+                "`key_between` asks the reverse index {lookups} times, and once is owed"
+            ));
+        }
+    } else {
+        failures.push("there is no `fn key_between(` in the module".to_owned());
+    }
+
+    assert!(
+        failures.is_empty(),
+        "the key of every character is picked in one function:\n{}",
+        failures.join("\n")
+    );
 }
 
 /// **Acceptance point 15.** A character with no reverse mapping in the source layout is carried

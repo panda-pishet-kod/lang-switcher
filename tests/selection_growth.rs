@@ -36,7 +36,9 @@ use std::time::Duration;
 
 use lang_switcher::convert;
 use lang_switcher::inject::{Dispatched, Modifiers};
-use lang_switcher::layouts::{Cycle, KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, MAX_UNITS};
+use lang_switcher::layouts::{
+    Cycle, KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, MAX_UNITS, Mods,
+};
 use lang_switcher::selection::{
     self, CHORD_EVENTS, ClipboardError, ClipboardText, Outcome, Path as SelectionPath, Plan,
     ProbeAnswer, Snapshot, Wait,
@@ -175,6 +177,51 @@ fn ligature(us: &LayoutMap) -> LayoutMap {
             "the ligature is set on the key of {ch}"
         );
     }
+
+    builder.finish()
+}
+
+/// Scan code of the decimal separator of the keypad, `VK_DECIMAL`, in the plain half of a map.
+const KEYPAD_DECIMAL: u16 = 0x53;
+
+/// Russian of FR-25 with the keypad decimal key giving `,` — the one key the hardwired table does
+/// not carry, and the key a `,` between two digits is recoded as since task T-87-1.
+fn ru_with_the_keypad_decimal() -> LayoutMap {
+    let hardwired = ru();
+    let mut builder = LayoutMapBuilder::new(convert::FALLBACK_RUSSIAN);
+
+    for scan in 0..=0xFF_u16 {
+        for extended in [false, true] {
+            for mods in Mods::ALL {
+                builder.set(scan, extended, mods, hardwired.lookup(scan, extended, mods));
+            }
+        }
+    }
+
+    assert!(
+        builder.set(
+            KEYPAD_DECIMAL,
+            false,
+            Mods::NONE,
+            KeyMapping::from_char(',')
+        ),
+        "the hardwired table of FR-25 carries no keypad key, so the slot is free"
+    );
+
+    builder.finish()
+}
+
+/// A layout whose keypad decimal key makes the four-unit ligature and whose every other key makes
+/// nothing — so that the keypad key and the key the reverse index names for the same `,` make
+/// counts three units apart.
+fn ligature_on_the_keypad_decimal() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(LIGATURE_LAYOUT);
+    let mapping = KeyMapping::from_to_unicode(MAX_UNITS as i32, &LIGATURE);
+
+    assert!(
+        builder.set(KEYPAD_DECIMAL, false, Mods::NONE, mapping),
+        "the ligature is set on the keypad decimal key"
+    );
 
     builder.finish()
 }
@@ -406,5 +453,58 @@ fn recode_words_makes_its_buffers_once_through_the_eight_steps() {
     assert!(
         found.iter().all(|&(_, grown)| grown == Growths::NONE),
         "neither the code units nor the text grew: {found:?}"
+    );
+}
+
+/// **Step 5 — the keypad key between two digits is counted where it is written.** Task T-87-1.
+///
+/// `recode_into` picks the key of a `,` between two digits by its neighbours; `recoded_len`, which
+/// sizes the code units of `recode`, and `units_bound`, which sizes those of `recode_words`, have to
+/// pick the same key, or the vector made at their count grows. On a real pair the keypad key and
+/// `Shift` + the `/?` key make one code unit each and no count can tell them apart; here the target
+/// has the four-unit ligature on the keypad key and nothing on the other, so a count that asked the
+/// reverse index itself would come out three units short on every number.
+#[test]
+fn the_keypad_key_between_two_digits_is_counted_where_it_is_written() {
+    let _serialised = serialised();
+
+    let russian = ru_with_the_keypad_decimal();
+    let target = ligature_on_the_keypad_decimal();
+    let ligature = String::from_utf16(&LIGATURE).expect("the ligature is valid UTF-16");
+    let numbers = "5,1 ".repeat(500);
+
+    // `recode`, the whole text in one direction — sized by `recoded_len`.
+    let (recoded, grown) = measured(|| selection::recode(&numbers, &russian, &target));
+
+    assert_eq!(
+        recoded.text().matches(ligature.as_str()).count(),
+        500,
+        "every `,` between two digits went as the keypad key"
+    );
+    assert_eq!(
+        grown,
+        Growths::NONE,
+        "`recode`: neither the code units nor the text grew"
+    );
+
+    // `recode_words`, through the eight steps — sized by `units_bound`.
+    let plan = plan(
+        vec![russian, target],
+        &[convert::FALLBACK_RUSSIAN, LIGATURE_LAYOUT],
+    );
+    let mut tape = Tape {
+        reads: Some(numbers.clone()),
+    };
+
+    let (outcome, grown) = measured(|| selection::run(&mut tape, &plan));
+
+    assert!(
+        matches!(outcome, Outcome::Converted { .. }),
+        "the text was converted, and it was {outcome:?}"
+    );
+    assert_eq!(
+        grown,
+        Growths::NONE,
+        "`recode_words`: neither the code units nor the text grew"
     );
 }
