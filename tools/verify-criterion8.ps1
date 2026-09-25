@@ -17,18 +17,18 @@
        "release without testing" measurement found the channel name, because what lay on disk
        was the build WITH the feature. Fact 8 of section 9 of STATE.md.
 
-    2. It runs a POSITIVE CONTROL over every one of the six strings. Absence on its own
+    2. It runs a POSITIVE CONTROL over every one of the seven strings. Absence on its own
        proves nothing at all: the Release profile has `strip = true`, and a single typo in a
        search pattern gives the same answer as a string that is genuinely not there. Each
        string must be MISSING from the shipping build and FOUND in the build that is supposed
        to carry it. Decision R-25, question 29.
 
-       There are TWO such builds, because the six strings are switched off by two different
+       There are TWO such builds, because the seven strings are switched off by two different
        mechanisms. Five are behind the `testing` feature and are controlled by measurement B.
-       The sixth, LANGSW_DEBUG_TIMEOUT_SEC, is behind `#[cfg(debug_assertions)]` and is
-       controlled by measurement B2 -- a release built with debug assertions forced on. Giving
-       it the feature's control would have been a control that cannot fail: the string is
-       rightly absent from the `testing` build too.
+       The sixth and the seventh, LANGSW_DEBUG_TIMEOUT_SEC and LANGSW_DEBUG_FONT_STEP, are
+       behind `#[cfg(debug_assertions)]` and are controlled by measurement B2 -- a release
+       built with debug assertions forced on. Giving them the feature's control would have been
+       a control that cannot fail: the strings are rightly absent from the `testing` build too.
 
     3. It searches in UTF-8 AND in UTF-16LE. Rust puts string literals in the binary as UTF-8,
        but a literal that went into a Win32 call through PCWSTR can be sitting there wide. A
@@ -56,14 +56,23 @@
     instrument would have noticed, because the acceptance read the mechanism out of the SOURCE
     rather than out of the built file. It is read out of the built file now.
 
+    The SEVENTH entry was added by the owner's word of 2026-09-25 (decision 143d, debt E83-B-2
+    of stage E83). LANGSW_DEBUG_FONT_STEP is the debug substitution of the step of the windows'
+    font (task T-83-3, 6 to 15 points), built the way FR-97's deadline is: behind
+    `#[cfg(debug_assertions)]`, absent from the Release build rather than disabled in it. The
+    deliveries e83 and e84 measured it with a separate instrument of their own, because this
+    list was closed; the list carries it now, so every delivery measures it without anybody
+    having to remember a second script.
+
     Written without a single Cyrillic character on purpose. The tooling that writes files here
     puts them in UTF-8 with NO byte order mark, Windows PowerShell 5.1 then reads such a .ps1
     in the system ANSI code page, and the parse dies on the first Russian word. Decision R-05.
     Windows PowerShell 5.1, not 7.x: no `&&`, no `??`, no ternary operator, no -AsHashtable.
 
-    Exit code: 0 only if all six strings are absent from the shipping build, the five of the
-    `testing` feature are present in the build with it, the sixth is present in the build with
-    debug assertions on, and the dependency sets agree. Otherwise non-zero, reasons listed.
+    Exit code: 0 only if all seven strings are absent from the shipping build, the five of the
+    `testing` feature are present in the build with it, the sixth and the seventh are present in
+    the build with debug assertions on, and the dependency sets agree. Otherwise non-zero,
+    reasons listed.
 
     Example:
       .\verify-criterion8.ps1
@@ -110,6 +119,12 @@ $ReleaseExe = Join-Path $env:CARGO_TARGET_DIR 'release\LangSwitcher.exe'
 # assertions off, and the string is rightly missing there too. Its control is measurement B2
 # instead: a release built with debug assertions forced ON, where it MUST be present.
 #
+# --- The seventh string, under the same control ------------------------------------------
+# Added by the owner's word of 2026-09-25 (decision 143d, debt E83-B-2). LANGSW_DEBUG_FONT_STEP
+# is the environment variable of the debug substitution of the font step (task T-83-3), in
+# `mod debug_font_step` of src\settings.rs -- behind `#[cfg(debug_assertions)]` exactly like the
+# sixth, so its control is measurement B2 as well.
+#
 # The `Control` field says which of the two halves proves the absence measured in A.
 $Strings = @(
     @{ Name = 'SEC-04a channel name';        Value = '\\.\pipe\Lang_Switcher.control.'; Source = 'src\control.rs, PIPE_NAME_PREFIX'; Control = 'testing' },
@@ -117,7 +132,8 @@ $Strings = @(
     @{ Name = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Value = 'LANGSW_TESTING_PANIC_ON_HANDOFF'; Source = 'src\hook.rs';     Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_PANIC_ON_VK';      Value = 'LANGSW_TESTING_PANIC_ON_VK';      Source = 'src\hook.rs';     Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_DROP_HOOK_MS';     Value = 'LANGSW_TESTING_DROP_HOOK_MS';     Source = 'src\watchdog.rs'; Control = 'testing' },
-    @{ Name = 'LANGSW_DEBUG_TIMEOUT_SEC';        Value = 'LANGSW_DEBUG_TIMEOUT_SEC';        Source = 'src\app.rs, mod debug_timeout'; Control = 'debug-assertions' }
+    @{ Name = 'LANGSW_DEBUG_TIMEOUT_SEC';        Value = 'LANGSW_DEBUG_TIMEOUT_SEC';        Source = 'src\app.rs, mod debug_timeout'; Control = 'debug-assertions' },
+    @{ Name = 'LANGSW_DEBUG_FONT_STEP';          Value = 'LANGSW_DEBUG_FONT_STEP';          Source = 'src\settings.rs, mod debug_font_step'; Control = 'debug-assertions' }
 )
 
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -184,7 +200,7 @@ Write-Host ("Target dir     {0}" -f $env:CARGO_TARGET_DIR)
 Write-Host ("Release binary {0}" -f $ReleaseExe)
 
 # ==========================================================================================
-# Measurement A -- the shipping configuration. All five strings must be ABSENT.
+# Measurement A -- the shipping configuration. All seven strings must be ABSENT.
 # ==========================================================================================
 Write-Host ''
 Write-Host '--- A. Release WITHOUT the `testing` feature ---------------------------'
@@ -249,9 +265,11 @@ if ($hashShipping -eq $hashTesting) {
 }
 
 # ==========================================================================================
-# Measurement B2 -- the positive control of the sixth string. Task T-41-12, finding H134.
+# Measurement B2 -- the positive control of the sixth and the seventh strings. Task T-41-12,
+# finding H134; the seventh by decision 143d.
 #
-# The self-termination of FR-97 is behind `#[cfg(debug_assertions)]`, and the Release profile
+# The self-termination of FR-97 is behind `#[cfg(debug_assertions)]`, and so is the debug
+# substitution of the font step (task T-83-3); the Release profile
 # now says `debug-assertions = false` out loud. A mechanism switched off by a default nobody
 # wrote down was the finding; a mechanism switched off by a line in the profile is a decision.
 #
@@ -370,7 +388,7 @@ if ($SkipFinalRebuild) {
     } else {
         Write-Host ''
         Write-Host '  Same SHA-256 as measurement A: the shipping binary is byte for byte the one'
-        Write-Host '  the six strings were measured against.'
+        Write-Host '  the seven strings were measured against.'
     }
     if ($hashFinal -eq $hashTesting) {
         $Failures.Add('after the final rebuild the binary on disk is still the one with the `testing` feature')
@@ -382,9 +400,9 @@ Write-Host ''
 Write-Host '======================================================================'
 if ($Failures.Count -eq 0) {
     Write-Host ' RESULT: PASS'
-    Write-Host ' All six strings are absent from the shipping build; the five of the `testing`'
-    Write-Host ' feature are present in the build with it, the sixth is present in the build with'
-    Write-Host ' debug assertions on, and the dependency sets agree.'
+    Write-Host ' All seven strings are absent from the shipping build; the five of the `testing`'
+    Write-Host ' feature are present in the build with it, the sixth and the seventh are present in'
+    Write-Host ' the build with debug assertions on, and the dependency sets agree.'
     Write-Host '======================================================================'
     exit 0
 }
