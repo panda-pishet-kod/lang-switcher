@@ -42,6 +42,11 @@
     are cargo's own defaults unless CARGO_HOME, RUSTUP_HOME and CARGO_TARGET_DIR are set: this
     script no longer supplies the author's folders for them.
 
+    SIGNTOOL (stage E90). LANGSW_SIGNTOOL names it; without it signtool.exe on PATH; without that
+    the newest Windows Kits 10 x64 signtool. Not found and signing asked: the script refuses
+    before it builds anything (exit 10). It used to put the folder of one SDK version on PATH,
+    and a machine with another version had no signtool at all.
+
     THE SIGNATURE. The certificate is CN=Panda_Pishet_Kod, thumbprint below, private key in
     Cert:\CurrentUser\My and NOT exportable, so there is no .pfx and none can be made. The
     command needs no administrator rights -- established by the setup stage, TOOLCHAIN.md
@@ -61,7 +66,8 @@
     Exit code: 0 only if the nine version values agree, the build succeeded, criterion 8
     passed, the copy was made, -- unless -SkipSign was given -- the signature was applied and
     verified, the artifact could be measured for NFR-07, and criterion 4 holds. 8 is the
-    version gate, 9 the perimeter gate; 1 to 7 are as they were.
+    version gate, 9 the perimeter gate; 1 to 7 are as they were; 10 -- signtool was not found
+    and signing was asked.
 
     Examples:
       .\release.ps1
@@ -95,10 +101,44 @@ $ScriptDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ScriptDir
 
 # --- Environment --------------------------------------------------------------------------
-# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89). The
-# SDK folder stays: signtool lives there.
-$SdkBin = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64'
-if ($env:PATH -notlike "*$SdkBin*") { $env:PATH = "$SdkBin;$env:PATH" }
+# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89).
+
+# signtool: LANGSW_SIGNTOOL, else PATH, else the newest Windows Kits 10 x64 one. See the header.
+$SignTool = $env:LANGSW_SIGNTOOL
+$SignToolFrom = 'LANGSW_SIGNTOOL'
+if (-not $SignTool) {
+    $onPath = @(Get-Command 'signtool.exe' -CommandType Application -ErrorAction SilentlyContinue)
+    if ($onPath.Count -gt 0) {
+        $SignTool = $onPath[0].Path
+        $SignToolFrom = 'PATH'
+    }
+}
+if ((-not $SignTool) -and ${env:ProgramFiles(x86)}) {
+    $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+    if (Test-Path -LiteralPath $kits) {
+        $versions = @(Get-ChildItem -LiteralPath $kits -Directory |
+            Where-Object { $_.Name -match '^\d+(\.\d+){3}$' } |
+            Sort-Object -Property @{ Expression = { [version]$_.Name } } -Descending)
+        foreach ($v in $versions) {
+            $candidate = Join-Path $v.FullName 'x64\signtool.exe'
+            if (Test-Path -LiteralPath $candidate) {
+                $SignTool = $candidate
+                $SignToolFrom = 'Windows Kits ' + $v.Name
+                break
+            }
+        }
+    }
+}
+if (-not $SignTool) {
+    $SignToolFrom = 'not found'
+    if (-not $SkipSign) {
+        Write-Host ''
+        Write-Host 'FAIL: signtool.exe was not found: not named by LANGSW_SIGNTOOL, not on PATH, not under'
+        Write-Host '      Windows Kits\10\bin. Install the Windows SDK, or set LANGSW_SIGNTOOL in'
+        Write-Host '      tools\local.ps1 (tools\local.example.ps1 shows the form), or pass -SkipSign.'
+        exit 10
+    }
+}
 
 # Where cargo builds: CARGO_TARGET_DIR when a caller set it -- an isolated acceptance run keeps
 # its own -- and cargo's default <repository>\target otherwise.
@@ -145,6 +185,7 @@ Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Artifact   {0}  [{1}]" -f $Artifact, $ArtifactFrom)
 Write-Host ("Target dir {0}" -f $TargetDir)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
+Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
 if ($SkipSign) { Write-Host 'Signing     SKIPPED by -SkipSign' }
 
 # --- 0. One version, nine places -------------------------------------------------------------
@@ -222,7 +263,7 @@ if ($SkipSign) {
 } else {
     Write-Section 'Step 4: sign the copy'
     Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <artifact>" -f $Thumbprint, $TimestampUrl)
-    & signtool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $Artifact
+    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $Artifact
     $signCode = $LASTEXITCODE
 
     if ($signCode -eq 0) {
@@ -233,7 +274,7 @@ if ($SkipSign) {
         Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
         Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
         Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <artifact>" -f $Thumbprint)
-        & signtool sign /sha1 $Thumbprint /fd SHA256 $Artifact
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $Artifact
         $signCode = $LASTEXITCODE
         if ($signCode -ne 0) {
             Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)
@@ -244,7 +285,7 @@ if ($SkipSign) {
     # --- 5. Verify the signature ------------------------------------------------------------
     Write-Section 'Step 5: verify the signature'
     Write-Host '  signtool verify /pa <artifact>'
-    & signtool verify /pa $Artifact
+    & $SignTool verify /pa $Artifact
     $verifyCode = $LASTEXITCODE
     if ($verifyCode -ne 0) {
         Write-Host ("FAIL: signtool verify /pa returned {0}" -f $verifyCode)

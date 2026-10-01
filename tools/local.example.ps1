@@ -27,6 +27,11 @@
                         Without it: ISCC.exe on PATH, then Inno Setup 6 under Program Files (x86)
                         and Program Files; found nowhere, build-installer.ps1 refuses.
 
+      LANGSW_SIGNTOOL   The full path of signtool.exe, the Windows SDK signing tool.
+                        Without it: signtool.exe on PATH, then the newest Windows Kits 10 x64 one;
+                        found nowhere, release.ps1 and build-installer.ps1 refuse to sign
+                        (with -SkipSign they go on without it).
+
       LANGSW_NEWS_KEYS  The folder of the encrypted signing keys of the author's feed:
                         make-news-key.ps1 writes them, sign-news.ps1 -Reserve reads one.
                         Without it: both refuse -- keys have no default place.
@@ -50,6 +55,7 @@
 
 # if (-not $env:LANGSW_ARTIFACTS) { $env:LANGSW_ARTIFACTS = 'C:\Builds\LangSwitcher\artifacts' }
 # if (-not $env:LANGSW_ISCC)      { $env:LANGSW_ISCC      = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+# if (-not $env:LANGSW_SIGNTOOL)  { $env:LANGSW_SIGNTOOL  = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe' }
 # if (-not $env:LANGSW_NEWS_KEYS) { $env:LANGSW_NEWS_KEYS = 'C:\Keys\LangSwitcher\news-keys' }
 # if (-not $env:LANGSW_NEWS_SITE) { $env:LANGSW_NEWS_SITE = 'C:\Builds\LangSwitcher\news-site\news.toml' }
 # if (-not $env:LANGSW_CONTROL)   { $env:LANGSW_CONTROL   = 'C:\Projects\LangSwitcher-control' }

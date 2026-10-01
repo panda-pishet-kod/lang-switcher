@@ -32,6 +32,12 @@
     its form). The installer script has no default product of its own: it is always
     given /DSourceExe=<the signed product> below.
 
+    SIGNTOOL (stage E90). LANGSW_SIGNTOOL, else signtool.exe on PATH, else the newest
+    Windows Kits 10 x64 signtool -- the rule of release.ps1. Not found and signing
+    asked: the script refuses before anything (exit 11). Not found under -SkipSign:
+    the check of the product's signature in step 1 is skipped with a warning, because
+    an unsigned dry run is exactly what -SkipSign is for.
+
     THE SIGNATURE. Certificate CN=Panda_Pishet_Kod, thumbprint below, private key
     in Cert:\CurrentUser\My and NOT exportable. The command needs no administrator
     rights (TOOLCHAIN.md section 5). If the RFC3161 timestamp service cannot be
@@ -63,6 +69,8 @@
       8  signing failed, even without a timestamp
       9  signtool verify /pa failed
      10  ISCC.exe was found neither by -Iscc, LANGSW_ISCC, PATH nor Program Files
+     11  signtool.exe was found neither by LANGSW_SIGNTOOL, PATH nor Windows Kits,
+         and signing was asked
 
     Examples:
       .\build-installer.ps1
@@ -101,10 +109,44 @@ $IssFile    = Join-Path $ProjectDir 'installer\LangSwitcher.iss'
 $IssOutput  = Join-Path $ProjectDir 'installer\Output\LangSwitcher-setup.exe'
 
 # --- Environment ----------------------------------------------------------------------------
-# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89). The
-# SDK folder stays: signtool lives there.
-$SdkBin  = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64'
-if ($env:PATH -notlike "*$SdkBin*") { $env:PATH = "$SdkBin;$env:PATH" }
+# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89).
+
+# signtool: LANGSW_SIGNTOOL, else PATH, else the newest Windows Kits 10 x64 one. See the header.
+$SignTool = $env:LANGSW_SIGNTOOL
+$SignToolFrom = 'LANGSW_SIGNTOOL'
+if (-not $SignTool) {
+    $onPath = @(Get-Command 'signtool.exe' -CommandType Application -ErrorAction SilentlyContinue)
+    if ($onPath.Count -gt 0) {
+        $SignTool = $onPath[0].Path
+        $SignToolFrom = 'PATH'
+    }
+}
+if ((-not $SignTool) -and ${env:ProgramFiles(x86)}) {
+    $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+    if (Test-Path -LiteralPath $kits) {
+        $versions = @(Get-ChildItem -LiteralPath $kits -Directory |
+            Where-Object { $_.Name -match '^\d+(\.\d+){3}$' } |
+            Sort-Object -Property @{ Expression = { [version]$_.Name } } -Descending)
+        foreach ($v in $versions) {
+            $candidate = Join-Path $v.FullName 'x64\signtool.exe'
+            if (Test-Path -LiteralPath $candidate) {
+                $SignTool = $candidate
+                $SignToolFrom = 'Windows Kits ' + $v.Name
+                break
+            }
+        }
+    }
+}
+if (-not $SignTool) {
+    $SignToolFrom = 'not found'
+    if (-not $SkipSign) {
+        Write-Host ''
+        Write-Host 'FAIL: signtool.exe was not found: not named by LANGSW_SIGNTOOL, not on PATH, not under'
+        Write-Host '      Windows Kits\10\bin. Install the Windows SDK, or set LANGSW_SIGNTOOL in'
+        Write-Host '      tools\local.ps1 (tools\local.example.ps1 shows the form), or pass -SkipSign.'
+        exit 11
+    }
+}
 
 # --- The artifact folder and the compiler ----------------------------------------------------
 # LANGSW_ARTIFACTS, else <repository>\dist\ -- the rule of release.ps1. Only the default folder
@@ -174,6 +216,7 @@ Write-Host ("Script     {0}" -f $IssFile)
 Write-Host ("Product    {0}" -f $ProductArtifact)
 Write-Host ("Installer  {0}" -f $SetupArtifact)
 Write-Host ("ISCC       {0}  [{1}]" -f $Iscc, $IsccFrom)
+Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 if ($SkipProductBuild) { Write-Host 'Product    NOT rebuilt, -SkipProductBuild was given' }
 if ($SkipSign)         { Write-Host 'Signing    SKIPPED by -SkipSign' }
@@ -199,13 +242,18 @@ $productHash = Show-Binary -Path $ProductArtifact -Label 'product to be packaged
 
 # The packaged product must already be signed, or the installed copy will not run
 # from %ProgramFiles% (section 8.2). Checked, not assumed.
-Write-Host '  signtool verify /pa <product>'
-& signtool verify /pa $ProductArtifact
-if ($LASTEXITCODE -ne 0) {
-    Write-Host ''
-    Write-Host '  WARNING: the product does not carry a valid signature.'
-    Write-Host '  The installed program will fail to start with CreateProcess error 740.'
-    Write-Host '  Continuing, because a deliberately unsigned dry run is a legitimate use.'
+if (-not $SignTool) {
+    Write-Host '  WARNING: signtool.exe was not found, so the signature of the product is NOT checked.'
+    Write-Host '  Continuing only because -SkipSign was given: an unsigned dry run is what it is for.'
+} else {
+    Write-Host '  signtool verify /pa <product>'
+    & $SignTool verify /pa $ProductArtifact
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host '  WARNING: the product does not carry a valid signature.'
+        Write-Host '  The installed program will fail to start with CreateProcess error 740.'
+        Write-Host '  Continuing, because a deliberately unsigned dry run is a legitimate use.'
+    }
 }
 
 # --- 2. Compile the script ----------------------------------------------------------------------
@@ -263,7 +311,7 @@ if ($SkipSign) {
 } else {
     Write-Section 'Step 4: sign the installer'
     Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <installer>" -f $Thumbprint, $TimestampUrl)
-    & signtool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $SetupArtifact
+    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $SetupArtifact
     $signCode = $LASTEXITCODE
 
     if ($signCode -eq 0) {
@@ -274,7 +322,7 @@ if ($SkipSign) {
         Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
         Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
         Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <installer>" -f $Thumbprint)
-        & signtool sign /sha1 $Thumbprint /fd SHA256 $SetupArtifact
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $SetupArtifact
         $signCode = $LASTEXITCODE
         if ($signCode -ne 0) {
             Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)
@@ -285,7 +333,7 @@ if ($SkipSign) {
     # --- 5. Verify the signature ------------------------------------------------------------------
     Write-Section 'Step 5: verify the signature'
     Write-Host '  signtool verify /pa <installer>'
-    & signtool verify /pa $SetupArtifact
+    & $SignTool verify /pa $SetupArtifact
     $verifyCode = $LASTEXITCODE
     if ($verifyCode -ne 0) {
         Write-Host ("FAIL: signtool verify /pa returned {0}" -f $verifyCode)
